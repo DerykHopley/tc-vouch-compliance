@@ -16,7 +16,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Working state
 
-Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-03); rerun it to change either, or to bring in the rig's newer rules.
+Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-03 @cbd764f); rerun it to change either, or to bring in the rig's newer rules.
 
 - Work lives in GitHub issues; one ticket is one PR into main.
 - Build in the main session, where every step's results stay in view. Spawn a subagent only for an independent check (the `code-review` skill, the `rig:verifier` agent) or for work that would flood the context (screenshots, a long log): it returns a verdict, not a summary to act on.
@@ -35,7 +35,8 @@ Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/dev
 
 - A spec holds at most **12 tickets**: about one day of review. A larger plan becomes two specs.
 - Parallel implementers are the one other use of subagents: each ticket needs little from the others, so a fresh context per ticket loses nothing.
-- `/implement-spec` runs as designed: ticket branches merge into one integration branch, and one PR takes the spec into main.
+- **`/rig:spec-build <spec>` builds a spec** (not Matt's `/implement-spec`, which merges locally and reviews once at the end): each ticket goes through the ticket loop below, its own PR into the spec's integration branch (`spec/<spec>-<slug>`) through the merge gate, and a `rig:verifier` on the merge commit. One PR then takes the spec into main and closes its tickets. In Factory mode, this is the queue: a spec's tickets are built by `/rig:spec-build`, never picked up from main on their own.
+- **A spec starts when the specs it depends on have landed in main.** A ticket closes only when its spec lands, so a ticket blocked by another spec's ticket waits until that code is in main. Two specs with no link between them may build at the same time, each on its own branch. In Factory mode, Claude starts `/rig:spec-build` on each spec as soon as nothing blocks it; in the other modes it names the startable specs and asks.
 - Ticket branches merge into the integration branch with `git merge --no-ff`, so each ticket stays one merge commit. After the spec lands, one bad ticket is undone alone with `git revert -m 1 <its merge-sha>`; a revert that conflicts goes to the owner.
 - An implementer's prompt holds the ticket number and what changed since the ticket was written (tickets merged since, renamed interfaces); the ticket and the implementer agent carry the rest.
 - The integration branch merges main in after each Fix lands, so the spec builds on fixed code.
@@ -48,7 +49,7 @@ Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/dev
 - Bug tickets count toward the 12, so a spec that keeps finding its own bugs reaches the owner instead of never closing.
 - After `/to-tickets`, check the blocking links have no cycle and at least one ticket can start. When no ticket can start and none is running, report the deadlock rather than wait.
 - When the owner says "put it in the spec", add it. Past 12 tickets, say so once ("Spec is now 13 of 12: split it, or drop something?") and let the owner choose.
-- When the spec's last ticket merges, tell the owner to run `/rig:spec-close`.
+- When the spec's last ticket is done, `/rig:spec-build` runs `/rig:spec-close`'s Ready part: the stories verified, the spec PR handed to the owner, and a watch on it. The owner's merge is the review; Landed then closes the spec and starts the next.
 
 
 ### Each ticket
@@ -97,7 +98,7 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 
 - **Merge gate (no branch protection: GitHub's free plan on a private repo):** merge only with `scripts/merge-on-green.sh <pr>`, run as a background task. It refuses a PR over 400 changed lines, lockfiles left out (`SIZE_CAP=<n>` when the owner allows a bigger one), then waits for every check on the PR's current commit (limit 20 minutes, about twice the fast lane), merges with a merge commit only if all pass, and refuses a PR with no checks. Never merge a PR any other way, unless the owner says so for that PR.
 - A ticket or a Fix: when the local checks pass, push, open the PR, start the merge gate, then start the next ticket. Report a red or timed-out result, not a green one.
-- A spec: its one PR into main goes through the merge gate once `/rig:spec-close` finds every ticket done, with `SIZE_CAP=off`: it carries every ticket, each already under the cap.
+- A spec: its one PR into main is the owner's to merge, in every review mode. `/rig:spec-close` hands it over when every ticket is done; the owner merges with GitHub's button (merge commit) or says "merge it", which runs the merge gate with `SIZE_CAP=off`: the PR carries every ticket, each already under the cap.
 - After merges, refresh the owner's running app when it won't break what they're doing; say what changed.
 - The owner tests in batches: keep a short "ready to check" list in `STATUS.md`.
 
