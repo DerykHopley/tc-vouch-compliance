@@ -65,7 +65,7 @@ Evidence that shows something is actually done, such as a record, an export or a
 _Avoid_: Operational evidence, proof of practice
 
 **Stale evidence**:
-Evidence past its review cycle; it can make a requirement partial at best.
+Evidence past its review cycle; it can make a requirement partly evidenced at best.
 _Avoid_: Expired, outdated, old
 
 **Citation**:
@@ -73,8 +73,8 @@ An exact quoted passage from one version of an evidence document, with its secti
 _Avoid_: Source, reference, link
 
 **Verdict**:
-The agent's proposed judgement of a control's evidence: found, partial or gap.
-_Avoid_: Status, result, score
+The agent's proposed judgement of a requirement's or control's evidence: evidenced, partly evidenced or not evidenced.
+_Avoid_: Status, result, score, found / partial / gap
 
 **Reviewed verdict**:
 A verdict the compliance lead has accepted or rejected, with an optional note; only accepted ones count towards readiness.
@@ -89,12 +89,12 @@ A requirement's verdict changed by the compliance lead before signing off a cont
 _Avoid_: Correction, manual verdict, edit
 
 **Remediation item**:
-A drafted fix for a gap (what's missing, an owner role, a due date), kept once the compliance lead approves it.
+A drafted fix for a requirement that is not evidenced (what's missing, an owner role, a due date), kept once the compliance lead approves it.
 _Avoid_: Ticket, task, action item
 
-**Gap**:
-A verdict meaning no evidence was found for a control.
-_Avoid_: Fail, non-compliance, finding
+**Not evidenced**:
+A verdict meaning no evidence was found for a requirement or control.
+_Avoid_: Gap, fail, non-compliance, finding
 
 **Readiness**:
 How much of a compliance profile's controls are backed by accepted verdicts, shown as controls by verdict.
