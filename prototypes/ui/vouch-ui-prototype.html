@@ -472,7 +472,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'plant',
+  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'none',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -845,13 +845,13 @@ const AVATARS = {
     <g class="eye"><circle class="w" cx="28.4" cy="19.5" r="2.4"/><circle class="k" cx="28.8" cy="19.5" r="1.1"/></g>
     <path class="sw" d="M20.5 25.5 q3.5 2.6 7 0" fill="none" stroke-width="1.5" stroke-linecap="round"/>`
 };
-const AVNAME = {tie:'Tie', plant:'Pot plant', notebook:'Notebook', cup:'Coffee cup', button:'Button', watch:'Pocket watch', owl:'Owl', stamp:'Stamp', monogram:'Monogram seal', lens:'Lens', seal:'Seal'};
-const AVKEYS = Object.keys(AVATARS);
+const AVNAME = {none:'None', tie:'Tie', plant:'Pot plant', notebook:'Notebook', cup:'Coffee cup', button:'Button', watch:'Pocket watch', owl:'Owl', stamp:'Stamp', monogram:'Monogram seal', lens:'Lens', seal:'Seal'};
+const AVKEYS = ['none', ...Object.keys(AVATARS)];
 const AVWHY = {tie:'the navy tie from the suits: shirt collar, a brass tie clip, a hint of stripe', plant:'the plant on every compliance desk: a terracotta-red pot, steady growth', notebook:'a black notebook with a brass band and a ribbon: where the auditor\'s notes go', cup:'the cup beside the working papers; its steam rises while Vouch works', button:'a jacket button from the double-breasted suits; the stitching is its bow tie',
   watch:'the brass pocket watch: deadlines and precision; its hands at ten past ten', owl:'scrutiny and judgement, in a white shirt and an oxblood bow tie',
   stamp:'the stamp that marks a document as vouched', monogram:'the seal without a face: a V pressed in wax, more mark than character',
   lens:'one eye behind a magnifier: looking closely at evidence', seal:'the earlier seal, for comparison'};
-function avatar(size){ return `<svg class="av ${S.running?'think':''}" width="${size}" height="${size}" viewBox="0 0 48 48" role="img" aria-label="Vouch">${AVATARS[S.avatar]}</svg>`; }
+function avatar(size){ if (S.avatar==='none') return ''; return `<svg class="av ${S.running?'think':''}" width="${size}" height="${size}" viewBox="0 0 48 48" role="img" aria-label="Vouch">${AVATARS[S.avatar]}</svg>`; }
 
 /* ---------- prototype switcher and notes ---------- */
 const VARIANTS = [['A','Counsel: chat-first'],['B','Working paper'],['C','Docket: one control at a time'],['D','Dossier: overview page']];
@@ -871,7 +871,7 @@ const QUESTIONS = [
 function Switcher(){
   const i = VARIANTS.findIndex(v=>v[0]===S.variant);
   return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button><button data-act="avatar">Avatar: ${AVNAME[S.avatar]}</button><button data-act="pane" data-pane="av">Avatars</button><button data-act="theme">Theme: ${({light:'Light',dark:'Dark',system:'System'})[S.theme]}</button></div>
-  ${S.pane==='av'?`<div class="pane" style="width:min(640px, calc(100vw - 24px))"><h4>Avatar options (click one to use it)</h4><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${AVKEYS.map(k=>`<button data-act="pickav" data-av="${k}" style="all:unset;cursor:pointer;display:grid;gap:4px;border:1px solid ${k===S.avatar?'#fff':'#333'};border-radius:4px;overflow:hidden"><div style="display:flex;justify-content:space-around;padding:10px 4px;background:var(--sheet)"><svg class="av" width="56" height="56" viewBox="0 0 48 48">${AVATARS[k]}</svg><svg class="av" width="28" height="28" viewBox="0 0 48 48" style="align-self:end">${AVATARS[k]}</svg></div><div style="background:var(--band);padding:8px;display:flex;justify-content:center"><svg class="av" width="40" height="40" viewBox="0 0 48 48" style="--sheet:var(--band-fg);--ink:var(--band-fg)">${AVATARS[k]}</svg></div><div style="padding:2px 8px 8px;font-family:var(--f-body)"><b>${AVNAME[k]}</b><div style="opacity:.75;font-size:11px">${AVWHY[k]}</div></div></button>`).join('')}</div></div>`:''}
+  ${S.pane==='av'?`<div class="pane" style="width:min(640px, calc(100vw - 24px))"><h4>Avatar options (click one to use it)</h4><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${Object.keys(AVATARS).map(k=>`<button data-act="pickav" data-av="${k}" style="all:unset;cursor:pointer;display:grid;gap:4px;border:1px solid ${k===S.avatar?'#fff':'#333'};border-radius:4px;overflow:hidden"><div style="display:flex;justify-content:space-around;padding:10px 4px;background:var(--sheet)"><svg class="av" width="56" height="56" viewBox="0 0 48 48">${AVATARS[k]}</svg><svg class="av" width="28" height="28" viewBox="0 0 48 48" style="align-self:end">${AVATARS[k]}</svg></div><div style="background:var(--band);padding:8px;display:flex;justify-content:center"><svg class="av" width="40" height="40" viewBox="0 0 48 48" style="--sheet:var(--band-fg);--ink:var(--band-fg)">${AVATARS[k]}</svg></div><div style="padding:2px 8px 8px;font-family:var(--f-body)"><b>${AVNAME[k]}</b><div style="opacity:.75;font-size:11px">${AVWHY[k]}</div></div></button>`).join('')}</div></div>`:''}
   ${S.pane==='q'?`<div class="pane"><h4>Questions this prototype should answer</h4><ol>${QUESTIONS.map(q=>`<li>${esc(q)}</li>`).join('')}</ol></div>`:''}
   ${S.pane==='state'?`<div class="pane"><h4>State (${S.profile})</h4><pre>${esc(JSON.stringify({variant:S.variant, view:S.view, profile:S.profile, selected:S.sel, running:S.running, controls:Object.fromEntries(ORDER.map(cid=>[cid, (({status,verdict,review})=>({status,verdict,review}))(stOf(cid))])), remediation:S.rem.filter(r=>r.p===S.profile), auditTrailEntries:S.trail.filter(t=>t.p===S.profile).length}, null, 1))}</pre></div>`:''}`;
 }
