@@ -88,6 +88,7 @@ Flow map (visual, private artifact): https://claude.ai/artifact/CXZ7LB2yySvQPsaR
 - 2026-11-03: **the interface stays English; answers, chat and the readiness report follow the profile's language.** Full interface translation is listed as a later improvement. Why: translating menus shows no agent behaviour and costs a day.
 - 2026-11-03: **a German-language profile cites the German ISA edition**, if its licence matches the English one (unverified: only the English Excel's licence sheet was read); otherwise English ISA text with German answers. Check at M4.
 - 2026-11-03: **the readiness report is written for the company's management and as an auditor's pre-read**: formal and fit to forward, which is why it carries the AI disclaimer, the audit trail and the not-applicable list.
+- 2026-11-03: **specs and tickets may be written ahead** (amends the milestone decision above): all six specs are filed (#1 to #6); tickets can be too. What must not happen is work stalling on an owner-only task, so `ready-for-human` tickets are filed first and listed for the owner up front. Why: the owner's clarification; the cost of waiting is the owner's blocked tasks, not early tickets.
 
 ## Ideas
 
