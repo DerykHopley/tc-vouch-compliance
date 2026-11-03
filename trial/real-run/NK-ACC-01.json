@@ -1,0 +1,32 @@
+{
+  "control_id": "NK-ACC-01",
+  "verdict": "partial",
+  "answer": "Control NK-ACC-01 is only partly supported by policy. Evidence points:\n\nACC-1 (review at least every six months): Supported. The access control policy says managers review their team's access rights at least every six months (doc access-control-policy, Reviews).\n\nACC-2 (each review recorded with date and reviewer): Not supported by the policies found. The policy assigns reviews to managers but does not require the review to be recorded, dated, or attributed to a reviewer. A procedure or review log would need to be obtained as evidence.\n\nACC-3 (rights no longer needed removed within five working days): Not supported. The policy has no removal deadline. The only related text is that HR informs IT of a leaver on their last working day (Leavers). It does not state when access must be removed, does not cover rights that are no longer needed for reasons other than leaving, and does not mention five working days.\n\nOverall: the review frequency is documented, but the recording requirement and the five-working-day removal requirement are not found in the policies. The control cannot be fully confirmed as designed. Recommend the policy owner (IT operations lead) add a recording requirement and a removal timeline, or provide the procedure that sets them.",
+  "sources": [
+    {
+      "doc_id": "access-control-policy",
+      "heading": "Reviews"
+    },
+    {
+      "doc_id": "access-control-policy",
+      "heading": "Access control policy"
+    },
+    {
+      "doc_id": "access-control-policy",
+      "heading": "Granting access"
+    },
+    {
+      "doc_id": "access-control-policy",
+      "heading": "Leavers"
+    }
+  ],
+  "warnings": [],
+  "covered_points": [
+    "ACC-1"
+  ],
+  "missing_points": [
+    "ACC-2",
+    "ACC-3"
+  ],
+  "gap_note": null
+}

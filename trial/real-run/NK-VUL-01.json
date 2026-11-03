@@ -1,0 +1,22 @@
+{
+  "control_id": "NK-VUL-01",
+  "verdict": "gap",
+  "answer": "Control NK-VUL-01 (technical vulnerabilities are tracked and fixed within set times): NOT EVIDENCED in the policy library. Ten searches covered security advisories, vulnerability management, patch management, critical-vulnerability remediation timelines, the 14-day fix window, and exception approval/recording. None returned a policy addressing vulnerability handling.\n\n- VUL-1 (advisory sources monitored): no policy found.\n- VUL-2 (critical weaknesses fixed within 14 days): no policy found. The only remediation-timing text retrieved (encryption-policy, \"Monthly check\") covers laptop encryption status, not vulnerabilities, and the 14-day figure does not appear in any retrieved document.\n- VUL-3 (exceptions approved and recorded): no policy found. The backup-policy restore-test record and the general policy-owner listings are unrelated.\n\nThe retrieved documents (acceptable-use, access-control, backup, encryption) were checked and do not govern vulnerability handling, so I have not cited them as support. Recommended next step: ask the control owner for the vulnerability management or patch management standard, and confirm whether one exists. Until it is produced, the control cannot be rated as effective.",
+  "sources": [],
+  "warnings": [],
+  "covered_points": [],
+  "missing_points": [
+    "VUL-1",
+    "VUL-2",
+    "VUL-3"
+  ],
+  "gap_note": {
+    "control_id": "NK-VUL-01",
+    "missing_points": [
+      "VUL-1",
+      "VUL-2",
+      "VUL-3"
+    ],
+    "owner_role": "Head of IT infrastructure"
+  }
+}

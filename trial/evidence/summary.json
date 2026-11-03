@@ -1,0 +1,595 @@
+{
+  "note": "Extracted from Claude Code session logs; see summarise.py. label_hint can be off by one when agents ran in parallel: match on the result's content.",
+  "arms": {
+    "b": {
+      "window": [
+        "2026-11-03T08:52:41",
+        "2026-11-03T09:21:21"
+      ],
+      "last_main_event": "2026-11-03T09:21:20.502Z",
+      "owner_message_times": [
+        "2026-11-03T08:52:41.509Z",
+        "2026-11-03T09:01:46.890Z"
+      ],
+      "tokens": {
+        "main": {
+          "input": 192,
+          "cache_write": 124229,
+          "cache_read": 12852157,
+          "output": 74086,
+          "calls": 83
+        },
+        "subagent": {
+          "input": 120,
+          "cache_write": 223552,
+          "cache_read": 1303589,
+          "output": 44167,
+          "calls": 60
+        },
+        "total": {
+          "input": 312,
+          "cache_write": 347781,
+          "cache_read": 14155746,
+          "output": 118253,
+          "calls": 143
+        }
+      }
+    },
+    "c": {
+      "window": [
+        "2026-11-03T08:52:57",
+        "2026-11-03T09:59:42"
+      ],
+      "last_main_event": "2026-11-03T09:59:41.585Z",
+      "owner_message_times": [
+        "2026-11-03T08:52:57.751Z",
+        "2026-11-03T09:27:14.668Z",
+        "2026-11-03T09:40:16.145Z",
+        "2026-11-03T09:40:55.480Z"
+      ],
+      "tokens": {
+        "main": {
+          "input": 56,
+          "cache_write": 55451,
+          "cache_read": 1292592,
+          "output": 18322,
+          "calls": 21
+        },
+        "workflow": {
+          "input": 532,
+          "cache_write": 1020768,
+          "cache_read": 11043714,
+          "output": 151420,
+          "calls": 258
+        },
+        "total": {
+          "input": 588,
+          "cache_write": 1076219,
+          "cache_read": 12336306,
+          "output": 169742,
+          "calls": 279
+        }
+      }
+    }
+  },
+  "b_subagent_reports": [
+    {
+      "agent": "agent-a04932879f5d17f05",
+      "meta": {
+        "agentType": "working-state:verifier",
+        "isBuiltIn": false,
+        "launchedWithDefaults": true,
+        "description": "Verify ticket #2 blind",
+        "toolUseId": "toolu_01GcnpcCFfk8fmN5T9NXqJGR",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": ""
+    },
+    {
+      "agent": "agent-a21b82eac9793fc1b",
+      "meta": {
+        "agentType": "general-purpose",
+        "isBuiltIn": true,
+        "launchedWithDefaults": true,
+        "description": "Standards review of T3 diff",
+        "toolUseId": "toolu_01VLPYALJtVpViUNXkXrr8Fc",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": ""
+    },
+    {
+      "agent": "agent-a27a9c3192a0a29d9",
+      "meta": {
+        "agentType": "working-state:verifier",
+        "isBuiltIn": false,
+        "launchedWithDefaults": true,
+        "description": "Verify Fix #6 blind",
+        "toolUseId": "toolu_019Uz4HAPbkLE2twjd42t8gm",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": "Now the five bad cases by hand, plus unexpected-user variants."
+    },
+    {
+      "agent": "agent-a31c88d5025940999",
+      "meta": {
+        "agentType": "general-purpose",
+        "isBuiltIn": true,
+        "launchedWithDefaults": true,
+        "description": "Standards review of Fix #6",
+        "toolUseId": "toolu_014c1K5e8fkPPWF3a8iqDD7M",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": ""
+    },
+    {
+      "agent": "agent-a9d6dcbff53e6a44b",
+      "meta": {
+        "agentType": "general-purpose",
+        "isBuiltIn": true,
+        "launchedWithDefaults": true,
+        "description": "Standards review of T2 diff",
+        "toolUseId": "toolu_01PuXgD2str2kRh8623hkj9T",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": ""
+    },
+    {
+      "agent": "agent-ab3db3114e98f37a7",
+      "meta": {
+        "agentType": "working-state:verifier",
+        "isBuiltIn": false,
+        "launchedWithDefaults": true,
+        "description": "Verify ticket #3 blind",
+        "toolUseId": "toolu_01YTrKSfqYPdjEErT9xadvWZ",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": "Now my own probes in the scratch folder."
+    },
+    {
+      "agent": "agent-adc1b7be0f721aba7",
+      "meta": {
+        "agentType": "general-purpose",
+        "isBuiltIn": true,
+        "launchedWithDefaults": true,
+        "description": "Standards review of T1 diff",
+        "toolUseId": "toolu_01CZD2z9Ft64dhcAv1AmU8kZ",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": ""
+    },
+    {
+      "agent": "agent-af585d62669c158aa",
+      "meta": {
+        "agentType": "working-state:verifier",
+        "isBuiltIn": false,
+        "launchedWithDefaults": true,
+        "description": "Verify ticket #4 blind",
+        "toolUseId": "toolu_01CLq7Z5iLo7YXvrcUZW3ViS",
+        "spawnDepth": 1,
+        "requestShape": "background",
+        "requestNonInteractive": true,
+        "pickedEffortModel": "claude-opus-5-5",
+        "finished": true
+      },
+      "final_report": "The working tree holds uncommitted edits (a rename refactor plus two extra CLI tests) that aren't mine. To judge the committed branch, I'll export HEAD to scratch and run the checks there too."
+    }
+  ],
+  "c_workflow_runs": [
+    {
+      "run": "wf_9c019e4c-668",
+      "agents": 2,
+      "steps": [
+        {
+          "label_hint": "queue:round 1",
+          "result": {
+            "tickets": [
+              {
+                "number": 1,
+                "title": "T1: Assess one control through a LangGraph graph"
+              }
+            ],
+            "skipped": [
+              {
+                "number": 2,
+                "why": "Blocked by #1, which is still open (ticket-lint verdict: ok)"
+              },
+              {
+                "number": 3,
+                "why": "Blocked by #1, which is still open (ticket-lint verdict: ok)"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "run": "wf_b406fb01-671",
+      "agents": 5,
+      "steps": [
+        {
+          "label_hint": "queue:round 1",
+          "result": {
+            "tickets": [
+              {
+                "number": 1,
+                "title": "T1: Assess one control through a LangGraph graph"
+              }
+            ],
+            "skipped": [
+              {
+                "number": 2,
+                "why": "Blocked by #1, which is still open (ticket-lint verdict: ok)"
+              },
+              {
+                "number": 3,
+                "why": "Blocked by #1, which is still open (ticket-lint verdict: ok)"
+              }
+            ]
+          }
+        },
+        {
+          "label_hint": "build:#1",
+          "result": {
+            "status": "built",
+            "branch": "ticket-1",
+            "pr": 4,
+            "changed_lines": 413,
+            "summary": "Ticket #1 is finished on branch ticket-1, commit 39481e3, in PR #4: https://github.com/DerykHopley/sprint3-trial-c/pull/4. The PR is ready for review (not a draft), titled after the ticket, and says \"Closes #1\". The owner answered on #1: take it as one PR, no split, and build on from ticket-1. I built on that branch, so this rerun changed no code. Merging origin/main was a no-op (already up to date). The diff is 413 lines without uv.lock, under this run's cap of 450.\n\nWhat the PR adds (I read every changed file myself on this run): controls.py (load_controls, get_control, UnknownControlError), graph.py (AssessState, Assessment, build_graph(model), assess(control, model); the model is passed in, and findings live in their own state keys, not in messages), fake_model.py (ScriptedChatModel plays the gather turns), cli.py (the `assess` command; uses the fake when ASSESS_FAKE_SCRIPT is set, otherwise ChatOpenRouter from ASSESS_MODEL), pytest-socket with addopts --disable-socket, and .env.example.\n\nEach criterion, all rechecked on this run:\n1. NK-VUL-01 with a gap answer turn gives verdict 'gap' and the script's answer text. Test: tests/test_graph.py::test_gap_answer_turn_gives_gap_assessment. Pass (checked).\n2. ASSESS_FAKE_SCRIPT=<file> assess NK-ENC-01 prints all four fields and exits 0. Test: tests/test_cli.py::test_assess_prints_one_assessment_as_json (subprocess). Pass (checked).\n3. assess NK-XXX-99 exits 2 with one stderr line naming the id and no traceback. Test: tests/test_cli.py::test_unknown_control_exits_2_with_one_line_error (subprocess). Pass (checked).\n4. The suite passes with OPENROUTER_API_KEY unset and sockets disabled. Covered by addopts --disable-socket and tests/test_cli.py::test_suite_runs_with_sockets_disabled. Locally, `env -u OPENROUTER_API_KEY uv run pytest` gave 6 passed (checked). CI fast lane is green on 39481e3 (checked).\n\nManual runs (step 4 of the ticket loop, checked): NK-ENC-01 with enc_found.json gave verdict found, exit 0. NK-VUL-01 with vul_gap.json gave verdict gap, exit 0. NK-XXX-99 printed \"assess: unknown control id: NK-XXX-99\", exit 2. ruff is clean. The one pytest warning comes from the test that tries a socket on purpose.\n\nTicket against code: no conflicts. pytest-socket blocks sockets only inside the pytest process. The CLI subprocesses stay offline because they use the fake model; that comes from reading the code and was not tested on its own.\n\nDecisions made on step 3 of the open-choices order (each is in a commit trailer and the PR description), for the owner to confirm:\n- The real model is ChatOpenRouter. ASSESS_MODEL is required and has no default, so the owner picks the paid model.\n- The answer turn is a submit_answer tool call.\n- Until T2, a tools node replies to each tool call with a placeholder.\n- The controls file comes from ASSESS_CONTROLS, defaulting to fixtures/nordlicht/controls.yaml.\n- .env.example lists variable names only.\n\nDocs (carried over from the earlier build, not re-fetched on this run): LangGraph graph-api (StateGraph, add_conditional_edges to END, compile), the OpenRouter integration (ChatOpenRouter reads OPENROUTER_API_KEY; checked against installed 0.2.9), BaseChatModel (_generate and _llm_type; checked against langchain-core 1.7.4), pytest-socket (addopts --disable-socket).\n\nGap: no test covers a real ChatOpenRouter call. That needs a live service, and the ticket rules it out.\n\nOn this run I only rewrote the PR description: I removed the over-cap note and the split section, and recorded that the owner accepted one PR and that CI is green. One more thing: another worktree (wf_fcaad863-851-2) still has the ticket-1 branch checked out. It matched origin/ticket-1, so nothing was lost; I pushed from my own worktree.",
+            "recommendation": "Run the working-state:verifier on #1 against branch ticket-1, then start the merge gate with scripts/merge-on-green.sh 4. The issue still has the ready-for-agent label; leave it until the PR merges."
+          }
+        },
+        {
+          "label_hint": "review:#1",
+          "result": {
+            "findings": 7,
+            "fixed": 4,
+            "owner_question": "The global CLAUDE.md says a project loads its secrets with a committed `.envrc` (`export OPENROUTER_API_KEY=$(secret-tool lookup service openrouter)`) and lists the names in `.env.example`. PR #4 adds `.env.example` but no `.envrc`. Should T1 add that `.envrc`, or should it go in a separate Fix? Recommended: a separate Fix ticket. Factory mode treats anything to do with secrets as a fixed gate, and no test in T1 needs the key. I haven't changed anything for this.",
+            "summary": "I ran the Standards review once on PR #4 (ticket-1, compared with main) and skipped the Spec axis. The repo has no coding-standards file and no GLOSSARY.md, so I reviewed against both CLAUDE.md files plus the code-smell baseline. The skill has no subagent tool here, so I did the review myself instead of in a separate subagent.\n\nThere are 7 findings. I fixed 4 of them in commit a11522b and pushed it to ticket-1 (39481e3..a11522b):\n1. Test level (project CLAUDE.md says each test goes at the lowest level that shows the behaviour): `test_suite_runs_with_sockets_disabled` sat in the subprocess end-to-end file `tests/test_cli.py` but runs no subprocess. I moved it to `tests/test_smoke.py`.\n2. Wrong type hint: `load_controls(path: Path)` gets a str from the environment in cli.py. It now takes `str | Path`.\n3. Repeated default: `assess()` passed `sources=[]` even though `Assessment` already defaults it. I removed the extra argument.\n4. Missing name: the CLI docstring lists `ASSESS_CONTROLS`, but `.env.example` didn't. I added it.\n\n2 findings are judgement calls I left alone:\n- Duplicated code: `ROOT` and `SCRIPTS` are defined in both test files. Moving them to a conftest would add more code than it removes.\n- Refused Bequest: `ScriptedChatModel.bind_tools` ignores the tools it's given. That's acceptable for a scripted fake.\n\nThe 7th finding needs the owner: there's no committed `.envrc` (see owner_question).\n\nI checked `evidence` in `AssessState` before flagging it as unused: the spec requires it, so it isn't a finding.\n\nChecks: ruff and ruff format pass. pytest passes (6 tests) with OPENROUTER_API_KEY unset and sockets disabled. Both manual CLI runs worked: NK-ENC-01 with the fake script exits 0 and prints all four fields, and NK-XXX-99 exits 2 with a one-line error. CI on a11522b hasn't been checked yet.\n\nThe PR is now 416 changed lines without uv.lock, 3 more than the 413 the owner accepted.\n\nThe worktree `/var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_fcaad863-851-2` still has ticket-1 checked out at 39481e3. Pull there before building on it."
+          }
+        },
+        {
+          "label_hint": "park:#1",
+          "result": "I didn't park ticket #1: you asked to take it as one PR and rerun the workflow, and the script's park step (add `needs-owner`, remove `ready-for-agent`, set PR #4 back to draft) would take it out of the queue, so the rerun would skip it. I changed no labels, comments or PR state. Its open question (should T1 add the `.envrc` or leave it to a separate Fix?) still needs your answer."
+        },
+        {
+          "label_hint": "queue:round 2",
+          "result": {
+            "tickets": [
+              {
+                "number": 1,
+                "title": "T1: Assess one control through a LangGraph graph"
+              }
+            ],
+            "skipped": [
+              {
+                "number": 2,
+                "why": "Blocked by #1, which is still open (ticket-lint verdict ok)"
+              },
+              {
+                "number": 3,
+                "why": "Blocked by #1, which is still open (ticket-lint verdict ok)"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "run": "wf_d0175e08-cb3",
+      "agents": 15,
+      "steps": [
+        {
+          "label_hint": "queue:round 1",
+          "result": {
+            "tickets": [
+              {
+                "number": 1,
+                "title": "T1: Assess one control through a LangGraph graph"
+              }
+            ],
+            "skipped": [
+              {
+                "number": 2,
+                "why": "Blocked by #1, which is still open (ticket-lint: ok)"
+              },
+              {
+                "number": 3,
+                "why": "Blocked by #1, which is still open (ticket-lint: ok)"
+              }
+            ]
+          }
+        },
+        {
+          "label_hint": "build:#1",
+          "result": {
+            "status": "built",
+            "branch": "ticket-1",
+            "pr": 4,
+            "changed_lines": 416,
+            "summary": "T1 was already built on origin/ticket-1. Commits: 39481e3 (build) and a11522b (standards review fixes). The owner's answers on #1 need no code change: take it as one PR with no split, and leave out .envrc with no Fix ticket. I worked on a local alias (ticket-1-build tracking origin/ticket-1) because another worktree already has the local ticket-1 branch checked out. I made no new commits, so there was nothing to push. origin/main merged as \"Already up to date\".\n\nSize: 416 changed lines without uv.lock, which is under the cap of 450 (checked).\n\nAcceptance criteria (all rechecked this run):\n- NK-VUL-01 with a gap answer turn gives verdict \"gap\" and the script's answer text. Test: tests/test_graph.py::test_gap_answer_turn_gives_gap_assessment (unit, no network). Passes.\n- `ASSESS_FAKE_SCRIPT=<file> uv run assess NK-ENC-01` prints all four fields and exits 0. Test: tests/test_cli.py::test_assess_prints_one_assessment_as_json (subprocess). Passes. A manual run printed control_id, verdict found, answer and an empty sources list, and exited 0.\n- `uv run assess NK-XXX-99` exits 2 with one stderr line and no traceback. Test: tests/test_cli.py::test_unknown_control_exits_2_with_one_line_error (subprocess). Passes. A manual run printed \"assess: unknown control id: NK-XXX-99\" and exited 2.\n- The suite passes with OPENROUTER_API_KEY unset and sockets disabled. pyproject sets addopts --disable-socket, and tests/test_smoke.py::test_suite_runs_with_sockets_disabled covers it. `env -u OPENROUTER_API_KEY uv run pytest -q` gave 6 passed. Its one warning comes from that test's deliberate blocked-socket attempt. The CI fast lane is green on a11522b.\n\nOther checks: `uv run ruff check` passed. A manual run of vul_gap.json with NK-VUL-01 printed verdict gap and exited 0.\n\nTicket vs code: no conflicts.\n\nDecisions: four step-3 decisions, unchanged from earlier runs and recorded in the 39481e3 trailers and the PR description:\n- the real model is ChatOpenRouter, with the model id from ASSESS_MODEL and no default;\n- the model ends gathering with a submit_answer tool call;\n- before T2, a tools node answers each tool call with \"not available yet\";\n- the controls file comes from ASSESS_CONTROLS, defaulting to fixtures/nordlicht/controls.yaml.\n\nPR #4 was already marked ready. I updated its description with the size (416, under 450), both commits, the owner's .envrc answer and this run's recheck results. It still has \"Closes #1\", the Docs: lines and the decisions.\n\nUnexplained: none.\n\nGaps: no test runs a real ChatOpenRouter model, because that needs a live service and the ticket rules out real calls.",
+            "recommendation": "Start the merge gate on PR #4 (scripts/merge-on-green.sh 4). The fast lane is green on a11522b and the PR is 416 lines, under the 450 cap."
+          }
+        },
+        {
+          "label_hint": "review:#1",
+          "result": {
+            "findings": 2,
+            "fixed": 1,
+            "owner_question": "",
+            "summary": "I ran the Standards review once on PR #4 (ticket-1 against main). It found 2 possible code smells. Neither breaks a rule the repo writes down. I fixed one, committed it as 62a1018 and pushed it to ticket-1. I didn't raise `.envrc` or the PR's size, because the owner already settled both in the comments on #1.\n\n1. **Fixed: possible Primitive Obsession.** In `graph.py`, `gather()` read the `submit_answer` tool call as a raw dict and copied `answer`, `verdict` and `cited` across by hand. The new `_submitted_answer` checks the call against the `submit_answer` model, and `gather()` merges in `model_dump()`. A bad verdict now fails at the call, and the default for `cited` is set in one place only. I staged only `src/audit_agent/graph.py`.\n2. **Not fixed: possible Duplicated Code.** `tests/test_cli.py` and `tests/test_graph.py` both define the `ROOT` and `SCRIPTS` paths, and the controls path in `test_graph.py` repeats `cli.DEFAULT_CONTROLS`. Pulling them out would add lines rather than save them, and the PR is close to its 450-line limit. Judgement call; I left it.\n\n**Checks after the fix (all checked):**\n- `uv run ruff check` passed.\n- `pytest -q` with `OPENROUTER_API_KEY` empty: 6 passed. The one warning comes from the test that deliberately tries to open a blocked socket.\n- `ASSESS_FAKE_SCRIPT=tests/scripts/vul_gap.json uv run assess NK-VUL-01` printed verdict `gap` and exited 0.\n- `ASSESS_FAKE_SCRIPT=tests/scripts/enc_found.json uv run assess NK-ENC-01` printed all four fields, verdict `found`, and exited 0.\n- The pre-push hook passed when I pushed.\n\n**Note:** a guard blocked `git checkout -B` in this worktree. Because the worktree was clean, I used a fast-forward-only merge of origin/ticket-1 instead.\n\nWorktree: /var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_d0175e08-cb3-3"
+          }
+        },
+        {
+          "label_hint": "verify:#1",
+          "result": {
+            "verdicts": [
+              {
+                "criterion": "For NK-VUL-01, with a fake script whose answer turn says gap, the graph returns an Assessment with verdict == 'gap' and the script's answer text (pytest test, no network)",
+                "verdict": "pass",
+                "evidence": "Checked. `uv run pytest -v` in a fresh clone of ticket-1 (62a1018) printed `tests/test_graph.py::test_gap_answer_turn_gives_gap_assessment PASSED`. I read the test: it loads NK-VUL-01 from fixtures/nordlicht/controls.yaml, passes ScriptedChatModel.from_file(tests/scripts/vul_gap.json) into assess(), and checks equality with the whole Assessment(verdict='gap', answer=<the script's exact text>, sources=[]). So it tests the claim itself, not something easier. pytest runs with addopts --disable-socket. I also ran the CLI for real under `unshare -rn`, where there is no network at all, with the fake script on NK-VUL-01. It printed verdict \"gap\" with the script's answer and exit=0. Requirements also checked in code: build_graph(model) receives the model and never creates one, and AssessState holds control, evidence and verdict (plus answer and cited) as separate keys outside messages."
+              },
+              {
+                "criterion": "ASSESS_FAKE_SCRIPT=<file> uv run assess NK-ENC-01 prints JSON with all four Assessment fields and exits 0 (pytest subprocess test)",
+                "verdict": "pass",
+                "evidence": "Checked. `ASSESS_FAKE_SCRIPT=tests/scripts/enc_found.json uv run assess NK-ENC-01` printed {control_id: NK-ENC-01, verdict: found, answer: 'Laptops use full-disk encryption, ...', sources: []} and exit=0. The script's first turn is a tool call, so tool-call turns are answered and skipped before the answer turn is used. tests/test_cli.py::test_assess_prints_one_assessment_as_json PASSED. It runs the installed `assess` entry point as a subprocess with OPENROUTER_API_KEY removed, and checks that the key set is exactly the four fields."
+              },
+              {
+                "criterion": "uv run assess NK-XXX-99 exits 2, stderr is one line containing NK-XXX-99, no traceback (pytest subprocess test)",
+                "verdict": "pass",
+                "evidence": "Checked. `uv run assess NK-XXX-99` printed stderr `assess: unknown control id: NK-XXX-99` with exit=2. The result is the same with ASSESS_FAKE_SCRIPT set, and with no model configured, because the control lookup happens before the model is built. tests/test_cli.py::test_unknown_control_exits_2_with_one_line_error PASSED. It checks returncode 2, empty stdout, exactly one stderr line containing the id, and no 'Traceback'."
+              },
+              {
+                "criterion": "The whole suite passes with OPENROUTER_API_KEY unset and sockets disabled (pytest-socket --disable-socket); CI's fast lane runs pytest that way",
+                "verdict": "pass",
+                "evidence": "Checked. pyproject has `[tool.pytest.ini_options] addopts = \"--disable-socket\"`, and pytest-socket is in the dev group. Locally, with OPENROUTER_API_KEY unset, the result was `6 passed`. test_smoke::test_suite_runs_with_sockets_disabled proves sockets are blocked inside the suite. CI run 41613457984 on head 62a1018 (the PR #4 head) passed the fast-lane job. Its log shows `configfile: pyproject.toml` and `6 passed`. The workflow sets no OPENROUTER_API_KEY. Note: pytest-socket does not cover the CLI subprocess tests, but my `unshare -rn` run shows the fake path needs no network."
+              }
+            ],
+            "unexpected_user": "I tried paths the ticket doesn't mention. All four acceptance criteria hold; these are possible follow-ups, outside its criteria:\n1. Running from outside the repo fails with a traceback, exit 1: `uv run --project repo assess NK-ENC-01` from the parent folder gave `FileNotFoundError: 'fixtures/nordlicht/controls.yaml'`. The default controls path is relative to the current folder.\n2. When ASSESS_FAKE_SCRIPT names a file that doesn't exist (`/nope.json`), you get a FileNotFoundError traceback with exit 1, not a one-line error with exit 2.\n3. A fake script whose last turn is a tool call, not the answer, ends with a traceback: `RuntimeError: fake script has no gather turns left`. The ticket says the last turn is always the answer, so this is a broken-input case.\n4. An answer turn with an invalid verdict (\"maybe\") ends with a pydantic literal_error traceback.\n5. An empty control id (`assess \"\"`) gives exit 2 and `assess: unknown control id: ` (handled).\n6. A known control with neither ASSESS_MODEL nor ASSESS_FAKE_SCRIPT set gives exit 2 and one clear line (handled).\n\nSteps taken, as a manual test record:\n- [x] Fresh clone of ticket-1 into a temporary folder (mktemp -d), at 62a1018. Expected: same head as PR #4. Seen: yes.\n- [x] `uv sync --locked`, then `uv run ruff check`. Expected: All checks passed. Seen: yes.\n- [x] `uv run pytest -v` with OPENROUTER_API_KEY unset. Expected: 6 passed. Seen: yes.\n- [x] `ASSESS_FAKE_SCRIPT=tests/scripts/enc_found.json uv run assess NK-ENC-01`. Expected: JSON with four fields, verdict found, exit 0. Seen: yes.\n- [x] `ASSESS_FAKE_SCRIPT=tests/scripts/vul_gap.json uv run assess NK-VUL-01`. Expected: verdict gap with the script's text, exit 0. Seen: yes.\n- [x] The same run under `unshare -rn`, with no network. Expected: same output, exit 0. Seen: yes.\n- [x] `uv run assess NK-XXX-99`, with and without a fake script. Expected: one stderr line naming the id, exit 2. Seen: yes.\n- [x] Known control with no model configured. Expected: one-line error, exit 2. Seen: yes.\n- [x] Missing fake file, script with no answer turn, invalid verdict, other working folder. Expected: a clean error. Seen: tracebacks, exit 1 (outside the criteria).\n- [x] `gh pr checks 4`, and the CI log for run 41613457984. Expected: fast-lane passes on 62a1018. Seen: pass, 6 passed.\n- [x] Deleted /tmp/tmp.3LpGYXP2EG. No app or server was started; this is a CLI only."
+          }
+        },
+        {
+          "label_hint": "merge:#1",
+          "result": {
+            "status": "merged",
+            "detail": "PR #4 (ticket-1) merged via scripts/merge-on-green.sh 4 (exit 0); merge commit 65379022975ee070a8b86c84ab31d746c099b7a0. Checked: ticket-1 (62a1018) already contained origin/main's tip (4e8c3d2), so no merge commit, fast checks or push were needed; fast-lane check passed on 62a1018."
+          }
+        },
+        {
+          "label_hint": "queue:round 2",
+          "result": {
+            "tickets": [
+              {
+                "number": 2,
+                "title": "T2: The agent searches the company's policies, within an allow-list"
+              },
+              {
+                "number": 3,
+                "title": "T3: The graph routes each control to found, partial or gap"
+              }
+            ],
+            "skipped": []
+          }
+        },
+        {
+          "label_hint": "build:#3",
+          "result": {
+            "status": "built",
+            "branch": "ticket-3",
+            "pr": 5,
+            "changed_lines": 207,
+            "summary": "T3 is built on branch ticket-3 (commit d3e03cf, from origin/main 6537902) and opened as PR #5 (https://github.com/DerykHopley/sprint3-trial-c/pull/5). Merging origin/main changed nothing. The diff is 7 files, +199/-8, under the 450 cap. Ruff and pytest pass (10 tests). The PR is open and not merged.\n\nWhat was built:\n- After gathering, a `judge` node asks the model which evidence points are covered, as structured output (`judge_coverage`, via `with_structured_output`).\n- `Assessment` gains `covered_points`, `missing_points` and `gap_note` (`GapNote`). The first two follow the control's order and drop ids from other controls.\n- Fixed edges set the verdict: all covered is found, some is partial, none is gap. A gap goes to an `escalate` node, which fills `gap_note` with the control id, missing points and `owner_role`.\n- The answer turn's verdict is no longer stored.\n- The fake model answers the structured-output call from the script's `judge.covered_points`.\n- Files changed: /var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_d0175e08-cb3-8/src/audit_agent/graph.py and /var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_d0175e08-cb3-8/src/audit_agent/fake_model.py, plus tests and 3 new fake scripts.\n\nAcceptance criteria, all tests in tests/test_graph.py:\n- Three runs: `test_judge_covering_all_points_gives_found` (NK-ENC-01), `test_judge_covering_some_points_gives_partial` (NK-ACC-01, ACC-1 only) and `test_judge_covering_nothing_gives_gap_with_gap_note` (NK-VUL-01).\n- `gap_note`: the gap test checks the whole `GapNote`, including the owner role \"Head of IT infrastructure\". The found and partial tests check `gap_note is None`.\n- An ENC-9 id from outside the control is dropped: `test_judge_ids_outside_the_control_are_ignored`.\n- The answer turn's verdict is ignored: `test_answer_turn_verdict_is_ignored_when_judge_covers_nothing`.\n- The CLI test `test_assess_prints_one_assessment_as_json` now also checks the 3 new fields.\n- The partial, gap and escalate tests did not fail first: their code was written in the same pass as the found test. I broke the code from a saved copy (removed the escalate edge, kept foreign ids, let the answer verdict through, turned partial into gap). Each test went red on its own assertion, and I restored the copy.\n- I ran `assess` with the fake model for all three controls. Each printed the expected JSON and exited 0.\n\nTicket against code and spec: no conflicts. The T1 tests that checked the exact `Assessment` fields were updated for the new fields.\n\nUnexplained: none. The pytest-socket warning comes from the existing smoke test.\n\nDecisions taken on step 3 (smallest revertable change), both in the commit trailer for the owner to confirm:\n1. `submit_answer` keeps its `verdict` field, and the graph stops storing it. Removing the field would change the T1 tool schema, prompt and fake scripts.\n2. The judge gets a fresh prompt: the control, the `evidence` state key and the draft answer. It does not see the gather conversation, because findings live in their own state keys and that conversation ends on an unanswered tool call.\n\nDocs (installed source only, online docs not read):\n- langchain-core 1.7.4: `with_structured_output` goes through `bind_tools(..., ls_structured_output_format=...)` and reads the result with `PydanticToolsParser`.\n- langchain-openrouter 0.2.9: `with_structured_output` defaults to `function_calling` and returns the Pydantic object.\n\nGaps:\n- No test shows how well a real model judges coverage; that needs a paid run.\n- `evidence` stays empty until T2, so the judge currently sees \"(none)\" plus the draft answer.\n\nStep 5 (standards review) and step 6 (verifier) were not run; they were outside the steps 1 to 4 this run was given.",
+            "recommendation": "Run the verifier on #3 / ticket-3, then the merge gate on PR #5. Expect a merge conflict in graph.py with T2's tool and evidence work."
+          }
+        },
+        {
+          "label_hint": "review:#3",
+          "result": {
+            "status": "built",
+            "branch": "ticket-2",
+            "pr": 6,
+            "changed_lines": 293,
+            "summary": "I built T2 in commit 2d-less single commit on ticket-2, based on origin/main 6537902. The merge of origin/main's tip was already up to date, and the diff is 293 lines, under the 450 cap. PR #6 is open as ready and says \"Closes #2\".\n\nWhat I built:\n- New module /var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_d0175e08-cb3-7/src/audit_agent/policies.py, with `search_policies(query, limit=5)`, re-exported from `audit_agent/__init__.py`.\n  - It keyword-searches only the `.md` files directly in `ASSESS_POLICY_DIR` (default `fixtures/nordlicht/policies`) and skips symlinks.\n  - Each passage has `doc_id`, `heading` and `text`.\n  - `invalid_input` is checked before the folder. A missing or unreadable folder gives `source_unavailable`.\n- In graph.py, the model is offered `search_policies` alongside `submit_answer`, and the tools node now runs the tool. That replaces T1's placeholder.\n  - Returned passages go to the `evidence` state key.\n  - `Assessment.sources` keeps only cited doc_ids that a search actually returned.\n  - New field `Assessment.warnings`. When a search hits `source_unavailable`, the verdict is forced to `gap`.\n- I also updated the CLI docstring and `.env.example` with `ASSESS_POLICY_DIR`.\n\nEach criterion and its test (all pass: `uv run pytest`, 24 passed; `ruff check` clean):\n1. `search_policies(\"encrypt\")` returns an `encryption-policy` passage with a heading: `tests/test_policies.py::test_keyword_search_finds_a_passage_under_its_heading`.\n2. Empty query, 201-character query, `limit=0` and `limit=11` each give `invalid_input`, also with a missing folder: `tests/test_policies.py::test_bad_input_returns_invalid_input_before_the_folder_is_checked`. It runs 10 cases: those four plus a blank query, each against the fixtures folder and a missing one.\n3. A query that names a path only returns passages from the policy folder: `tests/test_policies.py::test_a_query_naming_a_path_only_returns_policy_folder_passages`, plus `test_only_md_files_directly_in_the_folder_are_searched` (a sub-folder, a .txt file and a symlink are all ignored).\n4. Cited and searched shows up in `sources`; cited but never returned is dropped: `tests/test_graph.py::test_a_searched_and_cited_policy_becomes_a_source` and `test_a_cited_policy_no_search_returned_is_dropped` (new script `tests/scripts/enc_cites_unsearched.json`).\n5. A missing policy folder ends as `gap` with `source_unavailable` in `warnings`: `tests/test_graph.py::test_missing_policy_folder_finishes_as_a_gap_with_a_warning`.\n\nExtra tests:\n- `test_bad_search_input_goes_back_to_the_model_without_raising` (script `enc_bad_search.json`).\n- The CLI end-to-end test was updated to expect `warnings` and an `encryption-policy` source.\n- Three tests passed on their first run (criterion 3's two tests and the bad-input graph test), because earlier slices already had that behaviour.\n\nStep 4, checked by hand (all exit 0):\n- NK-ENC-01 with `enc_found.json` gives `found`, 3 `encryption-policy` sources and `warnings: []`.\n- The same run with `ASSESS_POLICY_DIR=/nonexistent` gives `gap`, no sources and `warnings: [\"source_unavailable\"]`.\n- NK-VUL-01 with `vul_gap.json` gives `gap` and no sources.\n\nWhere the ticket and the code disagreed:\n- T1's CLI test asserted exactly 4 keys and `sources == []`. I updated it to this ticket's contract.\n- T1's `Source` model has only `doc_id` and `heading`, no `text`. I kept that shape because the code already had it. The ticket says sources \"holds the passages\", so adding `text` is a one-field change if you want it.\n\nDecisions the ticket didn't settle (step 3; each is in the commit's decision trailers):\n- A passage is one paragraph under the nearest heading. Ranking counts how often the query's words appear as substrings, ignoring case.\n- `sources` holds each distinct (doc_id, heading) pair a search returned from a cited policy, in the order found.\n- A call to an unknown tool, or with missing or extra arguments, gets an `unknown_tool` or `invalid_input` reply instead of an exception.\n- Symlinked `.md` files are skipped.\n\nOne more choice not in the trailers: `source_unavailable` forces the verdict to `gap` but keeps the model's answer text, since T3 owns routing.\n\nDocs: https://reference.langchain.com/python/langchain_core/utils/function_calling/convert_to_openai_tool settled that `bind_tools` / `convert_to_openai_tool` accept a plain Python function. That page doesn't say how the schema is built. I checked that against installed langchain-core 1.7.4: the schema comes from the function's name, docstring and type hints.\n\nUnexplained: none.\n\nGaps: no real model was run (no paid runs), so whether a real model uses `search_policies` well is unverified.",
+            "recommendation": "Run the standards review and the blind verifier on PR #6. Then decide whether `Source` should also carry `text`, since the ticket says sources \"holds the passages\"."
+          }
+        },
+        {
+          "label_hint": "review:#2",
+          "result": {
+            "findings": 5,
+            "fixed": 2,
+            "owner_question": "",
+            "summary": "I ran a Standards-only review of PR #5 against origin/main. I fixed 2 of the 5 findings and pushed commit 0e5a779 to ticket-3. Nothing needs the owner.\n\nIssue #3 has no comments, so no earlier owner answer applied. The repo has no coding-standards doc and no GLOSSARY.md, so I reviewed against CLAUDE.md and the smell baseline. All five findings are judgement calls; none breaks a documented rule. No Agent tool was available, so I did the review myself instead of in a subagent.\n\nFixed:\n1. The module docstring in src/audit_agent/graph.py still listed only \"evidence, answer, verdict\" as the findings kept in state. It now names the new state keys too: covered and missing points, and the gap note.\n2. Duplicated test: test_tool_call_turns_are_skipped_until_the_answer_turn and the new test_judge_covering_all_points_gives_found use the same script and both checked for `found`. The verdict now comes from the judge, so I removed that check from the older test. The new found test still covers it.\n\nNot fixed:\n3. SYSTEM_PROMPT and the `submit_answer` docstring still ask the model for a verdict that the graph now ignores. The PR records keeping that field as a step-3 decision, so I left it.\n4. The fake model spots the judge call by checking for `ls_structured_output_format` in `bind_tools`, a keyword that LangChain passes internally. This could break in a later LangChain version. It's acceptable for now: the PR's Docs lines show it was checked against the installed langchain-core 1.7.4.\n5. `GapNote` repeats `control_id` and `missing_points` from `Assessment`. The ticket asks for exactly these fields, so this stays.\n\nChecks after the fixes: `uv run ruff check` passes and `uv run pytest -q` shows 10 passed (both checked).\n\nThe branch ticket-3 was already checked out in another worktree (wf_d0175e08-cb3-8). I worked on a local branch, review-ticket-3, and pushed with HEAD:ticket-3, so that worktree is now one commit behind origin. A guard also refused `git checkout -B`, so I used `git switch -c` instead."
+          }
+        },
+        {
+          "label_hint": "verify:#3",
+          "result": {
+            "findings": 3,
+            "fixed": 3,
+            "owner_question": "",
+            "summary": "I ran the Standards review once on PR #6 (origin/main...ticket-2, commit 2a47b11). It found 3 problems, and I fixed all 3 and pushed the fixes to ticket-2 as commit 8e46586. Ticket #2 has no comments, so there was no owner answer to take into account. The repo has no CODING_STANDARDS, CONTRIBUTING or GLOSSARY file, so the review checked against the two CLAUDE.md files and the skill's list of common code problems. I did it in the main session because no subagent tool was available. Checked: ruff check and ruff format --check pass, pytest gives 24 passed, and the pre-push hook passed. The one warning is the expected socket warning from the smoke test.\n\nProblems found and fixed:\n1. Repeated test setup: `tests/test_graph.py` and `tests/test_policies.py` each had their own copy of the `ROOT`/`POLICY_DIR` constants and the same automatic `policy_dir` fixture. In test_graph.py it sat in the middle of the file. Both now use one `policy_dir` fixture in the new file `tests/conftest.py`, which returns the folder path.\n2. Repeated error string: `\"source_unavailable\"` was typed out in `policies.py` and twice in `graph.py`. It is now one constant, `SOURCE_UNAVAILABLE`, in `policies.py`, and `graph.py` uses it. The tests still compare against the plain string, because that string is the agreed output.\n3. Loose type: `evidence` was a bare `list`. It is now `list[Passage]` in `AssessState` and `_sources`.\n\nNot raised as standards problems: the default policy folder is a relative path, but `DEFAULT_CONTROLS` in the CLI already works that way. `_run_tool` catches `TypeError` around `search_policies`, which could also catch an internal error, but that is a correctness question, not a standards one.\n\nBranches: I committed on a new local branch, `review-ticket-2`, in /var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_d0175e08-cb3-10 and pushed it as `ticket-2`. The local `ticket-2` is checked out in another worktree (wf_d0175e08-cb3-7), which is still at 2a47b11. It needs a pull before anyone builds on it there."
+          }
+        },
+        {
+          "label_hint": "verify:#2",
+          "result": {
+            "verdicts": [
+              {
+                "criterion": "Three scripted runs end in the expected verdict, covered_points and missing_points: NK-ENC-01 all covered -> found; NK-ACC-01 only ACC-1 -> partial; NK-VUL-01 none -> gap (pytest graph tests)",
+                "verdict": "pass",
+                "evidence": "Checked. In a fresh clone of ticket-3 (0e5a779), `uv run pytest -v` gave 10 passed, including test_judge_covering_all_points_gives_found, test_judge_covering_some_points_gives_partial and test_judge_covering_nothing_gives_gap_with_gap_note. I also ran the CLI, with OPENROUTER_API_KEY unset, and all three exited 0. enc_found -> verdict found, covered [ENC-1,ENC-2,ENC-3], missing []. acc_partial -> partial, covered [ACC-1], missing [ACC-2,ACC-3]. vul_gap -> gap, covered [], missing [VUL-1,VUL-2,VUL-3]. One weakness: in the partial and gap tests the answer turn already gives the same verdict, so those two tests alone can't prove the judge decides. Criteria 3 and 4 cover that."
+              },
+              {
+                "criterion": "The gap run's gap_note holds NK-VUL-01, all three missing ids and the owner role from controls.yaml; found and partial runs have gap_note == null",
+                "verdict": "pass",
+                "evidence": "Checked. The gap test compares the whole Assessment to GapNote(control_id='NK-VUL-01', missing_points=['VUL-1','VUL-2','VUL-3'], owner_role='Head of IT infrastructure'). That owner_role matches NK-VUL-01 in fixtures/nordlicht/controls.yaml. The found and partial tests assert gap_note is None. On the CLI, vul_gap printed the same gap_note, and enc_found and acc_partial printed \"gap_note\": null."
+              },
+              {
+                "criterion": "A judge naming ENC-1 and ENC-9 for NK-ENC-01 gives covered_points == [\"ENC-1\"] and verdict == \"partial\"",
+                "verdict": "pass",
+                "evidence": "Checked. test_judge_ids_outside_the_control_are_ignored passes. On the CLI, enc_foreign_id.json gave verdict partial, covered [ENC-1], missing [ENC-2,ENC-3], gap_note null, exit 0. In that script the answer turn says found, so the test does show the judge's result wins. Mutation check: I made the graph keep the answer turn's verdict (in the throwaway clone, restored from a copy afterwards), and this test went red."
+              },
+              {
+                "criterion": "An answer turn saying found, with a judge that covers nothing, still gives gap",
+                "verdict": "pass",
+                "evidence": "Checked. test_answer_turn_verdict_is_ignored_when_judge_covers_nothing passes. Its script has the answer turn give verdict found and the judge give covered_points []. The CLI on NK-ENC-01 gave verdict gap, with a gap_note holding missing [ENC-1,ENC-2,ENC-3] and owner_role 'Information security officer'. Under the same mutation (answer turn's verdict kept) this test failed: 2 failed, 8 passed."
+              }
+            ],
+            "unexpected_user": "I tried scripts that break the rules, run with ASSESS_FAKE_SCRIPT against NK-ENC-01. All checked.\n(1) A judge naming only ids from other controls ([ENC-9, ACC-1]) gives gap, with all three ENC ids missing. Correct.\n(2) A judge naming duplicate ids out of order ([ENC-3, ENC-1, ENC-1, ENC-2]) gives found, with covered_points in the control's own order. Correct.\n(3) A judge entry of {} gives gap. Reasonable.\n(4) A script with no `judge` key at all (the shape a T1-era script had) crashes. Output: a full Python traceback ending in `RuntimeError: fake script has no judge turn`, exit 1.\n(5) A judge giving covered_points as a string (\"ENC-1\") also prints a traceback: a pydantic ValidationError, exit 1.\n(4) and (5) are outside the ticket's criteria, so they don't fail it. They are a rough edge, though: the T1 CLI already handles a bad control with a one-line error and exit 2, but a bad fake script gives a raw stack trace. Worth a small Fix-lane ticket if fake scripts get hand-written often.\nGate checks: `uv run ruff check` gave \"All checks passed!\". pytest runs with --disable-socket and passes with no API key.\n\nManual test record (fresh clone in a mktemp -d folder, deleted afterwards):\n- [x] `uv run ruff check`: expect All checks passed. Got it.\n- [x] `uv run pytest -v`: expect all pass. 10 passed.\n- [x] CLI enc_found NK-ENC-01: expect found, covered all three, missing [], gap_note null, exit 0. Got it.\n- [x] CLI acc_partial NK-ACC-01: expect partial, [ACC-1] / [ACC-2,ACC-3], gap_note null. Got it.\n- [x] CLI vul_gap NK-VUL-01: expect gap and a gap_note with owner 'Head of IT infrastructure'. Got it.\n- [x] CLI enc_foreign_id NK-ENC-01: expect partial, covered [ENC-1]. Got it.\n- [x] CLI enc_says_found_judge_none NK-ENC-01: expect gap. Got it.\n- [x] Mutation (graph keeps the answer turn's verdict): expect the tests to go red. 2 failed; file restored from its copy.\n- [x] Edge scripts (only other controls' ids, duplicates, empty judge): expect correct verdicts and ordering. Got them.\n- [x] Missing or badly typed judge: a clean error was hoped for. Got a traceback, exit 1 (observation, not a criterion).\n- [x] Throwaway folder deleted: `ls` reports No such file or directory."
+          }
+        },
+        {
+          "label_hint": "merge:#3",
+          "result": {
+            "status": "merged",
+            "detail": "PR #5 (ticket-3) merged into main with merge commit b7876f4a511b5b28bfca2a4c699156d539fc5f3a (checked with gh pr view). ticket-3 already contained origin/main's tip (merging main into it changed nothing), so no new commit, fast checks or push were needed. scripts/merge-on-green.sh 5 waited for all checks on 0e5a779, they passed, and it merged. The temporary worktree and local branch ticket-3-merge were removed. The remote branch ticket-3 was not deleted."
+          }
+        },
+        {
+          "label_hint": "merge:#3",
+          "result": {
+            "verdicts": [
+              {
+                "criterion": "1. search_policies(\"encrypt\") returns at least one passage with doc_id == \"encryption-policy\" and a non-empty heading (pytest unit test)",
+                "verdict": "pass",
+                "evidence": "tests/test_policies.py::test_keyword_search_finds_a_passage_under_its_heading passes (suite: '24 passed, 1 warning in 1.47s'). I also called it directly and got: encrypt: [('encryption-policy', 'Monthly check'), ('encryption-policy', 'Encryption policy'), ('encryption-policy', 'Laptops')]. The test checks the claim itself: it filters to that doc_id, asserts every heading is non-empty, and also checks the passage text."
+              },
+              {
+                "criterion": "2. search_policies(\"\"), a 201-character query, limit=0 and limit=11 each return invalid_input, also when ASSESS_POLICY_DIR points at a missing folder (pytest unit tests)",
+                "verdict": "pass",
+                "evidence": "test_bad_input_returns_invalid_input_before_the_folder_is_checked runs 5 bad inputs (empty, blank, 201 characters, limit 0, limit 11) against both the fixture folder and a missing folder, and all pass. My own call with ASSESS_POLICY_DIR=/nonexistent/x: each of the four returned {'error': 'invalid_input', 'detail': ...}, while 'encrypt' returned {'error': 'source_unavailable'}, so input is checked before the folder. Also checked: a 200-character query padded with spaces is accepted ([]), and limit=True and limit=5.0 are rejected."
+              },
+              {
+                "criterion": "3. search_policies(\"../../pyproject.toml\") returns only passages whose doc_id is a file in the policy folder (pytest unit test)",
+                "verdict": "pass",
+                "evidence": "test_a_query_naming_a_path_only_returns_policy_folder_passages passes. On its own that test is weak: the query returns [] and the subset check holds trivially. The claim holds by design, though. The query only feeds re.findall(r'\\w+') for keyword scoring and is never used as a path. test_only_md_files_directly_in_the_folder_are_searched shows .txt files, subfolders and a symlink pointing outside are all skipped (result == ['kept']). My probes '../../pyproject.toml' and '/etc/passwd' both returned []."
+              },
+              {
+                "criterion": "4. A fake script that searches 'encrypt' then cites encryption-policy gives Assessment.sources holding that doc_id; a script citing a doc_id no search returned leaves it out of sources (pytest graph tests, no network)",
+                "verdict": "pass",
+                "evidence": "test_a_searched_and_cited_policy_becomes_a_source and test_a_cited_policy_no_search_returned_is_dropped pass. pyproject sets addopts='--disable-socket'. Through the CLI, ASSESS_FAKE_SCRIPT=tests/scripts/enc_cites_unsearched.json uv run assess NK-ENC-01 printed sources with only encryption-policy (3 headings), no backup-policy, exit=0. enc_found.json gave the same 3 encryption-policy sources. Note: Source keeps doc_id and heading only, not text. That Source shape came from T1, and the criterion only asks about doc_id."
+              },
+              {
+                "criterion": "5. With ASSESS_POLICY_DIR at a missing path, the graph finishes with verdict == 'gap' and 'source_unavailable' in warnings (pytest graph test)",
+                "verdict": "pass",
+                "evidence": "test_missing_policy_folder_finishes_as_a_gap_with_a_warning passes. CLI run: ASSESS_POLICY_DIR=/nonexistent ASSESS_FAKE_SCRIPT=tests/scripts/enc_found.json uv run assess NK-ENC-01 gave \"verdict\": \"gap\", \"sources\": [], \"warnings\": [\"source_unavailable\"], exit=0. A folder that is really a file (/etc/hostname) or can't be read (/root) also returns source_unavailable. Note: the answer text still reads 'Laptops use full-disk encryption...', the model's draft, even though the verdict is gap. The ticket doesn't forbid this."
+              },
+              {
+                "criterion": "Spec: warnings is an empty list in any other run; bad tool input goes back to the model and nothing raises through the graph",
+                "verdict": "pass",
+                "evidence": "The enc_found, enc_cites_unsearched and enc_bad_search CLI runs each printed \"warnings\": []. enc_bad_search (query '' with limit 11, then a call with no query) ended verdict gap, sources [], exit=0, so nothing raised. A missing or extra argument raises TypeError, which _run_tool catches and returns as invalid_input. test_gap_answer_turn_gives_gap_assessment compares the whole Assessment with warnings defaulting to []."
+              },
+              {
+                "criterion": "Spec: search_policies importable as `from audit_agent import search_policies`; ruff clean; suite passes with no API key and sockets disabled",
+                "verdict": "pass",
+                "evidence": "Fresh clone of ticket-2 (8e46586): 'uv run ruff check' gave 'All checks passed!' and 'uv run pytest -q' gave '24 passed'. test_policies.py imports it from the package and my probe script did the same."
+              }
+            ],
+            "unexpected_user": "Path tried: ASSESS_POLICY_DIR set to an empty string. This is what you get by copying .env.example, which this branch ships with a bare `ASSESS_POLICY_DIR=` line, into a dotenv or direnv setup.\n\nFound: policies._policy_dir uses os.environ.get('ASSESS_POLICY_DIR', DEFAULT), and Path('') is '.', so the tool searches the current working directory's .md files instead of the policy folder. From the repo root, `ASSESS_POLICY_DIR= search_policies('agent', 3)` returned [('CLAUDE', 'Review mode: Factory (on trial)'), ('CLAUDE', 'Working state'), ('CLAUDE', 'Triage labels')], meaning the project's own CLAUDE.md came back as company policy, which the model could then cite. Through the CLI with enc_found.json the run gave verdict 'found', sources [] and warnings [], so a misconfigured folder gives no source_unavailable warning. The ticket's wording ('the path in ASSESS_POLICY_DIR when that's set') makes this arguable rather than a criterion fail, and ASSESS_CONTROLS has the same pattern. Recommended fix: treat an empty value as unset (`os.environ.get(...) or DEFAULT`).\n\nAlso noticed: the default folder is relative to the working directory. Running assess from /tmp gives verdict gap with source_unavailable even though the fixtures exist. The default is a relative path and ASSESS_CONTROLS works the same way, so this is not a fail.\n\nManual test record (fresh clone of branch ticket-2 at 8e46586 under mktemp -d, now deleted; no app or ports, since this is CLI only):\n- [x] uv sync, then uv run ruff check: expect 'All checks passed!' (got it)\n- [x] uv run pytest -q: expect all green with sockets disabled (24 passed)\n- [x] search_policies('encrypt'): expect an encryption-policy passage with a heading (3 found)\n- [x] '', 201 characters, limit 0, limit 11, with the fixture folder and a missing folder: expect invalid_input each time (all 8 matched)\n- [x] '../../pyproject.toml' and '/etc/passwd': expect no passage from outside the policy folder (both [])\n- [x] ASSESS_POLICY_DIR missing, a file, or unreadable: expect {'error': 'source_unavailable'} (all three)\n- [x] assess NK-ENC-01 with enc_found.json: expect found, encryption-policy sources, warnings [], exit 0 (matched)\n- [x] assess with enc_cites_unsearched.json: expect backup-policy dropped (matched)\n- [x] assess with enc_bad_search.json: expect no raise, gap, exit 0 (matched)\n- [x] assess with ASSESS_POLICY_DIR=/nonexistent: expect gap plus source_unavailable (matched)\n- [ ] assess with ASSESS_POLICY_DIR set to empty: expect the default folder or source_unavailable (got cwd .md files, verdict found, no warning; see above)\n- [x] Deleted the clone and scratch folders (confirmed gone)"
+          }
+        },
+        {
+          "label_hint": "merge:#2",
+          "result": {
+            "status": "merged",
+            "detail": "PR #6 (ticket-2) is merged into main as merge commit 0ff512a. The merge gate passed on head 810fb30.\n\n- Merging origin/main (T3, b7876f4) into ticket-2 gave conflicts in src/audit_agent/graph.py, tests/test_cli.py and tests/test_graph.py. I kept both tickets' changes in full, with no rebase or force push:\n  - Assessment has T3's covered_points, missing_points and gap_note, plus T2's warnings.\n  - The gather model is bound to both submit_answer and search_policies, and T3's judge_model is kept.\n  - assess() passes T2's sources and warnings along with T3's fields.\n  - test_graph keeps T3's judge tests and T2's search and source tests.\n  - I dropped one test: T3's copy of test_tool_call_turns_are_skipped_until_the_answer_turn. It asserted sources == [], and T2 had already replaced it with test_a_searched_and_cited_policy_becomes_a_source.\n  - test_cli now checks every field from both tickets.\n- Local checks passed on the merged result: ruff check, ruff format --check, and pytest (28 passed). I pushed it as 810fb30, then ran scripts/merge-on-green.sh 6 in the foreground and it merged the PR.\n- Not checked: how the two tickets interact. When the policy folder is missing, T2's override in assess() still forces the verdict to gap. But T3's judge still sets covered_points, and a gap reached this way gets no gap_note. The tests don't cover this. It may deserve a follow-up ticket.\n- I removed the temporary worktree and the local ticket-2-merge branch."
+          }
+        },
+        {
+          "label_hint": "queue:round 3",
+          "result": {
+            "tickets": [],
+            "skipped": []
+          }
+        }
+      ]
+    },
+    {
+      "run": "wf_fcaad863-851",
+      "agents": 4,
+      "steps": [
+        {
+          "label_hint": "queue:round 1",
+          "result": {
+            "tickets": [
+              {
+                "number": 1,
+                "title": "T1: Assess one control through a LangGraph graph"
+              }
+            ],
+            "skipped": [
+              {
+                "number": 2,
+                "why": "Blocked by #1, which is still open (ticket-lint: ok)"
+              },
+              {
+                "number": 3,
+                "why": "Blocked by #1, which is still open (ticket-lint: ok)"
+              }
+            ]
+          }
+        },
+        {
+          "label_hint": "build:#1",
+          "result": {
+            "status": "over_cap",
+            "branch": "ticket-1",
+            "pr": 4,
+            "changed_lines": 413,
+            "question": "The T1 change is 413 lines without uv.lock, 13 over the 400 cap. Take it as one PR, or split it into two slices? T1a, graph and fake model (about 270 lines: controls.py, graph.py, fake_model.py, the test scripts, tests/test_graph.py). Its criterion: NK-VUL-01 with a gap answer turn gives verdict 'gap' and the script's answer text. T1b, CLI and offline suite (about 145 lines: cli.py, the assess entry point, the pytest-socket --disable-socket config, tests/test_cli.py, .env.example). Its criteria: the NK-ENC-01 subprocess run prints all four fields and exits 0; NK-XXX-99 exits 2 with one stderr line and no traceback; the suite passes with OPENROUTER_API_KEY unset and sockets disabled.",
+            "recommendation": "Take it as one PR. It is only 13 lines over, and 30 of its lines are test scripts and docstrings. T1a alone would leave no runnable CLI, while every criterion is already proven together. If the cap must hold, the T1a/T1b split above is clean, because T1b only adds the CLI on top of assess().",
+            "summary": "I built ticket #1 on branch ticket-1, commit 39481e3. origin/main was merged in and was already up to date. It is pushed as draft PR #4 (https://github.com/DerykHopley/sprint3-trial-c/pull/4) because it is over the size cap.\n\nWhat it does: `assess <control-id>` runs a LangGraph StateGraph and prints one JSON Assessment (control_id, verdict, answer, sources). The graph loops gather -> tools -> gather and ends when the model calls `submit_answer`. The model is passed into the graph. Findings (evidence, answer, verdict, cited) sit in their own state keys; `messages` is only the model's working conversation.\n\nFiles, all under /var/home/Deryk/development/TuringCollege/sprint3-trail-c/.claude/worktrees/wf_fcaad863-851-2:\n- src/audit_agent/controls.py\n- src/audit_agent/graph.py\n- src/audit_agent/fake_model.py (ScriptedChatModel, a BaseChatModel that plays the `gather` turns)\n- src/audit_agent/cli.py (the `assess` entry point)\n- tests/test_graph.py, tests/test_cli.py, and the scripts in tests/scripts/\n- pyproject.toml: adds langchain-openrouter and pytest-socket, and sets addopts --disable-socket\n- .env.example (variable names only)\n\nCriteria, all passing locally (checked):\n1. NK-VUL-01 with a `gap` answer turn: tests/test_graph.py::test_gap_answer_turn_gives_gap_assessment (unit, no network).\n2. `assess NK-ENC-01` with the fake script prints all four fields and exits 0: tests/test_cli.py::test_assess_prints_one_assessment_as_json (subprocess).\n3. `assess NK-XXX-99` exits 2 with one stderr line and no traceback: tests/test_cli.py::test_unknown_control_exits_2_with_one_line_error (subprocess, with no fake script and no key).\n4. The suite passes with OPENROUTER_API_KEY unset and sockets disabled: the --disable-socket addopts plus tests/test_cli.py::test_suite_runs_with_sockets_disabled. It passed locally under `env -u OPENROUTER_API_KEY`; CI has not been seen yet (unverified).\n\nManual run, step 4 of the ticket loop (checked): NK-ENC-01 gave `found` and exit 0, NK-VUL-01 gave `gap` and exit 0, NK-XXX-99 gave exit 2 with the error `assess: unknown control id: NK-XXX-99`. ruff check is clean. The pre-push hook passed.\n\nTicket vs code: no conflicts. One note: pytest-socket does not block sockets in the CLI subprocesses (inferred from its docs). They stay offline because they use the fake model.\n\nDecisions settled on step 3, each in a commit trailer:\n- The real model is ChatOpenRouter from langchain-openrouter, with the model id taken from ASSESS_MODEL and no default.\n- The answer turn is a `submit_answer` tool call.\n- Before T2, a placeholder tools node answers each tool call with \"not available yet\".\n- The controls file comes from ASSESS_CONTROLS, defaulting to fixtures/nordlicht/controls.yaml relative to the working directory.\n\nSettled on step 2: the new dependencies are left unpinned, like the existing ones. The .env.example follows the owner's global secrets rule.\n\nDocs:\n- LangGraph graph-api page: StateGraph, conditional edges, and compile().\n- LangChain OpenRouter integration page: ChatOpenRouter reads OPENROUTER_API_KEY. Field aliases checked in the installed 0.2.9 source.\n- BaseChatModel reference: a subclass needs _generate and _llm_type. The signature was checked in the installed langchain-core 1.7.4 source.\n- pytest-socket README: the addopts setting.\n\nGap: no test makes a real ChatOpenRouter call, because that needs the live service.\n\nNothing unexplained."
+          }
+        },
+        {
+          "label_hint": "park:#1",
+          "result": "Parked #1: it now has needs-owner instead of ready-for-agent, and I posted one comment with the question, the recommended answer and what was tried (https://github.com/DerykHopley/sprint3-trial-c/issues/1#issuecomment-6599453122). PR #4 was already a draft, so `gh pr ready --undo` was not needed, and it stays open and unmerged."
+        },
+        {
+          "label_hint": "queue:round 2",
+          "result": {
+            "tickets": [],
+            "skipped": [
+              {
+                "number": 2,
+                "why": "Blocked by #1, which is open (parked with needs-owner). Ticket-lint verdict: ok."
+              },
+              {
+                "number": 3,
+                "why": "Blocked by #1, which is open (parked with needs-owner). Ticket-lint verdict: ok."
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

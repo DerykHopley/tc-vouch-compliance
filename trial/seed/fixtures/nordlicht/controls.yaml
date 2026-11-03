@@ -1,0 +1,36 @@
+# Invented controls for the fictional Nordlicht Komponenten GmbH.
+# Written in our own words; not ISO 27001 or VDA ISA text.
+controls:
+  - id: NK-ACC-01
+    title: Access rights are reviewed
+    statement: Access rights to business systems are reviewed regularly, and rights no longer needed are removed.
+    owner_role: IT operations lead
+    evidence_points:
+      - id: ACC-1
+        text: Access rights are reviewed at least every six months.
+      - id: ACC-2
+        text: Each review is recorded with its date and reviewer.
+      - id: ACC-3
+        text: Rights no longer needed are removed within five working days.
+  - id: NK-ENC-01
+    title: Laptops are encrypted
+    statement: Every company laptop protects its data with full-disk encryption.
+    owner_role: Information security officer
+    evidence_points:
+      - id: ENC-1
+        text: Full-disk encryption is turned on for every company laptop.
+      - id: ENC-2
+        text: Recovery keys are stored centrally, not with the user.
+      - id: ENC-3
+        text: Encryption status is checked every month.
+  - id: NK-VUL-01
+    title: Technical vulnerabilities are handled
+    statement: Known weaknesses in systems are tracked and fixed within set times.
+    owner_role: Head of IT infrastructure
+    evidence_points:
+      - id: VUL-1
+        text: Sources of security advisories are monitored.
+      - id: VUL-2
+        text: Critical weaknesses are fixed within 14 days.
+      - id: VUL-3
+        text: Exceptions are approved and recorded.

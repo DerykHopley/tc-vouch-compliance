@@ -1,0 +1,31 @@
+{
+  "control_id": "NK-ENC-01",
+  "verdict": "found",
+  "answer": "Control NK-ENC-01 (Laptops are encrypted): the policy design supports the control. The Encryption policy (v2.1, approved March 2026, owned by the Information security officer) requires full-disk encryption on every company laptop, turned on by IT before handout, with users unable to disable it. It requires recovery keys to be held in the central device management system, with users keeping no copy (ENC-2 is consistent with this). It requires IT to check encryption status of every laptop monthly using the device management report, and to lock any unencrypted laptop until fixed (ENC-3 is consistent with this). ENC-1 is consistent with the stated requirement.\n\nLimitation: the policy documents only establish what is required. They do not show that the controls operated. For the audit conclusion, the auditor still needs operating evidence for the period, such as the device management export showing encryption status for all laptops (ENC-1), the central key store configuration and a sample of recovery key locations (ENC-2), and the monthly check records with any lock actions taken (ENC-3). Design assessment: supported. Operating effectiveness: not yet tested.",
+  "sources": [
+    {
+      "doc_id": "encryption-policy",
+      "heading": "Laptops"
+    },
+    {
+      "doc_id": "encryption-policy",
+      "heading": "Encryption policy"
+    },
+    {
+      "doc_id": "encryption-policy",
+      "heading": "Monthly check"
+    },
+    {
+      "doc_id": "encryption-policy",
+      "heading": "Recovery keys"
+    }
+  ],
+  "warnings": [],
+  "covered_points": [
+    "ENC-1",
+    "ENC-2",
+    "ENC-3"
+  ],
+  "missing_points": [],
+  "gap_note": null
+}
