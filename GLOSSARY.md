@@ -84,6 +84,10 @@ _Avoid_: Approval, sign-off, final verdict
 The append-only record of every reviewed verdict and approved remediation item: who, when, the note, and the evidence versions behind it.
 _Avoid_: History, log, changelog
 
+**Override**:
+A requirement's verdict changed by the compliance lead before signing off a control, with a reason; the agent's original verdict is kept.
+_Avoid_: Correction, manual verdict, edit
+
 **Remediation item**:
 A drafted fix for a gap (what's missing, an owner role, a due date), kept once the compliance lead approves it.
 _Avoid_: Ticket, task, action item
