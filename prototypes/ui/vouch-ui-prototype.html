@@ -18,7 +18,7 @@
   --paper:#EEF1F5; --sheet:#FFFFFF; --ink:#152132; --muted:#566377; --rule:#D3D9E2; --navy:#1E3A5F; --sign:#7A2232;
   --found:#2D7A4E; --partial:#A8701A; --gap:#B03A3A; --na:#748194; --run:#3D6FA8;
   --found-bg:#E6F2EA; --partial-bg:#F8EEDC; --gap-bg:#F7E3E3; --na-bg:#ECEFF3; --run-bg:#E3ECF6;
-  --inverse:#152132; --inverse-fg:#F4F6F9;
+  --inverse:#152132; --inverse-fg:#F4F6F9; --band:#152132; --band-fg:#F1F3F6; --brass:#7A2232; --check-a:transparent; --check-b:transparent;
   --f-display:"IBM Plex Serif", Georgia, "Times New Roman", serif;
   --f-body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -38,18 +38,18 @@
   --paper:#E8E7E3; --sheet:#F7F7F5; --ink:#1B1D21; --muted:#62656B; --rule:#D0CEC8; --navy:#1F3B6E; --sign:#1B1D21; --brass:#A8834A;
   --found:#3F7A55; --partial:#A06E22; --gap:#A4433F; --na:#7A7C80; --run:#1F3B6E;
   --found-bg:#E2EDE5; --partial-bg:#F3EAD9; --gap-bg:#F3E2E0; --na-bg:#E4E3DF; --run-bg:#E1E6EF;
-  --check-a:rgb(27 29 33 / .07); --check-b:rgb(31 59 110 / .08);
+  --check-a:rgb(27 29 33 / .07); --check-b:rgb(31 59 110 / .08); --band:#1B1D21; --band-fg:#F2F1EE;
   --f-display:"Libre Caslon Display", "Libre Caslon Text", Georgia, serif; --f-body:"Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;}
 @media (prefers-color-scheme: dark){:root[data-style="tailored"]:not([data-theme="light"]){
   --paper:#0D0D0E; --sheet:#171718; --ink:#ECE6DC; --muted:#9C978E; --rule:#2C2B29; --navy:#A9BEE6; --sign:#E3CB9F; --brass:#E2C391;
   --found:#7DBE93; --partial:#E0B064; --gap:#E08A80; --na:#8F8C86; --run:#A9BEE6;
   --found-bg:#18241C; --partial-bg:#2A2216; --gap-bg:#2B1B19; --na-bg:#1E1E1F; --run-bg:#1A2030;
-  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); color-scheme:dark}}
+  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); --band:#222224; --band-fg:#ECE6DC; color-scheme:dark}}
 :root[data-style="tailored"][data-theme="dark"]{
   --paper:#0D0D0E; --sheet:#171718; --ink:#ECE6DC; --muted:#9C978E; --rule:#2C2B29; --navy:#A9BEE6; --sign:#E3CB9F; --brass:#E2C391;
   --found:#7DBE93; --partial:#E0B064; --gap:#E08A80; --na:#8F8C86; --run:#A9BEE6;
   --found-bg:#18241C; --partial-bg:#2A2216; --gap-bg:#2B1B19; --na-bg:#1E1E1F; --run-bg:#1A2030;
-  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); color-scheme:dark}
+  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); --band:#222224; --band-fg:#ECE6DC; color-scheme:dark}
 [data-style="tailored"] h1,[data-style="tailored"] h2{font-weight:400;text-transform:uppercase;letter-spacing:.02em;line-height:1.1}
 [data-style="tailored"] .brand b{font-family:var(--f-display);font-weight:400;text-transform:uppercase;letter-spacing:.08em}
 [data-style="tailored"] .brand b::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;background:var(--brass);transform:rotate(45deg) translateY(-2px)}
@@ -202,6 +202,53 @@ textarea,input[type=text]{background:var(--sheet);border:1px solid var(--rule);b
 .C-decide{position:sticky;bottom:0;background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;box-shadow:0 -6px 18px rgb(0 0 0 / .06);margin-bottom:56px}
 .C-tray{border-top:1px solid var(--rule);padding-top:10px}
 
+/* ===== Variant D: Dossier (long overview page, after the Atlas layout) ===== */
+.D{max-width:1180px;margin:0 auto;padding-block:20px 110px;display:grid;gap:36px}
+.D-pill{display:inline-block;background:var(--na-bg);color:var(--muted);border-radius:999px;padding:2px 12px;font-size:12px;font-weight:600}
+.D-hero{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:28px;align-items:stretch}
+.D-hero h1{font-size:clamp(30px,4.2vw,50px);margin:10px 0 14px}
+.D-hero p{max-width:52ch;margin:0 0 16px;color:var(--muted)}
+.D-hero .next{display:flex;flex-wrap:wrap;gap:8px}
+.D-chat{background:var(--sheet);border:1px solid var(--rule);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.D-chat .log{display:grid;gap:8px;font-size:13px;max-height:280px;overflow:auto;align-content:start;flex:1}
+.D-chat .m{background:var(--paper);border-radius:10px;padding:8px 10px}
+.D-chat .m.user{background:var(--ink);color:var(--sheet);justify-self:end}
+.D-band{background:var(--band);color:var(--band-fg);border-radius:16px;padding:32px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:28px}
+.D-band h2{font-size:30px;margin-top:8px}
+.D-band p{opacity:.8;margin:0;max-width:56ch}
+.D-band .D-pill{background:color-mix(in srgb, var(--band-fg) 14%, transparent);color:var(--band-fg)}
+.D-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;grid-column:1/-1}
+.D-tile{border:1px solid color-mix(in srgb, var(--band-fg) 18%, transparent);border-radius:12px;padding:14px 16px}
+.D-tile b{display:block;font-family:var(--f-display);font-weight:400;font-size:38px;line-height:1.1;font-variant-numeric:tabular-nums}
+.D-tile span{font-size:12px;opacity:.75}
+.D-head{text-align:center;display:grid;gap:8px;justify-items:center}
+.D-head h2{font-size:30px}
+.D-head p{margin:0;color:var(--muted);max-width:60ch}
+.D-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.D-card{background:var(--sheet);border:1px solid var(--rule);border-radius:14px;padding:10px;text-align:left;display:grid;gap:8px;align-content:start}
+.D-card[aria-current="true"]{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.D-card .face{background:var(--paper);border-radius:10px;height:74px;display:flex;align-items:flex-end;justify-content:space-between;padding:8px 10px;border-bottom:4px solid var(--na)}
+.D-card .face b{font-family:var(--f-display);font-weight:400;font-size:28px;line-height:1}
+.D-card .face.v-found{border-bottom-color:var(--found)} .D-card .face.v-partial{border-bottom-color:var(--partial)} .D-card .face.v-gap{border-bottom-color:var(--gap)} .D-card .face.v-run{border-bottom-color:var(--run)}
+.D-card .q{font-size:13px;line-height:1.4}
+.D-card .sub{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.D-detail{background:var(--sheet);border:1px solid var(--rule);border-radius:16px;padding:22px;display:grid;gap:14px}
+.D-reqs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.D-req{border:1px solid var(--rule);border-radius:12px;padding:12px;display:grid;gap:6px;align-content:start;font-size:13px}
+.D-quotes{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.D-quote{background:var(--sheet);border:1px solid var(--rule);border-radius:14px;padding:16px;display:grid;gap:10px;align-content:space-between}
+.D-quote .mark{font-family:var(--f-display);font-size:40px;line-height:.6;color:var(--brass)}
+.D-quote p{margin:0;font-family:"IBM Plex Serif", Georgia, serif;font-size:14px}
+.D-quote footer{font-size:12px;color:var(--muted);display:grid;gap:2px}
+.D-ask{background:var(--band);color:var(--band-fg);border-radius:16px;padding:28px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:24px;align-items:center}
+.D-ask h2{font-size:28px}
+.D-ask p{opacity:.8;margin:6px 0 0}
+.D-ask form{display:grid;gap:8px}
+.D-ask input{background:color-mix(in srgb, var(--band-fg) 8%, transparent);border-color:color-mix(in srgb, var(--band-fg) 22%, transparent);color:var(--band-fg);border-radius:10px;padding:10px 12px}
+.D-ask .btn-primary{background:var(--band-fg);color:var(--band);border-color:var(--band-fg);justify-self:start}
+.D-foot{display:grid;grid-template-columns:2fr 1fr 1fr;gap:20px;font-size:12px;color:var(--muted);border-top:1px solid var(--rule);padding-top:16px}
+.D-foot b{display:block;color:var(--ink);font-size:13px;margin-bottom:4px}
+
 /* ===== Report and Developer (shared) ===== */
 .doc{max-width:900px;margin:16px auto 90px;padding:28px 32px;display:grid;gap:18px}
 .doc table{width:100%;border-collapse:collapse;font-size:13px}
@@ -234,6 +281,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
   .C-strip{grid-template-columns:repeat(6,minmax(0,1fr))}
   .C-areas{display:none}
   .doc{padding:20px 16px}
+  .D-hero,.D-band,.D-ask{grid-template-columns:1fr}
+  .D-band,.D-ask{padding:22px}
+  .D-foot{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -641,6 +691,40 @@ function VariantC(){
     <div class="C-q"><span class="mono" style="font-size:18px">${cid}</span> ${esc(isa.q)} ${s.status!=='none'&&s.status!=='running'?chip(s.verdict):''}</div>${body}</article>${decide}</div>`;
 }
 
+/* ---------- Variant D: Dossier ---------- */
+function VariantD(){
+  const p = S.profile, prof = PROFILES[p], c = counts(p), n = nextSuggestion(p), cid = S.sel, s = stOf(cid), res = RES[p][cid], isa = ISA[cid];
+  const de = prof.lang==='de';
+  const head = de ? `${c.accepted+c.rejected} von 12 geprüft.` : `${c.accepted} of 12 controls accepted.`;
+  const sub = de ? 'Das österreichische NIS2-Overlay ergänzt bei 1.6.2 eine Anforderung. Beginnen Sie dort.' : `${c.proposed} verdict${c.proposed===1?'':'s'} waiting for your review, ${c.rejected} rejected. ${n.none?`Next suggested: ${n.none}.`:''}`;
+  const actions = [n.prop&&['focus',n.prop,`Review ${n.prop}`,'btn-primary'], n.rej&&['run',n.rej,`Assess ${n.rej} again`,''], n.none&&['run',n.none,`Assess ${n.none}`, n.prop?'':'btn-primary'], ['view-report','','Readiness report','']].filter(Boolean);
+  const log = S.chat[p].slice(-5).map(x=> x.who==='user' ? `<div class="m user">${esc(x.text)}</div>` : x.kind==='opening' ? `<div class="m">${openingText()}</div>` : x.kind==='text' ? `<div class="m">${esc(x.text)}</div>` : x.kind==='reviewed' ? `<div class="m">Verdict on <b class="mono">${x.cid}</b> ${x.decision}.</div>` : `<div class="m">Assessment of <b class="mono">${x.cid}</b>: ${stOf(x.cid).status==='running'?'running…':'see below.'}</div>`).join('');
+  const hero = `<section class="D-hero"><div><span class="D-pill">${esc(prof.company)} · ${esc(prof.country)}</span>
+      <h1>${de?'Audit vorbereitet. Beleg für Beleg.':'Prepared for audit. One piece of evidence at a time.'}</h1>
+      <p><b style="color:var(--ink)">${esc(head)}</b> ${esc(sub)}</p>
+      <div class="next">${actions.map(([a,id,label,cls])=> a==='view-report' ? `<button class="btn" data-act="view" data-view="report">${label}</button>` : `<button class="btn ${cls}" data-act="${a==='focus'?'sel':'run'}" data-cid="${id}" data-scroll="detail">${label}</button>`).join('')}</div></div>
+    <div class="D-chat"><div class="lbl">Vouch</div><div class="log">${log}</div>
+      <form data-act="send" style="display:flex;gap:6px"><input type="text" id="ask-d" placeholder="${de?'Frage an Vouch':'Ask Vouch, for example “Assess 5.2.5”'}" autocomplete="off"><button class="btn btn-primary">Send</button></form></div></section>`;
+  const band = `<section class="D-band"><div><span class="D-pill">${de?'Stand':'Where you stand'}</span><h2>${de?'Bereitschaft':'Readiness'}</h2></div>
+      <p>${esc(prof.overlay)}. VDA ISA subset of 12 questions at ${prof.protection} protection. Only verdicts you accepted count; the figures describe evidence coverage, not ISA maturity levels.</p>
+      <div class="D-tiles"><div class="D-tile"><b>${c.accepted}</b><span>accepted of 12</span></div><div class="D-tile"><b>${c.found}</b><span>${vl('found').toLowerCase()}</span></div><div class="D-tile"><b>${c.partial}</b><span>${vl('partial').toLowerCase()}</span></div><div class="D-tile"><b>${c.gap}</b><span>${vl('gap').toLowerCase()}</span></div><div class="D-tile"><b>${c.proposed+c.rejected+c.none}</b><span>open</span></div><div class="D-tile"><b>${S.rem.filter(r=>r.p===p&&r.status!=='discarded').length}</b><span>remediation items</span></div></div></section>`;
+  const cards = AREAS.map(a=>a.ids.map(id=>{const st=stOf(id), v=verdictOf(id); return `<button class="D-card" data-act="sel" data-cid="${id}" data-scroll="detail" aria-current="${id===cid}"><div class="face v-${v}"><b>${id}</b>${st.status==='none'?'':`<span class="st st-${st.status}">${st.status==='running'?'assessing':st.status}</span>`}</div><div class="q">${esc(ISA[id].q)}</div><div class="sub"><span>${a.name}</span>${st.status==='none'?`<span>${vl('none')}</span>`:chip(v)}</div></button>`;}).join('')).join('');
+  let detail;
+  if (s.status==='none') detail = `<p style="margin:0">${reqList(cid).length} requirements apply in this profile${OVERLAY[p]?.[cid]?', one added by the country overlay':''}.</p><div><button class="btn btn-primary" data-act="run" data-cid="${cid}">Assess ${cid}</button></div>`;
+  else if (s.status==='running') detail = traceHtml(s.trace);
+  else detail = `<p style="margin:0;max-width:75ch">${esc(res.answer)}</p><div class="D-reqs">${reqList(cid).map(r=>{const rr=res.reqs[r.id]||{v:'gap'}, v=r.na?'na':rr.v; return `<div class="D-req"><div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap"><span><span class="mono">${r.id}</span> <span class="lbl">${COLNAME[r.col]}</span></span>${chip(v)}</div><div>${esc(r.text.split('\n')[0])}</div>${r.na?`<div class="muted" style="font-size:12px">${esc(r.na)}</div>`:''}${rr.why?`<div class="muted" style="font-size:12px">${esc(rr.why)}</div>`:''}${(rr.cites||[]).map(citeHtml).join('')}${v==='gap'&&!r.na?`<div>${remButton(cid,r.id)}</div>`:''}</div>`;}).join('')}</div>
+      <details><summary class="lbl" style="cursor:pointer">How Vouch reached this</summary>${traceHtml(s.trace)}</details><div>${reviewControls(cid)}</div>`;
+  const detailSec = `<section class="D-detail" id="detail"><div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><span class="D-pill">${cid} · ISO 27001 ${esc(isa.iso)}</span>${s.status!=='none'&&s.status!=='running'?chip(s.verdict):''}</div><h2 style="font-size:24px">${esc(isa.q)}</h2>${detail}</section>`;
+  const seen = new Set(), quotes = [];
+  ORDER.forEach(id=>{ const st=stOf(id); if (st.status==='none'||st.status==='running'||!RES[p][id]) return; Object.values(RES[p][id].reqs).forEach(r=>(r.cites||[]).forEach(x=>{ if(!x) return; const k=x.doc+x.q; if(!seen.has(k)){seen.add(k); quotes.push({...x, cid:id});} })); });
+  const qsec = `<section style="display:grid;gap:16px"><div class="D-head"><span class="D-pill">${de?'Belege':'Evidence on file'}</span><h2>${de?'Was die Nachweise sagen':'What the evidence says'}</h2><p>Every quote below was found word for word in the cited document version.</p></div>
+    <div class="D-quotes">${quotes.slice(0,8).map(x=>{const d=DOCS[x.doc]; return `<article class="D-quote"><div class="mark">“</div><p lang="${x.doc.startsWith('AW')?'de':'en'}">${esc(x.q)}</p><footer><span class="mono">${esc(x.doc)} v${esc(d.v)} · ${esc(x.sec)}</span><span><span class="kind kind-${d.k}">${d.k}</span> ${d.stale?'<span class="flag">stale</span>':''} · for ${x.cid}</span></footer></article>`;}).join('') || '<p class="muted">No assessed evidence yet.</p>'}</div></section>`;
+  const ask = `<section class="D-ask"><div><h2>${de?'Fragen Sie Vouch':'Ask Vouch'}</h2><p>${de?'Zum Beispiel: Welche Controls haben nur dokumentierte Nachweise?':'For example: which controls have documented evidence only? Which remediation items are due this month?'}</p></div>
+    <form data-act="send"><input type="text" id="ask-d2" placeholder="${de?'Ihre Frage':'Your question'}" autocomplete="off"><button class="btn btn-primary">Ask</button></form></section>`;
+  const foot = `<footer class="D-foot"><div><b>Vouch</b>Drafted by an AI assistant, reviewed by ${esc(prof.lead)}; not an audit result.</div><div><b>Profile</b>${esc(prof.company)}<br>${prof.langLabel} · protection ${prof.protection}</div><div><b>Sources</b>VDA ISA 6, © ENX Association, CC BY-ND 4.0</div></footer>`;
+  return `<div class="D wrap">${hero}${band}<section style="display:grid;gap:16px"><div class="D-head"><span class="D-pill">${de?'Controls':'The controls'}</span><h2>${de?'Zwölf Fragen, vier Bereiche':'Twelve questions, four areas'}</h2><p>Pick a control to see its requirements, the evidence behind each verdict, and your review.</p></div><div class="D-cards">${cards}</div></section>${detailSec}${qsec}${ask}${foot}</div>`;
+}
+
 /* ---------- Report (shared) ---------- */
 function Report(){
   const p = S.profile, prof = PROFILES[p], c = counts(p);
@@ -678,7 +762,7 @@ function Dev(){
 }
 
 /* ---------- prototype switcher and notes ---------- */
-const VARIANTS = [['A','Counsel: chat-first'],['B','Working paper'],['C','Docket: one control at a time']];
+const VARIANTS = [['A','Counsel: chat-first'],['B','Working paper'],['C','Docket: one control at a time'],['D','Dossier: overview page']];
 const QUESTIONS = [
   'Which variant (or which parts of each) fits a compliance lead preparing for weeks: chat-first, the working paper, or one question at a time?',
   'Should-requirements are shown but don\'t change the verdict here. Should they count, and how?',
@@ -710,7 +794,7 @@ function render(){
   const focus = document.activeElement?.id, val = focus ? document.getElementById(focus)?.value : null;
   const notes = {}; document.querySelectorAll('textarea[id^=note-],input[id^=note-]').forEach(t=>notes[t.id]=t.value);
   if (document.documentElement) document.documentElement.dataset.style = S.style;
-  const view = S.view==='report' ? Report() : S.view==='dev' ? Dev() : ({A:VariantA, B:VariantB, C:VariantC})[S.variant]();
+  const view = S.view==='report' ? Report() : S.view==='dev' ? Dev() : ({A:VariantA, B:VariantB, C:VariantC, D:VariantD})[S.variant]();
   document.getElementById('app').innerHTML = Top() + view + Switcher();
   Object.entries(notes).forEach(([id,v])=>{const el=document.getElementById(id); if(el) el.value=v;});
   if (focus && document.getElementById(focus)) { const el = document.getElementById(focus); el.focus(); if (val!=null && 'value' in el) el.value = val; }
@@ -721,7 +805,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b || b.tagName==='FORM' || b.tagName==='SELECT') return;
   const a = b.dataset.act, cid = b.dataset.cid;
   if (a==='run') run(cid);
-  else if (a==='sel') { S.sel = cid; render(); }
+  else if (a==='sel') { S.sel = cid; render(); if (b.dataset.scroll) document.getElementById(b.dataset.scroll)?.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); }
   else if (a==='focus') { S.sel = cid; if (S.variant==='A') { const s=stOf(cid); if (s.status==='proposed' && !S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===cid)) S.chat[S.profile].push({who:'vouch', kind:'assessment', cid}); else if (s.status==='accepted' && !S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===cid)) S.chat[S.profile].push({who:'vouch', kind:'assessment', cid}); } render(); }
   else if (a==='accept') review(cid,'accepted');
   else if (a==='reject') review(cid,'rejected');
@@ -730,7 +814,7 @@ document.addEventListener('click', e => {
   else if (a==='remno') decideRem(+b.dataset.id, false);
   else if (a==='ask') { const t = b.dataset.text; const m = t.match(/\d\.\d\.\d/); if (t.startsWith('Review') && m) { S.sel=m[0]; if (!S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===m[0])) S.chat[S.profile].push({who:'vouch',kind:'assessment',cid:m[0]}); render(); } else ask(t); }
   else if (a==='view') { S.view = b.dataset.view; render(); }
-  else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:2)) % 3][0]); }
+  else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
   else if (a==='style') { S.style = S.style==='tailored' ? 'plain' : 'tailored'; render(); }
   else if (a==='pane') { S.pane = S.pane===b.dataset.pane ? null : b.dataset.pane; render(); }
 });
@@ -738,15 +822,15 @@ document.addEventListener('change', e => { if (e.target.id==='prof') { S.profile
 document.addEventListener('submit', e => { e.preventDefault(); const inp = e.target.querySelector('input'); const t = inp.value.trim(); if (t) { inp.value=''; ask(t); } });
 document.addEventListener('keydown', e => {
   if (e.target.closest('input,textarea,select,[contenteditable]')) return;
-  if (e.key==='ArrowRight'||e.key==='ArrowLeft') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (e.key==='ArrowRight'?1:2)) % 3][0]); }
+  if (e.key==='ArrowRight'||e.key==='ArrowLeft') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (e.key==='ArrowRight'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
 });
-window.addEventListener('hashchange', () => { const m = location.hash.match(/variant-([abc])/i); if (m) { S.variant = m[1].toUpperCase(); render(); } });
+window.addEventListener('hashchange', () => { const m = location.hash.match(/variant-([abcd])/i); if (m) { S.variant = m[1].toUpperCase(); render(); } });
 
 (function start(){
   let v = null;
   try { v = new URLSearchParams(location.search).get('variant'); } catch(e) {}
-  const m = location.hash.match(/variant-([abc])/i); if (m) v = m[1];
-  if (v && /^[abc]$/i.test(v)) S.variant = v.toUpperCase();
+  const m = location.hash.match(/variant-([abcd])/i); if (m) v = m[1];
+  if (v && /^[abcd]$/i.test(v)) S.variant = v.toUpperCase();
   seed(); render();
 })();
 </script>
