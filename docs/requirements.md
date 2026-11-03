@@ -178,3 +178,4 @@ Updated 2026-11-03, after grilling. The earlier questions (the product, the cata
 - The third eval model from another provider, and the local Ollama model: named at M4, once checked on OpenRouter and on the owner's GPU.
 - Asset and risk management: its own grilling round (asset types, risk scale, how risk reorders the prep), only if M0 to M3 land on time.
 - The Lithuanian profile: a nice-to-have, after the risk stretch.
+- An avatar for Vouch: parked 2026-11-03. Fourteen options were tried on the prototype branch (`prototype/ui`: tick, clip, seal, button, pocket watch, owl, stamp, monogram seal, lens, tie, pot plant, notebook, coffee cup); none worked. Vouch may not need one, and that's fine: the formal persona carries it.
