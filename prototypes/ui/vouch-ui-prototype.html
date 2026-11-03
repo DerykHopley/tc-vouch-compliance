@@ -260,6 +260,17 @@ textarea,input[type=text]{background:var(--sheet);border:1px solid var(--rule);b
 .devbanner{background:var(--partial-bg);color:var(--partial);padding:6px 10px;border-radius:4px;font-size:13px;font-weight:600}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 
+/* ===== Avatar ===== */
+.av{display:inline-block;vertical-align:middle;flex:none;overflow:visible}
+.av .k{fill:var(--ink)} .av .w{fill:var(--sheet)} .av .n{fill:var(--navy)} .av .r{fill:var(--sign)}
+.av .s{stroke:var(--ink)} .av .sb{stroke:var(--brass)} .av .sw{stroke:var(--sheet)} .av .sr{stroke:var(--sign)}
+.av .eye{transform-box:fill-box;transform-origin:center;animation:av-blink 5.5s infinite}
+.av .eye + .eye{animation-delay:.04s}
+.av.think{animation:av-bob .9s ease-in-out infinite;transform-origin:50% 80%}
+@keyframes av-blink{0%,95%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}
+@keyframes av-bob{50%{transform:translateY(-2px) rotate(-5deg)}}
+.who{display:flex;align-items:center;gap:6px}
+
 /* ===== Prototype switcher (not part of the design) ===== */
 .proto{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:50;display:flex;align-items:center;gap:4px;background:#111;color:#fff;border-radius:999px;padding:5px 6px;box-shadow:0 6px 24px rgb(0 0 0 / .35);font:500 13px/1 var(--f-mono);max-width:calc(100vw - 24px)}
 .proto button{background:#2a2a2a;color:#fff;border:0;border-radius:999px;padding:7px 11px;font:inherit}
@@ -459,7 +470,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light',
+  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'tick',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -620,7 +631,7 @@ function VariantA(){
           ${s.status==='proposed'?`<div class="A-review">${reviewControls(x.cid)}</div>`:`<div style="margin-top:8px">${reviewControls(x.cid)}</div>`}`;
       }
     }
-    return `<div class="msg vouch"><div class="who">Vouch</div><div class="body">${body}</div></div>`;
+    return `<div class="msg vouch"><div class="who">${avatar(24)} Vouch</div><div class="body">${body}</div></div>`;
   }).join('');
   const n = nextSuggestion();
   const sug = [n.prop&&`Review ${n.prop}`, n.rej&&`Assess ${n.rej} again`, n.none&&`Assess ${n.none}`, 'Which controls are still missing evidence?'].filter(Boolean);
@@ -656,7 +667,7 @@ function VariantB(){
   }
   const log = S.chat[p].slice(-8).map(x=> x.who==='user' ? `<div class="m user">${esc(x.text)}</div>` : x.kind==='opening' ? `<div class="m">${openingText()}</div>` : x.kind==='text' ? `<div class="m">${esc(x.text)}</div>` : x.kind==='reviewed' ? `<div class="m">Verdict on <b class="mono">${x.cid}</b> ${x.decision}.</div>` : `<div class="m">Assessment of <b class="mono">${x.cid}</b>: ${stOf(x.cid).status==='running'?'running…':'see the working paper.'}</div>`).join('');
   const rail = `<aside class="B-rail"><div><div class="lbl">Readiness</div><div style="margin-top:6px">${readinessBar()}</div></div>
-    <div class="lbl">Ask Vouch</div><div class="log">${log}</div>
+    <div class="who">${avatar(28)}<span class="lbl">Ask Vouch</span></div><div class="log">${log}</div>
     ${s.trace && s.status!=='running' ? `<details><summary class="lbl" style="cursor:pointer">Steps for ${cid}</summary>${traceHtml(s.trace)}</details>`:''}
     <form data-act="send" style="display:flex;gap:6px"><input type="text" id="ask-b" placeholder="Ask about ${cid}…" autocomplete="off"><button class="btn btn-primary">Ask</button></form></aside>`;
   return `<div class="B"><nav class="B-index" aria-label="Controls">${idx}</nav><main class="B-paper wrap">${paper}</main>${rail}</div>`;
@@ -686,7 +697,7 @@ function VariantC(){
     <button class="btn btn-primary" data-act="sel" data-cid="${next}">${next} →</button>
     ${drafts.length?`<div class="C-tray" style="flex-basis:100%"><div class="lbl">Remediation drafts (${drafts.length})</div>${drafts.map(r=>`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;padding-top:4px"><span class="mono">${r.cid} ${r.req}</span><span style="flex:1;min-width:180px">${esc(r.text)} · ${esc(r.owner)} · due ${r.due}</span><button class="btn btn-ghost" data-act="remok" data-id="${r.id}">Approve</button><button class="btn btn-ghost" data-act="remno" data-id="${r.id}">Discard</button></div>`).join('')}</div>`:''}</div>`;
   return `<div class="C wrap"><div><div class="C-strip">${strip}</div><div class="C-areas" style="margin-top:4px">${areas}</div></div>
-    <div class="sheet" style="padding:12px 16px;font-size:13px">${openingText()}</div>
+    <div class="sheet" style="padding:12px 16px;font-size:13px;display:flex;gap:12px;align-items:flex-start">${avatar(44)}<div>${openingText()}</div></div>
     <article class="sheet C-card"><div class="lbl">Question ${i+1} of 12 · ${AREAS.find(a=>a.ids.includes(cid)).name} · ISO 27001 ${esc(isa.iso)}</div>
     <div class="C-q"><span class="mono" style="font-size:18px">${cid}</span> ${esc(isa.q)} ${s.status!=='none'&&s.status!=='running'?chip(s.verdict):''}</div>${body}</article>${decide}</div>`;
 }
@@ -703,7 +714,7 @@ function VariantD(){
       <h1>${de?'Audit vorbereitet. Beleg für Beleg.':'Prepared for audit. One piece of evidence at a time.'}</h1>
       <p><b style="color:var(--ink)">${esc(head)}</b> ${esc(sub)}</p>
       <div class="next">${actions.map(([a,id,label,cls])=> a==='view-report' ? `<button class="btn" data-act="view" data-view="report">${label}</button>` : `<button class="btn ${cls}" data-act="${a==='focus'?'sel':'run'}" data-cid="${id}" data-scroll="detail">${label}</button>`).join('')}</div></div>
-    <div class="D-chat"><div class="lbl">Vouch</div><div class="log">${log}</div>
+    <div class="D-chat"><div class="who">${avatar(36)}<span class="lbl">Vouch</span></div><div class="log">${log}</div>
       <form data-act="send" style="display:flex;gap:6px"><input type="text" id="ask-d" placeholder="${de?'Frage an Vouch':'Ask Vouch, for example “Assess 5.2.5”'}" autocomplete="off"><button class="btn btn-primary">Send</button></form></div></section>`;
   const band = `<section class="D-band"><div><span class="D-pill">${de?'Stand':'Where you stand'}</span><h2>${de?'Bereitschaft':'Readiness'}</h2></div>
       <p>${esc(prof.overlay)}. VDA ISA subset of 12 questions at ${prof.protection} protection. Only verdicts you accepted count; the figures describe evidence coverage, not ISA maturity levels.</p>
@@ -761,6 +772,29 @@ function Dev(){
     <p class="muted" style="font-size:12px">Token counts and prices are invented for the prototype.</p></article>`;
 }
 
+/* ---------- avatar: three original options ---------- */
+const AVATARS = {
+  tick: `<path class="s" d="M9 26 L19 36 L40 11" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="eye"><circle class="w" cx="27.3" cy="25.6" r="2.5"/><circle class="k" cx="27.8" cy="25.4" r="1.15"/></g>
+    <g class="eye"><circle class="w" cx="33.2" cy="18.6" r="2.5"/><circle class="k" cx="33.7" cy="18.4" r="1.15"/></g>
+    <path class="n" d="M16.4 37.6 h5.2 l-1 3 h-3.2 z"/><path class="n" d="M17.4 40.6 h3.2 l1.5 4.8 l-3.1 2.2 l-3.1 -2.2 z"/>`,
+  clip: `<path class="sb" d="M13 19 L8 5 L17 5 L18.5 19 M35 19 L40 5 L31 5 L29.5 19" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <path class="k" d="M9 18 h30 l-3.2 19 h-23.6 z"/>
+    <g class="eye"><circle class="w" cx="19" cy="25.5" r="3.1"/><circle class="k" cx="19.6" cy="25.5" r="1.4"/></g>
+    <g class="eye"><circle class="w" cx="29" cy="25.5" r="3.1"/><circle class="k" cx="29.6" cy="25.5" r="1.4"/></g>
+    <circle class="sb" cx="29" cy="25.5" r="4.6" fill="none" stroke-width="1.5"/><path class="sb" d="M33.2 28 q3.5 5 0.5 10" fill="none" stroke-width="1"/>
+    <path class="sw" d="M21 32 q3 2 6 0" fill="none" stroke-width="1.4" stroke-linecap="round"/>
+    <path class="n" d="M24 41.5 l-6.5 -3.6 v7.2 z M24 41.5 l6.5 -3.6 v7.2 z"/><circle class="n" cx="24" cy="41.5" r="1.7"/>`,
+  seal: `<path class="n" d="M17.5 34 l-4.5 12 l4.2 -2.2 l2.2 3.2 l3.4 -10.5z M30.5 34 l4.5 12 l-4.2 -2.2 l-2.2 3.2 l-3.4 -10.5z"/>
+    <path class="r" d="M24 3.5 C33.5 2.5 41.5 10 40.8 19.5 C41.8 28.5 35 37.2 25 37.6 C14.6 38.6 6.6 31 7.2 21 C6.6 11.8 13.8 4.2 24 3.5 Z"/><circle class="r" cx="39.5" cy="30.5" r="2.2"/><circle class="r" cx="9" cy="10.5" r="1.5"/>
+    <circle class="sw" cx="24" cy="21" r="11.5" fill="none" stroke-width="1" opacity=".55"/>
+    <g class="eye"><circle class="w" cx="19.6" cy="19.5" r="2.4"/><circle class="k" cx="20" cy="19.5" r="1.1"/></g>
+    <g class="eye"><circle class="w" cx="28.4" cy="19.5" r="2.4"/><circle class="k" cx="28.8" cy="19.5" r="1.1"/></g>
+    <path class="sw" d="M20.5 25.5 q3.5 2.6 7 0" fill="none" stroke-width="1.5" stroke-linecap="round"/>`
+};
+const AVNAME = {tick:'Tick', clip:'Clip', seal:'Seal'};
+function avatar(size){ return `<svg class="av ${S.running?'think':''}" width="${size}" height="${size}" viewBox="0 0 48 48" role="img" aria-label="Vouch">${AVATARS[S.avatar]}</svg>`; }
+
 /* ---------- prototype switcher and notes ---------- */
 const VARIANTS = [['A','Counsel: chat-first'],['B','Working paper'],['C','Docket: one control at a time'],['D','Dossier: overview page']];
 const QUESTIONS = [
@@ -773,11 +807,12 @@ const QUESTIONS = [
   'Wording: the glossary says found / partial / gap, the screen says Evidenced / Partly / Not evidenced. One vocabulary on screen?',
   'Austrian profile: the interface stays English and only the answers are German. Should the interface follow the profile\'s language too?',
   'ISA ships a German edition. Should a German-language profile cite the German ISA text?',
-  'Is the readiness report a page you would hand to an auditor, or only to your own management?'
+  'Is the readiness report a page you would hand to an auditor, or only to your own management?',
+  'Avatar: Tick, Clip or Seal? And does it stay beside the chat only, or also appear in the report and the empty states?'
 ];
 function Switcher(){
   const i = VARIANTS.findIndex(v=>v[0]===S.variant);
-  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button><button data-act="theme">Theme: ${({light:'Light',dark:'Dark',system:'System'})[S.theme]}</button></div>
+  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button><button data-act="avatar">Avatar: ${AVNAME[S.avatar]}</button><button data-act="theme">Theme: ${({light:'Light',dark:'Dark',system:'System'})[S.theme]}</button></div>
   ${S.pane==='q'?`<div class="pane"><h4>Questions this prototype should answer</h4><ol>${QUESTIONS.map(q=>`<li>${esc(q)}</li>`).join('')}</ol></div>`:''}
   ${S.pane==='state'?`<div class="pane"><h4>State (${S.profile})</h4><pre>${esc(JSON.stringify({variant:S.variant, view:S.view, profile:S.profile, selected:S.sel, running:S.running, controls:Object.fromEntries(ORDER.map(cid=>[cid, (({status,verdict,review})=>({status,verdict,review}))(stOf(cid))])), remediation:S.rem.filter(r=>r.p===S.profile), auditTrailEntries:S.trail.filter(t=>t.p===S.profile).length}, null, 1))}</pre></div>`:''}`;
 }
@@ -815,6 +850,7 @@ document.addEventListener('click', e => {
   else if (a==='ask') { const t = b.dataset.text; const m = t.match(/\d\.\d\.\d/); if (t.startsWith('Review') && m) { S.sel=m[0]; if (!S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===m[0])) S.chat[S.profile].push({who:'vouch',kind:'assessment',cid:m[0]}); render(); } else ask(t); }
   else if (a==='view') { S.view = b.dataset.view; render(); }
   else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
+  else if (a==='avatar') { S.avatar = ({tick:'clip', clip:'seal', seal:'tick'})[S.avatar]; render(); }
   else if (a==='theme') { S.theme = ({light:'dark', dark:'system', system:'light'})[S.theme]; render(); }
   else if (a==='style') { S.style = S.style==='tailored' ? 'plain' : 'tailored'; render(); }
   else if (a==='pane') { S.pane = S.pane===b.dataset.pane ? null : b.dataset.pane; render(); }
