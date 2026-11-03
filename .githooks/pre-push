@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Pre-push: the fast lane's quickest checks (CLAUDE.md, CI). Each check runs once its tool exists;
+# until M0 carries the code over, the missing ones are skipped with a note.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+if [ -f pyproject.toml ]; then uv run ruff check; else echo "pre-push: no pyproject.toml yet, ruff skipped"; fi
+if [ -f frontend/package.json ]; then npm --prefix frontend run lint; else echo "pre-push: no frontend yet, lint skipped"; fi
+if [ -d frontend/src ]; then python3 -I -B scripts/design-lint.py frontend/src; else echo "pre-push: no frontend/src yet, design-lint skipped"; fi
