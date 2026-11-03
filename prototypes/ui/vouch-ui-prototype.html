@@ -249,6 +249,29 @@ textarea,input[type=text]{background:var(--sheet);border:1px solid var(--rule);b
 .D-foot{display:grid;grid-template-columns:2fr 1fr 1fr;gap:20px;font-size:12px;color:var(--muted);border-top:1px solid var(--rule);padding-top:16px}
 .D-foot b{display:block;color:var(--ink);font-size:13px;margin-bottom:4px}
 
+/* ===== Variant E: Combined (Dossier overview, Working paper, floating chat as in Patch) ===== */
+.E-crumb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;font-size:13px}
+.E-fab{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--sheet);border:0;border-radius:999px;padding:12px 18px;font-weight:600;box-shadow:0 8px 24px rgb(0 0 0 / .2);display:flex;gap:10px;align-items:center}
+.E-fab kbd{font:500 11px var(--f-mono);opacity:.65}
+.E-chat{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:40;width:min(390px, calc(100vw - 32px));height:min(560px, calc(100vh - 170px));background:var(--sheet);border:1px solid var(--rule);border-radius:4px;box-shadow:0 16px 48px rgb(0 0 0 / .22);display:flex;flex-direction:column;min-width:0}
+.E-chat.expanded{width:min(640px, calc(100vw - 32px));height:calc(100vh - 160px)}
+.E-shell{display:grid;grid-template-columns:minmax(0,1fr) 400px;align-items:start}
+.E-chat.pinned{position:sticky;top:70px;right:auto;bottom:auto;width:auto;height:calc(100vh - 70px);border-radius:0;border-width:0 0 0 1px;box-shadow:none}
+.E-ch{display:flex;gap:6px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.E-ch b{font-family:var(--f-display);font-weight:400;font-size:16px;letter-spacing:.04em;text-transform:uppercase}
+.E-ctx{font-size:11px;background:var(--paper);border-radius:999px;padding:1px 9px;color:var(--muted);margin-right:auto}
+.E-ch .btn-ghost{font-size:12px}
+.E-log{flex:1;overflow:auto;padding:12px;display:grid;gap:8px;align-content:start;font-size:13px}
+.E-log .m{background:var(--paper);border-radius:3px;padding:8px 10px;max-width:92%}
+.E-log .m.user{background:var(--ink);color:var(--sheet);justify-self:end}
+.E-foot{border-top:1px solid var(--rule);padding:10px 12px;display:grid;gap:8px}
+.E-foot form{display:flex;gap:6px}
+@media (max-width:700px){
+  .E-chat,.E-chat.expanded,.E-chat.pinned{position:fixed;inset:0;width:auto;height:auto;border-radius:0;border:0;z-index:60}
+  .E-shell{grid-template-columns:1fr}
+  .E-wide{display:none}
+}
+
 /* ===== Report and Developer (shared) ===== */
 .doc{max-width:900px;margin:16px auto 90px;padding:28px 32px;display:grid;gap:18px}
 .doc table{width:100%;border-collapse:collapse;font-size:13px}
@@ -472,7 +495,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'none',
+  variant:'E', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, chatUI:'closed', page:'overview', style:'tailored', theme:'light', avatar:'none',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -528,7 +551,7 @@ function nextSuggestion(p=S.profile){
 function run(cid) {
   const p = S.profile;
   if (S.running || !RES[p][cid]) { if(!RES[p][cid]) toastChat(p, lang()==='de' ? `Für ${cid} liegen im Prototyp keine Beispieldaten vor.` : `The prototype has no example data for ${cid} in this profile.`); return; }
-  S.sel = cid;
+  S.sel = cid; if (S.variant==='E') { S.page='paper'; S.view='prep'; }
   const steps = traceFor(p, cid);
   S.st[p][cid] = {status:'running', trace:[]};
   S.running = cid;
@@ -672,6 +695,7 @@ function VariantB(){
     <div class="who">${avatar(28)}<span class="lbl">Ask Vouch</span></div><div class="log">${log}</div>
     ${s.trace && s.status!=='running' ? `<details><summary class="lbl" style="cursor:pointer">Steps for ${cid}</summary>${traceHtml(s.trace)}</details>`:''}
     <form data-act="send" style="display:flex;gap:6px"><input type="text" id="ask-b" placeholder="Ask about ${cid}…" autocomplete="off"><button class="btn btn-primary">Ask</button></form></aside>`;
+  if (S.variant==='E') return `<div class="B" style="grid-template-columns:250px minmax(0,1fr)"><nav class="B-index" aria-label="Controls">${idx}</nav><main class="B-paper wrap"><div class="E-crumb"><button class="btn btn-ghost" data-act="page" data-page="overview">\u2190 Overview</button><span class="muted">/ ${cid} working paper</span><button class="btn" data-act="ask-about" data-cid="${cid}" style="margin-left:auto">Ask Vouch about ${cid}</button></div>${paper}</main></div>`;
   return `<div class="B"><nav class="B-index" aria-label="Controls">${idx}</nav><main class="B-paper wrap">${paper}</main>${rail}</div>`;
 }
 
@@ -712,10 +736,11 @@ function VariantD(){
   const sub = de ? 'Das österreichische NIS2-Overlay ergänzt bei 1.6.2 eine Anforderung. Beginnen Sie dort.' : `${c.proposed} verdict${c.proposed===1?'':'s'} waiting for your review, ${c.rejected} rejected. ${n.none?`Next suggested: ${n.none}.`:''}`;
   const actions = [n.prop&&['focus',n.prop,`Review ${n.prop}`,'btn-primary'], n.rej&&['run',n.rej,`Assess ${n.rej} again`,''], n.none&&['run',n.none,`Assess ${n.none}`, n.prop?'':'btn-primary'], ['view-report','','Readiness report','']].filter(Boolean);
   const log = S.chat[p].slice(-5).map(x=> x.who==='user' ? `<div class="m user">${esc(x.text)}</div>` : x.kind==='opening' ? `<div class="m">${openingText()}</div>` : x.kind==='text' ? `<div class="m">${esc(x.text)}</div>` : x.kind==='reviewed' ? `<div class="m">Verdict on <b class="mono">${x.cid}</b> ${x.decision}.</div>` : `<div class="m">Assessment of <b class="mono">${x.cid}</b>: ${stOf(x.cid).status==='running'?'running…':'see below.'}</div>`).join('');
-  const hero = `<section class="D-hero"><div><span class="D-pill">${esc(prof.company)} · ${esc(prof.country)}</span>
+  const heroLeft = `<div><span class="D-pill">${esc(prof.company)} · ${esc(prof.country)}</span>
       <h1>${de?'Audit vorbereitet. Beleg für Beleg.':'Prepared for audit. One piece of evidence at a time.'}</h1>
       <p><b style="color:var(--ink)">${esc(head)}</b> ${esc(sub)}</p>
-      <div class="next">${actions.map(([a,id,label,cls])=> a==='view-report' ? `<button class="btn" data-act="view" data-view="report">${label}</button>` : `<button class="btn ${cls}" data-act="${a==='focus'?'sel':'run'}" data-cid="${id}" data-scroll="detail">${label}</button>`).join('')}</div></div>
+      <div class="next">${actions.map(([a,id,label,cls])=> a==='view-report' ? `<button class="btn" data-act="view" data-view="report">${label}</button>` : `<button class="btn ${cls}" data-act="${a==='focus'?'sel':'run'}" data-cid="${id}" data-scroll="detail">${label}</button>`).join('')}</div></div>`;
+  const hero = `<section class="D-hero">${heroLeft}
     <div class="D-chat"><div class="who">${avatar(36)}<span class="lbl">Vouch</span></div><div class="log">${log}</div>
       <form data-act="send" style="display:flex;gap:6px"><input type="text" id="ask-d" placeholder="${de?'Frage an Vouch':'Ask Vouch, for example “Assess 5.2.5”'}" autocomplete="off"><button class="btn btn-primary">Send</button></form></div></section>`;
   const band = `<section class="D-band"><div><span class="D-pill">${de?'Stand':'Where you stand'}</span><h2>${de?'Bereitschaft':'Readiness'}</h2></div>
@@ -735,7 +760,36 @@ function VariantD(){
   const ask = `<section class="D-ask"><div><h2>${de?'Fragen Sie Vouch':'Ask Vouch'}</h2><p>${de?'Zum Beispiel: Welche Controls haben nur dokumentierte Nachweise?':'For example: which controls have documented evidence only? Which remediation items are due this month?'}</p></div>
     <form data-act="send"><input type="text" id="ask-d2" placeholder="${de?'Ihre Frage':'Your question'}" autocomplete="off"><button class="btn btn-primary">Ask</button></form></section>`;
   const foot = `<footer class="D-foot"><div><b>Vouch</b>Drafted by an AI assistant, reviewed by ${esc(prof.lead)}; not an audit result.</div><div><b>Profile</b>${esc(prof.company)}<br>${prof.langLabel} · protection ${prof.protection}</div><div><b>Sources</b>VDA ISA 6, © ENX Association, CC BY-ND 4.0</div></footer>`;
+  if (S.variant==='E') return `<div class="D wrap"><section class="D-hero" style="grid-template-columns:1fr">${heroLeft}</section>${band}<section style="display:grid;gap:16px"><div class="D-head"><span class="D-pill">${de?'Controls':'The controls'}</span><h2>${de?'Zw\u00f6lf Fragen, vier Bereiche':'Twelve questions, four areas'}</h2><p>Open a control to work through its working paper.</p></div><div class="D-cards">${cards}</div></section>${qsec}${foot}</div>`;
   return `<div class="D wrap">${hero}${band}<section style="display:grid;gap:16px"><div class="D-head"><span class="D-pill">${de?'Controls':'The controls'}</span><h2>${de?'Zwölf Fragen, vier Bereiche':'Twelve questions, four areas'}</h2><p>Pick a control to see its requirements, the evidence behind each verdict, and your review.</p></div><div class="D-cards">${cards}</div></section>${detailSec}${qsec}${ask}${foot}</div>`;
+}
+
+/* ---------- Variant E: floating chat (Patch's pattern) ---------- */
+function ctxLabel(){ if (S.view==='report') return 'on Readiness report'; if (S.view==='dev') return 'on Developer'; return S.page==='paper' ? `on ${S.sel} · working paper` : 'on Overview'; }
+function ChatWidget(){
+  if (S.chatUI==='closed') return `<button class="E-fab" data-act="chat-open" aria-label="Open the chat with Vouch">Ask Vouch <kbd class="E-wide">Ctrl K</kbd></button>`;
+  const p = S.profile, de = lang()==='de';
+  const log = S.chat[p].map(x=>{
+    if (x.who==='user') return `<div class="m user">${esc(x.text)}</div>`;
+    if (x.kind==='opening') return `<div class="m">${openingText()}</div>`;
+    if (x.kind==='text') return `<div class="m">${esc(x.text)}</div>`;
+    if (x.kind==='reviewed') return `<div class="m">Noted: the verdict on <b class="mono">${x.cid}</b> is ${x.decision}.</div>`;
+    const st = stOf(x.cid);
+    if (st.status==='running') return `<div class="m"><div class="lbl">Assessing ${x.cid}</div>${traceHtml(st.trace)}</div>`;
+    const res = RES[p][x.cid];
+    return `<div class="m"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b class="mono">${x.cid}</b>${chip(st.verdict)}<span class="st st-${st.status}">${st.status}</span></div><p style="margin:6px 0">${esc(res.answer.split('. ')[0])}.</p><button class="btn btn-ghost" data-act="sel" data-cid="${x.cid}">Open the working paper →</button></div>`;
+  }).join('');
+  const n = nextSuggestion();
+  const sug = [n.prop&&`Review ${n.prop}`, n.none&&`Assess ${n.none}`, S.page==='paper'&&`What is missing for ${S.sel}?`].filter(Boolean);
+  const big = S.chatUI==='expanded', pinned = S.chatUI==='pinned';
+  return `<aside class="E-chat ${S.chatUI==='bubble'?'':S.chatUI}" aria-label="Chat with Vouch">
+    <div class="E-ch"><b>Vouch</b><span class="E-ctx">${esc(ctxLabel())}</span>
+      ${big||pinned?`<button class="btn btn-ghost E-wide" data-act="chat-pin" aria-pressed="${pinned}" title="${pinned?'Unpin: float over the page':'Pin beside the page'}">${pinned?'Unpin':'Pin'}</button>`:''}
+      ${!pinned?`<button class="btn btn-ghost E-wide" data-act="chat-size">${big?'Make smaller':'Make larger'}</button>`:''}
+      <button class="btn btn-ghost" data-act="chat-close" aria-label="Close the chat">Close</button></div>
+    <div class="E-log">${log}</div>
+    <div class="E-foot"><div class="sugg">${sug.map(t=>`<button data-act="ask" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <form data-act="send"><input type="text" id="ask-e" placeholder="${de?'Frage an Vouch':'Ask Vouch'}" autocomplete="off"><button class="btn btn-primary">Send</button></form></div></aside>`;
 }
 
 /* ---------- Report (shared) ---------- */
@@ -854,7 +908,7 @@ const AVWHY = {tie:'the navy tie from the suits: shirt collar, a brass tie clip,
 function avatar(size){ if (S.avatar==='none') return ''; return `<svg class="av ${S.running?'think':''}" width="${size}" height="${size}" viewBox="0 0 48 48" role="img" aria-label="Vouch">${AVATARS[S.avatar]}</svg>`; }
 
 /* ---------- prototype switcher and notes ---------- */
-const VARIANTS = [['A','Counsel: chat-first'],['B','Working paper'],['C','Docket: one control at a time'],['D','Dossier: overview page']];
+const VARIANTS = [['E','Combined: overview, working paper, floating chat'],['A','Counsel: chat-first'],['B','Working paper'],['C','Docket: one control at a time'],['D','Dossier: overview page']];
 const QUESTIONS = [
   'Which variant (or which parts of each) fits a compliance lead preparing for weeks: chat-first, the working paper, or one question at a time?',
   'Should-requirements are shown but don\'t change the verdict here. Should they count, and how?',
@@ -888,8 +942,10 @@ function render(){
   const focus = document.activeElement?.id, val = focus ? document.getElementById(focus)?.value : null;
   const notes = {}; document.querySelectorAll('textarea[id^=note-],input[id^=note-]').forEach(t=>notes[t.id]=t.value);
   if (document.documentElement) { document.documentElement.dataset.style = S.style; if (S.theme==='system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
-  const view = S.view==='report' ? Report() : S.view==='dev' ? Dev() : ({A:VariantA, B:VariantB, C:VariantC, D:VariantD})[S.variant]();
-  document.getElementById('app').innerHTML = Top() + view + Switcher();
+  const view = S.view==='report' ? Report() : S.view==='dev' ? Dev() : (S.variant==='E' ? (S.page==='paper' ? VariantB : VariantD) : ({A:VariantA, B:VariantB, C:VariantC, D:VariantD})[S.variant])();
+  const chat = S.variant==='E' ? ChatWidget() : '';
+  document.getElementById('app').innerHTML = Top() + (S.variant==='E' && S.chatUI==='pinned' ? `<div class="E-shell"><div style="min-width:0">${view}</div>${chat}</div>` : view + chat) + Switcher();
+  const lg = document.querySelector('.E-log'); if (lg) lg.scrollTop = lg.scrollHeight;
   Object.entries(notes).forEach(([id,v])=>{const el=document.getElementById(id); if(el) el.value=v;});
   if (focus && document.getElementById(focus)) { const el = document.getElementById(focus); el.focus(); if (val!=null && 'value' in el) el.value = val; }
 }
@@ -899,7 +955,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b || b.tagName==='FORM' || b.tagName==='SELECT') return;
   const a = b.dataset.act, cid = b.dataset.cid;
   if (a==='run') run(cid);
-  else if (a==='sel') { S.sel = cid; render(); if (b.dataset.scroll) document.getElementById(b.dataset.scroll)?.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); }
+  else if (a==='sel') { S.sel = cid; if (S.variant==='E') { S.page='paper'; S.view='prep'; } render(); if (b.dataset.scroll) document.getElementById(b.dataset.scroll)?.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'}); }
   else if (a==='focus') { S.sel = cid; if (S.variant==='A') { const s=stOf(cid); if (s.status==='proposed' && !S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===cid)) S.chat[S.profile].push({who:'vouch', kind:'assessment', cid}); else if (s.status==='accepted' && !S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===cid)) S.chat[S.profile].push({who:'vouch', kind:'assessment', cid}); } render(); }
   else if (a==='accept') review(cid,'accepted');
   else if (a==='reject') review(cid,'rejected');
@@ -911,6 +967,12 @@ document.addEventListener('click', e => {
   else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
   else if (a==='pickav') { S.avatar = b.dataset.av; render(); }
   else if (a==='avatar') { S.avatar = AVKEYS[(AVKEYS.indexOf(S.avatar)+1)%AVKEYS.length]; render(); }
+  else if (a==='chat-open') { S.chatUI='bubble'; render(); document.getElementById('ask-e')?.focus(); }
+  else if (a==='chat-close') { S.chatUI='closed'; render(); document.querySelector('.E-fab')?.focus(); }
+  else if (a==='chat-size') { S.chatUI = S.chatUI==='expanded' ? 'bubble' : 'expanded'; render(); }
+  else if (a==='chat-pin') { S.chatUI = S.chatUI==='pinned' ? 'expanded' : 'pinned'; render(); }
+  else if (a==='page') { S.page = b.dataset.page; render(); }
+  else if (a==='ask-about') { if (S.chatUI==='closed') S.chatUI='bubble'; render(); const i=document.getElementById('ask-e'); if (i) { i.value=`About ${cid}: `; i.focus(); } }
   else if (a==='theme') { S.theme = ({light:'dark', dark:'system', system:'light'})[S.theme]; render(); }
   else if (a==='style') { S.style = S.style==='tailored' ? 'plain' : 'tailored'; render(); }
   else if (a==='pane') { S.pane = S.pane===b.dataset.pane ? null : b.dataset.pane; render(); }
@@ -918,16 +980,18 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => { if (e.target.id==='prof') { S.profile = e.target.value; S.sel = S.profile==='aw' ? '1.6.2' : '5.1.1'; render(); } });
 document.addEventListener('submit', e => { e.preventDefault(); const inp = e.target.querySelector('input'); const t = inp.value.trim(); if (t) { inp.value=''; ask(t); } });
 document.addEventListener('keydown', e => {
+  if (S.variant==='E' && (e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k') { e.preventDefault(); if (S.chatUI==='closed') S.chatUI='bubble'; render(); document.getElementById('ask-e')?.focus(); return; }
+  if (S.variant==='E' && e.key==='Escape' && (S.chatUI==='bubble'||S.chatUI==='expanded')) { S.chatUI='closed'; render(); return; }
   if (e.target.closest('input,textarea,select,[contenteditable]')) return;
   if (e.key==='ArrowRight'||e.key==='ArrowLeft') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (e.key==='ArrowRight'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
 });
-window.addEventListener('hashchange', () => { const m = location.hash.match(/variant-([abcd])/i); if (m) { S.variant = m[1].toUpperCase(); render(); } });
+window.addEventListener('hashchange', () => { const m = location.hash.match(/variant-([abcde])/i); if (m) { S.variant = m[1].toUpperCase(); render(); } });
 
 (function start(){
   let v = null;
   try { v = new URLSearchParams(location.search).get('variant'); } catch(e) {}
-  const m = location.hash.match(/variant-([abcd])/i); if (m) v = m[1];
-  if (v && /^[abcd]$/i.test(v)) S.variant = v.toUpperCase();
+  const m = location.hash.match(/variant-([abcde])/i); if (m) v = m[1];
+  if (v && /^[abcde]$/i.test(v)) S.variant = v.toUpperCase();
   seed(); render();
 })();
 </script>
