@@ -459,7 +459,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored',
+  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -777,7 +777,7 @@ const QUESTIONS = [
 ];
 function Switcher(){
   const i = VARIANTS.findIndex(v=>v[0]===S.variant);
-  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button></div>
+  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button><button data-act="theme">Theme: ${({light:'Light',dark:'Dark',system:'System'})[S.theme]}</button></div>
   ${S.pane==='q'?`<div class="pane"><h4>Questions this prototype should answer</h4><ol>${QUESTIONS.map(q=>`<li>${esc(q)}</li>`).join('')}</ol></div>`:''}
   ${S.pane==='state'?`<div class="pane"><h4>State (${S.profile})</h4><pre>${esc(JSON.stringify({variant:S.variant, view:S.view, profile:S.profile, selected:S.sel, running:S.running, controls:Object.fromEntries(ORDER.map(cid=>[cid, (({status,verdict,review})=>({status,verdict,review}))(stOf(cid))])), remediation:S.rem.filter(r=>r.p===S.profile), auditTrailEntries:S.trail.filter(t=>t.p===S.profile).length}, null, 1))}</pre></div>`:''}`;
 }
@@ -793,7 +793,7 @@ function Top(){
 function render(){
   const focus = document.activeElement?.id, val = focus ? document.getElementById(focus)?.value : null;
   const notes = {}; document.querySelectorAll('textarea[id^=note-],input[id^=note-]').forEach(t=>notes[t.id]=t.value);
-  if (document.documentElement) document.documentElement.dataset.style = S.style;
+  if (document.documentElement) { document.documentElement.dataset.style = S.style; if (S.theme==='system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
   const view = S.view==='report' ? Report() : S.view==='dev' ? Dev() : ({A:VariantA, B:VariantB, C:VariantC, D:VariantD})[S.variant]();
   document.getElementById('app').innerHTML = Top() + view + Switcher();
   Object.entries(notes).forEach(([id,v])=>{const el=document.getElementById(id); if(el) el.value=v;});
@@ -815,6 +815,7 @@ document.addEventListener('click', e => {
   else if (a==='ask') { const t = b.dataset.text; const m = t.match(/\d\.\d\.\d/); if (t.startsWith('Review') && m) { S.sel=m[0]; if (!S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===m[0])) S.chat[S.profile].push({who:'vouch',kind:'assessment',cid:m[0]}); render(); } else ask(t); }
   else if (a==='view') { S.view = b.dataset.view; render(); }
   else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
+  else if (a==='theme') { S.theme = ({light:'dark', dark:'system', system:'light'})[S.theme]; render(); }
   else if (a==='style') { S.style = S.style==='tailored' ? 'plain' : 'tailored'; render(); }
   else if (a==='pane') { S.pane = S.pane===b.dataset.pane ? null : b.dataset.pane; render(); }
 });
