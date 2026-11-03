@@ -11,7 +11,7 @@
   State is in memory only. Nothing calls a model.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&family=Libre+Caslon+Display&family=Manrope:wght@400;500;600;700&display=swap">
 <style>
 /* Layout concept: an auditor's working paper. Cool grey paper, white sheets, navy ink, one oxblood accent for the actions that sign something off. */
 :root{
@@ -33,6 +33,43 @@
   --found:#62BE88; --partial:#E2AA4E; --gap:#E57575; --na:#8E99A8; --run:#7FAAE0;
   --found-bg:#16291F; --partial-bg:#2E2414; --gap-bg:#2F1A1B; --na-bg:#1D242E; --run-bg:#172434;
   --inverse:#E4E9F0; --inverse-fg:#0E131A; color-scheme:dark}
+/* Style "Tailored" (mood board: glen-check greys, navy tie, brass detail; dark mode from the lamp page: near-black with champagne). */
+:root[data-style="tailored"]{
+  --paper:#E8E7E3; --sheet:#F7F7F5; --ink:#1B1D21; --muted:#62656B; --rule:#D0CEC8; --navy:#1F3B6E; --sign:#1B1D21; --brass:#A8834A;
+  --found:#3F7A55; --partial:#A06E22; --gap:#A4433F; --na:#7A7C80; --run:#1F3B6E;
+  --found-bg:#E2EDE5; --partial-bg:#F3EAD9; --gap-bg:#F3E2E0; --na-bg:#E4E3DF; --run-bg:#E1E6EF;
+  --check-a:rgb(27 29 33 / .07); --check-b:rgb(31 59 110 / .08);
+  --f-display:"Libre Caslon Display", "Libre Caslon Text", Georgia, serif; --f-body:"Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;}
+@media (prefers-color-scheme: dark){:root[data-style="tailored"]:not([data-theme="light"]){
+  --paper:#0D0D0E; --sheet:#171718; --ink:#ECE6DC; --muted:#9C978E; --rule:#2C2B29; --navy:#A9BEE6; --sign:#E3CB9F; --brass:#E2C391;
+  --found:#7DBE93; --partial:#E0B064; --gap:#E08A80; --na:#8F8C86; --run:#A9BEE6;
+  --found-bg:#18241C; --partial-bg:#2A2216; --gap-bg:#2B1B19; --na-bg:#1E1E1F; --run-bg:#1A2030;
+  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); color-scheme:dark}}
+:root[data-style="tailored"][data-theme="dark"]{
+  --paper:#0D0D0E; --sheet:#171718; --ink:#ECE6DC; --muted:#9C978E; --rule:#2C2B29; --navy:#A9BEE6; --sign:#E3CB9F; --brass:#E2C391;
+  --found:#7DBE93; --partial:#E0B064; --gap:#E08A80; --na:#8F8C86; --run:#A9BEE6;
+  --found-bg:#18241C; --partial-bg:#2A2216; --gap-bg:#2B1B19; --na-bg:#1E1E1F; --run-bg:#1A2030;
+  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); color-scheme:dark}
+[data-style="tailored"] h1,[data-style="tailored"] h2{font-weight:400;text-transform:uppercase;letter-spacing:.02em;line-height:1.1}
+[data-style="tailored"] .brand b{font-family:var(--f-display);font-weight:400;text-transform:uppercase;letter-spacing:.08em}
+[data-style="tailored"] .brand b::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;background:var(--brass);transform:rotate(45deg) translateY(-2px)}
+[data-style="tailored"] .top::after{content:"";display:block;height:6px;background:
+  repeating-linear-gradient(90deg,var(--check-a) 0 2px,transparent 2px 4px,var(--check-b) 4px 5px,transparent 5px 12px),
+  repeating-linear-gradient(0deg,var(--check-a) 0 2px,transparent 2px 4px,var(--check-b) 4px 5px,transparent 5px 12px)}
+[data-style="tailored"] .nav{background:var(--paper);border-radius:999px;padding:3px}
+[data-style="tailored"] .nav button{border-radius:999px}
+[data-style="tailored"] .nav button[aria-current="page"]{background:var(--sheet);box-shadow:inset 0 -2px 0 var(--brass)}
+[data-style="tailored"] .btn{border-radius:999px;padding:7px 16px}
+[data-style="tailored"] .btn-ghost{padding:4px 8px}
+[data-style="tailored"] .btn-primary{background:var(--ink);border-color:var(--ink);color:var(--sheet)}
+[data-style="tailored"] .sheet{border-radius:14px}
+[data-style="tailored"] .prof select{border-radius:999px;padding:5px 12px}
+[data-style="tailored"] .quote{border-left-color:var(--brass);font-family:"IBM Plex Serif", Georgia, serif}
+[data-style="tailored"] .msg.user{background:var(--ink);color:var(--sheet)}
+[data-style="tailored"] .B-head{border-bottom-color:var(--brass)}
+[data-style="tailored"] .C-narr{border-left-color:var(--brass)}
+[data-style="tailored"] .C-q{font-family:"IBM Plex Serif", Georgia, serif;font-weight:500}
+[data-style="tailored"] .kpis div b{font-family:var(--f-display);font-weight:400}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{background:var(--paper);color:var(--ink);font:14px/1.5 var(--f-body);margin:0}
@@ -372,7 +409,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null,
+  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -656,7 +693,7 @@ const QUESTIONS = [
 ];
 function Switcher(){
   const i = VARIANTS.findIndex(v=>v[0]===S.variant);
-  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button></div>
+  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button></div>
   ${S.pane==='q'?`<div class="pane"><h4>Questions this prototype should answer</h4><ol>${QUESTIONS.map(q=>`<li>${esc(q)}</li>`).join('')}</ol></div>`:''}
   ${S.pane==='state'?`<div class="pane"><h4>State (${S.profile})</h4><pre>${esc(JSON.stringify({variant:S.variant, view:S.view, profile:S.profile, selected:S.sel, running:S.running, controls:Object.fromEntries(ORDER.map(cid=>[cid, (({status,verdict,review})=>({status,verdict,review}))(stOf(cid))])), remediation:S.rem.filter(r=>r.p===S.profile), auditTrailEntries:S.trail.filter(t=>t.p===S.profile).length}, null, 1))}</pre></div>`:''}`;
 }
@@ -672,6 +709,7 @@ function Top(){
 function render(){
   const focus = document.activeElement?.id, val = focus ? document.getElementById(focus)?.value : null;
   const notes = {}; document.querySelectorAll('textarea[id^=note-],input[id^=note-]').forEach(t=>notes[t.id]=t.value);
+  if (document.documentElement) document.documentElement.dataset.style = S.style;
   const view = S.view==='report' ? Report() : S.view==='dev' ? Dev() : ({A:VariantA, B:VariantB, C:VariantC})[S.variant]();
   document.getElementById('app').innerHTML = Top() + view + Switcher();
   Object.entries(notes).forEach(([id,v])=>{const el=document.getElementById(id); if(el) el.value=v;});
@@ -693,6 +731,7 @@ document.addEventListener('click', e => {
   else if (a==='ask') { const t = b.dataset.text; const m = t.match(/\d\.\d\.\d/); if (t.startsWith('Review') && m) { S.sel=m[0]; if (!S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===m[0])) S.chat[S.profile].push({who:'vouch',kind:'assessment',cid:m[0]}); render(); } else ask(t); }
   else if (a==='view') { S.view = b.dataset.view; render(); }
   else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:2)) % 3][0]); }
+  else if (a==='style') { S.style = S.style==='tailored' ? 'plain' : 'tailored'; render(); }
   else if (a==='pane') { S.pane = S.pane===b.dataset.pane ? null : b.dataset.pane; render(); }
 });
 document.addEventListener('change', e => { if (e.target.id==='prof') { S.profile = e.target.value; S.sel = S.profile==='aw' ? '1.6.2' : '5.1.1'; render(); } });
