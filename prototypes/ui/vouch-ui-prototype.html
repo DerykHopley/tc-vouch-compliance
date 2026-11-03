@@ -263,7 +263,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 /* ===== Avatar ===== */
 .av{display:inline-block;vertical-align:middle;flex:none;overflow:visible}
 .av .k{fill:var(--ink)} .av .w{fill:var(--sheet)} .av .n{fill:var(--navy)} .av .r{fill:var(--sign)}
-.av .s{stroke:var(--ink)} .av .sb{stroke:var(--brass)} .av .sw{stroke:var(--sheet)} .av .sr{stroke:var(--sign)}
+.av .s,.av .sk{stroke:var(--ink)} .av .b{fill:var(--brass)} .av .sn{stroke:var(--navy)} .av .rt{fill:var(--sign)} .av .sb{stroke:var(--brass)} .av .sw{stroke:var(--sheet)} .av .sr{stroke:var(--sign)}
 .av .eye{transform-box:fill-box;transform-origin:center;animation:av-blink 5.5s infinite}
 .av .eye + .eye{animation-delay:.04s}
 .av.think{animation:av-bob .9s ease-in-out infinite;transform-origin:50% 80%}
@@ -470,7 +470,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'tick',
+  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'button',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -774,17 +774,37 @@ function Dev(){
 
 /* ---------- avatar: three original options ---------- */
 const AVATARS = {
-  tick: `<path class="s" d="M9 26 L19 36 L40 11" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-    <g class="eye"><circle class="w" cx="27.3" cy="25.6" r="2.5"/><circle class="k" cx="27.8" cy="25.4" r="1.15"/></g>
-    <g class="eye"><circle class="w" cx="33.2" cy="18.6" r="2.5"/><circle class="k" cx="33.7" cy="18.4" r="1.15"/></g>
-    <path class="n" d="M16.4 37.6 h5.2 l-1 3 h-3.2 z"/><path class="n" d="M17.4 40.6 h3.2 l1.5 4.8 l-3.1 2.2 l-3.1 -2.2 z"/>`,
-  clip: `<path class="sb" d="M13 19 L8 5 L17 5 L18.5 19 M35 19 L40 5 L31 5 L29.5 19" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <path class="k" d="M9 18 h30 l-3.2 19 h-23.6 z"/>
-    <g class="eye"><circle class="w" cx="19" cy="25.5" r="3.1"/><circle class="k" cx="19.6" cy="25.5" r="1.4"/></g>
-    <g class="eye"><circle class="w" cx="29" cy="25.5" r="3.1"/><circle class="k" cx="29.6" cy="25.5" r="1.4"/></g>
-    <circle class="sb" cx="29" cy="25.5" r="4.6" fill="none" stroke-width="1.5"/><path class="sb" d="M33.2 28 q3.5 5 0.5 10" fill="none" stroke-width="1"/>
-    <path class="sw" d="M21 32 q3 2 6 0" fill="none" stroke-width="1.4" stroke-linecap="round"/>
-    <path class="n" d="M24 41.5 l-6.5 -3.6 v7.2 z M24 41.5 l6.5 -3.6 v7.2 z"/><circle class="n" cx="24" cy="41.5" r="1.7"/>`,
+  button: `<circle class="b" cx="24" cy="24" r="19"/><circle class="sk" cx="24" cy="24" r="15.5" fill="none" stroke-width="1.4" opacity=".3"/>
+    <g class="eye"><circle class="k" cx="18.8" cy="19.5" r="2.7"/><circle class="w" cx="19.6" cy="18.7" r=".8"/></g>
+    <g class="eye"><circle class="k" cx="29.2" cy="19.5" r="2.7"/><circle class="w" cx="30" cy="18.7" r=".8"/></g>
+    <path class="n" d="M19.5 29.5 L24 27.2 L24 31.8 Z M28.5 29.5 L24 27.2 L24 31.8 Z"/>
+    <circle class="k" cx="18.8" cy="29.5" r="2.7"/><circle class="k" cx="29.2" cy="29.5" r="2.7"/>`,
+  watch: `<rect class="b" x="21.5" y="2.5" width="5" height="4.5" rx="1"/><rect class="b" x="23" y="6.5" width="2" height="3"/>
+    <circle class="b" cx="24" cy="27" r="18"/><circle class="w" cx="24" cy="27" r="14.5"/>
+    <path class="sk" d="M24 13.5 v2.5 M24 38 v2.5 M10.5 27 h2.5 M35 27 h2.5" stroke-width="1.4" stroke-linecap="round"/>
+    <g class="eye"><circle class="k" cx="19.5" cy="23" r="1.9"/></g><g class="eye"><circle class="k" cx="28.5" cy="23" r="1.9"/></g>
+    <path class="sk" d="M24 30 L17.8 27.4 M24 30 L30.6 27" stroke-width="1.7" stroke-linecap="round"/><circle class="r" cx="24" cy="30" r="1.4"/>`,
+  owl: `<path class="k" d="M11 13 L14.5 3.5 L19.5 10.5 Z M37 13 L33.5 3.5 L28.5 10.5 Z"/>
+    <path class="k" d="M24 8 C35 8 40.5 16 40.5 26.5 C40.5 37.5 33 44.5 24 44.5 C15 44.5 7.5 37.5 7.5 26.5 C7.5 16 13 8 24 8Z"/>
+    <path class="w" d="M18.5 33 L24 41 L29.5 33 Z"/><path class="r" d="M24 36 l-5 -2.8 v5.6z M24 36 l5 -2.8 v5.6z"/>
+    <circle class="b" cx="17.5" cy="21" r="6.3"/><circle class="b" cx="30.5" cy="21" r="6.3"/>
+    <g class="eye"><circle class="w" cx="17.5" cy="21" r="4.7"/><circle class="k" cx="18" cy="21.3" r="2.2"/></g>
+    <g class="eye"><circle class="w" cx="30.5" cy="21" r="4.7"/><circle class="k" cx="31" cy="21.3" r="2.2"/></g>
+    <path class="b" d="M22 26.5 L26 26.5 L24 30.5Z"/>`,
+  stamp: `<circle class="b" cx="24" cy="11" r="8.5"/>
+    <g class="eye"><circle class="k" cx="21" cy="10" r="1.5"/></g><g class="eye"><circle class="k" cx="27" cy="10" r="1.5"/></g>
+    <path class="sk" d="M21.3 13.6 q2.7 1.8 5.4 0" fill="none" stroke-width="1.3" stroke-linecap="round"/>
+    <rect class="k" x="20.5" y="18.5" width="7" height="8.5"/><rect class="k" x="10" y="27" width="28" height="8" rx="1.5"/>
+    <rect class="r" x="9" y="35" width="30" height="3.6" rx="1"/>
+    <text x="24" y="46.5" font-size="5.6" text-anchor="middle" class="rt" font-family="Georgia, serif" letter-spacing=".7">VOUCHED</text>`,
+  monogram: `<path class="r" d="M24 3.5 C33.5 2.5 41.5 10 40.8 19.5 C41.8 28.5 35 37.2 25 37.6 C14.6 38.6 6.6 31 7.2 21 C6.6 11.8 13.8 4.2 24 3.5 Z"/><circle class="r" cx="39.5" cy="30.5" r="2.2"/>
+    <circle class="sw" cx="24" cy="20.5" r="12.5" fill="none" stroke-width="1" opacity=".5"/>
+    <path class="sw" d="M17.5 13 L24 28.5 L30.5 13" fill="none" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    <path class="n" d="M17.5 34 l-4.5 12 l4.2 -2.2 l2.2 3.2 l3.4 -10.5z M30.5 34 l4.5 12 l-4.2 -2.2 l-2.2 3.2 l-3.4 -10.5z"/>`,
+  lens: `<path class="sn" d="M32 32 L42.5 42.5" stroke-width="6" stroke-linecap="round"/>
+    <circle class="b" cx="21" cy="21" r="15.5"/><circle class="w" cx="21" cy="21" r="12"/>
+    <g class="eye"><circle class="n" cx="21" cy="21.5" r="6.2"/><circle class="k" cx="21" cy="21.5" r="3"/><circle class="w" cx="23.2" cy="19.3" r="1.3"/></g>
+    <path class="sk" d="M14 11.5 q7 -3.5 14 0" fill="none" stroke-width="1.6" stroke-linecap="round"/>`,
   seal: `<path class="n" d="M17.5 34 l-4.5 12 l4.2 -2.2 l2.2 3.2 l3.4 -10.5z M30.5 34 l4.5 12 l-4.2 -2.2 l-2.2 3.2 l-3.4 -10.5z"/>
     <path class="r" d="M24 3.5 C33.5 2.5 41.5 10 40.8 19.5 C41.8 28.5 35 37.2 25 37.6 C14.6 38.6 6.6 31 7.2 21 C6.6 11.8 13.8 4.2 24 3.5 Z"/><circle class="r" cx="39.5" cy="30.5" r="2.2"/><circle class="r" cx="9" cy="10.5" r="1.5"/>
     <circle class="sw" cx="24" cy="21" r="11.5" fill="none" stroke-width="1" opacity=".55"/>
@@ -792,7 +812,12 @@ const AVATARS = {
     <g class="eye"><circle class="w" cx="28.4" cy="19.5" r="2.4"/><circle class="k" cx="28.8" cy="19.5" r="1.1"/></g>
     <path class="sw" d="M20.5 25.5 q3.5 2.6 7 0" fill="none" stroke-width="1.5" stroke-linecap="round"/>`
 };
-const AVNAME = {tick:'Tick', clip:'Clip', seal:'Seal'};
+const AVNAME = {button:'Button', watch:'Pocket watch', owl:'Owl', stamp:'Stamp', monogram:'Monogram seal', lens:'Lens', seal:'Seal'};
+const AVKEYS = Object.keys(AVATARS);
+const AVWHY = {button:'a jacket button from the double-breasted suits; the stitching is its bow tie',
+  watch:'the brass pocket watch: deadlines and precision; its hands at ten past ten', owl:'scrutiny and judgement, in a white shirt and an oxblood bow tie',
+  stamp:'the stamp that marks a document as vouched', monogram:'the seal without a face: a V pressed in wax, more mark than character',
+  lens:'one eye behind a magnifier: looking closely at evidence', seal:'the earlier seal, for comparison'};
 function avatar(size){ return `<svg class="av ${S.running?'think':''}" width="${size}" height="${size}" viewBox="0 0 48 48" role="img" aria-label="Vouch">${AVATARS[S.avatar]}</svg>`; }
 
 /* ---------- prototype switcher and notes ---------- */
@@ -812,7 +837,8 @@ const QUESTIONS = [
 ];
 function Switcher(){
   const i = VARIANTS.findIndex(v=>v[0]===S.variant);
-  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button><button data-act="avatar">Avatar: ${AVNAME[S.avatar]}</button><button data-act="theme">Theme: ${({light:'Light',dark:'Dark',system:'System'})[S.theme]}</button></div>
+  return `<div class="proto" role="toolbar" aria-label="Prototype switcher"><button data-act="vprev" aria-label="Previous variant">←</button><span class="cur">${VARIANTS[i][0]} · ${VARIANTS[i][1]}</span><button data-act="vnext" aria-label="Next variant">→</button><button data-act="pane" data-pane="q">Questions</button><button data-act="pane" data-pane="state">State</button><button data-act="style">Style: ${S.style==='tailored'?'Tailored':'Plain'}</button><button data-act="avatar">Avatar: ${AVNAME[S.avatar]}</button><button data-act="pane" data-pane="av">Avatars</button><button data-act="theme">Theme: ${({light:'Light',dark:'Dark',system:'System'})[S.theme]}</button></div>
+  ${S.pane==='av'?`<div class="pane" style="width:min(640px, calc(100vw - 24px))"><h4>Avatar options (click one to use it)</h4><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${AVKEYS.map(k=>`<button data-act="pickav" data-av="${k}" style="all:unset;cursor:pointer;display:grid;gap:4px;border:1px solid ${k===S.avatar?'#fff':'#333'};border-radius:4px;overflow:hidden"><div style="display:flex;justify-content:space-around;padding:10px 4px;background:var(--sheet)"><svg class="av" width="56" height="56" viewBox="0 0 48 48">${AVATARS[k]}</svg><svg class="av" width="28" height="28" viewBox="0 0 48 48" style="align-self:end">${AVATARS[k]}</svg></div><div style="background:var(--band);padding:8px;display:flex;justify-content:center"><svg class="av" width="40" height="40" viewBox="0 0 48 48" style="--sheet:var(--band-fg);--ink:var(--band-fg)">${AVATARS[k]}</svg></div><div style="padding:2px 8px 8px;font-family:var(--f-body)"><b>${AVNAME[k]}</b><div style="opacity:.75;font-size:11px">${AVWHY[k]}</div></div></button>`).join('')}</div></div>`:''}
   ${S.pane==='q'?`<div class="pane"><h4>Questions this prototype should answer</h4><ol>${QUESTIONS.map(q=>`<li>${esc(q)}</li>`).join('')}</ol></div>`:''}
   ${S.pane==='state'?`<div class="pane"><h4>State (${S.profile})</h4><pre>${esc(JSON.stringify({variant:S.variant, view:S.view, profile:S.profile, selected:S.sel, running:S.running, controls:Object.fromEntries(ORDER.map(cid=>[cid, (({status,verdict,review})=>({status,verdict,review}))(stOf(cid))])), remediation:S.rem.filter(r=>r.p===S.profile), auditTrailEntries:S.trail.filter(t=>t.p===S.profile).length}, null, 1))}</pre></div>`:''}`;
 }
@@ -850,7 +876,8 @@ document.addEventListener('click', e => {
   else if (a==='ask') { const t = b.dataset.text; const m = t.match(/\d\.\d\.\d/); if (t.startsWith('Review') && m) { S.sel=m[0]; if (!S.chat[S.profile].some(x=>x.kind==='assessment'&&x.cid===m[0])) S.chat[S.profile].push({who:'vouch',kind:'assessment',cid:m[0]}); render(); } else ask(t); }
   else if (a==='view') { S.view = b.dataset.view; render(); }
   else if (a==='vprev'||a==='vnext') { const i = VARIANTS.findIndex(v=>v[0]===S.variant); setVariant(VARIANTS[(i + (a==='vnext'?1:VARIANTS.length-1)) % VARIANTS.length][0]); }
-  else if (a==='avatar') { S.avatar = ({tick:'clip', clip:'seal', seal:'tick'})[S.avatar]; render(); }
+  else if (a==='pickav') { S.avatar = b.dataset.av; render(); }
+  else if (a==='avatar') { S.avatar = AVKEYS[(AVKEYS.indexOf(S.avatar)+1)%AVKEYS.length]; render(); }
   else if (a==='theme') { S.theme = ({light:'dark', dark:'system', system:'light'})[S.theme]; render(); }
   else if (a==='style') { S.style = S.style==='tailored' ? 'plain' : 'tailored'; render(); }
   else if (a==='pane') { S.pane = S.pane===b.dataset.pane ? null : b.dataset.pane; render(); }
