@@ -18,7 +18,7 @@
   --paper:#EEF1F5; --sheet:#FFFFFF; --ink:#152132; --muted:#566377; --rule:#D3D9E2; --navy:#1E3A5F; --sign:#7A2232;
   --found:#2D7A4E; --partial:#A8701A; --gap:#B03A3A; --na:#748194; --run:#3D6FA8;
   --found-bg:#E6F2EA; --partial-bg:#F8EEDC; --gap-bg:#F7E3E3; --na-bg:#ECEFF3; --run-bg:#E3ECF6;
-  --inverse:#152132; --inverse-fg:#F4F6F9; --band:#152132; --band-fg:#F1F3F6; --brass:#7A2232; --check-a:transparent; --check-b:transparent;
+  --inverse:#152132; --inverse-fg:#F4F6F9; --leaf:#3F6B4E; --band:#152132; --band-fg:#F1F3F6; --brass:#7A2232; --check-a:transparent; --check-b:transparent;
   --f-display:"IBM Plex Serif", Georgia, "Times New Roman", serif;
   --f-body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -27,29 +27,29 @@
   --paper:#0E131A; --sheet:#151C26; --ink:#E4E9F0; --muted:#98A4B4; --rule:#2A3443; --navy:#8EB0DA; --sign:#E07A88;
   --found:#62BE88; --partial:#E2AA4E; --gap:#E57575; --na:#8E99A8; --run:#7FAAE0;
   --found-bg:#16291F; --partial-bg:#2E2414; --gap-bg:#2F1A1B; --na-bg:#1D242E; --run-bg:#172434;
-  --inverse:#E4E9F0; --inverse-fg:#0E131A; color-scheme:dark}}
+  --inverse:#E4E9F0; --inverse-fg:#0E131A; --leaf:#7FB08E; color-scheme:dark}}
 :root[data-theme="dark"]{
   --paper:#0E131A; --sheet:#151C26; --ink:#E4E9F0; --muted:#98A4B4; --rule:#2A3443; --navy:#8EB0DA; --sign:#E07A88;
   --found:#62BE88; --partial:#E2AA4E; --gap:#E57575; --na:#8E99A8; --run:#7FAAE0;
   --found-bg:#16291F; --partial-bg:#2E2414; --gap-bg:#2F1A1B; --na-bg:#1D242E; --run-bg:#172434;
-  --inverse:#E4E9F0; --inverse-fg:#0E131A; color-scheme:dark}
+  --inverse:#E4E9F0; --inverse-fg:#0E131A; --leaf:#7FB08E; color-scheme:dark}
 /* Style "Tailored" (mood board: glen-check greys, navy tie, brass detail; dark mode from the lamp page: near-black with champagne). */
 :root[data-style="tailored"]{
   --paper:#E8E7E3; --sheet:#F7F7F5; --ink:#1B1D21; --muted:#62656B; --rule:#D0CEC8; --navy:#1F3B6E; --sign:#1B1D21; --brass:#A8834A;
   --found:#3F7A55; --partial:#A06E22; --gap:#A4433F; --na:#7A7C80; --run:#1F3B6E;
   --found-bg:#E2EDE5; --partial-bg:#F3EAD9; --gap-bg:#F3E2E0; --na-bg:#E4E3DF; --run-bg:#E1E6EF;
-  --check-a:rgb(27 29 33 / .07); --check-b:rgb(31 59 110 / .08); --band:#1B1D21; --band-fg:#F2F1EE;
+  --check-a:rgb(27 29 33 / .07); --check-b:rgb(31 59 110 / .08); --band:#1B1D21; --band-fg:#F2F1EE; --leaf:#4E6B4F;
   --f-display:"Libre Caslon Display", "Libre Caslon Text", Georgia, serif; --f-body:"Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;}
 @media (prefers-color-scheme: dark){:root[data-style="tailored"]:not([data-theme="light"]){
   --paper:#0D0D0E; --sheet:#171718; --ink:#ECE6DC; --muted:#9C978E; --rule:#2C2B29; --navy:#A9BEE6; --sign:#E3CB9F; --brass:#E2C391;
   --found:#7DBE93; --partial:#E0B064; --gap:#E08A80; --na:#8F8C86; --run:#A9BEE6;
   --found-bg:#18241C; --partial-bg:#2A2216; --gap-bg:#2B1B19; --na-bg:#1E1E1F; --run-bg:#1A2030;
-  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); --band:#222224; --band-fg:#ECE6DC; color-scheme:dark}}
+  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); --band:#222224; --band-fg:#ECE6DC; --leaf:#86A985; color-scheme:dark}}
 :root[data-style="tailored"][data-theme="dark"]{
   --paper:#0D0D0E; --sheet:#171718; --ink:#ECE6DC; --muted:#9C978E; --rule:#2C2B29; --navy:#A9BEE6; --sign:#E3CB9F; --brass:#E2C391;
   --found:#7DBE93; --partial:#E0B064; --gap:#E08A80; --na:#8F8C86; --run:#A9BEE6;
   --found-bg:#18241C; --partial-bg:#2A2216; --gap-bg:#2B1B19; --na-bg:#1E1E1F; --run-bg:#1A2030;
-  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); --band:#222224; --band-fg:#ECE6DC; color-scheme:dark}
+  --check-a:rgb(236 230 220 / .05); --check-b:rgb(227 203 159 / .06); --band:#222224; --band-fg:#ECE6DC; --leaf:#86A985; color-scheme:dark}
 [data-style="tailored"] h1,[data-style="tailored"] h2{font-weight:400;text-transform:uppercase;letter-spacing:.02em;line-height:1.1}
 [data-style="tailored"] .brand b{font-family:var(--f-display);font-weight:400;text-transform:uppercase;letter-spacing:.08em}
 [data-style="tailored"] .brand b::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;background:var(--brass);transform:rotate(45deg) translateY(-2px)}
@@ -263,7 +263,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 /* ===== Avatar ===== */
 .av{display:inline-block;vertical-align:middle;flex:none;overflow:visible}
 .av .k{fill:var(--ink)} .av .w{fill:var(--sheet)} .av .n{fill:var(--navy)} .av .r{fill:var(--sign)}
-.av .s,.av .sk{stroke:var(--ink)} .av .b{fill:var(--brass)} .av .sn{stroke:var(--navy)} .av .rt{fill:var(--sign)} .av .sb{stroke:var(--brass)} .av .sw{stroke:var(--sheet)} .av .sr{stroke:var(--sign)}
+.av .s,.av .sk{stroke:var(--ink)} .av .b{fill:var(--brass)} .av .sn{stroke:var(--navy)} .av .lf{fill:var(--leaf)} .av .slf{stroke:var(--leaf)} .av .sm{stroke:var(--muted)} .av .wk{fill:var(--sheet);stroke:var(--ink)} .av .kt{fill:var(--ink)}
+.av .steam path{transform-box:fill-box;animation:av-steam 2.8s ease-in-out infinite} .av .steam path + path{animation-delay:.9s}
+@keyframes av-steam{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:.9;transform:translateY(-1.6px)}} .av .rt{fill:var(--sign)} .av .sb{stroke:var(--brass)} .av .sw{stroke:var(--sheet)} .av .sr{stroke:var(--sign)}
 .av .eye{transform-box:fill-box;transform-origin:center;animation:av-blink 5.5s infinite}
 .av .eye + .eye{animation-delay:.04s}
 .av.think{animation:av-bob .9s ease-in-out infinite;transform-origin:50% 80%}
@@ -470,7 +472,7 @@ function cost(tok){ return (tok[0]*1.0 + tok[1]*5.0)/1e6; }  /* illustrative per
 
 /* ---------- state ---------- */
 const S = {
-  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'button',
+  variant:'A', view:'prep', profile:'nk', sel:'5.1.1', pane:null, running:null, style:'tailored', theme:'light', avatar:'plant',
   st:{nk:{}, aw:{}}, chat:{nk:[], aw:[]}, rem:[], trail:[], runs:[]
 };
 function seed() {
@@ -774,6 +776,37 @@ function Dev(){
 
 /* ---------- avatar: three original options ---------- */
 const AVATARS = {
+  tie: `<path class="wk" d="M11.5 2 L19.5 4 L21.5 11.5 L14 8.5Z M36.5 2 L28.5 4 L26.5 11.5 L34 8.5Z" stroke-width="1"/>
+    <path class="n" d="M19 3.5 H29 L27 11 H21 Z"/>
+    <path class="n" d="M21 11 H27 L32.5 36.5 L24 45.5 L15.5 36.5 Z"/>
+    <path class="sb" d="M19.6 17 L28.4 14.2 M18.4 22.5 L29.6 18.8" stroke-width="1.2" opacity=".55"/>
+    <rect class="b" x="16.5" y="24.5" width="15" height="2.2" rx="1.1"/>
+    <g class="eye"><circle class="w" cx="21.2" cy="31" r="2.1"/><circle class="k" cx="21.6" cy="31" r="1"/></g>
+    <g class="eye"><circle class="w" cx="26.8" cy="31" r="2.1"/><circle class="k" cx="27.2" cy="31" r="1"/></g>
+    <path class="sw" d="M21.8 35.6 q2.2 1.6 4.4 0" fill="none" stroke-width="1.3" stroke-linecap="round"/>`,
+  plant: `<path class="slf" d="M24 24 V12" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="lf" d="M24 21 C16.5 19.5 11.5 12.5 12.5 4.5 C20 6.5 24.5 12.5 24 21Z"/>
+    <path class="lf" d="M24 21 C31.5 19.5 36.5 12.5 35.5 4.5 C28 6.5 23.5 12.5 24 21Z" opacity=".82"/>
+    <path class="lf" d="M24 19 C21.8 12 22.6 5.5 24 1.5 C25.4 5.5 26.2 12 24 19Z" opacity=".65"/>
+    <rect class="r" x="10.5" y="22" width="27" height="5.5" rx="1.3"/><path class="r" d="M12.8 27.5 H35.2 L32 44.5 H16 Z"/>
+    <g class="eye"><circle class="w" cx="20" cy="34" r="2.3"/><circle class="k" cx="20.4" cy="34" r="1.05"/></g>
+    <g class="eye"><circle class="w" cx="28" cy="34" r="2.3"/><circle class="k" cx="28.4" cy="34" r="1.05"/></g>
+    <path class="sw" d="M21.2 39 q2.8 2 5.6 0" fill="none" stroke-width="1.4" stroke-linecap="round"/>`,
+  notebook: `<rect class="wk" x="13.5" y="6.5" width="25" height="36" rx="2" stroke-width="1"/>
+    <rect class="k" x="10" y="5" width="25.5" height="37.5" rx="2.5"/>
+    <rect class="b" x="29.5" y="5" width="2.4" height="37.5"/>
+    <path class="r" d="M19 42.5 v5 l2.2 -1.7 l2.2 1.7 v-5z"/>
+    <rect class="w" x="14" y="10.5" width="11.5" height="6.5" rx=".8"/><text x="19.75" y="15.6" font-size="5" text-anchor="middle" class="kt" font-family="Georgia, serif">V</text>
+    <g class="eye"><circle class="w" cx="16.8" cy="26" r="2.4"/><circle class="k" cx="17.2" cy="26" r="1.1"/></g>
+    <g class="eye"><circle class="w" cx="24.2" cy="26" r="2.4"/><circle class="k" cx="24.6" cy="26" r="1.1"/></g>
+    <path class="sw" d="M17.8 31.5 q2.7 2 5.4 0" fill="none" stroke-width="1.4" stroke-linecap="round"/>`,
+  cup: `<g class="steam"><path class="sm" d="M19.5 12 q-2.6 -2.6 0 -5.2 q2.6 -2.6 0 -5.2" fill="none" stroke-width="1.6" stroke-linecap="round"/><path class="sm" d="M27.5 12 q-2.6 -2.6 0 -5.2 q2.6 -2.6 0 -5.2" fill="none" stroke-width="1.6" stroke-linecap="round"/></g>
+    <ellipse class="k" cx="24" cy="43.5" rx="17" ry="3"/>
+    <path class="sk" d="M36 21 h2.5 a5.2 5.2 0 0 1 0 10.4 h-2.5" fill="none" stroke-width="2.6"/>
+    <path class="wk" d="M11 15 H37 V30 C37 37 32 41.5 24 41.5 C16 41.5 11 37 11 30 Z" stroke-width="1.6"/>
+    <rect class="n" x="11.8" y="18" width="24.4" height="4"/>
+    <g class="eye"><circle class="k" cx="19" cy="28" r="1.9"/></g><g class="eye"><circle class="k" cx="29" cy="28" r="1.9"/></g>
+    <path class="sk" d="M21 33 q3 2.2 6 0" fill="none" stroke-width="1.5" stroke-linecap="round"/>`,
   button: `<circle class="b" cx="24" cy="24" r="19"/><circle class="sk" cx="24" cy="24" r="15.5" fill="none" stroke-width="1.4" opacity=".3"/>
     <g class="eye"><circle class="k" cx="18.8" cy="19.5" r="2.7"/><circle class="w" cx="19.6" cy="18.7" r=".8"/></g>
     <g class="eye"><circle class="k" cx="29.2" cy="19.5" r="2.7"/><circle class="w" cx="30" cy="18.7" r=".8"/></g>
@@ -812,9 +845,9 @@ const AVATARS = {
     <g class="eye"><circle class="w" cx="28.4" cy="19.5" r="2.4"/><circle class="k" cx="28.8" cy="19.5" r="1.1"/></g>
     <path class="sw" d="M20.5 25.5 q3.5 2.6 7 0" fill="none" stroke-width="1.5" stroke-linecap="round"/>`
 };
-const AVNAME = {button:'Button', watch:'Pocket watch', owl:'Owl', stamp:'Stamp', monogram:'Monogram seal', lens:'Lens', seal:'Seal'};
+const AVNAME = {tie:'Tie', plant:'Pot plant', notebook:'Notebook', cup:'Coffee cup', button:'Button', watch:'Pocket watch', owl:'Owl', stamp:'Stamp', monogram:'Monogram seal', lens:'Lens', seal:'Seal'};
 const AVKEYS = Object.keys(AVATARS);
-const AVWHY = {button:'a jacket button from the double-breasted suits; the stitching is its bow tie',
+const AVWHY = {tie:'the navy tie from the suits: shirt collar, a brass tie clip, a hint of stripe', plant:'the plant on every compliance desk: a terracotta-red pot, steady growth', notebook:'a black notebook with a brass band and a ribbon: where the auditor\'s notes go', cup:'the cup beside the working papers; its steam rises while Vouch works', button:'a jacket button from the double-breasted suits; the stitching is its bow tie',
   watch:'the brass pocket watch: deadlines and precision; its hands at ten past ten', owl:'scrutiny and judgement, in a white shirt and an oxblood bow tie',
   stamp:'the stamp that marks a document as vouched', monogram:'the seal without a face: a V pressed in wax, more mark than character',
   lens:'one eye behind a magnifier: looking closely at evidence', seal:'the earlier seal, for comparison'};
