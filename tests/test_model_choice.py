@@ -64,6 +64,7 @@ class FakeChat:
         self.requests: list[httpx2.Request] = []
         self.fail: Any = None  # a function of the attempt number: a Response, or it raises
         self.text_only = False  # a model that answers in words and never calls a tool
+        self.first_tool: str | None = None  # a tool the first gather turn asks for, then the answer
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
@@ -72,8 +73,17 @@ class FakeChat:
             if failed is not None:
                 return failed
         body = json.loads(request.content)
+        answered = any(m.get("role") == "tool" for m in body["messages"])
         if self.text_only:
             message = {"role": "assistant", "content": "Let me think about that some more."}
+        elif self.first_tool and "response_format" not in body and not answered:
+            args = json.dumps({"path": "/etc/passwd"})
+            call = {
+                "id": "call_0",
+                "type": "function",
+                "function": {"name": self.first_tool, "arguments": args},
+            }
+            message = {"role": "assistant", "content": None, "tool_calls": [call]}
         elif "response_format" in body:
             judged = {"covered_points": ["ENC-1", "ENC-2", "ENC-3"]}
             message = {"role": "assistant", "content": json.dumps(judged)}
@@ -470,6 +480,24 @@ def test_a_model_that_never_calls_a_tool_stops_at_the_call_budget_with_one_error
     assert "result" not in names
     assert len(chat.requests) == CALL_BUDGET == 8
     assert "call budget" in caplog.text
+
+
+def test_on_openrouter_a_tool_outside_the_allow_list_is_refused_and_counts_toward_the_budget(
+    client, chat, monkeypatch
+):
+    """#36's allow-list wraps the real model too; the budget counts the refused call's turn."""
+    ran = []
+    monkeypatch.setattr("vouch.graph.search_policies", lambda *a, **k: ran.append(a) or [])
+    chat.first_tool = "read_file"
+
+    response = assess(client)
+
+    assert "Refused read_file: it isn't on the compliance profile's allow-list." in response.text
+    assert events(response)[-1] == "result"
+    assert ran == []
+    told = [m for m in json.loads(chat.requests[1].content)["messages"] if m["role"] == "tool"]
+    assert told and all("is not available" in m["content"] for m in told)
+    assert len(chat.requests) == 3  # the refused turn, the answer, the judge
 
 
 def test_each_assessment_has_its_own_call_budget(client):
