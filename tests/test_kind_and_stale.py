@@ -235,6 +235,22 @@ def test_5_1_1_m1_is_capped_at_partly_evidenced_by_the_stale_encryption_standard
     assert result.verdict == "not-evidenced"  # no counted requirement is evidenced
 
 
+def test_the_quote_check_step_says_which_verdicts_the_checks_changed():
+    result = assess("5.1.1", NORDLICHT, encryption_run(), today=TODAY)
+
+    assert step_texts(result, "judge")[-1].startswith("Judged 2 of 2 requirements evidenced.")
+    assert step_texts(result, "check_quotes")[-1].endswith(
+        "Changed by the checks: M1 to partly evidenced, S1 to partly evidenced. "
+        "Now 0 of 2 requirements evidenced."
+    )
+
+
+def test_the_quote_check_step_adds_nothing_when_no_verdict_changed():
+    result = assess("5.1.1", NORDLICHT, encryption_run(), today=date(2023, 3, 14))
+
+    assert "Changed by the checks" not in step_texts(result, "check_quotes")[-1]
+
+
 def test_the_same_run_before_the_review_was_due_is_evidenced():
     result = assess("5.1.1", NORDLICHT, encryption_run(), today=date(2023, 3, 14))
 
