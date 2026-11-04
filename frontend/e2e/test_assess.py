@@ -36,6 +36,8 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
         "Checked each quote against its document: kept 6 citations.",
     ):
         expect(steps.filter(has_text=text).first).to_be_visible()
+    expect(steps.first).to_contain_text(f"Loaded control {CONTROL}: ")
+    expect(steps.first).to_contain_text("5 requirements apply")
     expect(steps.last).to_contain_text("Waiting for the compliance lead's review.")
     shown = steps.count()
     assert seen[0] == 1, f"the first render already held {seen[0]} steps"

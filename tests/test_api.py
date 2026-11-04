@@ -78,6 +78,9 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
     assert names[first : first + 5] == ["requirement"] * 5
     assert set(names[first + 5 : -1]) == {"step"} and names[-1] == "result"
     steps = [data for name, data in events if name == "step"]
+    assert events[0] == ("step", steps[0]) and steps[0]["node"] == "load_control"
+    assert steps[0]["text"].startswith(f"Loaded control {DEMO_CONTROL}: ")
+    assert "5 requirements apply" in steps[0]["text"]
     assert in_order(
         [s["node"] for s in steps],
         "gather", "tools", "gather", "check_answer", "judge", "check_quotes", "remediate", "review",

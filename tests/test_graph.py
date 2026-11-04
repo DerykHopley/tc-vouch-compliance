@@ -8,7 +8,13 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from vouch import ScriptedChatModel, UnknownControlError, assess, load_named_profile, load_profile
-from vouch.graph import NOT_JUDGED, OutputCheckError, ShouldScore, claims_audit_result
+from vouch.graph import (
+    NOT_JUDGED,
+    QUESTION_SHOWN,
+    OutputCheckError,
+    ShouldScore,
+    claims_audit_result,
+)
 from vouch.profile import NORDLICHT_PROFILE
 
 SCRIPTS = Path(__file__).parent / "scripts"
@@ -70,6 +76,45 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     assert step_texts(result, "check_quotes") == [
         "Checked each quote against its document: kept 6 citations."
     ]
+
+
+def test_the_first_step_says_the_control_was_loaded_and_how_many_requirements_apply():
+    result = assess("4.1.2", NORDLICHT, ScriptedChatModel.from_file(SCRIPTS / "isa_4_1_2.json"))
+
+    assert result.steps[0] == {
+        "node": "load_control",
+        "text": (
+            "Loaded control 4.1.2: To what extent is the user access to IT services and IT "
+            "systems secured? 5 requirements apply under Nordlicht Komponenten GmbH's profile."
+        ),
+    }
+    assert in_order([s["node"] for s in result.steps], "load_control", "apply_overlays")
+
+
+def test_the_load_step_counts_not_applicable_requirements_apart():
+    model = ScriptedChatModel(
+        script={"gather": [{"answer": "Logs."}], "judge": {"requirements": []}}
+    )
+
+    result = assess("5.2.4", NORDLICHT, model)
+
+    assert result.steps[0]["text"].endswith(
+        "7 requirements apply under Nordlicht Komponenten GmbH's profile; 1 is not applicable."
+    )
+
+
+def test_the_load_step_shortens_a_long_question():
+    model = ScriptedChatModel(
+        script={"gather": [{"answer": "Training."}], "judge": {"requirements": []}}
+    )
+
+    result = assess("2.1.3", NORDLICHT, model)
+
+    text = result.steps[0]["text"]
+    assert text.startswith("Loaded control 2.1.3: To what extent is staff made aware of")
+    assert "… 7 requirements apply" in text
+    question = text.split(": ", 1)[1].split(" 7 requirements")[0]
+    assert question.endswith("…") and len(question) <= QUESTION_SHOWN
 
 
 def test_the_assessment_reports_the_models_token_usage():

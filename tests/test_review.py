@@ -123,7 +123,24 @@ def test_a_skipped_draft_is_listed_not_drafted_and_drafts_for_other_requirements
     ]
     assert result.remediation[0].due_date == "2027-02-02"  # the default 90 days
     remediate = next(s for s in result.steps if s["node"] == "remediate")
-    assert remediate["text"] == "Drafted 3 remediation items. Not drafted: M1, S1."
+    assert remediate["text"] == "Drafted 1 remediation item. Not drafted: M1, S1."
+
+
+def test_a_model_that_drafts_nothing_says_so_and_lists_the_not_drafted_ones():
+    result, _, _ = proposed("5.2.9", script_5_2_9([]))
+
+    assert [d.missing for d in result.remediation] == [NOT_DRAFTED] * 3
+    remediate = next(s for s in result.steps if s["node"] == "remediate")
+    assert remediate["text"] == (
+        "No remediation item drafted by the model. Not drafted: M1, M2, S1."
+    )
+
+
+def test_some_drafts_are_counted_alone():
+    result, _, _ = proposed("5.2.9", script_5_2_9(drafted("M1", "S1")))
+
+    remediate = next(s for s in result.steps if s["node"] == "remediate")
+    assert remediate["text"] == "Drafted 2 remediation items. Not drafted: M2."
 
 
 def test_nothing_not_evidenced_means_no_remediation_call():
