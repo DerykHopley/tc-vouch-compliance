@@ -96,4 +96,5 @@ def create_app(frontend: Path | None = None) -> FastAPI:
     return app
 
 
-app = create_app(Path(os.environ[FRONTEND_ENV]) if os.environ.get(FRONTEND_ENV) else None)
+_frontend = os.environ.get(FRONTEND_ENV)
+app = create_app(Path(_frontend) if _frontend else None)

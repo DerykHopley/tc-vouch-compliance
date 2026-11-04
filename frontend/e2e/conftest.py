@@ -6,8 +6,9 @@ import pytest
 
 
 @pytest.fixture
-def ui_url() -> str:
-    return os.environ["UI_URL"]
+def vouch_url() -> str:
+    """Vouch on one origin: the built front end and the API, as on Cloud Run."""
+    return os.environ["VOUCH_URL"]
 
 
 @pytest.fixture

@@ -35,7 +35,7 @@ describe('Dossier landing', () => {
   })
 })
 
-describe("the control's page", () => {
+describe('the working paper', () => {
   const paper = () => screen.queryByRole('region', { name: 'Working paper' })
 
   it('opens straight at its address, as after a refresh', () => {
