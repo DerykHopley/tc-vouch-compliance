@@ -1,0 +1,15 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "authentication password second factor"}},
+    {"answer": "Sign-in methods follow each system's exposure: long passwords checked against breach lists, an authenticator app for internet-facing systems, and hardware keys for administrator accounts."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The standard says methods follow each system's exposure, but nothing shows the assessment was done.", "citations": [{"doc_id": "authentication-standard", "quote": "We decide how people sign in to a system by looking at what could go wrong with it."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Long passwords with a breach check and a second factor online.", "citations": [{"doc_id": "authentication-standard", "quote": "Passwords have at least 12 characters. The directory blocks passwords found in known breach lists."}, {"doc_id": "authentication-standard", "quote": "All internet-facing systems require an authenticator app as a second factor."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Methods are defined per exposure.", "citations": [{"doc_id": "authentication-standard", "quote": "Systems reachable only from the office network may rely on a password alone."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "At least 12 characters and a breached-password check.", "citations": [{"doc_id": "authentication-standard", "quote": "Passwords have at least 12 characters."}]},
+      {"requirement_id": "S3", "verdict": "partly-evidenced", "reason": "Hardware keys are required, but nothing shows them in use.", "citations": [{"doc_id": "authentication-standard", "quote": "Administrator accounts always require a hardware security key."}]}
+    ]
+  }
+}

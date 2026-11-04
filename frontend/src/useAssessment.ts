@@ -28,6 +28,8 @@ export function useAssessment(controlId: string) {
           steps.push(item.data)
           flushSync(() => setRun({ status: 'running', steps: [...steps] }))
           await nextTask()
+        } else if (item.event === 'requirement') {
+          continue // the result carries every requirement too; the page shows none yet
         } else if (item.event === 'result') {
           setRun({ status: 'done', steps, assessment: item.data.assessment })
         } else {

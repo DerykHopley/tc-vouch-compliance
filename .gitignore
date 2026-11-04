@@ -10,3 +10,6 @@ node_modules/
 
 # The deploy wizard's plain answers (project id, region, image tag): DEPLOY.md
 deploy/cloudrun/wizard.env
+
+# The eval's raw results and summaries (python -m vouch.evals)
+evals/results/

@@ -1,7 +1,0 @@
-{
-  "gather": [
-    {"tool": "search_policies", "args": {"query": "vulnerability"}},
-    {"answer": "No policy covers handling technical vulnerabilities.", "verdict": "gap", "cited": []}
-  ],
-  "judge": {"covered_points": []}
-}
