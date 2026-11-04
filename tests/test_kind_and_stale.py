@@ -1,17 +1,22 @@
 """Documented and implemented evidence, and stale documents (spec #2, ticket #22)."""
 
+import json
+import logging
+import shutil
 from datetime import date
 
 import pytest
 from assess_steps import step_texts
 
-from vouch import ScriptedChatModel, assess, load_named_profile
-from vouch.citations import Citation, CitationClaim, QuoteChecker
+from vouch import ScriptedChatModel, assess, load_named_profile, load_profile
+from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.documents import review_due
+from vouch.graph import GUARD
 from vouch.profile import NORDLICHT_PROFILE
 from vouch.search import search_records
 
 NORDLICHT = load_named_profile("nordlicht")
+TRUE_QUOTE = "Passwords have at least 12 characters."
 
 RECORDS_DIR = NORDLICHT_PROFILE.parent / "records"
 TODAY = date(2026, 11, 4)  # the expected answers' as_of
@@ -82,8 +87,9 @@ def write_doc(folder, name: str, front: str, body: str = BODY) -> None:
     (folder / f"{name}.md").write_text(f"---\n{front}---\n# Top\n\n{body}\n", encoding="utf-8")
 
 
-def check(folder, doc_id: str, today: date = TODAY):
-    return QuoteChecker([str(folder)], today=today).check(CitationClaim(doc_id=doc_id, quote=BODY))
+def check(folder, doc_id: str, today: date = TODAY, source: str = "policies"):
+    checker = QuoteChecker({source: str(folder)}, today=today)
+    return checker.check(CitationClaim(doc_id=doc_id, quote=BODY))
 
 
 FRESH = 'version: "1.0"\napproval_date: 2026-06-01\nreview_cycle: yearly\n'
@@ -93,7 +99,9 @@ FRESH = 'version: "1.0"\napproval_date: 2026-06-01\nreview_cycle: yearly\n'
 def test_a_citation_carries_its_documents_kind_and_a_fresh_one_is_not_stale(tmp_path, kind):
     write_doc(tmp_path, "doc", f"kind: {kind}\n{FRESH}")
 
-    assert check(tmp_path, "doc") == Citation("doc", "1.0", "Top", BODY, kind=kind, stale=False)
+    assert check(tmp_path, "doc") == Citation(
+        "doc", "1.0", "Top", BODY, kind=kind, stale=False, stale_because=None
+    )
 
 
 def test_a_citation_from_a_document_past_its_review_is_stale(tmp_path):
@@ -110,27 +118,75 @@ def test_a_citation_from_a_document_past_its_review_is_stale(tmp_path):
         'kind: documented\nversion: "1.0"\napproval_date: 2026-06-01\n',
         'kind: documented\nversion: "1.0"\napproval_date: soon\nreview_cycle: yearly\n',
         'kind: documented\nversion: "1.0"\napproval_date: 2026-06-01\nreview_cycle: weekly\n',
+        'kind: documented\nversion: "1.0"\napproval_date: 2026-06-01\nreview_cycle: [yearly]\n',
+        'kind: documented\nversion: "1.0"\napproval_date: 2026-06-01\nreview_cycle: {a: 1}\n',
+        'kind: documented\nversion: "1.0"\napproval_date: [2026-06-01]\nreview_cycle: yearly\n',
+        'kind: documented\nversion: "1.0"\napproval_date: 20260601\nreview_cycle: yearly\n',
     ],
-    ids=["no-approval-date", "no-cycle", "date-not-a-date", "unknown-cycle"],
+    ids=[
+        "no-approval-date",
+        "no-cycle",
+        "date-not-a-date",
+        "unknown-cycle",
+        "cycle-a-list",
+        "cycle-a-mapping",
+        "date-a-list",
+        "date-a-number",
+    ],
 )
 def test_a_document_with_no_review_date_counts_as_stale(tmp_path, front):
     write_doc(tmp_path, "doc", front)
 
-    assert check(tmp_path, "doc").stale is True
-    assert QuoteChecker([str(tmp_path)], today=TODAY).stale_reason("doc") == "no review date"
+    citation = check(tmp_path, "doc")
+
+    assert (citation.stale, citation.stale_because) == (True, "no review date")
 
 
-def test_a_document_with_no_kind_counts_as_documented(tmp_path):
-    write_doc(tmp_path, "doc", FRESH)
+@pytest.mark.parametrize(
+    ("source", "kind"),
+    [("policies", "documented"), ("records", "implemented"), ("patch", "documented")],
+)
+@pytest.mark.parametrize("front", ["", "kind: paper\n"], ids=["no-kind", "unknown-kind"])
+def test_a_document_with_no_valid_kind_takes_its_sources_kind_and_says_so(
+    tmp_path, caplog, source, kind, front
+):
+    write_doc(tmp_path, "doc", front + FRESH)
 
-    assert check(tmp_path, "doc").kind == "documented"
+    with caplog.at_level(logging.WARNING, logger="vouch.documents"):
+        citation = check(tmp_path, "doc", source=source)
+
+    assert citation.kind == kind
+    assert "doc" in caplog.text and kind in caplog.text
+
+
+def test_the_front_matters_kind_wins_over_the_source(tmp_path):
+    write_doc(tmp_path, "doc", f"kind: documented\n{FRESH}")
+
+    assert check(tmp_path, "doc", source="records").kind == "documented"
 
 
 def test_the_encryption_standard_is_stale_and_says_why():
-    checker = QuoteChecker([str(NORDLICHT_PROFILE.parent / "policies")], today=TODAY)
+    policies = {"policies": str(NORDLICHT_PROFILE.parent / "policies")}
+    checker = QuoteChecker(policies, today=TODAY)
 
-    assert checker.stale_reason("encryption-standard") == ENCRYPTION_STALE
-    assert checker.stale_reason("authentication-standard") is None
+    stale = checker.check(CitationClaim(doc_id="encryption-standard", quote=LAPTOPS))
+    fresh = checker.check(CitationClaim(doc_id="authentication-standard", quote=TRUE_QUOTE))
+
+    assert (stale.stale, stale.stale_because) == (True, ENCRYPTION_STALE)
+    assert (fresh.stale, fresh.stale_because) == (False, None)
+
+
+def test_a_doc_id_in_two_sources_is_dropped(tmp_path):
+    (tmp_path / "p").mkdir()
+    (tmp_path / "r").mkdir()
+    write_doc(tmp_path / "p", "doc", f"kind: documented\n{FRESH}")
+    write_doc(tmp_path / "r", "doc", f"kind: implemented\n{FRESH}")
+    checker = QuoteChecker(
+        {"policies": str(tmp_path / "p"), "records": str(tmp_path / "r")}, today=TODAY
+    )
+
+    assert checker.check(CitationClaim(doc_id="doc", quote=BODY)) == DropReason.IN_TWO_SOURCES
+    assert DropReason.IN_TWO_SOURCES == "the id names a document in more than one source"
 
 
 # The judge's rules, at the assess seam with today's date fixed.
@@ -227,3 +283,120 @@ def test_a_requirement_not_about_doing_can_be_evidenced_by_documented_evidence()
     m1 = requirement(assess("4.1.2", NORDLICHT, model, today=TODAY), "M1")
 
     assert m1.verdict == "evidenced"
+
+
+# Two sources, one unreadable; the step and reason name what happened.
+
+
+def nordlicht_copy(tmp_path, *sources: str):
+    """Nordlicht's profile and evidence copied to tmp_path, allowing only these sources."""
+    folder = tmp_path / "nordlicht"
+    shutil.copytree(NORDLICHT_PROFILE.parent, folder)
+    path = folder / "profile.yaml"
+    text = path.read_text(encoding="utf-8")
+    start = text.index("evidence_sources:")
+    end = text.index("# Room for risk")
+    allowed = "".join(f"  {s}:\n    folder: {s}\n" for s in sources) or "  {}\n"
+    path.write_text(text[:start] + "evidence_sources:\n" + allowed + text[end:], encoding="utf-8")
+    return load_profile(path)
+
+
+def two_searches(*, records_query: str = "password") -> ScriptedChatModel:
+    judge = [
+        {
+            "requirement_id": "M2",
+            "verdict": "evidenced",
+            "reason": "Shown.",
+            "citations": [{"doc_id": "authentication-standard", "quote": TRUE_QUOTE}],
+        }
+    ]
+    return judged_with(
+        [
+            {"tool": "search_policies", "args": {"query": "password"}},
+            {"tool": "search_records", "args": {"query": records_query}},
+        ],
+        judge,
+    )
+
+
+def judged_with(searches: list[dict], judge: list[dict]) -> ScriptedChatModel:
+    return ScriptedChatModel(
+        script={
+            "gather": [*searches, {"answer": "Draft answer."}],
+            "judge": {"requirements": judge},
+        }
+    )
+
+
+def test_one_unreadable_source_keeps_what_the_other_source_found(tmp_path):
+    profile = nordlicht_copy(tmp_path, "policies", "records")
+    shutil.rmtree(profile.evidence_sources["records"].folder)
+
+    result = assess("4.1.2", profile, two_searches(), today=TODAY)
+
+    m2 = requirement(result, "M2")
+    assert (m2.verdict, m2.reason) == ("evidenced", "Shown.")
+    assert "source_unavailable" in result.warnings
+
+
+def test_an_unreadable_source_beside_a_refused_one_says_it_could_not_be_read(tmp_path):
+    profile = nordlicht_copy(tmp_path, "records")
+    shutil.rmtree(profile.evidence_sources["records"].folder)
+
+    result = assess("4.1.2", profile, two_searches(), today=TODAY)
+
+    assert {(r.verdict, r.reason) for r in result.requirements} == {
+        ("not-evidenced", "no evidence source could be read")
+    }
+
+
+def test_the_step_names_the_source_that_could_not_be_read(tmp_path):
+    profile = nordlicht_copy(tmp_path, "policies", "records")
+    shutil.rmtree(profile.evidence_sources["records"].folder)
+    model = judged_with([{"tool": "search_records", "args": {"query": "password"}}], [])
+
+    result = assess("4.1.2", profile, model, today=TODAY)
+
+    assert step_texts(result, "tools") == ["Could not read the records."]
+
+
+def test_a_citation_naming_a_document_in_two_sources_is_dropped_as_a_guard_step(tmp_path):
+    profile = nordlicht_copy(tmp_path, "policies", "records")
+    policies = profile.evidence_sources["policies"].folder
+    records = profile.evidence_sources["records"].folder
+    shutil.copy(policies / "authentication-standard.md", records)
+
+    result = assess("4.1.2", profile, two_searches(), today=TODAY)
+
+    assert requirement(result, "M2").verdict == "not-evidenced"
+    assert (
+        "Dropped a citation for M2 from authentication-standard: the id names a document in "
+        "more than one source."
+    ) in step_texts(result, GUARD)
+
+
+# The judge sees each passage's source, kind and staleness, as data.
+
+
+def judge_evidence(model: ScriptedChatModel) -> list[dict]:
+    """The passages inside the <evidence> tags of the judge's prompt."""
+    [prompt] = [p for p in model.prompts if "Judge each" in str(p[0].content)]
+    text = str(prompt[-1].content)
+    body = text.split("<evidence>\n", 1)[1].split("\n</evidence>", 1)[0]
+    return json.loads(body)
+
+
+def test_each_passage_the_judge_sees_carries_its_source_kind_and_staleness():
+    model = judged_with(
+        [
+            {"tool": "search_policies", "args": {"query": "laptop encryption"}},
+            {"tool": "search_records", "args": {"query": "authenticator app"}},
+        ],
+        [],
+    )
+
+    assess("5.1.1", NORDLICHT, model, today=TODAY)
+
+    seen = {(p["doc_id"], p["source"], p["kind"], p["stale"]) for p in judge_evidence(model)}
+    assert ("encryption-standard", "policies", "documented", True) in seen
+    assert ("mfa-rollout-record", "records", "implemented", False) in seen

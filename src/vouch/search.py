@@ -1,5 +1,5 @@
-"""search_policies and search_records: one keyword search, over the policy or the records
-folder a compliance profile allows."""
+"""One keyword search over an evidence folder a compliance profile allows: the policies'
+(search_policies) or the records' (search_records)."""
 
 import re
 from pathlib import Path
@@ -29,7 +29,7 @@ class ErrorResult(TypedDict):
     detail: NotRequired[str]
 
 
-def search_policies(
+def search_folder(
     query: str, limit: int = DEFAULT_LIMIT, *, folder: Path
 ) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
@@ -48,7 +48,7 @@ def search_policies(
             error=FOLDER_ESCAPED, detail="the folder now resolves outside where it was allowed"
         )
     try:
-        passages = [p for doc in _policy_files(root) for p in _passages(doc)]
+        passages = [p for doc in _document_files(root) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}
@@ -58,8 +58,8 @@ def search_policies(
     return [passage for passage, _ in hits[:limit]]
 
 
-# The records are searched the same way; an empty folder gives no passages, not an error.
-search_records = search_policies
+# The names the tools go by; an empty folder gives no passages, not an error.
+search_policies = search_records = search_folder
 
 
 def _check_input(query: Any, limit: Any) -> str | None:
@@ -70,7 +70,7 @@ def _check_input(query: Any, limit: Any) -> str | None:
     return None
 
 
-def _policy_files(root: Path) -> list[Path]:
+def _document_files(root: Path) -> list[Path]:
     """The .md files directly in the resolved folder; a link pointing elsewhere is left out."""
     if not root.is_dir():
         raise FileNotFoundError(root)

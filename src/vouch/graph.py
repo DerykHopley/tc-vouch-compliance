@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict, get_args
+from typing import Annotated, Any, Literal, NamedTuple, TypedDict, get_args
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
@@ -32,6 +32,14 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, StringConstraints
 
 from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
+from vouch.documents import (
+    DOCUMENTED,
+    DocumentFacts,
+    EvidenceKind,
+    document_path,
+    facts_of,
+    read_facts,
+)
 from vouch.guards import (
     DATA_RULE,
     allowed_folder,
@@ -55,15 +63,14 @@ from vouch.search import (
     SOURCE_UNAVAILABLE,
     ErrorResult,
     Passage,
-    search_policies,
-    search_records,
+    search_folder,
 )
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-kind-stale-2"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-kind-stale-3"  # change it whenever a prompt below changes
 
 JudgedVerdict = Literal["evidenced", "partly-evidenced", "not-evidenced"]
 Verdict = JudgedVerdict | Literal["not-applicable"]
@@ -168,6 +175,7 @@ SUBMIT_ANSWER_TOOL = {
     },
 }
 
+
 def _search_tool_spec(name: str, what: str) -> dict[str, Any]:
     return {
         "type": "function",
@@ -198,13 +206,45 @@ SEARCH_RECORDS_TOOL = _search_tool_spec(
 )
 
 
-def _search_policies(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
-    # Looked up when called, so a test can replace vouch.graph.search_policies.
-    return search_policies(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
+def _search(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
+    # Looked up when called, so a test can replace vouch.graph.search_folder.
+    return search_folder(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
 
 
-def _search_records(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
-    return search_records(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
+class EvidencePassage(Passage):
+    """A passage as the judge sees it: where it was found, its document's kind, and whether
+    that document is stale on the run's date."""
+
+    source: str
+    kind: EvidenceKind
+    stale: bool
+
+
+def _with_facts(
+    passages: list[Passage], source: str, folder: Path, today: date
+) -> list[EvidencePassage]:
+    """Each passage with its document's source, kind and staleness, each document read once.
+    One that can't be read again takes its source's kind and counts as stale."""
+
+    def facts_for(doc_id: str) -> DocumentFacts:
+        path = document_path(folder, doc_id)
+        try:
+            if path is not None:
+                return read_facts(path, source, today)
+        except (OSError, UnicodeDecodeError):
+            pass
+        return facts_of(None, source, doc_id, today)
+
+    facts = {doc_id: facts_for(doc_id) for doc_id in dict.fromkeys(p["doc_id"] for p in passages)}
+    return [
+        EvidencePassage(
+            **p,
+            source=source,
+            kind=facts[p["doc_id"]].kind,
+            stale=facts[p["doc_id"]].stale_because is not None,
+        )
+        for p in passages
+    ]
 
 
 @dataclass(frozen=True)
@@ -222,10 +262,8 @@ class EvidenceTool:
 # Every evidence-source tool, by the name the model calls. A new source tool goes here, so the
 # allow-list covers it before it can run.
 EVIDENCE_TOOLS: dict[str, EvidenceTool] = {
-    SEARCH_POLICIES: EvidenceTool(
-        "policies", "the policies", SEARCH_POLICIES_TOOL, _search_policies
-    ),
-    SEARCH_RECORDS: EvidenceTool("records", "the records", SEARCH_RECORDS_TOOL, _search_records),
+    SEARCH_POLICIES: EvidenceTool("policies", "the policies", SEARCH_POLICIES_TOOL, _search),
+    SEARCH_RECORDS: EvidenceTool("records", "the records", SEARCH_RECORDS_TOOL, _search),
     "vulnerability_status": EvidenceTool("patch", "Patch's vulnerability status"),  # #24
 }
 
@@ -400,10 +438,11 @@ class AssessState(TypedDict, total=False):
     control: IsaControl
     control_requirements: ControlRequirements
     profile_id: str
-    evidence: Annotated[list[Passage], operator.add]
+    evidence: Annotated[list[EvidencePassage], operator.add]
     warnings: Annotated[list[str], operator.add]
     guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
     searched: list[str]  # the last tools step's searches that ran, one sentence each
+    unreadable: list[str]  # the last tools step's sources that couldn't be read, by label
     searches_run: Annotated[int, operator.add]
     searches_refused: Annotated[int, operator.add]
     usage: Annotated[list[dict[str, int]], operator.add]
@@ -414,7 +453,7 @@ class AssessState(TypedDict, total=False):
     requirements: list[RequirementVerdict]
     not_judged: list[str]
     claims: dict[str, list[CitationClaim]]  # the judge's citations per requirement, unchecked
-    document_folders: list[str]  # where cited documents are looked up: the profile's sources
+    document_folders: dict[str, str]  # source name to folder: where cited documents are found
     about_doing: list[str]  # the requirements the judge said ask for something to be done
     dropped_citations: list[DroppedCitation]
     messages: Annotated[list[AnyMessage], add_messages]
@@ -498,11 +537,12 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
             "relies on: the doc_id and a passage copied word for word from that document, at "
             "least four words from one paragraph, list item or table row. A quote that isn't "
             f"in the document is dropped, and a verdict with no citation left is not-evidenced. "
-            "Records show what was actually done (implemented evidence); policies say what "
-            "should be done (documented evidence). For a requirement that asks for something to "
-            "be done, set about_doing and say so in the reason: it is evidenced only with "
-            "implemented evidence. Evidence past its review date is stale and shows a "
-            f"requirement partly at most. {DATA_RULE}"
+            "Each passage gives its source, its kind (implemented: shows what was actually "
+            "done; documented: says what should be done) and whether it is stale (past its "
+            "review date). For a requirement that asks for something to be done, set "
+            "about_doing and say so in the reason: it is evidenced only with implemented "
+            "evidence. Stale evidence shows a requirement partly at most. "
+            f"{DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -607,11 +647,20 @@ def _apply_overrides(
     return reviewed, kept
 
 
+class JudgedRequirements(NamedTuple):
+    """What the judge step reads from one judgement."""
+
+    results: list[RequirementVerdict]
+    not_judged: list[str]  # ids the model didn't judge validly
+    claims: dict[str, list[CitationClaim]]  # the citations given per id, unchecked
+    about_doing: list[str]  # ids the model said ask for something to be done
+
+
 def _judged_requirements(
     control_requirements: ControlRequirements,
     judgement: Judgement | None,
     unjudged_reason: str = NOT_JUDGED,
-) -> tuple[list[RequirementVerdict], list[str], dict[str, list[CitationClaim]], list[str]]:
+) -> JudgedRequirements:
     """Each of the control's requirements with its verdict, the ids the model didn't judge
     validly, the citations given for each one it did (unchecked), and the ids it said ask for
     something to be done.
@@ -641,7 +690,7 @@ def _judged_requirements(
         results.append(
             RequirementVerdict(req.id, req.column, req.text, NOT_APPLICABLE, excluded.reason)
         )
-    return results, not_judged, claims, doing
+    return JudgedRequirements(results, not_judged, claims, doing)
 
 
 def _usage_of(message: Any) -> list[dict[str, int]]:
@@ -716,7 +765,8 @@ def build_graph(
         """Run each tool call the guards let through; a refusal is the call's reply and a
         `guard` step. Passages reach the model as data, instruction-like ones flagged; a
         passage already gathered isn't added or flagged again."""
-        messages, new, warnings, guards, searched = [], [], [], [], []
+        messages, new, warnings, guards, searched, unreadable = [], [], [], [], [], []
+        today = date.fromisoformat(state["today"])
         known = {_passage_key(p) for p in state["evidence"]}
         run = refused = 0
         for call in state["messages"][-1].tool_calls:
@@ -731,6 +781,8 @@ def build_graph(
                 content = f"tool {name} is not available"
             else:
                 result = tool.run(args, folder)
+                if isinstance(result, list):
+                    result = _with_facts(result, tool.source, folder, today)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)
                 if isinstance(result, list):
                     run += 1
@@ -747,6 +799,7 @@ def build_graph(
                     refused += 1
                 elif result["error"] == SOURCE_UNAVAILABLE:
                     warnings.append(SOURCE_UNAVAILABLE)
+                    unreadable.append(tool.label)
             messages.append(ToolMessage(content, tool_call_id=call["id"]))
         return {
             "messages": messages,
@@ -754,21 +807,27 @@ def build_graph(
             "warnings": warnings,
             "guards": guards + flagged_steps(new),
             "searched": searched,
+            "unreadable": list(dict.fromkeys(unreadable)),
             "searches_run": run,
             "searches_refused": refused,
         }
 
     def no_evidence_reason(state: AssessState) -> str | None:
-        """Why nothing could be read, so the model isn't asked to judge; None when something
-        could be. No source the profile allows can run: none allowed. Allowed sources, but every
-        search asked for was refused: none of them was searched, unless an allowed folder
-        couldn't be read (it now points outside), which is no source read."""
+        """Why nothing could be read, so the model isn't asked to judge; None when it is.
+
+        No source the profile allows can run: none allowed. A search that ran: judged on what
+        it read, any unreadable source left as a warning. Otherwise an allowed source that
+        couldn't be read (missing, or its folder now points outside) comes first: no source
+        read; then searches only of sources not allowed: none of the allowed ones searched.
+        """
         if not _offered_tools(profile):
             return NO_SOURCES_ALLOWED
-        if state["searches_refused"] and not state["searches_run"]:
-            return NO_SOURCE if FOLDER_ESCAPED in state["warnings"] else NO_ALLOWED_SEARCH
-        if SOURCE_UNAVAILABLE in state["warnings"]:
+        if state["searches_run"]:
+            return None
+        if {SOURCE_UNAVAILABLE, FOLDER_ESCAPED} & set(state["warnings"]):
             return NO_SOURCE
+        if state["searches_refused"]:
+            return NO_ALLOWED_SEARCH
         return None
 
     def check_answer(state: AssessState) -> dict[str, Any]:
@@ -809,14 +868,14 @@ def build_graph(
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
         if reason is not None:  # nothing could be read, so nothing is shown
-            results, *_ = _judged_requirements(control_requirements, None, reason)
+            results = _judged_requirements(control_requirements, None, reason).results
             return {"requirements": results, "not_judged": [], "claims": {}, "about_doing": []}
 
-        def read(judgement: Judgement | None) -> tuple[Any, list[str]]:
+        def read(judgement: Judgement | None) -> tuple[JudgedRequirements, list[str]]:
             judged = _judged_requirements(control_requirements, judgement)
-            return judged, [r.reason for r in judged[0] if r.verdict != NOT_APPLICABLE]
+            return judged, [r.reason for r in judged.results if r.verdict != NOT_APPLICABLE]
 
-        (results, not_judged, claims, doing), usage, rejected = _ask_until_clean(
+        judged, usage, rejected = _ask_until_clean(
             judge_model,
             _judge_prompt(state),
             read,
@@ -827,10 +886,10 @@ def build_graph(
             ),
         )
         return {
-            "requirements": results,
-            "not_judged": not_judged,
-            "claims": claims,
-            "about_doing": doing,
+            "requirements": judged.results,
+            "not_judged": judged.not_judged,
+            "claims": judged.claims,
+            "about_doing": judged.about_doing,
             "judge_rejected_word": rejected,
             "usage": usage,
         }
@@ -869,7 +928,7 @@ def build_graph(
                 reason = CITATIONS_DROPPED if given else NO_CITATION
                 requirement = replace(requirement, verdict="not-evidenced", reason=reason)
             requirement = replace(requirement, citations=tuple(kept))
-            results.append(_apply_rules(requirement, requirement.id in doing, checker))
+            results.append(_apply_rules(requirement, requirement.id in doing))
         return {"requirements": results, "dropped_citations": dropped}
 
     def remediate(state: AssessState) -> dict[str, Any]:
@@ -972,11 +1031,13 @@ class Step:
             if calls:
                 return " ".join(_asking(call, self.profile) for call in calls)
         if self.node == "tools":
-            if update.get("searched"):  # only searches that ran
-                return "Searched " + "; ".join(update["searched"]) + "."
-            if SOURCE_UNAVAILABLE in update.get("warnings", []):
-                return "The policy folder could not be read."
-            return "No search ran."
+            unreadable = update.get("unreadable", [])
+            text = (
+                "Searched " + "; ".join(update["searched"]) + "." if update.get("searched") else ""
+            )
+            if unreadable:
+                text = f"{text} Could not read {' or '.join(unreadable)}.".strip()
+            return text or "No search ran."
         if self.node == "check_answer":
             word = update.get("rejected_word")
             if word:
@@ -1048,9 +1109,7 @@ def _guard_steps(update: dict[str, Any]) -> list[Step]:
     ]
 
 
-def _apply_rules(
-    requirement: RequirementVerdict, about_doing: bool, checker: QuoteChecker
-) -> RequirementVerdict:
+def _apply_rules(requirement: RequirementVerdict, about_doing: bool) -> RequirementVerdict:
     """The judge's rules on a requirement whose citations are checked (spec #2, ticket #22).
 
     Stale evidence caps it at partly-evidenced, and the reason names each stale document and
@@ -1059,9 +1118,9 @@ def _apply_rules(
     """
     if requirement.verdict not in SHOWN_VERDICTS:
         return requirement
-    stale = dict.fromkeys(c.doc_id for c in requirement.citations if c.stale)
-    why = [f"{doc} is stale ({checker.stale_reason(doc)})" for doc in stale]
-    documented_only = all(c.kind == "documented" for c in requirement.citations)
+    stale = {c.doc_id: c.stale_because for c in requirement.citations if c.stale}
+    why = [f"{doc} is stale ({because})" for doc, because in stale.items()]
+    documented_only = all(c.kind == DOCUMENTED for c in requirement.citations)
     if about_doing and documented_only and requirement.verdict == "evidenced":
         why.append(DOCUMENTED_ONLY)
     if not why:
@@ -1177,7 +1236,7 @@ def assess_steps(
         "remediation": [],
         "today": (today or date.today()).isoformat(),
         "note": note,
-        "document_folders": [str(s.folder) for s in profile.evidence_sources.values()],
+        "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
         "messages": _prompt(control, control_requirements, profile, note),
     }
     config = _config(thread_id)

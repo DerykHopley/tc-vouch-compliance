@@ -16,24 +16,20 @@ stitched together across rows or paragraphs. It needs at least MIN_QUOTE_WORDS w
 import datetime
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from vouch.documents import Section, document_path, sections, stale_because
+from vouch.documents import EvidenceKind, Section, document_path, facts_of, sections
 from vouch.front_matter import split_front_matter
 
 MIN_QUOTE_WORDS = 4
 _ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"))
 _OWN_BLOCK = re.compile(r"^(\||[-*+]\s|\d+[.)]\s)")  # a table row or list item starts a block
 _WORD_CHAR = re.compile(r"\w")
-
-EvidenceKind = Literal["documented", "implemented"]
-KINDS: tuple[EvidenceKind, ...] = ("documented", "implemented")
 
 
 class DropReason(StrEnum):
@@ -44,6 +40,7 @@ class DropReason(StrEnum):
     EMPTY_QUOTE = "the quote is empty"
     TOO_SHORT = f"the quote is shorter than {MIN_QUOTE_WORDS} words"
     NOT_FOUND = "the quote isn't in that document"
+    IN_TWO_SOURCES = "the id names a document in more than one source"
 
 
 class CitationClaim(BaseModel):
@@ -67,6 +64,7 @@ class Citation:
     quote: str
     kind: EvidenceKind
     stale: bool
+    stale_because: str | None  # why it is stale (None: not stale)
 
 
 @dataclass(frozen=True)
@@ -106,10 +104,13 @@ def _occurs(quote: str, text: str) -> bool:
     return re.search(start + re.escape(quote) + end, text) is not None
 
 
-def _load(doc_id: str, folders: list[Path], today: datetime.date) -> _Document | DropReason:
-    path = next((p for f in folders if (p := document_path(f, doc_id))), None)
-    if path is None:
+def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Document | DropReason:
+    found = [(s, p) for s, f in sources.items() if (p := document_path(f, doc_id))]
+    if not found:
         return DropReason.NO_DOCUMENT
+    if len(found) > 1:  # which one the judge read can't be told, so neither is taken
+        return DropReason.IN_TWO_SOURCES
+    [(source, path)] = found
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -118,31 +119,25 @@ def _load(doc_id: str, folders: list[Path], today: datetime.date) -> _Document |
     version = str((data or {}).get("version") or "").strip()
     if not version:
         return DropReason.NO_VERSION
-    kind = (data or {}).get("kind")
-    kind = kind if kind in KINDS else "documented"  # unmarked: never taken as implemented
+    facts = facts_of(data, source, path.stem, today)
     blocks = tuple((s.heading, block) for s in sections(body) for block in _blocks(s))
-    return _Document(path.stem, version, kind, stale_because(data, today), blocks)
+    return _Document(path.stem, version, facts.kind, facts.stale_because, blocks)
 
 
 class QuoteChecker:
-    """Checks citations against the documents in these folders, reading each document once;
-    staleness is judged on `today`."""
+    """Checks citations against the documents in these sources' folders (source name to
+    folder), reading each document once; staleness is judged on `today`."""
 
-    def __init__(self, folders: Iterable[str], *, today: datetime.date):
-        self._folders = [Path(f) for f in folders]
+    def __init__(self, sources: Mapping[str, str | Path], *, today: datetime.date):
+        self._sources = {name: Path(folder) for name, folder in sources.items()}
         self._today = today
         self._documents: dict[str, _Document | DropReason] = {}
 
     def _document(self, doc_id: str) -> _Document | DropReason:
         key = doc_id.removesuffix(".md")
         if key not in self._documents:
-            self._documents[key] = _load(key, self._folders, self._today)
+            self._documents[key] = _load(key, self._sources, self._today)
         return self._documents[key]
-
-    def stale_reason(self, doc_id: str) -> str | None:
-        """Why the document is stale, or None when it isn't (or can't be read)."""
-        document = self._document(doc_id)
-        return None if isinstance(document, DropReason) else document.stale_because
 
     def check(self, claim: CitationClaim) -> Citation | DropReason:
         """The checked Citation, or why it is dropped."""
@@ -163,5 +158,6 @@ class QuoteChecker:
                     quote,
                     kind=document.kind,
                     stale=document.stale_because is not None,
+                    stale_because=document.stale_because,
                 )
         return DropReason.NOT_FOUND

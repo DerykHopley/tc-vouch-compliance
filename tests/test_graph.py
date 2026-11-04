@@ -108,6 +108,7 @@ def test_the_assessment_is_plain_json():
                 "wrong with it.",
                 "kind": "documented",
                 "stale": False,
+                "stale_because": None,
             }
         ],
     }
