@@ -107,3 +107,15 @@ _Avoid_: Audit report, self-assessment, export
 **Eval**:
 A measured run of assessments against cases with known expected verdicts and citations, used to compare models.
 _Avoid_: Test (for model-graded runs), benchmark
+
+**Eval case**:
+One control of a compliance profile in an eval, with the expected verdict and expected cited documents for each of its applicable requirements.
+_Avoid_: Test case, sample
+
+**Bad case**:
+An eval case that doesn't fit the compliance profile (an unknown control, a requirement that doesn't apply, one left out or named twice), so it is reported and not run.
+_Avoid_: Invalid test
+
+**Failed case**:
+An eval case whose assessment raised an error; every requirement and its control count as wrong.
+_Avoid_: Flaky case, crash

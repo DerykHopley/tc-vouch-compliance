@@ -7,12 +7,12 @@
   ],
   "judge": {
     "requirements": [
-      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Patch tracks CVEs for the systems in use, each with a CVSS score. (The", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Patch gathers advisories from the manufacturers and the CVE database every night and scores each one with CVSS 3.1."}]},
-      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Patch lists the affected assets per CVE and gives each a priority. (The", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Answered by Patch on 3 November 2026 at 07:00 UTC for the systems in Nordlicht's asset list."}]},
-      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Each tracked CVE is fixed, scheduled, or covered by a recorded risk-acceptance decision. (The", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Patch gathers advisories from the manufacturers and the CVE database every night and scores each one with CVSS 3.1."}]},
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Patch tracks CVEs for the systems in use, each with a CVSS score.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Patch gathers advisories from the manufacturers and the CVE database every night and scores each one with CVSS 3.1."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Patch lists the affected assets per CVE and gives each a priority.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Answered by Patch on 3 November 2026 at 07:00 UTC for the systems in Nordlicht's asset list."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Each tracked CVE is fixed, scheduled, or covered by a recorded risk-acceptance decision.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Patch gathers advisories from the manufacturers and the CVE database every night and scores each one with CVSS 3.1."}]},
       {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "Patching happens, as Patch shows, but no document defines patch management.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Answered by Patch on 3 November 2026 at 07:00 UTC for the systems in Nordlicht's asset list."}]},
-      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Risk-acceptance decisions record the mitigation for unpatched items. (The", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "CVE-2026-22510 | 6.1 | CAD vault server | Medium | Risk accepted, see RA-2026-03 | 2027-03-31"}]},
-      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "Patch shows tickets closed, not that installation was checked. (The", "citations": []}
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Risk-acceptance decisions record the mitigation for unpatched items.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "CVE-2026-22510 | 6.1 | CAD vault server | Medium | Risk accepted, see RA-2026-03 | 2027-03-31"}]},
+      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "Patch shows tickets closed, not that installation was checked.", "citations": []}
     ]
   }
 }

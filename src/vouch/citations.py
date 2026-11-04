@@ -81,9 +81,9 @@ def normalise(text: str) -> str:
     return " ".join(unicodedata.normalize("NFC", text).translate(_ZERO_WIDTH).split())
 
 
-def _blocks(section: Section) -> list[str]:
+def blocks(section: Section) -> list[str]:
     """The section's paragraphs, list items and table rows, each normalised."""
-    blocks: list[list[str]] = []
+    found: list[list[str]] = []
     open_block = False
     for line in section.lines:
         stripped = line.strip()
@@ -91,10 +91,10 @@ def _blocks(section: Section) -> list[str]:
             open_block = False
             continue
         if not open_block or _OWN_BLOCK.match(stripped):
-            blocks.append([])
-        blocks[-1].append(stripped)
+            found.append([])
+        found[-1].append(stripped)
         open_block = not stripped.startswith("|")  # a table row is always a block alone
-    return [normalise(" ".join(lines)) for lines in blocks]
+    return [normalise(" ".join(lines)) for lines in found]
 
 
 def _occurs(quote: str, text: str) -> bool:
@@ -120,8 +120,8 @@ def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Docum
     if not version:
         return DropReason.NO_VERSION
     facts = facts_of(data, source, path.stem, today)
-    blocks = tuple((s.heading, block) for s in sections(body) for block in _blocks(s))
-    return _Document(path.stem, version, facts.kind, facts.stale_because, blocks)
+    quotable = tuple((s.heading, block) for s in sections(body) for block in blocks(s))
+    return _Document(path.stem, version, facts.kind, facts.stale_because, quotable)
 
 
 class QuoteChecker:

@@ -1,7 +1,7 @@
 {
   "gather": [
-    {"tool": "search_policies", "args": {"query": "assigned managed rights access"}},
-    {"tool": "search_records", "args": {"query": "assigned managed rights access"}},
+    {"tool": "search_policies", "args": {"query": "assigned managed access extent"}},
+    {"tool": "search_records", "args": {"query": "assigned managed access extent"}},
     {"answer": "Draft answer for 4.2.1, from the evidence found."}
   ],
   "judge": {

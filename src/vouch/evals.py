@@ -1,15 +1,16 @@
-"""The offline eval: run `assess` on each case and score it against the expected answers.
+"""The offline eval: run `assess` on each eval case and score it against the expected answers.
 
-A case is one control of a compliance profile, with the verdict a good assessment gives each
-applicable requirement and the evidence documents a good answer cites. The cases are the
+An eval case is one control of a compliance profile, with the verdict a good assessment gives
+each applicable requirement and the evidence documents a good answer cites. The cases are the
 profile's expected answers (`fixtures/<profile>/expected-answers.yaml`), read when the eval
 runs, so an edit there counts on the next run.
 
 Scores: verdict accuracy per requirement (right verdicts of all requirements), per control
-(the rolled-up verdict against the roll-up of the expected verdicts), and citation precision
-(cited documents that are expected, of all documents cited after the quote check). A run that
-errors counts as a failed case, every requirement and its control wrong; a case that doesn't
-fit the profile is a bad case, reported and not run.
+(the rolled-up verdict against the expected verdicts rolled up by the spec's rule, written
+again here so a roll-up bug in the graph shows), and citation precision (cited documents that
+are expected, of all documents cited after the quote check). A run that errors is a failed
+case, every requirement and its control counted wrong; a case that doesn't fit the profile is
+a bad case, reported and not run.
 
 The model is a parameter (`model_for`, one per case), so the same runner drives the scripted
 fake model in CI and a real model in M4.
@@ -18,7 +19,7 @@ fake model in CI and a real model in M4.
 import argparse
 import json
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -28,8 +29,8 @@ import yaml
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.fake_model import ScriptedChatModel
-from vouch.graph import Assessment, RequirementVerdict, Verdict, assess, roll_up
-from vouch.isa import UnknownControlError, load_isa_control
+from vouch.graph import JUDGED_VERDICTS, Assessment, Verdict, assess
+from vouch.isa import Column, UnknownControlError, load_isa_control
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.profile import (
     DEFAULT_PROFILE,
@@ -43,23 +44,27 @@ EXPECTED_ANSWERS = "expected-answers.yaml"  # in the profile's fixtures folder
 FAKE_SCRIPTS_DIR = REPO_DIR / "evals" / "scripts"  # one folder per profile, a script per case
 RESULTS_DIR = REPO_DIR / "evals" / "results"  # git-ignored
 FAKE_MODEL = "the scripted fake model"
+EXIT_CASES_FAILED = 1  # a case failed or was bad
+EXIT_BAD_INPUT = 2
+
+# The spec's roll-up (spec #2): over these columns, not applicable left out.
+SPEC_ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 
 
-@dataclass(frozen=True)
-class ExpectedRequirement:
-    """One requirement's expected verdict and the documents a good answer cites."""
-
-    id: str
-    verdict: Verdict
-    cites: frozenset[str]
-
-
-@dataclass(frozen=True)
-class EvalCase:
-    """One control and the expected answer for each of its applicable requirements."""
-
-    control_id: str
-    requirements: tuple[ExpectedRequirement, ...]
+def spec_roll_up(verdicts: Iterable[tuple[Column, Verdict]]) -> Verdict:
+    """The control's verdict by the spec's rule, from (column, verdict) pairs: over must, high,
+    very high and overlay requirements, not applicable ones left out, all evidenced gives
+    evidenced, none evidenced gives not-evidenced, anything else partly-evidenced. With none
+    counted, the control is not applicable."""
+    counted = [
+        v for column, v in verdicts if column in SPEC_ROLL_UP_COLUMNS and v != "not-applicable"
+    ]
+    if not counted:
+        return "not-applicable"
+    evidenced = counted.count("evidenced")
+    if evidenced == len(counted):
+        return "evidenced"
+    return "partly-evidenced" if evidenced else "not-evidenced"
 
 
 @dataclass(frozen=True)
@@ -80,10 +85,41 @@ class RequirementScore:
 
 
 @dataclass(frozen=True)
+class ExpectedRequirement:
+    """One requirement's expected verdict, the documents a good answer cites, and why (for
+    people, and the fake scripts' reason)."""
+
+    id: str
+    verdict: Verdict
+    cites: frozenset[str]
+    why: str = field(default="", compare=False)
+
+    def unanswered(self) -> RequirementScore:
+        """Its score when the run gave it no verdict."""
+        return RequirementScore(self.id, self.verdict, None, expected_cites=self.cites)
+
+
+@dataclass(frozen=True)
+class EvalCase:
+    """One control and the expected answer for each of its applicable requirements."""
+
+    control_id: str
+    requirements: tuple[ExpectedRequirement, ...]
+
+
+@dataclass(frozen=True)
+class BadCase:
+    """A case that doesn't fit the profile, so it isn't run."""
+
+    control_id: str
+    problem: str
+
+
+@dataclass(frozen=True)
 class CaseScore:
     control_id: str
     requirements: tuple[RequirementScore, ...]
-    expected_verdict: Verdict | None
+    expected_verdict: Verdict | None  # None: the run failed
     verdict: Verdict | None  # None: the run failed
     error: str | None = None  # why the run failed
     assessment: Assessment | None = field(default=None, compare=False)  # the raw result
@@ -109,19 +145,22 @@ class CaseScore:
         return sum(r.cited_right for r in self.requirements)
 
 
-def score_case(case: EvalCase, assessment: Assessment) -> CaseScore:
-    """The case's requirements scored against the assessment's verdicts and citations."""
+def score_case(case: EvalCase, assessment: Assessment, columns: Mapping[str, Column]) -> CaseScore:
+    """The case's requirements scored against the assessment's verdicts and citations; the
+    expected control verdict rolls up the expected verdicts by the spec's rule, each in its
+    column (requirement id to column)."""
     given = {r.id: r for r in assessment.requirements}
-    scores, as_expected = [], []
+    scores = []
     for req in case.requirements:
-        result = given.get(req.id)
-        if result is None:
-            scores.append(RequirementScore(req.id, req.verdict, None, expected_cites=req.cites))
+        given_verdict = given.get(req.id)
+        if given_verdict is None:
+            scores.append(req.unanswered())
             continue
-        doc_ids = frozenset(c.doc_id for c in result.citations)
-        scores.append(RequirementScore(req.id, req.verdict, result.verdict, doc_ids, req.cites))
-        as_expected.append(RequirementVerdict(req.id, result.column, "", req.verdict, ""))
-    expected_verdict = roll_up(as_expected)
+        doc_ids = frozenset(c.doc_id for c in given_verdict.citations)
+        scores.append(
+            RequirementScore(req.id, req.verdict, given_verdict.verdict, doc_ids, req.cites)
+        )
+    expected_verdict = spec_roll_up((columns[r.id], r.verdict) for r in case.requirements)
     return CaseScore(
         case.control_id, tuple(scores), expected_verdict, assessment.verdict, None, assessment
     )
@@ -129,13 +168,12 @@ def score_case(case: EvalCase, assessment: Assessment) -> CaseScore:
 
 def failed_case(case: EvalCase, error: str) -> CaseScore:
     """A case whose run errored: no verdicts, so every requirement and the control are wrong."""
-    scores = tuple(
-        RequirementScore(r.id, r.verdict, None, expected_cites=r.cites) for r in case.requirements
-    )
+    scores = tuple(r.unanswered() for r in case.requirements)
     return CaseScore(case.control_id, scores, None, None, error)
 
 
-def _share(part: int, whole: int) -> float | None:
+def _share(count: tuple[int, int]) -> float | None:
+    part, whole = count
     return part / whole if whole else None
 
 
@@ -144,40 +182,66 @@ class EvalReport:
     """The scored cases of one eval run, and the bad cases left out of it."""
 
     scores: list[CaseScore]
-    bad_cases: list[tuple[str, str]] = field(default_factory=list)  # (control id, problem)
+    bad_cases: list[BadCase] = field(default_factory=list)
+
+    @property
+    def requirements_right(self) -> tuple[int, int]:
+        """(right verdicts, requirements scored)."""
+        return sum(s.right for s in self.scores), sum(s.total for s in self.scores)
+
+    @property
+    def controls_right(self) -> tuple[int, int]:
+        """(controls whose rolled-up verdict is the expected one, controls scored)."""
+        return sum(s.control_right for s in self.scores), len(self.scores)
+
+    @property
+    def citations_right(self) -> tuple[int, int]:
+        """(cited documents that are expected, documents cited)."""
+        return sum(s.cited_right for s in self.scores), sum(s.cited for s in self.scores)
 
     @property
     def verdict_accuracy(self) -> float | None:
-        """Right verdicts of all requirements scored; None when none were."""
-        return _share(sum(s.right for s in self.scores), sum(s.total for s in self.scores))
+        """None when no requirement was scored."""
+        return _share(self.requirements_right)
 
     @property
     def control_accuracy(self) -> float | None:
-        """Controls whose rolled-up verdict is the expected one, of all scored."""
-        return _share(sum(s.control_right for s in self.scores), len(self.scores))
+        return _share(self.controls_right)
 
     @property
     def citation_precision(self) -> float | None:
-        """Cited documents that are expected, of all cited; None when nothing was cited."""
-        return _share(sum(s.cited_right for s in self.scores), sum(s.cited for s in self.scores))
+        """None when nothing was cited."""
+        return _share(self.citations_right)
+
+    @property
+    def all_ran(self) -> bool:
+        """No case was bad and none failed."""
+        return not self.bad_cases and all(s.error is None for s in self.scores)
 
 
-def case_problem(case: EvalCase, profile: ComplianceProfile) -> str | None:
-    """Why the case doesn't fit the profile (an unknown control, a requirement that doesn't
-    apply), or None when it fits."""
+def _columns(case: EvalCase, profile: ComplianceProfile) -> dict[str, Column] | str:
+    """Each applicable requirement's column, or why the case doesn't fit the profile: an
+    unknown control, a requirement that doesn't apply, one named twice or one left out."""
     try:
         control = load_isa_control(case.control_id)
     except UnknownControlError as error:
         return str(error)
     requirements = profile.requirements_for(control)
-    applicable = {r.id for r in requirements.applicable}
+    columns = {r.id: r.column for r in requirements.applicable}
     excluded = {n.requirement.id for n in requirements.not_applicable}
+    named: set[str] = set()
     for req in case.requirements:
         if req.id in excluded:
             return f"{req.id} is not applicable in the {profile.id} profile"
-        if req.id not in applicable:
+        if req.id not in columns:
             return f"{case.control_id} has no requirement {req.id} at {profile.protection_level}"
-    return None
+        if req.id in named:
+            return f"the case names {req.id} twice"
+        named.add(req.id)
+    left_out = [r for r in columns if r not in named]
+    if left_out:
+        return f"the case leaves out {', '.join(left_out)}"
+    return columns
 
 
 def run_eval(
@@ -194,9 +258,9 @@ def run_eval(
     `today` is fixed, so the stale rule gives the same verdicts on every run."""
     report = EvalReport(scores=[])
     for case in cases:
-        problem = case_problem(case, profile)
-        if problem is not None:
-            report.bad_cases.append((case.control_id, problem))
+        columns = _columns(case, profile)
+        if isinstance(columns, str):
+            report.bad_cases.append(BadCase(case.control_id, columns))
             continue
         try:
             assessment = assess(case.control_id, profile, model_for(case.control_id), today=today)
@@ -204,7 +268,7 @@ def run_eval(
         except Exception as error:  # noqa: BLE001
             report.scores.append(failed_case(case, f"{type(error).__name__}: {error}"))
             continue
-        report.scores.append(score_case(case, assessment))
+        report.scores.append(score_case(case, assessment, columns))
     return report
 
 
@@ -212,7 +276,6 @@ def run_eval(
 class EvalCases:
     """A profile's cases, and the date staleness is judged on when they run."""
 
-    profile: str
     today: date
     cases: tuple[EvalCase, ...]
 
@@ -224,53 +287,58 @@ class CasesError(ValueError):
         super().__init__(f"bad expected answers {path}: {problem}")
 
 
-def load_cases(path: Path) -> EvalCases:
-    """The cases in an expected-answers file: per control, each requirement's expected verdict
-    and cited documents (its `why` is for people). Its `as_of` is the eval's today."""
+def _expected(control_id: str, raw: dict[str, Any]) -> ExpectedRequirement:
+    where = f"{control_id} {raw['id']}"
+    if raw["verdict"] not in JUDGED_VERDICTS:
+        raise ValueError(f"{where}: verdict {raw['verdict']!r} is not one of {JUDGED_VERDICTS}")
+    cites = raw.get("cites", [])
+    if not isinstance(cites, list):
+        raise TypeError(f"{where}: cites must be a list of document ids")
+    return ExpectedRequirement(
+        str(raw["id"]), raw["verdict"], frozenset(map(str, cites)), str(raw.get("why", ""))
+    )
+
+
+def load_cases(path: Path, profile_id: str) -> EvalCases:
+    """The cases in a profile's expected-answers file: per control, each requirement's
+    expected verdict, cited documents and why. Its `as_of` is the eval's today. A file for
+    another profile, a verdict a judge can't give, or cites that aren't a list is refused."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        cases = tuple(
-            EvalCase(
-                str(control["id"]),
-                tuple(
-                    ExpectedRequirement(
-                        str(r["id"]), r["verdict"], frozenset(map(str, r.get("cites") or []))
-                    )
-                    for r in control["requirements"]
-                ),
-            )
-            for control in data["controls"]
-        )
+        if data["profile"] != profile_id:
+            raise ValueError(f"it is for {data['profile']}, not {profile_id}")
         today = data["as_of"]
         if not isinstance(today, date):
             raise TypeError("as_of is not a date")
-        return EvalCases(str(data["profile"]), today, cases)
+        cases = tuple(
+            EvalCase(
+                str(control["id"]),
+                tuple(_expected(str(control["id"]), r) for r in control["requirements"]),
+            )
+            for control in data["controls"]
+        )
+        return EvalCases(today, cases)
     except OSError as error:
         raise CasesError(path, error.strerror or "can't be read") from error
-    except (yaml.YAMLError, KeyError, TypeError) as error:
+    except (yaml.YAMLError, KeyError, TypeError, ValueError) as error:
         raise CasesError(path, f"{type(error).__name__}: {error}") from error
 
 
-def _count(part: int, whole: int, noun: str) -> str:
+def _count(count: tuple[int, int], noun: str) -> str:
+    part, whole = count
     share = f" ({part / whole:.0%})" if whole else ""
     return f"{part} of {whole} {noun}{share}"
 
 
 def summary(report: EvalReport, *, profile: str, model: str, today: date) -> str:
     """A short summary: the three scores, a line per case, then the bad cases."""
-    scores = report.scores
-    right = sum(s.right for s in scores)
     lines = [
         f"Eval of {profile} on {model}, staleness judged on {today.isoformat()}",
-        f"Verdict accuracy: {_count(right, sum(s.total for s in scores), 'requirements')}",
-        "Control accuracy: "
-        + _count(sum(s.control_right for s in scores), len(scores), "controls"),
-        "Citation precision: "
-        + _count(
-            sum(s.cited_right for s in scores), sum(s.cited for s in scores), "cited documents"
-        ),
+        f"Verdict accuracy: {_count(report.requirements_right, 'requirements')}",
+        f"Control accuracy: {_count(report.controls_right, 'controls')}",
+        f"Citation precision: {_count(report.citations_right, 'cited documents')}",
     ]
-    for s in scores:
+    for s in report.scores:
         if s.error is not None:
             lines.append(f"  {s.control_id:<6} Failed: {s.error}")
             continue
@@ -281,7 +349,7 @@ def summary(report: EvalReport, *, profile: str, model: str, today: date) -> str
             + f"; control {s.verdict}, expected {s.expected_verdict}"
             + f"; citations {s.cited_right}/{s.cited} expected"
         )
-    lines.extend(f"  Bad case {control_id}: {problem}" for control_id, problem in report.bad_cases)
+    lines.extend(f"  Bad case {b.control_id}: {b.problem}" for b in report.bad_cases)
     return "\n".join(lines) + "\n"
 
 
@@ -306,9 +374,10 @@ def write_results(report: EvalReport, folder: Path, *, profile: str, today: date
             {**asdict(replace(s, assessment=None)), "assessment": _raw(s.assessment)}
             for s in report.scores
         ],
-        "bad_cases": [{"control_id": c, "problem": p} for c, p in report.bad_cases],
+        "bad_cases": [asdict(b) for b in report.bad_cases],
     }
-    path.write_text(json.dumps(raw, indent=2, default=_jsonable, ensure_ascii=False) + "\n")
+    text = json.dumps(raw, indent=2, default=_jsonable, ensure_ascii=False) + "\n"
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -323,7 +392,8 @@ def fake_models(folder: Path) -> Callable[[str], BaseChatModel]:
 
 def main(argv: list[str] | None = None) -> int:
     """`python -m vouch.evals [--profile <name>] [--results <folder>]`: run the profile's
-    cases on the scripted fake model, print the summary, save the raw results and summary."""
+    cases on the scripted fake model, print the summary, save the raw results and summary.
+    Exits 1 when a case failed or was bad, 2 when the profile or its cases can't be read."""
     parser = argparse.ArgumentParser(
         prog="python -m vouch.evals",
         description="Score Vouch's verdicts and citations against a profile's expected "
@@ -334,17 +404,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         profile = load_named_profile(args.profile)
-        cases = load_cases(FIXTURES_DIR / profile.id / EXPECTED_ANSWERS)
+        cases = load_cases(FIXTURES_DIR / profile.id / EXPECTED_ANSWERS, profile.id)
     except (UnknownProfileError, ProfileError, CasesError) as error:
         print(f"eval: {error}", file=sys.stderr)
-        return 2
+        return EXIT_BAD_INPUT
     models = fake_models(FAKE_SCRIPTS_DIR / profile.id)
     report = run_eval(cases.cases, profile, models, today=cases.today)
     raw = write_results(report, args.results, profile=profile.id, today=cases.today)
     text = summary(report, profile=profile.id, model=FAKE_MODEL, today=cases.today)
     raw.with_name(f"{raw.stem}-summary.txt").write_text(text, encoding="utf-8")
     print(text + f"Raw results: {raw}")
-    return 0
+    return 0 if report.all_ran else EXIT_CASES_FAILED
 
 
 if __name__ == "__main__":

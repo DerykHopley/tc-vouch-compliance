@@ -1,7 +1,7 @@
 {
   "gather": [
-    {"tool": "search_policies", "args": {"query": "observations information reported security"}},
-    {"tool": "search_records", "args": {"query": "observations information reported security"}},
+    {"tool": "search_policies", "args": {"query": "observations information relevant reported"}},
+    {"tool": "search_records", "args": {"query": "observations information relevant reported"}},
     {"answer": "Draft answer for 1.6.1, from the evidence found."}
   ],
   "judge": {

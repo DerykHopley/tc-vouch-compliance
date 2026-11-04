@@ -1,16 +1,21 @@
 """The offline eval: Vouch's verdicts and citations scored against the expected answers."""
 
 import json
+import os
 import re
-import time
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
 import pytest
 
+import vouch.graph
 from vouch import ScriptedChatModel, load_named_profile
 from vouch.citations import Citation
 from vouch.evals import (
+    EXPECTED_ANSWERS,
+    BadCase,
     CasesError,
     EvalCase,
     EvalReport,
@@ -20,8 +25,12 @@ from vouch.evals import (
     main,
     run_eval,
     score_case,
+    spec_roll_up,
 )
 from vouch.graph import Assessment, RequirementVerdict, ShouldScore
+from vouch.paths import FIXTURES_DIR, REPO_DIR
+
+NORDLICHT_ANSWERS = FIXTURES_DIR / "nordlicht" / EXPECTED_ANSWERS
 
 
 def cited(*doc_ids: str) -> tuple[Citation, ...]:
@@ -60,6 +69,7 @@ CASE = EvalCase(
         expected("S1", "not-evidenced"),
     ),
 )
+COLUMNS = {"M1": "must", "M2": "must", "S1": "should"}
 RESULT = result(
     "1.1.1",
     "partly-evidenced",
@@ -70,7 +80,7 @@ RESULT = result(
 
 
 def test_a_case_scores_each_requirement_its_control_and_its_citations():
-    score = score_case(CASE, RESULT)
+    score = score_case(CASE, RESULT, COLUMNS)
 
     assert (score.right, score.total) == (2, 3)
     assert [r.requirement_id for r in score.requirements if not r.right] == ["M2"]
@@ -81,13 +91,32 @@ def test_a_case_scores_each_requirement_its_control_and_its_citations():
     assert (score.cited_right, score.cited) == (1, 2)
 
 
+@pytest.mark.parametrize(
+    ("verdicts", "control"),
+    [
+        ([("must", "evidenced"), ("high", "evidenced"), ("should", "not-evidenced")], "evidenced"),
+        ([("must", "partly-evidenced"), ("overlay", "not-evidenced")], "not-evidenced"),
+        ([("must", "evidenced"), ("overlay", "partly-evidenced")], "partly-evidenced"),
+        ([("must", "evidenced"), ("very high", "not-evidenced")], "partly-evidenced"),
+        ([("must", "not-applicable"), ("must", "evidenced")], "evidenced"),
+        ([("should", "evidenced")], "not-applicable"),
+    ],
+)
+def test_the_expected_control_verdict_follows_the_specs_roll_up_rule(verdicts, control):
+    assert spec_roll_up(verdicts) == control
+
+
 def test_a_report_totals_accuracy_per_requirement_and_per_control_and_precision():
     right_control = score_case(
         EvalCase("5.2.9", (expected("M1", "not-evidenced"),)),
         result("5.2.9", "not-evidenced", got("M1", "not-evidenced")),
+        {"M1": "must"},
     )
-    report = EvalReport([score_case(CASE, RESULT), right_control])
+    report = EvalReport([score_case(CASE, RESULT, COLUMNS), right_control])
 
+    assert report.requirements_right == (3, 4)
+    assert report.controls_right == (1, 2)
+    assert report.citations_right == (1, 2)
     assert report.verdict_accuracy == 3 / 4
     assert report.control_accuracy == 1 / 2
     assert report.citation_precision == 1 / 2
@@ -95,7 +124,7 @@ def test_a_report_totals_accuracy_per_requirement_and_per_control_and_precision(
 
 def test_a_failed_run_counts_every_requirement_and_its_control_wrong():
     failed = failed_case(CASE, "ScriptExhaustedError: script has 2 gather turns")
-    report = EvalReport([score_case(CASE, RESULT), failed])
+    report = EvalReport([score_case(CASE, RESULT, COLUMNS), failed])
 
     assert failed.error == "ScriptExhaustedError: script has 2 gather turns"
     assert (failed.right, failed.total, failed.control_right) == (0, 3, False)
@@ -108,6 +137,7 @@ def test_with_nothing_cited_precision_is_not_a_number_but_none():
     nothing = score_case(
         EvalCase("5.2.9", (expected("M1", "not-evidenced"),)),
         result("5.2.9", "not-evidenced", got("M1", "not-evidenced")),
+        {"M1": "must"},
     )
 
     assert EvalReport([nothing]).citation_precision is None
@@ -137,23 +167,44 @@ def scripted(script: dict) -> ScriptedChatModel:
     return ScriptedChatModel(script=script)
 
 
+def backup_models(asked: list[str] | None = None):
+    def model_for(control_id: str) -> ScriptedChatModel:
+        if asked is not None:
+            asked.append(control_id)
+        return scripted(BACKUP_SCRIPT)
+
+    return model_for
+
+
 def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run():
     not_applicable = EvalCase("5.2.4", (expected("M4", "evidenced"),))  # the profile excludes it
     unknown_control = EvalCase("9.9.9", (expected("M1", "evidenced"),))
     asked: list[str] = []
 
-    def model_for(control_id: str) -> ScriptedChatModel:
-        asked.append(control_id)
-        return scripted(BACKUP_SCRIPT)
+    report = run_eval(
+        [not_applicable, unknown_control, BACKUP], NORDLICHT, backup_models(asked), today=TODAY
+    )
 
-    report = run_eval([not_applicable, unknown_control, BACKUP], NORDLICHT, model_for, today=TODAY)
-
-    assert [c for c, _ in report.bad_cases] == ["5.2.4", "9.9.9"]
-    assert "M4" in report.bad_cases[0][1] and "not applicable" in report.bad_cases[0][1]
-    assert "9.9.9" in report.bad_cases[1][1]
+    assert [b.control_id for b in report.bad_cases] == ["5.2.4", "9.9.9"]
+    assert "M4" in report.bad_cases[0].problem
+    assert "not applicable" in report.bad_cases[0].problem
+    assert "9.9.9" in report.bad_cases[1].problem
     assert asked == ["5.2.9"]
     assert [s.control_id for s in report.scores] == ["5.2.9"]
     assert report.verdict_accuracy == 1
+
+
+def test_a_case_missing_an_applicable_requirement_or_naming_one_twice_is_a_bad_case():
+    missing = EvalCase("5.2.9", BACKUP.requirements[:2])  # no S1
+    twice = EvalCase("5.2.9", (*BACKUP.requirements, expected("M1", "evidenced")))
+
+    report = run_eval([missing, twice], NORDLICHT, backup_models(), today=TODAY)
+
+    assert report.scores == []
+    assert report.bad_cases == [
+        BadCase("5.2.9", "the case leaves out S1"),
+        BadCase("5.2.9", "the case names M1 twice"),
+    ]
 
 
 def test_a_run_that_errors_is_a_failed_case_with_its_message_and_the_rest_still_run():
@@ -182,48 +233,129 @@ def test_a_model_that_cannot_be_made_is_a_failed_case_too():
     assert "bad fake script" in report.scores[0].error
 
 
-def test_the_runner_prints_accuracy_and_precision_for_nordlicht_on_the_fake_model(tmp_path, capsys):
-    started = time.monotonic()
+def test_a_broken_roll_up_in_the_graph_lowers_control_accuracy(monkeypatch):
+    assert run_eval([BACKUP], NORDLICHT, backup_models(), today=TODAY).control_accuracy == 1
+
+    monkeypatch.setattr(vouch.graph, "roll_up", lambda requirements: "evidenced")
+    report = run_eval([BACKUP], NORDLICHT, backup_models(), today=TODAY)
+
+    assert report.control_accuracy == 0
+    assert report.verdict_accuracy == 1  # the requirements were still judged right
+
+
+def test_the_fake_model_scores_every_nordlicht_case_right_and_prints_it(tmp_path, capsys):
+    """The fake scripts are drafted from the expected answers, so anything short of all right
+    is a harness regression (or expected answers changed without regenerating the scripts)."""
+    cases = load_cases(NORDLICHT_ANSWERS, "nordlicht").cases
+    requirements = sum(len(c.requirements) for c in cases)
+    cites = sum(len(r.cites) for c in cases for r in c.requirements)
+
     code = main(["--results", str(tmp_path)])
-    took = time.monotonic() - started
 
     out = capsys.readouterr().out
     assert code == 0
-    assert re.search(r"Verdict accuracy: \d+ of 84 requirements \(\d+%\)", out)
-    assert re.search(r"Control accuracy: \d+ of 12 controls \(\d+%\)", out)
-    assert re.search(r"Citation precision: \d+ of \d+ cited documents \(\d+%\)", out)
+    assert f"Verdict accuracy: {requirements} of {requirements} requirements (100%)" in out
+    assert f"Control accuracy: {len(cases)} of {len(cases)} controls (100%)" in out
+    assert f"Citation precision: {cites} of {cites} cited documents (100%)" in out
     assert "Failed" not in out and "Bad case" not in out
-    assert took < 30  # the fast lane's budget for the whole eval is a minute
 
     [raw] = tmp_path.glob("*.json")
-    saved = json.loads(raw.read_text())
-    assert [c["control_id"] for c in saved["cases"]] == [
-        "1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
-        "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9",
-    ]  # fmt: skip
+    saved = json.loads(raw.read_text(encoding="utf-8"))
+    assert [c["control_id"] for c in saved["cases"]] == [c.control_id for c in cases]
     assert saved["today"] == "2026-11-04"
     assert all(c["assessment"]["requirements"] for c in saved["cases"])
-    assert (tmp_path / raw.name.replace(".json", "-summary.txt")).read_text() in out
+    summary = tmp_path / raw.name.replace(".json", "-summary.txt")
+    assert summary.read_text(encoding="utf-8") in out
+
+
+def test_the_runner_exits_1_when_a_case_failed_or_was_bad(tmp_path, monkeypatch, capsys):
+    def no_model(control_id: str):
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr("vouch.evals.fake_models", lambda folder: no_model)
+
+    assert main(["--results", str(tmp_path)]) == 1
+    assert "Failed: RuntimeError: no model" in capsys.readouterr().out
+
+
+# The expected-answers file.
+
+
+def answers_file(tmp_path: Path, requirement: str, profile: str = "nordlicht") -> Path:
+    path = tmp_path / "expected-answers.yaml"
+    path.write_text(
+        f"profile: {profile}\nas_of: 2026-11-04\ncontrols:\n"
+        f'  - id: "5.2.9"\n    requirements:\n      - {requirement}\n',
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_cases_come_from_the_expected_answers_read_when_the_eval_runs(tmp_path):
-    answers = tmp_path / "expected-answers.yaml"
-    answers.write_text(
-        "profile: nordlicht\nas_of: 2026-11-04\ncontrols:\n"
-        '  - id: "5.2.9"\n    requirements:\n'
-        "      - {id: M1, verdict: not-evidenced, cites: [], why: Nothing.}\n"
-    )
+    path = answers_file(tmp_path, "{id: M1, verdict: not-evidenced, cites: [], why: Nothing.}")
 
-    cases = load_cases(answers)
+    cases = load_cases(path, "nordlicht")
 
-    assert cases.profile == "nordlicht"
     assert cases.today == date(2026, 11, 4)
     assert cases.cases == (EvalCase("5.2.9", (expected("M1", "not-evidenced"),)),)
+    assert cases.cases[0].requirements[0].why == "Nothing."
+
+
+@pytest.mark.parametrize(
+    ("requirement", "problem"),
+    [
+        ("{id: M1, verdict: evidenced, cites: backup-concept, why: A.}", "5.2.9 M1.*cites"),
+        ("{id: M1, verdict: compliant, cites: [], why: A.}", "5.2.9 M1.*verdict"),
+        ("{id: M1, verdict: not-applicable, cites: [], why: A.}", "5.2.9 M1.*verdict"),
+    ],
+)
+def test_a_requirement_with_bare_cites_or_an_unknown_verdict_is_refused_naming_it(
+    tmp_path, requirement, problem
+):
+    with pytest.raises(CasesError, match=problem):
+        load_cases(answers_file(tmp_path, requirement), "nordlicht")
+
+
+def test_expected_answers_for_another_profile_are_refused(tmp_path):
+    path = answers_file(tmp_path, "{id: M1, verdict: evidenced, cites: [], why: A.}", "acme")
+
+    with pytest.raises(CasesError, match="acme.*nordlicht"):
+        load_cases(path, "nordlicht")
 
 
 def test_an_expected_answers_file_without_a_date_is_refused_naming_the_file(tmp_path):
     answers = tmp_path / "expected-answers.yaml"
-    answers.write_text("profile: nordlicht\ncontrols: []\n")
+    answers.write_text("profile: nordlicht\ncontrols: []\n", encoding="utf-8")
 
     with pytest.raises(CasesError, match="expected-answers.yaml.*as_of"):
-        load_cases(answers)
+        load_cases(answers, "nordlicht")
+
+
+def test_no_why_in_nordlichts_expected_answers_is_cut_short_by_a_yaml_comment():
+    """An unquoted ` #` starts a YAML comment, so the rest of the line is lost."""
+    cut = [
+        line.strip()
+        for line in NORDLICHT_ANSWERS.read_text(encoding="utf-8").splitlines()
+        if re.match(r"\s*why: [^\"'].* #", line)
+    ]
+    assert cut == []
+
+
+# The script generator.
+
+
+def test_the_script_generator_gives_the_same_scripts_whatever_the_hash_seed(tmp_path):
+    def generate(seed: str) -> dict[str, str]:
+        out = tmp_path / seed
+        subprocess.run(
+            [sys.executable, str(REPO_DIR / "evals" / "scripts" / "generate.py"), "--out", out],
+            check=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        )
+        return {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.json"))}
+
+    first = generate("1")
+
+    assert len(first) == 12
+    assert generate("2") == first

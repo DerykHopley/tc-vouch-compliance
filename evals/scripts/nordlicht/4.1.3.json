@@ -1,7 +1,7 @@
 {
   "gather": [
-    {"tool": "search_policies", "args": {"query": "information accounts securely managed"}},
-    {"tool": "search_records", "args": {"query": "information accounts securely managed"}},
+    {"tool": "search_policies", "args": {"query": "information accounts securely applied"}},
+    {"tool": "search_records", "args": {"query": "information accounts securely applied"}},
     {"answer": "Draft answer for 4.1.3, from the evidence found."}
   ],
   "judge": {

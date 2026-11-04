@@ -347,15 +347,15 @@ controls:
       - id: M1
         verdict: evidenced
         cites: [patch-vulnerability-status]
-        why: Patch tracks CVEs for the systems in use, each with a CVSS score. (The #24 fixture must show this.)
+        why: Patch tracks CVEs for the systems in use, each with a CVSS score.
       - id: M2
         verdict: evidenced
         cites: [patch-vulnerability-status]
-        why: Patch lists the affected assets per CVE and gives each a priority. (The #24 fixture must show this.)
+        why: Patch lists the affected assets per CVE and gives each a priority.
       - id: M3
         verdict: evidenced
         cites: [patch-vulnerability-status]
-        why: Each tracked CVE is fixed, scheduled, or covered by a recorded risk-acceptance decision. (The #24 fixture must show this.)
+        why: Each tracked CVE is fixed, scheduled, or covered by a recorded risk-acceptance decision.
       - id: S1
         verdict: partly-evidenced
         cites: [patch-vulnerability-status]
@@ -363,11 +363,11 @@ controls:
       - id: S2
         verdict: evidenced
         cites: [patch-vulnerability-status]
-        why: Risk-acceptance decisions record the mitigation for unpatched items. (The #24 fixture must show this.)
+        why: Risk-acceptance decisions record the mitigation for unpatched items.
       - id: S3
         verdict: not-evidenced
         cites: []
-        why: Patch shows tickets closed, not that installation was checked. (The #24 fixture must not show verification.)
+        why: Patch shows tickets closed, not that installation was checked.
 
   - id: "5.2.9"
     requirements:
