@@ -8,9 +8,12 @@ VOUCH_TEST_DATABASE_URL; without it they're skipped.
 import logging
 import os
 import re
+import select
+import socket
+import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -108,6 +111,59 @@ def test_connections_use_langgraphs_postgres_settings(make_db):
     assert url == URL
     assert kwargs["autocommit"] is True
     assert kwargs["row_factory"] is dict_row
+
+
+def bounded(kwargs: dict[str, Any]) -> bool:
+    """#119: the statement timeout and TCP keepalives, from vouch.database's constants."""
+    return (
+        database.CONNECTION_KWARGS.items() <= kwargs.items()
+        and kwargs["options"] == f"-c statement_timeout={database.STATEMENT_TIMEOUT_SECONDS}s"
+        and kwargs["keepalives"] == 1
+    )
+
+
+def test_the_private_psycopg_names_the_bounded_wait_needs_still_exist():
+    """BoundedConnection catches psycopg.errors._WaitTimeout and passes `timeout` to `wait`:
+    an upgrade that drops either fails here, not at the first frozen database."""
+    import inspect
+
+    import psycopg
+
+    assert issubclass(psycopg.errors._WaitTimeout, Exception)
+    assert "timeout" in inspect.signature(psycopg.Connection.wait).parameters
+
+
+def test_every_connection_has_a_statement_timeout_and_keepalives(make_db):
+    pooled, direct = FlakyConnect(), FlakyConnect(failures=1)
+
+    with make_db(connect=pooled).connection():
+        pass
+    with pytest.raises(DatabaseUnavailable):
+        make_db(connect=direct).setup()
+
+    assert bounded(pooled.calls[0][1]) and bounded(direct.calls[0][1])
+
+
+def test_the_checkout_check_waits_no_longer_than_its_bound(make_db):
+    """Each checkout checks the connection with a shorter wait than a query's, then sets it
+    back."""
+    seen: list[float] = []
+
+    class Checked(FakeConnection):
+        wait_timeout = database.WAIT_TIMEOUT_SECONDS
+
+        def execute(self, query: str, *args: Any) -> None:
+            seen.append(self.wait_timeout)
+
+    db = make_db(connect=lambda url, **kwargs: Checked())
+
+    with db.connection() as conn:
+        assert conn.wait_timeout == database.WAIT_TIMEOUT_SECONDS
+    with db.connection() as conn:  # the same one, from the pool
+        assert conn.wait_timeout == database.WAIT_TIMEOUT_SECONDS
+
+    assert seen == [database.CHECK_TIMEOUT_SECONDS] * 2
+    assert database.CHECK_TIMEOUT_SECONDS < database.WAIT_TIMEOUT_SECONDS
 
 
 def test_nothing_connects_until_a_connection_is_asked_for(make_db):
@@ -494,3 +550,149 @@ def test_a_developers_model_choice_outlasts_a_restart_in_the_database(empty_data
         shown = second.get("/api/developer/settings").json()
 
     assert (shown["model"], shown["kept_in"]) == (OTHER_MODEL, "database")
+
+
+class FreezableProxy:
+    """A TCP proxy to the test server that can freeze: it keeps every connection open and
+    accepts new ones, but passes nothing on, as a paused Postgres container does (#119). Its
+    kernel still acknowledges what it's sent, so TCP keepalives see nothing wrong."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self.target = (host, port)
+        self.frozen = threading.Event()
+        self.stopped = threading.Event()
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.port = self.listener.getsockname()[1]
+        self.sockets: list[socket.socket] = [self.listener]
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        while not self.stopped.is_set():
+            try:
+                client, _ = self.listener.accept()
+            except OSError:
+                return
+            self.sockets.append(client)
+            if self.frozen.is_set():
+                continue  # accepted, and never answered
+            server = socket.create_connection(self.target)
+            self.sockets.append(server)
+            for source, sink in ((client, server), (server, client)):
+                threading.Thread(target=self._pump, args=(source, sink), daemon=True).start()
+
+    def _pump(self, source: socket.socket, sink: socket.socket) -> None:
+        while not self.stopped.is_set():
+            if self.frozen.is_set():
+                time.sleep(0.05)
+                continue
+            try:
+                ready, _, _ = select.select([source], [], [], 0.05)
+                if ready and not self.frozen.is_set():  # frozen while it waited: pass nothing
+                    data = source.recv(65536)
+                    if not data:
+                        return
+                    sink.sendall(data)
+            except (OSError, ValueError):  # closed by stop()
+                return
+
+    def stop(self) -> None:
+        self.stopped.set()
+        for sock in self.sockets:
+            sock.close()
+
+
+@pytest.fixture
+def freezable(empty_database) -> Iterator[tuple[Database, FreezableProxy]]:
+    """A Database on the test server through a FreezableProxy. Its health clock moves on past
+    the cache at every check, so each health call asks the database."""
+    target = empty_database.url.get_secret_value()
+    params = conninfo.conninfo_to_dict(target)
+    proxy = FreezableProxy(str(params.get("host") or "127.0.0.1"), int(params.get("port") or 5432))
+    now = [0.0]
+
+    def clock() -> float:
+        now[0] += database.HEALTH_CACHE_SECONDS
+        return now[0]
+
+    url = conninfo.make_conninfo(target, host="127.0.0.1", port=proxy.port)
+    db = Database(SecretStr(url), clock=clock)
+    try:
+        yield db, proxy
+    finally:
+        proxy.frozen.clear()
+        db.close()
+        proxy.stop()
+
+
+def within(seconds: float, action: Callable[[], Any]) -> Any:
+    """`action`'s answer (or the DatabaseUnavailable it raised), failing the test if it takes
+    `seconds` or more.
+    It runs in a thread, so a hang fails here and the fixture's thaw lets it finish."""
+    outcome: list[Any] = []
+
+    def run() -> None:
+        try:
+            outcome.append(action())
+        except DatabaseUnavailable as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=run, daemon=True)
+    start = time.monotonic()
+    worker.start()
+    worker.join(seconds)
+    took = time.monotonic() - start
+    assert outcome, f"still waiting after {took:.1f}s"
+    return outcome[0]
+
+
+@needs_postgres
+@pytest.mark.enable_socket
+def test_against_a_frozen_database_health_says_unavailable_within_its_bound(freezable):
+    db, proxy = freezable
+    client = client_with_a_database_route(Settings(database_url=db.url), db)
+    assert client.get("/api/health").json()["database"] == "reachable"  # one pooled connection
+
+    proxy.frozen.set()
+    bound = database.HEALTH_TIMEOUT_SECONDS + database.CHECK_TIMEOUT_SECONDS + 1
+    health = within(bound, lambda: client.get("/api/health"))
+
+    assert health.json()["database"] == "unavailable"
+
+
+@needs_postgres
+@pytest.mark.enable_socket
+def test_against_a_frozen_database_a_route_answers_503_within_its_bound(freezable):
+    db, proxy = freezable
+    client = client_with_a_database_route(Settings(database_url=db.url), db)
+    assert client.get("/needs-database").json() == {"connected": True}  # one pooled connection
+
+    proxy.frozen.set()
+    bound = database.CHECKOUT_TIMEOUT_SECONDS + database.CHECK_TIMEOUT_SECONDS + 1
+    refused = within(bound, lambda: client.get("/needs-database"))
+
+    assert refused.status_code == 503
+    assert refused.json()["unavailable"] == "database"
+
+
+@needs_postgres
+@pytest.mark.enable_socket
+def test_a_query_the_database_freezes_during_is_unavailable_within_its_bound(freezable):
+    db, proxy = freezable
+
+    def frozen_mid_query() -> None:
+        with db.connection() as conn:
+            proxy.frozen.set()
+            conn.execute("SELECT 1")
+
+    raised = within(database.WAIT_TIMEOUT_SECONDS + 1, frozen_mid_query)
+
+    assert isinstance(raised, DatabaseUnavailable)
+    assert database.NO_ANSWER.split("{")[0] in str(raised)
+
+
+@needs_postgres
+def test_the_server_holds_each_statement_to_the_timeout(empty_database):
+    with empty_database.connection() as conn:
+        shown = conn.execute("SHOW statement_timeout").fetchone()
+
+    assert shown == {"statement_timeout": f"{database.STATEMENT_TIMEOUT_SECONDS}s"}

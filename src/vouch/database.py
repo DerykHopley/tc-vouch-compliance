@@ -12,6 +12,10 @@ unreachable database leaves the app running, health says so, and a route that ne
 each connection on checkout and reconnects with a backoff. A malformed URL is never sent to
 libpq, whose error messages can echo it.
 
+Every use is bounded in time (#119): a server-side statement timeout, TCP keepalives, and, for a
+server that freezes without closing its sockets (which neither of those can notice), a wait
+bound on every answer, the pool's checkout check included (BoundedConnection).
+
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
@@ -51,6 +55,21 @@ HEALTH_CACHE_SECONDS = 5.0
 """Health reuses its last answer this long, so it doesn't check the database on every call."""
 CONNECT_TIMEOUT_SECONDS = 5
 """libpq's wait for one connection attempt."""
+STATEMENT_TIMEOUT_SECONDS = 5
+"""The server cancels a statement that runs longer (a lock wait, a slow server that still
+answers); the route then answers 503."""
+WAIT_TIMEOUT_SECONDS = 6.0
+"""How long this side waits on a connection for any one answer: what bounds a frozen server,
+which can't enforce its own statement timeout. Just over that timeout, so a slow server's own
+cancel comes first."""
+CHECK_TIMEOUT_SECONDS = 1.0
+"""The wait for the pool's checkout check (an empty query) on a pooled connection."""
+KEEPALIVE_IDLE_SECONDS = 10
+KEEPALIVE_INTERVAL_SECONDS = 5
+KEEPALIVE_COUNT = 3
+"""TCP keepalives (libpq): a peer gone from the network is noticed after about 25 s idle. They
+add nothing on a Unix socket (Cloud Run's) or against a frozen server whose kernel still
+acknowledges them: WAIT_TIMEOUT_SECONDS covers those."""
 RECONNECT_SECONDS = 60.0
 """How long the pool keeps reconnecting in the background before it waits for the next request."""
 MALFORMED = f"{DATABASE_URL_ENV} is malformed"
@@ -78,6 +97,58 @@ CREATE_USAGE = (
 
 Connection = psycopg.Connection[DictRow]
 
+CONNECTION_KWARGS: dict[str, Any] = {
+    "autocommit": True,
+    "row_factory": dict_row,
+    "connect_timeout": CONNECT_TIMEOUT_SECONDS,
+    "options": f"-c statement_timeout={STATEMENT_TIMEOUT_SECONDS}s",
+    "keepalives": 1,
+    "keepalives_idle": KEEPALIVE_IDLE_SECONDS,
+    "keepalives_interval": KEEPALIVE_INTERVAL_SECONDS,
+    "keepalives_count": KEEPALIVE_COUNT,
+}
+"""Every connection's settings: LangGraph's (autocommit, dict rows) and the bounds (#119)."""
+
+
+NO_ANSWER = "the database didn't answer within {bound}s"
+"""The OperationalError a bounded wait ends with."""
+
+
+class BoundedConnection(psycopg.Connection[DictRow]):
+    """psycopg's Connection, waiting at most `wait_timeout` seconds for any one answer (#119).
+
+    A frozen server (a paused instance, a stuck proxy) keeps its socket open and its kernel
+    acknowledges what it's sent, so psycopg would wait as long as the freeze lasts. Past the
+    bound the connection is closed (the pool then discards it) and the wait raises
+    OperationalError, a DatabaseUnavailable to the caller. Every query, fetch and the pool's
+    check go through `wait`; psycopg's own `wait` takes the timeout, and closes the connection
+    the same way when a cancel goes unanswered.
+
+    It relies on two psycopg details outside its public docs, read in the installed 3.3.8
+    source: `Connection.wait`'s `timeout`, and `psycopg.errors._WaitTimeout` (private). The
+    dependency is capped below 3.4 in pyproject.toml, and a test fails if either changes.
+    """
+
+    wait_timeout: float = WAIT_TIMEOUT_SECONDS
+
+    def wait(self, gen: Any, interval: float = 0.1, timeout: float | None = None) -> Any:
+        bound = self.wait_timeout if timeout is None else min(timeout, self.wait_timeout)
+        try:
+            return super().wait(gen, interval=interval, timeout=bound)
+        except psycopg.errors._WaitTimeout:  # private: raised only for `timeout` (see above)
+            self.pgconn.finish()
+            raise psycopg.OperationalError(NO_ANSWER.format(bound=bound)) from None
+
+
+def check_within_bound(conn: BoundedConnection) -> None:
+    """The pool's checkout check (`check_connection`), waiting CHECK_TIMEOUT_SECONDS at most."""
+    before = getattr(conn, "wait_timeout", WAIT_TIMEOUT_SECONDS)  # a test's fake may not have one
+    conn.wait_timeout = CHECK_TIMEOUT_SECONDS
+    try:
+        ConnectionPool.check_connection(conn)
+    finally:
+        conn.wait_timeout = before
+
 
 class Connect(Protocol):
     """psycopg's `Connection.connect`: the seam a test swaps for a flaky fake."""
@@ -100,7 +171,7 @@ class Database:
         self,
         url: SecretStr,
         *,
-        connect: Connect = psycopg.Connection.connect,
+        connect: Connect = BoundedConnection.connect,
         timeout: float = CHECKOUT_TIMEOUT_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -289,12 +360,7 @@ class Database:
         if self._malformed:
             raise DatabaseMisconfigured(MALFORMED)
         try:
-            conn = self._connect(
-                self.url.get_secret_value(),
-                autocommit=True,
-                row_factory=dict_row,
-                connect_timeout=CONNECT_TIMEOUT_SECONDS,
-            )
+            conn = self._connect(self.url.get_secret_value(), **CONNECTION_KWARGS)
         except psycopg.Error as error:
             reason = self._redacted(str(error))
             raise DatabaseUnavailable(f"cannot connect to the database: {reason}") from None
@@ -318,15 +384,11 @@ class Database:
                 self._pool = ConnectionPool(
                     self.url.get_secret_value(),
                     connection_class=self._connection_class(),
-                    kwargs={
-                        "autocommit": True,
-                        "row_factory": dict_row,
-                        "connect_timeout": CONNECT_TIMEOUT_SECONDS,
-                    },
+                    kwargs=dict(CONNECTION_KWARGS),
                     min_size=0,
                     max_size=POOL_MAX_SIZE,
                     open=False,
-                    check=ConnectionPool.check_connection,
+                    check=check_within_bound,
                     timeout=self.timeout,
                     reconnect_timeout=RECONNECT_SECONDS,
                     name="vouch",
@@ -338,7 +400,7 @@ class Database:
         """psycopg's Connection, opened through this Database's seam (the pool calls it)."""
         database = self
 
-        class PooledConnection(psycopg.Connection[DictRow]):
+        class PooledConnection(BoundedConnection):
             @classmethod
             def connect(cls, conninfo: str = "", **kwargs: Any) -> Connection:  # type: ignore[override]
                 return database._open_one(conninfo, **kwargs)
