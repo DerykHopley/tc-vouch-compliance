@@ -15,8 +15,10 @@ from pydantic import BaseModel, ConfigDict
 from vouch.api import VERDICTS as API_VERDICTS
 from vouch.front_matter import split_front_matter
 from vouch.isa import load_isa_control
+from vouch.paths import FIXTURES_DIR
+from vouch.profile import NORDLICHT_PROFILE, load_profile
 
-NORDLICHT = Path(__file__).resolve().parents[1] / "fixtures" / "nordlicht"
+NORDLICHT = FIXTURES_DIR / "nordlicht"
 FOLDERS = {"policies": "documented", "records": "implemented"}
 DOCUMENTS = sorted(p for folder in FOLDERS for p in (NORDLICHT / folder).glob("*.md"))
 EXPECTED_ANSWERS = NORDLICHT / "expected-answers.yaml"
@@ -174,14 +176,11 @@ def test_5_2_5_rests_on_patch_alone():
 # The expected-answers draft.
 
 
-def test_the_draft_covers_must_and_should_of_the_12_questions_but_5_2_4_m4():
-    # Interim, until #17's profile computes the applicable list: normal protection
-    # (must and should), less 5.2.4 M4, which Nordlicht's profile marks not applicable.
+def test_the_draft_covers_exactly_nordlichts_applicable_requirements():
+    profile = load_profile(NORDLICHT_PROFILE)
     expected = {
-        c: {r.id for r in load_isa_control(c).requirements if r.column in ("must", "should")}
-        for c in TWELVE
+        c: {r.id for r in profile.requirements_for(load_isa_control(c)).applicable} for c in TWELVE
     }
-    expected["5.2.4"].discard("M4")
 
     assert {c: set(reqs) for c, reqs in expected_answers().items()} == expected
 

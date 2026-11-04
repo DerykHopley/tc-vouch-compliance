@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
 from vouch.front_matter import split_front_matter
+from vouch.paths import FIXTURES_DIR
 
-DEFAULT_POLICY_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "policies"
+DEFAULT_POLICY_DIR = FIXTURES_DIR / "nordlicht" / "policies"
 POLICY_DIR_ENV = "ASSESS_POLICY_DIR"
 MAX_QUERY_CHARS = 200
 DEFAULT_LIMIT = 5
