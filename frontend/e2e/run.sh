@@ -41,11 +41,11 @@ if [ -n "${VOUCH_IMAGE:-}" ]; then
 else
   (cd "$ROOT/frontend" && npm run build) >"$LOG_DIR/build.log" 2>&1 \
     || { echo "The front-end build failed:" >&2; tail -n 30 "$LOG_DIR/build.log" >&2; exit 1; }
-  (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_FRONTEND="$ROOT/frontend/dist" \
+  (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_AUTH_MODE=local VOUCH_FRONTEND="$ROOT/frontend/dist" \
     uv run uvicorn vouch.api:app --port "$VOUCH_PORT") >"$LOG_DIR/vouch.log" 2>&1 &
 fi
 PIDS+=($!)
-(cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
+(cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
   uv run uvicorn vouch.api:app --port "$FAILING_PORT") >"$LOG_DIR/failing-api.log" 2>&1 &
 PIDS+=($!)
 

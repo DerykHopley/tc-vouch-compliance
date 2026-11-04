@@ -47,9 +47,16 @@ def requested_control(request: Annotated[AssessmentRequest, Body()]) -> Control:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-def current_user(request: Request) -> User:
+def app_settings(request: Request) -> Settings:
+    """The Settings the app was created with."""
+    return request.app.state.settings
+
+
+AppSettings = Annotated[Settings, Depends(app_settings)]
+
+
+def current_user(settings: AppSettings) -> User:
     """The request's user: local mode's default user; in clerk mode, refused until #32 signs in."""
-    settings: Settings = request.app.state.settings
     if settings.auth_mode == "local":
         return DEFAULT_USER
     raise HTTPException(status_code=401, detail="Sign in to use Vouch.")
@@ -64,14 +71,13 @@ def health() -> dict[str, str]:
     "/assessments", response_class=EventSourceResponse, dependencies=[Depends(current_user)]
 )
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)], request: Request
+    control: Annotated[Control, Depends(requested_control)], settings: AppSettings
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
     Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
     nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
     """
-    settings: Settings = request.app.state.settings
     try:
         for item in assess_steps(control, fake_model(settings, DEMO_SCRIPT)):
             if isinstance(item, Assessment):
@@ -97,13 +103,18 @@ def unknown_api_path(path: str) -> None:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """The API under /api; given the built front end (`settings.frontend`), that on every other path.
 
-    `settings` defaults to the environment's (load_settings).
+    `settings` defaults to the environment's (load_settings). Settings that can't serve stop
+    the app with a message naming the setting.
 
     A path that is neither a route nor a built file gets the front end's index.html when a
     browser asks for a page, so a deep link survives a refresh (client routing).
     """
     app = FastAPI(title="Vouch")
-    settings = settings or load_settings()
+    if settings is None:
+        try:
+            settings = load_settings()
+        except SettingsError as error:
+            raise SystemExit(f"Vouch cannot start: {error}.") from None
     app.state.settings = settings
     frontend = settings.frontend
     app.include_router(router)
@@ -118,12 +129,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-def _app_from_env() -> FastAPI:
-    try:
-        settings = load_settings()
-    except SettingsError as error:
-        raise SystemExit(f"Vouch cannot start: {error}.") from None
-    return create_app(settings)
-
-
-app = _app_from_env()
+app = create_app()
