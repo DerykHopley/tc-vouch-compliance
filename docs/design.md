@@ -97,6 +97,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Readiness bar | segments by accepted verdict, with the counts in words beside it |
 | Chat | closed (button), bubble, enlarged, pinned; the page it's on |
 | Invitation page (**pending design pass**) | opening ("Opening Vouch…"), Clerk's sign-in, sign-in could not be loaded (Clerk's script or Vouch's chunk failed); and, before it, "Vouch could not be reached" when health can't be read |
+| Developer page (**pending design pass**, #34) | developer only (a compliance lead gets the Dossier and no link); the model, with a field to change it: saving, changed ("The next assessment runs on …"), refused (the API's message, the field marked invalid); "no OpenRouter key" notice (fake model); "kept until the server restarts" note (no database); prompt version; usage link |
 
 **Checklist:** every state in the row is reachable and looks as described, in light and dark.
 

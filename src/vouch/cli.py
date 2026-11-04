@@ -9,9 +9,8 @@ from vouch.controls import UnknownControlError, load_control
 from vouch.exit_codes import EXIT_BAD_INPUT
 from vouch.fake_model import ScriptError
 from vouch.graph import assess
+from vouch.model_choice import OpenRouter
 from vouch.settings import Settings, SettingsError, fake_model, load_settings
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def build_model(settings: Settings) -> BaseChatModel:
@@ -22,9 +21,7 @@ def build_model(settings: Settings) -> BaseChatModel:
     api_key, model = settings.openrouter_api_key, settings.model
     if not api_key or not model:
         raise SettingsError("set OPENROUTER_API_KEY and ASSESS_MODEL, or ASSESS_FAKE_SCRIPT")
-    from langchain_openai import ChatOpenAI  # only the real path needs the provider
-
-    return ChatOpenAI(model=model, api_key=api_key, base_url=OPENROUTER_BASE_URL)
+    return OpenRouter(api_key).chat_model(model)  # with the API's retries and timeout
 
 
 def main(argv: list[str] | None = None) -> int:

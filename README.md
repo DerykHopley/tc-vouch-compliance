@@ -42,9 +42,13 @@ curl -N -X POST localhost:8000/api/assessments \
 ```
 
 `POST /api/assessments` streams server-sent events: a `step` per agent step, one `result`, then
-the stream closes (or one `error`). The API runs only the scripted fake model: the bundled demo
-script, or the one `ASSESS_FAKE_SCRIPT` names. It never builds the real model until sign-in
-exists.
+the stream closes (or one `error`). The model (`vouch.model_choice`): the script
+`ASSESS_FAKE_SCRIPT` names, when set; else OpenRouter, when `OPENROUTER_API_KEY` is set (a paid
+call; on Cloud Run only a signed-in user reaches it); else the bundled demo script. OpenRouter
+runs the model a developer chose on the developer page (`/developer`, `GET /api/developer/settings`
+and `PUT /api/developer/model`, developers only), else `ASSESS_MODEL`, else
+`anthropic/claude-haiku-5.5`. The choice is kept in the database, or in memory without one.
+`scripts/dev.sh` drops the key, so it always runs the fake.
 
 ### Sign-in (clerk mode)
 

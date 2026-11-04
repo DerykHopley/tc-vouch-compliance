@@ -25,9 +25,10 @@ Cloud Run" and "the walking skeleton has no secrets").
   `--max=1` caps the whole service, shared by every revision that gets traffic (*checked* in
   `gcloud run deploy --help`, SDK 589, and Cloud Run's "maximum instances" page; the lower limit
   wins). Max 1 caps what the free tier has to cover; that it stays inside is *unverified*.
-- **The scripted fake model only** (*checked* in `vouch.api`: the assessment route always uses
-  `fake_model`), so the deploy needs no secret and an open URL costs no model calls.
-  Secrets come with sign-in (M3), through Secret Manager.
+- **The scripted fake model until the service has `OPENROUTER_API_KEY`** (*checked* in
+  `vouch.model_choice`: no key, the demo script), so a deploy without it costs no model calls.
+  With the key (M3, through Secret Manager) assessments use OpenRouter, and in clerk mode only a
+  signed-in user reaches them.
 - **Public** (`--allow-unauthenticated`, *checked* in the `gcloud run deploy` reference): anyone
   with the URL can use it until sign-in lands.
 

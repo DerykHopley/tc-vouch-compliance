@@ -25,6 +25,10 @@ from vouch.search import (
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
 Verdict = Literal["found", "partial", "gap"]
+PROMPT_VERSION = "1"
+"""The version of the prompts below (_prompt, _judge_prompt, the tools' descriptions): raise it
+with any change to their words, so a run can say which prompts drafted it (the developer page,
+#34; the audit trail, M2)."""
 
 
 class SubmitAnswer(BaseModel):

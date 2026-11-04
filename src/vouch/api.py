@@ -17,15 +17,22 @@ from pydantic import BaseModel, StringConstraints
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.database import Connection, Database, DatabaseUnavailable
-from vouch.graph import Assessment, assess_steps
+from vouch.graph import PROMPT_VERSION, Assessment, assess_steps
+from vouch.model_choice import (
+    MODEL_ID,
+    USAGE_URL,
+    CatalogueUnavailable,
+    ModelChoice,
+    NoKey,
+    UnknownModel,
+    model_store,
+)
 from vouch.settings import (
     DEFAULT_USER,
-    DEMO_SCRIPT,
     FRONTEND_ENV,
     Settings,
     SettingsError,
     User,
-    fake_model,
     load_settings,
 )
 
@@ -38,6 +45,13 @@ SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
+NO_KEY = (
+    "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
+    "checked. Set OPENROUTER_API_KEY to choose a model."
+)
+CATALOGUE_UNAVAILABLE = (
+    "OpenRouter cannot be reached to check the model just now. Please try again shortly."
+)
 
 
 class AssessmentRequest(BaseModel):
@@ -141,17 +155,25 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     return answer
 
 
+def app_models(request: Request) -> ModelChoice:
+    """Which model an assessment runs on (vouch.model_choice)."""
+    return request.app.state.models
+
+
+AppModels = Annotated[ModelChoice, Depends(app_models)]
+
+
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)], settings: AppSettings
+    control: Annotated[Control, Depends(requested_control)], models: AppModels
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
-    Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
-    nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
+    The model is vouch.model_choice's: OpenRouter when a key is set (in clerk mode only a
+    signed-in user gets here), else the scripted fake. A failure after retries is the `error`.
     """
     try:
-        for item in assess_steps(control, fake_model(settings, DEMO_SCRIPT)):
+        for item in assess_steps(control, models.for_assessment()):
             if isinstance(item, Assessment):
                 yield ServerSentEvent(event="result", data={"assessment": _api_assessment(item)})
             else:
@@ -164,6 +186,51 @@ def create_assessment(
 
 def _api_assessment(assessment: Assessment) -> dict[str, Any]:
     return assessment.to_dict() | {"verdict": VERDICTS[assessment.verdict]}
+
+
+DEVELOPERS = [Depends(require_developer)]
+"""The developer page's API: a compliance lead gets a 403 (the role itself is never sent)."""
+
+
+class ModelRequest(BaseModel):
+    model: Annotated[str, StringConstraints(strip_whitespace=True, pattern=f"^{MODEL_ID.pattern}$")]
+
+
+def _developer_settings(models: ModelChoice, model: str | None = None) -> dict[str, Any]:
+    try:
+        shown = model or models.current()
+    except DatabaseUnavailable:
+        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
+    return {
+        "model": shown,
+        "runs_on": models.runs_on,
+        "prompt_version": PROMPT_VERSION,
+        "usage_url": USAGE_URL,
+        "kept_in": models.store.kept_in,
+    }
+
+
+@router.get("/developer/settings", dependencies=DEVELOPERS)
+def developer_settings(models: AppModels) -> dict[str, Any]:
+    """The model, where assessments run (`fake` without a key), the prompt version, usage."""
+    return _developer_settings(models)
+
+
+@router.put("/developer/model", dependencies=DEVELOPERS)
+def change_model(request: ModelRequest, models: AppModels) -> dict[str, Any]:
+    """The next assessment runs on `model`, once OpenRouter's model list has it."""
+    try:
+        model = models.change(request.model)
+    except NoKey:
+        raise HTTPException(status_code=409, detail=NO_KEY) from None
+    except UnknownModel:
+        detail = f"OpenRouter has no model “{request.model}”. Check the id on openrouter.ai/models."
+        raise HTTPException(status_code=422, detail=detail) from None
+    except CatalogueUnavailable:
+        raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
+    except DatabaseUnavailable:
+        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
+    return _developer_settings(models, model)
 
 
 @router.get("/{path:path}", include_in_schema=False)
@@ -203,6 +270,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.auth.close()
         if app.state.database is not None:
             app.state.database.close()
+        app.state.models.close()
 
     # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
@@ -210,6 +278,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
+    app.state.models = ModelChoice(settings, model_store(app.state.database))
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

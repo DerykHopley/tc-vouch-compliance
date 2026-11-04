@@ -437,3 +437,46 @@ def test_the_setup_command_reports_a_real_refusal_at_once(change, reason, capsys
     assert time.monotonic() - started < 2
     assert reason in err
     assert "wrong-pw-33" not in err
+
+
+@needs_postgres
+def test_a_setting_is_kept_and_read_back_with_or_without_the_setup(empty_database):
+    """Vouch's own settings table (#34, the model choice): made by the setup command, or on the
+    first write when a deploy hasn't run it since."""
+    assert empty_database.setting("model") is None  # no table yet: nothing stored
+
+    empty_database.set_setting("model", "anthropic/claude-haiku-5.5")
+    empty_database.set_setting("model", "openai/gpt-5.5")  # replaced, not added
+    empty_database.setup()
+
+    assert empty_database.setting("model") == "openai/gpt-5.5"
+    assert database.SETTINGS_TABLE in tables(empty_database)
+
+
+def test_a_setting_with_the_database_down_is_unavailable(make_db):
+    db = make_db(UNREACHABLE_URL, timeout=0.3)
+
+    with pytest.raises(DatabaseUnavailable):
+        db.setting("model")
+    with pytest.raises(DatabaseUnavailable):
+        db.set_setting("model", "x/y")
+
+
+@needs_postgres
+def test_a_developers_model_choice_outlasts_a_restart_in_the_database(empty_database):
+    """#34: the choice is kept in the database, so a new instance of the app runs on it too."""
+    from test_model_choice import OTHER_MODEL, FakeCatalogue, FakeChat, fake_openrouter
+
+    url = empty_database.url
+
+    def app_on_the_database():
+        app = create_app(Settings(openrouter_api_key=SecretStr("sk-or-test"), database_url=url))
+        app.state.models.openrouter = fake_openrouter(FakeChat(), FakeCatalogue([OTHER_MODEL]))
+        return app
+
+    with TestClient(app_on_the_database()) as first:
+        assert first.put("/api/developer/model", json={"model": OTHER_MODEL}).status_code == 200
+    with TestClient(app_on_the_database()) as second:
+        shown = second.get("/api/developer/settings").json()
+
+    assert (shown["model"], shown["kept_in"]) == (OTHER_MODEL, "database")
