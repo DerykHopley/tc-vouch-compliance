@@ -1,11 +1,12 @@
 import json
 from importlib.metadata import version
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from vouch.api import app
-from vouch.settings import FAKE_SCRIPT_ENV
+from vouch.api import app, create_app
+from vouch.settings import FAKE_SCRIPT_ENV, Settings
 
 DEMO_CONTROL = "NK-ENC-01"
 
@@ -15,6 +16,11 @@ def client(monkeypatch):
     monkeypatch.delenv(FAKE_SCRIPT_ENV, raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     return TestClient(app, raise_server_exceptions=False)
+
+
+def client_playing(script) -> TestClient:
+    """The app in local mode, its fake model playing `script`."""
+    return TestClient(create_app(Settings(fake_script=Path(script))), raise_server_exceptions=False)
 
 
 def read_events(response) -> list[tuple[str, dict]]:
@@ -56,8 +62,8 @@ def test_demo_control_streams_steps_then_one_result_with_a_decided_verdict(clien
     assert "encryption-policy" in {s["doc_id"] for s in assessment["sources"]}
 
 
-def test_a_gap_maps_to_not_evidenced(client, monkeypatch):
-    monkeypatch.setenv(FAKE_SCRIPT_ENV, "tests/scripts/vul_gap.json")
+def test_a_gap_maps_to_not_evidenced():
+    client = client_playing("tests/scripts/vul_gap.json")
 
     response = client.post("/api/assessments", json={"control_id": "NK-VUL-01"})
 
@@ -88,10 +94,10 @@ def test_empty_or_missing_control_id_gets_422(client, body):
     assert response.status_code == 422
 
 
-def test_a_broken_fake_script_ends_the_stream_with_one_error_event(client, monkeypatch, tmp_path):
+def test_a_broken_fake_script_ends_the_stream_with_one_error_event(tmp_path):
     script = tmp_path / "broken.json"
     script.write_text('{"gather": [')
-    monkeypatch.setenv(FAKE_SCRIPT_ENV, str(script))
+    client = client_playing(script)
 
     response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 

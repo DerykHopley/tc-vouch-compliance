@@ -1,12 +1,12 @@
 """search_policies: keyword search over the company's policy folder, within an allow-list."""
 
-import os
 import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
+from vouch.settings import load_settings
+
 DEFAULT_POLICY_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "policies"
-POLICY_DIR_ENV = "ASSESS_POLICY_DIR"
 MAX_QUERY_CHARS = 200
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 10
@@ -56,7 +56,7 @@ def _check_input(query: Any, limit: Any) -> str | None:
 
 
 def _policy_dir() -> Path:
-    return Path(os.environ.get(POLICY_DIR_ENV) or DEFAULT_POLICY_DIR)
+    return load_settings().policy_dir or DEFAULT_POLICY_DIR
 
 
 def _policy_files(folder: Path) -> list[Path]:

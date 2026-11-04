@@ -44,6 +44,10 @@ _Avoid_: Config, settings, project
 One run of the agent over one control in one compliance profile, ending in a verdict with its cited evidence.
 _Avoid_: Check, evaluation, audit
 
+**User**:
+One person using Vouch: signed in with Clerk on the live app, or the one default user on a developer's machine. Their id scopes everything they store. A user's role is compliance lead (the default) or developer.
+_Avoid_: Account, tenant
+
 **Audit prep**:
 The weeks-long work of a compliance lead getting a compliance profile's controls evidenced before an audit; Vouch's guided chat walks them through it.
 _Avoid_: Onboarding, project, campaign

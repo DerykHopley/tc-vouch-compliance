@@ -5,26 +5,32 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import logging
-import os
 from collections.abc import Iterable
 from importlib.metadata import version
-from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.graph import Assessment, assess_steps
-from vouch.settings import DEMO_SCRIPT, fake_model_from_env
+from vouch.settings import (
+    DEFAULT_USER,
+    DEMO_SCRIPT,
+    FRONTEND_ENV,
+    Settings,
+    SettingsError,
+    User,
+    fake_model,
+    load_settings,
+)
 
 log = logging.getLogger(__name__)
 
 # The trial's verdicts, as the API names them (GLOSSARY.md, "Verdict"). #20 renames them inside.
 VERDICTS = {"found": "evidenced", "partial": "partly-evidenced", "gap": "not-evidenced"}
 FAILED = "The assessment could not be completed. Please try again later."
-FRONTEND_ENV = "VOUCH_FRONTEND"
 
 router = APIRouter(prefix="/api")
 
@@ -41,22 +47,33 @@ def requested_control(request: Annotated[AssessmentRequest, Body()]) -> Control:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
+def current_user(request: Request) -> User:
+    """The request's user: local mode's default user; in clerk mode, refused until #32 signs in."""
+    settings: Settings = request.app.state.settings
+    if settings.auth_mode == "local":
+        return DEFAULT_USER
+    raise HTTPException(status_code=401, detail="Sign in to use Vouch.")
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": version("vouch")}
 
 
-@router.post("/assessments", response_class=EventSourceResponse)
+@router.post(
+    "/assessments", response_class=EventSourceResponse, dependencies=[Depends(current_user)]
+)
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)],
+    control: Annotated[Control, Depends(requested_control)], request: Request
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
     Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
     nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
     """
+    settings: Settings = request.app.state.settings
     try:
-        for item in assess_steps(control, fake_model_from_env(DEMO_SCRIPT)):
+        for item in assess_steps(control, fake_model(settings, DEMO_SCRIPT)):
             if isinstance(item, Assessment):
                 yield ServerSentEvent(event="result", data={"assessment": _api_assessment(item)})
             else:
@@ -77,13 +94,18 @@ def unknown_api_path(path: str) -> None:
     raise HTTPException(status_code=404)
 
 
-def create_app(frontend: Path | None = None) -> FastAPI:
-    """The API under /api; given the built front end, that on every other path.
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """The API under /api; given the built front end (`settings.frontend`), that on every other path.
+
+    `settings` defaults to the environment's (load_settings).
 
     A path that is neither a route nor a built file gets the front end's index.html when a
     browser asks for a page, so a deep link survives a refresh (client routing).
     """
     app = FastAPI(title="Vouch")
+    settings = settings or load_settings()
+    app.state.settings = settings
+    frontend = settings.frontend
     app.include_router(router)
     if frontend is not None:
         if not (frontend / "index.html").is_file():
@@ -96,5 +118,12 @@ def create_app(frontend: Path | None = None) -> FastAPI:
     return app
 
 
-_frontend = os.environ.get(FRONTEND_ENV)
-app = create_app(Path(_frontend) if _frontend else None)
+def _app_from_env() -> FastAPI:
+    try:
+        settings = load_settings()
+    except SettingsError as error:
+        raise SystemExit(f"Vouch cannot start: {error}.") from None
+    return create_app(settings)
+
+
+app = _app_from_env()
