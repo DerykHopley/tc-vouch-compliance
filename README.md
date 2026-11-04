@@ -6,10 +6,21 @@ citing its sources.
 
 ## Run it locally
 
-You need [uv](https://docs.astral.sh/uv/) and Python 3.12.
+You need [uv](https://docs.astral.sh/uv/) and Python 3.12, and Node 24 for the front end.
 
 ```sh
-uv sync
+uv sync && (cd frontend && npm ci)
+scripts/dev.sh                                   # open the URL it prints; Ctrl-C stops both
+scripts/dev.sh --api-port 8010 --web-port 5180   # when 8000 or 5173 is taken
+```
+
+`scripts/dev.sh` starts the API (reloading when `src/` changes, on the scripted fake model) and
+the Vite dev server, which passes `/api` to it. A port already in use stops it before anything
+starts.
+
+The agent on its own, from the command line:
+
+```sh
 ASSESS_FAKE_SCRIPT=tests/scripts/enc_found.json uv run assess NK-ENC-01
 ```
 
