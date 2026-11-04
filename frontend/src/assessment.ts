@@ -1,3 +1,5 @@
+import { authHeaders } from './session.ts'
+
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
 
 export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced'
@@ -57,7 +59,7 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
 export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent> {
   const response = await fetch('/api/assessments', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(await authHeaders()) },
     body: JSON.stringify({ control_id: controlId }),
   })
   if (response.status >= 500 || !response.body) throw new Error(`service answered ${response.status}`)

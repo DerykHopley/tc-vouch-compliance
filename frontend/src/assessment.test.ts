@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { readEvents } from './assessment.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { assess, readEvents } from './assessment.ts'
+import { setSessionToken } from './session.ts'
 
 function streamOf(...chunks: string[]): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder()
@@ -51,5 +52,37 @@ describe('readEvents', () => {
   it('skips comments and keep-alive pings', async () => {
     const body = streamOf(': ping\n\n', 'event: error\ndata: {"message":"No."}\n\n')
     expect(await all(body)).toEqual([{ event: 'error', data: { message: 'No.' } }])
+  })
+})
+
+describe('assess, signed in', () => {
+  const result =
+    'event: result\ndata: {"assessment":{"control_id":"NK-ENC-01","verdict":"evidenced","answer":"Yes."}}\n\n'
+  const sentHeaders = async () => {
+    const calls: RequestInit[] = []
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      calls.push(init)
+      return Promise.resolve(new Response(streamOf(result), { status: 200 }))
+    })
+    for await (const item of assess('NK-ENC-01')) void item
+    return calls[0].headers as Record<string, string>
+  }
+
+  afterEach(() => {
+    setSessionToken(null)
+    vi.unstubAllGlobals()
+  })
+
+  it('sends a fresh session token from the token source on each call', async () => {
+    let n = 0
+    setSessionToken(async () => `token-${++n}`)
+    expect((await sentHeaders()).Authorization).toBe('Bearer token-1')
+    expect((await sentHeaders()).Authorization).toBe('Bearer token-2')
+  })
+
+  it('sends no Authorization header without a token source (local mode) or a token', async () => {
+    expect(await sentHeaders()).not.toHaveProperty('Authorization')
+    setSessionToken(async () => null)
+    expect(await sentHeaders()).not.toHaveProperty('Authorization')
   })
 })

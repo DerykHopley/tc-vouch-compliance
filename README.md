@@ -46,6 +46,21 @@ the stream closes (or one `error`). The API runs only the scripted fake model: t
 script, or the one `ASSESS_FAKE_SCRIPT` names. It never builds the real model until sign-in
 exists.
 
+### Sign-in (clerk mode)
+
+Locally there is no sign-in: one default user. In `clerk` mode, as on Cloud Run, every `/api`
+route but `/api/health` needs a Clerk session token (`Authorization: Bearer ...`); without a
+valid one the API answers 401, and 503 when Clerk can't be reached. The front end shows the
+"access is by invitation" page with Clerk's sign-in until a user signs in. A user is a developer
+when their **private** metadata in Clerk is `{"role": "developer"}`; anyone else is a compliance
+lead. To try it locally on the development instance, with the Clerk keys loaded from the keyring
+by `.envrc`:
+
+```sh
+npm --prefix frontend run build
+VOUCH_AUTH_MODE=clerk VOUCH_FRONTEND=frontend/dist uv run uvicorn vouch.api:app --port 8000
+```
+
 ### One container, as on Cloud Run
 
 ```sh

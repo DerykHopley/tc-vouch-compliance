@@ -43,6 +43,8 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .hero h1 { font-size: clamp(30px, 4.2vw, 50px); margin: 10px 0 14px; }
 .hero p { max-width: 52ch; margin: 0; color: var(--muted); }
 .hero p b { color: var(--ink); }
+/* The invitation page (clerk mode): Clerk's sign-in under the hero */
+.signin-note { color: var(--muted); margin: 0; }
 .band { background: var(--band); color: var(--band-fg); padding: 32px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 28px; }
 .band h2 { font-size: 30px; margin-top: 8px; }
 .band p { opacity: .8; margin: 0; max-width: 56ch; }

@@ -167,3 +167,10 @@ describe('Ask Vouch', () => {
     expect(bubble()).toBeTruthy()
   })
 })
+
+describe('local mode', () => {
+  it('has no sign-out: nobody is signed in', () => {
+    render(<App />)
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+  })
+})

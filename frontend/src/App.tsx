@@ -24,7 +24,8 @@ const PATHS: Record<View, string> = { dossier: '/', paper: `/controls/${CONTROL.
 const viewAt = (path: string): View =>
   (Object.keys(PATHS) as View[]).find((view) => PATHS[view] === path) ?? 'dossier'
 
-export default function App() {
+/** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out. */
+export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   const [theme, setTheme] = useState<Theme>(systemTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -59,6 +60,7 @@ export default function App() {
           <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
             {other === 'dark' ? 'Dark theme' : 'Light theme'}
           </button>
+          {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
         </div>
       </header>
       {view === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
