@@ -41,6 +41,7 @@ from vouch.guards import (
     refusal_step,
 )
 from vouch.isa import Column, IsaControl, Requirement, load_isa_control
+from vouch.patch import EVIDENCE_PENDING, vulnerability_status
 from vouch.profile import (
     ComplianceProfile,
     ControlRequirements,
@@ -60,8 +61,9 @@ from vouch.search import (
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
+VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-remediation-review-3"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-patch-1"  # change it whenever a prompt below changes
 
 JudgedVerdict = Literal["evidenced", "partly-evidenced", "not-evidenced"]
 Verdict = JudgedVerdict | Literal["not-applicable"]
@@ -72,6 +74,7 @@ NOT_JUDGED = "not judged"  # the reason given when the model skipped a requireme
 # The reasons every requirement is not-evidenced, without asking the model, when nothing was read.
 NO_SOURCE = "no evidence source could be read"
 NO_SOURCES_ALLOWED = "no evidence sources allowed"
+PENDING = "evidence pending: Patch's vulnerability status could not be read"
 # The reasons an evidenced or partly evidenced verdict becomes not-evidenced after the quote
 # check: nothing checked shows it (#21).
 NO_CITATION = "No citation given, so nothing checked shows it."
@@ -180,9 +183,25 @@ SEARCH_POLICIES_TOOL = {
 }
 
 
+VULNERABILITY_STATUS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": VULNERABILITY_STATUS,
+        "description": "Ask Patch for the company's vulnerability status: the tracked CVEs "
+        "with their CVSS scores, the assets affected, priorities, treatments, overdue items "
+        "and risk-acceptance decisions; returns passages with doc_id, heading and text.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
 def _search_policies(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
     # Looked up when called, so a test can replace vouch.graph.search_policies.
     return search_policies(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
+
+
+def _vulnerability_status(_args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
+    return vulnerability_status(folder)
 
 
 @dataclass(frozen=True)
@@ -204,7 +223,9 @@ EVIDENCE_TOOLS: dict[str, EvidenceTool] = {
         "policies", "the policies", SEARCH_POLICIES_TOOL, _search_policies
     ),
     "search_records": EvidenceTool("records", "the records"),  # #22
-    "vulnerability_status": EvidenceTool("patch", "Patch's vulnerability status"),  # #24
+    VULNERABILITY_STATUS: EvidenceTool(
+        "patch", "Patch's vulnerability status", VULNERABILITY_STATUS_TOOL, _vulnerability_status
+    ),
 }
 
 
@@ -217,7 +238,8 @@ def _asking(call: dict[str, Any], profile: ComplianceProfile | None) -> str:
         return f"Asked for {tool.label}, which this profile doesn't allow."
     if tool.run is None:
         return f"Asked for {tool.label}, which Vouch can't search yet."
-    return f"Searching {tool.label} for “{call['args'].get('query', '')}”."
+    query = call["args"].get("query")
+    return f"Searching {tool.label} for “{query}”." if query else f"Asking for {tool.label}."
 
 
 @dataclass(frozen=True)
@@ -382,6 +404,7 @@ class AssessState(TypedDict, total=False):
     warnings: Annotated[list[str], operator.add]
     guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
     searched: list[str]  # the last tools step's searches that ran, one sentence each
+    pending: list[str]  # the last tools step's sources that couldn't answer, and why
     searches_run: Annotated[int, operator.add]
     searches_refused: Annotated[int, operator.add]
     usage: Annotated[list[dict[str, int]], operator.add]
@@ -686,7 +709,7 @@ def build_graph(
         """Run each tool call the guards let through; a refusal is the call's reply and a
         `guard` step. Passages reach the model as data, instruction-like ones flagged; a
         passage already gathered isn't added or flagged again."""
-        messages, new, warnings, guards, searched = [], [], [], [], []
+        messages, new, warnings, guards, searched, pending = [], [], [], [], [], []
         known = {_passage_key(p) for p in state["evidence"]}
         run = refused = 0
         for call in state["messages"][-1].tool_calls:
@@ -705,7 +728,10 @@ def build_graph(
                 if isinstance(result, list):
                     run += 1
                     found = _plural(len(result), "passage")
-                    searched.append(f"the {tool.source} for “{args.get('query', '')}”: {found}")
+                    query = args.get("query")
+                    searched.append(
+                        tool.label + (f" for “{query}”" if query else "") + f": {found}"
+                    )
                     for passage in result:
                         if _passage_key(passage) not in known:
                             known.add(_passage_key(passage))
@@ -717,6 +743,9 @@ def build_graph(
                     refused += 1
                 elif result["error"] == SOURCE_UNAVAILABLE:
                     warnings.append(SOURCE_UNAVAILABLE)
+                elif result["error"] == EVIDENCE_PENDING:
+                    warnings.append(EVIDENCE_PENDING)
+                    pending.append(result.get("detail", f"{tool.label} could not be read"))
             messages.append(ToolMessage(content, tool_call_id=call["id"]))
         return {
             "messages": messages,
@@ -724,15 +753,21 @@ def build_graph(
             "warnings": warnings,
             "guards": guards + flagged_steps(new),
             "searched": searched,
+            "pending": pending,
             "searches_run": run,
             "searches_refused": refused,
         }
 
     def no_evidence_reason(state: AssessState) -> str | None:
         """Why nothing could be read, so the model isn't asked to judge; None when something
-        could be. No source offered, or every search refused, counts as none allowed."""
+        could be. No source offered, or every search refused, counts as none allowed. While
+        Patch's evidence is pending, nothing is judged on the rest: the lead runs it again."""
         refused_only = state["searches_refused"] and not state["searches_run"]
-        if not _offered_tools(profile) or refused_only:
+        if not _offered_tools(profile):
+            return NO_SOURCES_ALLOWED
+        if EVIDENCE_PENDING in state["warnings"]:
+            return PENDING
+        if refused_only:
             return NO_SOURCES_ALLOWED
         if SOURCE_UNAVAILABLE in state["warnings"]:
             return NO_SOURCE
@@ -933,8 +968,11 @@ class Step:
             if calls:
                 return " ".join(_asking(call, self.profile) for call in calls)
         if self.node == "tools":
+            said = [f"{why}, so the evidence is pending." for why in update.get("pending", [])]
             if update.get("searched"):  # only searches that ran
-                return "Searched " + "; ".join(update["searched"]) + "."
+                said.insert(0, "Searched " + "; ".join(update["searched"]) + ".")
+            if said:
+                return " ".join(said)
             if SOURCE_UNAVAILABLE in update.get("warnings", []):
                 return "The policy folder could not be read."
             return "No search ran."
