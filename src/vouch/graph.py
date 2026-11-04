@@ -1,8 +1,9 @@
 """The assessment graph: one VDA ISA control under one compliance profile in, one Assessment out.
 
-The agent gathers evidence (ReAct over `search_policies`), drafts an answer, and judges each
-applicable requirement, quoting the passages each verdict relies on. Each quote is checked in
-code against the document it cites; one that fails is dropped, shown as a guard step. The
+The graph applies the profile's country overlays first, taking an overlay branch when one adds a
+requirement to the control. The agent then gathers evidence (ReAct over `search_policies`),
+drafts an answer, and judges each applicable requirement, quoting the passages each verdict
+relies on. Each quote is checked in code against the document it cites; one that fails is dropped, shown as a guard step. The
 control's verdict rolls up from the verdicts in code, never from the model.
 """
 
@@ -35,7 +36,7 @@ from vouch.search import (
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
 GUARD = "guard"  # the node a guard step names, such as a dropped citation's
-PROMPT_VERSION = "m1-checked-citations-1"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-country-overlays-1"  # change it whenever a prompt below changes
 
 Verdict = Literal["evidenced", "partly-evidenced", "not-evidenced", "not-applicable"]
 JUDGED_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced")
@@ -201,7 +202,9 @@ def should_score(requirements: Iterable[RequirementVerdict]) -> ShouldScore:
 
 class AssessState(TypedDict, total=False):
     control: IsaControl
+    profile: ComplianceProfile
     control_requirements: ControlRequirements
+    overlay_requirements: tuple[Requirement, ...]  # the applicable ones the overlays add
     evidence: Annotated[list[Passage], operator.add]
     warnings: Annotated[list[str], operator.add]
     usage: Annotated[list[dict[str, int]], operator.add]
@@ -238,6 +241,14 @@ def _prompt(
             f"Requirements:\n{_format_requirements(control_requirements.applicable)}"
         ),
     ]
+
+
+def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage:
+    listed = "\n".join(f"- {r.id} ({r.source}): {r.text}" for r in overlay_requirements)
+    return HumanMessage(
+        "These requirements come from a country overlay, national rules added to this "
+        f"control. Gather evidence for each of them too:\n{listed}"
+    )
 
 
 def _judge_prompt(state: AssessState) -> list[AnyMessage]:
@@ -307,6 +318,30 @@ def build_graph(model: BaseChatModel):
     """Compile the graph around a model passed in by the caller."""
     bound = model.bind_tools([SEARCH_POLICIES_TOOL, SUBMIT_ANSWER_TOOL])
     judge_model = model.with_structured_output(Judgement, include_raw=True)
+
+    def apply_overlays(state: AssessState) -> dict[str, Any]:
+        """The control's requirements under the profile, overlay requirements included, and the
+        prompt that starts gathering."""
+        control, profile = state["control"], state["profile"]
+        control_requirements = profile.requirements_for(control)
+        return {
+            "control_requirements": control_requirements,
+            "overlay_requirements": tuple(
+                r for r in control_requirements.applicable if r.column == "overlay"
+            ),
+            "messages": _prompt(control, control_requirements, profile),
+        }
+
+    def overlay_branch(state: AssessState) -> dict[str, Any]:
+        """Asks the gathering to find evidence for each overlay requirement too."""
+        overlay_requirements = state["overlay_requirements"]
+        return {
+            "overlay_requirements": overlay_requirements,
+            "messages": [_overlay_prompt(overlay_requirements)],
+        }
+
+    def after_overlays(state: AssessState) -> str:
+        return "overlay_branch" if state["overlay_requirements"] else "gather"
 
     def gather(state: AssessState) -> dict[str, Any]:
         reply = bound.invoke(state["messages"])
@@ -442,12 +477,16 @@ def build_graph(model: BaseChatModel):
         return "judge" if state.get("answer") is not None else "gather"
 
     graph = StateGraph(AssessState)
+    graph.add_node("apply_overlays", apply_overlays)
+    graph.add_node("overlay_branch", overlay_branch)
     graph.add_node("gather", gather)
     graph.add_node("tools", tools)
     graph.add_node("check_answer", check_answer)
     graph.add_node("judge", judge)
     graph.add_node("check_quotes", check_quotes)
-    graph.add_edge(START, "gather")
+    graph.add_edge(START, "apply_overlays")
+    graph.add_conditional_edges("apply_overlays", after_overlays, ["overlay_branch", "gather"])
+    graph.add_edge("overlay_branch", "gather")
     graph.add_conditional_edges("gather", after_gather, ["tools", "check_answer"])
     graph.add_edge("tools", "gather")
     graph.add_conditional_edges("check_answer", after_check, ["gather", "judge"])
@@ -466,6 +505,18 @@ class Step:
     def describe(self) -> str:
         """One plain sentence, in the glossary's words, saying what the step did."""
         update = self.update
+        if self.node == "apply_overlays":
+            added = _by_overlay(update["overlay_requirements"])
+            if not added:
+                return (
+                    "No country overlay adds a requirement to this control, "
+                    "so no overlay branch is taken."
+                )
+            listed = "; ".join(f"{name} adds {', '.join(ids)}" for name, ids in added.items())
+            return f"Applied the country overlays: {listed}."
+        if self.node == "overlay_branch":
+            ids = ", ".join(f"{r.id} ({r.source})" for r in update["overlay_requirements"])
+            return f"Overlay branch: gathering evidence for {ids}."
         if self.node == "gather":
             calls = update["messages"][-1].tool_calls if update.get("messages") else []
             queries = [c["args"].get("query", "") for c in calls if c["name"] == SEARCH_POLICIES]
@@ -506,6 +557,14 @@ class Step:
         return f"Finished the {self.node} step."
 
 
+def _by_overlay(requirements: Iterable[Requirement]) -> dict[str, list[str]]:
+    """Each overlay's name and the ids of the requirements it adds, in order."""
+    added: dict[str, list[str]] = {}
+    for r in requirements:
+        added.setdefault(r.source, []).append(r.id)
+    return added
+
+
 def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" + ("" if count == 1 else "s")
 
@@ -524,15 +583,13 @@ def assess_steps(
     """Run the graph for one loaded control: a Step per node as it finishes (and a guard Step
     per dropped citation), each RequirementVerdict once its quotes are checked, then the
     Assessment."""
-    control_requirements = profile.requirements_for(control)
     initial = {
         "control": control,
-        "control_requirements": control_requirements,
+        "profile": profile,
         "evidence": [],
         "warnings": [],
         "usage": [],
         "document_folders": [str(s.folder) for s in profile.evidence_sources.values()],
-        "messages": _prompt(control, control_requirements, profile),
     }
     final: dict[str, Any] = {}
     steps: list[dict[str, str]] = []

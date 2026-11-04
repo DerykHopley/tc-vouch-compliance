@@ -70,10 +70,10 @@ def test_demo_control_streams_steps_then_requirement_events_then_one_result(clie
     assert response.headers["content-type"].startswith("text/event-stream")
     events = read_events(response)
     names = [name for name, _ in events]
-    assert names == ["step"] * 6 + ["requirement"] * 5 + ["result"]
+    assert names == ["step"] * 7 + ["requirement"] * 5 + ["result"]
     steps = [data for name, data in events if name == "step"]
     assert [s["node"] for s in steps] == [
-        "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
+        "apply_overlays", "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
     ]
     assert all(set(s) == {"node", "text"} and s["text"] for s in steps)
     assert steps[-2]["text"] == "Judged 4 of 5 requirements evidenced."

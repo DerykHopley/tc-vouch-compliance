@@ -60,7 +60,7 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     assert result.model == "scripted-fake"
     assert result.prompt_version
     assert [s["node"] for s in result.steps] == [
-        "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
+        "apply_overlays", "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
     ]
     assert step_texts(result, "gather")[-1] == "Drafted an answer."
     assert step_texts(result, "judge") == ["Judged 3 of 5 requirements evidenced."]
