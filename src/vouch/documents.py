@@ -19,12 +19,17 @@ class Section:
 
 def document_path(folder: Path, doc_id: str) -> Path | None:
     """The document with this id (its file name without `.md`, which may be given) directly in
-    the folder, or None. An id holding a path, or a link pointing out of the folder, is None."""
+    the folder, or None. An id holding a path, or a link pointing out of the folder, is None;
+    so is every document when the folder (resolved by the profile on load) now resolves
+    elsewhere, swapped for a symlink since."""
     doc_id = doc_id.removesuffix(SUFFIX)
     if not doc_id or doc_id in {".", ".."} or "/" in doc_id or "\\" in doc_id:
         return None
-    path = folder / f"{doc_id}{SUFFIX}"
-    if not path.is_file() or path.resolve().parent != folder.resolve():
+    root = folder.resolve()
+    if root != folder:
+        return None
+    path = root / f"{doc_id}{SUFFIX}"
+    if not path.is_file() or path.resolve().parent != root:
         return None
     return path
 

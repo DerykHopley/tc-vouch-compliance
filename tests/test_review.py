@@ -256,7 +256,11 @@ def test_a_re_run_after_reject_receives_the_note():
 
 
 def thread_values(saver, thread_id) -> dict:
-    return build_graph(None, saver).get_state({"configurable": {"thread_id": thread_id}}).values
+    return (
+        build_graph(None, checkpointer=saver)
+        .get_state({"configurable": {"thread_id": thread_id}})
+        .values
+    )
 
 
 def test_resuming_runs_nothing_before_the_interrupt_again_and_a_second_resume_is_refused():
@@ -412,7 +416,7 @@ def test_the_review_step_refuses_an_override_resume_did_not_check():
     }
 
     with pytest.raises(InvalidReviewError):
-        build_graph(None, saver).invoke(
+        build_graph(None, checkpointer=saver).invoke(
             Command(resume=twice), {"configurable": {"thread_id": result.thread_id}}
         )
 
