@@ -203,7 +203,7 @@ def test_a_folder_swapped_for_a_symlink_after_loading_is_refused_and_shown(tmp_p
     assert not any(SECRET in reply for reply in tool_replies(model))
     assert "folder_escaped" in result.warnings
     assert {(r.verdict, r.reason) for r in result.requirements} == {
-        ("not-evidenced", "no evidence sources allowed")
+        ("not-evidenced", "no evidence source could be read")  # allowed, but not readable
     }
     assert model.judge_turn == 0
 
@@ -291,10 +291,10 @@ def test_a_profile_with_no_sources_refuses_every_tool_and_gives_not_evidenced(tm
 
 
 def test_a_profile_allowing_only_sources_not_built_yet_gives_not_evidenced(tmp_path):
-    profile = load_profile(copy_profile(tmp_path, records="records"))  # no search_records yet
+    profile = load_profile(copy_profile(tmp_path, patch="patch"))  # no vulnerability_status yet
     model = recording(
         [
-            {"tool": "search_records", "args": {"query": "password"}},
+            {"tool": "vulnerability_status", "args": {}},
             {"answer": "Nothing could be searched."},
         ],
         judge=[{"requirement_id": "M1", "verdict": "evidenced", "reason": "Never asked."}],
@@ -308,6 +308,26 @@ def test_a_profile_allowing_only_sources_not_built_yet_gives_not_evidenced(tmp_p
     assert model.judge_turn == 0
     texts = " ".join(s["text"] for s in result.steps)
     assert "Search" not in texts  # no step says a search ran that never did
+
+
+@pytest.mark.parametrize(
+    ("allowed", "asked"),
+    [({"policies": "policies"}, "search_records"), ({"records": "records"}, "search_policies")],
+    ids=["policies-allowed-records-asked", "records-allowed-policies-asked"],
+)
+def test_an_allowed_source_never_searched_is_not_called_not_allowed(allowed, asked, tmp_path):
+    profile = load_profile(copy_profile(tmp_path, **allowed))
+    model = recording(
+        [{"tool": asked, "args": {"query": "password"}}, {"answer": "Nothing was read."}],
+        judge=[{"requirement_id": "M1", "verdict": "evidenced", "reason": "Never asked."}],
+    )
+
+    result = assess("4.1.2", profile, model)
+
+    assert {(r.verdict, r.reason) for r in result.requirements} == {
+        ("not-evidenced", "no allowed source was searched")
+    }
+    assert model.judge_turn == 0
 
 
 def test_a_flagged_passage_found_twice_is_flagged_and_judged_once():
@@ -451,9 +471,9 @@ def gather_step(profile, *calls: tuple[str, dict]) -> Step:
             "Asked for the records, which this profile doesn't allow.",
         ),
         (
-            {"records": "records"},
-            [("search_records", {"query": "joiners"})],
-            "Asked for the records, which Vouch can't search yet.",
+            {"patch": "patch"},
+            [("vulnerability_status", {})],
+            "Asked for Patch's vulnerability status, which Vouch can't search yet.",
         ),
         (
             {"policies": "policies"},

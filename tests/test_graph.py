@@ -99,6 +99,8 @@ def test_the_assessment_is_plain_json():
                 "section": "How we chose our sign-in methods",
                 "quote": "We decide how people sign in to a system by looking at what could go "
                 "wrong with it.",
+                "kind": "documented",
+                "stale": False,
             }
         ],
     }

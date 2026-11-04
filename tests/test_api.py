@@ -94,6 +94,8 @@ def test_demo_control_streams_steps_then_requirement_events_then_one_result(clie
             "version": "3.1",
             "section": "Passwords",
             "quote": "Passwords have at least 12 characters.",
+            "kind": "documented",
+            "stale": False,
         }
     ]
     assessment = events[-1][1]["assessment"]

@@ -8,6 +8,7 @@ cites; one that fails is dropped, shown as a guard step. The control's verdict r
 the verdicts in code, never from the model.
 """
 
+import datetime
 import json
 import logging
 import operator
@@ -43,12 +44,14 @@ from vouch.search import (
     ErrorResult,
     Passage,
     search_policies,
+    search_records,
 )
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
+SEARCH_RECORDS = "search_records"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-guards-3"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-kind-stale-1"  # change it whenever a prompt below changes
 
 Verdict = Literal["evidenced", "partly-evidenced", "not-evidenced", "not-applicable"]
 JUDGED_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced")
@@ -57,6 +60,7 @@ NOT_JUDGED = "not judged"  # the reason given when the model skipped a requireme
 # The reasons every requirement is not-evidenced, without asking the model, when nothing was read.
 NO_SOURCE = "no evidence source could be read"
 NO_SOURCES_ALLOWED = "no evidence sources allowed"
+NO_ALLOWED_SEARCH = "no allowed source was searched"  # sources were allowed; only others asked
 # The reasons an evidenced or partly evidenced verdict becomes not-evidenced after the quote
 # check: nothing checked shows it (#21).
 NO_CITATION = "No citation given, so nothing checked shows it."
@@ -64,6 +68,9 @@ CITATIONS_DROPPED = (
     "Every citation given for it was dropped by the quote check, so nothing checked shows it."
 )
 SHOWN_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced")  # need a citation
+# What the judge's rules add to a reason when they cap a verdict at partly-evidenced (#22).
+CAPPED = "At most partly evidenced:"
+DOCUMENTED_ONLY = "it asks for something to be done, and only documented evidence shows it"
 # The columns the roll-up counts: should requirements only give the should score.
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 # Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
@@ -99,6 +106,11 @@ class RequirementJudgement(BaseModel):
     requirement_id: str = Field(description="The requirement's id, such as M1 or S2.")
     verdict: str = Field(description="evidenced, partly-evidenced or not-evidenced.")
     reason: str = Field(description="One sentence saying why, from the evidence.")
+    about_doing: bool = Field(
+        default=False,
+        description="True when the requirement asks for something to be done (a check "
+        "carried out, an assessment made), so it needs implemented evidence.",
+    )
     citations: list[CitationClaim] = Field(
         default_factory=list, description="The passages the verdict relies on, quoted exactly."
     )
@@ -119,32 +131,43 @@ SUBMIT_ANSWER_TOOL = {
     },
 }
 
-SEARCH_POLICIES_TOOL = {
-    "type": "function",
-    "function": {
-        "name": SEARCH_POLICIES,
-        "description": "Search the company's policies by keyword; returns passages with "
-        "doc_id, heading and text.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": MAX_LIMIT,
-                    "default": DEFAULT_LIMIT,
+def _search_tool_spec(name: str, what: str) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": f"Search the company's {what} by keyword; returns passages with "
+            "doc_id, heading and text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_LIMIT,
+                        "default": DEFAULT_LIMIT,
+                    },
                 },
+                "required": ["query"],
             },
-            "required": ["query"],
         },
-    },
-}
+    }
+
+
+SEARCH_POLICIES_TOOL = _search_tool_spec(SEARCH_POLICIES, "policies")
+SEARCH_RECORDS_TOOL = _search_tool_spec(
+    SEARCH_RECORDS, "records (what was actually done: logs, registers, reviews)"
+)
 
 
 def _search_policies(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
     # Looked up when called, so a test can replace vouch.graph.search_policies.
     return search_policies(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
+
+
+def _search_records(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
+    return search_records(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
 
 
 @dataclass(frozen=True)
@@ -165,7 +188,7 @@ EVIDENCE_TOOLS: dict[str, EvidenceTool] = {
     SEARCH_POLICIES: EvidenceTool(
         "policies", "the policies", SEARCH_POLICIES_TOOL, _search_policies
     ),
-    "search_records": EvidenceTool("records", "the records"),  # #22
+    SEARCH_RECORDS: EvidenceTool("records", "the records", SEARCH_RECORDS_TOOL, _search_records),
     "vulnerability_status": EvidenceTool("patch", "Patch's vulnerability status"),  # #24
 }
 
@@ -272,6 +295,8 @@ class AssessState(TypedDict, total=False):
     not_judged: list[str]
     claims: dict[str, list[CitationClaim]]  # the judge's citations per requirement, unchecked
     document_folders: list[str]  # where cited documents are looked up: the profile's sources
+    today: str  # the ISO date staleness is judged on (#22)
+    about_doing: list[str]  # the requirements the judge said ask for something to be done
     dropped_citations: list[DroppedCitation]
     messages: Annotated[list[AnyMessage], add_messages]
 
@@ -331,7 +356,11 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
             "relies on: the doc_id and a passage copied word for word from that document, at "
             "least four words from one paragraph, list item or table row. A quote that isn't "
             f"in the document is dropped, and a verdict with no citation left is not-evidenced. "
-            f"{DATA_RULE}"
+            "Records show what was actually done (implemented evidence); policies say what "
+            "should be done (documented evidence). For a requirement that asks for something to "
+            "be done, set about_doing and say so in the reason: it is evidenced only with "
+            "implemented evidence. Evidence past its review date is stale and shows a "
+            f"requirement partly at most. {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -346,9 +375,10 @@ def _judged_requirements(
     control_requirements: ControlRequirements,
     judgement: Judgement | None,
     unjudged_reason: str = NOT_JUDGED,
-) -> tuple[list[RequirementVerdict], list[str], dict[str, list[CitationClaim]]]:
+) -> tuple[list[RequirementVerdict], list[str], dict[str, list[CitationClaim]], list[str]]:
     """Each of the control's requirements with its verdict, the ids the model didn't judge
-    validly, and the citations given for each one it did (unchecked).
+    validly, the citations given for each one it did (unchecked), and the ids it said ask for
+    something to be done.
 
     A requirement the model skipped, or gave a verdict outside JUDGED_VERDICTS, is
     not-evidenced with `unjudged_reason`. Judgements for ids the control doesn't apply are
@@ -358,12 +388,14 @@ def _judged_requirements(
     given: dict[str, RequirementJudgement] = {}
     for item in judgement.requirements if judgement else []:
         given.setdefault(item.requirement_id, item)
-    results, not_judged, claims = [], [], {}
+    results, not_judged, claims, doing = [], [], {}, []
     for req in control_requirements.applicable:
         item = given.get(req.id)
         if item is not None and item.verdict in JUDGED_VERDICTS:
             verdict, reason = item.verdict, item.reason
             claims[req.id] = item.citations
+            if item.about_doing:
+                doing.append(req.id)
         else:
             verdict, reason = "not-evidenced", unjudged_reason
             not_judged.append(req.id)
@@ -373,7 +405,7 @@ def _judged_requirements(
         results.append(
             RequirementVerdict(req.id, req.column, req.text, NOT_APPLICABLE, excluded.reason)
         )
-    return results, not_judged, claims
+    return results, not_judged, claims, doing
 
 
 def _usage_of(message: Any) -> list[dict[str, int]]:
@@ -446,10 +478,13 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
 
     def no_evidence_reason(state: AssessState) -> str | None:
         """Why nothing could be read, so the model isn't asked to judge; None when something
-        could be. No source offered, or every search refused, counts as none allowed."""
-        refused_only = state["searches_refused"] and not state["searches_run"]
-        if not _offered_tools(profile) or refused_only:
+        could be. No source the profile allows can run: none allowed. Allowed sources, but every
+        search asked for was refused: none of them was searched, unless an allowed folder
+        couldn't be read (it now points outside), which is no source read."""
+        if not _offered_tools(profile):
             return NO_SOURCES_ALLOWED
+        if state["searches_refused"] and not state["searches_run"]:
+            return NO_SOURCE if FOLDER_ESCAPED in state["warnings"] else NO_ALLOWED_SEARCH
         if SOURCE_UNAVAILABLE in state["warnings"]:
             return NO_SOURCE
         return None
@@ -492,13 +527,13 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
         if reason is not None:  # nothing could be read, so nothing is shown
-            results, _, _ = _judged_requirements(control_requirements, None, reason)
-            return {"requirements": results, "not_judged": [], "claims": {}}
+            results, *_ = _judged_requirements(control_requirements, None, reason)
+            return {"requirements": results, "not_judged": [], "claims": {}, "about_doing": []}
         prompt, usage, rejected = _judge_prompt(state), [], None
         for attempt in range(OUTPUT_RETRIES + 1):
             reply = judge_model.invoke(prompt)
             usage += _usage_of(reply["raw"])
-            results, not_judged, claims = _judged_requirements(
+            results, not_judged, claims, doing = _judged_requirements(
                 control_requirements, reply["parsed"]
             )
             judged = [r for r in results if r.verdict != NOT_APPLICABLE]
@@ -521,6 +556,7 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
             "requirements": results,
             "not_judged": not_judged,
             "claims": claims,
+            "about_doing": doing,
             "judge_rejected_word": rejected,
             "usage": usage,
         }
@@ -529,10 +565,14 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         """Keep each citation whose quote is in the document it cites; drop and log the rest.
 
         A requirement judged evidenced or partly evidenced with no citation left (none given,
-        or every one dropped) becomes not-evidenced: nothing checked shows it. Each document
+        or every one dropped) becomes not-evidenced: nothing checked shows it. Then the
+        judge's rules (`_apply_rules`) cap what the checked citations can show. Each document
         is read once.
         """
-        claims, checker = state.get("claims", {}), QuoteChecker(state["document_folders"])
+        today = datetime.date.fromisoformat(state["today"])
+        claims = state.get("claims", {})
+        checker = QuoteChecker(state["document_folders"], today=today)
+        doing = set(state.get("about_doing", []))
         results, dropped = [], []
         for requirement in state["requirements"]:
             kept: list[Citation] = []
@@ -554,7 +594,8 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
             if not kept and requirement.verdict in SHOWN_VERDICTS:
                 reason = CITATIONS_DROPPED if given else NO_CITATION
                 requirement = replace(requirement, verdict="not-evidenced", reason=reason)
-            results.append(replace(requirement, citations=tuple(kept)))
+            requirement = replace(requirement, citations=tuple(kept))
+            results.append(_apply_rules(requirement, requirement.id in doing, checker))
         return {"requirements": results, "dropped_citations": dropped}
 
     def after_gather(state: AssessState) -> str:
@@ -633,6 +674,28 @@ class Step:
         return f"Finished the {self.node} step."
 
 
+def _apply_rules(
+    requirement: RequirementVerdict, about_doing: bool, checker: QuoteChecker
+) -> RequirementVerdict:
+    """The judge's rules on a requirement whose citations are checked (spec #2, ticket #22).
+
+    Stale evidence caps it at partly-evidenced, and the reason names each stale document and
+    why. A requirement about doing something (as the judge said) needs implemented evidence to
+    be evidenced; with documented evidence only it is capped too, and the reason says so.
+    """
+    if requirement.verdict not in SHOWN_VERDICTS:
+        return requirement
+    stale = dict.fromkeys(c.doc_id for c in requirement.citations if c.stale)
+    why = [f"{doc} is stale ({checker.stale_reason(doc)})" for doc in stale]
+    documented_only = all(c.kind == "documented" for c in requirement.citations)
+    if about_doing and documented_only and requirement.verdict == "evidenced":
+        why.append(DOCUMENTED_ONLY)
+    if not why:
+        return requirement
+    reason = f"{requirement.reason} {CAPPED} {'; '.join(why)}."
+    return replace(requirement, verdict="partly-evidenced", reason=reason)
+
+
 def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" + ("" if count == 1 else "s")
 
@@ -646,11 +709,14 @@ def _total_usage(usage: list[dict[str, int]]) -> dict[str, int]:
 
 
 def assess_steps(
-    control: IsaControl, profile: ComplianceProfile, model: BaseChatModel
+    control: IsaControl,
+    profile: ComplianceProfile,
+    model: BaseChatModel,
+    today: datetime.date | None = None,
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control: a Step per node as it finishes (and a guard Step
     per dropped citation), each RequirementVerdict once its quotes are checked, then the
-    Assessment."""
+    Assessment. Staleness is judged on `today` (the real date when not given)."""
     control_requirements = profile.requirements_for(control)
     initial = {
         "control": control,
@@ -661,6 +727,7 @@ def assess_steps(
         "searches_refused": 0,
         "usage": [],
         "document_folders": [str(s.folder) for s in profile.evidence_sources.values()],
+        "today": (today or datetime.date.today()).isoformat(),
         "messages": _prompt(control, control_requirements, profile),
     }
     final: dict[str, Any] = {}
@@ -698,11 +765,17 @@ def assess_steps(
     )
 
 
-def assess(control_id: str, profile: ComplianceProfile, model: BaseChatModel) -> Assessment:
+def assess(
+    control_id: str,
+    profile: ComplianceProfile,
+    model: BaseChatModel,
+    today: datetime.date | None = None,
+) -> Assessment:
     """Run the graph for one control under a compliance profile and return its Assessment.
+    Staleness is judged on `today` (the real date when not given).
 
     An unknown control raises UnknownControlError before the model is called."""
-    *_, assessment = assess_steps(load_isa_control(control_id), profile, model)
+    *_, assessment = assess_steps(load_isa_control(control_id), profile, model, today)
     if not isinstance(assessment, Assessment):
         raise TypeError(f"the graph ended without an Assessment for {control_id}")
     return assessment

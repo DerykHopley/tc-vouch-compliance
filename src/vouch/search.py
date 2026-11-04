@@ -1,4 +1,5 @@
-"""search_policies: keyword search over the policy folder a compliance profile allows."""
+"""search_policies and search_records: one keyword search, over the policy or the records
+folder a compliance profile allows."""
 
 import re
 from pathlib import Path
@@ -33,7 +34,7 @@ def search_policies(
 ) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
-    `folder` is the policy folder the compliance profile allows, resolved as the profile
+    `folder` is the evidence folder the compliance profile allows, resolved as the profile
     resolved it on load. It is resolved again here, on the path actually read: one that now
     resolves elsewhere (swapped for a symlink) is refused with `folder_escaped`. Errors come
     back as a dict with an `error` key; nothing is raised.
@@ -55,6 +56,10 @@ def search_policies(
     hits = [(passage, score) for passage, score in scored if score > 0]
     hits.sort(key=lambda hit: hit[1], reverse=True)  # stable: ties keep folder order
     return [passage for passage, _ in hits[:limit]]
+
+
+# The records are searched the same way; an empty folder gives no passages, not an error.
+search_records = search_policies
 
 
 def _check_input(query: Any, limit: Any) -> str | None:
