@@ -504,6 +504,7 @@ class AssessState(TypedDict, total=False):
     document_folders: dict[str, str]  # source name to folder: where cited documents are found
     about_doing: list[str]  # the requirements the judge said ask for something to be done
     dropped_citations: list[DroppedCitation]
+    verdict_changes: list[str]  # "M1 to partly evidenced": verdicts the quote check changed
     messages: Annotated[list[AnyMessage], add_messages]
     today: str  # ISO 8601: due dates count from it
     note: str  # the lead's note from a rejected review, when this run was asked for again
@@ -1062,7 +1063,16 @@ def build_graph(
             requirement = replace(requirement, citations=tuple(kept))
             results.append(_apply_rules(requirement, requirement.id in doing))
         results, pending_ids = _noted_pending(results, state["pending"])
-        return {"requirements": results, "dropped_citations": dropped, "pending_ids": pending_ids}
+        judged = {r.id: r.verdict for r in state["requirements"]}
+        changes = [
+            f"{r.id} to {r.verdict.replace('-', ' ')}" for r in results if r.verdict != judged[r.id]
+        ]
+        return {
+            "requirements": results,
+            "dropped_citations": dropped,
+            "pending_ids": pending_ids,
+            "verdict_changes": changes,
+        }
 
     def remediate(state: AssessState) -> dict[str, Any]:
         """The model drafts one remediation item per not-evidenced requirement; none of those,
@@ -1208,7 +1218,16 @@ class Step:
             kept = sum(len(r.citations) for r in update["requirements"])
             dropped = len(update["dropped_citations"])
             text = f"Checked each quote against its document: kept {_plural(kept, 'citation')}"
-            return text + (f", dropped {dropped}." if dropped else ".")
+            text += f", dropped {dropped}." if dropped else "."
+            changes = update.get("verdict_changes")
+            if changes:  # the judge step showed the verdicts before these checks
+                judged = [r for r in update["requirements"] if r.verdict != NOT_APPLICABLE]
+                evidenced = sum(r.verdict == "evidenced" for r in judged)
+                text += (
+                    f" Changed by the checks: {', '.join(changes)}."
+                    f" Now {evidenced} of {len(judged)} requirements evidenced."
+                )
+            return text
         if self.node == GUARD:
             if "text" in update:  # a refused tool call or a flagged passage
                 return update["text"]
