@@ -5,7 +5,8 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import AsyncIterator, Iterable, Iterator
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated, Any
 
@@ -72,10 +73,11 @@ def app_database(request: Request) -> Database | None:
 def database_connection(
     db: Annotated[Database | None, Depends(app_database)],
 ) -> Iterator[Connection]:
-    """A connection for a route that needs the database; a 503 when there's none to be had."""
-    if db is None:
-        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE)
+    """A connection for a route that needs the database. A 503 when there's none to be had, or
+    when it drops while the route uses it."""
     try:
+        if db is None:
+            raise DatabaseUnavailable("no database URL is set")
         with db.connection() as conn:
             yield conn
     except DatabaseUnavailable:
@@ -133,7 +135,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     A path that is neither a route nor a built file gets the front end's index.html when a
     browser asks for a page, so a deep link survives a refresh (client routing).
     """
-    app = FastAPI(title="Vouch")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        if app.state.database is not None:
+            app.state.database.close()
+
+    app = FastAPI(title="Vouch", lifespan=lifespan)
     if settings is None:
         try:
             settings = load_settings()

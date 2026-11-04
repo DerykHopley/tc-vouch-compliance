@@ -1,12 +1,14 @@
 """The database module (#33): one owner of connections, LangGraph's settings, retries, 503s.
 
-The unit tests run offline on fakes. The integration tests need a Postgres server: CI's full lane
-gives one (a service container) through VOUCH_TEST_DATABASE_URL; without it they're skipped.
+The unit tests run offline on fakes, or on libpq failing before any network. The integration
+tests need a Postgres server: CI's `database` job gives one (a service container) through
+VOUCH_TEST_DATABASE_URL; without it they're skipped.
 """
 
 import logging
 import os
 import re
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,69 +19,91 @@ import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
 from psycopg import conninfo
+from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 from pydantic import SecretStr
 
 from vouch import database
 from vouch.api import create_app, database_connection
-from vouch.database import Database, DatabaseUnavailable
+from vouch.database import Database, DatabaseMisconfigured, DatabaseUnavailable
+from vouch.exit_codes import EXIT_BAD_INPUT, EXIT_UNAVAILABLE
 from vouch.settings import DATABASE_URL_ENV, Settings, load_settings
 
 PASSWORD = "pw-marker-33"
 URL = f"postgresql://vouch:{PASSWORD}@127.0.0.1:5432/vouch"
 # A Unix socket in a folder that doesn't exist: libpq fails at once, with no network.
 UNREACHABLE_URL = f"postgresql://vouch:{PASSWORD}@/vouch?host=/nonexistent-33"
-
-
-class FlakyConnect:
-    """psycopg's connect, failing the first `failures` calls as a dropped instance does."""
-
-    def __init__(self, failures: int, message: str = "server closed the connection") -> None:
-        self.failures = failures
-        self.message = message
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-
-    def __call__(self, url: str, **kwargs: Any) -> Any:
-        self.calls.append((url, kwargs))
-        if len(self.calls) <= self.failures:
-            raise psycopg.OperationalError(self.message)
-        return FakeConnection()
+# The reviewer's case: libpq can't decode the password, and echoes it.
+MALFORMED_URL = "postgresql://vouch:s3cr%zzet@/vouch?host=/nonexistent-33"
+WRONG_PASSWORD = 'connection failed: FATAL:  password authentication failed for user "vouch"'
+NO_DATABASE = 'connection failed: FATAL:  database "vouch" does not exist'
 
 
 class FakeConnection:
-    closed = False
+    """What the pool touches on a connection: enough to pool it without a server."""
+
+    def __init__(self) -> None:
+        self.autocommit = True
+        self.broken = False
+        self.closed = False
+        self.pgconn = type("PGconn", (), {"transaction_status": TransactionStatus.IDLE})()
+
+    def execute(self, query: str, *args: Any) -> None:
+        if self.broken:  # as libpq does: the status turns unknown, so the pool discards it
+            self.pgconn.transaction_status = TransactionStatus.UNKNOWN
+            raise psycopg.OperationalError("server closed the connection unexpectedly")
+
+    def rollback(self) -> None: ...
 
     def close(self) -> None:
         self.closed = True
 
 
-def test_a_connection_failing_once_then_succeeding_is_retried_after_a_backoff():
-    connect, waits = FlakyConnect(failures=1), []
-    db = Database(SecretStr(URL), connect=connect, sleep=waits.append)
+class FlakyConnect:
+    """psycopg's connect, failing the first `failures` calls with `message`."""
+
+    def __init__(self, failures: int = 0, message: str = "server closed the connection") -> None:
+        self.failures = failures
+        self.message = message
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.made: list[FakeConnection] = []
+
+    def __call__(self, url: str, **kwargs: Any) -> Any:
+        self.calls.append((url, kwargs))
+        if len(self.calls) <= self.failures:
+            raise psycopg.OperationalError(self.message)
+        self.made.append(FakeConnection())
+        return self.made[-1]
+
+
+@pytest.fixture
+def make_db() -> Iterator[Any]:
+    """Databases that are closed after the test, so no pool keeps reconnecting."""
+    made: list[Database] = []
+
+    def make(url: str = URL, **kwargs: Any) -> Database:
+        made.append(Database(SecretStr(url), **kwargs))
+        return made[-1]
+
+    yield make
+    for db in made:
+        db.close()
+
+
+def test_a_connection_failing_once_then_succeeding_is_retried(make_db):
+    connect = FlakyConnect(failures=1)
+    db = make_db(connect=connect)
 
     with db.connection() as conn:
         assert isinstance(conn, FakeConnection)
 
     assert len(connect.calls) == 2
-    assert waits == [database.BACKOFF]
-    assert conn.closed
 
 
-def test_after_every_attempt_fails_it_gives_up_with_growing_waits():
-    connect, waits = FlakyConnect(failures=99), []
-    db = Database(SecretStr(URL), connect=connect, sleep=waits.append)
+def test_connections_use_langgraphs_postgres_settings(make_db):
+    connect = FlakyConnect()
 
-    with pytest.raises(DatabaseUnavailable), db.connection():
-        pass
-
-    assert len(connect.calls) == database.ATTEMPTS
-    assert waits == [database.BACKOFF * 2**n for n in range(database.ATTEMPTS - 1)]
-
-
-def test_connections_use_langgraphs_postgres_settings():
-    connect = FlakyConnect(failures=0)
-
-    with Database(SecretStr(URL), connect=connect).connection():
+    with make_db(connect=connect).connection():
         pass
 
     [(url, kwargs)] = connect.calls
@@ -88,26 +112,116 @@ def test_connections_use_langgraphs_postgres_settings():
     assert kwargs["row_factory"] is dict_row
 
 
-def test_the_database_password_never_reaches_an_error_or_the_log(caplog):
+def test_nothing_connects_until_a_connection_is_asked_for(make_db):
+    connect = FlakyConnect()
+    db = make_db(connect=connect)
+    create_app(Settings(database_url=db.url))
+
+    assert connect.calls == []
+
+
+def test_connections_are_pooled_and_a_dead_one_is_replaced_on_checkout(make_db):
+    connect = FlakyConnect()
+    db = make_db(connect=connect)
+    with db.connection() as first:
+        pass
+    with db.connection() as again:
+        assert again is first  # pooled, not reopened
+    first.broken = True  # the instance restarted meanwhile
+
+    with db.connection() as replaced:
+        assert replaced is not first
+        assert not replaced.broken
+
+    assert first.pgconn.transaction_status == TransactionStatus.UNKNOWN  # discarded, not reused
+
+
+@pytest.mark.parametrize("refusal", [WRONG_PASSWORD, NO_DATABASE])
+def test_a_refusal_a_retry_cant_change_fails_at_once_with_its_reason(make_db, refusal):
+    connect = FlakyConnect(failures=99, message=refusal)
+    db = make_db(connect=connect, timeout=5)
+    started = time.monotonic()
+
+    with pytest.raises(DatabaseMisconfigured) as refused, db.connection():
+        pass
+
+    assert time.monotonic() - started < 1  # not the 5 s wait, nor the pool's 1 s backoff
+    assert len(connect.calls) == 1
+    assert refusal.split("FATAL:  ")[1] in str(refused.value)
+
+
+def test_a_connection_level_failure_is_retried_until_the_wait_runs_out(make_db):
+    connect = FlakyConnect(failures=99, message="connection refused")
+    db = make_db(connect=connect, timeout=1.5)
+
+    with pytest.raises(DatabaseUnavailable, match="connection refused"), db.connection():
+        pass
+
+    assert len(connect.calls) >= 2  # the pool reconnected after its backoff
+
+
+def test_a_malformed_url_says_only_that_without_libpqs_text(make_db, caplog):
     caplog.set_level(logging.DEBUG)
-    connect = FlakyConnect(failures=99, message=f"bad things near {URL} and {PASSWORD}")
-    db = Database(SecretStr(URL), connect=connect, sleep=lambda _: None)
+    db = make_db(MALFORMED_URL)  # the real psycopg connect
+
+    with pytest.raises(DatabaseMisconfigured) as refused, db.connection():
+        pass
+
+    assert str(refused.value) == f"{DATABASE_URL_ENV} is malformed"
+    assert "s3cr" not in caplog.text
+    assert db.reachable() is False
+
+
+def test_the_password_never_reaches_an_error_or_the_log_in_any_form(make_db, caplog):
+    caplog.set_level(logging.DEBUG)
+    url = "postgresql://vouch:p%40ss-marker-33@127.0.0.1:5432/vouch"  # decoded: p@ss-marker-33
+    message = f"FATAL: password authentication failed near {url}, p%40ss-marker-33, p@ss-marker-33"
+    db = make_db(url, connect=FlakyConnect(failures=99, message=message))
 
     with pytest.raises(DatabaseUnavailable) as refused, db.connection():
         pass
 
-    assert "bad things" in str(refused.value)  # the reason survives, for the owner
-    assert PASSWORD not in str(refused.value)
-    assert PASSWORD not in caplog.text
-    assert PASSWORD not in repr(db)
+    assert "password authentication failed" in str(refused.value)  # the reason survives
+    for form in ("p%40ss-marker-33", "p@ss-marker-33"):
+        assert form not in str(refused.value)
+        assert form not in caplog.text
+    assert "marker" not in repr(db)
 
 
-def test_an_unreachable_database_raises_unavailable_not_psycopgs_error():
-    db = Database(SecretStr(UNREACHABLE_URL), sleep=lambda _: None)
+def test_an_unreachable_database_raises_unavailable_not_psycopgs_error(make_db):
+    db = make_db(UNREACHABLE_URL, timeout=0.3)  # the real psycopg connect
+
+    with pytest.raises(DatabaseUnavailable, match="No such file"), db.connection():
+        pass
+
+
+def test_a_connection_dropping_in_use_is_unavailable(make_db):
+    db = make_db(connect=FlakyConnect())
 
     with pytest.raises(DatabaseUnavailable), db.connection():
-        pass
-    assert db.reachable() is False
+        raise psycopg.OperationalError("terminating connection due to administrator command")
+    with pytest.raises(DatabaseUnavailable), db.checkpointer():
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+
+
+def test_health_checks_the_database_at_most_once_in_a_few_seconds(make_db):
+    now = [100.0]
+    connect = FlakyConnect()
+    db = make_db(connect=connect, clock=lambda: now[0])
+    checks = []
+    real = Database.connection
+
+    def counted(self, timeout=None):
+        checks.append(timeout)
+        return real(self, timeout)
+
+    db.connection = counted.__get__(db)
+
+    assert db.reachable() and db.reachable()
+    now[0] += database.HEALTH_CACHE_SECONDS
+    assert db.reachable()
+
+    assert checks == [database.HEALTH_TIMEOUT_SECONDS] * 2
 
 
 def test_settings_read_the_database_url_as_a_secret():
@@ -119,19 +233,28 @@ def test_settings_read_the_database_url_as_a_secret():
     assert load_settings({}).database_url is None
 
 
-def client_with_a_database_route(settings: Settings) -> TestClient:
-    """The app on `settings`, plus a route that needs the database."""
+def client_with_a_database_route(settings: Settings, db: Database | None = None) -> TestClient:
+    """The app on `settings` (its Database replaced by `db`), plus routes that need it."""
     app = create_app(settings)
+    if db is not None:
+        app.state.database = db
 
     @app.get("/needs-database")
     def needs_database(conn: Annotated[Any, Depends(database_connection)]) -> dict[str, bool]:
         return {"connected": conn is not None}
 
+    @app.get("/drops-database")
+    def drops_database(conn: Annotated[Any, Depends(database_connection)]) -> None:
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_with_the_database_down_the_app_starts_health_says_unavailable_and_routes_answer_503():
-    client = client_with_a_database_route(Settings(database_url=SecretStr(UNREACHABLE_URL)))
+def test_with_the_database_down_the_app_starts_health_says_unavailable_and_routes_answer_503(
+    make_db,
+):
+    db = make_db(UNREACHABLE_URL, timeout=0.3)
+    client = client_with_a_database_route(Settings(database_url=db.url), db)
 
     health = client.get("/api/health")
     refused = client.get("/needs-database")
@@ -140,7 +263,18 @@ def test_with_the_database_down_the_app_starts_health_says_unavailable_and_route
     assert health.json()["status"] == "ok"
     assert health.json()["database"] == "unavailable"
     assert refused.status_code == 503
+    assert "try again shortly" in refused.json()["detail"]
     assert PASSWORD not in health.text + refused.text
+
+
+def test_a_connection_dropping_mid_route_answers_503_not_500(make_db):
+    db = make_db(connect=FlakyConnect())
+    client = client_with_a_database_route(Settings(database_url=db.url), db)
+
+    response = client.get("/drops-database")
+
+    assert response.status_code == 503
+    assert "try again shortly" in response.json()["detail"]
 
 
 def test_with_no_database_url_health_is_unchanged_and_database_routes_answer_503():
@@ -150,16 +284,36 @@ def test_with_no_database_url_health_is_unchanged_and_database_routes_answer_503
     assert client.get("/needs-database").status_code == 503
 
 
+def test_the_app_closes_its_database_at_shutdown():
+    app = create_app(Settings(database_url=SecretStr(URL)))
+
+    with TestClient(app):
+        assert not app.state.database.closed
+    assert app.state.database.closed
+
+
 def test_the_setup_command_without_a_url_refuses_naming_the_setting(capsys):
-    assert database.main([], env={}) == database.EXIT_BAD_INPUT
+    assert database.main([], env={}) == EXIT_BAD_INPUT
     assert DATABASE_URL_ENV in capsys.readouterr().err
 
 
-def test_the_setup_command_against_an_unreachable_database_fails_without_the_password(capsys):
-    code = database.main([], env={DATABASE_URL_ENV: UNREACHABLE_URL}, sleep=lambda _: None)
+def test_the_setup_command_on_a_malformed_url_refuses_without_the_password(capsys):
+    assert database.main([], env={DATABASE_URL_ENV: MALFORMED_URL}) == EXIT_BAD_INPUT
+
+    captured = capsys.readouterr()
+    assert f"{DATABASE_URL_ENV} is malformed" in captured.err
+    assert "s3cr" not in captured.out + captured.err
+
+
+def test_the_setup_command_against_an_unreachable_database_fails_without_the_password(
+    capsys, monkeypatch
+):
+    monkeypatch.setattr(database, "CHECKOUT_TIMEOUT_SECONDS", 0.3)
+
+    code = database.main([], env={DATABASE_URL_ENV: UNREACHABLE_URL})
 
     err = capsys.readouterr().err
-    assert code == database.EXIT_UNAVAILABLE
+    assert code == EXIT_UNAVAILABLE
     assert "unavailable" in err
     assert PASSWORD not in err
 
@@ -178,11 +332,11 @@ def test_no_other_module_opens_a_connection():
     assert opening == []
 
 
-# Integration: a real Postgres server (CI's full lane, or `podman run postgres:16` locally).
+# Integration: a real Postgres server (CI's `database` job, or `podman run postgres:16` locally).
 
 SERVER_URL = os.environ.get("VOUCH_TEST_DATABASE_URL")
 needs_postgres = pytest.mark.skipif(
-    not SERVER_URL, reason="no Postgres server: set VOUCH_TEST_DATABASE_URL (CI's full lane)"
+    not SERVER_URL, reason="no Postgres server: set VOUCH_TEST_DATABASE_URL (CI's database job)"
 )
 LANGGRAPH_TABLES = {
     "checkpoints",
@@ -201,9 +355,11 @@ def empty_database() -> Iterator[Database]:
     name = f"vouch_test_{uuid.uuid4().hex[:12]}"
     with psycopg.connect(SERVER_URL, autocommit=True) as admin:
         admin.execute(f'CREATE DATABASE "{name}"')
+    db = Database(SecretStr(conninfo.make_conninfo(SERVER_URL, dbname=name)))
     try:
-        yield Database(SecretStr(conninfo.make_conninfo(SERVER_URL, dbname=name)))
+        yield db
     finally:
+        db.close()
         with psycopg.connect(SERVER_URL, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
 
@@ -251,7 +407,20 @@ def test_a_checkpoint_is_written_and_read_back_through_the_module(empty_database
 
 @needs_postgres
 def test_health_says_reachable_with_the_database_up(empty_database):
-    client = client_with_a_database_route(Settings(database_url=empty_database.url))
+    client = client_with_a_database_route(Settings(database_url=empty_database.url), empty_database)
 
     assert client.get("/api/health").json()["database"] == "reachable"
     assert client.get("/needs-database").json() == {"connected": True}
+
+
+@needs_postgres
+@pytest.mark.parametrize("change", [{"password": "wrong-pw-33"}, {"dbname": "no_such_db_33"}])
+def test_a_real_refusal_fails_at_once_with_a_clear_reason(change):
+    assert SERVER_URL
+    with Database(SecretStr(conninfo.make_conninfo(SERVER_URL, **change))) as db:
+        started = time.monotonic()
+        with pytest.raises(DatabaseUnavailable, match="refused") as refused, db.connection():
+            pass
+
+    assert time.monotonic() - started < 2
+    assert "wrong-pw-33" not in str(refused.value)
