@@ -83,7 +83,13 @@ def extract(excel: Path = EXCEL_FILE) -> dict:
     finally:
         workbook.close()  # read-only workbooks hold the file open until closed
     check_headers(sheet_rows)
-    rows = {row[COL_ID]: row for row in sheet_rows if len(row) > COL_ID}
+    rows: dict = {}
+    for row in sheet_rows:
+        if len(row) <= COL_ID or row[COL_ID] is None:
+            continue
+        if row[COL_ID] in rows:
+            raise ValueError(f"{SHEET} sheet: control {row[COL_ID]} appears more than once")
+        rows[row[COL_ID]] = row
     controls = []
     for control_id in CONTROL_IDS:
         if control_id not in rows:

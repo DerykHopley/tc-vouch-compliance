@@ -2,9 +2,10 @@
 
 `assess --requirements <isa-control>`: list a VDA ISA control's requirements (`5.1.1`).
 `assess --requirements <isa-control> --profile <name>`: only those the compliance profile
-applies, then those it marks not applicable, with the reason.
+applies, then those it marks not applicable, with the reason. Flags go in any order.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -20,7 +21,7 @@ from vouch.settings import fake_model_from_env
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 EXIT_BAD_INPUT = 2
-USAGE = "usage: assess <control-id> | assess --requirements <isa-control> [--profile <name>]"
+USAGE = "assess <control-id> | assess --requirements <isa-control> [--profile <name>]"
 
 
 class ConfigError(RuntimeError):
@@ -42,9 +43,10 @@ def build_model() -> BaseChatModel:
 
 
 def _requirement_lines(req: Requirement) -> list[str]:
-    """One line per requirement, its sub-items indented below it."""
+    """One line per requirement, its sub-items indented below it; an overlay's names its source."""
     first, *rest = req.text.split("\n")
-    return [f"{req.id} ({req.column}): {first}", *(f"  {line}" for line in rest)]
+    label = f"overlay, {req.source}" if req.column == "overlay" else req.column
+    return [f"{req.id} ({label}): {first}", *(f"  {line}" for line in rest)]
 
 
 def format_requirements(control: IsaControl, profile: ComplianceProfile | None = None) -> str:
@@ -54,6 +56,7 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
     each with its reason.
     """
     lines = [f"{control.id} {control.question}"]
+    overlay_requirements: list[Requirement] = []
     if profile is None:
         for req in control.requirements:
             lines.extend(_requirement_lines(req))
@@ -69,7 +72,15 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
             for excluded in requirements.not_applicable:
                 lines.extend(_requirement_lines(excluded.requirement))
                 lines.append(f"  Reason: {excluded.reason}")
-    lines.append(f"Source: {control.source}, (c) ENX Association, CC BY-ND 4.0; see {NOTICE_FILE}")
+        everything = requirements.applicable + tuple(
+            n.requirement for n in requirements.not_applicable
+        )
+        overlay_requirements = [r for r in everything if r.column == "overlay"]
+    lines.append(
+        f"Source of the ISA text: {control.source}, (c) ENX Association, CC BY-ND 4.0; "
+        f"see {NOTICE_FILE}"
+    )
+    lines.extend(f"{r.id} is {r.source}'s, not ISA text." for r in overlay_requirements)
     return "\n".join(lines)
 
 
@@ -84,17 +95,41 @@ def list_requirements(control_id: str, profile_name: str | None = None) -> int:
     return 0
 
 
+class _OneLineParser(argparse.ArgumentParser):
+    """argparse, but a misuse prints one stderr line (the usage and what's wrong) and exits 2."""
+
+    def error(self, message: str):
+        self.exit(EXIT_BAD_INPUT, f"usage: {USAGE} ({message})\n")
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = _OneLineParser(
+        prog="assess",
+        usage=USAGE,
+        allow_abbrev=False,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("control_id", nargs="?", metavar="<control-id>")
+    parser.add_argument("--requirements", metavar="<isa-control>")
+    parser.add_argument("--profile", metavar="<name>")
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if len(args) == 2 and args[0] == "--requirements":
-        return list_requirements(args[1])
-    if len(args) == 4 and args[0] == "--requirements" and args[2] == "--profile":
-        return list_requirements(args[1], args[3])
-    if len(args) != 1 or args[0].startswith("--requirements"):
-        print(USAGE, file=sys.stderr)
-        return EXIT_BAD_INPUT
+    parser = _parser()
     try:
-        control = load_control(args[0])
+        args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+        if (args.control_id is None) == (args.requirements is None) or (
+            args.control_id is not None and args.profile is not None
+        ):
+            parser.error("give a control id, or --requirements with an optional --profile")
+    except SystemExit as stop:  # --help (0) or a misuse (2), already printed
+        return stop.code if isinstance(stop.code, int) else EXIT_BAD_INPUT
+    if args.requirements is not None:
+        return list_requirements(args.requirements, args.profile)
+    try:
+        control = load_control(args.control_id)
         model = build_model()
     except (UnknownControlError, ConfigError, ScriptError) as error:
         print(f"assess: {error}", file=sys.stderr)

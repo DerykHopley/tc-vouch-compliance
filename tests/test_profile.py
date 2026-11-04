@@ -1,14 +1,16 @@
 """Compliance profiles: YAML files validated on load, deciding which requirements apply."""
 
 from pathlib import Path
+from typing import get_args
 
 import pytest
 import yaml
 
-from vouch.isa import load_isa_control
-from vouch.profile import NORDLICHT_PROFILE, ProfileError, load_profile
+from vouch import isa
+from vouch.isa import SOURCE, load_isa_control
+from vouch.profile import NORDLICHT_PROFILE, ComplianceProfile, ProfileError, load_profile
 
-FIXTURES = NORDLICHT_PROFILE.parent
+NORDLICHT_DIR = NORDLICHT_PROFILE.parent
 
 
 def test_nordlichts_profile_loads():
@@ -22,23 +24,24 @@ def test_nordlichts_profile_loads():
     assert profile.base_framework == "VDA ISA 2027.1"
     assert profile.overlays == ()
     assert set(profile.evidence_sources) == {"policies", "records", "patch"}
-    assert profile.evidence_sources["policies"].folder == FIXTURES / "policies"
+    assert profile.evidence_sources["policies"].folder == NORDLICHT_DIR / "policies"
     assert profile.asset_register == ()
     assert profile.risks == ()
 
 
 def write_profile(tmp_path: Path, **changes) -> Path:
-    """A copy of Nordlicht's profile in tmp_path, its folders made, with these fields changed
-    (a value of None removes the field)."""
+    """A copy of Nordlicht's profile in tmp_path/nordlicht, its folders made, with these fields
+    changed (a value of None removes the field)."""
     data = yaml.safe_load(NORDLICHT_PROFILE.read_text(encoding="utf-8"))
     for field, value in changes.items():
         if value is None:
             data.pop(field)
         else:
             data[field] = value
+    folder = tmp_path / "nordlicht"
     for name in ("policies", "records", "patch"):
-        (tmp_path / name).mkdir(exist_ok=True)
-    path = tmp_path / "profile.yaml"
+        (folder / name).mkdir(parents=True, exist_ok=True)
+    path = folder / "profile.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     return path
 
@@ -123,6 +126,8 @@ def with_overlay_requirement(**changes) -> list[dict]:
     return [{**OVERLAY, "requirements": [{**OVERLAY["requirements"][0], **changes}]}]
 
 
+NA_M4 = {"control": "5.2.4", "requirement": "M4", "reason": "x"}
+
 # Each foreseeable bad profile, and the field (with its problem) its error must name.
 INVALID = {
     "missing field": ({"company": None}, "company: Field required"),
@@ -158,6 +163,41 @@ INVALID = {
         {"base_framework": "ISA 6"},
         "base_framework: Input should be 'VDA ISA 2027.1'",
     ),
+    "the same overlay requirement id twice on a control": (
+        {"overlays": [OVERLAY, {**OVERLAY, "name": "Second overlay"}]},
+        "overlays.1.requirements.0.id: control 1.6.2 already has O1",
+    ),
+    "not-applicable requirement the protection level doesn't bring in": (
+        {"not_applicable": [{"control": "5.2.4", "requirement": "H1", "reason": "x"}]},
+        "not_applicable.0.requirement: 5.2.4 H1 doesn't apply at normal protection",
+    ),
+    "the same not-applicable requirement twice": (
+        {"not_applicable": [NA_M4, NA_M4]},
+        "not_applicable.1: overlaps not_applicable.0 (control 5.2.4)",
+    ),
+    "a not-applicable control and one of its requirements": (
+        {"not_applicable": [NA_M4, {"control": "5.2.4", "reason": "x"}]},
+        "not_applicable.1: overlaps not_applicable.0 (control 5.2.4)",
+    ),
+    "id not the profile's folder name": (
+        {"id": "someone-else"},
+        "id: must be the profile's folder name, nordlicht",
+    ),
+    "answer language not a two-letter code": (
+        {"answer_language": "English"},
+        "answer_language: String should match pattern",
+    ),
+    "empty company": ({"company": " "}, "company: String should have at least 1 character"),
+    "empty id": ({"id": ""}, "id: String should have at least 1 character"),
+    "empty country": ({"country": ""}, "country: String should have at least 1 character"),
+    "absolute folder": (
+        {"evidence_sources": {"policies": {"folder": "/tmp"}}},
+        "evidence_sources.policies.folder: must stay inside the profile's folder",
+    ),
+    "folder escaping the profile's folder": (
+        {"evidence_sources": {"policies": {"folder": "../nordlicht/../.."}}},
+        "evidence_sources.policies.folder: must stay inside the profile's folder",
+    ),
     "folder that doesn't exist": (
         {"evidence_sources": {"policies": {"folder": "no-such-folder"}}},
         "evidence_sources.policies.folder: folder ",
@@ -186,3 +226,23 @@ def test_the_missing_folder_error_says_which_folder(tmp_path):
 def test_a_missing_profile_file_is_a_profile_error(tmp_path):
     with pytest.raises(ProfileError, match="profile.yaml"):
         load_profile(tmp_path / "profile.yaml")
+
+
+def test_folders_are_never_resolved_against_the_working_directory():
+    data = yaml.safe_load(NORDLICHT_PROFILE.read_text(encoding="utf-8"))
+
+    with pytest.raises(TypeError, match="base_dir"):
+        ComplianceProfile.model_validate(data)  # no context: no profile folder to resolve from
+
+
+def test_a_broken_base_framework_comes_out_as_a_profile_error(tmp_path, monkeypatch):
+    broken = tmp_path / "controls.yaml"
+    broken.write_text("controls: [\n")
+    monkeypatch.setattr(isa, "CONTROLS_FILE", broken)
+
+    with pytest.raises(ProfileError, match="cannot read base framework file"):
+        load_profile(NORDLICHT_PROFILE)
+
+
+def test_the_base_framework_a_profile_accepts_is_the_one_vouch_ships():
+    assert get_args(ComplianceProfile.model_fields["base_framework"].annotation) == (SOURCE,)
