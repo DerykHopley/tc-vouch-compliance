@@ -5,6 +5,8 @@ import App from './App.tsx'
 import type { DeveloperSettings } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
 
+const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
+
 const SETTINGS: DeveloperSettings = {
   model: 'anthropic/claude-haiku-5.5',
   runs_on: 'openrouter',
@@ -12,15 +14,17 @@ const SETTINGS: DeveloperSettings = {
   prompt_version: '1',
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
+  daily_limit: 30,
+  usage: { openrouter: NO_RUNS, fake: NO_RUNS },
 }
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
-function api(settingsStatus = 200, put?: (body: { model: string }) => [number, unknown], refusal?: unknown) {
+function api(settingsStatus = 200, put?: (body: Record<string, unknown>) => [number, unknown], refusal?: unknown) {
   const body = settingsStatus === 200 ? SETTINGS : (refusal ?? { detail: 'This is available to developers only.' })
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === '/api/developer/settings')
       return Promise.resolve(new Response(JSON.stringify(body), { status: settingsStatus }))
-    if (url === '/api/developer/model' && put) {
+    if ((url === '/api/developer/model' || url === '/api/developer/daily-limit') && put) {
       const [status, body] = put(JSON.parse(init!.body as string))
       return Promise.resolve(new Response(JSON.stringify(body), { status }))
     }
@@ -47,6 +51,55 @@ describe('the developer page', () => {
     const usage = within(region).getByRole('link', { name: /usage and costs/i })
     expect(usage.getAttribute('href')).toBe('https://openrouter.ai/activity')
     expect(within(region).queryByText(/fake model/i)).toBeNull()
+  })
+
+  it("totals OpenRouter's tokens and cost, reported and estimated apart, and keeps the fake's apart", () => {
+    const openrouter = { ...NO_RUNS, assessments: 3, input_tokens: 12_345, output_tokens: 678, reported_cost_usd: 0.0016, estimated_cost_usd: 0.0002 }
+    const fake = { ...NO_RUNS, assessments: 1, input_tokens: 900, output_tokens: 40, estimated_cost_usd: 0.0001 }
+    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake } }} onChange={() => {}} />)
+    const totals = screen.getByRole('region', { name: 'Usage' })
+    expect(within(totals).getByText(
+      'OpenRouter: 3 assessments · 12,345 tokens in · 678 tokens out · $0.0016 reported · $0.0002 estimated',
+    )).toBeTruthy()
+    expect(within(totals).getByText(
+      'Fake model: 1 assessment · 900 tokens in · 40 tokens out · $0.0001 estimated, not spent',
+    )).toBeTruthy()
+    expect(within(totals).queryByText(/incomplete/)).toBeNull()
+  })
+
+  it('says how many assessments have an incomplete cost, and shows no fake line without fake runs', () => {
+    const openrouter = { ...NO_RUNS, assessments: 2, input_tokens: 10, output_tokens: 2, reported_cost_usd: 0.5, incomplete: 1 }
+    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake: NO_RUNS } }} onChange={() => {}} />)
+    expect(screen.getByText("1 of them has an incomplete cost: some calls' cost could not be known.")).toBeTruthy()
+    expect(screen.queryByText(/Fake model:/)).toBeNull()
+  })
+
+  it('shows the daily limit, changes it, and says the new limit applies', async () => {
+    const put = vi.fn((body: Record<string, unknown>) => [200, { ...SETTINGS, daily_limit: body.daily_limit }] as [number, unknown])
+    api(200, put)
+    const onChange = vi.fn()
+    render(<DeveloperPage settings={SETTINGS} onChange={onChange} />)
+    expect(screen.getByText('30 assessments per user per day (UTC)')).toBeTruthy()
+    const field = screen.getByRole('textbox', { name: 'Assessments per day' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '5')
+    await userEvent.click(screen.getByRole('button', { name: 'Change limit' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...SETTINGS, daily_limit: 5 }))
+    expect(put).toHaveBeenCalledWith({ daily_limit: 5 })
+    expect(screen.getByRole('status').textContent).toBe('Each user may now start 5 assessments a day.')
+  })
+
+  it('shows a refused daily limit in place', async () => {
+    api(200, () => [422, { detail: [{ msg: 'Input should be greater than or equal to 1' }] }])
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    const field = screen.getByRole('textbox', { name: 'Assessments per day' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '0')
+    await userEvent.click(screen.getByRole('button', { name: 'Change limit' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'The daily limit is a whole number of assessments, from 1 to 10,000.',
+    )
+    expect(field.getAttribute('aria-invalid')).toBe('true')
   })
 
   it('says when no key makes assessments run on the fake model, and when the choice lasts only until a restart', () => {

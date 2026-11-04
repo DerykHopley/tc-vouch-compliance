@@ -49,12 +49,20 @@ One person using Vouch: signed in with Clerk on the live app, or the one default
 _Avoid_: Account, tenant
 
 **Developer page**:
-The page, and its API, where a developer sees and changes the model assessments run on, and sees the prompt version and a link to usage. Only a user with the developer role reaches it; a compliance lead never sees it.
+The page, and its API, where a developer sees and changes the model assessments run on and the daily limit, and sees the prompt version and every assessment's usage totalled. Only a user with the developer role reaches it; a compliance lead never sees it.
 _Avoid_: Admin page, settings page
 
 **Prompt version**:
 The version of the assessment's prompts (`PROMPT_VERSION`), raised with any change to their words, so a run can say which prompts drafted it.
 _Avoid_: Prompt id, template version
+
+**Daily limit**:
+How many assessments one user may start in a UTC day (30 unless a developer changes it); past it, an assessment is refused with the time the count resets.
+_Avoid_: Quota, rate limit (that is the per-minute request limit)
+
+**Usage**:
+One assessment's input and output tokens and its cost: OpenRouter's reported cost, or one computed from a price table and marked estimated.
+_Avoid_: Spend, billing
 
 **Audit prep**:
 The weeks-long work of a compliance lead getting a compliance profile's controls evidenced before an audit; Vouch's guided chat walks them through it.

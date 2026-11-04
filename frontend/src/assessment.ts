@@ -16,9 +16,38 @@ export type Step = { node: string; text: string }
 // The trial's assessment shape until M1 renames its fields (#20, #21, #26); the page reads only these.
 export type Assessment = { control_id: string; verdict: Verdict; answer: string }
 
+/**
+ * One assessment's tokens and cost (#35): `cost_usd` is OpenRouter's reported part plus the part computed from a
+ * price table (`estimated` when there is one); `cost_complete` is false when some call's cost could not be known.
+ */
+export type Usage = {
+  model: string
+  input_tokens: number
+  output_tokens: number
+  reported_cost_usd: number
+  estimated_cost_usd: number
+  cost_usd: number
+  estimated: boolean
+  cost_complete: boolean
+}
+
+export const count = (n: number) => n.toLocaleString('en-US')
+export const plural = (n: number, noun: string) => `${count(n)} ${noun}${n === 1 ? '' : 's'}`
+export const dollars = (n: number) =>
+  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 })
+
+type UsageShown = Pick<Usage, 'input_tokens' | 'output_tokens' | 'cost_usd' | 'estimated' | 'cost_complete'>
+
+/** An assessment's tokens and cost in words: an incomplete cost is "at least" its known part, never $0. */
+export function usageWords({ input_tokens, output_tokens, cost_usd, estimated, cost_complete }: UsageShown): string {
+  const known = `${dollars(cost_usd)}${estimated ? ' (estimated)' : ''}`
+  const cost = cost_complete ? known : cost_usd > 0 ? `at least ${known}` : 'cost unknown'
+  return `${count(input_tokens)} tokens in · ${count(output_tokens)} tokens out · ${cost}`
+}
+
 export type AssessmentEvent =
   | { event: 'step'; data: Step }
-  | { event: 'result'; data: { assessment: Assessment } }
+  | { event: 'result'; data: { assessment: Assessment; usage?: Usage } }
   | { event: 'error'; data: { message: string } }
 
 /** Shown, with Retry, for any throw from `assess`. */
@@ -69,7 +98,11 @@ export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent
     return
   }
   if (!response.ok) {
-    yield { event: 'error', data: { message: NOT_STARTED } }
+    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why; any other refusal doesn't.
+    const detail = response.status === 429
+      ? await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
+      : undefined
+    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : NOT_STARTED } }
     return
   }
   for await (const item of readEvents(response.body)) {

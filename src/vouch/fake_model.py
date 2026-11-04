@@ -1,11 +1,13 @@
 """A scripted chat model: plays back a JSON script, never touches the network."""
 
 import json
+import math
 from pathlib import Path
 from typing import Annotated, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
@@ -83,11 +85,45 @@ def _load_script(path: Path) -> Script:
         raise ScriptError(path, f"{where}: {first['msg']}") from error
 
 
+CHARS_PER_TOKEN = 4
+"""The fake's token counts: about four characters a token, as for English text."""
+
+
+def _tokens(text: str) -> int:
+    return math.ceil(len(text) / CHARS_PER_TOKEN)
+
+
+def _usage(messages: list[BaseMessage], written: str) -> UsageMetadata:
+    """Token counts for one call, as a real model reports them (#35: usage and cost)."""
+    sent = _tokens("".join(str(m.content) for m in messages))
+    out = _tokens(written)
+    return {"input_tokens": sent, "output_tokens": out, "total_tokens": sent + out}
+
+
+class ScriptedJudge(BaseChatModel):
+    """The judge's call: answers with the script's `judge` entry as JSON, a model call like any
+    other, so its callbacks (the usage meter) see it."""
+
+    script: Script
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-fake-judge"
+
+    def _generate(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        content = self.script.judge.model_dump_json()
+        reply = AIMessage(content, usage_metadata=_usage(messages, content))
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+
 class ScriptedChatModel(BaseChatModel):
     """Plays the script's `gather` turns in order, one per model call.
 
     A tool turn becomes a tool call; the answer turn becomes a call to the
-    `submit_answer` tool, the same way a real model hands back its answer.
+    `submit_answer` tool, the same way a real model hands back its answer. Each reply reports
+    token counts (`usage_metadata`) estimated from the text sent and written.
     """
 
     script: Script
@@ -107,8 +143,10 @@ class ScriptedChatModel(BaseChatModel):
         return self
 
     def with_structured_output(self, schema: type[BaseModel], **kwargs: Any) -> Runnable:
-        """The judge's structured output is the script's `judge` entry."""
-        return RunnableLambda(lambda _: schema.model_validate(self.script.judge.model_dump()))
+        """The judge's structured output is the script's `judge` entry, from a model call made
+        with this model's callbacks."""
+        judge = ScriptedJudge(script=self.script, callbacks=self.callbacks)
+        return judge | RunnableLambda(lambda reply: schema.model_validate_json(reply.content))
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
@@ -123,4 +161,5 @@ class ScriptedChatModel(BaseChatModel):
         else:
             name, args = SUBMIT_ANSWER, step.model_dump(include=set(SubmitAnswer.model_fields))
         call = {"name": name, "args": args, "id": f"call_{self.turn}", "type": "tool_call"}
-        return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+        reply = AIMessage("", tool_calls=[call], usage_metadata=_usage(messages, json.dumps(args)))
+        return ChatResult(generations=[ChatGeneration(message=reply)])
