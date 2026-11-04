@@ -377,6 +377,20 @@ def test_a_malformed_jwt_key_stops_the_app_at_startup_naming_it(jwt_key):
     assert jwt_key not in str(stopped.value)
 
 
+def test_a_private_key_as_the_jwt_key_stops_the_app_at_startup():
+    private_pem = PRIVATE.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    keys = ClerkKeys(KEYS.secret_key, KEYS.publishable_key, SecretStr(private_pem), (ORIGIN,))
+
+    with pytest.raises(SystemExit) as stopped:
+        create_app(Settings(auth_mode="clerk", clerk=keys))
+
+    assert "CLERK_JWT_KEY is not a PEM public key" in str(stopped.value)
+
+
 def test_a_jwt_key_with_its_line_breaks_starts():
     assert "\n" in PUBLIC
     create_app(Settings(auth_mode="clerk", clerk=KEYS))

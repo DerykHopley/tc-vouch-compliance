@@ -21,6 +21,11 @@ export default function Invitation({ children }: { children: ReactNode }) {
   )
 }
 
+/** Shown when Clerk's chunk, or the signed-in app, fails to render: reloading fetches it again. */
+export function LoadFailed() {
+  return <p className="signin-note" role="alert">Vouch could not be loaded. Please reload the page.</p>
+}
+
 /** Shown in place of Clerk's form when it can't load. */
 export function SignInFailed() {
   return <p className="signin-note" role="alert">Sign-in could not be loaded. Please try again shortly.</p>

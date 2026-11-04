@@ -30,6 +30,7 @@ import httpx
 import jwt
 from clerk_backend_api.security import authenticate_request
 from clerk_backend_api.security.types import AuthenticateRequestOptions
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt.algorithms import RSAAlgorithm
 from starlette.requests import Request
 
@@ -68,9 +69,11 @@ def _checked_jwt_key(keys: ClerkKeys) -> str:
     """The JWT key as the SDK will use it (line breaks dropped), parsed once. Raises SettingsError."""
     key = re.sub(r"\r\n|\n|\r", "", keys.jwt_key.get_secret_value())
     try:
-        RSAAlgorithm(RSAAlgorithm.SHA256).prepare_key(key)
+        parsed = RSAAlgorithm(RSAAlgorithm.SHA256).prepare_key(key)
     except (jwt.InvalidKeyError, ValueError, TypeError):
-        raise SettingsError(f"{CLERK_JWT_KEY_ENV} is not a PEM public key") from None
+        parsed = None
+    if not isinstance(parsed, RSAPublicKey):  # prepare_key also takes a private key
+        raise SettingsError(f"{CLERK_JWT_KEY_ENV} is not a PEM public key")
     return key
 
 

@@ -1,7 +1,7 @@
 import { Component, lazy, type ReactNode, Suspense } from 'react'
 import App from './App.tsx'
 import type { AuthConfig } from './authConfig.ts'
-import Invitation, { SignInFailed } from './Invitation.tsx'
+import Invitation, { LoadFailed } from './Invitation.tsx'
 import TopBar from './TopBar.tsx'
 
 // Clerk's package is its own chunk, fetched only in clerk mode (#32).
@@ -12,7 +12,7 @@ export default function Root({ auth }: { auth: AuthConfig }) {
   if (auth.mode === 'local') return <App />
   if (auth.mode === 'unreachable') return <Unreachable />
   return (
-    <ChunkFailed fallback={<Invitation><SignInFailed /></Invitation>}>
+    <ChunkFailed fallback={<Invitation><LoadFailed /></Invitation>}>
       <Suspense fallback={null}>
         <ClerkApp publishableKey={auth.publishableKey} />
       </Suspense>
@@ -33,7 +33,7 @@ function Unreachable() {
   )
 }
 
-/** Shows `fallback` when Clerk's chunk can't load (its import rejects), not a blank page. */
+/** Shows `fallback`, not a blank page, when Clerk's chunk can't load (its import rejects) or the app inside fails. */
 class ChunkFailed extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
 

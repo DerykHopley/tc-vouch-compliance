@@ -30,9 +30,10 @@ describe('Root', () => {
     expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
   })
 
-  it('shows the invitation page with "could not be loaded" when Clerk\'s chunk fails', async () => {
+  it('shows the invitation page with "Vouch could not be loaded" when Clerk\'s chunk fails', async () => {
     render(<Root auth={{ mode: 'clerk', publishableKey: 'pk_test_x' }} />)
-    expect((await screen.findByRole('alert')).textContent).toMatch(/sign-in could not be loaded/i)
+    // Not "sign-in could not be loaded": the boundary also catches the signed-in app's errors
+    expect((await screen.findByRole('alert')).textContent).toBe('Vouch could not be loaded. Please reload the page.')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Access is by invitation')
     expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
   })
