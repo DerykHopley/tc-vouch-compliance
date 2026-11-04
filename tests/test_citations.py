@@ -16,7 +16,7 @@ TODAY = datetime.date(2026, 11, 4)
 TRUE_QUOTE = "Passwords have at least 12 characters."
 INVENTED = "Passwords have at least 20 characters and expire every 30 days."
 NOT_FOUND = "the quote isn't in that document"
-ADMIN_QUOTE ="Administrator accounts always require a hardware security key."
+ADMIN_QUOTE = "Administrator accounts always require a hardware security key."
 
 
 def cite(doc_id: str, quote: str) -> dict:
@@ -91,7 +91,7 @@ def test_an_invented_quote_is_dropped_logged_and_shown_as_a_guard_step(caplog):
     assert m2_dropped(result) == ["authentication-standard: the quote isn't in that document."]
     assert INVENTED in caplog.text
     nodes = [s["node"] for s in result.steps]
-    assert nodes[-3:] == ["judge", "check_quotes", GUARD]
+    assert nodes[nodes.index("judge") :][:3] == ["judge", "check_quotes", GUARD]
     assert step_texts(result, "check_quotes") == [
         "Checked each quote against its document: kept 5 citations, dropped 1."
     ]

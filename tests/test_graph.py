@@ -62,7 +62,14 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     assert result.model == "scripted-fake"
     assert result.prompt_version
     assert [s["node"] for s in result.steps] == [
-        "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
+        "gather",
+        "tools",
+        "gather",
+        "check_answer",
+        "judge",
+        "check_quotes",
+        "remediate",
+        "review",
     ]
     assert step_texts(result, "gather")[-1] == "Drafted an answer."
     assert step_texts(result, "judge") == ["Judged 3 of 5 requirements evidenced."]
@@ -137,7 +144,9 @@ def test_an_unknown_verdict_or_a_skipped_requirement_is_not_evidenced_not_judged
     assert (m1.id, m1.verdict, m1.reason) == ("M1", "not-evidenced", "not judged")
     assert NOT_JUDGED == "not judged"
     assert result.verdict == "partly-evidenced"
-    assert step_texts(result, "judge")[-1] == "Judged 4 of 5 requirements evidenced. Not judged: M1."
+    assert (
+        step_texts(result, "judge")[-1] == "Judged 4 of 5 requirements evidenced. Not judged: M1."
+    )
 
 
 def test_a_judgement_for_a_requirement_the_control_lacks_is_ignored():
@@ -245,9 +254,7 @@ def test_a_refused_answer_answers_every_tool_call_in_its_message():
             tool_call("submit_answer", {"answer": "Also certified."}, "a2"),
         ],
     )
-    second = AIMessage(
-        "", tool_calls=[tool_call("submit_answer", {"answer": "Shown."}, "a3")]
-    )
+    second = AIMessage("", tool_calls=[tool_call("submit_answer", {"answer": "Shown."}, "a3")])
     model = RecordingModel(
         script={"gather": [{"answer": "unused"}]}, replies=[first, second], received=[]
     )

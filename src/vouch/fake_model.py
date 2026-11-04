@@ -11,7 +11,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
 
-from vouch.graph import SUBMIT_ANSWER, USAGE_KEYS, Judgement, SubmitAnswer
+from vouch.graph import SUBMIT_ANSWER, USAGE_KEYS, Judgement, RemediationPlan, SubmitAnswer
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -47,29 +47,36 @@ Turn = Annotated[
 
 
 class Script(BaseModel):
-    """The script format: tool turns and answer turns, an answer last; an optional judge.
+    """The script format: tool turns and answer turns, an answer last; an optional judge and
+    an optional remediation plan.
 
     An answer turn before the last one is played when the graph asks for the answer again
     (the output check refused it). `judge` is one judgement, or a list played in turn when the
     graph asks for a judgement again; the last one repeats. Its verdicts are any strings, as a
     real model's can be; the graph decides what an unknown one means. Keys the format doesn't
-    name are ignored, as they always were.
+    name are ignored, as they always were. `remediate` works as `judge` does, for the drafts of
+    remediation items.
     """
 
     gather: list[Turn] = Field(min_length=1)
     judge: Judgement | list[Judgement] = Field(default_factory=Judgement)
+    remediate: RemediationPlan | list[RemediationPlan] = Field(default_factory=RemediationPlan)
 
-    @property
-    def judgements(self) -> list[Judgement]:
-        return self.judge if isinstance(self.judge, list) else [self.judge]
+    def replies_for(self, schema: type[BaseModel]) -> list[BaseModel]:
+        """The structured replies scripted for a schema: the plans for a RemediationPlan, the
+        judgements for anything else (the judge's)."""
+        replies = self.remediate if schema is RemediationPlan else self.judge
+        return replies if isinstance(replies, list) else [replies]
 
     @model_validator(mode="after")
     def _answer_comes_last(self) -> "Script":
         ends_with_answer = isinstance(self.gather[-1], AnswerTurn)
         if not ends_with_answer:  # a ValueError, so pydantic reports it as a validation error
             raise ValueError("the last gather turn must be an answer")
-        if not self.judgements:
+        if not self.replies_for(Judgement):
             raise ValueError("judge: a list of judgements needs at least one")
+        if not self.replies_for(RemediationPlan):
+            raise ValueError("remediate: a list of plans needs at least one")
         return self
 
 
@@ -97,7 +104,8 @@ class ScriptedChatModel(BaseChatModel):
 
     script: Script
     turn: int = 0
-    judge_turn: int = 0
+    turns: dict[Any, int] = Field(default_factory=dict)  # structured replies given, per schema
+    prompts: list[list[BaseMessage]] = Field(default_factory=list)  # each call's messages, in order
 
     @classmethod
     def from_file(cls, path: str | Path) -> "ScriptedChatModel":
@@ -115,26 +123,28 @@ class ScriptedChatModel(BaseChatModel):
     def with_structured_output(
         self, schema: type[BaseModel], *, include_raw: bool = False, **kwargs: Any
     ) -> Runnable:
-        """The judge's structured output is the script's next judgement (the last repeats);
-        with `include_raw`, a dict with the raw message (carrying token usage), as LangChain's
-        models give."""
+        """The structured output is the script's next judgement, or for a RemediationPlan its
+        next plan (the last repeats); with `include_raw`, a dict with the raw message (carrying
+        token usage), as LangChain's models give."""
 
-        def judge(messages: list[BaseMessage]) -> Any:
-            judgements = self.script.judgements
-            judgement = judgements[min(self.judge_turn, len(judgements) - 1)]
-            self.judge_turn += 1
-            parsed = schema.model_validate(judgement.model_dump())
+        def reply(messages: list[BaseMessage]) -> Any:
+            self.prompts.append(list(messages))
+            replies = self.script.replies_for(schema)
+            turn = self.turns.get(schema, 0)
+            self.turns[schema] = turn + 1
+            parsed = schema.model_validate(replies[min(turn, len(replies) - 1)].model_dump())
             if not include_raw:
                 return parsed
             content = parsed.model_dump_json()
             raw = AIMessage(content, usage_metadata=_fake_usage(messages, content))
             return {"raw": raw, "parsed": parsed, "parsing_error": None}
 
-        return RunnableLambda(judge)
+        return RunnableLambda(reply)
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> ChatResult:
+        self.prompts.append(list(messages))
         gather = self.script.gather
         if self.turn >= len(gather):
             raise ScriptExhaustedError(f"script has {len(gather)} gather turns")
