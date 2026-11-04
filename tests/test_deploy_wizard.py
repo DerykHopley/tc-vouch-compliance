@@ -105,6 +105,7 @@ def test_a_dry_run_prints_every_command_runs_none_and_writes_nothing(tmp_path):
         f"docker push {IMAGE}:v1",
         f"gcloud run deploy vouch --image={IMAGE}:v1 --region=europe-west1",
         "--min-instances=0 --max-instances=1",
+        "--max=1",
         "--allow-unauthenticated",
         "/api/health",
     ):
@@ -129,6 +130,15 @@ def test_a_deploy_saves_only_plain_answers_and_finishes(tmp_path):
         "REGION=europe-west1",
         "TAG=v1",
     ]
+
+
+def test_the_deploy_caps_the_service_not_just_the_revision_at_one_instance(tmp_path):
+    result, calls = run_wizard(tmp_path, answers="vouch-demo-123\n" + "y\n" * 10, healthy=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    [deploy] = [line for line in calls.splitlines() if line.startswith("gcloud run deploy ")]
+    args = deploy.split()
+    assert "--max=1" in args  # the service-level limit, shared by every revision with traffic
+    assert "--max-instances=1" in args and "--min-instances=0" in args
 
 
 def test_the_project_id_is_asked_once(tmp_path):

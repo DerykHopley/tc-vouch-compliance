@@ -162,7 +162,7 @@ fi
 step  # Deploy
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on the scripted fake model."
 run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --region="$REGION" \
-  --project="$PROJECT_ID" --allow-unauthenticated --min-instances=0 --max-instances=1 --quiet
+  --project="$PROJECT_ID" --allow-unauthenticated --min-instances=0 --max-instances=1 --max=1 --quiet
 
 step  # URL
 LOGS=(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\"" \
