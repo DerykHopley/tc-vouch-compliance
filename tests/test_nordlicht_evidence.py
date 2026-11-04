@@ -1,7 +1,6 @@
 """Nordlicht's evidence folder: every document's front matter, the planted cases, and the
 expected-answers draft (#18)."""
 
-import calendar
 import datetime
 import re
 from functools import cache
@@ -12,6 +11,7 @@ import pytest
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from vouch.documents import stale_because
 from vouch.front_matter import split_front_matter
 from vouch.graph import JUDGED_VERDICTS
 from vouch.isa import load_isa_control
@@ -26,8 +26,7 @@ TWELVE = ["1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
           "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9"]  # fmt: skip
 PATCH = "patch-vulnerability-status"  # the recorded Patch response's id (#24)
 VERDICTS = set(JUDGED_VERDICTS)  # the draft speaks the graph's verdict words
-CYCLE_MONTHS = {"quarterly": 3, "half-yearly": 6, "yearly": 12, "two-yearly": 24}
-DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date once #22 lands
+DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date (#22)
 
 
 class FrontMatter(BaseModel):
@@ -75,24 +74,9 @@ def expected_answers() -> dict[str, dict[str, dict]]:
     return {c["id"]: {r["id"]: r for r in c["requirements"]} for c in draft()["controls"]}
 
 
-def review_due(approved: datetime.date, cycle: str) -> datetime.date:
-    """The approval date plus the review cycle, clamped to the month's last day.
-
-    The staleness rule lives here until #22 moves it into vouch.
-    """
-    months = approved.month - 1 + CYCLE_MONTHS[cycle]
-    year, month = approved.year + months // 12, months % 12 + 1
-    return approved.replace(
-        year=year, month=month, day=min(approved.day, calendar.monthrange(year, month)[1])
-    )
-
-
 def stale_on(day: datetime.date) -> list[str]:
-    return [
-        p.stem
-        for p in DOCUMENTS
-        if review_due(read(p)[0].approval_date, read(p)[0].review_cycle) < day
-    ]
+    """The documents stale on this day, by vouch's rule (vouch.documents)."""
+    return [p.stem for p in DOCUMENTS if stale_because(read(p)[0].model_dump(), day)]
 
 
 # Front matter.
@@ -109,22 +93,6 @@ def test_every_document_has_valid_front_matter_with_all_fields(path):
     assert meta.id == path.stem
     assert meta.kind == FOLDERS[path.parent.name]
     assert body.strip()
-
-
-@pytest.mark.parametrize(
-    ("approved", "cycle", "due"),
-    [
-        (datetime.date(2022, 3, 14), "yearly", datetime.date(2023, 3, 14)),
-        (datetime.date(2026, 11, 20), "quarterly", datetime.date(2027, 2, 20)),
-        (datetime.date(2026, 1, 31), "quarterly", datetime.date(2026, 4, 30)),
-        (datetime.date(2026, 8, 31), "half-yearly", datetime.date(2027, 2, 28)),
-        (datetime.date(2024, 2, 29), "yearly", datetime.date(2025, 2, 28)),
-        (datetime.date(2026, 7, 14), "two-yearly", datetime.date(2028, 7, 14)),
-    ],
-    ids=["plain", "across-a-year", "31st-to-30th", "31st-to-february", "leap-day", "two-yearly"],
-)
-def test_review_due_clamps_to_the_months_last_day(approved, cycle, due):
-    assert review_due(approved, cycle) == due
 
 
 # Planted cases.

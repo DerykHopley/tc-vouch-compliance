@@ -1,5 +1,6 @@
 """Citations: every quote is checked against the document version it cites (#21)."""
 
+import datetime
 import json
 import logging
 
@@ -11,6 +12,7 @@ from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.graph import GUARD
 
 NORDLICHT = load_named_profile("nordlicht")
+TODAY = datetime.date(2026, 11, 4)
 TRUE_QUOTE = "Passwords have at least 12 characters."
 INVENTED = "Passwords have at least 20 characters and expire every 30 days."
 NOT_FOUND = "the quote isn't in that document"
@@ -68,6 +70,9 @@ def test_a_true_quote_is_kept_with_document_id_version_and_section():
             version="3.1",
             section="Passwords",
             quote=TRUE_QUOTE,
+            kind="documented",
+            stale=False,
+            stale_because=None,
         ),
     )
     assert m2(result).verdict == "evidenced"
@@ -192,6 +197,9 @@ def test_the_citations_reach_the_assessment_as_plain_json():
             "version": "3.1",
             "section": "Passwords",
             "quote": TRUE_QUOTE,
+            "kind": "documented",
+            "stale": False,
+            "stale_because": None,
         }
     ]
     assert "sources" not in data
@@ -206,7 +214,9 @@ def write_doc(folder, name: str, body: str, version: str | None = "1.0") -> None
 
 
 def check(folder, doc_id: str, quote: str):
-    return QuoteChecker([str(folder)]).check(CitationClaim(doc_id=doc_id, quote=quote))
+    return QuoteChecker({"policies": str(folder)}, today=TODAY).check(
+        CitationClaim(doc_id=doc_id, quote=quote)
+    )
 
 
 @pytest.mark.parametrize("doc_id", ["ISMS_Policy_v2.1", "ISMS_Policy_v2.1.md"])
@@ -216,7 +226,15 @@ def test_any_id_search_can_return_can_be_cited(tmp_path, doc_id):
     checked = check(tmp_path, doc_id, "All laptops use full disk encryption.")
 
     quote = "All laptops use full disk encryption."
-    assert checked == Citation("ISMS_Policy_v2.1", "1.0", "Policy", quote)
+    assert checked == Citation(
+        "ISMS_Policy_v2.1",
+        "1.0",
+        "Policy",
+        quote,
+        kind="documented",
+        stale=True,
+        stale_because="no review date",
+    )
 
 
 @pytest.mark.parametrize("doc_id", ["sub/policy", "sub\\policy", "..", "../policy"])
@@ -252,7 +270,7 @@ def test_a_quote_matches_whatever_its_unicode_form_and_zero_width_characters(tmp
 
 def test_each_document_is_read_once_per_check(tmp_path):
     write_doc(tmp_path, "policy", "All laptops use full disk encryption. USB sticks are blocked.")
-    checker = QuoteChecker([str(tmp_path)])
+    checker = QuoteChecker({"policies": str(tmp_path)}, today=TODAY)
 
     first = checker.check(CitationClaim(doc_id="policy", quote="All laptops use full disk"))
     (tmp_path / "policy.md").unlink()
