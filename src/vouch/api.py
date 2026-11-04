@@ -5,7 +5,8 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import logging
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated, Any
 
@@ -14,6 +15,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
 from vouch.controls import Control, UnknownControlError, load_control
+from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.graph import Assessment, assess_steps
 from vouch.settings import (
     DEFAULT_USER,
@@ -31,6 +33,7 @@ log = logging.getLogger(__name__)
 # The trial's verdicts, as the API names them (GLOSSARY.md, "Verdict"). #20 renames them inside.
 VERDICTS = {"found": "evidenced", "partial": "partly-evidenced", "gap": "not-evidenced"}
 FAILED = "The assessment could not be completed. Please try again later."
+DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 
 router = APIRouter(prefix="/api")
 
@@ -62,9 +65,32 @@ def current_user(settings: AppSettings) -> User:
     raise HTTPException(status_code=401, detail="Sign in to use Vouch.")
 
 
+def app_database(request: Request) -> Database | None:
+    """The app's Database; None when no database URL is set."""
+    return request.app.state.database
+
+
+def database_connection(
+    db: Annotated[Database | None, Depends(app_database)],
+) -> Iterator[Connection]:
+    """A connection for a route that needs the database. A 503 when there's none to be had, or
+    when it drops while the route uses it."""
+    try:
+        if db is None:
+            raise DatabaseUnavailable("no database URL is set")
+        with db.connection() as conn:
+            yield conn
+    except DatabaseUnavailable:
+        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
+
+
 @router.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "version": version("vouch")}
+def health(db: Annotated[Database | None, Depends(app_database)]) -> dict[str, str]:
+    """With a database URL set, also whether the database is reachable."""
+    answer = {"status": "ok", "version": version("vouch")}
+    if db is not None:
+        answer["database"] = "reachable" if db.reachable() else "unavailable"
+    return answer
 
 
 @router.post(
@@ -109,13 +135,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     A path that is neither a route nor a built file gets the front end's index.html when a
     browser asks for a page, so a deep link survives a refresh (client routing).
     """
-    app = FastAPI(title="Vouch")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        if app.state.database is not None:
+            app.state.database.close()
+
+    app = FastAPI(title="Vouch", lifespan=lifespan)
     if settings is None:
         try:
             settings = load_settings()
         except SettingsError as error:
             raise SystemExit(f"Vouch cannot start: {error}.") from None
     app.state.settings = settings
+    app.state.database = Database(settings.database_url) if settings.database_url else None
     frontend = settings.frontend
     app.include_router(router)
     if frontend is not None:
