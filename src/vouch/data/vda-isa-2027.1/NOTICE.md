@@ -3,7 +3,7 @@
 This folder holds material from the **VDA Information Security Assessment (VDA ISA), version 2027.1 (2026-09-30)**, English edition:
 
 - `isa2027.1-en.xlsx`: the ISA Excel, unchanged, as downloaded from the ENX Association's TISAX downloads (<https://portal.enx.com>).
-- `controls.yaml`: twelve controls of its "Information Security" tab (1.1.1, 1.6.1, 1.6.2, 2.1.3, 4.1.2, 4.1.3, 4.2.1, 5.1.1, 5.1.2, 5.2.4, 5.2.5, 5.2.9): each control question, its requirements (must, should, and the additional requirements for high and very high protection needs) and its ISO 27001 reference. They are copied word for word from the Excel by `vouch.isa_extract`. Only the "+" bullet markers are left out, and each bullet is stored as its own entry. No text is changed, translated or added. Vouch's own fields (requirement ids such as `M1`, column names) sit beside the ISA text, not inside it.
+- `controls.yaml`: twelve controls of its "Information Security" tab (1.1.1, 1.6.1, 1.6.2, 2.1.3, 4.1.2, 4.1.3, 4.2.1, 5.1.1, 5.1.2, 5.2.4, 5.2.5, 5.2.9): each control question, its requirements (must, should, and the additional requirements for high and very high protection needs) and its ISO 27001 reference. They are copied word for word from the Excel by `vouch.isa_extract`. Only the "+" bullet markers and the spaces and empty lines after each bullet's last word are left out (16 bullets end with them in the Excel, for example 5.2.4 S1), and each bullet is stored as its own entry. Line breaks and spaces inside a bullet are kept. No text is changed, translated or added. Vouch's own fields (requirement ids such as `M1`, column names) sit beside the ISA text, not inside it.
 
 ## Credit
 
