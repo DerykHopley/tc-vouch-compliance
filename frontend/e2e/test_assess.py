@@ -5,13 +5,13 @@ from playwright.sync_api import Page, expect
 CONTROL = "NK-ENC-01"
 
 
-def start_assessment(page: Page, ui_url: str) -> None:
-    page.goto(ui_url)
+def start_assessment(page: Page, vouch_url: str) -> None:
+    page.goto(vouch_url)
     card = page.get_by_role("article").filter(has_text=CONTROL)
     card.get_by_role("button", name=f"Assess {CONTROL}").click()
 
 
-def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page: Page, ui_url):
+def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page: Page, vouch_url):
     seen: list[int] = []  # the number of steps on screen each time it changes
     page.expose_function("stepCount", lambda n: seen.append(n))
     page.add_init_script(
@@ -21,7 +21,7 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
            }).observe(document, {childList: true, subtree: true})"""
     )
 
-    start_assessment(page, ui_url)
+    start_assessment(page, vouch_url)
 
     paper = page.get_by_role("region", name="Working paper")
     expect(paper.get_by_role("heading", name=CONTROL)).to_be_visible()
@@ -36,10 +36,10 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     assert sorted(set(seen)) == [1, 2, 3, 4, 5], seen
 
 
-def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, ui_url):
+def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, vouch_url):
     page.route("**/api/assessments", lambda route: route.abort("connectionrefused"))
 
-    start_assessment(page, ui_url)
+    start_assessment(page, vouch_url)
 
     paper = page.get_by_role("region", name="Working paper")
     expect(paper.get_by_role("alert")).to_have_text(
@@ -52,14 +52,14 @@ def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, 
 
 
 def test_an_error_event_shows_its_message_in_place_of_the_result(
-    page: Page, ui_url, failing_api_url
+    page: Page, vouch_url, failing_api_url
 ):
     page.route(
         "**/api/assessments",
         lambda route: route.fulfill(response=route.fetch(url=f"{failing_api_url}/api/assessments")),
     )
 
-    start_assessment(page, ui_url)
+    start_assessment(page, vouch_url)
 
     paper = page.get_by_role("region", name="Working paper")
     expect(paper.get_by_role("alert")).to_have_text(
@@ -68,12 +68,12 @@ def test_an_error_event_shows_its_message_in_place_of_the_result(
     expect(paper.get_by_role("region", name="Verdict and draft answer")).to_have_count(0)
 
 
-def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page: Page, ui_url):
+def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page: Page, vouch_url):
     held = []  # the assessment's request, held open until the test lets it go
     page.route("**/api/assessments", lambda route: held.append(route))
     posts = []
     page.on("request", lambda r: posts.append(r) if r.url.endswith("/api/assessments") else None)
-    page.goto(ui_url)
+    page.goto(vouch_url)
     button = page.get_by_role("button", name=f"Assess {CONTROL}")
 
     button.evaluate("b => { b.click(); b.click() }")  # two clicks before React re-renders
@@ -90,9 +90,9 @@ def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page
     assert len(posts) == 1
 
 
-def test_with_reduced_motion_steps_appear_without_animation(page: Page, ui_url, browser):
+def test_with_reduced_motion_steps_appear_without_animation(page: Page, vouch_url, browser):
     def step_animation(p: Page) -> str:
-        start_assessment(p, ui_url)
+        start_assessment(p, vouch_url)
         step = p.get_by_role("list", name="Agent steps").get_by_role("listitem").first
         expect(step).to_be_visible()
         return step.evaluate("li => getComputedStyle(li).animationName")
@@ -104,3 +104,16 @@ def test_with_reduced_motion_steps_appear_without_animation(page: Page, ui_url, 
         assert step_animation(reduced.new_page()) == "none"
     finally:
         reduced.close()
+
+
+def test_the_working_paper_survives_a_refresh_and_opens_from_its_address(page: Page, vouch_url):
+    start_assessment(page, vouch_url)
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("region", name="Verdict and draft answer")).to_be_visible()
+    expect(page).to_have_url(f"{vouch_url}/controls/{CONTROL}")
+
+    page.reload()
+    expect(paper.get_by_role("heading", name=CONTROL)).to_be_visible()
+
+    page.goto(f"{vouch_url}/controls/{CONTROL}")
+    expect(paper.get_by_role("button", name=f"Assess {CONTROL}", exact=True)).to_be_enabled()

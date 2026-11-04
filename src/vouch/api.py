@@ -1,14 +1,17 @@
 """The HTTP API: health, and one control's assessment streamed as server-sent events.
 
-Run it locally with `uv run uvicorn vouch.api:app --port 8000`.
+Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
+built front end (frontend/dist), it serves that too, on one origin, as the container does.
 """
 
 import logging
+import os
 from collections.abc import Iterable
 from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
@@ -21,8 +24,9 @@ log = logging.getLogger(__name__)
 # The trial's verdicts, as the API names them (GLOSSARY.md, "Verdict"). #20 renames them inside.
 VERDICTS = {"found": "evidenced", "partial": "partly-evidenced", "gap": "not-evidenced"}
 FAILED = "The assessment could not be completed. Please try again later."
+FRONTEND_ENV = "VOUCH_FRONTEND"
 
-app = FastAPI(title="Vouch")
+router = APIRouter(prefix="/api")
 
 
 class AssessmentRequest(BaseModel):
@@ -37,12 +41,12 @@ def requested_control(request: Annotated[AssessmentRequest, Body()]) -> Control:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-@app.get("/api/health")
+@router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": version("vouch")}
 
 
-@app.post("/api/assessments", response_class=EventSourceResponse)
+@router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
     control: Annotated[Control, Depends(requested_control)],
 ) -> Iterable[ServerSentEvent]:
@@ -65,3 +69,32 @@ def create_assessment(
 
 def _api_assessment(assessment: Assessment) -> dict[str, Any]:
     return assessment.to_dict() | {"verdict": VERDICTS[assessment.verdict]}
+
+
+@router.get("/{path:path}", include_in_schema=False)
+def unknown_api_path(path: str) -> None:
+    """Under /api, a path that isn't a route is a 404, never the front end's page."""
+    raise HTTPException(status_code=404)
+
+
+def create_app(frontend: Path | None = None) -> FastAPI:
+    """The API under /api; given the built front end, that on every other path.
+
+    A path that is neither a route nor a built file gets the front end's index.html when a
+    browser asks for a page, so a deep link survives a refresh (client routing).
+    """
+    app = FastAPI(title="Vouch")
+    app.include_router(router)
+    if frontend is not None:
+        if not (frontend / "index.html").is_file():
+            raise SystemExit(
+                f"Vouch cannot start: no front-end build at {frontend} ({FRONTEND_ENV}). "
+                "Build it with `npm run build` in frontend/, or unset "
+                f"{FRONTEND_ENV} to run the API alone."
+            )
+        app.frontend("/", directory=frontend)
+    return app
+
+
+_frontend = os.environ.get(FRONTEND_ENV)
+app = create_app(Path(_frontend) if _frontend else None)

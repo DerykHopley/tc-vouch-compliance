@@ -35,11 +35,24 @@ the stream closes (or one `error`). The API runs only the scripted fake model: t
 script, or the one `ASSESS_FAKE_SCRIPT` names. It never builds the real model until sign-in
 exists.
 
+### One container, as on Cloud Run
+
+```sh
+docker build -t vouch:dev .
+docker run --rm -p 127.0.0.1:8081:8080 vouch:dev     # open http://localhost:8081
+```
+
+FastAPI serves the API under `/api` and the built front end (`VOUCH_FRONTEND`, `frontend/dist`)
+on every other path, so a link such as `/controls/NK-ENC-01` survives a refresh. It listens on
+`$PORT` (8080 by default). Without a front-end build it stops at once and says so.
+
 ## Checks
 
 ```sh
 uv run ruff check
 uv run pytest            # sockets are disabled; no test needs an API key
+frontend/e2e/run.sh      # the browser check, on the built front end
+VOUCH_IMAGE=vouch:dev frontend/e2e/run.sh --browser firefox   # on the container
 ```
 
 ## Docs

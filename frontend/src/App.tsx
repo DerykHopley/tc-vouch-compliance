@@ -15,16 +15,35 @@ function systemTheme(): Theme {
 const COMPANY = 'Nordlicht Komponenten GmbH'
 const CONTROL: Control = { id: 'NK-ENC-01', title: 'Laptops are encrypted', owner: 'Information security officer' }
 
+type View = 'dossier' | 'paper'
+
+/** Each view's address: the control's working paper at /controls/<id>, the Dossier at /. */
+const PATHS: Record<View, string> = { dossier: '/', paper: `/controls/${CONTROL.id}` }
+
+/** The view an address shows; the Dossier for one it does not know. */
+const viewAt = (path: string): View =>
+  (Object.keys(PATHS) as View[]).find((view) => PATHS[view] === path) ?? 'dossier'
+
 export default function App() {
   const [theme, setTheme] = useState<Theme>(systemTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
   const other: Theme = theme === 'light' ? 'dark' : 'light'
-  const [view, setView] = useState<'dossier' | 'paper'>('dossier')
+  const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  useEffect(() => {
+    const onPopState = () => setView(viewAt(window.location.pathname)) // Back or Forward
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+  /** Shows a view and gives it its address, so a refresh or a shared link opens it again. */
+  const showView = (next: View) => {
+    if (window.location.pathname !== PATHS[next]) window.history.pushState(null, '', PATHS[next])
+    setView(next)
+  }
   const { run, start } = useAssessment(CONTROL.id)
   const assess = () => {
-    setView('paper')
+    showView('paper')
     void start()
   }
 
@@ -35,7 +54,7 @@ export default function App() {
           <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
           <nav className="nav" aria-label="Main">
             <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); setView('dossier') }}>Dossier</a>
+              onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
           </nav>
           <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
             {other === 'dark' ? 'Dark theme' : 'Light theme'}
