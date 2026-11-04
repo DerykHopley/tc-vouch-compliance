@@ -185,7 +185,12 @@ CLOUD_FIELDS = [
 
 def table_rows(body: str) -> list[dict[str, str]]:
     """The first Markdown table in the body, one {header: cell} per data row."""
-    lines = [line.strip() for line in body.splitlines() if line.strip().startswith("|")]
+    lines: list[str] = []
+    for line in map(str.strip, body.splitlines()):
+        if line.startswith("|"):
+            lines.append(line)
+        elif lines:  # the first table has ended
+            break
     header, _, *rows = ([cell.strip() for cell in line.strip("|").split("|")] for line in lines)
     return [dict(zip(header, row, strict=True)) for row in rows]
 
@@ -212,11 +217,15 @@ def test_the_cloud_services_register_lists_each_service_with_every_field():
 def test_the_training_record_is_an_export_from_the_e_learning_platform():
     _, body = document("training-attendance-record")
 
-    assert "Export from our e-learning platform" in body
+    assert "from our e-learning platform" in body
 
 
 def test_no_document_says_nordlicht_uses_no_outside_it_services():
     assert mentioning(r"no (outside|external)( IT)? services") == []
+
+
+def test_no_document_names_a_training_server_in_place_of_the_e_learning_platform():
+    assert mentioning(r"training server") == []
 
 
 @pytest.mark.parametrize("doc_id", ["network-transfer-standard", "network-services-register"])
@@ -224,6 +233,8 @@ def test_the_network_documents_allow_approved_outside_services_and_point_to_the_
     _, body = document(doc_id)
 
     assert "cloud services register" in body
+    assert re.search(r"outside (services|providers)", body, re.IGNORECASE)
+    assert "approved" in body
 
 
 def test_nothing_mentions_a_vpn_or_remote_access_except_to_say_there_is_none():

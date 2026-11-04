@@ -24,7 +24,7 @@ The basic course runs every year in the first quarter. New employees take it wit
 
 ## Records
 
-Our training server records who completed each course and when. HR follows up with anyone who has not finished within four weeks.
+Our e-learning platform records who completed each course and when. HR follows up with anyone who has not finished within four weeks.
 
 ## Contact
 
