@@ -20,7 +20,7 @@ WHAT=(
   "with --db-ready, go on; without, print how to run vouch-db-setup and stop"
   "Cloud Run service \"vouch\": public, min 0 and max 1 instance, each secret's version pinned, the Cloud SQL instance"
   "print the service's address"
-  "GET /api/health answers {\"status\": \"ok\", \"database\": \"reachable\"} (or it stops with the logs command)"
+  "GET /api/health answers {\"status\": \"ok\", \"database\": \"reachable\"} (or it stops: needs-setup with the vouch-db-setup commands, else the logs command)"
 )
 
 # The secret settings, as ENV:entry: the env var (also the secret's name in Secret Manager) and the
@@ -327,13 +327,18 @@ SQL_INSTANCE=$(query gcloud sql instances describe "$SQL_NAME" --project="$PROJE
 [[ $DRY == yes ]] && SQL_INSTANCE="$PROJECT_ID:$REGION:$SQL_NAME"
 [[ -n "$SQL_INSTANCE" ]] || stop "Project $PROJECT_ID has no Cloud SQL instance $SQL_NAME (#29), or you can't see it: gcloud sql instances list --project=$PROJECT_ID"
 ok "Cloud SQL instance $SQL_INSTANCE"
+# setup_commands: how to run vouch-db-setup against the instance, from the owner's machine.
+setup_commands() {
+  printf '    %-52s # terminal 1: leave it running\n' "cloud-sql-proxy $SQL_INSTANCE --port 5432"
+  printf '    %-52s # terminal 2: .envrc gives VOUCH_DATABASE_URL\n' "uv run vouch-db-setup"
+}
+RERUN_DB_READY="scripts/deploy-wizard.sh --db-ready   (it skips what is done)"
 say "The app needs vouch-db-setup to have run once against it (and after a LangGraph upgrade)."
 say "From your machine, through the Cloud SQL Auth Proxy (DEPLOY.md, The database):"
-printf '    %-52s # terminal 1: leave it running\n' "cloud-sql-proxy $SQL_INSTANCE --port 5432"
-printf '    %-52s # terminal 2: .envrc gives VOUCH_DATABASE_URL\n' "uv run vouch-db-setup"
+setup_commands
 if [[ $DB_READY == yes ]]; then ok "vouch-db-setup has run (--db-ready)"
 elif [[ $DRY == no ]]; then
-  stop "Run vouch-db-setup (above), then: scripts/deploy-wizard.sh --db-ready   (it skips what is done)"
+  stop "Run vouch-db-setup (above), then: $RERUN_DB_READY"
 fi
 
 step  # Deploy
@@ -349,6 +354,8 @@ run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --re
   --set-secrets="$SECRETS_ARG" \
   --set-env-vars="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZED_PARTIES" \
   --add-cloudsql-instances="$SQL_INSTANCE" --quiet
+# Health on the old revision would pass, so a skipped deploy is never Done (#123).
+[[ $RAN == no ]] && stop "Nothing was deployed: the service still runs its last revision, without this run's image or secret versions. Run scripts/deploy-wizard.sh --db-ready again and answer y to the deploy."
 
 step  # URL
 LOGS=(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\"" \
@@ -372,6 +379,11 @@ else
     # From M3 the live app always has a database (#33): ok without it isn't a working deploy.
     if [[ "$body" =~ \"status\"[[:space:]]*:[[:space:]]*\"ok\" &&
           "$body" =~ \"database\"[[:space:]]*:[[:space:]]*\"reachable\" ]]; then healthy=yes; break; fi
+    # The database answers, but has no tables (#123): a retry won't change that.
+    [[ "$body" =~ \"database\"[[:space:]]*:[[:space:]]*\"needs-setup\" ]] \
+      && stop "The database answers, but vouch-db-setup hasn't run on it, so every assessment would fail. Run it:
+$(setup_commands)
+    then: $RERUN_DB_READY"
   done
   [[ $healthy == yes ]] || stop "$URL/api/health didn't answer ok with the database reachable. The log says why: $(quoted "${LOGS[@]}")"
   ok "$URL/api/health answers ok, the database reachable"

@@ -14,7 +14,7 @@ Cloud Run" and "the walking skeleton has no secrets").
 > deploys with the secrets and the Cloud SQL instance: see "Secrets and access" below.
 
 > *Unverified:* nothing here has run against a real project yet. The first deploy is #15. The
-> wizard's own behaviour is *checked* with fake `gcloud`, `docker` and `curl`
+> wizard's own behaviour is *checked* with fake `gcloud`, `docker`, `curl` and `secret-tool`
 > (`tests/test_deploy_wizard.py`). Each claim below says *checked* (and where) or *unverified*.
 
 ## What runs where
@@ -207,6 +207,7 @@ keeps the count down.
 ```bash
 URL=$(gcloud run services describe vouch --region=$REGION --project=$PROJECT_ID --format='value(status.url)')
 curl -fsS $URL/api/health          # {"status":"ok","version":"...","database":"reachable"}
+                                   # "needs-setup": run vouch-db-setup ("The database")
 ```
 
 The first answer can take 10 to 30 s, a cold start (*unverified*: Patch's figure). If it doesn't answer, the log says why:
@@ -240,14 +241,20 @@ gcloud run deploy vouch ... --add-cloudsql-instances=$SQL_INSTANCE
 
 On Cloud Run the URL is the keyring's `cloudsql-vouch-run-url`
 (`postgresql://vouch:<password>@/vouch?host=/cloudsql/<connection name>`), given to the service
-from Secret Manager as `VOUCH_DATABASE_URL` (the wizard does both, "Secrets and access"). Health then says `"database": "reachable"` or
-`"unavailable"` (its answer is reused for 5 s). Health's `status` stays `ok` either way: it says
-the app is alive.
+from Secret Manager as `VOUCH_DATABASE_URL` (the wizard does both, "Secrets and access"). Health then says `"database": "reachable"`
+(it answers, and `vouch-db-setup`'s tables are there), `"needs-setup"` (it answers, but
+`vouch-db-setup` never ran on it: every assessment answers 503 until it does, #123) or
+`"unavailable"`; its answer is reused for 5 s (*checked*, `tests/test_database.py`). Health's
+`status` stays `ok` in each case: it says the app is alive.
 
 **The deploy check needs the database.** From M3 on the live app always has a database, so the
 wizard's health check (step 11) passes only on `"status": "ok"` *and* `"database": "reachable"`
 (*checked*, `tests/test_deploy_wizard.py`). A deploy without the database URL or the instance
-flag fails there, with the logs command. The wizard's deploy carries both (#118).
+flag fails there, with the logs command. The wizard's deploy carries both (#118). On
+`"needs-setup"` it stops with the two `vouch-db-setup` commands (*checked*,
+`tests/test_deploy_wizard.py`). It says Done only when this run deployed: answering n to the
+deploy ends with "Nothing was deployed" and a non-zero exit, since health would pass on the old
+revision (#123; *checked*, `tests/test_deploy_wizard.py`).
 
 The app holds a small pool (at most 4 connections; db-f1-micro allows 25, *checked* on Cloud SQL's
 flags page for ~0.5 GB instances). It checks each connection before use and reconnects after an

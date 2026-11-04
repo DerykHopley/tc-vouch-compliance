@@ -6,7 +6,8 @@
 #
 # It runs in clerk auth mode, as on Cloud Run, and refuses to start without the Clerk keys, naming
 # them (docs/requirements.md, 2026-11-04). VOUCH_AUTH_MODE=local runs it without sign-in, on a
-# developer's machine only. Until #34 it runs only the scripted fake model (the bundled demo script).
+# developer's machine only. Assessments run on OpenRouter when OPENROUTER_API_KEY is set (on Cloud
+# Run, from Secret Manager), else on the scripted fake model's bundled demo script (vouch.model_choice).
 
 # The front end: frontend/dist.
 FROM node:24-slim AS frontend

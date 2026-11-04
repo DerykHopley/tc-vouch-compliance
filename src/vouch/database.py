@@ -8,7 +8,8 @@ Cloud SQL Auth Proxy, on Cloud Run through the instance's Unix socket
 
 Nothing connects at start (the pool's `min_size` is 0, and it opens on first use): an
 unreachable database leaves the app running, health says so, and a route that needs it answers
-503 (vouch.api) after a bounded wait. A dropped connection is the pool's to mend: it checks
+503 (vouch.api) after a bounded wait. Health also says when the database answers but
+vouch-db-setup never ran (`needs-setup`, #123). A dropped connection is the pool's to mend: it checks
 each connection on checkout and reconnects with a backoff. A malformed URL is never sent to
 libpq, whose error messages can echo it.
 
@@ -31,7 +32,7 @@ import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date, datetime
-from typing import Any, Protocol, Self
+from typing import Any, Literal, Protocol, Self
 
 import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -95,6 +96,28 @@ CREATE_USAGE = (
     "estimated boolean NOT NULL, cost_complete boolean NOT NULL, at timestamptz NOT NULL)"
 )
 
+SETUP_TABLES = (
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+    "checkpoint_migrations",
+    "store",
+    "store_migrations",
+    SETTINGS_TABLE,
+    COUNTS_TABLE,
+    USAGE_TABLE,
+)
+"""Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
+langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
+SETUP_CHECK = (
+    "SELECT count(*) AS missing FROM unnest(%s::text[]) AS t(name) WHERE to_regclass(name) IS NULL"
+)
+"""How many of SETUP_TABLES are missing, in one query on the catalogue (no table is read)."""
+
+Health = Literal["reachable", "needs-setup", "unavailable"]
+"""The database as health reports it: answering with its tables, answering without them
+(vouch-db-setup never ran), or not answering."""
+
 Connection = psycopg.Connection[DictRow]
 
 CONNECTION_KWARGS: dict[str, Any] = {
@@ -140,14 +163,21 @@ class BoundedConnection(psycopg.Connection[DictRow]):
             raise psycopg.OperationalError(NO_ANSWER.format(bound=bound)) from None
 
 
-def check_within_bound(conn: BoundedConnection) -> None:
-    """The pool's checkout check (`check_connection`), waiting CHECK_TIMEOUT_SECONDS at most."""
+@contextmanager
+def waiting_at_most(conn: Any, seconds: float) -> Iterator[None]:
+    """`conn` waits at most `seconds` for any one answer inside the block, then as before."""
     before = getattr(conn, "wait_timeout", WAIT_TIMEOUT_SECONDS)  # a test's fake may not have one
-    conn.wait_timeout = CHECK_TIMEOUT_SECONDS
+    conn.wait_timeout = seconds
     try:
-        ConnectionPool.check_connection(conn)
+        yield
     finally:
         conn.wait_timeout = before
+
+
+def check_within_bound(conn: BoundedConnection) -> None:
+    """The pool's checkout check (`check_connection`), waiting CHECK_TIMEOUT_SECONDS at most."""
+    with waiting_at_most(conn, CHECK_TIMEOUT_SECONDS):
+        ConnectionPool.check_connection(conn)
 
 
 class Connect(Protocol):
@@ -185,7 +215,7 @@ class Database:
         self._lock = threading.Lock()
         self._closed = False
         self._last_failure: str | None = None
-        self._health: tuple[float, bool] | None = None
+        self._health: tuple[float, Health] | None = None
 
     def __repr__(self) -> str:
         return f"Database(url={self.url!r})"
@@ -225,16 +255,24 @@ class Database:
         finally:
             pool.putconn(conn)
 
-    def reachable(self) -> bool:
-        """Whether a connection can be had; reused for HEALTH_CACHE_SECONDS."""
+    def health(self) -> Health:
+        """Whether a connection can be had and vouch-db-setup's tables are there (#123); one
+        check, its answer reused for HEALTH_CACHE_SECONDS."""
         now = self._clock()
         if self._health is not None and now - self._health[0] < HEALTH_CACHE_SECONDS:
             return self._health[1]
+        answer: Health
         try:
-            with self.connection(timeout=HEALTH_TIMEOUT_SECONDS):
-                answer = True
+            with (
+                self.connection(timeout=HEALTH_TIMEOUT_SECONDS) as conn,
+                waiting_at_most(conn, HEALTH_TIMEOUT_SECONDS),
+            ):
+                row = conn.execute(SETUP_CHECK, (list(SETUP_TABLES),)).fetchone()
+            answer = "reachable" if row and row["missing"] == 0 else "needs-setup"
         except DatabaseUnavailable:
-            answer = False
+            answer = "unavailable"
+        if answer == "needs-setup":
+            log.error("vouch-db-setup's tables are missing: run vouch-db-setup on this database")
         self._health = (now, answer)
         return answer
 

@@ -576,3 +576,24 @@ def test_a_health_check_with_the_database_unavailable_stops_the_deploy(tmp_path)
     assert result.returncode != 0
     assert "database" in result.stderr
     assert "gcloud logging read" in result.stderr
+
+
+def test_a_health_check_saying_needs_setup_stops_naming_vouch_db_setup_and_the_proxy(tmp_path):
+    """#123: the database answers but vouch-db-setup never ran, so every assessment would 503."""
+    result, calls = deployed(tmp_path, database="needs-setup")
+    assert result.returncode != 0
+    assert "Done" not in result.stdout + result.stderr
+    assert "vouch-db-setup" in result.stderr
+    assert f"cloud-sql-proxy {SQL_INSTANCE} --port 5432" in result.stderr
+    assert "uv run vouch-db-setup" in result.stderr
+    assert len(calls_to(calls, "curl ")) == 1  # a clear answer: no retry
+
+
+def test_answering_n_to_the_deploy_says_nothing_was_deployed_and_fails(tmp_path):
+    """#123: health passing on the old revision isn't this run's deploy."""
+    result, calls = deployed(tmp_path, no=("Deploy the service",))
+    assert result.returncode != 0
+    assert "Done" not in result.stdout + result.stderr
+    assert "Nothing was deployed" in result.stderr
+    assert "gcloud run deploy" not in calls
+    assert "curl" not in calls
