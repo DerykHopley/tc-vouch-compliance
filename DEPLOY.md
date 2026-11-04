@@ -21,8 +21,10 @@ Cloud Run" and "the walking skeleton has no secrets").
   and the built front end on every other path (*checked* in the `Dockerfile` and README, "One
   container").
 - **Min 0 instances** (it sleeps when nobody uses it; the first request after a sleep waits for the
-  container to start) and **max 1** (*checked*: per-revision flags in the `gcloud run deploy`
-  reference). Max 1 caps what the free tier has to cover; that it stays inside is *unverified*.
+  container to start) and **max 1**, set twice: `--max-instances=1` caps each revision and
+  `--max=1` caps the whole service, shared by every revision that gets traffic (*checked* in
+  `gcloud run deploy --help`, SDK 589, and Cloud Run's "maximum instances" page; the lower limit
+  wins). Max 1 caps what the free tier has to cover; that it stays inside is *unverified*.
 - **The scripted fake model only** (*checked* in `vouch.api`: the assessment route always uses
   `fake_model_from_env`), so the deploy needs no secret and an open URL costs no model calls.
   Secrets come with sign-in (M3), through Secret Manager.
@@ -90,8 +92,10 @@ Each deploy gets the next tag: `v2`, `v3`… The wizard counts them in `wizard.e
 
 ```bash
 gcloud run deploy vouch --image=$IMAGE:v1 --region=$REGION --project=$PROJECT_ID \
-  --allow-unauthenticated --min-instances=0 --max-instances=1 --quiet
+  --allow-unauthenticated --min-instances=0 --max-instances=1 --max=1 --quiet
 ```
+
+`--max=1` is the service-level limit: without it Cloud Run leaves the service at its automatic default (3 on the live service), so a traffic split across revisions could run more than one instance. `--max-instances=1` alone caps only each revision.
 
 No environment variables and no secrets: the image sets `VOUCH_FRONTEND` and `PORT` (*checked* in the `Dockerfile`).
 
