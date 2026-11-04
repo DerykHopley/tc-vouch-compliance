@@ -136,7 +136,7 @@ def test_the_encryption_standard_is_stale_and_says_why():
 # The judge's rules, at the assess seam with today's date fixed.
 
 
-def judged(control: str, judge: list[dict], query: str = "encryption") -> ScriptedChatModel:
+def judged(judge: list[dict], query: str = "encryption") -> ScriptedChatModel:
     return ScriptedChatModel(
         script={
             "gather": [
@@ -164,7 +164,7 @@ def requirement(result, req_id: str):
 
 def encryption_run() -> ScriptedChatModel:
     cites = [("encryption-standard", LAPTOPS), ("encryption-standard", METHODS)]
-    return judged("5.1.1", [judgement("M1", *cites), judgement("S1", *cites)])
+    return judged([judgement("M1", *cites), judgement("S1", *cites)])
 
 
 def test_5_1_1_m1_is_capped_at_partly_evidenced_by_the_stale_encryption_standard():
@@ -173,8 +173,7 @@ def test_5_1_1_m1_is_capped_at_partly_evidenced_by_the_stale_encryption_standard
     m1 = requirement(result, "M1")
     assert m1.verdict == "partly-evidenced"
     assert m1.reason == (
-        "Shown. At most partly evidenced: encryption-standard is stale "
-        f"({ENCRYPTION_STALE})."
+        f"Shown. At most partly evidenced: encryption-standard is stale ({ENCRYPTION_STALE})."
     )
     assert {(c.kind, c.stale) for c in m1.citations} == {("documented", True)}
     assert result.verdict == "not-evidenced"  # no counted requirement is evidenced
@@ -190,7 +189,7 @@ def test_the_same_run_before_the_review_was_due_is_evidenced():
 
 def test_a_partly_evidenced_requirement_on_stale_evidence_still_says_why():
     judge = judgement("M1", ("encryption-standard", LAPTOPS)) | {"verdict": "partly-evidenced"}
-    result = assess("5.1.1", NORDLICHT, judged("5.1.1", [judge]), today=TODAY)
+    result = assess("5.1.1", NORDLICHT, judged([judge]), today=TODAY)
 
     m1 = requirement(result, "M1")
     assert m1.verdict == "partly-evidenced"
@@ -198,9 +197,7 @@ def test_a_partly_evidenced_requirement_on_stale_evidence_still_says_why():
 
 
 def test_4_1_2_risk_assessment_with_documented_evidence_only_is_partly_evidenced():
-    model = judged(
-        "4.1.2", [judgement("M1", ("authentication-standard", EXPOSURE), doing=True)], "sign in"
-    )
+    model = judged([judgement("M1", ("authentication-standard", EXPOSURE), doing=True)], "sign in")
 
     m1 = requirement(assess("4.1.2", NORDLICHT, model, today=TODAY), "M1")
 
@@ -216,7 +213,7 @@ def test_4_1_2_risk_assessment_with_documented_evidence_only_is_partly_evidenced
 
 def test_a_doing_requirement_with_implemented_evidence_can_be_evidenced():
     cites = [("authentication-standard", EXPOSURE), ("mfa-rollout-record", ROLLOUT)]
-    model = judged("4.1.2", [judgement("M1", *cites, doing=True)], "sign in")
+    model = judged([judgement("M1", *cites, doing=True)], "sign in")
 
     m1 = requirement(assess("4.1.2", NORDLICHT, model, today=TODAY), "M1")
 
@@ -225,7 +222,7 @@ def test_a_doing_requirement_with_implemented_evidence_can_be_evidenced():
 
 
 def test_a_requirement_not_about_doing_can_be_evidenced_by_documented_evidence():
-    model = judged("4.1.2", [judgement("M1", ("authentication-standard", EXPOSURE))], "sign in")
+    model = judged([judgement("M1", ("authentication-standard", EXPOSURE))], "sign in")
 
     m1 = requirement(assess("4.1.2", NORDLICHT, model, today=TODAY), "M1")
 
