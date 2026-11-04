@@ -1,6 +1,7 @@
 """The assessment graph: one VDA ISA control under one compliance profile in, one Assessment out.
 
-The agent gathers evidence (ReAct over the evidence-source tools the profile allows), drafts
+The graph applies the profile's country overlays first, taking an overlay branch when one adds a
+requirement to the control. The agent then gathers evidence (ReAct over the evidence-source tools the profile allows), drafts
 an answer, and judges each applicable requirement, quoting the passages each verdict relies
 on. Every evidence-source tool call passes the guards first (`vouch.guards`), and document
 text reaches the model only as data. Each quote is checked in code against the document it
@@ -61,7 +62,7 @@ from vouch.search import (
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-remediation-review-3"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-overlays-2"  # change it whenever a prompt below changes
 
 JudgedVerdict = Literal["evidenced", "partly-evidenced", "not-evidenced"]
 Verdict = JudgedVerdict | Literal["not-applicable"]
@@ -377,6 +378,7 @@ def should_score(requirements: Iterable[RequirementVerdict]) -> ShouldScore:
 class AssessState(TypedDict, total=False):
     control: IsaControl
     control_requirements: ControlRequirements
+    overlay_requirements: tuple[Requirement, ...]  # the applicable ones the overlays add
     profile_id: str
     evidence: Annotated[list[Passage], operator.add]
     warnings: Annotated[list[str], operator.add]
@@ -461,6 +463,14 @@ def _prompt(
             f"{_note_text(note)}"
         ),
     ]
+
+
+def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage:
+    listed = "\n".join(f"- {r.id} ({r.source}): {r.text}" for r in overlay_requirements)
+    return HumanMessage(
+        "These requirements come from a country overlay, national rules added to this "
+        f"control. Gather evidence for each of them too:\n{listed}"
+    )
 
 
 def _judge_prompt(state: AssessState) -> list[AnyMessage]:
@@ -672,6 +682,32 @@ def build_graph(
         bound = model.bind_tools([*_offered_tools(profile), SUBMIT_ANSWER_TOOL])
         judge_model = model.with_structured_output(Judgement, include_raw=True)
         remediation_model = model.with_structured_output(RemediationPlan, include_raw=True)
+
+    def apply_overlays(state: AssessState) -> dict[str, Any]:
+        """The control's requirements under the profile, overlay requirements included, and the
+        prompt that starts gathering."""
+        control = state["control"]
+        control_requirements = profile.requirements_for(control)
+        applicable = set(control_requirements.applicable)
+        return {
+            "control_requirements": control_requirements,
+            "overlay_requirements": tuple(
+                r for r in control_requirements.overlay if r in applicable
+            ),
+            "messages": _prompt(control, control_requirements, profile, state.get("note", "")),
+        }
+
+    def overlay_branch(state: AssessState) -> dict[str, Any]:
+        """Asks the gathering to find evidence for each overlay requirement too."""
+        overlay_requirements = state["overlay_requirements"]
+        return {
+            # Unchanged; given again only so this step's describe() can name them.
+            "overlay_requirements": overlay_requirements,
+            "messages": [_overlay_prompt(overlay_requirements)],
+        }
+
+    def after_overlays(state: AssessState) -> str:
+        return "overlay_branch" if state["overlay_requirements"] else "gather"
 
     def gather(state: AssessState) -> dict[str, Any]:
         reply = bound.invoke(state["messages"])
@@ -893,6 +929,8 @@ def build_graph(
 
     graph = StateGraph(AssessState)
     for node, run in {
+        "apply_overlays": apply_overlays,
+        "overlay_branch": overlay_branch,
         "gather": gather,
         "tools": tools,
         "check_answer": check_answer,
@@ -902,7 +940,9 @@ def build_graph(
         "review": review,
     }.items():
         graph.add_node(node, described(node, run))
-    graph.add_edge(START, "gather")
+    graph.add_edge(START, "apply_overlays")
+    graph.add_conditional_edges("apply_overlays", after_overlays, ["overlay_branch", "gather"])
+    graph.add_edge("overlay_branch", "gather")
     graph.add_conditional_edges("gather", after_gather, ["tools", "check_answer"])
     graph.add_edge("tools", "gather")
     graph.add_conditional_edges("check_answer", after_check, ["gather", "judge"])
@@ -926,6 +966,18 @@ class Step:
     def describe(self) -> str:
         """One plain sentence, in the glossary's words, saying what the step did."""
         update = self.update
+        if self.node == "apply_overlays":
+            added = _by_overlay(update["overlay_requirements"])
+            if not added:
+                return (
+                    "No country overlay adds a requirement to this control, "
+                    "so no overlay branch is taken."
+                )
+            listed = "; ".join(f"{name} adds {', '.join(ids)}" for name, ids in added.items())
+            return f"Applied the country overlays: {listed}."
+        if self.node == "overlay_branch":
+            ids = ", ".join(f"{r.id} ({r.source})" for r in update["overlay_requirements"])
+            return f"Overlay branch: gathering evidence for {ids}."
         if self.node == "gather":
             calls = update["messages"][-1].tool_calls if update.get("messages") else []
             if any(c["name"] == SUBMIT_ANSWER for c in calls):
@@ -1007,6 +1059,14 @@ def _guard_steps(update: dict[str, Any]) -> list[Step]:
     return [Step(GUARD, {"text": text}) for text in update.get("guards", [])] + [
         Step(GUARD, {"dropped_citation": d}) for d in update.get("dropped_citations", [])
     ]
+
+
+def _by_overlay(requirements: Iterable[Requirement]) -> dict[str, list[str]]:
+    """Each overlay's name and the ids of the requirements it adds, in order."""
+    added: dict[str, list[str]] = {}
+    for r in requirements:
+        added.setdefault(r.source, []).append(r.id)
+    return added
 
 
 def _plural(count: int, noun: str) -> str:
@@ -1099,10 +1159,8 @@ def assess_steps(
     again; `today` (default: the date now) is what due dates count from."""
     thread_id = uuid.uuid4().hex  # always a new thread: never piled onto an earlier run's state
     graph = build_graph(model, profile, checkpointer or memory_checkpointer())
-    control_requirements = profile.requirements_for(control)
     initial = {
         "control": control,
-        "control_requirements": control_requirements,
         "profile_id": profile.id,
         "model": _model_name(model),
         "prompt_version": PROMPT_VERSION,
@@ -1116,7 +1174,6 @@ def assess_steps(
         "today": (today or date.today()).isoformat(),
         "note": note,
         "document_folders": [str(s.folder) for s in profile.evidence_sources.values()],
-        "messages": _prompt(control, control_requirements, profile, note),
     }
     config = _config(thread_id)
     for node, update in (
