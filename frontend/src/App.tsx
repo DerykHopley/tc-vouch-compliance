@@ -45,16 +45,16 @@ export default function App() {
             <div className="tile"><b>0</b><span>evidenced</span></div>
             <div className="tile"><b>0</b><span>partly evidenced</span></div>
             <div className="tile"><b>0</b><span>not evidenced</span></div>
-            <div className="tile"><b>1</b><span>open</span></div>
+            <div className="tile"><b>1</b><span>not assessed</span></div>
           </div>
         </section>
         <section className="controls">
           <div className="head"><span className="pill">The controls</span><h2>One control to begin</h2></div>
           <div className="cards">
-            <article className="card" aria-labelledby="card-title">
-              <div className="face"><b>{CONTROL.id}</b></div>
-              <div id="card-title" className="q">{CONTROL.title}</div>
-              <div className="sub"><span>{CONTROL.owner}</span><span className="chip v-none">Not assessed</span></div>
+            <article className="card" aria-labelledby="control-title">
+              <div className="card-head"><b>{CONTROL.id}</b></div>
+              <div id="control-title" className="control-title">{CONTROL.title}</div>
+              <div className="card-meta"><span>{CONTROL.owner}</span><span className="chip v-none">Not assessed</span></div>
             </article>
           </div>
         </section>

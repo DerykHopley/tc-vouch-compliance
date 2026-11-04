@@ -1,12 +1,14 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from './App.tsx'
 
 function systemPrefers(dark: boolean | null) {
   window.matchMedia = (query: string) =>
     ({ matches: dark === true && query === '(prefers-color-scheme: dark)', media: query }) as MediaQueryList
 }
+
+beforeEach(() => systemPrefers(null))
 
 afterEach(() => {
   cleanup()
@@ -15,7 +17,6 @@ afterEach(() => {
 
 describe('Dossier landing', () => {
   it('shows the top bar, headline, readiness band and one control card', () => {
-    systemPrefers(null)
     render(<App />)
     const top = screen.getByRole('banner')
     expect(within(top).getByText('Vouch')).toBeTruthy()
@@ -37,7 +38,6 @@ describe('theme', () => {
   })
 
   it('starts light when the system has no preference', () => {
-    systemPrefers(null)
     render(<App />)
     expect(document.documentElement.dataset.theme).toBe('light')
   })
@@ -56,7 +56,6 @@ describe('Ask Vouch', () => {
   const bubble = () => screen.queryByRole('complementary', { name: 'Chat with Vouch' })
 
   it('opens an empty bubble and closes it again', async () => {
-    systemPrefers(null)
     render(<App />)
     expect(bubble()).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
@@ -66,7 +65,6 @@ describe('Ask Vouch', () => {
   })
 
   it('closes on Esc and gives focus back to the button', async () => {
-    systemPrefers(null)
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
     await userEvent.keyboard('{Escape}')
@@ -75,7 +73,6 @@ describe('Ask Vouch', () => {
   })
 
   it('opens with Ctrl+K', async () => {
-    systemPrefers(null)
     render(<App />)
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(bubble()).toBeTruthy()
