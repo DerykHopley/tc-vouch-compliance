@@ -21,11 +21,12 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from vouch import api
-from vouch.api import create_app, current_user
-from vouch.auth import ClerkAuth
+from vouch.api import create_app, current_user, require_developer, user_role
+from vouch.auth import ClerkAuth, Role
 from vouch.settings import ClerkKeys, Settings, User
 
 SECRET = "sk_test_fake-secret"
+ORIGIN = "http://localhost:5173"
 
 
 def _key_pair() -> tuple[rsa.RSAPrivateKey, str]:
@@ -39,23 +40,28 @@ def _key_pair() -> tuple[rsa.RSAPrivateKey, str]:
 PRIVATE, PUBLIC = _key_pair()
 OTHER_PRIVATE, _ = _key_pair()
 KEYS = ClerkKeys(
-    secret_key=SecretStr(SECRET), publishable_key="pk_test_ZmFrZSQ", jwt_key=SecretStr(PUBLIC)
+    secret_key=SecretStr(SECRET),
+    publishable_key="pk_test_ZmFrZSQ",
+    jwt_key=SecretStr(PUBLIC),
+    authorized_parties=(ORIGIN, "https://vouch.example.com"),
 )
 
 
 def token(sub: str = "user_alice", key: Any = PRIVATE, ttl: int = 60, **claims: Any) -> str:
-    """A session token as Clerk's front end sends it: RS256, short-lived, the user in `sub`."""
+    """A session token as Clerk's front end sends it: RS256, short-lived, the user in `sub`.
+    A claim given as None is left out."""
     now = int(time.time())
     body = {
         "sub": sub,
         "sid": f"sess_{sub}",
         "iss": "https://vouch-test.clerk.accounts.dev",
-        "azp": "http://localhost:5173",
+        "azp": ORIGIN,
         "iat": now - 1,
         "nbf": now - 1,
         "exp": now + ttl,
         "v": 2,
     } | claims
+    body = {name: value for name, value in body.items() if value is not None}
     return jwt.encode(body, key, algorithm="RS256", headers={"kid": "ins_test"})
 
 
@@ -102,14 +108,23 @@ def clerk() -> FakeClerk:
 
 
 def clerk_app(clerk: FakeClerk, clock: Callable[[], float] = time.monotonic):
-    """The app in clerk mode, its Clerk Backend API the fake, plus a route that shows the user."""
+    """The app in clerk mode, its Clerk Backend API the fake, plus routes that show the user,
+    their role, and one only a developer may use (as #34's developer page will)."""
     app = create_app(Settings(auth_mode="clerk", clerk=KEYS))
     http = httpx.Client(transport=httpx.MockTransport(clerk))
     app.state.auth = ClerkAuth(KEYS, client=http, clock=clock)
 
     @app.get("/whoami")
     def whoami(user: Annotated[User, Depends(current_user)]) -> dict[str, str]:
-        return {"id": user.id, "role": user.role}
+        return {"id": user.id}
+
+    @app.get("/role")
+    def role(role: Annotated[Role, Depends(user_role)]) -> dict[str, str]:
+        return {"role": role}
+
+    @app.get("/developer", dependencies=[Depends(require_developer)])
+    def developer() -> dict[str, str]:
+        return {"ok": "yes"}
 
     return app
 
@@ -132,6 +147,10 @@ BAD_TOKENS = {
     "no-subject": lambda: token(sub=""),
     "machine-token": lambda: "ak_" + token(),  # an API key: never a user's session
     "unsigned": lambda: jwt.encode({"sub": "user_alice", "exp": time.time() + 60}, None, "none"),
+    "other-origin": lambda: token(azp="https://evil.example"),
+    "no-origin": lambda: token(azp=None),
+    "jwt-template-no-sid": lambda: token(sid=None),
+    "never-expires": lambda: token(exp=None),
 }
 
 
@@ -162,7 +181,13 @@ def test_every_route_except_health_refuses_a_request_without_a_valid_token(clerk
 
     assert answers.pop(("GET", "/api/health")) == 200
     assert set(answers.values()) == {401}
+    assert client.get("/developer", headers=headers).status_code == 401
     assert clerk.calls == []  # refused before Clerk's API is asked about anyone
+
+
+def test_a_token_from_each_authorised_origin_is_accepted(client):
+    for origin in KEYS.authorized_parties:
+        assert client.get("/whoami", headers=bearer(token(azp=origin))).status_code == 200
 
 
 def test_a_refusal_says_to_sign_in_and_names_bearer(client):
@@ -181,13 +206,14 @@ def test_a_session_cookie_alone_is_not_enough(client):
     assert response.status_code == 401
 
 
-def test_a_valid_token_reaches_the_assessment(client):
+def test_a_valid_token_reaches_the_assessment_without_asking_clerk(client, clerk):
     response = client.post(
         "/api/assessments", json={"control_id": "NK-ENC-01"}, headers=bearer(token())
     )
 
     assert response.status_code == 200
     assert "event: result" in response.text
+    assert clerk.calls == []  # the token is checked offline; the role isn't needed here
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
@@ -209,19 +235,18 @@ def test_two_users_are_told_apart_by_their_tokens(client):
 def test_claims_beyond_the_user_id_are_never_read(client):
     """A role claim in the token is ignored: the role is the backend's, from private metadata."""
     response = client.get(
-        "/whoami", headers=bearer(token("user_alice", role="developer", metadata={"role": "dev"}))
+        "/role", headers=bearer(token("user_alice", role="developer", metadata={"role": "dev"}))
     )
 
-    assert response.json() == {"id": "user_alice", "role": "compliance-lead"}
+    assert response.json() == {"role": "compliance-lead"}
 
 
-# --- The role comes from Clerk's private metadata --------------------------------------------
+# --- The role comes from Clerk's private metadata, only where a route needs it ----------------
 
 
 def test_a_user_named_developer_in_private_metadata_is_a_developer(client):
-    response = client.get("/whoami", headers=bearer(token("user_dev")))
-
-    assert response.json() == {"id": "user_dev", "role": "developer"}
+    assert client.get("/role", headers=bearer(token("user_dev"))).json() == {"role": "developer"}
+    assert client.get("/developer", headers=bearer(token("user_dev"))).status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -233,14 +258,17 @@ def test_anyone_else_is_a_compliance_lead(clerk, metadata):
     clerk.metadata["user_carol"] = metadata
     client = TestClient(clerk_app(clerk), raise_server_exceptions=False)
 
-    response = client.get("/whoami", headers=bearer(token("user_carol")))
+    role = client.get("/role", headers=bearer(token("user_carol")))
+    developer = client.get("/developer", headers=bearer(token("user_carol")))
 
-    assert response.json() == {"id": "user_carol", "role": "compliance-lead"}
+    assert role.json() == {"role": "compliance-lead"}
+    assert developer.status_code == 403
+    assert developer.json() == {"detail": "This is available to developers only."}
 
 
 def test_public_metadata_never_makes_a_developer(client, clerk):
     """The fake's public metadata says developer for everyone; only private metadata counts."""
-    assert client.get("/whoami", headers=bearer(token("user_alice"))).json()["role"] == (
+    assert client.get("/role", headers=bearer(token("user_alice"))).json()["role"] == (
         "compliance-lead"
     )
     assert str(clerk.calls[0].url) == "https://api.clerk.com/v1/users/user_alice"
@@ -251,26 +279,24 @@ def test_the_role_is_asked_once_per_user_then_cached_until_it_expires(clerk):
     client = TestClient(clerk_app(clerk, clock=lambda: now[0]), raise_server_exceptions=False)
 
     for _ in range(3):
-        client.get("/whoami", headers=bearer(token("user_dev")))
-    client.get("/whoami", headers=bearer(token("user_alice")))
+        client.get("/role", headers=bearer(token("user_dev")))
+    client.get("/role", headers=bearer(token("user_alice")))
     assert [call.url.path for call in clerk.calls] == ["/v1/users/user_dev", "/v1/users/user_alice"]
 
     clerk.metadata["user_dev"] = {}  # the owner takes the role away
     now[0] += ClerkAuth.ROLE_TTL + 1
-    response = client.get("/whoami", headers=bearer(token("user_dev")))
+    response = client.get("/role", headers=bearer(token("user_dev")))
 
     assert response.json()["role"] == "compliance-lead"
     assert len(clerk.calls) == 3
 
 
-def test_a_user_clerk_does_not_know_is_refused(client):
+def test_a_user_clerk_does_not_know_is_refused_where_the_role_is_needed(client):
     """A deleted user's token still verifies until it expires; Clerk's 404 signs them out."""
-    response = client.get("/whoami", headers=bearer(token("user_deleted")))
-
-    assert response.status_code == 401
+    assert client.get("/role", headers=bearer(token("user_deleted"))).status_code == 401
 
 
-# --- Clerk unreachable: 503, never access ------------------------------------------------------
+# --- Clerk unreachable: 503 where the role is needed, never access ----------------------------
 
 CLERK_FAILURES = {
     "unreachable": unreachable,
@@ -286,28 +312,34 @@ CLERK_FAILURES = {
 def test_clerk_failing_gives_503_with_a_message_never_access(client, clerk, failure):
     clerk.fail = failure
 
-    whoami = client.get("/whoami", headers=bearer(token("user_dev")))
-    assess = client.post(
-        "/api/assessments", json={"control_id": "NK-ENC-01"}, headers=bearer(token("user_dev"))
-    )
-
-    for response in (whoami, assess):
+    for path in ("/role", "/developer"):
+        response = client.get(path, headers=bearer(token("user_dev")))
         assert response.status_code == 503
         assert response.json() == {
             "detail": "Vouch cannot check your sign-in just now. Please try again shortly."
         }
 
 
+def test_clerk_failing_never_stops_a_route_that_needs_no_role(client, clerk):
+    clerk.fail = unreachable
+
+    response = client.post(
+        "/api/assessments", json={"control_id": "NK-ENC-01"}, headers=bearer(token("user_dev"))
+    )
+
+    assert response.status_code == 200
+
+
 def test_a_failed_role_lookup_is_not_cached(client, clerk):
     clerk.fail = unreachable
-    assert client.get("/whoami", headers=bearer(token("user_dev"))).status_code == 503
+    assert client.get("/role", headers=bearer(token("user_dev"))).status_code == 503
 
     clerk.fail = None
-    assert client.get("/whoami", headers=bearer(token("user_dev"))).json()["role"] == "developer"
+    assert client.get("/role", headers=bearer(token("user_dev"))).json()["role"] == "developer"
 
 
-def test_the_verifier_failing_gives_503_never_access(client, monkeypatch):
-    """Anything unexpected while checking a token fails closed."""
+def test_the_verifier_failing_never_lets_the_request_through(client, monkeypatch):
+    """Anything unexpected while checking a token is a server error, never access."""
 
     def broken(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("verifier broke")
@@ -316,7 +348,7 @@ def test_the_verifier_failing_gives_503_never_access(client, monkeypatch):
 
     response = client.get("/whoami", headers=bearer(token()))
 
-    assert response.status_code == 503
+    assert response.status_code == 500
 
 
 def test_no_token_or_secret_reaches_the_log(client, clerk, caplog):
@@ -324,11 +356,40 @@ def test_no_token_or_secret_reaches_the_log(client, clerk, caplog):
     sent = token("user_dev")
     client.get("/whoami", headers=bearer(token(key=OTHER_PRIVATE)))
     clerk.fail = unreachable
-    client.get("/whoami", headers=bearer(sent))
+    client.get("/role", headers=bearer(sent))
 
     assert caplog.text  # the refusals were logged
     assert sent not in caplog.text and sent.split(".")[1] not in caplog.text
     assert SECRET not in caplog.text
+
+
+# --- Startup and shutdown ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("jwt_key", ["-----BEGIN PUBLIC KEY-----marker", "not a key", PUBLIC[:80]])
+def test_a_malformed_jwt_key_stops_the_app_at_startup_naming_it(jwt_key):
+    keys = ClerkKeys(KEYS.secret_key, KEYS.publishable_key, SecretStr(jwt_key), (ORIGIN,))
+
+    with pytest.raises(SystemExit) as stopped:
+        create_app(Settings(auth_mode="clerk", clerk=keys))
+
+    assert "CLERK_JWT_KEY" in str(stopped.value)
+    assert jwt_key not in str(stopped.value)
+
+
+def test_a_jwt_key_with_its_line_breaks_starts():
+    assert "\n" in PUBLIC
+    create_app(Settings(auth_mode="clerk", clerk=KEYS))
+
+
+def test_the_connection_to_clerk_is_closed_on_shutdown(clerk):
+    app = clerk_app(clerk)
+    http = app.state.auth._client
+
+    with TestClient(app):
+        assert not http.is_closed
+
+    assert http.is_closed
 
 
 # --- What the front end needs, and local mode -------------------------------------------------
@@ -344,11 +405,14 @@ def test_local_mode_is_unchanged_one_default_user_and_no_sign_in():
     app = create_app(Settings())
 
     @app.get("/whoami")
-    def whoami(user: Annotated[User, Depends(current_user)]) -> dict[str, str]:
-        return {"id": user.id, "role": user.role}
+    def whoami(
+        user: Annotated[User, Depends(current_user)], role: Annotated[Role, Depends(user_role)]
+    ) -> dict[str, str]:
+        return {"id": user.id, "role": role}
 
     client = TestClient(app)
 
-    assert client.get("/whoami").json() == {"id": "local-user", "role": "compliance-lead"}
+    # Local mode is for a developer's machine: its one user is a developer.
+    assert client.get("/whoami").json() == {"id": "local-user", "role": "developer"}
     assert client.get("/api/health").json()["auth"] == {"mode": "local", "publishable_key": None}
     assert client.get("/openapi.json").status_code == 200  # the API map stays, locally

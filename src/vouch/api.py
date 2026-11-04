@@ -5,7 +5,8 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import logging
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated, Any
 
@@ -13,7 +14,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
-from vouch.auth import ClerkAuth, ClerkUnavailable, SignedOut
+from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.graph import Assessment, assess_steps
 from vouch.settings import (
@@ -34,6 +35,7 @@ VERDICTS = {"found": "evidenced", "partial": "partly-evidenced", "gap": "not-evi
 FAILED = "The assessment could not be completed. Please try again later."
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
+DEVELOPERS_ONLY = "This is available to developers only."
 
 
 class AssessmentRequest(BaseModel):
@@ -56,24 +58,46 @@ def app_settings(request: Request) -> Settings:
 AppSettings = Annotated[Settings, Depends(app_settings)]
 
 
+def _signed_out() -> HTTPException:
+    return HTTPException(status_code=401, detail=SIGNED_OUT, headers={"WWW-Authenticate": "Bearer"})
+
+
 def current_user(request: Request, settings: AppSettings) -> User:
     """The request's user: local mode's default user; in clerk mode, the verified token's (auth.py).
 
-    No valid token is a 401; sign-in that can't be checked (Clerk unreachable) a 503, never access.
+    Checked offline, so Clerk's API is never asked. No valid token is a 401.
     """
     if settings.auth_mode == "local":
         return DEFAULT_USER
-    auth: ClerkAuth | None = getattr(request.app.state, "auth", None)
+    auth: ClerkAuth = request.app.state.auth
     try:
-        if auth is None:
-            raise SignedOut()
         return auth.user(request)
     except SignedOut:
-        raise HTTPException(
-            status_code=401, detail=SIGNED_OUT, headers={"WWW-Authenticate": "Bearer"}
-        ) from None
+        raise _signed_out() from None
+
+
+CurrentUser = Annotated[User, Depends(current_user)]
+
+
+def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
+    """The user's role, for a route that needs it. Local mode's one user is a developer: local
+    mode is for a developer's machine. In clerk mode Clerk's API is asked (cached, auth.py);
+    when it can't answer, a 503, never access."""
+    if settings.auth_mode == "local":
+        return "developer"
+    auth: ClerkAuth = request.app.state.auth
+    try:
+        return auth.role(user)
+    except SignedOut:
+        raise _signed_out() from None
     except ClerkUnavailable:
         raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
+
+
+def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
+    """A route only a developer may use (the developer page, #34); anyone else gets a 403."""
+    if role != "developer":
+        raise HTTPException(status_code=403, detail=DEVELOPERS_ONLY)
 
 
 public = APIRouter(prefix="/api")
@@ -136,12 +160,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings = load_settings()
         except SettingsError as error:
             raise SystemExit(f"Vouch cannot start: {error}.") from None
-    signed_in = settings.auth_mode == "clerk"
+    clerk_mode = settings.auth_mode == "clerk"
+    auth = None
+    if clerk_mode:
+        if settings.clerk is None:  # load_settings never makes these Settings
+            raise SystemExit("Vouch cannot start: clerk mode needs the Clerk settings.")
+        try:
+            auth = ClerkAuth(settings.clerk)
+        except SettingsError as error:
+            raise SystemExit(f"Vouch cannot start: {error}.") from None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        if app.state.auth is not None:
+            app.state.auth.close()
+
     # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
-    app = FastAPI(title="Vouch", **(no_map if signed_in else {}))
+    app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.state.settings = settings
-    app.state.auth = ClerkAuth(settings.clerk) if settings.clerk and signed_in else None
+    app.state.auth = auth
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

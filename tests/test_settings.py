@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Annotated
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
 from fastapi.testclient import TestClient
 
@@ -38,11 +40,21 @@ def test_with_nothing_set_a_request_sees_the_default_user():
     assert DEFAULT_USER.id == "local-user"
 
 
+def _public_key() -> str:
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = private.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem.decode()
+
+
 CLERK_KEYS = {
     "CLERK_SECRET_KEY": "sk_test_marker",
     "CLERK_PUBLISHABLE_KEY": "pk_test_marker",
-    "CLERK_JWT_KEY": "-----BEGIN PUBLIC KEY-----marker",
+    "CLERK_JWT_KEY": _public_key(),
+    "CLERK_AUTHORIZED_PARTIES": "http://localhost:5173",
 }
+"""Everything clerk mode needs: the three keys, and the origins (not a secret)."""
 
 
 @pytest.mark.parametrize("missing", sorted(CLERK_KEYS))
@@ -61,6 +73,28 @@ def test_clerk_mode_with_its_keys_starts_and_refuses_a_request_without_sign_in()
     assert client.get("/whoami").status_code == 401
     assert client.post("/api/assessments", json={"control_id": "NK-ENC-01"}).status_code == 401
     assert client.get("/api/health").status_code == 200
+
+
+def test_the_authorised_origins_are_read_as_a_list():
+    env = {"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS
+    env["CLERK_AUTHORIZED_PARTIES"] = " https://vouch.example.com , http://localhost:8000,"
+
+    clerk = load_settings(env).clerk
+
+    assert clerk is not None
+    assert clerk.authorized_parties == ("https://vouch.example.com", "http://localhost:8000")
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [",", "vouch.example.com", "https://vouch.example.com/", "https://x.example/app", "*"],
+    ids=["only-commas", "no-scheme", "trailing-slash", "a-path", "wildcard"],
+)
+def test_origins_that_are_not_origins_refuse_naming_the_setting(origins):
+    env = {"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS | {"CLERK_AUTHORIZED_PARTIES": origins}
+
+    with pytest.raises(SettingsError, match="CLERK_AUTHORIZED_PARTIES"):
+        load_settings(env)
 
 
 def test_an_unknown_auth_mode_refuses_naming_the_setting():
@@ -99,7 +133,11 @@ def test_a_secret_value_never_reaches_a_log_or_an_error(caplog, monkeypatch):
         name: f"{marker}-{name}"
         for name in ("CLERK_SECRET_KEY", "CLERK_JWT_KEY", "OPENROUTER_API_KEY")
     }
-    env = {"VOUCH_AUTH_MODE": "clerk", "CLERK_PUBLISHABLE_KEY": "pk_test_public"} | secrets
+    env = {
+        "VOUCH_AUTH_MODE": "clerk",
+        "CLERK_PUBLISHABLE_KEY": "pk_test_public",
+        "CLERK_AUTHORIZED_PARTIES": "http://localhost:5173",
+    } | secrets
     seen = []
 
     settings = load_settings(env)
