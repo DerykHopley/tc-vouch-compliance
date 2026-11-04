@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from vouch.documents import sections
+from vouch.documents import escaped, paragraphs
 from vouch.front_matter import split_front_matter
 
 MAX_QUERY_CHARS = 200
@@ -42,13 +42,10 @@ def search_folder(
     problem = _check_input(query, limit)
     if problem:
         return ErrorResult(error=INVALID_INPUT, detail=problem)
-    root = folder.resolve()
-    if root != folder:
-        return ErrorResult(
-            error=FOLDER_ESCAPED, detail="the folder now resolves outside where it was allowed"
-        )
+    if escaped(folder):
+        return folder_escaped()
     try:
-        passages = [p for doc in _document_files(root) for p in _passages(doc)]
+        passages = [p for doc in _document_files(folder) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}
@@ -56,6 +53,18 @@ def search_folder(
     hits = [(passage, score) for passage, score in scored if score > 0]
     hits.sort(key=lambda hit: hit[1], reverse=True)  # stable: ties keep folder order
     return [passage for passage, _ in hits[:limit]]
+
+
+def folder_escaped() -> ErrorResult:
+    """The refusal for a source folder that has `escaped` since the profile loaded."""
+    return ErrorResult(
+        error=FOLDER_ESCAPED, detail="the folder now resolves outside where it was allowed"
+    )
+
+
+def passages_of(doc_id: str, body: str) -> list[Passage]:
+    """The body's passages: one per paragraph, under the nearest heading above it."""
+    return [Passage(doc_id=doc_id, heading=h, text=t) for h, t in paragraphs(body)]
 
 
 # The names the tools go by; an empty folder gives no passages, not an error.
@@ -82,19 +91,8 @@ def _document_files(root: Path) -> list[Path]:
 
 
 def _passages(doc: Path) -> list[Passage]:
-    """One passage per paragraph, each under the nearest heading above it."""
-    passages: list[Passage] = []
     _, body = split_front_matter(doc.read_text(encoding="utf-8"))
-    for section in sections(body):
-        paragraph: list[str] = []
-        for line in (*section.lines, ""):  # a blank line closes the last paragraph
-            if line.strip():
-                paragraph.append(line.strip())
-            elif paragraph:
-                text = "\n".join(paragraph)
-                passages.append(Passage(doc_id=doc.stem, heading=section.heading, text=text))
-                paragraph = []
-    return passages
+    return passages_of(doc.stem, body)
 
 
 def _score(passage: Passage, terms: set[str]) -> int:

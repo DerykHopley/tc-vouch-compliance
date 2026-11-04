@@ -36,19 +36,23 @@ class Section:
     lines: tuple[str, ...]
 
 
+def escaped(folder: Path) -> bool:
+    """Whether a folder the profile resolved on load now resolves elsewhere (swapped for a
+    symlink since): nothing in it may be read."""
+    return folder.resolve() != folder
+
+
 def document_path(folder: Path, doc_id: str) -> Path | None:
     """The document with this id (its file name without `.md`, which may be given) directly in
     the folder, or None. An id holding a path, or a link pointing out of the folder, is None;
-    so is every document when the folder (resolved by the profile on load) now resolves
-    elsewhere, swapped for a symlink since."""
+    so is every document when the folder has `escaped`."""
     doc_id = doc_id.removesuffix(SUFFIX)
     if not doc_id or doc_id in {".", ".."} or "/" in doc_id or "\\" in doc_id:
         return None
-    root = folder.resolve()
-    if root != folder:
+    if escaped(folder):
         return None
-    path = root / f"{doc_id}{SUFFIX}"
-    if not path.is_file() or path.resolve().parent != root:
+    path = folder / f"{doc_id}{SUFFIX}"
+    if not path.is_file() or path.resolve().parent != folder:
         return None
     return path
 
@@ -130,3 +134,18 @@ def read_facts(path: Path, source: str, today: datetime.date) -> DocumentFacts:
     """The facts of the document at this path, read from its front matter."""
     data, _ = split_front_matter(path.read_text(encoding="utf-8"))
     return facts_of(data, source, path.stem, today)
+
+
+def paragraphs(body: str) -> list[tuple[str, str]]:
+    """Each paragraph of the body (a table counts as one), with the heading of its section:
+    (heading, text), the text's lines stripped."""
+    found: list[tuple[str, str]] = []
+    for section in sections(body):
+        paragraph: list[str] = []
+        for line in (*section.lines, ""):  # a blank line closes the last paragraph
+            if line.strip():
+                paragraph.append(line.strip())
+            elif paragraph:
+                found.append((section.heading, "\n".join(paragraph)))
+                paragraph = []
+    return found

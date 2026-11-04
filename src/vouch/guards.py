@@ -92,19 +92,19 @@ def _tagged(tag: str, value: object) -> str:
     return f"<{tag}>\n{body}\n</{tag}>"
 
 
-def as_data(passages: Iterable[Passage]) -> str:
-    """Passages as data inside `<evidence>` tags, the instruction-like ones marked."""
+def as_data(passages: Iterable[Passage], pending: Iterable[str] = ()) -> str:
+    """Passages as data inside `<evidence>` tags, the instruction-like ones marked, then a
+    `{"pending": note}` entry for each note about a source whose evidence is pending."""
     return _tagged(
         "evidence",
         [
             {**p, "instruction_like": True} if _passage_instruction_like(p) else dict(p)
             for p in passages
-        ],
+        ]
+        + [{"pending": note} for note in pending],
     )
 
 
 def draft_as_data(answer: str) -> str:
     """The earlier model's draft answer as data inside `<draft>` tags, labelled as such."""
-    return _tagged(
-        "draft", {"draft_answer": answer, "instruction_like": instruction_like(answer)}
-    )
+    return _tagged("draft", {"draft_answer": answer, "instruction_like": instruction_like(answer)})
