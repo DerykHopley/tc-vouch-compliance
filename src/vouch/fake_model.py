@@ -6,11 +6,12 @@ from typing import Annotated, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
 
-from vouch.graph import SUBMIT_ANSWER, Judgement, SubmitAnswer, Verdict
+from vouch.graph import SUBMIT_ANSWER, Judgement, SubmitAnswer
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -30,13 +31,7 @@ class ToolTurn(BaseModel):
 
 
 class AnswerTurn(SubmitAnswer):
-    """The answer the model hands back, plus the script's `verdict`.
-
-    The graph ignores `verdict` (the judge step decides it), but the script
-    format still allows only found, partial or gap there.
-    """
-
-    verdict: Verdict | None = None
+    """The answer the model hands back. The judge step, not the answer, decides verdicts."""
 
 
 def _turn_kind(turn: Any) -> str:
@@ -52,19 +47,22 @@ Turn = Annotated[
 
 
 class Script(BaseModel):
-    """The script format: tool turns, then one answer turn last; an optional judge.
+    """The script format: tool turns and answer turns, an answer last; an optional judge.
 
-    Keys the format doesn't name are ignored, as they always were.
+    An answer turn before the last one is played when the graph asks for the answer again
+    (the output check refused it). The judge's verdicts are any strings, as a real model's
+    can be; the graph decides what an unknown one means. Keys the format doesn't name are
+    ignored, as they always were.
     """
 
     gather: list[Turn] = Field(min_length=1)
     judge: Judgement = Field(default_factory=Judgement)
 
     @model_validator(mode="after")
-    def _answer_comes_last_and_only_last(self) -> "Script":
-        is_answer = [isinstance(turn, AnswerTurn) for turn in self.gather]
-        if not is_answer[-1] or any(is_answer[:-1]):
-            raise ValueError("the last gather turn, and only the last, must be the answer")
+    def _answer_comes_last(self) -> "Script":
+        ends_with_answer = isinstance(self.gather[-1], AnswerTurn)
+        if not ends_with_answer:  # a ValueError, so pydantic reports it as a validation error
+            raise ValueError("the last gather turn must be an answer")
         return self
 
 
@@ -106,9 +104,21 @@ class ScriptedChatModel(BaseChatModel):
         """The script already says which tool each turn calls, so the tools offered are ignored."""
         return self
 
-    def with_structured_output(self, schema: type[BaseModel], **kwargs: Any) -> Runnable:
-        """The judge's structured output is the script's `judge` entry."""
-        return RunnableLambda(lambda _: schema.model_validate(self.script.judge.model_dump()))
+    def with_structured_output(
+        self, schema: type[BaseModel], *, include_raw: bool = False, **kwargs: Any
+    ) -> Runnable:
+        """The judge's structured output is the script's `judge` entry; with `include_raw`, a
+        dict with the raw message (carrying token usage), as LangChain's models give."""
+
+        def judge(messages: list[BaseMessage]) -> Any:
+            parsed = schema.model_validate(self.script.judge.model_dump())
+            if not include_raw:
+                return parsed
+            content = parsed.model_dump_json()
+            raw = AIMessage(content, usage_metadata=_usage(messages, content))
+            return {"raw": raw, "parsed": parsed, "parsing_error": None}
+
+        return RunnableLambda(judge)
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
@@ -123,4 +133,17 @@ class ScriptedChatModel(BaseChatModel):
         else:
             name, args = SUBMIT_ANSWER, step.model_dump(include=set(SubmitAnswer.model_fields))
         call = {"name": name, "args": args, "id": f"call_{self.turn}", "type": "tool_call"}
-        return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+        usage = _usage(messages, json.dumps(call))
+        message = AIMessage("", tool_calls=[call], usage_metadata=usage)
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+def _usage(messages: list[BaseMessage], output: str) -> UsageMetadata:
+    """A made-up but steady token count (one per word), so token usage is never empty."""
+    input_tokens = sum(len(str(m.content).split()) for m in messages)
+    output_tokens = len(output.split())
+    return UsageMetadata(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+    )

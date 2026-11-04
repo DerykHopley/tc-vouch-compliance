@@ -21,12 +21,13 @@ starts.
 The agent on its own, from the command line:
 
 ```sh
-ASSESS_FAKE_SCRIPT=tests/scripts/enc_found.json uv run assess NK-ENC-01
+ASSESS_FAKE_SCRIPT=tests/scripts/isa_4_1_2.json uv run assess 4.1.2 --profile nordlicht
 ```
 
-This assesses control `NK-ENC-01` on the scripted fake model, offline and free, and prints the
-Assessment as JSON. The controls and policies it reads are the demo company's, in
-`fixtures/nordlicht/`.
+This assesses VDA ISA control `4.1.2` for the `nordlicht` compliance profile (the default) on
+the scripted fake model, offline and free, and prints the Assessment as JSON: a verdict per
+requirement, the control's rolled-up verdict and its should score. The profile and policies it
+reads are the demo company's, in `fixtures/nordlicht/`.
 
 To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTER_API_KEY` and
 `ASSESS_MODEL`. That is a paid call: load the key from the system keyring, never from a file in
@@ -38,11 +39,11 @@ the repo.
 uv run uvicorn vouch.api:app --port 8000
 curl localhost:8000/api/health
 curl -N -X POST localhost:8000/api/assessments \
-  -H 'content-type: application/json' -d '{"control_id": "NK-ENC-01"}'
+  -H 'content-type: application/json' -d '{"control_id": "4.1.2"}'
 ```
 
-`POST /api/assessments` streams server-sent events: a `step` per agent step, one `result`, then
-the stream closes (or one `error`). The API runs only the scripted fake model: the bundled demo
+`POST /api/assessments` streams server-sent events: a `step` per agent step, a `requirement` per
+judged requirement, one `result`, then the stream closes (or one `error`). The API runs only the scripted fake model: the bundled demo
 script, or the one `ASSESS_FAKE_SCRIPT` names. It never builds the real model until sign-in
 exists.
 
@@ -54,7 +55,7 @@ docker run --rm -p 127.0.0.1:8081:8080 vouch:dev     # open http://localhost:808
 ```
 
 FastAPI serves the API under `/api` and the built front end (`VOUCH_FRONTEND`, `frontend/dist`)
-on every other path, so a link such as `/controls/NK-ENC-01` survives a refresh. It listens on
+on every other path, so a link such as `/controls/4.1.2` survives a refresh. It listens on
 `$PORT` (8080 by default). Without a front-end build it stops at once and says so.
 
 ## Checks

@@ -11,8 +11,6 @@ from typing import Literal
 
 import yaml
 
-from vouch.controls import UnknownControlError
-
 FRAMEWORK_DIR = Path(__file__).resolve().parent / "data" / "vda-isa-2027.1"
 CONTROLS_FILE = FRAMEWORK_DIR / "controls.yaml"
 NOTICE_FILE = FRAMEWORK_DIR / "NOTICE.md"
@@ -22,6 +20,14 @@ Column = Literal["must", "should", "high", "very high", "overlay"]
 # Each base framework column and the letter its requirement ids start with, in the Excel's
 # order. Overlay requirements (O1, ...) come from a compliance profile, never from the Excel.
 COLUMN_PREFIX: dict[Column, str] = {"must": "M", "should": "S", "high": "H", "very high": "V"}
+
+
+class UnknownControlError(LookupError):
+    """No control with this id exists in the base framework."""
+
+    def __init__(self, control_id: str):
+        super().__init__(f"unknown control id: {control_id}")
+        self.control_id = control_id
 
 
 class BaseFrameworkError(RuntimeError):

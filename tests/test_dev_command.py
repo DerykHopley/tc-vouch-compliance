@@ -144,7 +144,7 @@ def test_starts_both_servers_and_ctrl_c_stops_both(tmp_path: Path) -> None:
         assert code == 200 and '"status":"ok"' in body.replace(" ", "")
         stream = subprocess.run(
             ["curl", "-sS", "-N", "--max-time", "30", "-X", "POST", url + "api/assessments"]
-            + ["-H", "content-type: application/json", "-d", '{"control_id": "NK-ENC-01"}'],
+            + ["-H", "content-type: application/json", "-d", '{"control_id": "4.1.2"}'],
             check=False,
             capture_output=True,
             text=True,

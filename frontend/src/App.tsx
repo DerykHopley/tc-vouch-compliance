@@ -11,9 +11,13 @@ function systemTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-// The trial's company and one of its controls, until M1 brings profiles and the ISA catalogue.
+// Nordlicht and one VDA ISA control (its question, unchanged), until the Dossier lists all 12.
 const COMPANY = 'Nordlicht Komponenten GmbH'
-const CONTROL: Control = { id: 'NK-ENC-01', title: 'Laptops are encrypted', owner: 'Information security officer' }
+const CONTROL: Control = {
+  id: '4.1.2',
+  title: 'To what extent is the user access to IT services and IT systems secured?',
+  owner: 'IT Security Officer',
+}
 
 type View = 'dossier' | 'paper'
 

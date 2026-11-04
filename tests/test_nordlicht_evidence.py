@@ -12,8 +12,8 @@ import pytest
 import yaml
 from pydantic import BaseModel, ConfigDict
 
-from vouch.api import VERDICTS as API_VERDICTS
 from vouch.front_matter import split_front_matter
+from vouch.graph import JUDGED_VERDICTS
 from vouch.isa import load_isa_control
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import NORDLICHT_PROFILE, load_profile
@@ -25,7 +25,7 @@ EXPECTED_ANSWERS = NORDLICHT / "expected-answers.yaml"
 TWELVE = ["1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
           "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9"]  # fmt: skip
 PATCH = "patch-vulnerability-status"  # the recorded Patch response's id (#24)
-VERDICTS = set(API_VERDICTS.values())  # the draft speaks the API's verdict words
+VERDICTS = set(JUDGED_VERDICTS)  # the draft speaks the graph's verdict words
 CYCLE_MONTHS = {"quarterly": 3, "half-yearly": 6, "yearly": 12, "two-yearly": 24}
 DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date once #22 lands
 

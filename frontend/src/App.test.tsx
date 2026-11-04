@@ -30,7 +30,7 @@ describe('Dossier landing', () => {
     expect(screen.getByRole('region', { name: 'Readiness' })).toBeTruthy()
     const cards = screen.getAllByRole('article')
     expect(cards).toHaveLength(1)
-    expect(within(cards[0]).getByText('NK-ENC-01')).toBeTruthy()
+    expect(within(cards[0]).getByText('4.1.2')).toBeTruthy()
     expect(within(cards[0]).getByText('Not assessed')).toBeTruthy()
   })
 })
@@ -39,18 +39,18 @@ describe('the working paper', () => {
   const paper = () => screen.queryByRole('region', { name: 'Working paper' })
 
   it('opens straight at its address, as after a refresh', () => {
-    window.history.replaceState(null, '', '/controls/NK-ENC-01')
+    window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
-    expect(within(paper()!).getByRole('heading', { name: /NK-ENC-01/ })).toBeTruthy()
-    expect(within(paper()!).getByRole('button', { name: 'Assess NK-ENC-01' })).toBeTruthy()
+    expect(within(paper()!).getByRole('heading', { name: /4.1.2/ })).toBeTruthy()
+    expect(within(paper()!).getByRole('button', { name: 'Assess 4.1.2' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
   })
 
   it('gets its address when assessed from the card, and Back returns to the Dossier', async () => {
     vi.stubGlobal('fetch', () => new Promise(() => {})) // never answers: only the address matters here
     render(<App />)
-    await userEvent.click(screen.getByRole('button', { name: 'Assess NK-ENC-01' }))
-    expect(window.location.pathname).toBe('/controls/NK-ENC-01')
+    await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
+    expect(window.location.pathname).toBe('/controls/4.1.2')
     expect(paper()).toBeTruthy()
 
     window.history.back()
@@ -58,8 +58,37 @@ describe('the working paper', () => {
     expect(window.location.pathname).toBe('/')
   })
 
+  it('keeps running through requirement events, then shows the verdict and the answer', async () => {
+    const encode = (text: string) => new TextEncoder().encode(text)
+    let finish = () => {}
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encode('event: step\ndata: {"node":"judge","text":"Judged 4 of 5."}\n\n'))
+        controller.enqueue(encode('event: requirement\ndata: {"requirement":{"id":"M1","column":"must",'
+          + '"text":"T","verdict":"partly-evidenced","reason":"R"}}\n\n'))
+        finish = () => {
+          controller.enqueue(encode('event: result\ndata: {"assessment":{"control_id":"4.1.2",'
+            + '"verdict":"partly-evidenced","answer":"Sign-in follows exposure."}}\n\n'))
+          controller.close()
+        }
+      },
+    })
+    vi.stubGlobal('fetch', async () => new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
+    await within(paper()!).findByText('Judged 4 of 5.')
+    await new Promise((resolve) => setTimeout(resolve, 20)) // let the requirement event land
+    expect(within(paper()!).queryByRole('alert')).toBeNull()
+    expect(within(paper()!).getByRole('button', { name: 'Assessing 4.1.2' })).toBeTruthy()
+
+    finish()
+    const result = await within(paper()!).findByRole('region', { name: 'Verdict and draft answer' })
+    expect(within(result).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(result).getByText('Sign-in follows exposure.')).toBeTruthy()
+  })
+
   it('leaves for the Dossier at /', async () => {
-    window.history.replaceState(null, '', '/controls/NK-ENC-01')
+    window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
     await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
     expect(window.location.pathname).toBe('/')
@@ -67,7 +96,7 @@ describe('the working paper', () => {
   })
 
   it('shows the Dossier for an address it does not know', () => {
-    window.history.replaceState(null, '', '/controls/NK-XXX-99')
+    window.history.replaceState(null, '', '/controls/9.9.9')
     render(<App />)
     expect(paper()).toBeNull()
     expect(screen.getAllByRole('article')).toHaveLength(1)

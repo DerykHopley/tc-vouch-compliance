@@ -1,74 +1,66 @@
+"""The control's roll-up and should score, from its requirements' verdicts."""
+
 import pytest
 
-from vouch import ScriptedChatModel, assess, load_control
+from vouch.graph import RequirementVerdict, roll_up, should_score
+
+COLUMNS = {"M": "must", "S": "should", "H": "high", "V": "very high", "O": "overlay"}
+E, P, N, NA = "evidenced", "partly-evidenced", "not-evidenced", "not-applicable"
 
 
-def scripted(covered_points, verdict="partial"):
-    """A script that searches once, answers, and has the judge name these points."""
-    return ScriptedChatModel(
-        script={
-            "gather": [
-                {"tool": "search_policies", "args": {"query": "policy"}},
-                {"answer": "Draft answer.", "verdict": verdict, "cited": []},
-            ],
-            "judge": {"covered_points": covered_points},
-        }
-    )
+def req(rid: str, verdict: str) -> RequirementVerdict:
+    return RequirementVerdict(id=rid, column=COLUMNS[rid[0]], text="", verdict=verdict, reason="")
 
 
 @pytest.mark.parametrize(
-    ("control_id", "judged", "verdict", "covered", "missing"),
+    ("requirements", "expected"),
     [
-        ("NK-ENC-01", ["ENC-1", "ENC-2", "ENC-3"], "found", ["ENC-1", "ENC-2", "ENC-3"], []),
-        ("NK-ACC-01", ["ACC-1"], "partial", ["ACC-1"], ["ACC-2", "ACC-3"]),
-        ("NK-VUL-01", [], "gap", [], ["VUL-1", "VUL-2", "VUL-3"]),
+        ([req("M1", E), req("M2", E)], E),
+        ([req("M1", N), req("M2", N)], N),
+        ([req("M1", E), req("M2", N)], P),
+        ([req("M1", P), req("M2", P)], P),
+        ([req("M1", P), req("M2", N)], P),
+        ([req("M1", E), req("H1", E), req("V1", E), req("O1", E)], E),
+        ([req("M1", E), req("H1", N)], P),
+        ([req("M1", E), req("O1", N)], P),
+        ([req("M1", N), req("V1", E)], P),
+        ([req("M1", E), req("S1", N), req("S2", N)], E),
+        ([req("M1", N), req("S1", E)], N),
+        ([req("M1", E), req("M2", NA)], E),
+        ([req("M1", N), req("M2", NA)], N),
+        ([req("M1", NA), req("S1", E)], NA),
     ],
-    ids=["found", "partial", "gap"],
+    ids=[
+        "all-evidenced",
+        "none-evidenced",
+        "mixed",
+        "all-partly",
+        "partly-and-none",
+        "high-very-high-overlay-count",
+        "high-not-evidenced",
+        "overlay-not-evidenced",
+        "very-high-evidenced",
+        "should-ignored-when-musts-evidenced",
+        "should-ignored-when-musts-not",
+        "not-applicable-ignored",
+        "not-applicable-ignored-none-evidenced",
+        "nothing-counted",
+    ],
 )
-def test_judged_coverage_routes_the_verdict(control_id, judged, verdict, covered, missing):
-    result = assess(load_control(control_id), scripted(judged))
-
-    assert result.verdict == verdict
-    assert result.covered_points == covered
-    assert result.missing_points == missing
+def test_the_roll_up_rule(requirements, expected):
+    assert roll_up(requirements) == expected
 
 
-def test_a_gap_is_escalated_to_the_controls_owner():
-    result = assess(load_control("NK-VUL-01"), scripted([]))
+def test_the_should_score_counts_should_requirements_only():
+    requirements = [
+        req("M1", E),
+        req("H1", E),
+        req("O1", E),
+        req("S1", E),
+        req("S2", P),
+        req("S3", N),
+        req("S4", E),
+        req("S5", NA),
+    ]
 
-    assert result.gap_note == {
-        "control_id": "NK-VUL-01",
-        "missing_points": ["VUL-1", "VUL-2", "VUL-3"],
-        "owner_role": "Head of IT infrastructure",
-    }
-
-
-@pytest.mark.parametrize(
-    ("control_id", "judged"),
-    [("NK-ENC-01", ["ENC-1", "ENC-2", "ENC-3"]), ("NK-ACC-01", ["ACC-1"])],
-    ids=["found", "partial"],
-)
-def test_found_and_partial_have_no_gap_note(control_id, judged):
-    result = assess(load_control(control_id), scripted(judged))
-
-    assert result.gap_note is None
-
-
-def test_ids_from_another_control_are_ignored():
-    result = assess(load_control("NK-ENC-01"), scripted(["ENC-1", "ENC-9"]))
-
-    assert result.covered_points == ["ENC-1"]
-    assert result.verdict == "partial"
-
-
-def test_covered_points_follow_the_controls_order():
-    result = assess(load_control("NK-ENC-01"), scripted(["ENC-3", "ENC-1"]))
-
-    assert result.covered_points == ["ENC-1", "ENC-3"]
-    assert result.missing_points == ["ENC-2"]
-
-
-def test_the_answer_turns_verdict_is_ignored():
-    result = assess(load_control("NK-ENC-01"), scripted([], verdict="found"))
-
-    assert result.verdict == "gap"
+    assert should_score(requirements) == {"evidenced": 2, "total": 4}
