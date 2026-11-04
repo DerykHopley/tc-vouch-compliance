@@ -116,13 +116,21 @@ def test_connections_use_langgraphs_postgres_settings(make_db):
 def bounded(kwargs: dict[str, Any]) -> bool:
     """#119: the statement timeout and TCP keepalives, from vouch.database's constants."""
     return (
-        kwargs["options"] == f"-c statement_timeout={database.STATEMENT_TIMEOUT_SECONDS}s"
+        database.CONNECTION_KWARGS.items() <= kwargs.items()
+        and kwargs["options"] == f"-c statement_timeout={database.STATEMENT_TIMEOUT_SECONDS}s"
         and kwargs["keepalives"] == 1
-        and kwargs["keepalives_idle"] == database.KEEPALIVE_IDLE_SECONDS
-        and kwargs["keepalives_interval"] == database.KEEPALIVE_INTERVAL_SECONDS
-        and kwargs["keepalives_count"] == database.KEEPALIVE_COUNT
-        and kwargs["connect_timeout"] == database.CONNECT_TIMEOUT_SECONDS
     )
+
+
+def test_the_private_psycopg_names_the_bounded_wait_needs_still_exist():
+    """BoundedConnection catches psycopg.errors._WaitTimeout and passes `timeout` to `wait`:
+    an upgrade that drops either fails here, not at the first frozen database."""
+    import inspect
+
+    import psycopg
+
+    assert issubclass(psycopg.errors._WaitTimeout, Exception)
+    assert "timeout" in inspect.signature(psycopg.Connection.wait).parameters
 
 
 def test_every_connection_has_a_statement_timeout_and_keepalives(make_db):
@@ -679,7 +687,7 @@ def test_a_query_the_database_freezes_during_is_unavailable_within_its_bound(fre
     raised = within(database.WAIT_TIMEOUT_SECONDS + 1, frozen_mid_query)
 
     assert isinstance(raised, DatabaseUnavailable)
-    assert "didn't answer" in str(raised)
+    assert database.NO_ANSWER.split("{")[0] in str(raised)
 
 
 @needs_postgres

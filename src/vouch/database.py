@@ -110,6 +110,10 @@ CONNECTION_KWARGS: dict[str, Any] = {
 """Every connection's settings: LangGraph's (autocommit, dict rows) and the bounds (#119)."""
 
 
+NO_ANSWER = "the database didn't answer within {bound}s"
+"""The OperationalError a bounded wait ends with."""
+
+
 class BoundedConnection(psycopg.Connection[DictRow]):
     """psycopg's Connection, waiting at most `wait_timeout` seconds for any one answer (#119).
 
@@ -119,6 +123,10 @@ class BoundedConnection(psycopg.Connection[DictRow]):
     OperationalError, a DatabaseUnavailable to the caller. Every query, fetch and the pool's
     check go through `wait`; psycopg's own `wait` takes the timeout, and closes the connection
     the same way when a cancel goes unanswered.
+
+    It relies on two psycopg details outside its public docs, read in the installed 3.3.8
+    source: `Connection.wait`'s `timeout`, and `psycopg.errors._WaitTimeout` (private). The
+    dependency is capped below 3.4 in pyproject.toml, and a test fails if either changes.
     """
 
     wait_timeout: float = WAIT_TIMEOUT_SECONDS
@@ -127,18 +135,19 @@ class BoundedConnection(psycopg.Connection[DictRow]):
         bound = self.wait_timeout if timeout is None else min(timeout, self.wait_timeout)
         try:
             return super().wait(gen, interval=interval, timeout=bound)
-        except psycopg.errors._WaitTimeout:  # psycopg's own, raised only for `timeout`
+        except psycopg.errors._WaitTimeout:  # private: raised only for `timeout` (see above)
             self.pgconn.finish()
-            raise psycopg.OperationalError(f"the database didn't answer within {bound}s") from None
+            raise psycopg.OperationalError(NO_ANSWER.format(bound=bound)) from None
 
 
-def check_within_bound(conn: Any) -> None:
+def check_within_bound(conn: BoundedConnection) -> None:
     """The pool's checkout check (`check_connection`), waiting CHECK_TIMEOUT_SECONDS at most."""
+    before = getattr(conn, "wait_timeout", WAIT_TIMEOUT_SECONDS)  # a test's fake may not have one
     conn.wait_timeout = CHECK_TIMEOUT_SECONDS
     try:
         ConnectionPool.check_connection(conn)
     finally:
-        conn.wait_timeout = WAIT_TIMEOUT_SECONDS
+        conn.wait_timeout = before
 
 
 class Connect(Protocol):
