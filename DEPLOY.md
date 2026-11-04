@@ -150,7 +150,8 @@ stops at step 7.
 
 The app holds a small pool (at most 4 connections; db-f1-micro allows 25, *checked* on Cloud SQL's
 flags page for ~0.5 GB instances). It checks each connection before use and reconnects after an
-instance restart; a wrong password or a missing database is reported at once.
+instance restart. A wrong password or a missing database: the app answers 503 after a 5 s wait,
+and `vouch-db-setup` names the reason at once.
 
 **LangGraph's tables, once per database** (and again after an upgrade of
 `langgraph-checkpoint-postgres`; it only migrates). Run from your machine through the Cloud SQL

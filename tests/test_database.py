@@ -35,8 +35,6 @@ URL = f"postgresql://vouch:{PASSWORD}@127.0.0.1:5432/vouch"
 UNREACHABLE_URL = f"postgresql://vouch:{PASSWORD}@/vouch?host=/nonexistent-33"
 # The reviewer's case: libpq can't decode the password, and echoes it.
 MALFORMED_URL = "postgresql://vouch:s3cr%zzet@/vouch?host=/nonexistent-33"
-WRONG_PASSWORD = 'connection failed: FATAL:  password authentication failed for user "vouch"'
-NO_DATABASE = 'connection failed: FATAL:  database "vouch" does not exist'
 
 
 class FakeConnection:
@@ -136,18 +134,15 @@ def test_connections_are_pooled_and_a_dead_one_is_replaced_on_checkout(make_db):
     assert first.pgconn.transaction_status == TransactionStatus.UNKNOWN  # discarded, not reused
 
 
-@pytest.mark.parametrize("refusal", [WRONG_PASSWORD, NO_DATABASE])
-def test_a_refusal_a_retry_cant_change_fails_at_once_with_its_reason(make_db, refusal):
-    connect = FlakyConnect(failures=99, message=refusal)
-    db = make_db(connect=connect, timeout=5)
-    started = time.monotonic()
-
-    with pytest.raises(DatabaseMisconfigured) as refused, db.connection():
+def test_a_closed_pool_is_unavailable_not_psycopgs_error(make_db):
+    """The app shutting down while a request waits: PoolClosed becomes a 503."""
+    db = make_db(connect=FlakyConnect())
+    with db.connection():
         pass
+    db._pool.close()  # the pool alone, as during shutdown before Database.close returns
 
-    assert time.monotonic() - started < 1  # not the 5 s wait, nor the pool's 1 s backoff
-    assert len(connect.calls) == 1
-    assert refusal.split("FATAL:  ")[1] in str(refused.value)
+    with pytest.raises(DatabaseUnavailable), db.connection():
+        pass
 
 
 def test_a_connection_level_failure_is_retried_until_the_wait_runs_out(make_db):
@@ -176,7 +171,7 @@ def test_the_password_never_reaches_an_error_or_the_log_in_any_form(make_db, cap
     caplog.set_level(logging.DEBUG)
     url = "postgresql://vouch:p%40ss-marker-33@127.0.0.1:5432/vouch"  # decoded: p@ss-marker-33
     message = f"FATAL: password authentication failed near {url}, p%40ss-marker-33, p@ss-marker-33"
-    db = make_db(url, connect=FlakyConnect(failures=99, message=message))
+    db = make_db(url, connect=FlakyConnect(failures=99, message=message), timeout=0.5)
 
     with pytest.raises(DatabaseUnavailable) as refused, db.connection():
         pass
@@ -305,17 +300,26 @@ def test_the_setup_command_on_a_malformed_url_refuses_without_the_password(capsy
     assert "s3cr" not in captured.out + captured.err
 
 
-def test_the_setup_command_against_an_unreachable_database_fails_without_the_password(
-    capsys, monkeypatch
-):
-    monkeypatch.setattr(database, "CHECKOUT_TIMEOUT_SECONDS", 0.3)
-
+def test_the_setup_command_against_an_unreachable_database_fails_without_the_password(capsys):
     code = database.main([], env={DATABASE_URL_ENV: UNREACHABLE_URL})
 
     err = capsys.readouterr().err
     assert code == EXIT_UNAVAILABLE
-    assert "unavailable" in err
+    assert "No such file" in err  # libpq's own reason
     assert PASSWORD not in err
+
+
+def test_the_setup_connects_once_without_the_pool_or_a_retry(make_db):
+    connect = FlakyConnect(failures=1, message="server closed the connection")
+    db = make_db(connect=connect)
+
+    with pytest.raises(DatabaseUnavailable, match="server closed the connection"):
+        db.setup()
+
+    [(_, kwargs)] = connect.calls
+    assert kwargs["autocommit"] is True and kwargs["row_factory"] is dict_row
+    assert kwargs["connect_timeout"] == database.CONNECT_TIMEOUT_SECONDS
+    assert db._pool is None
 
 
 def test_no_other_module_opens_a_connection():
@@ -414,13 +418,22 @@ def test_health_says_reachable_with_the_database_up(empty_database):
 
 
 @needs_postgres
-@pytest.mark.parametrize("change", [{"password": "wrong-pw-33"}, {"dbname": "no_such_db_33"}])
-def test_a_real_refusal_fails_at_once_with_a_clear_reason(change):
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"password": "wrong-pw-33"}, "password authentication failed"),
+        ({"dbname": "no_such_db_33"}, "does not exist"),
+    ],
+)
+def test_the_setup_command_reports_a_real_refusal_at_once(change, reason, capsys):
     assert SERVER_URL
-    with Database(SecretStr(conninfo.make_conninfo(SERVER_URL, **change))) as db:
-        started = time.monotonic()
-        with pytest.raises(DatabaseUnavailable, match="refused") as refused, db.connection():
-            pass
+    url = conninfo.make_conninfo(SERVER_URL, **change)
+    started = time.monotonic()
 
+    code = database.main([], env={DATABASE_URL_ENV: url})
+
+    err = capsys.readouterr().err
+    assert code == EXIT_UNAVAILABLE
     assert time.monotonic() - started < 2
-    assert "wrong-pw-33" not in str(refused.value)
+    assert reason in err
+    assert "wrong-pw-33" not in err
