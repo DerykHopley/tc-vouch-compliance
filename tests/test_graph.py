@@ -26,6 +26,10 @@ def scripted(
     return ScriptedChatModel(script={"gather": gather, "judge": judgements})
 
 
+def judge_step(result) -> str:
+    return next(s["text"] for s in result.steps if s["node"] == "judge")
+
+
 def judged(*ids: str, verdict: str = "evidenced") -> list[dict]:
     return [{"requirement_id": r, "verdict": verdict, "reason": "Shown."} for r in ids]
 
@@ -52,9 +56,16 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     assert result.model == "scripted-fake"
     assert result.prompt_version
     assert [s["node"] for s in result.steps] == [
-        "gather", "tools", "gather", "check_answer", "cite", "judge"
+        "gather",
+        "tools",
+        "gather",
+        "check_answer",
+        "cite",
+        "judge",
+        "remediate",
+        "review",
     ]
-    assert result.steps[-1]["text"] == "Judged 3 of 5 requirements evidenced."
+    assert judge_step(result) == "Judged 3 of 5 requirements evidenced."
 
 
 def test_the_assessment_reports_the_models_token_usage():
@@ -112,7 +123,7 @@ def test_an_unknown_verdict_or_a_skipped_requirement_is_not_evidenced_not_judged
     assert (m1.id, m1.verdict, m1.reason) == ("M1", "not-evidenced", "not judged")
     assert NOT_JUDGED == "not judged"
     assert result.verdict == "partly-evidenced"
-    assert result.steps[-1]["text"] == "Judged 4 of 5 requirements evidenced. Not judged: M1."
+    assert judge_step(result) == "Judged 4 of 5 requirements evidenced. Not judged: M1."
 
 
 def test_a_judgement_for_a_requirement_the_control_lacks_is_ignored():
@@ -254,7 +265,7 @@ def test_a_judgement_reason_claiming_an_audit_result_is_asked_for_again_once():
     result = assess("4.1.2", NORDLICHT, model)
 
     assert {r.reason for r in result.requirements} == {"Shown."}
-    assert result.steps[-1]["text"] == (
+    assert judge_step(result) == (
         "A reason claimed an audit result (“compliant”), so the judgement was asked for again. "
         "Judged 5 of 5 requirements evidenced."
     )

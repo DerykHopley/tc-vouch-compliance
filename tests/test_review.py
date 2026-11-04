@@ -1,0 +1,344 @@
+"""Remediation drafts, the review interrupt, and resuming with the compliance lead's decision."""
+
+from datetime import date
+
+import pytest
+from pydantic import ValidationError
+
+from vouch import ScriptedChatModel, assess, load_named_profile
+from vouch.graph import (
+    InvalidReviewError,
+    NotWaitingForReviewError,
+    OutputCheckError,
+    ReviewDecision,
+    build_graph,
+    memory_checkpointer,
+    resume,
+)
+
+NORDLICHT = load_named_profile("nordlicht")
+TODAY = date(2026, 11, 4)
+
+
+def drafted(*ids: str, days: int = 30, missing: str = "A tested backup concept.") -> list[dict]:
+    return [
+        {
+            "requirement_id": r,
+            "missing": missing,
+            "owner_role": "IT operations lead",
+            "due_in_days": days,
+        }
+        for r in ids
+    ]
+
+
+def script_5_2_9(remediate: list[dict] | list[list[dict]] | None = None) -> dict:
+    """5.2.9 (backup), where Nordlicht has nothing: all three requirements not evidenced."""
+    judge = [
+        {"requirement_id": r, "verdict": "not-evidenced", "reason": "No document covers it."}
+        for r in ("M1", "M2", "S1")
+    ]
+    if remediate is None:
+        remediate = drafted("M1", "M2", "S1")
+    if remediate and isinstance(remediate[0], list):
+        plans: dict | list[dict] = [{"items": r} for r in remediate]
+    else:
+        plans = {"items": remediate}
+    return {
+        "gather": [
+            {"tool": "search_policies", "args": {"query": "backup recovery"}},
+            {"answer": "No backup or recovery concept was found.", "cited": []},
+        ],
+        "judge": {"requirements": judge},
+        "remediate": plans,
+    }
+
+
+def mixed_4_1_2() -> dict:
+    """4.1.2 with M1 evidenced, M2 not evidenced: the roll-up is partly-evidenced."""
+    verdicts = {
+        "M1": "evidenced",
+        "M2": "not-evidenced",
+        "S1": "evidenced",
+        "S2": "not-evidenced",
+        "S3": "evidenced",
+    }
+    return {
+        "gather": [
+            {"tool": "search_policies", "args": {"query": "authentication"}},
+            {"answer": "Sign-in methods are set per system.", "cited": []},
+        ],
+        "judge": {
+            "requirements": [
+                {"requirement_id": r, "verdict": v, "reason": "From the standard."}
+                for r, v in verdicts.items()
+            ]
+        },
+        "remediate": {"items": drafted("M2", "S2")},
+    }
+
+
+def proposed(control_id: str, script: dict, checkpointer=None, **kwargs):
+    model = ScriptedChatModel(script=script)
+    saver = checkpointer or memory_checkpointer()
+    return assess(control_id, NORDLICHT, model, saver, today=TODAY, **kwargs), model, saver
+
+
+def test_5_2_9_gets_one_remediation_draft_per_not_evidenced_requirement():
+    result, _, _ = proposed("5.2.9", script_5_2_9())
+
+    assert [d.requirement_id for d in result.remediation] == ["M1", "M2", "S1"]
+    first = result.remediation[0]
+    assert first.missing == "A tested backup concept."
+    assert first.owner_role == "IT operations lead"
+    assert first.due_date == "2026-12-04"  # 30 days after TODAY
+
+
+def test_a_skipped_draft_is_listed_not_drafted_and_drafts_for_other_requirements_ignored():
+    result, _, _ = proposed("5.2.9", script_5_2_9(drafted("M2", "M7")))
+
+    assert [(d.requirement_id, d.missing) for d in result.remediation] == [
+        ("M1", "not drafted"),
+        ("M2", "A tested backup concept."),
+        ("S1", "not drafted"),
+    ]
+    assert result.remediation[0].due_date == "2027-02-02"  # the default 90 days
+    remediate = next(s for s in result.steps if s["node"] == "remediate")
+    assert remediate["text"] == "Drafted 3 remediation items. Not drafted: M1, S1."
+
+
+def test_no_gap_means_no_remediation_call():
+    script = mixed_4_1_2()
+    for item in script["judge"]["requirements"]:
+        item["verdict"] = "evidenced"
+
+    result, model, _ = proposed("4.1.2", script)
+
+    assert result.remediation == []
+    assert model.remediate_turn == 0
+
+
+def test_a_draft_claiming_an_audit_result_is_asked_for_again_once():
+    first = drafted("M1", "M2", "S1", missing="Nothing; backups are compliant.")
+    result, model, _ = proposed("5.2.9", script_5_2_9([first, drafted("M1", "M2", "S1")]))
+
+    assert model.remediate_turn == 2
+    assert result.remediation[0].missing == "A tested backup concept."
+    assert "asked for again" in next(s for s in result.steps if s["node"] == "remediate")["text"]
+
+
+def test_a_draft_claiming_an_audit_result_twice_fails():
+    bad = drafted("M1", "M2", "S1", missing="Backups passed.")
+    with pytest.raises(OutputCheckError):
+        proposed("5.2.9", script_5_2_9([bad, bad]))
+
+
+def test_the_run_stops_at_the_review_interrupt_and_returns_the_proposed_assessment():
+    result, _, _ = proposed("4.1.2", mixed_4_1_2())
+
+    assert result.status == "waiting-for-review"
+    assert result.review is None
+    assert result.thread_id
+    assert result.verdict == "partly-evidenced"
+    assert [s["node"] for s in result.steps][-3:] == ["judge", "remediate", "review"]
+    assert result.steps[-1]["text"] == "Waiting for the compliance lead's review."
+    assert [d.requirement_id for d in result.remediation] == ["M2", "S2"]
+
+
+def test_accept_resumes_and_records_the_decision():
+    result, model, saver = proposed("4.1.2", mixed_4_1_2())
+
+    reviewed = resume(
+        result.thread_id, ReviewDecision(decision="accept", note="Fine."), model, saver
+    )
+
+    assert reviewed.status == "accepted"
+    assert reviewed.review.decision == "accept"
+    assert reviewed.review.note == "Fine."
+    assert reviewed.review.overrides == []
+    assert reviewed.verdict == "partly-evidenced"
+    assert reviewed.thread_id == result.thread_id
+    assert reviewed.remediation == result.remediation
+    assert reviewed.steps[:-1] == result.steps[:-1]  # every step of the run is kept
+    assert reviewed.steps[-1] == {
+        "node": "review",
+        "text": "The compliance lead accepted the assessment.",
+    }
+
+
+def test_reject_resumes_and_records_the_note():
+    result, model, saver = proposed("4.1.2", mixed_4_1_2())
+
+    reviewed = resume(
+        result.thread_id,
+        ReviewDecision(decision="reject", note="The 2025 MFA rollout record was missed."),
+        model,
+        saver,
+    )
+
+    assert reviewed.status == "rejected"
+    assert reviewed.review.note == "The 2025 MFA rollout record was missed."
+    assert reviewed.steps[-1]["text"] == "The compliance lead rejected the assessment."
+
+
+def test_an_override_changes_the_verdict_keeps_the_agents_and_recalculates_the_roll_up():
+    result, model, saver = proposed("4.1.2", mixed_4_1_2())
+    decision = ReviewDecision(
+        decision="accept",
+        overrides=[
+            {
+                "requirement_id": "M2",
+                "verdict": "evidenced",
+                "reason": "The MFA rollout record shows it.",
+            }
+        ],
+    )
+
+    reviewed = resume(result.thread_id, decision, model, saver)
+
+    m2 = next(r for r in reviewed.requirements if r.id == "M2")
+    assert (m2.verdict, m2.reason) == ("evidenced", "The MFA rollout record shows it.")
+    assert result.verdict == "partly-evidenced"
+    assert reviewed.verdict == "evidenced"
+    (override,) = reviewed.review.overrides
+    assert (override.agent_verdict, override.agent_reason) == (
+        "not-evidenced",
+        "From the standard.",
+    )
+    assert reviewed.steps[-1]["text"] == (
+        "The compliance lead accepted the assessment, overriding M2."
+    )
+
+
+def test_an_override_on_a_should_requirement_changes_the_should_score_not_the_verdict():
+    result, model, saver = proposed("4.1.2", mixed_4_1_2())
+    decision = ReviewDecision(
+        decision="accept",
+        overrides=[
+            {"requirement_id": "S2", "verdict": "evidenced", "reason": "Shown in the export."}
+        ],
+    )
+
+    reviewed = resume(result.thread_id, decision, model, saver)
+
+    assert (result.should_score.evidenced, reviewed.should_score.evidenced) == (2, 3)
+    assert reviewed.verdict == "partly-evidenced"
+
+
+def test_a_re_run_after_reject_receives_the_note():
+    note = "Look at the MFA rollout record in records/."
+    result, model, saver = proposed("4.1.2", mixed_4_1_2())
+    resume(result.thread_id, ReviewDecision(decision="reject", note=note), model, saver)
+
+    again, model_again, _ = proposed("4.1.2", mixed_4_1_2(), saver, note=note)
+
+    first_gather, judge_prompt = model_again.prompts[0], model_again.prompts[2]
+    assert note in first_gather[-1].content
+    assert note in judge_prompt[-1].content
+    assert not any(note in str(m.content) for p in model.prompts for m in p)  # not the first run
+    assert again.thread_id != result.thread_id
+
+
+def thread_values(model, saver, thread_id) -> dict:
+    return build_graph(model, saver).get_state({"configurable": {"thread_id": thread_id}}).values
+
+
+def test_resuming_runs_nothing_before_the_interrupt_again_and_a_second_resume_is_refused():
+    result, model, saver = proposed("5.2.9", script_5_2_9())
+    calls_before = len(model.prompts)  # gather twice, judge, remediate
+    assert calls_before == 4
+    assert "review" not in thread_values(model, saver, result.thread_id)  # nothing written yet
+
+    reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), model, saver)
+
+    assert len(model.prompts) == calls_before  # no model call on resume: no node re-drafted
+    assert reviewed.remediation == result.remediation
+    with pytest.raises(NotWaitingForReviewError):
+        resume(result.thread_id, ReviewDecision(decision="reject"), model, saver)
+    values = thread_values(model, saver, result.thread_id)
+    assert values["review"].decision == "accept"  # the refused second resume wrote nothing
+    assert [s["node"] for s in values["steps"]].count("review") == 1  # one review written
+    assert [s["node"] for s in values["steps"]].count("remediate") == 1
+
+
+def test_resuming_an_unknown_thread_is_refused():
+    with pytest.raises(NotWaitingForReviewError):
+        resume(
+            "no-such-thread",
+            ReviewDecision(decision="accept"),
+            ScriptedChatModel(script=mixed_4_1_2()),
+            memory_checkpointer(),
+        )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        [{"requirement_id": "M9", "verdict": "evidenced", "reason": "Shown."}],
+        [{"requirement_id": "H1", "verdict": "evidenced", "reason": "Not applied at normal."}],
+        [
+            {"requirement_id": "M2", "verdict": "evidenced", "reason": "Shown."},
+            {"requirement_id": "M2", "verdict": "not-evidenced", "reason": "Not shown."},
+        ],
+    ],
+    ids=["unknown", "not-in-the-profile", "named-twice"],
+)
+def test_an_override_naming_a_requirement_the_assessment_did_not_judge_is_refused(overrides):
+    result, model, saver = proposed("4.1.2", mixed_4_1_2())
+
+    with pytest.raises(InvalidReviewError):
+        resume(
+            result.thread_id, ReviewDecision(decision="accept", overrides=overrides), model, saver
+        )
+    reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), model, saver)
+    assert reviewed.status == "accepted"  # the refused decision resumed nothing
+
+
+def test_an_override_on_a_not_applicable_requirement_is_refused():
+    script = mixed_4_1_2()
+    script["judge"]["requirements"] = [
+        {"requirement_id": r, "verdict": "evidenced", "reason": "Shown."}
+        for r in ("M1", "M2", "M3", "M5", "S1", "S2", "S3")
+    ]
+    result, model, saver = proposed("5.2.4", script)
+    assert any(r.id == "M4" and r.verdict == "not-applicable" for r in result.requirements)
+
+    with pytest.raises(InvalidReviewError):
+        resume(
+            result.thread_id,
+            ReviewDecision(
+                decision="accept",
+                overrides=[
+                    {"requirement_id": "M4", "verdict": "evidenced", "reason": "We do run it."}
+                ],
+            ),
+            model,
+            saver,
+        )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"decision": "maybe"},
+        {"decision": "accept", "overrides": [{"requirement_id": "M1", "verdict": "evidenced"}]},
+        {
+            "decision": "accept",
+            "overrides": [{"requirement_id": "M1", "verdict": "evidenced", "reason": "  "}],
+        },
+        {
+            "decision": "accept",
+            "overrides": [{"requirement_id": "M1", "verdict": "compliant", "reason": "Shown."}],
+        },
+        {
+            "decision": "accept",
+            "overrides": [
+                {"requirement_id": "M1", "verdict": "not-applicable", "reason": "Shown."}
+            ],
+        },
+    ],
+    ids=["bad-decision", "no-reason", "blank-reason", "invalid-verdict", "not-applicable"],
+)
+def test_a_malformed_review_decision_does_not_validate(body):
+    with pytest.raises(ValidationError):
+        ReviewDecision.model_validate(body)

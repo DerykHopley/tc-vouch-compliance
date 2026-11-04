@@ -1,4 +1,5 @@
-"""The HTTP API: health, and one control's assessment streamed as server-sent events.
+"""The HTTP API: health, one control's assessment streamed as server-sent events up to the
+compliance lead's review, and the review that resumes it.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -15,9 +16,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
 
-from vouch.graph import Assessment, RequirementVerdict, assess_steps
+from vouch.graph import (
+    Assessment,
+    InvalidReviewError,
+    NotWaitingForReviewError,
+    RequirementVerdict,
+    ReviewDecision,
+    assess_steps,
+    memory_checkpointer,
+    resume,
+)
 from vouch.isa import IsaControl, UnknownControlError, load_isa_control
 from vouch.profile import (
     DEFAULT_PROFILE,
@@ -63,6 +74,13 @@ def compliance_profile() -> ComplianceProfile:
         raise HTTPException(status_code=500, detail=FAILED) from None
 
 
+@cache
+def checkpointer() -> BaseCheckpointSaver:
+    """Where paused assessments wait for review: in memory, one per process, until M2 brings
+    Postgres. A restart forgets them."""
+    return memory_checkpointer()
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": version("vouch")}
@@ -72,15 +90,17 @@ def health() -> dict[str, str]:
 def create_assessment(
     control: Annotated[IsaControl, Depends(requested_control)],
     profile: Annotated[ComplianceProfile, Depends(compliance_profile)],
+    saver: Annotated[BaseCheckpointSaver, Depends(checkpointer)],
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, a `requirement` event per judged requirement, one
-    `result`, then close; or one `error`, then close.
+    `result` (the proposed Assessment, waiting for review, with the `thread_id` to review it
+    by), then close; or one `error`, then close.
 
     Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
     nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
     """
     try:
-        for item in assess_steps(control, profile, fake_model_from_env(DEMO_SCRIPT)):
+        for item in assess_steps(control, profile, fake_model_from_env(DEMO_SCRIPT), saver):
             if isinstance(item, Assessment):
                 yield ServerSentEvent(event="result", data={"assessment": item.to_dict()})
             elif isinstance(item, RequirementVerdict):
@@ -91,6 +111,25 @@ def create_assessment(
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
+
+
+@router.post("/assessments/{thread_id}/review")
+def review_assessment(
+    thread_id: str,
+    decision: Annotated[ReviewDecision, Body()],
+    saver: Annotated[BaseCheckpointSaver, Depends(checkpointer)],
+) -> dict[str, dict]:
+    """Resume a waiting assessment with the lead's decision; the reviewed Assessment.
+
+    409 when the thread is unknown or not waiting; 422 for an override naming a requirement
+    the assessment didn't judge (the decision's shape is checked before, also 422)."""
+    try:
+        reviewed = resume(thread_id, decision, fake_model_from_env(DEMO_SCRIPT), saver)
+    except NotWaitingForReviewError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except InvalidReviewError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"assessment": reviewed.to_dict()}
 
 
 @router.get("/{path:path}", include_in_schema=False)
