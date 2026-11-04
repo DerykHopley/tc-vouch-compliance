@@ -109,6 +109,8 @@ def test_a_secret_value_never_reaches_a_log_or_an_error(caplog, monkeypatch):
             load_settings({k: v for k, v in env.items() if k != missing})
         seen.append(str(refused.value))
     # A failing assessment logs its exception; the secrets are in the environment meanwhile.
+    # Local mode, as clerk mode refuses the request before it runs (the Clerk keys' refusals
+    # and printed forms are covered above).
     for name, value in secrets.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("ASSESS_FAKE_SCRIPT", str(ROOT / "tests" / "scripts" / "broken.json"))
@@ -139,3 +141,15 @@ def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
     assert "Vouch cannot start" in started.stderr
     assert all(name in started.stderr for name in CLERK_KEYS)
     assert "Traceback" not in started.stderr
+
+
+def test_a_blank_clerk_key_counts_as_missing():
+    env = {"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS | {"CLERK_JWT_KEY": "   "}
+
+    with pytest.raises(SettingsError, match="CLERK_JWT_KEY"):
+        load_settings(env)
+
+
+def test_the_tests_start_from_no_vouch_settings():
+    """tests/conftest.py: a developer's exported settings can't change the tests' results."""
+    assert not ENV_NAMES & set(os.environ)

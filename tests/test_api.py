@@ -5,17 +5,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from vouch.api import app, create_app
-from vouch.settings import FAKE_SCRIPT_ENV, Settings
+from vouch.api import create_app
+from vouch.settings import Settings
 
 DEMO_CONTROL = "NK-ENC-01"
 
 
 @pytest.fixture
-def client(monkeypatch):
-    monkeypatch.delenv(FAKE_SCRIPT_ENV, raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    return TestClient(app, raise_server_exceptions=False)
+def client():
+    """The app in local mode on the bundled demo script."""
+    return TestClient(create_app(Settings()), raise_server_exceptions=False)
 
 
 def client_playing(script) -> TestClient:

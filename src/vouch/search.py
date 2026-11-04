@@ -4,9 +4,9 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from vouch.settings import load_settings
+from vouch.settings import DEFAULT_POLICY_DIR, policy_dir
 
-DEFAULT_POLICY_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "policies"
+__all__ = ["DEFAULT_POLICY_DIR", "search_policies"]
 MAX_QUERY_CHARS = 200
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 10
@@ -37,7 +37,7 @@ def search_policies(query: str, limit: int = DEFAULT_LIMIT) -> list[Passage] | E
     if problem:
         return ErrorResult(error=INVALID_INPUT, detail=problem)
     try:
-        passages = [p for doc in _policy_files(_policy_dir()) for p in _passages(doc)]
+        passages = [p for doc in _policy_files(policy_dir()) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}
@@ -53,10 +53,6 @@ def _check_input(query: Any, limit: Any) -> str | None:
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIMIT:
         return f"limit must be an integer from 1 to {MAX_LIMIT}"
     return None
-
-
-def _policy_dir() -> Path:
-    return load_settings().policy_dir or DEFAULT_POLICY_DIR
 
 
 def _policy_files(folder: Path) -> list[Path]:

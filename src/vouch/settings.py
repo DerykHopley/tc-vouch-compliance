@@ -37,6 +37,7 @@ ENV_NAMES = frozenset(
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
+DEFAULT_POLICY_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "policies"
 
 
 class SettingsError(RuntimeError):
@@ -70,8 +71,27 @@ class Settings:
     openrouter_api_key: SecretStr | None = None
     model: str | None = None
     fake_script: Path | None = None
-    policy_dir: Path | None = None
+    policy_dir: Path = DEFAULT_POLICY_DIR
     frontend: Path | None = None
+
+
+def _read(env: Mapping[str, str], name: str) -> str | None:
+    """`name`'s value; set but blank is unset, as `.envrc` leaves a key missing from the keyring."""
+    return (env.get(name) or "").strip() or None
+
+
+def _read_path(env: Mapping[str, str], name: str) -> Path | None:
+    value = _read(env, name)
+    return Path(value) if value else None
+
+
+def policy_dir(env: Mapping[str, str] | None = None) -> Path:
+    """The policy folder alone, without checking the other settings.
+
+    search_policies reads it on each call, as the graph's tool call carries no settings; #23
+    moves the folder into the compliance profile.
+    """
+    return _read_path(os.environ if env is None else env, POLICY_DIR_ENV) or DEFAULT_POLICY_DIR
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -79,11 +99,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = os.environ if env is None else env
 
     def read(name: str) -> str | None:
-        return env.get(name) or None  # set but empty is unset, as `.envrc` leaves a missing key
+        return _read(env, name)
 
     def read_path(name: str) -> Path | None:
-        value = read(name)
-        return Path(value) if value else None
+        return _read_path(env, name)
 
     auth_mode = read(AUTH_MODE_ENV) or "local"
     if auth_mode not in get_args(AuthMode):
@@ -94,9 +113,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         if missing:
             raise SettingsError(f"{AUTH_MODE_ENV}=clerk needs {', '.join(missing)}, not set")
         clerk = ClerkKeys(
-            secret_key=SecretStr(env[CLERK_SECRET_KEY_ENV]),
-            publishable_key=env[CLERK_PUBLISHABLE_KEY_ENV],
-            jwt_key=SecretStr(env[CLERK_JWT_KEY_ENV]),
+            secret_key=SecretStr(env[CLERK_SECRET_KEY_ENV].strip()),
+            publishable_key=env[CLERK_PUBLISHABLE_KEY_ENV].strip(),
+            jwt_key=SecretStr(env[CLERK_JWT_KEY_ENV].strip()),
         )
     api_key = read(OPENROUTER_API_KEY_ENV)
     return Settings(
@@ -105,7 +124,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         openrouter_api_key=SecretStr(api_key) if api_key else None,
         model=read(MODEL_ENV),
         fake_script=read_path(FAKE_SCRIPT_ENV),
-        policy_dir=read_path(POLICY_DIR_ENV),
+        policy_dir=policy_dir(env),
         frontend=read_path(FRONTEND_ENV),
     )
 

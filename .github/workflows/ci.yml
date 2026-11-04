@@ -77,10 +77,13 @@ jobs:
           echo "$out" | grep -F "no front-end build"
       - name: without the Clerk keys the container refuses to start, naming them
         run: |
-          if out=$(docker run --rm vouch:ci 2>&1); then
+          # timeout: a regression that starts the server must fail here, not hang the job
+          if out=$(timeout 60 docker run --rm vouch:ci 2>&1); then
             echo "The container started in clerk mode without the Clerk keys."; exit 1
           fi
-          echo "$out" | grep -F "CLERK_SECRET_KEY"
+          for key in CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY CLERK_JWT_KEY; do
+            echo "$out" | grep -F "$key"
+          done
       - run: uv sync --locked
       - run: uv run --locked --project frontend/e2e playwright install --with-deps ${{ matrix.browser }}
       - run: frontend/e2e/run.sh --browser ${{ matrix.browser }}
