@@ -11,8 +11,8 @@ export default function Invitation({ children }: { children: ReactNode }) {
           <span className="pill">By invitation</span>
           <h1>Access is by invitation</h1>
           <p>
-            Vouch is available to invited users only. If you have received an invitation, sign in with the e-mail
-            address it was sent to.
+            Vouch is available to invited users only. If you have received an invitation, sign in with the Discord
+            account that uses the e-mail address it was sent to.
           </p>
         </section>
         <section className="signin" aria-label="Sign in">{children}</section>

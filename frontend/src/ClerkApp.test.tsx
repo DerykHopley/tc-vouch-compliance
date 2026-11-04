@@ -49,7 +49,7 @@ describe('signed out', () => {
     expect(clerk.provider.publishableKey).toBe('pk_test_x')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Access is by invitation')
     expect(screen.getByText(/available to invited users only/i)).toBeTruthy()
-    expect(screen.getByText(/sign in with the e-mail address it was sent to/i)).toBeTruthy()
+    expect(screen.getByText(/sign in with the Discord account that uses the e-mail address it was sent to/i)).toBeTruthy()
     expect(screen.getByRole('form', { name: 'Clerk sign-in' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
   })
