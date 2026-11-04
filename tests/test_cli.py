@@ -140,20 +140,20 @@ def test_requirements_with_a_broken_base_framework_exits_2_naming_the_file(
     assert captured.out == ""
 
 
-def test_requirements_with_a_profile_mark_nordlichts_5_2_4_m4_not_applicable():
-    result = run_assess("--requirements", "5.2.4", "--profile", "nordlicht")
+def test_requirements_with_a_profile_mark_nordlichts_5_1_2_s3_not_applicable():
+    result = run_assess("--requirements", "5.1.2", "--profile", "nordlicht")
 
     assert result.returncode == 0, result.stderr
     out = result.stdout
     assert "Profile: Nordlicht Komponenten GmbH (nordlicht), normal protection\n" in out
     applicable, excluded = out.split("Not applicable:\n")
     listed = [line.split(" ", 1)[0] for line in applicable.splitlines() if "): " in line]
-    assert listed == ["M1", "M2", "M3", "M5", "S1", "S2", "S3"]  # no M4, no high or very high
+    assert listed == ["M1", "M2", "M3", "S1", "S2"]  # no S3, no high or very high
     assert excluded.startswith(
-        "M4 (must): When using external IT services, information on the monitoring options "
-        "is obtained and considered in the assessment.\n"
-        "  Reason: Nordlicht runs its IT systems on premises and uses no external IT services"
+        "S3 (should): Remote access connections to the organization’s network possess adequate "
+        "security features."
     )
+    assert "  Reason: Nordlicht allows no remote access to its company network" in excluded
     assert "CC BY-ND 4.0" in out
 
 
@@ -179,8 +179,8 @@ def test_a_profile_name_cannot_reach_outside_the_fixtures(capsys):
 @pytest.mark.parametrize(
     "args",
     [
-        ["--profile", "nordlicht", "--requirements", "5.2.4"],
-        ["--requirements=5.2.4", "--profile=nordlicht"],
+        ["--profile", "nordlicht", "--requirements", "5.1.2"],
+        ["--requirements=5.1.2", "--profile=nordlicht"],
     ],
     ids=["profile-first", "equals-forms"],
 )
@@ -189,8 +189,8 @@ def test_requirements_and_profile_work_in_any_order_and_with_equals(args, capsys
 
     assert cli.main(args) == 0
     out = capsys.readouterr().out
-    assert out.startswith("5.2.4 ")
-    assert "Not applicable:\nM4 (must)" in out
+    assert out.startswith("5.1.2 ")
+    assert "Not applicable:\nS3 (should)" in out
 
 
 def test_requirements_equals_form_lists_the_control(capsys):

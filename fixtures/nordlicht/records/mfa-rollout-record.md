@@ -20,10 +20,9 @@ Screenshot notes from the directory's password settings, 14 August 2026: minimum
 |---|---|---|---|
 | Email | Internet | Authenticator app | 2025-11-03 |
 | Supplier portal | Internet | Authenticator app | 2026-01-19 |
-| VPN | Internet | Authenticator app | 2025-11-03 |
 | ERP | Office network | None | n/a |
 
-All 171 employee accounts have an authenticator app registered.
+All 171 employee accounts have an authenticator app registered. Employees sign in to the outside services in the cloud services register with their company account, so the same password settings and second factor apply.
 
 ## Administrator accounts
 

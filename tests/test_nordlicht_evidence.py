@@ -169,3 +169,99 @@ def test_5_1_1_is_capped_by_the_stale_encryption_standard():
 
     assert {r["verdict"] for r in answers.values()} == {"partly-evidenced"}
     assert all("encryption-standard" in r["cites"] for r in answers.values())
+
+
+# The owner's review (#19, #111): outside services, no remote access, the missed review.
+
+CLOUD_REGISTER = "cloud-services-register"
+CLOUD_FIELDS = [
+    "Owner",
+    "Highest classification",
+    "Data location",
+    "Contract",
+    "Provider report or certificate",
+]
+
+
+def table_rows(body: str) -> list[dict[str, str]]:
+    """The first Markdown table in the body, one {header: cell} per data row."""
+    lines = [line.strip() for line in body.splitlines() if line.strip().startswith("|")]
+    header, _, *rows = ([cell.strip() for cell in line.strip("|").split("|")] for line in lines)
+    return [dict(zip(header, row, strict=True)) for row in rows]
+
+
+def sentences(doc_id: str) -> list[str]:
+    _, body = document(doc_id)
+    return [s for s in re.split(r"(?<=[.!?])\s+|\n", body) if s.strip()]
+
+
+def test_the_cloud_services_register_lists_each_service_with_every_field():
+    meta, body = document(CLOUD_REGISTER)
+    services = table_rows(body)
+
+    assert meta.kind == "implemented"
+    assert len(services) == 3
+    for service in services:
+        for field in ["Service", *CLOUD_FIELDS]:
+            assert service[field], f"{service['Service']} has no {field}"
+    names = " ".join(s["Service"] for s in services).lower()
+    assert "e-learning" in names
+    assert "mail filter" in names
+
+
+def test_the_training_record_is_an_export_from_the_e_learning_platform():
+    _, body = document("training-attendance-record")
+
+    assert "Export from our e-learning platform" in body
+
+
+def test_no_document_says_nordlicht_uses_no_outside_it_services():
+    assert mentioning(r"no (outside|external)( IT)? services") == []
+
+
+@pytest.mark.parametrize("doc_id", ["network-transfer-standard", "network-services-register"])
+def test_the_network_documents_allow_approved_outside_services_and_point_to_the_register(doc_id):
+    _, body = document(doc_id)
+
+    assert "cloud services register" in body
+
+
+def test_nothing_mentions_a_vpn_or_remote_access_except_to_say_there_is_none():
+    assert mentioning(r"\bvpn\b") == []
+    remote = [(p.stem, s) for p in DOCUMENTS for s in sentences(p.stem) if "remote" in s.lower()]
+    assert remote, "the network and transfer standard says there is no remote access"
+    for doc_id, sentence in remote:
+        assert "no remote access" in sentence.lower(), f"{doc_id}: {sentence}"
+
+
+def test_the_policy_states_the_two_yearly_cycle_for_its_supporting_standards():
+    meta, body = document("information-security-policy")
+    review = body.split("## Review", 1)[1]
+
+    assert meta.review_cycle == "yearly"
+    assert "supporting standards and procedures are reviewed at least every two years" in review
+
+
+def test_5_2_4_m4_is_partly_evidenced_by_the_cloud_services_register():
+    m4 = expected_answers()["5.2.4"]["M4"]
+
+    assert m4["verdict"] == "partly-evidenced"
+    assert m4["cites"] == [CLOUD_REGISTER]
+
+
+def test_1_1_1_s4_is_partly_evidenced_because_the_encryption_standard_missed_its_reviews():
+    s4 = expected_answers()["1.1.1"]["S4"]
+
+    assert s4["verdict"] == "partly-evidenced"
+    assert s4["cites"] == [
+        "information-security-policy",
+        "policy-publication-record",
+        "encryption-standard",
+    ]
+
+
+def test_the_three_supplier_accounts_stay_the_planted_gap():
+    s5 = expected_answers()["4.1.3"]["S5"]
+
+    assert s5["verdict"] == "partly-evidenced"
+    assert "three supplier accounts" in s5["why"]

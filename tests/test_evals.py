@@ -177,7 +177,7 @@ def backup_models(asked: list[str] | None = None):
 
 
 def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run():
-    not_applicable = EvalCase("5.2.4", (expected("M4", "evidenced"),))  # the profile excludes it
+    not_applicable = EvalCase("5.1.2", (expected("S3", "evidenced"),))  # the profile excludes it
     unknown_control = EvalCase("9.9.9", (expected("M1", "evidenced"),))
     asked: list[str] = []
 
@@ -185,8 +185,8 @@ def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run()
         [not_applicable, unknown_control, BACKUP], NORDLICHT, backup_models(asked), today=TODAY
     )
 
-    assert [b.control_id for b in report.bad_cases] == ["5.2.4", "9.9.9"]
-    assert "M4" in report.bad_cases[0].problem
+    assert [b.control_id for b in report.bad_cases] == ["5.1.2", "9.9.9"]
+    assert "S3" in report.bad_cases[0].problem
     assert "not applicable" in report.bad_cases[0].problem
     assert "9.9.9" in report.bad_cases[1].problem
     assert asked == ["5.2.9"]

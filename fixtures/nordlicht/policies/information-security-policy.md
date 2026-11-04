@@ -40,4 +40,4 @@ When this policy or a supporting standard changes in a way that affects people, 
 
 ## Review
 
-The information security officer reviews this policy every year and after any serious security incident, and proposes changes to management.
+The information security officer reviews this policy every year and after any serious security incident, and proposes changes to management. The supporting standards and procedures are reviewed at least every two years by their owners, and also after any serious security incident or major change.
