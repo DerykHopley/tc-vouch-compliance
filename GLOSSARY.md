@@ -88,6 +88,10 @@ _Avoid_: Source, reference, link
 The agent's proposed judgement of a requirement's or control's evidence: evidenced, partly evidenced or not evidenced.
 _Avoid_: Status, result, score, found / partial / gap
 
+**Guard step**:
+A step in an assessment saying a guard, in code outside the model, refused or removed something: a refused tool call, a flagged passage, a dropped quote, or a secret or personal data removed.
+_Avoid_: Alert, block, filter step (a warning is something else: a source that could not be read)
+
 **Reviewed verdict**:
 A verdict the compliance lead has accepted or rejected, with an optional note; only accepted ones count towards readiness.
 _Avoid_: Approval, sign-off, final verdict
