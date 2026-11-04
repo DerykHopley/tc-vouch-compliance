@@ -8,11 +8,14 @@ protection_level: normal  # normal, high or very high
 base_framework: VDA ISA 2027.1
 overlays: []
 not_applicable:
-  - control: 5.2.4
-    requirement: M4
+  - control: 5.1.2
+    requirement: S3
     reason: >-
-      Nordlicht runs its IT systems on premises and uses no external IT services,
-      so there are no external monitoring options to assess.
+      Nordlicht allows no remote access to its company network: the firewall blocks
+      every connection from the internet into it, staff and suppliers work on site,
+      and suppliers do their maintenance on site. The services reachable from the
+      internet (email, the supplier portal and the customer exchange platform) sit in
+      a separate network zone with no way through to the company network.
 evidence_sources:
   policies:
     folder: policies

@@ -12,13 +12,12 @@ language: en
 
 ## Services
 
-All four services run on our own servers in the company server room.
+All three services run on our own servers in the company server room. Outside services we have approved, such as the mail filter that incoming and outgoing mail passes through, are listed in the cloud services register.
 
 | Service | Used for | Highest classification allowed | Protection in transit | Checked |
 |---|---|---|---|---|
 | Company email | Day-to-day mail | Internal; confidential only with end-to-end encryption | TLS 1.2 or newer enforced; end-to-end encryption for marked mail | 2026-09-08 |
 | Customer exchange platform | Drawings and prototype data | Strictly confidential | TLS 1.3; files encrypted at rest; downloads logged | 2026-09-08 |
-| VPN | Remote access | Strictly confidential | IPsec with second factor | 2026-09-08 |
 | Supplier portal | Orders and delivery notes | Internal | TLS 1.2 or newer | 2026-09-08 |
 
 ## Check

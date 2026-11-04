@@ -135,16 +135,16 @@ def test_an_overlay_on_another_control_takes_no_branch():
     assert step_texts(result, "apply_overlays") == [NO_BRANCH]
 
 
-def test_nordlichts_5_2_4_m4_is_listed_not_applicable_with_its_reason_and_not_judged():
-    every = ("M1", "M2", "M3", "M4", "M5", "S1", "S2", "S3")
-    model = judging({r: "evidenced" for r in every})  # the model's M4 verdict is ignored
+def test_nordlichts_5_1_2_s3_is_listed_not_applicable_with_its_reason_and_not_judged():
+    every = ("M1", "M2", "M3", "S1", "S2", "S3")
+    model = judging({r: "evidenced" for r in every})  # the model's S3 verdict is ignored
 
-    result = assess("5.2.4", NORDLICHT, model)
+    result = assess("5.1.2", NORDLICHT, model)
 
-    m4 = next(r for r in result.requirements if r.id == "M4")
-    assert m4.verdict == "not-applicable"
-    assert m4.reason.startswith("Nordlicht runs its IT systems on premises")
-    assert m4.citations == ()
-    assert "M4" not in text_of(model.judged[0])
-    assert step_texts(result, "judge") == ["Judged 7 of 7 requirements evidenced."]
+    s3 = next(r for r in result.requirements if r.id == "S3")
+    assert s3.verdict == "not-applicable"
+    assert s3.reason.startswith("Nordlicht allows no remote access to its company network")
+    assert s3.citations == ()
+    assert "S3" not in text_of(model.judged[0])
+    assert step_texts(result, "judge") == ["Judged 5 of 5 requirements evidenced."]
     assert result.verdict == "evidenced"

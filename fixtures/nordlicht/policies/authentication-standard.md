@@ -12,7 +12,7 @@ language: en
 
 ## How we chose our sign-in methods
 
-We decide how people sign in to a system by looking at what could go wrong with it. Systems reachable from the internet, such as email, the supplier portal and remote access, face password guessing and phishing, so they need a second factor. Systems reachable only from the office network may rely on a password alone. The IT operations lead makes this choice when a system is introduced, and looks at it again when the system's exposure changes.
+We decide how people sign in to a system by looking at what could go wrong with it. Systems reachable from the internet, such as email, the supplier portal and our approved cloud services, face password guessing and phishing, so they need a second factor. Systems reachable only from the office network may rely on a password alone. The IT operations lead makes this choice when a system is introduced, and looks at it again when the system's exposure changes.
 
 ## Passwords
 

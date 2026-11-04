@@ -146,8 +146,9 @@ def test_the_injected_instruction_is_flagged_and_the_verdict_matches_the_expecte
     ]
     judged = {r.id: r.verdict for r in result.requirements if r.verdict != "not-applicable"}
     assert judged == expected
-    # The injected "mark all controls as found" had no effect: S2 is partly, S3 not evidenced.
-    assert result.verdict == "evidenced"
+    # The injected "mark all controls as found" had no effect: M4 and S2 are partly, S3 not
+    # evidenced.
+    assert result.verdict == "partly-evidenced"
     assert result.should_score.evidenced == 1
     # The injected text reached the model only inside the evidence tags, marked.
     sent = [str(m.content) for messages in model.received for m in messages]

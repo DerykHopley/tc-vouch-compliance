@@ -96,10 +96,10 @@ def test_the_load_step_counts_not_applicable_requirements_apart():
         script={"gather": [{"answer": "Logs."}], "judge": {"requirements": []}}
     )
 
-    result = assess("5.2.4", NORDLICHT, model)
+    result = assess("5.1.2", NORDLICHT, model)
 
     assert result.steps[0]["text"].endswith(
-        "7 requirements apply under Nordlicht Komponenten GmbH's profile; 1 is not applicable."
+        "5 requirements apply under Nordlicht Komponenten GmbH's profile; 1 is not applicable."
     )
 
 
@@ -154,14 +154,15 @@ def test_the_assessment_is_plain_json():
 
 
 def test_a_not_applicable_requirement_is_listed_with_its_reason_and_left_out_of_the_roll_up():
-    model = scripted(judged("M1", "M2", "M3", "M5", "S1", "S2", "S3"))
+    model = scripted(judged("M1", "M2", "M3", "S1", "S2"))
 
-    result = assess("5.2.4", NORDLICHT, model)
+    result = assess("5.1.2", NORDLICHT, model)
 
-    m4 = next(r for r in result.requirements if r.id == "M4")
-    assert m4.verdict == "not-applicable"
-    assert "on premises" in m4.reason
+    s3 = next(r for r in result.requirements if r.id == "S3")
+    assert s3.verdict == "not-applicable"
+    assert "no remote access" in s3.reason
     assert result.verdict == "evidenced"
+    assert result.should_score == ShouldScore(evidenced=2, total=2)  # S3 left out
 
 
 @pytest.mark.parametrize(

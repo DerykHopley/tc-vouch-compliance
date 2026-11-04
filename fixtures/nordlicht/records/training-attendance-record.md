@@ -12,7 +12,7 @@ language: en
 
 ## Basic course
 
-Export from our training server, 30 September 2026. The 2026 basic course ran from 12 January to 31 March. Completed by 166 of 171 employees (97 percent). The five who have not completed it are on long-term leave; HR has scheduled them for their first week back.
+Export of training completions from our e-learning platform, 30 September 2026. The 2026 basic course ran from 12 January to 31 March. Completed by 166 of 171 employees (97 percent). The five who have not completed it are on long-term leave; HR has scheduled them for their first week back.
 
 ## Target-group sessions
 

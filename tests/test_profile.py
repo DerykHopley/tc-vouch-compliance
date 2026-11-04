@@ -76,15 +76,25 @@ def test_at_very_high_protection_high_and_very_high_requirements_apply(tmp_path)
     assert ids(applicable)[-6:] == ["H1", "H2", "H3", "H4", "H5", "V1"]
 
 
-def test_5_2_4_m4_is_not_applicable_for_nordlicht_with_its_reason():
+def test_5_1_2_s3_is_not_applicable_for_nordlicht_with_its_reason():
+    profile = load_profile(NORDLICHT_PROFILE)
+
+    requirements = profile.requirements_for(load_isa_control("5.1.2"))
+
+    assert ids(requirements.applicable) == ["M1", "M2", "M3", "S1", "S2"]
+    [excluded] = requirements.not_applicable
+    assert excluded.requirement.id == "S3"
+    assert "no remote access to its company network" in excluded.reason
+
+
+def test_5_2_4_m4_applies_to_nordlicht_now_it_uses_outside_services():
     profile = load_profile(NORDLICHT_PROFILE)
 
     requirements = profile.requirements_for(load_isa_control("5.2.4"))
 
-    assert ids(requirements.applicable) == ["M1", "M2", "M3", "M5", "S1", "S2", "S3"]
-    [excluded] = requirements.not_applicable
-    assert excluded.requirement.id == "M4"
-    assert "no external IT services" in excluded.reason
+    assert ids(requirements.applicable) == ["M1", "M2", "M3", "M4", "M5", "S1", "S2", "S3"]
+    assert requirements.not_applicable == ()
+    assert [(e.control, e.requirement) for e in profile.not_applicable] == [("5.1.2", "S3")]
 
 
 def test_a_not_applicable_control_leaves_none_of_its_requirements_applicable(tmp_path):

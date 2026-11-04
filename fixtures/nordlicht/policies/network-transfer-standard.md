@@ -12,7 +12,7 @@ language: en
 
 ## Services we use to move information
 
-IT keeps a register of the network services we use to send information in and out of the company, such as email, the customer exchange platform and remote access. All of them run on our own servers in the company server room; we use no outside IT services. A new service is added to the register before it is used.
+IT keeps a register of the network services we use to send information in and out of the company, such as email, the supplier portal and the customer exchange platform. These run on our own servers in the company server room. We may also use services run by outside providers, once IT and the information security officer have approved them; the approved ones are listed in the cloud services register, each with its owner, the highest classification it may hold, where the data is kept and the contract. A new service is added to its register before it is used.
 
 ## Rules by classification
 
@@ -22,6 +22,6 @@ Public information may be sent by any company service. Internal information may 
 
 All our services encrypt data in transit. The customer exchange platform encrypts files both in transit and at rest, and logs every download.
 
-## Remote access
+## No remote access
 
-Remote access to the company network is only possible through the company VPN, which requires the second factor described in the authentication standard. VPN access is granted on request by a manager and ends automatically when the account is disabled.
+There is no remote access to the company network. The firewall blocks every connection from the internet into it. Email, the supplier portal and the customer exchange platform can be reached from outside, but they sit in a separate network zone with no way through to the company network. Employees and suppliers work on site, and suppliers carry out maintenance on site, accompanied by IT.

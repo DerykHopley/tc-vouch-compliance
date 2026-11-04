@@ -332,10 +332,10 @@ def test_an_override_on_a_not_applicable_requirement_is_refused():
     script = mixed_4_1_2()
     script["judge"]["requirements"] = [
         {"requirement_id": r, "verdict": "evidenced", "reason": "Shown."}
-        for r in ("M1", "M2", "M3", "M5", "S1", "S2", "S3")
+        for r in ("M1", "M2", "M3", "S1", "S2")
     ]
-    result, _, saver = proposed("5.2.4", script)
-    assert any(r.id == "M4" and r.verdict == "not-applicable" for r in result.requirements)
+    result, _, saver = proposed("5.1.2", script)
+    assert any(r.id == "S3" and r.verdict == "not-applicable" for r in result.requirements)
 
     with pytest.raises(InvalidReviewError):
         resume(
@@ -343,7 +343,7 @@ def test_an_override_on_a_not_applicable_requirement_is_refused():
             ReviewDecision(
                 decision="accept",
                 overrides=[
-                    {"requirement_id": "M4", "verdict": "evidenced", "reason": "We do run it."}
+                    {"requirement_id": "S3", "verdict": "evidenced", "reason": "We do run it."}
                 ],
             ),
             saver,

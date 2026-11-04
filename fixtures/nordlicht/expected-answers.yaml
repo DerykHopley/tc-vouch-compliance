@@ -1,7 +1,7 @@
 # Expected answers for Nordlicht Komponenten GmbH: DRAFT, for the owner's review (#19).
 #
 # Per applicable requirement of the 12 ISA questions (normal protection: must and should;
-# 5.2.4 M4 is not applicable in Nordlicht's profile, so it is left out): the verdict a good
+# 5.1.2 S3 is not applicable in Nordlicht's profile, so it is left out): the verdict a good
 # assessment gives, and the evidence documents a good answer cites (ids from policies/ and
 # records/, or patch-vulnerability-status, the recorded Patch response added in #24).
 # `why` is our own one-line reasoning, never ISA text.
@@ -47,9 +47,9 @@ controls:
         cites: [information-security-policy]
         why: The policy names nine supporting standards and procedures, each with an owner.
       - id: S4
-        verdict: evidenced
-        cites: [information-security-policy, policy-publication-record]
-        why: Yearly review is required, and the July 2026 review is recorded.
+        verdict: partly-evidenced
+        cites: [information-security-policy, policy-publication-record, encryption-standard]
+        why: A review process exists and the policy's July 2026 review is recorded, but the encryption standard it names has missed three yearly reviews since March 2022.
 
   - id: "1.6.1"
     requirements:
@@ -306,10 +306,6 @@ controls:
         verdict: evidenced
         cites: [network-transfer-standard, network-services-register]
         why: Confidential data goes only by the platform or end-to-end encrypted email.
-      - id: S3
-        verdict: evidenced
-        cites: [network-transfer-standard, mfa-rollout-record]
-        why: VPN only, with a second factor, granted by a manager and ended with the account.
 
   - id: "5.2.4"
     requirements:
@@ -325,6 +321,10 @@ controls:
         verdict: evidenced
         cites: [logging-standard, log-review-record]
         why: Each system's need for logging is decided and recorded in the March scope list.
+      - id: M4
+        verdict: partly-evidenced
+        cites: [cloud-services-register]
+        why: The services were approved on each provider's report or certificate, but the monitoring the providers offer was not looked at when they were approved, and nobody has been given the job of watching it.
       - id: M5
         verdict: evidenced
         cites: [logging-standard, log-review-record]
