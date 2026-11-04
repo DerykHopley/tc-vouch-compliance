@@ -440,17 +440,30 @@ def test_the_setup_command_reports_a_real_refusal_at_once(change, reason, capsys
 
 
 @needs_postgres
-def test_a_setting_is_kept_and_read_back_with_or_without_the_setup(empty_database):
-    """Vouch's own settings table (#34, the model choice): made by the setup command, or on the
-    first write when a deploy hasn't run it since."""
-    assert empty_database.setting("model") is None  # no table yet: nothing stored
+def test_a_setting_is_kept_and_read_back_once_the_setup_has_run(empty_database):
+    """Vouch's own settings table (#34, the model choice), made by the setup command alone."""
+    empty_database.setup()
+    assert empty_database.setting("model") is None
 
     empty_database.set_setting("model", "anthropic/claude-haiku-5.5")
     empty_database.set_setting("model", "openai/gpt-5.5")  # replaced, not added
-    empty_database.setup()
 
     assert empty_database.setting("model") == "openai/gpt-5.5"
     assert database.SETTINGS_TABLE in tables(empty_database)
+
+
+@needs_postgres
+def test_without_the_setup_a_setting_reads_as_unset_and_a_write_is_unavailable(
+    empty_database, caplog
+):
+    """Only vouch-db-setup creates the table: a write before it is a 503 whose log names it."""
+    assert empty_database.setting("model") is None
+
+    with pytest.raises(DatabaseUnavailable):
+        empty_database.set_setting("model", "openai/gpt-5.5")
+
+    assert "vouch-db-setup" in caplog.text
+    assert database.SETTINGS_TABLE not in tables(empty_database)
 
 
 def test_a_setting_with_the_database_down_is_unavailable(make_db):
@@ -468,6 +481,7 @@ def test_a_developers_model_choice_outlasts_a_restart_in_the_database(empty_data
     from test_model_choice import OTHER_MODEL, FakeCatalogue, FakeChat, fake_openrouter
 
     url = empty_database.url
+    empty_database.setup()
 
     def app_on_the_database():
         app = create_app(Settings(openrouter_api_key=SecretStr("sk-or-test"), database_url=url))

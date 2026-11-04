@@ -28,8 +28,8 @@ This assesses control `NK-ENC-01` on the scripted fake model, offline and free, 
 Assessment as JSON. The controls and policies it reads are the demo company's, in
 `fixtures/nordlicht/`.
 
-To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTER_API_KEY` and
-`ASSESS_MODEL`. That is a paid call: load the key from the system keyring, never from a file in
+To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTER_API_KEY`
+(`ASSESS_MODEL` names the model; `anthropic/claude-haiku-5.5` without it). That is a paid call: load the key from the system keyring, never from a file in
 the repo.
 
 ### The API
@@ -47,7 +47,9 @@ the stream closes (or one `error`). The model (`vouch.model_choice`): the script
 call; on Cloud Run only a signed-in user reaches it); else the bundled demo script. OpenRouter
 runs the model a developer chose on the developer page (`/developer`, `GET /api/developer/settings`
 and `PUT /api/developer/model`, developers only), else `ASSESS_MODEL`, else
-`anthropic/claude-haiku-5.5`. The choice is kept in the database, or in memory without one.
+`anthropic/claude-haiku-5.5`. The choice is kept in the database (its table made by
+`vouch-db-setup`), or in memory without one. One assessment makes at most 8 model calls, each
+retried at most once.
 `scripts/dev.sh` drops the key, so it always runs the fake.
 
 ### Sign-in (clerk mode)

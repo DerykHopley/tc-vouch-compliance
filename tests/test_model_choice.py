@@ -24,6 +24,7 @@ from vouch.api import create_app
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
 from vouch.model_choice import (
+    CALL_BUDGET,
     DEFAULT_MODEL,
     MAX_RETRIES,
     USAGE_URL,
@@ -62,6 +63,7 @@ class FakeChat:
     def __init__(self) -> None:
         self.requests: list[httpx2.Request] = []
         self.fail: Any = None  # a function of the attempt number: a Response, or it raises
+        self.text_only = False  # a model that answers in words and never calls a tool
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
@@ -70,7 +72,9 @@ class FakeChat:
             if failed is not None:
                 return failed
         body = json.loads(request.content)
-        if "response_format" in body:
+        if self.text_only:
+            message = {"role": "assistant", "content": "Let me think about that some more."}
+        elif "response_format" in body:
             judged = {"covered_points": ["ENC-1", "ENC-2", "ENC-3"]}
             message = {"role": "assistant", "content": json.dumps(judged)}
         else:
@@ -95,6 +99,7 @@ class FakeCatalogue:
         self.ids = ids
         self.calls: list[httpx.Request] = []
         self.fail = False
+        self.next_link = "/api/v1/models?offset={offset}&limit=2"  # as OpenRouter's docs show
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request)
@@ -103,7 +108,7 @@ class FakeCatalogue:
         offset = int(request.url.params.get("offset", 0))
         page = self.ids[offset : offset + 2]  # two a page, so paging is exercised
         more = offset + 2 < len(self.ids)
-        next_page = f"/api/v1/models?offset={offset + 2}&limit=2" if more else None
+        next_page = self.next_link.format(offset=offset + 2) if more else None
         return httpx.Response(
             200, json={"data": [{"id": i} for i in page], "links": {"next": next_page}}
         )
@@ -206,6 +211,7 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
     assert response.json() == {
         "model": DEFAULT_MODEL,
         "runs_on": "openrouter",
+        "fake_reason": None,
         "prompt_version": PROMPT_VERSION,
         "usage_url": USAGE_URL,
         "kept_in": "memory",
@@ -233,6 +239,87 @@ def test_the_id_is_checked_against_every_page_of_openrouters_models(client, cata
     assert response.status_code == 200
     assert len(catalogue.calls) == 2
     assert all(c.headers["authorization"] == f"Bearer {KEY}" for c in catalogue.calls)
+
+
+def test_a_relative_next_link_is_read_against_the_api_base(client, catalogue):
+    catalogue.next_link = "models?offset={offset}&limit=2"  # relative to /api/v1/
+
+    response = client.put("/api/developer/model", json={"model": "google/gemini-3-flash"})
+
+    assert response.status_code == 200
+    assert [str(c.url) for c in catalogue.calls] == [
+        "https://openrouter.ai/api/v1/models",
+        "https://openrouter.ai/api/v1/models?offset=2&limit=2",
+    ]
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "https://evil.example/api/v1/models?offset={offset}",
+        "//evil.example/models?offset={offset}",
+        "http://openrouter.ai/api/v1/models?offset={offset}",  # not https: another origin
+        "https://openrouter.ai:8443/api/v1/models?offset={offset}",
+    ],
+)
+def test_a_next_link_to_another_origin_is_not_followed(client, catalogue, link):
+    catalogue.next_link = link
+
+    response = client.put("/api/developer/model", json={"model": "google/gemini-3-flash"})
+
+    assert response.status_code == 503  # the list couldn't be read to its end
+    assert [c.url.host for c in catalogue.calls] == ["openrouter.ai"]
+
+
+def test_the_model_list_is_kept_for_ten_minutes(chat, catalogue):
+    now = [1000.0]
+    app = app_with_key(chat, catalogue)
+    app.state.models.openrouter.clock = lambda: now[0]
+    client = TestClient(app)
+
+    client.put("/api/developer/model", json={"model": OTHER_MODEL})
+    client.put("/api/developer/model", json={"model": DEFAULT_MODEL})
+    first = len(catalogue.calls)
+    now[0] += model_choice.CATALOGUE_TTL_SECONDS
+    client.put("/api/developer/model", json={"model": OTHER_MODEL})
+
+    assert first == 2  # one reading of both pages served both checks
+    assert len(catalogue.calls) == 4
+    assert model_choice.CATALOGUE_TTL_SECONDS == 600
+
+
+def test_with_a_fake_script_the_id_is_kept_without_asking_openrouter(chat, catalogue):
+    settings = Settings(openrouter_api_key=SecretStr(KEY), fake_script=model_choice.DEMO_SCRIPT)
+    client = TestClient(app_with_key(chat, catalogue, settings))
+
+    changed = client.put("/api/developer/model", json={"model": OTHER_MODEL})
+    shown = client.get("/api/developer/settings").json()
+
+    assert changed.status_code == 200
+    assert catalogue.calls == []
+    assert (shown["model"], shown["runs_on"], shown["fake_reason"]) == (
+        OTHER_MODEL,
+        "fake",
+        "fake_script",
+    )
+
+
+def test_the_key_is_only_ever_sent_to_openrouter():
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": [{"id": OTHER_MODEL}], "links": {"next": None}})
+
+    router = OpenRouter(
+        SecretStr(KEY),
+        base_url="https://elsewhere.example/api/v1/",
+        catalogue_client=httpx.Client(transport=httpx.MockTransport(answer)),
+    )
+
+    assert router.knows(OTHER_MODEL)
+    assert [r.url.host for r in seen] == ["elsewhere.example"]
+    assert "authorization" not in seen[0].headers
 
 
 def test_an_unknown_model_id_is_refused_with_a_message_and_the_model_stays(client):
@@ -274,7 +361,7 @@ def test_without_a_key_the_page_says_the_fake_model_runs_and_a_change_is_refused
     shown = client.get("/api/developer/settings").json()
     refused = client.put("/api/developer/model", json={"model": OTHER_MODEL})
 
-    assert shown["runs_on"] == "fake"
+    assert (shown["runs_on"], shown["fake_reason"]) == ("fake", "no_key")
     assert shown["model"] == DEFAULT_MODEL
     assert refused.status_code == 409
     assert refused.json()["detail"] == (
@@ -286,9 +373,7 @@ def test_without_a_key_the_page_says_the_fake_model_runs_and_a_change_is_refused
 # --- The model is kept in the database when there is one ----------------------------------------
 
 
-def test_with_the_database_down_an_assessment_runs_on_the_default_and_the_page_answers_503(
-    chat, catalogue
-):
+def test_with_the_database_down_an_assessment_is_a_503_before_any_paid_call(chat, catalogue):
     settings = Settings(openrouter_api_key=SecretStr(KEY), database_url=SecretStr(UNREACHABLE_DB))
     app = app_with_key(chat, catalogue, settings)
     app.state.database = Database(settings.database_url, timeout=0.3)
@@ -300,8 +385,12 @@ def test_with_the_database_down_an_assessment_runs_on_the_default_and_the_page_a
     change = client.put("/api/developer/model", json={"model": OTHER_MODEL})
     app.state.database.close()
 
-    assert events(response)[-1] == "result"
-    assert set(chat.models) == {DEFAULT_MODEL}
+    assert response.status_code == 503
+    assert not response.headers["content-type"].startswith("text/event-stream")
+    assert response.json()["detail"] == (
+        "The database is unavailable just now. Please try again shortly."
+    )
+    assert chat.requests == []  # no other model runs in its place
     assert page.status_code == 503
     assert change.status_code == 503
 
@@ -342,8 +431,8 @@ def test_an_openrouter_error_is_retried_with_backoff_then_one_error_event(
     assert events(response) == ["error"]
     assert "could not be completed" in response.text
     assert len(chat.requests) == 1 + MAX_RETRIES
-    assert len(quick_backoff) == MAX_RETRIES
-    assert quick_backoff[0] < quick_backoff[1]  # exponential: 0.5 s, then 1 s (less jitter)
+    assert len(quick_backoff) == MAX_RETRIES == 1
+    assert 0.375 <= quick_backoff[0] <= 0.5  # the SDK's first backoff: 0.5 s less up to 25%
     assert KEY not in response.text + caplog.text
 
 
@@ -369,11 +458,30 @@ def test_an_openrouter_error_that_clears_on_retry_gives_the_result(client, chat,
     assert len(quick_backoff) == 1
 
 
+def test_a_model_that_never_calls_a_tool_stops_at_the_call_budget_with_one_error_event(
+    client, chat, caplog
+):
+    chat.text_only = True
+
+    response = assess(client)
+
+    names = events(response)
+    assert names[-1] == "error" and names.count("error") == 1
+    assert "result" not in names
+    assert len(chat.requests) == CALL_BUDGET == 8
+    assert "call budget" in caplog.text
+
+
+def test_each_assessment_has_its_own_call_budget(client):
+    for _ in range(CALL_BUDGET):  # more calls in all than one budget holds
+        assert events(assess(client))[-1] == "result"
+
+
 def test_a_request_to_openrouter_has_a_timeout():
     model = OpenRouter(SecretStr(KEY)).chat_model(DEFAULT_MODEL)
 
-    assert model.request_timeout == model_choice.TIMEOUT_SECONDS
-    assert model.max_retries == MAX_RETRIES
+    assert model.request_timeout == model_choice.TIMEOUT_SECONDS == 120
+    assert model.max_retries == MAX_RETRIES == 1
     assert KEY not in repr(model)
 
 
@@ -424,3 +532,22 @@ def test_the_model_choice_never_shows_the_key():
     choice = ModelChoice(Settings(openrouter_api_key=SecretStr(KEY)), MemoryModelStore())
 
     assert KEY not in repr(choice) + repr(choice.openrouter)
+
+
+# --- The CLI asks the same ModelChoice ----------------------------------------------------------
+
+
+def test_the_cli_runs_openrouter_on_the_default_model_without_assess_model():
+    from vouch.cli import build_model
+
+    model = build_model(Settings(openrouter_api_key=SecretStr(KEY)))
+
+    assert model.model_name == DEFAULT_MODEL
+    assert model.max_retries == MAX_RETRIES
+
+
+def test_a_new_openrouter_opens_no_catalogue_client_until_asked():
+    router = OpenRouter(SecretStr(KEY))
+
+    assert router._catalogue is None
+    router.close()  # nothing to close

@@ -11,16 +11,16 @@ from importlib.metadata import version
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.database import Connection, Database, DatabaseUnavailable
-from vouch.graph import PROMPT_VERSION, Assessment, assess_steps
+from vouch.graph import Assessment, assess_steps
 from vouch.model_choice import (
     MODEL_ID,
-    USAGE_URL,
     CatalogueUnavailable,
     ModelChoice,
     NoKey,
@@ -49,6 +49,7 @@ NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
 )
+UNKNOWN_MODEL = "OpenRouter has no model “{model}”. Check the id on openrouter.ai/models."
 CATALOGUE_UNAVAILABLE = (
     "OpenRouter cannot be reached to check the model just now. Please try again shortly."
 )
@@ -104,15 +105,17 @@ AppDatabase = Annotated[Database | None, Depends(app_database)]
 
 
 def database_connection(db: AppDatabase) -> Iterator[Connection]:
-    """A connection for a route that needs the database. A 503 when there's none to be had, or
-    when it drops while the route uses it."""
-    try:
-        if db is None:
-            raise DatabaseUnavailable("no database URL is set")
-        with db.connection() as conn:
-            yield conn
-    except DatabaseUnavailable:
-        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
+    """A connection for a route that needs the database. A 503 (database_unavailable) when
+    there's none to be had, or when it drops while the route uses it."""
+    if db is None:
+        raise DatabaseUnavailable("no database URL is set")
+    with db.connection() as conn:
+        yield conn
+
+
+def database_unavailable(request: Request, error: Exception) -> JSONResponse:
+    """Any route: the database can't be used just now is a 503, its reason only in the log."""
+    return JSONResponse(status_code=503, content={"detail": DATABASE_UNAVAILABLE})
 
 
 def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
@@ -163,17 +166,26 @@ def app_models(request: Request) -> ModelChoice:
 AppModels = Annotated[ModelChoice, Depends(app_models)]
 
 
+def chosen_model(models: AppModels) -> str | None:
+    """The model id the assessment runs on (None: the fake), read before the stream starts: a
+    stored choice that can't be read is a plain 503, and no other paid model runs instead."""
+    return models.chosen()
+
+
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)], models: AppModels
+    control: Annotated[Control, Depends(requested_control)],
+    models: AppModels,
+    chosen: Annotated[str | None, Depends(chosen_model)],
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
     The model is vouch.model_choice's: OpenRouter when a key is set (in clerk mode only a
-    signed-in user gets here), else the scripted fake. A failure after retries is the `error`.
+    signed-in user gets here), else the scripted fake. A failure after retries, or a run past
+    its call budget, is the `error`.
     """
     try:
-        for item in assess_steps(control, models.for_assessment()):
+        for item in assess_steps(control, models.for_assessment(chosen)):
             if isinstance(item, Assessment):
                 yield ServerSentEvent(event="result", data={"assessment": _api_assessment(item)})
             else:
@@ -196,24 +208,10 @@ class ModelRequest(BaseModel):
     model: Annotated[str, StringConstraints(strip_whitespace=True, pattern=f"^{MODEL_ID.pattern}$")]
 
 
-def _developer_settings(models: ModelChoice, model: str | None = None) -> dict[str, Any]:
-    try:
-        shown = model or models.current()
-    except DatabaseUnavailable:
-        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
-    return {
-        "model": shown,
-        "runs_on": models.runs_on,
-        "prompt_version": PROMPT_VERSION,
-        "usage_url": USAGE_URL,
-        "kept_in": models.store.kept_in,
-    }
-
-
 @router.get("/developer/settings", dependencies=DEVELOPERS)
 def developer_settings(models: AppModels) -> dict[str, Any]:
-    """The model, where assessments run (`fake` without a key), the prompt version, usage."""
-    return _developer_settings(models)
+    """The model, where assessments run (and why on the fake), the prompt version, usage."""
+    return models.settings()
 
 
 @router.put("/developer/model", dependencies=DEVELOPERS)
@@ -224,13 +222,11 @@ def change_model(request: ModelRequest, models: AppModels) -> dict[str, Any]:
     except NoKey:
         raise HTTPException(status_code=409, detail=NO_KEY) from None
     except UnknownModel:
-        detail = f"OpenRouter has no model “{request.model}”. Check the id on openrouter.ai/models."
+        detail = UNKNOWN_MODEL.format(model=request.model)
         raise HTTPException(status_code=422, detail=detail) from None
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
-    except DatabaseUnavailable:
-        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
-    return _developer_settings(models, model)
+    return models.settings(model)
 
 
 @router.get("/{path:path}", include_in_schema=False)
@@ -275,6 +271,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
+    app.add_exception_handler(DatabaseUnavailable, database_unavailable)
     app.state.settings = settings
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None

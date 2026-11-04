@@ -163,6 +163,8 @@ cloud-sql-proxy $SQL_INSTANCE --port 5432          # terminal 1: leave it runnin
 uv run vouch-db-setup                              # terminal 2: .envrc gives VOUCH_DATABASE_URL
 ```
 
+It also creates Vouch's settings table, where the developer page keeps the model (#34): until
+it has run, changing the model answers 503 and the log says to run `vouch-db-setup`.
 It prints `vouch-db-setup: LangGraph's tables are ready (checkpointer and store)`, or why it
 couldn't connect, without the password.
 

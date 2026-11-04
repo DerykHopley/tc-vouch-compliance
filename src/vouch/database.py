@@ -14,8 +14,8 @@ libpq, whose error messages can echo it.
 
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
-It also creates Vouch's own settings table (the developer's model choice, #34), which the first
-write creates too, so a deploy that hasn't rerun the setup still works.
+It also creates Vouch's own settings table (the developer's model choice, #34); nothing else
+does. Before it has run, a setting reads as unset and a write is DatabaseUnavailable (a 503).
 """
 
 import logging
@@ -157,19 +157,24 @@ class Database:
                 row = conn.execute(
                     f"SELECT value FROM {SETTINGS_TABLE} WHERE name = %s", (name,)
                 ).fetchone()
-            except psycopg.errors.UndefinedTable:  # the setup hasn't run, nor any write
+            except psycopg.errors.UndefinedTable:  # vouch-db-setup hasn't run: nothing stored
                 return None
         return row["value"] if row else None
 
     def set_setting(self, name: str, value: str) -> None:
         """Store `value` as setting `name`, replacing any before. Raises DatabaseUnavailable."""
         with self.connection() as conn:
-            conn.execute(CREATE_SETTINGS)
-            conn.execute(
-                f"INSERT INTO {SETTINGS_TABLE} (name, value) VALUES (%s, %s) "
-                "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
-                (name, value),
-            )
+            try:
+                conn.execute(
+                    f"INSERT INTO {SETTINGS_TABLE} (name, value) VALUES (%s, %s) "
+                    "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
+                    (name, value),
+                )
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", SETTINGS_TABLE)
+                raise DatabaseUnavailable(
+                    f"no {SETTINGS_TABLE} table: run vouch-db-setup"
+                ) from None
 
     @contextmanager
     def checkpointer(self) -> Iterator[PostgresSaver]:
