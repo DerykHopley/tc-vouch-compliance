@@ -40,7 +40,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - name: design lint, every colour a token
-        run: python3 -I -B scripts/design-lint.py frontend/src
+        run: python3 -I -B scripts/design-lint.py frontend/src && python3 -I -B scripts/token-roles.py frontend/src
         working-directory: .
       # The dev command's real-server test needs the front-end deps installed above (the fast
       # lane, without them, skips it and runs the rest of the file).

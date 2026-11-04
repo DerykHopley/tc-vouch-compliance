@@ -67,7 +67,7 @@ Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/dev
 
 Steps marked "on trial" are being tuned to stay out of the way; `CHANGELOG.md` in the rig says what would end each trial.
 
-Implementer subagents run as the `rig:implementer` agent type, checkers as `rig:verifier`; this project's own rules for them live in `none yet`.
+Implementer subagents run as the `rig:implementer` agent type, checkers as `rig:verifier`; this project's own rules for them live in `docs/agents/agent-rules.md`.
 
 
 ### Triage when filing
