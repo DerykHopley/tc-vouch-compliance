@@ -133,10 +133,12 @@ def _search_policies(args: dict[str, Any], folder: Path) -> list[Passage] | Erro
 
 @dataclass(frozen=True)
 class EvidenceTool:
-    """An evidence-source tool: the profile source it reads, and once built, its spec for the
-    model and how to run it in the folder the guards allow."""
+    """An evidence-source tool: the profile source it reads, what the compliance lead calls
+    it, and once built, its spec for the model and how to run it in the folder the guards
+    allow."""
 
     source: EvidenceSourceName
+    label: str  # in step text, never the tool's name: "the policies"
     spec: dict[str, Any] | None = None  # None: not built yet, so never offered or run
     run: Callable[[dict[str, Any], Path], list[Passage] | ErrorResult] | None = None
 
@@ -144,10 +146,24 @@ class EvidenceTool:
 # Every evidence-source tool, by the name the model calls. A new source tool goes here, so the
 # allow-list covers it before it can run.
 EVIDENCE_TOOLS: dict[str, EvidenceTool] = {
-    SEARCH_POLICIES: EvidenceTool("policies", SEARCH_POLICIES_TOOL, _search_policies),
-    "search_records": EvidenceTool("records"),  # #22
-    "vulnerability_status": EvidenceTool("patch"),  # #24
+    SEARCH_POLICIES: EvidenceTool(
+        "policies", "the policies", SEARCH_POLICIES_TOOL, _search_policies
+    ),
+    "search_records": EvidenceTool("records", "the records"),  # #22
+    "vulnerability_status": EvidenceTool("patch", "Patch's vulnerability status"),  # #24
 }
+
+
+def _asking(call: dict[str, Any], profile: ComplianceProfile | None) -> str:
+    """In plain words, what a tool call the model made is about to search, or why it won't."""
+    tool = EVIDENCE_TOOLS.get(call["name"])
+    if tool is None:
+        return "Asked for a source that isn't available."
+    if profile is None or tool.source not in profile.evidence_sources:
+        return f"Asked for {tool.label}, which this profile doesn't allow."
+    if tool.run is None:
+        return f"Asked for {tool.label}, which Vouch can't search yet."
+    return f"Searching {tool.label} for “{call['args'].get('query', '')}”."
 
 
 @dataclass(frozen=True)
@@ -507,10 +523,12 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
 
 @dataclass(frozen=True)
 class Step:
-    """One node of the graph finished: its name and the state update it made."""
+    """One node of the graph finished: its name, the state update it made, and the profile
+    it ran under (which says what a tool call will search)."""
 
     node: str
     update: dict[str, Any]
+    profile: ComplianceProfile | None = None
 
     def describe(self) -> str:
         """One plain sentence, in the glossary's words, saying what the step did."""
@@ -521,7 +539,7 @@ class Step:
                 cited = _plural(len(update.get("cited", [])), "document")
                 return f"Drafted an answer citing {cited}."
             if calls:
-                return "Asked for " + ", ".join(c["name"] for c in calls) + "."
+                return " ".join(_asking(call, self.profile) for call in calls)
         if self.node == "tools":
             if update.get("searched"):  # only searches that ran
                 return "Searched " + "; ".join(update["searched"]) + "."
@@ -589,12 +607,12 @@ def assess_steps(
             final = chunk
             continue
         for node, update in chunk.items():
-            step = Step(node, update or {})
+            step = Step(node, update or {}, profile)
             steps.append({"node": node, "text": step.describe()})
             yield step
             for text in (update or {}).get("guards", []):  # one per refusal or flagged passage
                 steps.append({"node": "guard", "text": text})
-                yield Step("guard", {"text": text})
+                yield Step("guard", {"text": text}, profile)
             if node == "judge":
                 yield from update["requirements"]
     requirements = final["requirements"]

@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from vouch import ScriptedChatModel, assess, load_named_profile, load_profile, search_policies
 from vouch.front_matter import split_front_matter
+from vouch.graph import Step
 from vouch.guards import as_data, flagged_steps, instruction_like
 from vouch.profile import NORDLICHT_PROFILE, ProfileError
 
@@ -392,3 +393,52 @@ def test_a_document_cannot_close_the_evidence_tags_early():
     assert data.count("</evidence>") == 1
     assert data.endswith("</evidence>")
     assert json.loads(data.removeprefix("<evidence>\n").removesuffix("\n</evidence>")) == [passage]
+
+
+def gather_step(profile, *calls: tuple[str, dict]) -> Step:
+    """The gather step for a model message making these tool calls."""
+    message = AIMessage(
+        "",
+        tool_calls=[
+            {"name": name, "args": args, "id": f"c{i}", "type": "tool_call"}
+            for i, (name, args) in enumerate(calls)
+        ],
+    )
+    return Step("gather", {"messages": [message]}, profile)
+
+
+@pytest.mark.parametrize(
+    ("allowed", "calls", "text"),
+    [
+        (
+            {"policies": "policies"},
+            [("search_policies", {"query": "authentication"})],
+            "Searching the policies for “authentication”.",
+        ),
+        (
+            {"policies": "policies"},
+            [("search_records", {"query": "joiners"})],
+            "Asked for the records, which this profile doesn't allow.",
+        ),
+        (
+            {"records": "records"},
+            [("search_records", {"query": "joiners"})],
+            "Asked for the records, which Vouch can't search yet.",
+        ),
+        (
+            {"policies": "policies"},
+            [("delete_everything", {}), ("search_policies", {"query": "logs"})],
+            "Asked for a source that isn't available. Searching the policies for “logs”.",
+        ),
+    ],
+    ids=["offered", "not-allowed", "not-built", "unknown-then-offered"],
+)
+def test_the_gather_step_says_in_plain_words_what_is_about_to_be_searched(
+    allowed, calls, text, tmp_path
+):
+    profile = load_profile(copy_profile(tmp_path, **allowed))
+
+    described = gather_step(profile, *calls).describe()
+
+    assert described == text
+    assert "search_" not in described  # no tool name reaches the compliance lead
