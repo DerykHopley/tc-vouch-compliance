@@ -24,18 +24,19 @@ from pydantic import (
     model_validator,
 )
 
-from vouch.controls import UnknownControlError
 from vouch.isa import (
     SOURCE,
     BaseFrameworkError,
     Column,
     IsaControl,
     Requirement,
+    UnknownControlError,
     load_isa_control,
 )
 from vouch.paths import FIXTURES_DIR
 
 PROFILE_FILE = "profile.yaml"
+DEFAULT_PROFILE = "nordlicht"  # the one profile until a user can choose theirs
 NORDLICHT_PROFILE = FIXTURES_DIR / "nordlicht" / PROFILE_FILE
 
 ProtectionLevel = Literal["normal", "high", "very high"]

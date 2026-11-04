@@ -1,0 +1,15 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "authentication password second factor"}},
+    {"answer": "Sign-in methods follow each system's exposure: long passwords checked against breach lists, an authenticator app for internet-facing systems, and hardware keys for administrator accounts.", "cited": ["authentication-standard"]}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The standard says methods follow each system's exposure, but nothing shows the assessment was done."},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Long passwords with a breach check and a second factor online."},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Methods are defined per exposure."},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "At least 12 characters and a breached-password check."},
+      {"requirement_id": "S3", "verdict": "partly-evidenced", "reason": "Hardware keys are required, but nothing shows them in use."}
+    ]
+  }
+}

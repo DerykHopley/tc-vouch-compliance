@@ -5,11 +5,11 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from vouch.controls import UnknownControlError
 from vouch.isa import (
     COLUMN_PREFIX,
     FRAMEWORK_DIR,
     BaseFrameworkError,
+    UnknownControlError,
     load_base_framework,
     load_isa_control,
 )

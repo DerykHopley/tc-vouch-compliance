@@ -2,7 +2,7 @@
 
 from playwright.sync_api import Page, expect
 
-CONTROL = "NK-ENC-01"
+CONTROL = "4.1.2"
 
 
 def start_assessment(page: Page, vouch_url: str) -> None:
@@ -26,14 +26,14 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     paper = page.get_by_role("region", name="Working paper")
     expect(paper.get_by_role("heading", name=CONTROL)).to_be_visible()
     steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
-    expect(steps).to_have_count(5)
-    expect(steps.first).to_contain_text("encrypt")
-    expect(steps.last).to_contain_text("Judged 3 of 3 requirements evidenced.")
+    expect(steps).to_have_count(6)
+    expect(steps.first).to_contain_text("authentication")
+    expect(steps.last).to_contain_text("Judged 4 of 5 requirements evidenced.")
     result = paper.get_by_role("region", name="Verdict and draft answer")
-    expect(result.get_by_text("Evidenced", exact=True)).to_be_visible()
-    expect(result).to_contain_text("full-disk encryption")
+    expect(result.get_by_text("Partly evidenced", exact=True)).to_be_visible()
+    expect(result).to_contain_text("hardware security keys")
     assert seen[0] == 1, f"the first render already held {seen[0]} steps"
-    assert sorted(set(seen)) == [1, 2, 3, 4, 5], seen
+    assert sorted(set(seen)) == [1, 2, 3, 4, 5, 6], seen
 
 
 def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, vouch_url):
@@ -47,7 +47,7 @@ def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, 
     )
     page.unroute("**/api/assessments")
     paper.get_by_role("button", name=f"Retry {CONTROL}", exact=True).click()
-    expect(paper.get_by_role("region", name="Verdict and draft answer").get_by_text("Evidenced", exact=True)).to_be_visible()
+    expect(paper.get_by_role("region", name="Verdict and draft answer").get_by_text("Partly evidenced", exact=True)).to_be_visible()
     expect(paper.get_by_role("alert")).to_have_count(0)
 
 

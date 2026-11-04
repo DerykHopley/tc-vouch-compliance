@@ -21,45 +21,63 @@ def run_assess(*args: str, fake_script: Path | None = None) -> subprocess.Comple
     )
 
 
-def test_assess_prints_assessment_json():
-    result = run_assess("NK-ENC-01", fake_script=SCRIPTS / "enc_found.json")
+@pytest.mark.parametrize("profile_args", [[], ["--profile", "nordlicht"]], ids=["default", "named"])
+def test_assess_prints_assessment_json(profile_args):
+    result = run_assess("4.1.2", *profile_args, fake_script=SCRIPTS / "isa_4_1_2.json")
 
     assert result.returncode == 0, result.stderr
     assessment = json.loads(result.stdout)
-    assert assessment["control_id"] == "NK-ENC-01"
-    assert assessment["verdict"] == "found"
-    assert assessment["answer"] == (
-        "Laptops use full-disk encryption with centrally stored recovery keys."
-    )
-    assert "encryption-standard" in {s["doc_id"] for s in assessment["sources"]}
-    assert assessment["covered_points"] == ["ENC-1", "ENC-2", "ENC-3"]
-    assert assessment["missing_points"] == []
-    assert assessment["gap_note"] is None
+    assert assessment["control_id"] == "4.1.2"
+    assert assessment["profile_id"] == "nordlicht"
+    assert assessment["verdict"] == "partly-evidenced"
+    assert [(r["id"], r["verdict"]) for r in assessment["requirements"]][:2] == [
+        ("M1", "partly-evidenced"),
+        ("M2", "evidenced"),
+    ]
+    assert assessment["should_score"] == {"evidenced": 2, "total": 3}
+    assert "authentication-standard" in {s["doc_id"] for s in assessment["sources"]}
 
 
-def test_unknown_control_exits_2_with_one_line_error():
-    result = run_assess("NK-XXX-99")
+@pytest.mark.parametrize(
+    ("args", "named"),
+    [(["9.9.9"], "9.9.9"), (["4.1.2", "--profile", "nobody"], "nobody")],
+    ids=["unknown-control", "unknown-profile"],
+)
+def test_unknown_control_or_profile_exits_2_with_one_line_error(args, named):
+    result = run_assess(*args, fake_script=SCRIPTS / "isa_4_1_2.json")
 
     assert result.returncode == 2
     lines = result.stderr.splitlines()
     assert len(lines) == 1
-    assert "NK-XXX-99" in lines[0]
+    assert named in lines[0]
     assert "Traceback" not in result.stderr
     assert result.stdout == ""
 
 
-def test_a_gap_prints_its_gap_note():
-    result = run_assess("NK-VUL-01", fake_script=SCRIPTS / "vul_gap.json")
+def test_an_answer_claiming_an_audit_result_twice_exits_1_with_one_line(tmp_path):
+    script = tmp_path / "compliant.json"
+    script.write_text('{"gather": [{"answer": "We are compliant."}, {"answer": "Compliant."}]}')
 
-    assert result.returncode == 0, result.stderr
-    assessment = json.loads(result.stdout)
-    assert assessment["verdict"] == "gap"
-    assert assessment["covered_points"] == []
-    assert assessment["gap_note"] == {
-        "control_id": "NK-VUL-01",
-        "missing_points": ["VUL-1", "VUL-2", "VUL-3"],
-        "owner_role": "Head of IT infrastructure",
-    }
+    result = run_assess("4.1.2", fake_script=script)
+
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1, result.stderr
+    assert "audit result" in lines[0]
+    assert result.stdout == ""
+
+
+def test_a_failed_model_call_exits_1_with_one_line_and_no_details(tmp_path):
+    script = tmp_path / "short.json"  # the retry asks for a turn the script doesn't have
+    script.write_text('{"gather": [{"answer": "We are compliant."}]}')
+
+    result = run_assess("4.1.2", fake_script=script)
+
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1, result.stderr
+    assert lines[0] == "assess: the assessment could not be completed (ScriptExhaustedError)"
+    assert result.stdout == ""
 
 
 def test_requirements_lists_each_requirement_of_a_control_with_its_text():
@@ -224,13 +242,15 @@ def test_an_overlay_requirement_shows_its_source_and_the_isa_credit_covers_isa_t
         ["--requirements", "5.1.1", "--profile"],
         ["--requirements", "5.1.1", "--profile", "nordlicht", "extra"],
         ["--profile", "nordlicht"],
-        ["NK-ENC-01", "--profile", "nordlicht"],
+        ["4.1.2", "--requirements", "5.1.1"],
+        ["4.1.2", "--profile"],
         [],
         ["--req", "5.1.1"],
     ],
     ids=[
         "no-id", "extra-arg", "profile-without-name", "extra-after-profile",
-        "profile-alone", "profile-with-control-run", "nothing", "abbreviated-flag",
+        "profile-alone", "control-and-requirements", "control-profile-without-name",
+        "nothing", "abbreviated-flag",
     ],
 )
 def test_requirements_misused_exits_2_with_the_usage_line(args, capsys):
@@ -252,9 +272,9 @@ BAD_SCRIPTS = {
     "missing-file": None,
     "malformed-json": '{"gather": [',
     "no-answer-turn": '{"gather": [{"tool": "search_policies", "args": {"query": "x"}}]}',
-    "bad-verdict": '{"gather": [{"answer": "A.", "verdict": "maybe", "cited": []}]}',
-    "bad-judge": '{"gather": [{"answer": "A.", "verdict": "gap", "cited": []}],'
-    ' "judge": {"covered_points": "VUL-1"}}',
+    "judgement-without-verdict": '{"gather": [{"answer": "A.", "cited": []}],'
+    ' "judge": {"requirements": [{"requirement_id": "M1", "reason": "R."}]}}',
+    "bad-judge": '{"gather": [{"answer": "A.", "cited": []}], "judge": {"requirements": "M1"}}',
 }
 
 
@@ -264,12 +284,12 @@ def test_a_bad_fake_script_exits_2_with_one_line_naming_it(case, tmp_path):
     if BAD_SCRIPTS[case] is not None:
         script.write_text(BAD_SCRIPTS[case])
 
-    result = run_assess("NK-VUL-01", fake_script=script)
+    result = run_assess("5.2.9", fake_script=script)
 
     assert result.returncode == 2
     lines = result.stderr.splitlines()
     assert len(lines) == 1, result.stderr
     assert str(script) in lines[0]
     assert "Traceback" not in result.stderr
-    if case == "bad-verdict":
+    if case == "judgement-without-verdict":
         assert "verdict" in lines[0].split(str(script), 1)[1]  # the problem, not the file name

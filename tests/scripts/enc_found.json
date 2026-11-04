@@ -1,7 +1,0 @@
-{
-  "gather": [
-    {"tool": "search_policies", "args": {"query": "encrypt"}},
-    {"answer": "Laptops use full-disk encryption with centrally stored recovery keys.", "verdict": "found", "cited": ["encryption-standard"]}
-  ],
-  "judge": {"covered_points": ["ENC-1", "ENC-2", "ENC-3"]}
-}

@@ -1,4 +1,5 @@
-"""`assess <control-id>`: run the graph for one control and print its Assessment as JSON.
+"""`assess <control-id> [--profile <name>]`: run the graph for one VDA ISA control (`4.1.2`)
+under a compliance profile (nordlicht unless named) and print its Assessment as JSON.
 
 `assess --requirements <isa-control>`: list a VDA ISA control's requirements (`5.1.1`).
 `assess --requirements <isa-control> --profile <name>`: only those the compliance profile
@@ -12,16 +13,32 @@ import sys
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from vouch.controls import UnknownControlError, load_control
 from vouch.fake_model import ScriptError
-from vouch.graph import assess
-from vouch.isa import NOTICE_FILE, BaseFrameworkError, IsaControl, Requirement, load_isa_control
-from vouch.profile import ComplianceProfile, ProfileError, UnknownProfileError, load_named_profile
+from vouch.graph import OutputCheckError, assess
+from vouch.isa import (
+    NOTICE_FILE,
+    BaseFrameworkError,
+    IsaControl,
+    Requirement,
+    UnknownControlError,
+    load_isa_control,
+)
+from vouch.profile import (
+    DEFAULT_PROFILE,
+    ComplianceProfile,
+    ProfileError,
+    UnknownProfileError,
+    load_named_profile,
+)
 from vouch.settings import fake_model_from_env
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+EXIT_FAILED = 1
 EXIT_BAD_INPUT = 2
-USAGE = "assess <control-id> | assess --requirements <isa-control> [--profile <name>]"
+USAGE = (
+    "assess <control-id> [--profile <name>] | "
+    "assess --requirements <isa-control> [--profile <name>]"
+)
 
 
 class ConfigError(RuntimeError):
@@ -120,21 +137,38 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     try:
         args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-        if (args.control_id is None) == (args.requirements is None) or (
-            args.control_id is not None and args.profile is not None
-        ):
-            parser.error("give a control id, or --requirements with an optional --profile")
+        if (args.control_id is None) == (args.requirements is None):
+            parser.error("give a control id or --requirements, each with an optional --profile")
     except SystemExit as stop:  # --help (0) or a misuse (2), already printed
         return stop.code if isinstance(stop.code, int) else EXIT_BAD_INPUT
     if args.requirements is not None:
         return list_requirements(args.requirements, args.profile)
     try:
-        control = load_control(args.control_id)
+        profile = load_named_profile(args.profile or DEFAULT_PROFILE)
         model = build_model()
-    except (UnknownControlError, ConfigError, ScriptError) as error:
+        assessment = assess(args.control_id, profile, model)
+    except (
+        UnknownControlError,
+        BaseFrameworkError,
+        UnknownProfileError,
+        ProfileError,
+        ConfigError,
+        ScriptError,
+    ) as error:
         print(f"assess: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT
-    print(json.dumps(assess(control, model).to_dict(), indent=2))
+    except OutputCheckError as error:
+        print(f"assess: {error}", file=sys.stderr)
+        return EXIT_FAILED
+    # A failed model call (a provider error, a script run out): one line, no provider details,
+    # as the API's `error` event does. Any exception, since providers raise their own kinds.
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"assess: the assessment could not be completed ({type(error).__name__})",
+            file=sys.stderr,
+        )
+        return EXIT_FAILED
+    print(json.dumps(assessment.to_dict(), indent=2))
     return 0
 
 
