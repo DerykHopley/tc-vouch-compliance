@@ -6,12 +6,12 @@ import sys
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.controls import UnknownControlError, load_control
+from vouch.exit_codes import EXIT_BAD_INPUT
 from vouch.fake_model import ScriptError
 from vouch.graph import assess
 from vouch.settings import Settings, SettingsError, fake_model, load_settings
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-EXIT_BAD_INPUT = 2
 
 
 def build_model(settings: Settings) -> BaseChatModel:

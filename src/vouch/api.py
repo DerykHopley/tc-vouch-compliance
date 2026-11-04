@@ -5,7 +5,7 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import logging
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated, Any
@@ -16,6 +16,7 @@ from pydantic import BaseModel, StringConstraints
 
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
+from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.graph import Assessment, assess_steps
 from vouch.settings import (
     DEFAULT_USER,
@@ -36,6 +37,7 @@ FAILED = "The assessment could not be completed. Please try again later."
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
+DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 
 
 class AssessmentRequest(BaseModel):
@@ -79,6 +81,26 @@ def current_user(request: Request, settings: AppSettings) -> User:
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
+def app_database(request: Request) -> Database | None:
+    """The app's Database; None when no database URL is set."""
+    return request.app.state.database
+
+
+AppDatabase = Annotated[Database | None, Depends(app_database)]
+
+
+def database_connection(db: AppDatabase) -> Iterator[Connection]:
+    """A connection for a route that needs the database. A 503 when there's none to be had, or
+    when it drops while the route uses it."""
+    try:
+        if db is None:
+            raise DatabaseUnavailable("no database URL is set")
+        with db.connection() as conn:
+            yield conn
+    except DatabaseUnavailable:
+        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
+
+
 def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
     """The user's role, for a route that needs it. Local mode's one user is a developer: local
     mode is for a developer's machine. In clerk mode Clerk's API is asked (cached, auth.py);
@@ -108,11 +130,15 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 
 @public.get("/health")
-def health(settings: AppSettings) -> dict[str, Any]:
-    """Also tells the front end how to sign in: Clerk's publishable key is public."""
+def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
+    """Also tells the front end how to sign in (Clerk's publishable key is public), and, with a
+    database URL set, whether the database is reachable."""
     publishable_key = settings.clerk.publishable_key if settings.clerk else None
     auth = {"mode": settings.auth_mode, "publishable_key": publishable_key}
-    return {"status": "ok", "version": version("vouch"), "auth": auth}
+    answer: dict[str, Any] = {"status": "ok", "version": version("vouch"), "auth": auth}
+    if db is not None:
+        answer["database"] = "reachable" if db.reachable() else "unavailable"
+    return answer
 
 
 @router.post("/assessments", response_class=EventSourceResponse)
@@ -175,12 +201,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         if app.state.auth is not None:
             app.state.auth.close()
+        if app.state.database is not None:
+            app.state.database.close()
 
     # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.state.settings = settings
     app.state.auth = auth
+    app.state.database = Database(settings.database_url) if settings.database_url else None
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)
