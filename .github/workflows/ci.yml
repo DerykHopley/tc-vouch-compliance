@@ -53,6 +53,32 @@ jobs:
           -k test_starts_both_servers_and_ctrl_c_stops_both
         working-directory: .
 
+  database:
+    # Full lane only (main, nightly, by hand): tests/test_database.py's integration tests against a
+    # Postgres service container (#33). Cloud SQL runs PostgreSQL 16.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: the database module against Postgres, its integration tests not skipped
+        run: set -o pipefail; uv run pytest tests/test_database.py -rs | tee "$RUNNER_TEMP/db.txt" && ! grep -q SKIPPED "$RUNNER_TEMP/db.txt"
+        env:
+          VOUCH_TEST_DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/postgres
+
   browser:
     # The browser check (frontend/e2e) against the container, as on Cloud Run, on the fake model.
     # Fast lane (a PR): Chromium. Full lane (main, nightly, by hand): Chromium and Firefox.

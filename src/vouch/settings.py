@@ -29,11 +29,13 @@ MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 POLICY_DIR_ENV = "ASSESS_POLICY_DIR"
 FRONTEND_ENV = "VOUCH_FRONTEND"
+DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 ENV_NAMES = frozenset(
     {AUTH_MODE_ENV, *CLERK_KEY_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {POLICY_DIR_ENV, FRONTEND_ENV}
+    | {DATABASE_URL_ENV}
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
@@ -73,6 +75,8 @@ class Settings:
     fake_script: Path | None = None
     policy_dir: Path = DEFAULT_POLICY_DIR
     frontend: Path | None = None
+    database_url: SecretStr | None = None
+    """Postgres; it holds the password. None: no database, and its routes answer 503."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -118,6 +122,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             jwt_key=SecretStr(env[CLERK_JWT_KEY_ENV].strip()),
         )
     api_key = read(OPENROUTER_API_KEY_ENV)
+    database_url = read(DATABASE_URL_ENV)
     return Settings(
         auth_mode=cast(AuthMode, auth_mode),  # checked against AuthMode above
         clerk=clerk,
@@ -126,6 +131,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fake_script=read_path(FAKE_SCRIPT_ENV),
         policy_dir=policy_dir(env),
         frontend=read_path(FRONTEND_ENV),
+        database_url=SecretStr(database_url) if database_url else None,
     )
 
 

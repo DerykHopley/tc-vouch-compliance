@@ -113,6 +113,49 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   --project=$PROJECT_ID --limit=50 --freshness=1h
 ```
 
+## The database (Cloud SQL, from #33)
+
+Vouch's Postgres is the Cloud SQL instance `vouch-db` (`europe-west1`, Enterprise, `db-f1-micro`;
+created in #29). The app reads one URL, `VOUCH_DATABASE_URL`: there's no pooler, so the same URL
+serves the app and the setup command. With it unset the app runs without a database; health then
+leaves the database out, and a route that needs it answers 503 (*checked*, `tests/test_database.py`).
+
+**Deploy flag and role** (*checked*, docs.cloud.google.com/sql/docs/postgres/connect-run): the
+service connects through the instance's Unix socket, `/cloudsql/<connection name>`. It needs the
+Cloud SQL Admin API, the instance added to the service, and the **Cloud SQL Client** role on the
+service's account:
+
+```bash
+export SQL_INSTANCE=$(gcloud sql instances describe vouch-db --project=$PROJECT_ID --format='value(connectionName)')
+gcloud services enable sqladmin.googleapis.com --project=$PROJECT_ID
+SA=$(gcloud run services describe vouch --region=$REGION --project=$PROJECT_ID \
+  --format='value(spec.template.spec.serviceAccountName)')
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$SA \
+  --role=roles/cloudsql.client    # the role id is *unverified* (from memory); its name is checked
+# step 5's deploy, with the instance added:
+gcloud run deploy vouch ... --add-cloudsql-instances=$SQL_INSTANCE
+```
+
+On Cloud Run the URL is the keyring's `cloudsql-vouch-run-url`
+(`postgresql://vouch:<password>@/vouch?host=/cloudsql/<connection name>`), given to the service
+from Secret Manager as `VOUCH_DATABASE_URL` (#37). Health then says `"database": "reachable"` or
+`"unavailable"`.
+
+**LangGraph's tables, once per database** (and again after an upgrade of
+`langgraph-checkpoint-postgres`; it only migrates). Run from your machine through the Cloud SQL
+Auth Proxy, in two terminals from the repo root:
+
+```bash
+cloud-sql-proxy $SQL_INSTANCE --port 5432          # terminal 1: leave it running
+uv run vouch-db-setup                              # terminal 2: .envrc gives VOUCH_DATABASE_URL
+```
+
+It prints `vouch-db-setup: LangGraph's tables are ready (checkpointer and store)`, or why it
+couldn't connect, without the password.
+
+**When the trial ends** the instance stops unless the billing account is upgraded, as Cloud Run
+does; health then says `unavailable` (docs/requirements.md, 2026-11-04).
+
 ## Redeploy, roll back, remove
 
 - **Redeploy after a change:** run the wizard again. It skips what exists and builds the next tag.
