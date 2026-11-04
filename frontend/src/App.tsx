@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import AskVouch from './AskVouch.tsx'
+import { useAssessment } from './useAssessment.ts'
+import WorkingPaper, { AssessButton, RunChip } from './WorkingPaper.tsx'
 
 type Theme = 'light' | 'dark'
 
@@ -17,6 +19,12 @@ export default function App() {
     document.documentElement.dataset.theme = theme
   }, [theme])
   const other: Theme = theme === 'light' ? 'dark' : 'light'
+  const [view, setView] = useState<'dossier' | 'paper'>('dossier')
+  const { run, start } = useAssessment(CONTROL.id)
+  const assess = () => {
+    setView('paper')
+    void start()
+  }
 
   return (
     <>
@@ -24,13 +32,15 @@ export default function App() {
         <div className="top-in wrap">
           <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
           <nav className="nav" aria-label="Main">
-            <a href="/" aria-current="page">Dossier</a>
+            <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); setView('dossier') }}>Dossier</a>
           </nav>
           <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
             {other === 'dark' ? 'Dark theme' : 'Light theme'}
           </button>
         </div>
       </header>
+      {view === 'paper' ? <main><WorkingPaper control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
       <main className="dossier wrap">
         <section className="hero">
           <span className="pill">Nordlicht Komponenten GmbH · Germany</span>
@@ -54,11 +64,13 @@ export default function App() {
             <article className="card" aria-labelledby="control-title">
               <div className="card-head"><b>{CONTROL.id}</b></div>
               <div id="control-title" className="control-title">{CONTROL.title}</div>
-              <div className="card-meta"><span>{CONTROL.owner}</span><span className="chip v-none">Not assessed</span></div>
+              <div className="card-meta"><span>{CONTROL.owner}</span><RunChip run={run} /></div>
+              <div><AssessButton control={CONTROL} run={run} onAssess={assess} /></div>
             </article>
           </div>
         </section>
       </main>
+      )}
       <AskVouch />
     </>
   )
