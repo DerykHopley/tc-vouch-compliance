@@ -2,7 +2,8 @@
 # The browser check, against the built front end served by the backend on one origin, as on
 # Cloud Run. It starts throwaway servers on free ports, runs the checks, and stops the servers:
 #   - Vouch: the API on the bundled demo script (the scripted fake model: no key, no paid call)
-#     serving frontend/dist. With VOUCH_IMAGE set, that image's container instead of uvicorn;
+#     serving frontend/dist. With VOUCH_IMAGE set, that image's container instead of uvicorn,
+#     in local auth mode (the image's own default is clerk);
 #   - a second API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 #
@@ -35,7 +36,7 @@ for s in socks: s.bind(("127.0.0.1", 0))
 print(*(s.getsockname()[1] for s in socks))')
 
 if [ -n "${VOUCH_IMAGE:-}" ]; then
-  "$CONTAINER" run --rm --name "$NAME" -p "127.0.0.1:$VOUCH_PORT:8080" "$VOUCH_IMAGE" \
+  "$CONTAINER" run --rm --name "$NAME" -p "127.0.0.1:$VOUCH_PORT:8080" -e VOUCH_AUTH_MODE=local "$VOUCH_IMAGE" \
     >"$LOG_DIR/vouch.log" 2>&1 &
 else
   (cd "$ROOT/frontend" && npm run build) >"$LOG_DIR/build.log" 2>&1 \

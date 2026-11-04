@@ -97,7 +97,7 @@ gcloud run deploy vouch --image=$IMAGE:v1 --region=$REGION --project=$PROJECT_ID
 
 `--max=1` is the service-level limit: without it Cloud Run leaves the service at its automatic default (3 on the live service), so a traffic split across revisions could run more than one instance. `--max-instances=1` alone caps only each revision.
 
-No environment variables and no secrets: the image sets `VOUCH_FRONTEND` and `PORT` (*checked* in the `Dockerfile`).
+The image sets `VOUCH_FRONTEND`, `PORT` and `VOUCH_AUTH_MODE=clerk` (*checked* in the `Dockerfile`). In clerk mode it refuses to start without the three Clerk keys, naming them (*checked*, `tests/test_settings.py` and CI), so a deploy from M3 on needs them from Secret Manager (#37).
 
 ## 6 and 7. The URL, and the health check
 

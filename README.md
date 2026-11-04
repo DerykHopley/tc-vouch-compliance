@@ -50,7 +50,7 @@ exists.
 
 ```sh
 docker build -t vouch:dev .
-docker run --rm -p 127.0.0.1:8081:8080 vouch:dev     # open http://localhost:8081
+docker run --rm -p 127.0.0.1:8081:8080 -e VOUCH_AUTH_MODE=local vouch:dev   # open http://localhost:8081
 ```
 
 FastAPI serves the API under `/api` and the built front end (`VOUCH_FRONTEND`, `frontend/dist`)

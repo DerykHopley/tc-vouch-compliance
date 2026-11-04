@@ -71,10 +71,16 @@ jobs:
       - run: docker build -t vouch:ci .
       - name: without a front-end build the container refuses to start
         run: |
-          if out=$(docker run --rm --tmpfs /app/frontend/dist vouch:ci 2>&1); then
+          if out=$(docker run --rm -e VOUCH_AUTH_MODE=local --tmpfs /app/frontend/dist vouch:ci 2>&1); then
             echo "The container started without a front-end build."; exit 1
           fi
           echo "$out" | grep -F "no front-end build"
+      - name: without the Clerk keys the container refuses to start, naming them
+        run: |
+          if out=$(docker run --rm vouch:ci 2>&1); then
+            echo "The container started in clerk mode without the Clerk keys."; exit 1
+          fi
+          echo "$out" | grep -F "CLERK_SECRET_KEY"
       - run: uv sync --locked
       - run: uv run --locked --project frontend/e2e playwright install --with-deps ${{ matrix.browser }}
       - run: frontend/e2e/run.sh --browser ${{ matrix.browser }}
