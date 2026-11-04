@@ -1,4 +1,5 @@
-"""The HTTP API: health, and one control's assessment streamed as server-sent events.
+"""The HTTP API: health, one control's assessment streamed as server-sent events up to the
+compliance lead's review, the review that resumes it, and the developer page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -9,6 +10,8 @@ import logging
 import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
+from dataclasses import asdict, dataclass
+from functools import cache
 from importlib.metadata import version
 from typing import Annotated, Any, cast
 
@@ -16,13 +19,24 @@ from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.language_models.chat_models import BaseChatModel
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch.allow_list import ALLOWED_TOOLS, GUARD, ToolAllowList
+from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
-from vouch.controls import Control, UnknownControlError, load_control
 from vouch.database import Connection, Database, DatabaseUnavailable
-from vouch.graph import Assessment, assess_steps
+from vouch.graph import (
+    Assessment,
+    InvalidReviewError,
+    NotWaitingForReviewError,
+    RequirementVerdict,
+    ReviewDecision,
+    UnknownAssessmentError,
+    assess_steps,
+    memory_checkpointer,
+    resume,
+)
+from vouch.isa import IsaControl, UnknownControlError, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.model_choice import (
     MODEL_ID,
@@ -31,6 +45,13 @@ from vouch.model_choice import (
     NoKey,
     UnknownModel,
     model_store,
+)
+from vouch.profile import (
+    DEFAULT_PROFILE,
+    ComplianceProfile,
+    ProfileError,
+    UnknownProfileError,
+    load_named_profile,
 )
 from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
@@ -54,8 +75,6 @@ from vouch.spending import (
 
 log = logging.getLogger(__name__)
 
-# The trial's verdicts, as the API names them (GLOSSARY.md, "Verdict"). #20 renames them inside.
-VERDICTS = {"found": "evidenced", "partial": "partly-evidenced", "gap": "not-evidenced"}
 FAILED = "The assessment could not be completed. Please try again later."
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
@@ -73,14 +92,55 @@ CATALOGUE_UNAVAILABLE = (
 
 class AssessmentRequest(BaseModel):
     control_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    note: str = ""  # the lead's note from a rejected review, when the control is assessed again
 
 
-def requested_control(request: Annotated[AssessmentRequest, Body()]) -> Control:
-    """Looked up before the stream starts, so an unknown control is a plain 404."""
+@dataclass(frozen=True)
+class RequestedAssessment:
+    control: IsaControl
+    note: str
+
+
+def requested_assessment(request: Annotated[AssessmentRequest, Body()]) -> RequestedAssessment:
+    """The control is looked up before the stream starts, so an unknown one is a plain 404."""
     try:
-        return load_control(request.control_id)
+        return RequestedAssessment(load_isa_control(request.control_id), request.note)
     except UnknownControlError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@cache
+def load_default_profile() -> ComplianceProfile:
+    """The default compliance profile, read once; a failed read isn't kept, so it's tried again."""
+    return load_named_profile(DEFAULT_PROFILE)
+
+
+def compliance_profile() -> ComplianceProfile:
+    """Loaded before the stream starts, so a broken profile is a plain 500, not an event."""
+    try:
+        return load_default_profile()
+    except (ProfileError, UnknownProfileError):
+        log.exception("the compliance profile %s could not be loaded", DEFAULT_PROFILE)
+        raise HTTPException(status_code=500, detail=FAILED) from None
+
+
+Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
+
+
+def profile_tools(profile: Profile) -> frozenset[str]:
+    """The tools the API lets the model call: the compliance profile's allow-list (security
+    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
+    return allowed_tools(profile)
+
+
+@cache
+def checkpointer() -> BaseCheckpointSaver:
+    """Where paused assessments wait for review: in memory, one per process, until M2 brings
+    Postgres. A restart forgets them."""
+    return memory_checkpointer()
+
+
+Checkpointer = Annotated[BaseCheckpointSaver, Depends(checkpointer)]
 
 
 def app_settings(request: Request) -> Settings:
@@ -212,12 +272,14 @@ AppSpending = Annotated[SpendingGuard, Depends(app_spending)]
 def within_daily_limit(
     user: CurrentUser,
     spending: AppSpending,
-    control: Annotated[Control, Depends(requested_control)],
+    requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
+    profile: Profile,
     chosen: Annotated[str | None, Depends(chosen_model)],
 ) -> None:
     """Counts the assessment against the user's daily limit before the stream starts, and only
-    once the control and the model are known: FastAPI skips a dependency whose own dependencies
-    failed, so a 422, a 404 or the model choice's 503 takes no count. Over the limit, a 429
+    once the control, the compliance profile and the model are known: FastAPI skips a
+    dependency whose own dependencies failed, so a 422, a 404, a broken profile's 500 or the
+    model choice's 503 takes no count. Over the limit, a 429
     saying when it resets (daily_limit_reached); the counter unavailable, or only in memory for
     a paid model, a 503."""
     try:
@@ -259,40 +321,53 @@ def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
 
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)],
+    requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
+    profile: Profile,
+    tools: Annotated[frozenset[str], Depends(profile_tools)],
+    saver: Checkpointer,
     models: AppModels,
     chosen: Annotated[str | None, Depends(chosen_model)],
-    # Counted only once the control and the model passed (within_daily_limit depends on both).
+    # Counted only once the control, the profile and the model passed (within_daily_limit
+    # depends on each).
     _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
     user: CurrentUser,
     spending: AppSpending,
-    request: Request,
 ) -> Iterable[ServerSentEvent]:
-    """A `step` event per agent step, one `result`, then close; or one `error`, then close.
+    """A `step` event per agent step, a `requirement` event per judged requirement, one
+    `result` (the proposed Assessment, waiting for review, with the `thread_id` to review it
+    by), then close; or one `error`, then close. Each request is a new assessment; with a
+    `note`, a rejected control assessed again, the note passed to the model.
 
     The model is vouch.model_choice's: OpenRouter when a key is set (in clerk mode only a
     signed-in user gets here), else the scripted fake. A failure after retries, or a run past
     its call budget, is the `error`.
 
-    Every tool call the model makes is checked against the allow-list here too (security
-    layer 2): a refused one is a `guard` step. The call budget sits inside, on the model itself,
-    so it counts every call made to OpenRouter, refused tool calls included.
+    Every tool call the model makes is checked against the compliance profile's allow-list here
+    too (security layer 2): a refused one is a `guard` step. The call budget sits inside, on the
+    model itself, so it counts every call made to OpenRouter, refused tool calls included.
 
-    The `result` carries the assessment's `usage`, its tokens and cost (vouch.spending), which
-    is kept whether the assessment ends in its result or an `error`: the calls were made.
+    The `result` carries the assessment's `usage`, its tokens and cost (vouch.spending), metered
+    on every model call (the judge's and the remediation drafts' included), which is kept
+    whether the assessment ends in its result or an `error`: the calls were made. Every event
+    is redacted (security layer 4).
     """
+    control = requested.control
     meter = UsageMeter(chosen)
     try:
         assessed = models.for_assessment(chosen, callbacks=[meter])
-        model = ToolAllowList(assessed, request.app.state.allowed_tools)
+        model = ToolAllowList(assessed, tools)
         # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
-        # The graph's signature is spec M1's to change, so the cast stays until then.
-        for item in assess_steps(control, cast(BaseChatModel, model)):
+        steps = assess_steps(
+            control, profile, cast(BaseChatModel, model), saver, note=requested.note
+        )
+        for item in steps:
             if isinstance(item, Assessment):
-                result = {"assessment": _api_assessment(item), "usage": meter.usage().to_dict()}
+                result = {"assessment": item.to_dict(), "usage": meter.usage().to_dict()}
                 yield from _redacted("result", result)
+            elif isinstance(item, RequirementVerdict):
+                yield from _redacted("requirement", {"requirement": asdict(item)})
             else:
-                yield from _redacted("step", {"node": item.node, "text": item.describe()})
+                yield from _redacted("step", item.to_dict())
             for refusal in model.take_refusals():
                 yield from _redacted("step", {"node": GUARD, "text": refusal})
     except Exception:  # any failure reaches the browser as one formal sentence
@@ -302,7 +377,7 @@ def create_assessment(
         record_off_the_event_loop(spending, user.id, control.id, meter.usage())
 
 
-_REMOVED_FROM = {"result": "assessment", "step": "step"}
+_REMOVED_FROM = {"result": "assessment", "requirement": "requirement", "step": "step"}
 """What a guard step calls the event something was removed from."""
 
 
@@ -316,8 +391,26 @@ def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
     yield ServerSentEvent(event=event, data=clean)
 
 
-def _api_assessment(assessment: Assessment) -> dict[str, Any]:
-    return assessment.to_dict() | {"verdict": VERDICTS[assessment.verdict]}
+@router.post("/assessments/{thread_id}/review")
+def review_assessment(
+    thread_id: str, decision: Annotated[ReviewDecision, Body()], saver: Checkpointer
+) -> dict[str, Any]:
+    """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
+    as the stream's events are (its state holds the model's words as written). No model runs.
+
+    404 for an unknown thread; 409 for one not waiting (reviewed already); 422 for an override
+    naming a requirement the assessment didn't judge, or naming one twice (the decision's shape
+    is checked before, also 422)."""
+    try:
+        reviewed = resume(thread_id, decision, saver)
+    except UnknownAssessmentError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except NotWaitingForReviewError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except InvalidReviewError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    clean, _ = redact_data({"assessment": reviewed.to_dict()})
+    return clean
 
 
 DEVELOPERS = [Depends(require_developer)]
@@ -417,7 +510,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
     app.state.rate_limit = RateLimit()
-    app.state.allowed_tools = ALLOWED_TOOLS
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))

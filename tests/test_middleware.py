@@ -4,20 +4,23 @@ allow-list checked again outside the graph, and the filter on answers and logs."
 import io
 import json
 import logging
+import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from vouch.api import create_app
+from vouch.api import compliance_profile, create_app, profile_tools
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import SUBMIT_ANSWER
 from vouch.limits import MAX_MESSAGE_BYTES, RateLimit
+from vouch.profile import NORDLICHT_PROFILE, load_profile
 from vouch.redaction import install_log_redaction
-from vouch.settings import POLICY_DIR_ENV, Settings
+from vouch.settings import Settings
 
-DEMO_CONTROL = "NK-ENC-01"
+DEMO_CONTROL = "4.1.2"
 
 
 def read_events(response) -> list[tuple[str, dict]]:
@@ -128,10 +131,10 @@ def test_a_tool_outside_the_allow_list_is_refused_when_the_model_asks_for_it(tmp
     script = {
         "gather": [
             {"tool": "read_file", "args": {"path": "/etc/passwd"}},
-            {"tool": "search_policies", "args": {"query": "encrypt"}},
-            {"answer": "Laptops are encrypted.", "cited": ["encryption-policy"]},
+            {"tool": "search_policies", "args": {"query": "password second factor"}},
+            {"answer": "Passwords have at least 12 characters."},
         ],
-        "judge": {"covered_points": ["ENC-1"]},
+        "judge": {"requirements": []},
     }
     client = client_for(Settings(fake_script=write_script(tmp_path, script)))
 
@@ -143,12 +146,33 @@ def test_a_tool_outside_the_allow_list_is_refused_when_the_model_asks_for_it(tmp
     assert events[-1][0] == "result"  # the run goes on without it
 
 
+def test_the_api_takes_its_allow_list_from_the_compliance_profile(tmp_path):
+    """A profile that allows no records: the API refuses search_records before the graph does,
+    so the one guard step is the API's."""
+    script = {
+        "gather": [
+            {"tool": "search_records", "args": {"query": "access review"}},
+            {"answer": "Nothing was searched."},
+        ],
+    }
+    client = client_for(Settings(fake_script=write_script(tmp_path, script)))
+    profile = load_profile(copy_profile(tmp_path, policies="policies"))
+    client.app.dependency_overrides[compliance_profile] = lambda: profile
+
+    events = read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
+
+    assert guard_steps(events) == [
+        "Refused search_records: it isn't on the compliance profile's allow-list."
+    ]
+    assert events[-1][0] == "result"
+
+
 def test_the_api_refuses_a_tool_the_graph_would_run_once_the_allow_list_drops_it(monkeypatch):
     """The API's check stands on its own: here the graph would run the search, the API won't."""
     searches = []
-    monkeypatch.setattr("vouch.graph.search_policies", lambda *a, **k: searches.append(a) or [])
+    monkeypatch.setattr("vouch.graph.search_folder", lambda *a, **k: searches.append(a) or [])
     client = client_for()
-    client.app.state.allowed_tools = frozenset({SUBMIT_ANSWER})
+    client.app.dependency_overrides[profile_tools] = lambda: frozenset({SUBMIT_ANSWER})
 
     events = read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
 
@@ -181,18 +205,32 @@ def server_log():
     root.setLevel(level)
 
 
+def copy_profile(tmp_path: Path, **sources: str) -> Path:
+    """Nordlicht's profile and evidence copied to tmp_path/nordlicht, allowing only the
+    sources named (name=folder)."""
+    folder = tmp_path / "nordlicht"
+    shutil.copytree(NORDLICHT_PROFILE.parent, folder)
+    path = folder / "profile.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["evidence_sources"] = {name: {"folder": where} for name, where in sources.items()}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return path
+
+
 @pytest.fixture
-def planted_policies(tmp_path, monkeypatch) -> Path:
-    """A policy folder whose one document carries a key and a stranger's e-mail address."""
-    folder = tmp_path / "policies"
+def planted_policies(tmp_path) -> Path:
+    """A compliance profile whose one policy carries a key and a stranger's e-mail address."""
+    path = copy_profile(tmp_path, policies="policies")
+    folder = path.parent / "policies"
+    shutil.rmtree(folder)
     folder.mkdir()
     (folder / "encryption-policy.md").write_text(
+        '---\nid: encryption-policy\nkind: documented\nversion: "1.0"\n---\n'
         f"# Encryption {PLANTED_EMAIL}\n\n"
         f"Laptops are encrypted. The recovery service key is {PLANTED_KEY}; "
         f"questions to {PLANTED_EMAIL}.\n"
     )
-    monkeypatch.setenv(POLICY_DIR_ENV, str(folder))
-    return folder
+    return path
 
 
 def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_log(
@@ -202,14 +240,24 @@ def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_
     script = {
         "gather": [
             {"tool": "search_policies", "args": {"query": "encrypted"}},
-            {
-                "answer": f"Laptops are encrypted (key {PLANTED_KEY}, ask {PLANTED_EMAIL}).",
-                "cited": ["encryption-policy"],
-            },
+            {"answer": f"Laptops are encrypted (key {PLANTED_KEY}, ask {PLANTED_EMAIL})."},
         ],
-        "judge": {"covered_points": ["ENC-1"]},
+        "judge": {
+            "requirements": [
+                {
+                    "requirement_id": "M1",
+                    "verdict": "partly-evidenced",
+                    "reason": f"Questions go to {PLANTED_EMAIL}.",
+                    "citations": [
+                        {"doc_id": "encryption-policy", "quote": "Laptops are encrypted. The recovery"}
+                    ],
+                }
+            ]
+        },
     }
     client = client_for(Settings(fake_script=write_script(tmp_path, script)))
+    profile = load_profile(planted_policies)
+    client.app.dependency_overrides[compliance_profile] = lambda: profile
 
     response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
@@ -217,20 +265,24 @@ def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_
     assert events[-1][0] == "result"
     assessment = events[-1][1]["assessment"]
     assert assessment["answer"] == "Laptops are encrypted (key [removed], ask [removed])."
-    assert assessment["sources"] == [
-        {"doc_id": "encryption-policy", "heading": "Encryption [removed]"}
-    ]
+    (m1,) = [r for r in assessment["requirements"] if r["id"] == "M1"]
+    assert m1["reason"].startswith("Questions go to [removed].")
+    assert m1["citations"][0]["section"] == "Encryption [removed]"
+    requirement = next(data for name, data in events if name == "requirement")["requirement"]
+    assert requirement == m1  # the requirement event is redacted as the result is
     for planted in (PLANTED_KEY, PLANTED_EMAIL):
         assert planted not in response.text
         assert planted not in server_log.getvalue()
-    assert "Removed a key and an e-mail address from the assessment." in guard_steps(events)
+    assert "Removed an e-mail address from the requirement." in guard_steps(events)
+    # The requirements come before the answer in the Assessment, so the address is found first.
+    assert "Removed an e-mail address and a key from the assessment." in guard_steps(events)
 
 
 def test_a_planted_key_and_email_in_a_failure_never_reach_the_log(server_log, monkeypatch):
     def leaking_search(*args, **kwargs):
         raise RuntimeError(f"bad passage: {PLANTED_KEY} {PLANTED_EMAIL}")
 
-    monkeypatch.setattr("vouch.graph.search_policies", leaking_search)
+    monkeypatch.setattr("vouch.graph.search_folder", leaking_search)
 
     response = client_for().post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
@@ -244,10 +296,7 @@ def test_a_planted_key_and_email_in_a_failure_never_reach_the_log(server_log, mo
 def test_the_apps_own_secret_values_are_removed_whatever_their_shape(tmp_path):
     """A key with no known prefix is still removed: the app knows its own secrets."""
     odd_key = "Zq8-nothing-like-a-known-prefix-3141"
-    script = {
-        "gather": [{"answer": f"The key is {odd_key}.", "cited": []}],
-        "judge": {"covered_points": []},
-    }
+    script = {"gather": [{"answer": f"The key is {odd_key}."}]}
     settings = Settings(
         fake_script=write_script(tmp_path, script), openrouter_api_key=SecretStr(odd_key)
     )
@@ -256,3 +305,18 @@ def test_the_apps_own_secret_values_are_removed_whatever_their_shape(tmp_path):
 
     assert odd_key not in response.text
     assert read_events(response)[-1][1]["assessment"]["answer"] == "The key is [removed]."
+
+
+def test_the_reviewed_assessment_is_redacted_as_the_stream_is(tmp_path):
+    """The paused thread keeps the model's words as written; the review's answer removes them."""
+    script = {"gather": [{"answer": f"Ask {PLANTED_EMAIL} about the key {PLANTED_KEY}."}]}
+    client = client_for(Settings(fake_script=write_script(tmp_path, script)))
+    events = read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
+    thread_id = events[-1][1]["assessment"]["thread_id"]
+
+    response = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
+
+    assert response.status_code == 200
+    assert response.json()["assessment"]["answer"] == "Ask [removed] about the key [removed]."
+    for planted in (PLANTED_KEY, PLANTED_EMAIL):
+        assert planted not in response.text

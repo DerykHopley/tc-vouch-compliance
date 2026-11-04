@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.28.1",
     "langgraph-checkpoint-postgres>=3.2.0",
     "psycopg[binary]>=3.3.8",
+    "pydantic>=2.14.2",
 ]
 
 [project.scripts]
@@ -22,6 +23,7 @@ vouch-db-setup = "vouch.database:main"
 
 [dependency-groups]
 dev = [
+    "openpyxl>=3.1.5",
     "pyjwt[crypto]>=2.9",
     "pytest",
     "pytest-socket>=0.8.1",

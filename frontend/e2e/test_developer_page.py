@@ -38,7 +38,7 @@ def test_a_developer_sees_the_daily_limit_and_every_assessments_usage_totalled(
     page: Page, vouch_url
 ):
     """#35. The servers are shared by the tests, so the totals hold whatever ran before."""
-    page.request.post(f"{vouch_url}/api/assessments", data={"control_id": "NK-ENC-01"})
+    page.request.post(f"{vouch_url}/api/assessments", data={"control_id": "4.1.2"})
     page.goto(f"{vouch_url}/developer")
 
     settings = page.get_by_role("region", name="Developer settings")

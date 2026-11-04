@@ -89,6 +89,16 @@ def test_redact_data_reaches_every_string_and_names_each_kind_once():
     assert removed == ["a key", "an e-mail address"]
 
 
+def test_redact_data_reaches_strings_inside_tuples():
+    """dataclasses.asdict keeps tuples: a requirement's citations reach the stream as one."""
+    data = {"citations": ({"section": "Contact jo@gmail.com"},)}
+
+    clean, removed = redact_data(data)
+
+    assert clean == {"citations": [{"section": "Contact [removed]"}]}
+    assert removed == ["an e-mail address"]
+
+
 def test_the_apps_own_secret_values_are_removed_exactly():
     settings = Settings(
         clerk=ClerkKeys(

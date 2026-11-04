@@ -35,7 +35,7 @@ def test_a_built_asset_is_served_as_itself(client):
 
 
 def test_a_deep_link_loads_the_page_so_the_app_can_route_it(client):
-    response = client.get("/controls/NK-ENC-01", headers=BROWSER)
+    response = client.get("/controls/4.1.2", headers=BROWSER)
 
     assert response.status_code == 200
     assert response.text == PAGE
