@@ -1,0 +1,16 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "services secured systems access"}},
+    {"tool": "search_records", "args": {"query": "services secured systems access"}},
+    {"answer": "Draft answer for 4.1.2, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The standard says sign-in methods follow each system's exposure, but no record shows that assessment was done.", "citations": [{"doc_id": "authentication-standard", "quote": "We follow the national cyber security authority's current guidance on sign-in methods."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Long passwords with a breach check and a second factor online, as the directory settings show.", "citations": [{"doc_id": "authentication-standard", "quote": "The directory blocks passwords found in known breach lists."}, {"doc_id": "mfa-rollout-record", "quote": "Screenshot notes from the directory's password settings, 14 August 2026: minimum length 12 characters; breached-password check on; no expiry timer; account locked for 15 minutes after 10 failed attempts."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Methods are defined per exposure and enforced as the rollout table shows.", "citations": [{"doc_id": "authentication-standard", "quote": "We follow the national cyber security authority's current guidance on sign-in methods."}, {"doc_id": "mfa-rollout-record", "quote": "All 9 administrator accounts are separate from their owners' everyday accounts and require a hardware security key since 15 April 2026."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "At least 12 characters and a breached-password check, set in the directory.", "citations": [{"doc_id": "authentication-standard", "quote": "Passwords have at least 12 characters."}, {"doc_id": "mfa-rollout-record", "quote": "Screenshot notes from the directory's password settings, 14 August 2026: minimum length 12 characters; breached-password check on; no expiry timer; account locked for 15 minutes after 10 failed attempts."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Separate administrator accounts with hardware keys since April 2026.", "citations": [{"doc_id": "authentication-standard", "quote": "Administrator accounts always require a hardware security key."}, {"doc_id": "mfa-rollout-record", "quote": "All 9 administrator accounts are separate from their owners' everyday accounts and require a hardware security key since 15 April 2026."}]}
+    ]
+  }
+}

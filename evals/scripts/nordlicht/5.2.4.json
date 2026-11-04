@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "analysed recorded extent event"}},
+    {"tool": "search_records", "args": {"query": "analysed recorded extent event"}},
+    {"answer": "Draft answer for 5.2.4, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Logging rules agreed with the works council, and the scope list and reviews show them in use.", "citations": [{"doc_id": "log-review-record", "quote": "Email | Customer correspondence | Internet | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions, forwarding rules"}, {"doc_id": "logging-standard", "quote": "Logs can hold personal data, so we log only what we need, and the works council has agreed to these rules."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Sign-ins, rights changes and administrator actions are logged, as the scope list shows.", "citations": [{"doc_id": "log-review-record", "quote": "Directory | Accounts and rights | Office network | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions"}, {"doc_id": "logging-standard", "quote": "Every system in scope records sign-ins, failed sign-ins and changes to accounts and rights."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Each system's need for logging is decided and recorded in the March scope list.", "citations": [{"doc_id": "log-review-record", "quote": "Checked on 9 March 2026 by the IT operations lead."}, {"doc_id": "logging-standard", "quote": "For each IT system, the IT operations lead decides whether it needs logging, based on what data it holds and how exposed it is."}]},
+      {"requirement_id": "M5", "verdict": "evidenced", "reason": "Monthly reviews from June to September are recorded with findings.", "citations": [{"doc_id": "log-review-record", "quote": "June 2026 | 2026-07-03 | 1 account with 40 failed sign-ins from abroad | Yes, as 2026-028"}, {"doc_id": "logging-standard", "quote": "Logs let us notice misuse and attacks early, and work out what happened after an incident."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Findings go to the security desk, and two did.", "citations": [{"doc_id": "log-review-record", "quote": "Canteen menu screen | Nothing confidential | Office network | No: holds no protected data"}, {"doc_id": "logging-standard", "quote": "Anything found in a log review that may be a security event is reported to the security desk under the security event reporting procedure."}]},
+      {"requirement_id": "S2", "verdict": "partly-evidenced", "reason": "The standard says other administrators can't change logs, but nothing shows it.", "citations": [{"doc_id": "logging-standard", "quote": "Administrators of other systems cannot change or delete logs there."}]},
+      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "Logging covers systems, not network traffic.", "citations": []}
+    ]
+  }
+}

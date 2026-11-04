@@ -1,0 +1,13 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "cryptographic procedures managed extent"}},
+    {"tool": "search_records", "args": {"query": "cryptographic procedures managed extent"}},
+    {"answer": "Draft answer for 5.1.1, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The approved methods match current guidance, but the standard was approved in March 2022 with a yearly review, so it is stale.", "citations": [{"doc_id": "encryption-standard", "quote": "We use only encryption methods that the national cyber security authority recommends: AES with keys of at least 128 bits for stored data, RSA with at least 3072 bits or elliptic curves with at least 256 bits for key exchange and signatures, and SHA-256 or stronger for hashing."}]},
+      {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "Methods, key strengths and key handling are covered, but the standard is stale.", "citations": [{"doc_id": "encryption-standard", "quote": "We use only encryption methods that the national cyber security authority recommends: AES with keys of at least 128 bits for stored data, RSA with at least 3072 bits or elliptic curves with at least 256 bits for key exchange and signatures, and SHA-256 or stronger for hashing."}]}
+    ]
+  }
+}

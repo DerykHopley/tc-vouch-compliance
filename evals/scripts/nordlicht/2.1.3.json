@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "information handling arising respect"}},
+    {"tool": "search_records", "args": {"query": "information handling arising respect"}},
+    {"answer": "Draft answer for 2.1.3, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "166 of 171 completed the 2026 course; the rest are scheduled.", "citations": [{"doc_id": "training-attendance-record", "quote": "The 2026 basic course ran from 12 January to 31 March."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "The concept lists the policy, reporting, malware, login rules, NDAs and keeping company information on company systems.", "citations": [{"doc_id": "awareness-training-concept", "quote": "The yearly security training covers: our information security policy, how to report a security event, what to do when malware is suspected, password and login rules, keeping customer information confidential under a non-disclosure agreement, and the rule that company information stays on company systems, never in private online storage."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Administrators, managers and customer-network staff get their own sessions.", "citations": [{"doc_id": "awareness-training-concept", "quote": "Staff who work on customer networks or in prototype areas receive the customer-specific briefing before they start."}, {"doc_id": "training-attendance-record", "quote": "Managers: access approvals and incidents | 2026-03-04 | 22 | 20"}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Management approved the concept on 16 February 2026.", "citations": [{"doc_id": "awareness-training-concept", "quote": "Management approved this concept on 16 February 2026."}]},
+      {"requirement_id": "S4", "verdict": "evidenced", "reason": "A yearly course, and a briefing after the February phishing incident.", "citations": [{"doc_id": "awareness-training-concept", "quote": "After a serious incident or a new kind of phishing attack, the information security officer sends a short briefing to everyone affected."}, {"doc_id": "training-attendance-record", "quote": "After the phishing incident 2026-007, a two-page briefing on spotting fake sign-in pages was sent to all employees on 16 February 2026; 158 confirmed reading it."}]},
+      {"requirement_id": "S5", "verdict": "evidenced", "reason": "The training platform export records completion per person.", "citations": [{"doc_id": "training-attendance-record", "quote": "Export from our training server, 30 September 2026."}]},
+      {"requirement_id": "S6", "verdict": "evidenced", "reason": "The information security officer and the security desk are named in every course and on the intranet.", "citations": [{"doc_id": "awareness-training-concept", "quote": "The information security officer and the security desk are named in every course and on the intranet as the people to ask about security."}]}
+    ]
+  }
+}
