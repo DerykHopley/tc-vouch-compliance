@@ -110,11 +110,10 @@ AUDIT_RESULT = re.compile(
 )
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
 USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
+QUESTION_SHOWN = 90  # the load step shortens a longer control question to this many characters
 # A remediation item the model didn't draft, or one for a requirement the lead overrode to
 # not evidenced: the lead fills it in.
 NOT_DRAFTED = "not drafted"  # its "missing"
-LOAD_CONTROL = "load_control"  # the first step's node: the control, loaded before the graph
-QUESTION_SHOWN = 90  # the load step shortens a longer control question to this many characters
 NO_OWNER = "no owner suggested"  # its owner role
 DEFAULT_DUE_DAYS = 90  # its due date, counted from today
 MAX_DUE_DAYS = 365
@@ -1185,18 +1184,18 @@ class Step:
     def describe(self) -> str:
         """One plain sentence, in the glossary's words, saying what the step did."""
         update = self.update
-        if self.node == LOAD_CONTROL:
+        if self.node == "load_control":
             control: IsaControl = update["control"]
             requirements: ControlRequirements = update["control_requirements"]
             question = textwrap.shorten(control.question, QUESTION_SHOWN, placeholder="…")
             applicable, excluded = len(requirements.applicable), len(requirements.not_applicable)
             text = (
                 f"Loaded control {control.id}: {question} "
-                f"{_plural(applicable, 'requirement')} {'applies' if applicable == 1 else 'apply'}"
-                f" under {update['company']}'s profile"
+                f"{_plural(applicable, 'requirement')} {_verb(applicable, 'applies', 'apply')} "
+                f"under {self.profile.company}'s profile"
             )
             if excluded:
-                text += f"; {excluded} {'is' if excluded == 1 else 'are'} not applicable"
+                text += f"; {excluded} {_verb(excluded, 'is', 'are')} not applicable"
             return text + "."
         if self.node == "apply_overlays":
             added = _by_overlay(update["overlay_requirements"])
@@ -1269,7 +1268,8 @@ class Step:
                 return f"No remediation item drafted: {waiting}."
             if not drafts:
                 return "No requirement is not evidenced, so no remediation item was drafted."
-            made = len(drafts) - len(update.get("not_drafted", []))  # not the placeholders
+            not_drafted = update.get("not_drafted", [])
+            made = len(drafts) - len(not_drafted)  # not the placeholders
             text = (
                 f"Drafted {_plural(made, 'remediation item')}."
                 if made
@@ -1283,8 +1283,8 @@ class Step:
                     f"A draft claimed an audit result (“{word}”), so the drafts were asked for "
                     f"again. {text}"
                 )
-            if update.get("not_drafted"):
-                text += " Not drafted: " + ", ".join(update["not_drafted"]) + "."
+            if not_drafted:
+                text += " Not drafted: " + ", ".join(not_drafted) + "."
             return text
         if self.node == "review":
             review = update.get("review")
@@ -1304,12 +1304,8 @@ class Step:
 
 def _loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
     """The first step: the control, loaded before the graph runs, and what applies of it."""
-    update = {
-        "control": control,
-        "control_requirements": profile.requirements_for(control),
-        "company": profile.company,
-    }
-    return Step(LOAD_CONTROL, update, profile)
+    update = {"control": control, "control_requirements": profile.requirements_for(control)}
+    return Step("load_control", update, profile)
 
 
 def _waiting_step() -> Step:
@@ -1355,6 +1351,11 @@ def _apply_rules(requirement: RequirementVerdict, about_doing: bool) -> Requirem
 
 def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def _verb(count: int, one: str, many: str) -> str:
+    """The verb that agrees with this count: _verb(1, "is", "are") is "is"."""
+    return one if count == 1 else many
 
 
 def _model_name(model: BaseChatModel) -> str:
@@ -1436,9 +1437,9 @@ def assess_steps(
     today: date | None = None,
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
-    Step saying the control was loaded, a Step per node as it finishes (and a guard Step per dropped citation), each
-    RequirementVerdict once its quotes are checked, a Step saying it waits for review, then the
-    proposed Assessment, whose `thread_id` resumes it (see `resume`).
+    Step saying the control was loaded, a Step per node as it finishes (and a guard Step per
+    dropped citation), each RequirementVerdict once its quotes are checked, a Step saying it
+    waits for review, then the proposed Assessment, whose `thread_id` resumes it (see `resume`).
 
     Without a checkpointer the thread is kept in a fresh in-memory saver, so it can't be
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
