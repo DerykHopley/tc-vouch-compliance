@@ -7,7 +7,12 @@
 #
 # A port already in use stops the run before anything starts. The API never builds the real
 # model: OPENROUTER_API_KEY is dropped, and ASSESS_FAKE_SCRIPT (if set) picks the fake's script.
-# Needs: backend deps (uv sync) and front-end deps (npm ci in frontend/).
+# Needs: bash 4.4 or newer, backend deps (uv sync) and front-end deps (npm ci in frontend/).
+# `wait -n` and an empty array under `set -u` need bash 4.4; macOS ships 3.2.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  echo "scripts/dev.sh needs bash 4.4 or newer; this is $BASH_VERSION. On macOS: brew install bash" >&2
+  exit 1
+fi
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,15 +38,15 @@ if [ "$API_PORT" -eq "$WEB_PORT" ]; then
   exit 2
 fi
 
-# Free when a server could bind it now (SO_REUSEADDR, as uvicorn and Vite do, so a recently
-# closed connection doesn't count as in use).
+# Taken when anything answers on either loopback: a Vite on `localhost` may listen on ::1 only.
+# (tests/test_dev_command.py probes the same way.)
 port_free() {
   python3 -c '
 import socket, sys
-s = socket.socket()
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try: s.bind(("127.0.0.1", int(sys.argv[1])))
-except OSError: sys.exit(1)' "$1"
+for host in ("127.0.0.1", "::1"):
+    try: socket.create_connection((host, int(sys.argv[1])), timeout=1).close()
+    except OSError: continue
+    sys.exit(1)' "$1"
 }
 for pair in "api-port $API_PORT" "web-port $WEB_PORT"; do
   read -r flag port <<<"$pair"
@@ -90,7 +95,11 @@ wait_for() {
   for _ in $(seq 1 120); do
     if curl -fsS "$1" >/dev/null 2>&1; then return 0; fi
     for pid in "${PIDS[@]}"; do
-      kill -0 "$pid" 2>/dev/null || { echo "A server stopped while starting; see its output above." >&2; exit 1; }
+      kill -0 "$pid" 2>/dev/null || {
+        echo "A server stopped while starting; see its output above. If it says its port is" \
+          "in use, the port may have been taken just now: rerun, or choose another port." >&2
+        exit 1
+      }
     done
     sleep 0.5
   done
@@ -105,6 +114,6 @@ echo "Vouch is running: $URL   (API on port $API_PORT; Ctrl-C stops both)"
 echo
 
 # Either server exiting on its own ends the run, and the other one with it.
-wait -n
+wait -n || true  # a crashed server's non-zero status must not end the run before the message
 echo "A server stopped; stopping the other." >&2
 exit 1
