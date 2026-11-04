@@ -62,22 +62,20 @@ class Script(BaseModel):
     judge: Judgement | list[Judgement] = Field(default_factory=Judgement)
     remediate: RemediationPlan | list[RemediationPlan] = Field(default_factory=RemediationPlan)
 
-    @property
-    def judgements(self) -> list[Judgement]:
-        return self.judge if isinstance(self.judge, list) else [self.judge]
-
-    @property
-    def plans(self) -> list[RemediationPlan]:
-        return self.remediate if isinstance(self.remediate, list) else [self.remediate]
+    def replies_for(self, schema: type[BaseModel]) -> list[BaseModel]:
+        """The structured replies scripted for a schema: the plans for a RemediationPlan, the
+        judgements for anything else (the judge's)."""
+        replies = self.remediate if schema is RemediationPlan else self.judge
+        return replies if isinstance(replies, list) else [replies]
 
     @model_validator(mode="after")
     def _answer_comes_last(self) -> "Script":
         ends_with_answer = isinstance(self.gather[-1], AnswerTurn)
         if not ends_with_answer:  # a ValueError, so pydantic reports it as a validation error
             raise ValueError("the last gather turn must be an answer")
-        if not self.judgements:
+        if not self.replies_for(Judgement):
             raise ValueError("judge: a list of judgements needs at least one")
-        if not self.plans:
+        if not self.replies_for(RemediationPlan):
             raise ValueError("remediate: a list of plans needs at least one")
         return self
 
@@ -106,8 +104,7 @@ class ScriptedChatModel(BaseChatModel):
 
     script: Script
     turn: int = 0
-    judge_turn: int = 0
-    remediate_turn: int = 0
+    turns: dict[Any, int] = Field(default_factory=dict)  # structured replies given, per schema
     prompts: list[list[BaseMessage]] = Field(default_factory=list)  # each call's messages, in order
 
     @classmethod
@@ -130,24 +127,19 @@ class ScriptedChatModel(BaseChatModel):
         next plan (the last repeats); with `include_raw`, a dict with the raw message (carrying
         token usage), as LangChain's models give."""
 
-        def judge(messages: list[BaseMessage]) -> Any:
+        def reply(messages: list[BaseMessage]) -> Any:
             self.prompts.append(list(messages))
-            if schema is RemediationPlan:
-                plans = self.script.plans
-                planned: BaseModel = plans[min(self.remediate_turn, len(plans) - 1)]
-                self.remediate_turn += 1
-            else:
-                judgements = self.script.judgements
-                planned = judgements[min(self.judge_turn, len(judgements) - 1)]
-                self.judge_turn += 1
-            parsed = schema.model_validate(planned.model_dump())
+            replies = self.script.replies_for(schema)
+            turn = self.turns.get(schema, 0)
+            self.turns[schema] = turn + 1
+            parsed = schema.model_validate(replies[min(turn, len(replies) - 1)].model_dump())
             if not include_raw:
                 return parsed
             content = parsed.model_dump_json()
             raw = AIMessage(content, usage_metadata=_fake_usage(messages, content))
             return {"raw": raw, "parsed": parsed, "parsing_error": None}
 
-        return RunnableLambda(judge)
+        return RunnableLambda(reply)
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any

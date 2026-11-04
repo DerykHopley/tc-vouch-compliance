@@ -4,7 +4,7 @@ from importlib.metadata import version
 import pytest
 from fastapi.testclient import TestClient
 
-from vouch import profile
+from vouch import ScriptedChatModel, profile
 from vouch.api import app, load_default_profile
 from vouch.settings import FAKE_SCRIPT_ENV
 
@@ -85,7 +85,9 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
         "review",
     ]
     assert all(set(s) == {"node", "text"} and s["text"] for s in steps)
-    assert steps[5]["text"] == "Judged 4 of 5 requirements evidenced."
+    assert next(s["text"] for s in steps if s["node"] == "judge") == (
+        "Judged 4 of 5 requirements evidenced."
+    )
     assert steps[-1]["text"] == "Waiting for the compliance lead's review."
     requirements = [data["requirement"] for name, data in events if name == "requirement"]
     assert [(r["id"], r["verdict"]) for r in requirements] == [
@@ -148,13 +150,52 @@ def test_reviewing_a_thread_that_is_not_waiting_is_409(client):
     first = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "reject"})
 
     again = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
-    unknown = client.post("/api/assessments/no-such-thread/review", json={"decision": "accept"})
 
     assert first.status_code == 200
     assert first.json()["assessment"]["status"] == "rejected"
     assert again.status_code == 409
-    assert unknown.status_code == 409
-    assert "not waiting for review" in unknown.json()["detail"]
+    assert "not waiting for review" in again.json()["detail"]
+
+
+def test_reviewing_an_unknown_thread_is_404(client):
+    response = client.post("/api/assessments/no-such-thread/review", json={"decision": "accept"})
+
+    assert response.status_code == 404
+    assert "no-such-thread" in response.json()["detail"]
+
+
+def test_review_needs_no_model_script(client, monkeypatch, tmp_path):
+    thread_id = proposed_thread(client)
+    broken = tmp_path / "broken.json"
+    broken.write_text('{"gather": [')
+    monkeypatch.setenv(FAKE_SCRIPT_ENV, str(broken))
+
+    response = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
+
+    assert response.status_code == 200
+    assert response.json()["assessment"]["model"] == "scripted-fake"
+
+
+def test_assessing_again_after_reject_carries_the_note_to_the_model(client, monkeypatch):
+    prompts = []
+    real = ScriptedChatModel._generate
+
+    def recording(self, messages, *args, **kwargs):
+        prompts.append(messages)
+        return real(self, messages, *args, **kwargs)
+
+    monkeypatch.setattr(ScriptedChatModel, "_generate", recording)
+    note = "The exposure assessment is in the records folder."
+    thread_id = proposed_thread(client)
+    client.post(f"/api/assessments/{thread_id}/review", json={"decision": "reject", "note": note})
+    prompts.clear()
+
+    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL, "note": note})
+
+    events = read_events(response)
+    assert events[-1][0] == "result"
+    assert events[-1][1]["assessment"]["thread_id"] != thread_id
+    assert note in prompts[0][-1].content
 
 
 @pytest.mark.parametrize(

@@ -8,14 +8,16 @@ the model.
 import json
 import operator
 import re
+import threading
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict, get_args
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import Runnable, RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -39,9 +41,11 @@ SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
 PROMPT_VERSION = "m1-remediation-review-1"  # change it whenever a prompt below changes
 
-Verdict = Literal["evidenced", "partly-evidenced", "not-evidenced", "not-applicable"]
-JUDGED_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced")
+JudgedVerdict = Literal["evidenced", "partly-evidenced", "not-evidenced"]
+Verdict = JudgedVerdict | Literal["not-applicable"]
+JUDGED_VERDICTS: tuple[JudgedVerdict, ...] = get_args(JudgedVerdict)
 NOT_APPLICABLE: Verdict = "not-applicable"
+Decision = Literal["accept", "reject"]
 NOT_JUDGED = "not judged"  # the reason given when the model skipped a requirement or misnamed it
 NO_SOURCE = "no evidence source could be read"
 # The columns the roll-up counts: should requirements only give the should score.
@@ -55,8 +59,11 @@ AUDIT_RESULT = re.compile(
 )
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
 USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
-NOT_DRAFTED = "not drafted"  # what's missing, when the model skipped a requirement's draft
-DEFAULT_DUE_DAYS = 90  # the due date of a draft the model skipped
+# A remediation item the model didn't draft, or one for a requirement the lead overrode to
+# not evidenced: the lead fills it in.
+NOT_DRAFTED = "not drafted"  # its "missing"
+NO_OWNER = "no owner suggested"  # its owner role
+DEFAULT_DUE_DAYS = 90  # its due date, counted from today
 MAX_DUE_DAYS = 365
 
 
@@ -89,7 +96,9 @@ class Judgement(BaseModel):
     requirements: list[RequirementJudgement] = Field(default_factory=list)
 
 
-class RemediationItem(BaseModel):
+class RemediationItemReply(BaseModel):
+    """The model's draft of one remediation item."""
+
     requirement_id: str = Field(description="The not-evidenced requirement's id, such as M1.")
     missing: str = Field(description="What evidence or practice is missing, in one sentence.")
     owner_role: str = Field(description="The role that should own the fix, not a person's name.")
@@ -101,7 +110,7 @@ class RemediationItem(BaseModel):
 class RemediationPlan(BaseModel):
     """One remediation item for each not-evidenced requirement listed."""
 
-    items: list[RemediationItem] = Field(default_factory=list)
+    items: list[RemediationItemReply] = Field(default_factory=list)
 
 
 SUBMIT_ANSWER_TOOL = {
@@ -156,7 +165,7 @@ class ShouldScore:
 
 
 @dataclass(frozen=True)
-class RemediationDraft:
+class RemediationItem:
     """A drafted remediation item for a not-evidenced requirement, until the lead approves it."""
 
     requirement_id: str
@@ -164,19 +173,25 @@ class RemediationDraft:
     owner_role: str
     due_date: str  # ISO 8601
 
+    @classmethod
+    def not_drafted(cls, requirement_id: str, today: date) -> "RemediationItem":
+        """An item for the lead to fill in."""
+        due = (today + timedelta(days=DEFAULT_DUE_DAYS)).isoformat()
+        return cls(requirement_id, NOT_DRAFTED, NO_OWNER, due)
+
 
 class OverrideRequest(BaseModel):
     """The lead changes one requirement's verdict, with a reason."""
 
     requirement_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    verdict: Literal["evidenced", "partly-evidenced", "not-evidenced"]
+    verdict: JudgedVerdict
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class ReviewDecision(BaseModel):
     """The compliance lead's review of one control: accept or reject, a note, any overrides."""
 
-    decision: Literal["accept", "reject"]
+    decision: Decision
     note: str = ""
     overrides: list[OverrideRequest] = Field(default_factory=list)
 
@@ -196,18 +211,27 @@ class Override:
 class Review:
     """The lead's recorded decision on the control."""
 
-    decision: Literal["accept", "reject"]
+    decision: Decision
     note: str
     overrides: list[Override]
+
+    @property
+    def status(self) -> "Status":
+        return REVIEWED[self.decision]
 
 
 Status = Literal["waiting-for-review", "accepted", "rejected"]
 WAITING: Status = "waiting-for-review"
+REVIEWED: dict[Decision, Status] = {"accept": "accepted", "reject": "rejected"}
 WAITING_TEXT = "Waiting for the compliance lead's review."
 
 
+class UnknownAssessmentError(LookupError):
+    """No assessment has this thread id."""
+
+
 class NotWaitingForReviewError(RuntimeError):
-    """The thread is unknown, or isn't paused at the review."""
+    """The assessment exists but isn't paused at the review (it was reviewed already)."""
 
 
 class InvalidReviewError(ValueError):
@@ -228,7 +252,7 @@ class Assessment:
     token_usage: dict[str, int] = field(default_factory=dict)
     model: str = ""
     prompt_version: str = PROMPT_VERSION
-    remediation: list[RemediationDraft] = field(default_factory=list)
+    remediation: list[RemediationItem] = field(default_factory=list)
     thread_id: str = ""  # resume this thread with the lead's review decision
     status: Status = WAITING
     review: Review | None = None
@@ -280,11 +304,13 @@ class AssessState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     today: str  # ISO 8601: due dates count from it
     note: str  # the lead's note from a rejected review, when this run was asked for again
-    remediation: list[RemediationDraft]
+    remediation: list[RemediationItem]
     remediate_rejected_word: str | None
     not_drafted: list[str]
     review: Review
     steps: Annotated[list[dict[str, str]], operator.add]  # each node's described step
+    model: str  # the model that drafted it, and its prompt version
+    prompt_version: str
 
 
 def _format_requirements(requirements: Iterable[Requirement]) -> str:
@@ -343,14 +369,15 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
     ]
 
 
-def _not_evidenced(state: AssessState) -> list[RequirementVerdict]:
-    return [r for r in state["requirements"] if r.verdict == "not-evidenced"]
+def _not_evidenced(requirements: list[RequirementVerdict]) -> list[RequirementVerdict]:
+    return [r for r in requirements if r.verdict == "not-evidenced"]
 
 
 def _remediation_prompt(state: AssessState) -> list[AnyMessage]:
     control = state["control"]
-    gaps = "\n".join(
-        f"- {r.id} ({r.column}): {r.text}\n  Why: {r.reason}" for r in _not_evidenced(state)
+    not_evidenced = "\n".join(
+        f"- {r.id} ({r.column}): {r.text}\n  Why: {r.reason}"
+        for r in _not_evidenced(state["requirements"])
     )
     return [
         SystemMessage(
@@ -360,39 +387,69 @@ def _remediation_prompt(state: AssessState) -> list[AnyMessage]:
             "until it is due. Say what is missing; never call the company compliant, "
             "certified or passed."
         ),
-        HumanMessage(f"Control {control.id}: {control.question}\nNot evidenced:\n{gaps}"),
+        HumanMessage(f"Control {control.id}: {control.question}\nNot evidenced:\n{not_evidenced}"),
     ]
 
 
 def _drafts(
-    gaps: list[RequirementVerdict], plan: RemediationPlan | None, today: date
-) -> tuple[list[RemediationDraft], list[str]]:
-    """One draft per gap, in the requirements' order, and the ids the model didn't draft.
+    not_evidenced: list[RequirementVerdict], plan: RemediationPlan | None, today: date
+) -> tuple[list[RemediationItem], list[str]]:
+    """One remediation item per not-evidenced requirement, in the requirements' order, and the
+    ids the model didn't draft.
 
-    A skipped requirement gets a draft saying "not drafted", due in DEFAULT_DUE_DAYS. Items
-    for requirements that aren't gaps are ignored; of two for one requirement, the first counts.
+    A skipped requirement gets an item saying "not drafted" (RemediationItem.not_drafted).
+    Items for other requirements are ignored; of two for one requirement, the first counts.
     """
-    given: dict[str, RemediationItem] = {}
+    given: dict[str, RemediationItemReply] = {}
     for item in plan.items if plan else []:
         given.setdefault(item.requirement_id, item)
     drafts, not_drafted = [], []
-    for req in gaps:
+    for req in not_evidenced:
         item = given.get(req.id)
         if item is None:
             not_drafted.append(req.id)
-            missing, owner, days = NOT_DRAFTED, NOT_DRAFTED, DEFAULT_DUE_DAYS
-        else:
-            missing, owner, days = item.missing, item.owner_role, item.due_in_days
-        due = (today + timedelta(days=days)).isoformat()
-        drafts.append(RemediationDraft(req.id, missing, owner, due))
+            drafts.append(RemediationItem.not_drafted(req.id, today))
+            continue
+        due = (today + timedelta(days=item.due_in_days)).isoformat()
+        drafts.append(RemediationItem(req.id, item.missing, item.owner_role, due))
     return drafts, not_drafted
+
+
+def _check_overrides(
+    requirements: list[RequirementVerdict], overrides: list[OverrideRequest]
+) -> None:
+    """Raise InvalidReviewError for an override naming a requirement the assessment didn't
+    judge (unknown, or not applicable under the profile), or naming one twice."""
+    judged = {r.id for r in requirements if r.verdict != NOT_APPLICABLE}
+    named = [o.requirement_id for o in overrides]
+    for requirement_id in named:
+        if requirement_id not in judged:
+            raise InvalidReviewError(
+                f"override names {requirement_id}, which this assessment didn't judge"
+            )
+    if len(set(named)) != len(named):
+        raise InvalidReviewError("an override names the same requirement twice")
+
+
+def _reviewed_remediation(
+    requirements: list[RequirementVerdict], drafted: list[RemediationItem], today: date
+) -> list[RemediationItem]:
+    """The remediation items after overrides: one per requirement still not evidenced. A
+    requirement overridden away from not evidenced loses its item; one overridden to it gets a
+    "not drafted" item for the lead."""
+    by_id = {item.requirement_id: item for item in drafted}
+    return [
+        by_id.get(r.id) or RemediationItem.not_drafted(r.id, today)
+        for r in _not_evidenced(requirements)
+    ]
 
 
 def _apply_overrides(
     requirements: list[RequirementVerdict], overrides: list[OverrideRequest]
 ) -> tuple[list[RequirementVerdict], list[Override]]:
     """The requirements with the lead's verdicts and reasons in place, and the overrides kept
-    with the agent's verdicts. The decision was checked against the requirements before."""
+    with the agent's verdicts. InvalidReviewError for overrides `_check_overrides` refuses."""
+    _check_overrides(requirements, overrides)
     by_id = {o.requirement_id: o for o in overrides}
     reviewed, kept = [], []
     for req in requirements:
@@ -447,13 +504,50 @@ def _usage_of(message: Any) -> list[dict[str, int]]:
     return [{k: usage[k] for k in USAGE_KEYS}]
 
 
-def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None = None):
+def _ask_until_clean[T](
+    model: Runnable,
+    prompt: list[AnyMessage],
+    read: Callable[[Any], tuple[T, list[str]]],
+    *,
+    what: str,
+    refusal: Callable[[str], str],
+) -> tuple[T, list[dict[str, int]], str | None]:
+    """Ask a structured-output model; `read` turns its parsed reply into a result and the
+    texts to check. A text claiming an audit result gets the reply asked for again once, with
+    `refusal(word)` added to the prompt, then OutputCheckError naming `what`.
+
+    Returns the result, the token usage, and the word that was refused (or None)."""
+    usage: list[dict[str, int]] = []
+    rejected = None
+    for attempt in range(OUTPUT_RETRIES + 1):
+        reply = model.invoke(prompt)
+        usage += _usage_of(reply["raw"])
+        result, texts = read(reply["parsed"])
+        word = next((w for text in texts if (w := claims_audit_result(text))), None)
+        if word is None:
+            break
+        if attempt == OUTPUT_RETRIES:
+            raise OutputCheckError(f"{what} claimed an audit result (“{word}”) again")
+        rejected = word
+        prompt = [*prompt, HumanMessage(refusal(word))]
+    return result, usage, rejected
+
+
+def _no_model(_: Any) -> Any:
+    raise RuntimeError("this graph was built without a model: it can only resume a review")
+
+
+def build_graph(model: BaseChatModel | None, checkpointer: BaseCheckpointSaver | None = None):
     """Compile the graph around a model and a checkpointer passed in by the caller.
 
-    The run pauses at the review interrupt, so a checkpointer keeps the thread to resume."""
-    bound = model.bind_tools([SEARCH_POLICIES_TOOL, SUBMIT_ANSWER_TOOL])
-    judge_model = model.with_structured_output(Judgement, include_raw=True)
-    remediation_model = model.with_structured_output(RemediationPlan, include_raw=True)
+    The run pauses at the review interrupt, so a checkpointer keeps the thread to resume.
+    Without a model the graph can only resume a review: no model is called after it."""
+    if model is None:
+        bound = judge_model = remediation_model = RunnableLambda(_no_model)
+    else:
+        bound = model.bind_tools([SEARCH_POLICIES_TOOL, SUBMIT_ANSWER_TOOL])
+        judge_model = model.with_structured_output(Judgement, include_raw=True)
+        remediation_model = model.with_structured_output(RemediationPlan, include_raw=True)
 
     def gather(state: AssessState) -> dict[str, Any]:
         reply = bound.invoke(state["messages"])
@@ -529,27 +623,21 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
         if SOURCE_UNAVAILABLE in state["warnings"]:  # nothing could be read, so nothing shown
             results, _ = _judged_requirements(control_requirements, None, NO_SOURCE)
             return {"requirements": results, "not_judged": []}
-        prompt, usage, rejected = _judge_prompt(state), [], None
-        for attempt in range(OUTPUT_RETRIES + 1):
-            reply = judge_model.invoke(prompt)
-            usage += _usage_of(reply["raw"])
-            results, not_judged = _judged_requirements(control_requirements, reply["parsed"])
-            judged = [r for r in results if r.verdict != NOT_APPLICABLE]
-            word = next((w for r in judged if (w := claims_audit_result(r.reason))), None)
-            if word is None:
-                break
-            if attempt == OUTPUT_RETRIES:
-                raise OutputCheckError(
-                    f"a judgement's reason claimed an audit result (“{word}”) again"
-                )
-            rejected = word
-            prompt = [
-                *prompt,
-                HumanMessage(
-                    f"Judgement refused: a reason says “{word}”, an audit result Vouch never "
-                    "claims. Judge again, saying only what the evidence shows."
-                ),
-            ]
+
+        def read(judgement: Judgement | None) -> tuple[Any, list[str]]:
+            results, not_judged = _judged_requirements(control_requirements, judgement)
+            return (results, not_judged), [r.reason for r in results if r.verdict != NOT_APPLICABLE]
+
+        (results, not_judged), usage, rejected = _ask_until_clean(
+            judge_model,
+            _judge_prompt(state),
+            read,
+            what="a judgement's reason",
+            refusal=lambda word: (
+                f"Judgement refused: a reason says “{word}”, an audit result Vouch never "
+                "claims. Judge again, saying only what the evidence shows."
+            ),
+        )
         return {
             "requirements": results,
             "not_judged": not_judged,
@@ -558,36 +646,28 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
         }
 
     def remediate(state: AssessState) -> dict[str, Any]:
-        """The model drafts one remediation item per not-evidenced requirement; no gaps, no
-        call. A draft claiming an audit result gets the plan asked for again once, then an
+        """The model drafts one remediation item per not-evidenced requirement; none of those,
+        no call. A draft claiming an audit result gets the plan asked for again once, then an
         error. Before the interrupt, so it only reads and asks the model."""
-        gaps = _not_evidenced(state)
-        if not gaps:
+        not_evidenced = _not_evidenced(state["requirements"])
+        if not not_evidenced:
             return {"remediation": [], "not_drafted": [], "remediate_rejected_word": None}
         today = date.fromisoformat(state["today"])
-        prompt, usage, rejected = _remediation_prompt(state), [], None
-        for attempt in range(OUTPUT_RETRIES + 1):
-            reply = remediation_model.invoke(prompt)
-            usage += _usage_of(reply["raw"])
-            drafts, not_drafted = _drafts(gaps, reply["parsed"], today)
-            word = next(
-                (w for d in drafts if (w := claims_audit_result(f"{d.missing} {d.owner_role}"))),
-                None,
-            )
-            if word is None:
-                break
-            if attempt == OUTPUT_RETRIES:
-                raise OutputCheckError(
-                    f"a remediation draft claimed an audit result (“{word}”) again"
-                )
-            rejected = word
-            prompt = [
-                *prompt,
-                HumanMessage(
-                    f"Remediation refused: a draft says “{word}”, an audit result Vouch never "
-                    "claims. Draft again, saying only what is missing."
-                ),
-            ]
+
+        def read(plan: RemediationPlan | None) -> tuple[Any, list[str]]:
+            drafts, not_drafted = _drafts(not_evidenced, plan, today)
+            return (drafts, not_drafted), [f"{d.missing} {d.owner_role}" for d in drafts]
+
+        (drafts, not_drafted), usage, rejected = _ask_until_clean(
+            remediation_model,
+            _remediation_prompt(state),
+            read,
+            what="a remediation draft",
+            refusal=lambda word: (
+                f"Remediation refused: a draft says “{word}”, an audit result Vouch never "
+                "claims. Draft again, saying only what is missing."
+            ),
+        )
         return {
             "remediation": drafts,
             "not_drafted": not_drafted,
@@ -600,8 +680,10 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
         nothing before the interrupt writes; the decision comes back as its value."""
         decision = ReviewDecision.model_validate(interrupt({"control_id": state["control"].id}))
         requirements, overrides = _apply_overrides(state["requirements"], decision.overrides)
+        today = date.fromisoformat(state["today"])
         return {
             "requirements": requirements,
+            "remediation": _reviewed_remediation(requirements, state["remediation"], today),
             "review": Review(decision.decision, decision.note, overrides),
         }
 
@@ -616,7 +698,7 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
 
         def run_and_describe(state: AssessState) -> dict[str, Any]:
             update = run(state)
-            return {**update, "steps": [{"node": node, "text": Step(node, update).describe()}]}
+            return {**update, "steps": [Step(node, update).to_dict()]}
 
         return run_and_describe
 
@@ -702,16 +784,21 @@ class Step:
             review = update.get("review")
             if review is None:
                 return WAITING_TEXT
-            text = (
-                "The compliance lead "
-                + ("accepted" if review.decision == "accept" else "rejected")
-                + " the assessment"
-            )
+            text = f"The compliance lead {review.status} the assessment"
             if review.overrides:
                 ids = ", ".join(o.requirement_id for o in review.overrides)
                 text += f", overriding {ids}"
             return text + "."
         return f"Finished the {self.node} step."
+
+    def to_dict(self) -> dict[str, str]:
+        """The step as the stream and the Assessment carry it."""
+        return {"node": self.node, "text": self.describe()}
+
+
+def _waiting_step() -> Step:
+    """The step a paused run ends with: the review node, interrupted, made no update."""
+    return Step("review", {})
 
 
 def _plural(count: int, noun: str) -> str:
@@ -734,7 +821,7 @@ STATE_TYPES: tuple[type, ...] = (
     ControlRequirements,
     NotApplicableRequirement,
     RequirementVerdict,
-    RemediationDraft,
+    RemediationItem,
     Review,
     Override,
 )
@@ -752,16 +839,16 @@ def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def _assessment(values: dict[str, Any], model: BaseChatModel, thread_id: str) -> Assessment:
+def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
     """The Assessment from the thread's state: proposed while it waits, reviewed after."""
     requirements = values["requirements"]
     review: Review | None = values.get("review")
-    status: Status = WAITING
-    if review is not None:
-        status = "accepted" if review.decision == "accept" else "rejected"
-    steps = list(values.get("steps", []))
+    steps = list(values["steps"])
     if review is None:
-        steps.append({"node": "review", "text": WAITING_TEXT})
+        status: Status = WAITING
+        steps.append(_waiting_step().to_dict())
+    else:
+        status = review.status
     return Assessment(
         control_id=values["control"].id,
         profile_id=values["profile_id"],
@@ -773,8 +860,9 @@ def _assessment(values: dict[str, Any], model: BaseChatModel, thread_id: str) ->
         warnings=list(dict.fromkeys(values["warnings"])),
         steps=steps,
         token_usage=_total_usage(values["usage"]),
-        model=_model_name(model),
-        remediation=values.get("remediation", []),
+        model=values["model"],
+        prompt_version=values["prompt_version"],
+        remediation=values["remediation"],
         thread_id=thread_id,
         status=status,
         review=review,
@@ -787,28 +875,30 @@ def assess_steps(
     model: BaseChatModel,
     checkpointer: BaseCheckpointSaver | None = None,
     *,
-    thread_id: str | None = None,
     note: str = "",
     today: date | None = None,
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
-    """Run the graph for one loaded control up to the review interrupt: a Step per node as it
-    finishes, each RequirementVerdict once judged, a Step saying it waits for review, then the
-    proposed Assessment, whose `thread_id` resumes it (see `resume`).
+    """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
+    Step per node as it finishes, each RequirementVerdict once judged, a Step saying it waits
+    for review, then the proposed Assessment, whose `thread_id` resumes it (see `resume`).
 
     Without a checkpointer the thread is kept in a fresh in-memory saver, so it can't be
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
     again; `today` (default: the date now) is what due dates count from."""
-    thread_id = thread_id or uuid.uuid4().hex
+    thread_id = uuid.uuid4().hex  # always a new thread: never piled onto an earlier run's state
     graph = build_graph(model, checkpointer or memory_checkpointer())
     control_requirements = profile.requirements_for(control)
     initial = {
         "control": control,
         "control_requirements": control_requirements,
         "profile_id": profile.id,
+        "model": _model_name(model),
+        "prompt_version": PROMPT_VERSION,
         "evidence": [],
         "warnings": [],
         "usage": [],
         "steps": [],
+        "remediation": [],
         "today": (today or date.today()).isoformat(),
         "note": note,
         "messages": _prompt(control, control_requirements, profile, note),
@@ -820,12 +910,12 @@ def assess_steps(
         for node, update in chunk.items()
     ):
         if node == "__interrupt__":
-            yield Step("review", {})
+            yield _waiting_step()
             continue
         yield Step(node, update or {})
         if node == "judge":
             yield from update["requirements"]
-    yield _assessment(graph.get_state(config).values, model, thread_id)
+    yield _assessment(graph.get_state(config).values, thread_id)
 
 
 def assess(
@@ -834,53 +924,51 @@ def assess(
     model: BaseChatModel,
     checkpointer: BaseCheckpointSaver | None = None,
     *,
-    thread_id: str | None = None,
     note: str = "",
     today: date | None = None,
 ) -> Assessment:
-    """Run the graph for one control under a compliance profile up to the review interrupt and
-    return the proposed Assessment; `resume` its `thread_id` with the lead's decision.
+    """Run the graph for one control under a compliance profile, on a new thread, up to the
+    review interrupt and return the proposed Assessment; `resume` its `thread_id` with the
+    lead's decision. Assessing a rejected control again is a new run, with the lead's `note`.
 
     An unknown control raises UnknownControlError before the model is called."""
     *_, assessment = assess_steps(
-        load_isa_control(control_id),
-        profile,
-        model,
-        checkpointer,
-        thread_id=thread_id,
-        note=note,
-        today=today,
+        load_isa_control(control_id), profile, model, checkpointer, note=note, today=today
     )
     if not isinstance(assessment, Assessment):
         raise TypeError(f"the graph ended without an Assessment for {control_id}")
     return assessment
 
 
+# One lock per thread, so two reviews of one assessment can't both find it waiting and resume
+# it: the second finds it reviewed. Locks are per process, as the in-memory saver is (M2).
+_review_locks: dict[str, threading.Lock] = {}
+_review_locks_guard = threading.Lock()
+
+
+def _review_lock(thread_id: str) -> threading.Lock:
+    with _review_locks_guard:
+        return _review_locks.setdefault(thread_id, threading.Lock())
+
+
 def resume(
-    thread_id: str,
-    decision: ReviewDecision,
-    model: BaseChatModel,
-    checkpointer: BaseCheckpointSaver,
+    thread_id: str, decision: ReviewDecision, checkpointer: BaseCheckpointSaver
 ) -> Assessment:
     """Resume a thread waiting for review with the lead's decision and return the reviewed
-    Assessment: overrides applied, the roll-up recalculated, the decision recorded.
+    Assessment: overrides applied, the roll-up and remediation items recalculated, the decision
+    recorded. No model is called.
 
-    Raises NotWaitingForReviewError for a thread that is unknown or not waiting, and
-    InvalidReviewError for an override naming a requirement the assessment didn't judge, or
-    naming one twice. Nothing is resumed when either is raised."""
-    graph = build_graph(model, checkpointer)
+    Raises UnknownAssessmentError for an unknown thread, NotWaitingForReviewError for one not
+    waiting (reviewed already, perhaps at the same moment), and InvalidReviewError for an
+    override `_check_overrides` refuses. Nothing is resumed when any is raised."""
+    graph = build_graph(None, checkpointer)
     config = _config(thread_id)
-    snapshot = graph.get_state(config)
-    if not snapshot.interrupts:
-        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-    judged = {r.id for r in snapshot.values["requirements"] if r.verdict != NOT_APPLICABLE}
-    named = [o.requirement_id for o in decision.overrides]
-    for requirement_id in named:
-        if requirement_id not in judged:
-            raise InvalidReviewError(
-                f"override names {requirement_id}, which this assessment didn't judge"
-            )
-    if len(set(named)) != len(named):
-        raise InvalidReviewError("an override names the same requirement twice")
-    values = graph.invoke(Command(resume=decision.model_dump()), config)
-    return _assessment(values, model, thread_id)
+    with _review_lock(thread_id):
+        snapshot = graph.get_state(config)
+        if not snapshot.values:
+            raise UnknownAssessmentError(f"no assessment {thread_id}")
+        if not snapshot.interrupts:
+            raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
+        _check_overrides(snapshot.values["requirements"], decision.overrides)
+        values = graph.invoke(Command(resume=decision.model_dump()), config)
+    return _assessment(values, thread_id)

@@ -28,7 +28,7 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
     expect(steps).to_have_count(8)
     expect(steps.first).to_contain_text("authentication")
-    expect(steps.nth(5)).to_contain_text("Judged 4 of 5 requirements evidenced.")
+    expect(steps.filter(has_text="Judged 4 of 5 requirements evidenced.")).to_have_count(1)
     expect(steps.last).to_contain_text("Waiting for the compliance lead's review.")
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Partly evidenced", exact=True)).to_be_visible()
