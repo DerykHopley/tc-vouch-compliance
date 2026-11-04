@@ -2,7 +2,9 @@
 a recorded Patch response from the folder the profile allows; when it can't (missing,
 malformed, too slow) the evidence is pending, and nothing crashes (spec #2, ticket #24)."""
 
+import logging
 import shutil
+import threading
 import time
 from pathlib import Path
 
@@ -11,13 +13,23 @@ import yaml
 
 from vouch import ScriptedChatModel, assess, load_named_profile, load_profile
 from vouch.front_matter import split_front_matter
-from vouch.graph import Judgement, ShouldScore
+from vouch.graph import (
+    NOT_JUDGED,
+    PENDING_REASON,
+    Judgement,
+    RemediationPlan,
+    ReviewDecision,
+    ShouldScore,
+    memory_checkpointer,
+    resume,
+)
 from vouch.profile import NORDLICHT_PROFILE
 
 NORDLICHT_DIR = NORDLICHT_PROFILE.parent
 PATCH = "patch-vulnerability-status"
 RESPONSE = NORDLICHT_DIR / "patch" / f"{PATCH}.md"
-PENDING = "evidence pending: Patch's vulnerability status could not be read"
+LABEL = "Patch's vulnerability status"
+PENDING = PENDING_REASON.format(sources=LABEL)
 
 
 def quote(text: str) -> dict[str, str]:
@@ -157,13 +169,14 @@ def test_the_response_reaches_the_judge_as_evidence_data():
     assert "CVE-2026-31244" in judge_input
 
 
-# Evidence pending: no crash, every requirement not evidenced with the reason.
+# Evidence pending: no crash; with nothing else read, every requirement waits for Patch.
 
 
 def assert_pending(result) -> None:
     assert result.verdict == "not-evidenced"
     assert {(r.verdict, r.reason) for r in result.requirements} == {("not-evidenced", PENDING)}
     assert "evidence_pending" in result.warnings
+    assert result.remediation == []  # a pending requirement isn't a gap to fix
 
 
 @pytest.mark.parametrize(
@@ -202,6 +215,7 @@ def test_a_missing_or_malformed_response_gives_evidence_pending(broken, tmp_path
 
     assert_pending(result)
     assert Judgement not in model.turns  # nothing to judge, so the model isn't asked
+    assert RemediationPlan not in model.turns  # nor to draft remediation for it
     texts = [s["text"] for s in result.steps]
     assert any(
         t.startswith("Patch's vulnerability status could not be read (")
@@ -210,15 +224,25 @@ def test_a_missing_or_malformed_response_gives_evidence_pending(broken, tmp_path
     )
 
 
-def test_a_slow_response_gives_evidence_pending_after_the_timeout(monkeypatch):
+def slow_patch(monkeypatch, seconds: float = 1) -> list[threading.Thread]:
+    """Patch answering only after `seconds`, with a 0.05-second timeout; returns the threads
+    that read it."""
     from vouch import patch
 
+    readers: list[threading.Thread] = []
+
     def slow(folder):
-        time.sleep(1)
+        readers.append(threading.current_thread())
+        time.sleep(seconds)
         raise AssertionError("the slow reply should never be used")
 
     monkeypatch.setattr(patch, "TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(patch, "read_response", slow)
+    return readers
+
+
+def test_a_slow_response_gives_evidence_pending_after_the_timeout(monkeypatch):
+    readers = slow_patch(monkeypatch)
     started = time.monotonic()
 
     result = assess("5.2.5", load_named_profile("nordlicht"), patch_model())
@@ -227,6 +251,136 @@ def test_a_slow_response_gives_evidence_pending_after_the_timeout(monkeypatch):
     assert_pending(result)
     texts = [s["text"] for s in result.steps]
     assert "Patch didn't answer within 0.05 seconds, so the evidence is pending." in texts
+    assert [t.daemon for t in readers] == [True]  # a hung read never blocks the process exit
+
+
+def test_patch_still_pending_is_not_asked_again_in_the_same_run(monkeypatch):
+    readers = slow_patch(monkeypatch)
+    model = patch_model({"tool": "vulnerability_status"}, {"tool": "vulnerability_status"})
+
+    result = assess("5.2.5", load_named_profile("nordlicht"), model)
+
+    assert len(readers) == 1  # the second call was answered at once
+    texts = [s["text"] for s in result.steps]
+    assert (
+        "Patch's vulnerability status is already pending in this run, so it wasn't asked again."
+        in texts
+    )
+    assert_pending(result)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("reset by peer"), RecursionError(), MemoryError(), OSError("disk")],
+    ids=["connection", "recursion", "memory", "os"],
+)
+def test_any_error_reading_patch_gives_evidence_pending_and_is_logged(error, monkeypatch, caplog):
+    from vouch import patch
+
+    def failing(folder):
+        raise error
+
+    monkeypatch.setattr(patch, "read_response", failing)
+
+    with caplog.at_level(logging.WARNING, logger="vouch.patch"):
+        result = assess("5.2.5", load_named_profile("nordlicht"), patch_model())
+
+    assert_pending(result)
+    texts = [s["text"] for s in result.steps]
+    assert (
+        "Patch's vulnerability status could not be read (the read failed unexpectedly), so "
+        "the evidence is pending." in texts
+    )
+    assert type(error).__name__ in caplog.text
+
+
+def test_a_later_answer_from_patch_clears_its_pending_state(monkeypatch):
+    from vouch import patch
+
+    real, calls = patch.read_response, []
+
+    def missing_once(folder):
+        calls.append(folder)
+        if len(calls) == 1:
+            raise patch.ResponseError("there is no recorded response")
+        return real(folder)
+
+    monkeypatch.setattr(patch, "read_response", missing_once)
+    model = patch_model({"tool": "vulnerability_status"}, {"tool": "vulnerability_status"})
+
+    result = assess("5.2.5", load_named_profile("nordlicht"), model)
+
+    assert len(calls) == 2  # not timed out, so asking again may help
+    assert {r.id: r.verdict for r in result.requirements} == expected_5_2_5()
+    assert "evidence_pending" not in result.warnings
+    assert all("pending" not in r.reason for r in result.requirements)
+
+
+# Pending is about one source: what else was read is still judged.
+
+POLICY = {
+    "doc_id": "information-security-policy",
+    "quote": "The information security officer works out our security requirements each year",
+}
+
+
+def pending_with_policies(monkeypatch, judge: list[dict]) -> "RecordingModel":
+    slow_patch(monkeypatch)
+    script = patch_model(
+        {"tool": "search_policies", "args": {"query": "security requirements"}},
+        {"tool": "vulnerability_status"},
+        judge=judge,
+    ).script
+    return RecordingModel(script=script, received=[])
+
+
+def test_a_pending_patch_keeps_the_verdicts_other_evidence_shows(monkeypatch):
+    model = pending_with_policies(
+        monkeypatch,
+        [
+            {
+                "requirement_id": "M2",
+                "verdict": "partly-evidenced",
+                "reason": "Requirements are worked out yearly.",
+                "citations": [POLICY],
+            },
+            {"requirement_id": "M1", "verdict": "not-evidenced", "reason": "Nothing shows it."},
+        ],
+    )
+
+    result = assess("5.2.5", load_named_profile("nordlicht"), model)
+
+    by_id = {r.id: r for r in result.requirements}
+    assert by_id["M2"].verdict == "partly-evidenced"
+    assert by_id["M2"].reason == "Requirements are worked out yearly."
+    assert by_id["M2"].citations[0].doc_id == "information-security-policy"
+    assert by_id["M1"].verdict == "not-evidenced"
+    assert by_id["M1"].reason == f"Nothing shows it. ({PENDING})"
+    assert "evidence_pending" in result.warnings
+    judge_input = str(model.received[0][-1].content)
+    evidence = judge_input[judge_input.index("<evidence>") : judge_input.index("</evidence>")]
+    assert f"{LABEL} could not be read, so its evidence is pending" in evidence
+
+
+def test_requirements_pending_on_patch_get_no_remediation_but_the_review_lists_them(
+    monkeypatch,
+):
+    model = pending_with_policies(monkeypatch, [])
+    saver = memory_checkpointer()
+
+    proposed = assess("5.2.5", load_named_profile("nordlicht"), model, saver)
+
+    assert proposed.remediation == []
+    assert RemediationPlan not in model.turns
+    remediate = next(s["text"] for s in proposed.steps if s["node"] == "remediate")
+    assert remediate == (
+        "No remediation item drafted: the evidence for M1, M2, M3, S1, S2, S3 is pending."
+    )
+
+    reviewed = resume(proposed.thread_id, ReviewDecision(decision="accept"), saver)
+
+    assert reviewed.remediation == []
+    assert {r.reason for r in reviewed.requirements} == {f"{NOT_JUDGED} ({PENDING})"}
 
 
 def test_the_default_timeout_outlasts_patchs_wake_up():
@@ -241,10 +395,8 @@ def test_the_default_timeout_outlasts_patchs_wake_up():
 def test_a_profile_that_doesnt_allow_patch_cant_call_it(tmp_path, monkeypatch):
     from vouch import patch
 
-    def never(folder):
-        raise AssertionError("Patch was read without the profile allowing it")
-
-    monkeypatch.setattr(patch, "read_response", never)
+    read: list[Path] = []
+    monkeypatch.setattr(patch, "read_response", read.append)
     profile = load_profile(copy_profile(tmp_path, policies="policies"))
     model = patch_model(
         {"tool": "vulnerability_status"},
@@ -260,3 +412,4 @@ def test_a_profile_that_doesnt_allow_patch_cant_call_it(tmp_path, monkeypatch):
     texts = [s["text"] for s in result.steps]
     assert "Asked for Patch's vulnerability status, which this profile doesn't allow." in texts
     assert {r.verdict for r in result.requirements} == {"not-evidenced"}
+    assert read == []  # Patch was never read
