@@ -43,7 +43,9 @@ This assesses each of Nordlicht's 12 controls on the scripted fake model (a scri
 `evals/scripts/nordlicht/`) and scores the verdicts and citations against
 `fixtures/nordlicht/expected-answers.yaml`, read when it runs: verdict accuracy per requirement
 and per control, and citation precision. It prints a summary and saves it, with the raw results,
-to `evals/results/` (git-ignored). On the fake model it checks the harness, not a model.
+to `evals/results/` (git-ignored). On the fake model it checks the harness, not a model. The
+scripts are drafted from the expected answers: after those change, regenerate them with
+`uv run python evals/scripts/generate.py` and read the diff.
 
 ### The API
 

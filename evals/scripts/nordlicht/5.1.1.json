@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "cryptographic procedures managed extent"}},
     {"tool": "search_records", "args": {"query": "cryptographic procedures managed extent"}},
-    {"answer": "Draft answer for 5.1.1, from the policies and records found."}
+    {"answer": "Draft answer for 5.1.1, from the evidence found."}
   ],
   "judge": {
     "requirements": [

@@ -1,8 +1,8 @@
 {
   "gather": [
-    {"tool": "search_policies", "args": {"query": "services secured systems extent"}},
-    {"tool": "search_records", "args": {"query": "services secured systems extent"}},
-    {"answer": "Draft answer for 4.1.2, from the policies and records found."}
+    {"tool": "search_policies", "args": {"query": "services secured systems access"}},
+    {"tool": "search_records", "args": {"query": "services secured systems access"}},
+    {"answer": "Draft answer for 4.1.2, from the evidence found."}
   ],
   "judge": {
     "requirements": [

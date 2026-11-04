@@ -1,8 +1,8 @@
 {
   "gather": [
-    {"tool": "search_policies", "args": {"query": "services recovery ensured extent"}},
-    {"tool": "search_records", "args": {"query": "services recovery ensured extent"}},
-    {"answer": "Draft answer for 5.2.9, from the policies and records found."}
+    {"tool": "search_policies", "args": {"query": "recovery services ensured extent"}},
+    {"tool": "search_records", "args": {"query": "recovery services ensured extent"}},
+    {"answer": "Draft answer for 5.2.9, from the evidence found."}
   ],
   "judge": {
     "requirements": [
