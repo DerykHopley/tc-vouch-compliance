@@ -45,8 +45,8 @@ Names and uses come from the prototype's Tailored block; M0 copies the values in
 | `--paper` | `tokens.css` `:root` | page background (glen-check grey) | panels |
 | `--sheet` | `tokens.css` `:root` | panels, cards, inputs | page background |
 | `--ink` | `tokens.css` `:root` | body text; primary buttons; the working paper's head rule | large fills other than buttons and bands |
-| `--muted` | `tokens.css` `:root` | secondary text, labels | anything that must be read to act |
-| `--rule` | `tokens.css` `:root` | borders and table rules | text |
+| `--muted` | `tokens.css` `:root` | secondary text, labels; the edge of input fields (5.45:1 on `--sheet` in light, 6.17:1 in dark, measured with `scripts/contrast.py`) | anything that must be read to act |
+| `--rule` | `tokens.css` `:root` | borders and table rules | text; the edge of an input field (1.47:1 on `--sheet` in light, 1.27:1 in dark, under the 3:1 a control's edge needs) |
 | `--navy` | `tokens.css` `:root` | links, focus ring, the running state | sign-off actions |
 | `--sign` | `tokens.css` `:root` | sign-off actions (Accept verdict, approve), decision-bar rule | links, decoration |
 | `--brass` | `tokens.css` `:root` | small details: active tab edge, quote rule, the brand mark, the top strip | text, buttons |
@@ -97,6 +97,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Readiness bar | segments by accepted verdict, with the counts in words beside it |
 | Chat | closed (button), bubble, enlarged, pinned; the page it's on |
 | Invitation page (**pending design pass**) | opening ("Opening Vouch…"), Clerk's sign-in, sign-in could not be loaded (Clerk's script or Vouch's chunk failed); and, before it, "Vouch could not be reached" when health can't be read |
+| Developer page (**pending design pass**, #34) | developer only (a compliance lead gets the Dossier and no link); the model, with a field to change it: saving, changed ("The next assessment runs on …"), refused (the API's message, the field marked invalid); "no OpenRouter key" notice, or "a fake script runs every assessment" notice (`ASSESS_FAKE_SCRIPT`); "the developer settings are unavailable just now" (the database is down: a 503 with `"unavailable": "database"`; any other refusal hides the page); "kept until the server restarts" note (no database); prompt version; usage link |
 
 **Checklist:** every state in the row is reachable and looks as described, in light and dark.
 

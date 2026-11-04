@@ -14,6 +14,8 @@ libpq, whose error messages can echo it.
 
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
+It also creates Vouch's own settings table (the developer's model choice, #34); nothing else
+does. Before it has run, a setting reads as unset and a write is DatabaseUnavailable (a 503).
 """
 
 import logging
@@ -50,6 +52,11 @@ CONNECT_TIMEOUT_SECONDS = 5
 RECONNECT_SECONDS = 60.0
 """How long the pool keeps reconnecting in the background before it waits for the next request."""
 MALFORMED = f"{DATABASE_URL_ENV} is malformed"
+SETTINGS_TABLE = "vouch_settings"
+"""Settings a developer changes while the app runs, by name: the model (vouch.model_choice)."""
+CREATE_SETTINGS = (
+    f"CREATE TABLE IF NOT EXISTS {SETTINGS_TABLE} (name text PRIMARY KEY, value text NOT NULL)"
+)
 
 Connection = psycopg.Connection[DictRow]
 
@@ -142,6 +149,33 @@ class Database:
         self._health = (now, answer)
         return answer
 
+    def setting(self, name: str) -> str | None:
+        """The stored value of setting `name`; None when it was never set. Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                row = conn.execute(
+                    f"SELECT value FROM {SETTINGS_TABLE} WHERE name = %s", (name,)
+                ).fetchone()
+            except psycopg.errors.UndefinedTable:  # vouch-db-setup hasn't run: nothing stored
+                return None
+        return row["value"] if row else None
+
+    def set_setting(self, name: str, value: str) -> None:
+        """Store `value` as setting `name`, replacing any before. Raises DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                conn.execute(
+                    f"INSERT INTO {SETTINGS_TABLE} (name, value) VALUES (%s, %s) "
+                    "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
+                    (name, value),
+                )
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", SETTINGS_TABLE)
+                raise DatabaseUnavailable(
+                    f"no {SETTINGS_TABLE} table: run vouch-db-setup"
+                ) from None
+
     @contextmanager
     def checkpointer(self) -> Iterator[PostgresSaver]:
         """LangGraph's Postgres checkpointer on the pool. Raises DatabaseUnavailable."""
@@ -171,6 +205,7 @@ class Database:
             with self._unavailable_on_drop():
                 PostgresSaver(conn).setup()
                 PostgresStore(conn).setup()
+                conn.execute(CREATE_SETTINGS)
         finally:
             conn.close()
 

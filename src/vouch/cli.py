@@ -9,22 +9,18 @@ from vouch.controls import UnknownControlError, load_control
 from vouch.exit_codes import EXIT_BAD_INPUT
 from vouch.fake_model import ScriptError
 from vouch.graph import assess
-from vouch.settings import Settings, SettingsError, fake_model, load_settings
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+from vouch.model_choice import MemoryModelStore, ModelChoice
+from vouch.settings import Settings, SettingsError, load_settings
 
 
 def build_model(settings: Settings) -> BaseChatModel:
-    """The fake when ASSESS_FAKE_SCRIPT is set; otherwise the real model. Raises SettingsError."""
-    fake = fake_model(settings)
-    if fake is not None:
-        return fake
-    api_key, model = settings.openrouter_api_key, settings.model
-    if not api_key or not model:
-        raise SettingsError("set OPENROUTER_API_KEY and ASSESS_MODEL, or ASSESS_FAKE_SCRIPT")
-    from langchain_openai import ChatOpenAI  # only the real path needs the provider
-
-    return ChatOpenAI(model=model, api_key=api_key, base_url=OPENROUTER_BASE_URL)
+    """The API's model rule (vouch.model_choice), on ASSESS_MODEL or the default model: the fake
+    when ASSESS_FAKE_SCRIPT is set, else OpenRouter. With neither set the CLI stops, rather
+    than run the API's demo script. Raises SettingsError."""
+    choice = ModelChoice(settings, MemoryModelStore())
+    if choice.fake_reason == "no_key":
+        raise SettingsError("set OPENROUTER_API_KEY, or ASSESS_FAKE_SCRIPT")
+    return choice.for_assessment(choice.chosen())
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -11,6 +11,7 @@ from importlib.metadata import version
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, StringConstraints
@@ -21,15 +22,21 @@ from vouch.controls import Control, UnknownControlError, load_control
 from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.graph import Assessment, assess_steps
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
+from vouch.model_choice import (
+    MODEL_ID,
+    CatalogueUnavailable,
+    ModelChoice,
+    NoKey,
+    UnknownModel,
+    model_store,
+)
 from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
     DEFAULT_USER,
-    DEMO_SCRIPT,
     FRONTEND_ENV,
     Settings,
     SettingsError,
     User,
-    fake_model,
     load_settings,
 )
 
@@ -42,6 +49,14 @@ SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
+NO_KEY = (
+    "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
+    "checked. Set OPENROUTER_API_KEY to choose a model."
+)
+UNKNOWN_MODEL = "OpenRouter has no model “{model}”. Check the id on openrouter.ai/models."
+CATALOGUE_UNAVAILABLE = (
+    "OpenRouter cannot be reached to check the model just now. Please try again shortly."
+)
 
 
 class AssessmentRequest(BaseModel):
@@ -94,15 +109,22 @@ AppDatabase = Annotated[Database | None, Depends(app_database)]
 
 
 def database_connection(db: AppDatabase) -> Iterator[Connection]:
-    """A connection for a route that needs the database. A 503 when there's none to be had, or
-    when it drops while the route uses it."""
-    try:
-        if db is None:
-            raise DatabaseUnavailable("no database URL is set")
-        with db.connection() as conn:
-            yield conn
-    except DatabaseUnavailable:
-        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE) from None
+    """A connection for a route that needs the database. A 503 (database_unavailable) when
+    there's none to be had, or when it drops while the route uses it."""
+    if db is None:
+        raise DatabaseUnavailable("no database URL is set")
+    with db.connection() as conn:
+        yield conn
+
+
+def database_unavailable(request: Request, error: Exception) -> JSONResponse:
+    """Any route: the database can't be used just now is a 503, its reason only in the log.
+
+    `unavailable: "database"` tells the front end which 503 this is: on the developer API it
+    comes only after require_developer passed, so the page shows saying so. Any other 503 (the
+    role lookup's, when Clerk can't be asked) leaves the role unknown, and the page hidden."""
+    content = {"detail": DATABASE_UNAVAILABLE, "unavailable": "database"}
+    return JSONResponse(status_code=503, content=content)
 
 
 def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
@@ -153,22 +175,39 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     return answer
 
 
+def app_models(request: Request) -> ModelChoice:
+    """Which model an assessment runs on (vouch.model_choice)."""
+    return request.app.state.models
+
+
+AppModels = Annotated[ModelChoice, Depends(app_models)]
+
+
+def chosen_model(models: AppModels) -> str | None:
+    """The model id the assessment runs on (None: the fake), read before the stream starts: a
+    stored choice that can't be read is a plain 503, and no other paid model runs instead."""
+    return models.chosen()
+
+
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
     control: Annotated[Control, Depends(requested_control)],
-    settings: AppSettings,
+    models: AppModels,
+    chosen: Annotated[str | None, Depends(chosen_model)],
     request: Request,
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
-    Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
-    nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
+    The model is vouch.model_choice's: OpenRouter when a key is set (in clerk mode only a
+    signed-in user gets here), else the scripted fake. A failure after retries, or a run past
+    its call budget, is the `error`.
 
     Every tool call the model makes is checked against the allow-list here too (security
-    layer 2): a refused one is a `guard` step.
+    layer 2): a refused one is a `guard` step. The call budget sits inside, on the model itself,
+    so it counts every call made to OpenRouter, refused tool calls included.
     """
     try:
-        model = ToolAllowList(fake_model(settings, DEMO_SCRIPT), request.app.state.allowed_tools)
+        model = ToolAllowList(models.for_assessment(chosen), request.app.state.allowed_tools)
         # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
         # The graph's signature is spec M1's to change, so the cast stays until then.
         for item in assess_steps(control, cast(BaseChatModel, model)):
@@ -199,6 +238,35 @@ def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
 
 def _api_assessment(assessment: Assessment) -> dict[str, Any]:
     return assessment.to_dict() | {"verdict": VERDICTS[assessment.verdict]}
+
+
+DEVELOPERS = [Depends(require_developer)]
+"""The developer page's API: a compliance lead gets a 403 (the role itself is never sent)."""
+
+
+class ModelRequest(BaseModel):
+    model: Annotated[str, StringConstraints(strip_whitespace=True, pattern=f"^{MODEL_ID.pattern}$")]
+
+
+@router.get("/developer/settings", dependencies=DEVELOPERS)
+def developer_settings(models: AppModels) -> dict[str, Any]:
+    """The model, where assessments run (and why on the fake), the prompt version, usage."""
+    return models.settings()
+
+
+@router.put("/developer/model", dependencies=DEVELOPERS)
+def change_model(request: ModelRequest, models: AppModels) -> dict[str, Any]:
+    """The next assessment runs on `model`, once OpenRouter's model list has it."""
+    try:
+        model = models.change(request.model)
+    except NoKey:
+        raise HTTPException(status_code=409, detail=NO_KEY) from None
+    except UnknownModel:
+        detail = UNKNOWN_MODEL.format(model=request.model)
+        raise HTTPException(status_code=422, detail=detail) from None
+    except CatalogueUnavailable:
+        raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
+    return models.settings(model)
 
 
 @router.get("/{path:path}", include_in_schema=False)
@@ -238,10 +306,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.auth.close()
         if app.state.database is not None:
             app.state.database.close()
+        app.state.models.close()
 
     # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
+    app.add_exception_handler(DatabaseUnavailable, database_unavailable)
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
@@ -249,6 +319,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.allowed_tools = ALLOWED_TOOLS
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
+    app.state.models = ModelChoice(settings, model_store(app.state.database))
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

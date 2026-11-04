@@ -48,6 +48,14 @@ _Avoid_: Check, evaluation, audit
 One person using Vouch: signed in with Clerk on the live app, or the one default user on a developer's machine. Their id scopes everything they store. A user's role is compliance lead (the default) or developer.
 _Avoid_: Account, tenant
 
+**Developer page**:
+The page, and its API, where a developer sees and changes the model assessments run on, and sees the prompt version and a link to usage. Only a user with the developer role reaches it; a compliance lead never sees it.
+_Avoid_: Admin page, settings page
+
+**Prompt version**:
+The version of the assessment's prompts (`PROMPT_VERSION`), raised with any change to their words, so a run can say which prompts drafted it.
+_Avoid_: Prompt id, template version
+
 **Audit prep**:
 The weeks-long work of a compliance lead getting a compliance profile's controls evidenced before an audit; Vouch's guided chat walks them through it.
 _Avoid_: Onboarding, project, campaign
