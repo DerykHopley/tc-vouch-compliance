@@ -404,10 +404,11 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         prompt that starts gathering."""
         control = state["control"]
         control_requirements = profile.requirements_for(control)
+        applicable = set(control_requirements.applicable)
         return {
             "control_requirements": control_requirements,
             "overlay_requirements": tuple(
-                r for r in control_requirements.applicable if r.column == "overlay"
+                r for r in control_requirements.overlay if r in applicable
             ),
             "messages": _prompt(control, control_requirements, profile),
         }
@@ -416,6 +417,7 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         """Asks the gathering to find evidence for each overlay requirement too."""
         overlay_requirements = state["overlay_requirements"]
         return {
+            # Unchanged; given again only so this step's describe() can name them.
             "overlay_requirements": overlay_requirements,
             "messages": [_overlay_prompt(overlay_requirements)],
         }

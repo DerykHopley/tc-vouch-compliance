@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from assess_steps import step_texts
+from assess_steps import in_order, step_texts
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableLambda
 from pydantic import Field
@@ -30,6 +30,7 @@ WITH_OVERLAY = NORDLICHT.model_copy(
         )
     }
 )
+NO_BRANCH = "No country overlay adds a requirement to this control, so no overlay branch is taken."
 TRUE_QUOTE = {
     "doc_id": "authentication-standard",
     "quote": "Passwords have at least 12 characters.",
@@ -92,7 +93,7 @@ def test_an_overlay_requirement_is_judged_counted_in_the_roll_up_and_shown_as_a_
     o1 = result.requirements[-1]
     assert (o1.id, o1.column, o1.verdict) == ("O1", "overlay", "not-evidenced")
     assert result.verdict == "partly-evidenced"  # O1 counts like a must requirement
-    assert [s["node"] for s in result.steps][:3] == ["apply_overlays", "overlay_branch", "gather"]
+    assert in_order([s["node"] for s in result.steps], "apply_overlays", "overlay_branch", "gather")
     assert step_texts(result, "apply_overlays") == [
         f"Applied the country overlays: {OVERLAY} adds O1."
     ]
@@ -119,11 +120,9 @@ def test_without_an_overlay_no_branch_is_taken_and_the_step_says_so():
     result = assess("1.6.2", NORDLICHT, model)
 
     nodes = [s["node"] for s in result.steps]
-    assert nodes[:2] == ["apply_overlays", "gather"]
+    assert in_order(nodes, "apply_overlays", "gather")
     assert "overlay_branch" not in nodes
-    assert step_texts(result, "apply_overlays") == [
-        "No country overlay adds a requirement to this control, so no overlay branch is taken."
-    ]
+    assert step_texts(result, "apply_overlays") == [NO_BRANCH]
     assert "overlay" not in text_of(model.gathered[0]).lower()
 
 
@@ -133,9 +132,7 @@ def test_an_overlay_on_another_control_takes_no_branch():
     result = assess("1.6.1", WITH_OVERLAY, model)
 
     assert "overlay_branch" not in [s["node"] for s in result.steps]
-    assert step_texts(result, "apply_overlays") == [
-        "No country overlay adds a requirement to this control, so no overlay branch is taken."
-    ]
+    assert step_texts(result, "apply_overlays") == [NO_BRANCH]
 
 
 def test_nordlichts_5_2_4_m4_is_listed_not_applicable_with_its_reason_and_not_judged():

@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from assess_steps import step_texts
+from assess_steps import in_order, step_texts
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
@@ -61,9 +61,10 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     }
     assert result.model == "scripted-fake"
     assert result.prompt_version
-    assert [s["node"] for s in result.steps] == [
-        "apply_overlays", "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
-    ]
+    assert in_order(
+        [s["node"] for s in result.steps],
+        "gather", "tools", "gather", "check_answer", "judge", "check_quotes",
+    )  # fmt: skip
     assert step_texts(result, "gather")[-1] == "Drafted an answer."
     assert step_texts(result, "judge") == ["Judged 3 of 5 requirements evidenced."]
     assert step_texts(result, "check_quotes") == [

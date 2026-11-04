@@ -89,10 +89,7 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
             for excluded in requirements.not_applicable:
                 lines.extend(_requirement_lines(excluded.requirement))
                 lines.append(f"  Reason: {excluded.reason}")
-        everything = requirements.applicable + tuple(
-            n.requirement for n in requirements.not_applicable
-        )
-        overlay_requirements = [r for r in everything if r.column == "overlay"]
+        overlay_requirements = list(requirements.overlay)
     lines.append(
         f"Source of the ISA text: {control.source}, (c) ENX Association, CC BY-ND 4.0; "
         f"see {NOTICE_FILE}"

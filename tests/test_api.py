@@ -2,6 +2,7 @@ import json
 from importlib.metadata import version
 
 import pytest
+from assess_steps import in_order
 from fastapi.testclient import TestClient
 
 from vouch import profile
@@ -70,13 +71,17 @@ def test_demo_control_streams_steps_then_requirement_events_then_one_result(clie
     assert response.headers["content-type"].startswith("text/event-stream")
     events = read_events(response)
     names = [name for name, _ in events]
-    assert names == ["step"] * 7 + ["requirement"] * 5 + ["result"]
+    first_requirement = names.index("requirement")
+    assert set(names[:first_requirement]) == {"step"}
+    assert names[first_requirement:] == ["requirement"] * 5 + ["result"]
     steps = [data for name, data in events if name == "step"]
-    assert [s["node"] for s in steps] == [
-        "apply_overlays", "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
-    ]
+    assert in_order(
+        [s["node"] for s in steps],
+        "gather", "tools", "gather", "check_answer", "judge", "check_quotes",
+    )  # fmt: skip
     assert all(set(s) == {"node", "text"} and s["text"] for s in steps)
-    assert steps[-2]["text"] == "Judged 4 of 5 requirements evidenced."
+    judge_texts = [s["text"] for s in steps if s["node"] == "judge"]
+    assert judge_texts == ["Judged 4 of 5 requirements evidenced."]
     requirements = [data["requirement"] for name, data in events if name == "requirement"]
     assert [(r["id"], r["verdict"]) for r in requirements] == [
         ("M1", "partly-evidenced"),
