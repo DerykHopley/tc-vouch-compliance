@@ -1,0 +1,7 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "encrypt"}},
+    {"answer": "Backups are tested every quarter.", "verdict": "partial", "cited": ["backup-policy"]}
+  ],
+  "judge": {"covered_points": []}
+}
