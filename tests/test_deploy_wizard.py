@@ -17,7 +17,8 @@ case "$(basename "$0") $*" in
   "gcloud auth list"*) [ -n "$SIGNED_IN" ] && echo owner@example.com ;;
   "gcloud services list"*) printf 'run.googleapis.com\\nartifactregistry.googleapis.com\\n' ;;
   "gcloud run services describe"*) echo "$URL" ;;
-  "curl"*) [ -n "$HEALTHY" ] || exit 22; echo '{"status": "ok", "version": "0.1.0"}' ;;
+  "curl"*) [ -n "$HEALTHY" ] || exit 22
+    echo '{"status": "ok", "version": "0.1.0", "database": "'"$DATABASE"'"}' ;;
 esac
 exit 0
 """
@@ -29,6 +30,7 @@ def run_wizard(
     answers: str = "",
     signed_in: bool = True,
     healthy: bool = False,
+    database: str = "reachable",
     path: str | None = None,
 ):
     bin_dir = tmp_path / "bin"
@@ -43,6 +45,7 @@ def run_wizard(
         "URL": URL,
         "SIGNED_IN": "yes" if signed_in else "",
         "HEALTHY": "yes" if healthy else "",
+        "DATABASE": database,
         "WIZARD_ENV": str(tmp_path / "wizard.env"),
     }
     result = subprocess.run(
@@ -184,4 +187,13 @@ def test_a_failed_health_check_stops_and_prints_the_logs_command(tmp_path):
     assert result.returncode != 0
     assert "gcloud run deploy vouch" in calls
     assert f"{URL}/api/health" in result.stderr
+    assert "gcloud logging read" in result.stderr
+
+
+def test_a_health_check_with_the_database_unavailable_stops_the_deploy(tmp_path):
+    """From M3 the live app always has a database (#33): status ok alone isn't a working deploy."""
+    answers = "vouch-demo-123\n" + "y\n" * 10
+    result, _ = run_wizard(tmp_path, answers=answers, healthy=True, database="unavailable")
+    assert result.returncode != 0
+    assert "database" in result.stderr
     assert "gcloud logging read" in result.stderr

@@ -139,7 +139,18 @@ gcloud run deploy vouch ... --add-cloudsql-instances=$SQL_INSTANCE
 On Cloud Run the URL is the keyring's `cloudsql-vouch-run-url`
 (`postgresql://vouch:<password>@/vouch?host=/cloudsql/<connection name>`), given to the service
 from Secret Manager as `VOUCH_DATABASE_URL` (#37). Health then says `"database": "reachable"` or
-`"unavailable"`.
+`"unavailable"` (its answer is reused for 5 s). Health's `status` stays `ok` either way: it says
+the app is alive.
+
+**The deploy check needs the database.** From M3 on the live app always has a database, so the
+wizard's health check (step 7) passes only on `"status": "ok"` *and* `"database": "reachable"`
+(*checked*, `tests/test_deploy_wizard.py`). A deploy without the database URL or the instance
+flag fails there, with the logs command. Until #37 adds both to the wizard's deploy, a wizard run
+stops at step 7.
+
+The app holds a small pool (at most 4 connections; db-f1-micro allows 25, *checked* on Cloud SQL's
+flags page for ~0.5 GB instances). It checks each connection before use and reconnects after an
+instance restart; a wrong password or a missing database is reported at once.
 
 **LangGraph's tables, once per database** (and again after an upgrade of
 `langgraph-checkpoint-postgres`; it only migrates). Run from your machine through the Cloud SQL

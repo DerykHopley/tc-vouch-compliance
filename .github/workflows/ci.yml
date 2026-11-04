@@ -54,9 +54,8 @@ jobs:
         working-directory: .
 
   database:
-    # Full lane only (main, nightly, by hand): tests/test_database.py's integration tests against a
-    # Postgres service container (#33). Cloud SQL runs PostgreSQL 16.
-    if: github.event_name != 'pull_request'
+    # tests/test_database.py's integration tests against a Postgres service container (#33), on
+    # every PR and on main: it takes seconds. Cloud SQL runs PostgreSQL 16.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:

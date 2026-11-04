@@ -14,7 +14,7 @@ WHAT=(
   "the image from the Dockerfile, tagged v1, v2, ..."
   "Cloud Run service \"vouch\": public, min 0 and max 1 instance, the fake model only"
   "print the service's address"
-  "GET /api/health answers {\"status\": \"ok\"} (or it stops with the logs command)"
+  "GET /api/health answers {\"status\": \"ok\", \"database\": \"reachable\"} (or it stops with the logs command)"
 )
 
 usage() {
@@ -180,10 +180,12 @@ else
   healthy=no
   for _ in 1 2 3; do
     body=$("${HEALTH[@]}" 2>/dev/null || true)
-    if [[ "$body" =~ \"status\"[[:space:]]*:[[:space:]]*\"ok\" ]]; then healthy=yes; break; fi
+    # From M3 the live app always has a database (#33): ok without it isn't a working deploy.
+    if [[ "$body" =~ \"status\"[[:space:]]*:[[:space:]]*\"ok\" &&
+          "$body" =~ \"database\"[[:space:]]*:[[:space:]]*\"reachable\" ]]; then healthy=yes; break; fi
   done
-  [[ $healthy == yes ]] || stop "$URL/api/health didn't answer ok. The log says why: $(quoted "${LOGS[@]}")"
-  ok "$URL/api/health answers ok"
+  [[ $healthy == yes ]] || stop "$URL/api/health didn't answer ok with the database reachable. The log says why: $(quoted "${LOGS[@]}")"
+  ok "$URL/api/health answers ok, the database reachable"
 fi
 
 printf '\n%s%s✓ Done.%s %s\n\n' "$B" "$G" "$N" \
