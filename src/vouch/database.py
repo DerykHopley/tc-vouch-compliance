@@ -14,8 +14,9 @@ libpq, whose error messages can echo it.
 
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
-It also creates Vouch's own settings table (the developer's model choice, #34); nothing else
-does. Before it has run, a setting reads as unset and a write is DatabaseUnavailable (a 503).
+It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
+limit, #35), the daily assessment counts and the usage (#35); nothing else does. Before it has
+run, a setting reads as unset, and a write, a count or the usage is DatabaseUnavailable (a 503).
 """
 
 import logging
@@ -25,6 +26,7 @@ import time
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from datetime import date
 from typing import Any, Protocol, Self
 
 import psycopg
@@ -56,6 +58,21 @@ SETTINGS_TABLE = "vouch_settings"
 """Settings a developer changes while the app runs, by name: the model (vouch.model_choice)."""
 CREATE_SETTINGS = (
     f"CREATE TABLE IF NOT EXISTS {SETTINGS_TABLE} (name text PRIMARY KEY, value text NOT NULL)"
+)
+
+COUNTS_TABLE = "vouch_assessment_counts"
+"""How many assessments each user started on each UTC day (the daily limit, vouch.spending)."""
+USAGE_TABLE = "vouch_usage"
+"""Each assessment's tokens and cost (vouch.spending)."""
+CREATE_COUNTS = (
+    f"CREATE TABLE IF NOT EXISTS {COUNTS_TABLE} (user_id text NOT NULL, day date NOT NULL, "
+    "count integer NOT NULL, PRIMARY KEY (user_id, day))"
+)
+CREATE_USAGE = (
+    f"CREATE TABLE IF NOT EXISTS {USAGE_TABLE} (id bigserial PRIMARY KEY, "
+    "user_id text NOT NULL, control_id text NOT NULL, model text NOT NULL, "
+    "input_tokens integer NOT NULL, output_tokens integer NOT NULL, cost_usd double precision, "
+    "estimated boolean NOT NULL, at timestamptz NOT NULL)"
 )
 
 Connection = psycopg.Connection[DictRow]
@@ -176,6 +193,53 @@ class Database:
                     f"no {SETTINGS_TABLE} table: run vouch-db-setup"
                 ) from None
 
+    def take_assessment(self, user_id: str, day: date, limit: int) -> bool:
+        """Count one assessment for the user's day if they started fewer than `limit`, in one
+        statement, so two at once can't both slip under it. Raises DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
+            row = conn.execute(
+                f"INSERT INTO {COUNTS_TABLE} AS c (user_id, day, count) VALUES (%s, %s, 1) "
+                "ON CONFLICT (user_id, day) DO UPDATE SET count = c.count + 1 "
+                "WHERE c.count < %s RETURNING c.count",
+                (user_id, day, limit),
+            ).fetchone()
+        return row is not None
+
+    def record_usage(self, **usage: Any) -> None:
+        """Keep one assessment's usage (vouch.spending's Usage, and whose and when). Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(USAGE_TABLE):
+            conn.execute(
+                f"INSERT INTO {USAGE_TABLE} (user_id, control_id, model, input_tokens, "
+                "output_tokens, cost_usd, estimated, at) VALUES (%(user_id)s, %(control_id)s, "
+                "%(model)s, %(input_tokens)s, %(output_tokens)s, %(cost_usd)s, %(estimated)s, "
+                "%(at)s)",
+                usage,
+            )
+
+    def usage_totals(self) -> dict[str, Any]:
+        """Every assessment's usage added up. Raises DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(USAGE_TABLE):
+            row = conn.execute(
+                "SELECT count(*) AS assessments, "
+                "coalesce(sum(input_tokens), 0) AS input_tokens, "
+                "coalesce(sum(output_tokens), 0) AS output_tokens, "
+                "coalesce(sum(cost_usd), 0) AS cost_usd, "
+                "coalesce(bool_or(estimated), false) AS estimated, "
+                f"count(*) FILTER (WHERE cost_usd IS NULL) AS unpriced FROM {USAGE_TABLE}"
+            ).fetchone()
+        assert row is not None  # an aggregate always gives one row
+        return {key: (float(v) if key == "cost_usd" else v) for key, v in row.items()}
+
+    @contextmanager
+    def _needs_setup(self, table: str) -> Iterator[None]:
+        """A table vouch-db-setup makes: missing, it's DatabaseUnavailable, and the log says so."""
+        try:
+            yield
+        except psycopg.errors.UndefinedTable:
+            log.error("no %s table: run vouch-db-setup on this database", table)
+            raise DatabaseUnavailable(f"no {table} table: run vouch-db-setup") from None
+
     @contextmanager
     def checkpointer(self) -> Iterator[PostgresSaver]:
         """LangGraph's Postgres checkpointer on the pool. Raises DatabaseUnavailable."""
@@ -206,6 +270,8 @@ class Database:
                 PostgresSaver(conn).setup()
                 PostgresStore(conn).setup()
                 conn.execute(CREATE_SETTINGS)
+                conn.execute(CREATE_COUNTS)
+                conn.execute(CREATE_USAGE)
         finally:
             conn.close()
 

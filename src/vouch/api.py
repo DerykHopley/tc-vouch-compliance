@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.language_models.chat_models import BaseChatModel
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
 from vouch.allow_list import ALLOWED_TOOLS, GUARD, ToolAllowList
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
@@ -38,6 +38,13 @@ from vouch.settings import (
     SettingsError,
     User,
     load_settings,
+)
+from vouch.spending import (
+    MAX_DAILY_LIMIT,
+    DailyLimitReached,
+    SpendingGuard,
+    UsageMeter,
+    spending_store,
 )
 
 log = logging.getLogger(__name__)
@@ -189,11 +196,40 @@ def chosen_model(models: AppModels) -> str | None:
     return models.chosen()
 
 
+def app_spending(request: Request) -> SpendingGuard:
+    """The daily limit and usage (vouch.spending)."""
+    return request.app.state.spending
+
+
+AppSpending = Annotated[SpendingGuard, Depends(app_spending)]
+
+
+def within_daily_limit(user: CurrentUser, spending: AppSpending) -> None:
+    """Counts the assessment against the user's daily limit before the stream starts: over it,
+    a 429 saying when it resets (daily_limit_reached); the counter unavailable, a 503."""
+    spending.start(user.id)
+
+
+def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
+    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's."""
+    assert isinstance(error, DailyLimitReached)
+    content = {
+        "detail": error.message(),
+        "limit": "daily",
+        "resets_at": error.resets_at.isoformat(),
+    }
+    headers = {"Retry-After": str(error.retry_after)}
+    return JSONResponse(status_code=429, content=content, headers=headers)
+
+
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
     control: Annotated[Control, Depends(requested_control)],
     models: AppModels,
     chosen: Annotated[str | None, Depends(chosen_model)],
+    counted: Annotated[None, Depends(within_daily_limit)],
+    user: CurrentUser,
+    spending: AppSpending,
     request: Request,
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
@@ -205,14 +241,20 @@ def create_assessment(
     Every tool call the model makes is checked against the allow-list here too (security
     layer 2): a refused one is a `guard` step. The call budget sits inside, on the model itself,
     so it counts every call made to OpenRouter, refused tool calls included.
+
+    The `result` carries the assessment's `usage`, its tokens and cost (vouch.spending), which
+    is kept whether the assessment ends in its result or an `error`: the calls were made.
     """
+    meter = UsageMeter(chosen)
     try:
-        model = ToolAllowList(models.for_assessment(chosen), request.app.state.allowed_tools)
+        assessed = models.for_assessment(chosen, callbacks=[meter])
+        model = ToolAllowList(assessed, request.app.state.allowed_tools)
         # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
         # The graph's signature is spec M1's to change, so the cast stays until then.
         for item in assess_steps(control, cast(BaseChatModel, model)):
             if isinstance(item, Assessment):
-                yield from _redacted("result", {"assessment": _api_assessment(item)})
+                result = {"assessment": _api_assessment(item), "usage": meter.usage().to_dict()}
+                yield from _redacted("result", result)
             else:
                 yield from _redacted("step", {"node": item.node, "text": item.describe()})
             for refusal in model.take_refusals():
@@ -220,6 +262,8 @@ def create_assessment(
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
+    finally:
+        spending.record(user.id, control.id, meter.usage())
 
 
 _REMOVED_FROM = {"result": "assessment", "step": "step"}
@@ -248,14 +292,35 @@ class ModelRequest(BaseModel):
     model: Annotated[str, StringConstraints(strip_whitespace=True, pattern=f"^{MODEL_ID.pattern}$")]
 
 
+class DailyLimitRequest(BaseModel):
+    daily_limit: Annotated[int, Field(ge=1, le=MAX_DAILY_LIMIT, strict=True)]
+
+
+def _developer_page(
+    models: ModelChoice, spending: SpendingGuard, model: str | None = None
+) -> dict[str, Any]:
+    return models.settings(model) | spending.settings()
+
+
 @router.get("/developer/settings", dependencies=DEVELOPERS)
-def developer_settings(models: AppModels) -> dict[str, Any]:
-    """The model, where assessments run (and why on the fake), the prompt version, usage."""
-    return models.settings()
+def developer_settings(models: AppModels, spending: AppSpending) -> dict[str, Any]:
+    """The model, where assessments run (and why on the fake), the prompt version, the daily
+    limit, and every assessment's usage totalled."""
+    return _developer_page(models, spending)
+
+
+@router.put("/developer/daily-limit", dependencies=DEVELOPERS)
+def change_daily_limit(
+    request: DailyLimitRequest, models: AppModels, spending: AppSpending
+) -> dict[str, Any]:
+    """Each user may start `daily_limit` assessments a day, from the next one on."""
+    spending.store.set_daily_limit(request.daily_limit)
+    log.info("the daily limit is now %d assessments", request.daily_limit)
+    return _developer_page(models, spending)
 
 
 @router.put("/developer/model", dependencies=DEVELOPERS)
-def change_model(request: ModelRequest, models: AppModels) -> dict[str, Any]:
+def change_model(request: ModelRequest, models: AppModels, spending: AppSpending) -> dict[str, Any]:
     """The next assessment runs on `model`, once OpenRouter's model list has it."""
     try:
         model = models.change(request.model)
@@ -266,7 +331,7 @@ def change_model(request: ModelRequest, models: AppModels) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=detail) from None
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
-    return models.settings(model)
+    return _developer_page(models, spending, model)
 
 
 @router.get("/{path:path}", include_in_schema=False)
@@ -312,6 +377,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.add_exception_handler(DatabaseUnavailable, database_unavailable)
+    app.add_exception_handler(DailyLimitReached, daily_limit_reached)
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
@@ -320,6 +386,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
+    app.state.spending = SpendingGuard(spending_store(app.state.database))
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

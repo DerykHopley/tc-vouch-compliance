@@ -29,6 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, Literal, Protocol
 
 import httpx
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import PrivateAttr, SecretStr
@@ -46,7 +47,7 @@ OPENROUTER_HOST = "openrouter.ai"
 DEFAULT_MODEL = "anthropic/claude-haiku-5.5"
 """docs/requirements.md, Decisions (2026-11-03)."""
 USAGE_URL = "https://openrouter.ai/activity"
-"""OpenRouter's own usage and cost per request, until #35 shows them in Vouch."""
+"""OpenRouter's own usage and cost per request, beside Vouch's totals (vouch.spending)."""
 CALL_BUDGET = 8
 """Model calls one assessment may make; a run on the demo script makes 3 (2 gather, 1 judge)."""
 MAX_RETRIES = 1
@@ -181,9 +182,12 @@ class OpenRouter:
         if self._catalogue is not None:
             self._catalogue.close()
 
-    def chat_model(self, model: str) -> BaseChatModel:
+    def chat_model(
+        self, model: str, callbacks: list[BaseCallbackHandler] | None = None
+    ) -> BaseChatModel:
         """A chat model for one assessment, within CALL_BUDGET calls."""
         return _budgeted_chat_openai()(
+            callbacks=callbacks,
             model=model,
             api_key=self.api_key,
             base_url=str(self.base_url),
@@ -302,12 +306,16 @@ class ModelChoice:
         assessment starts. Raises DatabaseUnavailable: then no assessment runs."""
         return self.current() if self.runs_on == "openrouter" else None
 
-    def for_assessment(self, chosen: str | None) -> BaseChatModel:
+    def for_assessment(
+        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+    ) -> BaseChatModel:
         """A fresh model for one assessment, on `chosen` (from `chosen()`): its own call budget,
-        or the fake at the start of its script."""
+        or the fake at the start of its script. `callbacks` see every call (the usage meter)."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
-            return fake_model(self._settings, DEMO_SCRIPT)
-        return self.openrouter.chat_model(chosen)
+            fake = fake_model(self._settings, DEMO_SCRIPT)
+            fake.callbacks = callbacks
+            return fake
+        return self.openrouter.chat_model(chosen, callbacks)
 
     def close(self) -> None:
         if self.openrouter is not None:

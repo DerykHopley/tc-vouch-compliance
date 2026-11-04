@@ -225,6 +225,15 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "prompt_version": PROMPT_VERSION,
         "usage_url": USAGE_URL,
         "kept_in": "memory",
+        "daily_limit": 30,  # vouch.spending (#35)
+        "usage": {
+            "assessments": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "estimated": False,
+            "unpriced": 0,
+        },
     }
 
 
@@ -530,6 +539,7 @@ def clerk() -> FakeClerk:
     [
         ("GET", "/api/developer/settings", None),
         ("PUT", "/api/developer/model", {"model": OTHER_MODEL}),
+        ("PUT", "/api/developer/daily-limit", {"daily_limit": 5}),
     ],
 )
 def test_a_compliance_lead_gets_403_from_the_developer_api(clerk, method, path, body):

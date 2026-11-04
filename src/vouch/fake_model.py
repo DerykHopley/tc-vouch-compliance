@@ -1,11 +1,13 @@
 """A scripted chat model: plays back a JSON script, never touches the network."""
 
 import json
+import math
 from pathlib import Path
 from typing import Annotated, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
@@ -83,11 +85,27 @@ def _load_script(path: Path) -> Script:
         raise ScriptError(path, f"{where}: {first['msg']}") from error
 
 
+CHARS_PER_TOKEN = 4
+"""The fake's token counts: about four characters a token, as for English text."""
+
+
+def _tokens(text: str) -> int:
+    return math.ceil(len(text) / CHARS_PER_TOKEN)
+
+
+def _usage(messages: list[BaseMessage], call: dict[str, Any]) -> UsageMetadata:
+    """Token counts for one turn, as a real model reports them (#35: usage and cost)."""
+    sent = _tokens("".join(str(m.content) for m in messages))
+    written = _tokens(json.dumps(call["args"]))
+    return {"input_tokens": sent, "output_tokens": written, "total_tokens": sent + written}
+
+
 class ScriptedChatModel(BaseChatModel):
     """Plays the script's `gather` turns in order, one per model call.
 
     A tool turn becomes a tool call; the answer turn becomes a call to the
-    `submit_answer` tool, the same way a real model hands back its answer.
+    `submit_answer` tool, the same way a real model hands back its answer. Each reply reports
+    token counts (`usage_metadata`) estimated from the text sent and written.
     """
 
     script: Script
@@ -123,4 +141,5 @@ class ScriptedChatModel(BaseChatModel):
         else:
             name, args = SUBMIT_ANSWER, step.model_dump(include=set(SubmitAnswer.model_fields))
         call = {"name": name, "args": args, "id": f"call_{self.turn}", "type": "tool_call"}
-        return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+        reply = AIMessage("", tool_calls=[call], usage_metadata=_usage(messages, call))
+        return ChatResult(generations=[ChatGeneration(message=reply)])
