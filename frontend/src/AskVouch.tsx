@@ -1,4 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react'
+
+// Must match the sheet breakpoint in app.css.
+const SHEET_QUERY = '(max-width: 700px)'
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+
+/** While the bubble is a full-screen sheet, Tab and Shift+Tab cycle inside it: the page behind can't be seen. */
+function keepFocusInSheet(e: ReactKeyboardEvent<HTMLElement>) {
+  if (e.key !== 'Tab' || !window.matchMedia?.(SHEET_QUERY).matches) return
+  const inside = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)]
+  if (inside.length === 0) return
+  const at = inside.indexOf(document.activeElement as HTMLElement)
+  const step = e.shiftKey ? -1 : 1
+  e.preventDefault()
+  inside[(at + step + inside.length) % inside.length].focus()
+}
 
 /** The "Ask Vouch" button, bottom right, and the chat bubble it opens (empty until M2). */
 export default function AskVouch() {
@@ -33,7 +48,7 @@ export default function AskVouch() {
     )
   }
   return (
-    <aside className="bubble" aria-label="Chat with Vouch">
+    <aside className="bubble" aria-label="Chat with Vouch" onKeyDown={keepFocusInSheet}>
       <div className="bubble-head">
         <b>Vouch</b>
         <span className="page-context">on Dossier</span>
