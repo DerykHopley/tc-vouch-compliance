@@ -34,6 +34,8 @@ PUBLISHABLE_FORM='^pk_(test|live)_[A-Za-z0-9+/=_$-]+$'
 # gcloud's HTTP log would hold a secret's payload, on the screen or in ~/.config/gcloud/logs. This
 # env var beats a `gcloud config set core/log_http true` (cloud.google.com/sdk/docs/properties).
 export CLOUDSDK_CORE_LOG_HTTP=false
+# Debug verbosity can print request bodies too; this beats `core/verbosity debug` the same way.
+export CLOUDSDK_CORE_VERBOSITY=warning
 
 usage() {
   cat <<'EOF'
@@ -277,11 +279,12 @@ for pair in "${SECRETS[@]}"; do
     fi
     version=""
   fi
-  if [[ $DRY == no ]]; then
-    keyring_holds "$entry" || stop "The keyring's $entry is empty or unreadable now (locked?). Nothing was added to $secret. Unlock or fix it, then run this again."
-  fi
   add=(gcloud secrets versions add "$secret" --data-file=- --project="$PROJECT_ID" --format='value(name)')
   if confirm "Put $entry's value in $secret (a new version)" "secret-tool lookup service $entry | $(quoted "${add[@]}")"; then
+    # Checked again after the prompt, right before the add: the entry may have changed meanwhile.
+    if [[ $DRY == no ]]; then
+      keyring_holds "$entry" || stop "The keyring's $entry is empty or unreadable now (locked?). Nothing was added to $secret. Unlock or fix it, then run this again."
+    fi
     if ! added=$(secret-tool lookup service "$entry" | "${add[@]}"); then
       # The pipe broke: a version made from it may hold part of the value, or nothing. Disable it.
       bad=$(version_number "$added")

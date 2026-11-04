@@ -52,7 +52,7 @@ ALL_APIS = (
 FAKE = r"""#!/bin/sh
 tool=$(basename "$0")
 echo "$tool $*" >> "$CALLS"
-case "$tool $*" in "gcloud secrets"*) echo "${CLOUDSDK_CORE_LOG_HTTP-unset}" >> "$STATE/log_http" ;; esac
+case "$tool $*" in "gcloud secrets"*) echo "${CLOUDSDK_CORE_LOG_HTTP-unset} ${CLOUDSDK_CORE_VERBOSITY-unset}" >> "$STATE/log_http" ;; esac
 if [ -n "$FAIL" ]; then case "$tool $*" in "$FAIL"*) echo "ERROR: (fake) PERMISSION_DENIED" >&2; exit 1 ;; esac; fi
 secret_flag() { for a in "$@"; do case "$a" in --secret=*) echo "${a#--secret=}" ;; esac; done; }
 not_found() { echo "ERROR: (gcloud.secrets) NOT_FOUND: Secret [$1] not found or has no versions." >&2; exit 1; }
@@ -336,12 +336,12 @@ def test_secret_values_reach_gcloud_only_on_standard_input(tmp_path):
         assert " ".join(call).startswith(add)
 
 
-def test_every_secret_manager_call_runs_with_http_logging_off(tmp_path):
+def test_every_secret_manager_call_runs_with_http_logging_off_and_no_debug_verbosity(tmp_path):
     result, calls = deployed(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     logged = (tmp_path / "state" / "log_http").read_text().splitlines()
     assert len(logged) == len(calls_to(calls, "gcloud secrets ")) > 0
-    assert set(logged) == {"false"}
+    assert set(logged) == {"false warning"}  # beats core/log_http and core/verbosity in config
     assert "--verbosity" not in calls and "--log-http" not in calls
 
 
