@@ -8,6 +8,8 @@ dependencies = [
     "langchain-core",
     "pyyaml",
     "langchain-openai>=1.7.3",
+    "fastapi>=0.162.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -15,6 +17,7 @@ assess = "vouch.cli:main"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest",
     "pytest-socket>=0.8.1",
     "ruff",
@@ -29,7 +32,7 @@ packages = ["src/vouch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--disable-socket"
+addopts = "--disable-socket --allow-unix-socket"  # unix: the event loop's self-pipe (TestClient)
 
 [tool.ruff]
 line-length = 100

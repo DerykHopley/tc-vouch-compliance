@@ -2,6 +2,7 @@
 
 import json
 import operator
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -224,12 +225,25 @@ def build_graph(model: BaseChatModel):
     return graph.compile()
 
 
-def assess(control: Control, model: BaseChatModel) -> Assessment:
-    """Run the graph for one control and return its Assessment."""
-    final = build_graph(model).invoke(
-        {"control": control, "evidence": [], "warnings": [], "messages": _prompt(control)}
-    )
-    return Assessment(
+@dataclass(frozen=True)
+class Step:
+    """One node of the graph finished: its name and the state update it made."""
+
+    node: str
+    update: dict[str, Any]
+
+
+def assess_steps(control: Control, model: BaseChatModel) -> Iterator[Step | Assessment]:
+    """Run the graph for one control: a Step per node as it finishes, then the Assessment."""
+    initial = {"control": control, "evidence": [], "warnings": [], "messages": _prompt(control)}
+    final: dict[str, Any] = {}
+    for mode, chunk in build_graph(model).stream(initial, stream_mode=["updates", "values"]):
+        if mode == "values":
+            final = chunk
+        else:
+            for node, update in chunk.items():
+                yield Step(node, update or {})
+    yield Assessment(
         control_id=control.id,
         verdict=final["verdict"],
         answer=final["answer"],
@@ -239,3 +253,10 @@ def assess(control: Control, model: BaseChatModel) -> Assessment:
         missing_points=final["missing_points"],
         gap_note=final.get("gap_note"),
     )
+
+
+def assess(control: Control, model: BaseChatModel) -> Assessment:
+    """Run the graph for one control and return its Assessment."""
+    *_, assessment = assess_steps(control, model)
+    assert isinstance(assessment, Assessment)
+    return assessment
