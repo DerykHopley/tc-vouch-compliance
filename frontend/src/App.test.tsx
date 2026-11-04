@@ -88,6 +88,25 @@ describe('Ask Vouch', () => {
     }
   })
 
+  it('makes the page behind the full-screen sheet inert at 400px, and gives it back on close', async () => {
+    systemPrefers(null, 400)
+    render(<App />)
+    const page = [screen.getByRole('banner'), screen.getByRole('main')]
+    await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+    for (const el of page) expect(el.hasAttribute('inert')).toBe(true)
+    expect(bubble()!.hasAttribute('inert')).toBe(false)
+    await userEvent.keyboard('{Escape}')
+    for (const el of page) expect(el.hasAttribute('inert')).toBe(false)
+  })
+
+  it('leaves the page live beside the bubble at 1400px', async () => {
+    systemPrefers(null, 1400)
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+    expect(screen.getByRole('banner').hasAttribute('inert')).toBe(false)
+    expect(screen.getByRole('main').hasAttribute('inert')).toBe(false)
+  })
+
   it('leaves the page reachable by Tab beside the bubble at 1400px', async () => {
     systemPrefers(null, 1400)
     render(<App />)
