@@ -6,7 +6,8 @@
 #
 # Usage: scripts/merge-on-green.sh <pr-number>
 # Env:   MERGE_TIMEOUT  how long to wait for checks (default 20m, about twice the fast lane)
-#        SIZE_CAP       most changed lines a PR may have, lockfiles left out (default 400; off for a spec's PR)
+#        SIZE_TARGET    changed lines a PR aims to stay under, lockfiles left out (default 400).
+#                       Over it the PR still merges; the line it prints says so.
 set -euo pipefail
 
 pr=${1:?usage: scripts/merge-on-green.sh <pr-number>}
@@ -16,20 +17,17 @@ limit=${MERGE_TIMEOUT:-20m}
 head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
 echo "PR #$pr at ${head:0:7}: waiting for checks (limit $limit)"
 
-# Size cap: count changed lines from GitHub's own per-file numbers (never a possibly stale
-# local main), leaving out lockfiles. Over the cap, refuse before waiting on any check.
-cap=${SIZE_CAP:-400}
-if [ "$cap" = off ]; then
-  echo "PR #$pr: size cap off (SIZE_CAP=off)"
+# Size: count changed lines from GitHub's own per-file numbers (never a possibly stale
+# local main), leaving out lockfiles. 400 is a target, not a wall: the ticket loop gives a
+# bigger PR a deeper review before it gets here, and the size line goes in the report.
+target=${SIZE_TARGET:-400}
+lockfiles='(^|/)(uv\.lock|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|poetry\.lock|Cargo\.lock|bun\.lockb|Gemfile\.lock|composer\.lock|go\.sum)$'
+size=$(gh pr view "$pr" --json files --jq '.files[] | "\(.additions + .deletions) \(.path)"' \
+  | LOCKFILES="$lockfiles" awk '$2 !~ ENVIRON["LOCKFILES"] { n += $1 } END { print n + 0 }')
+if [ "$size" -gt "$target" ]; then
+  echo "PR #$pr: $size changed lines without lockfiles, over the $target target; merging (name it in the report)"
 else
-  lockfiles='(^|/)(uv\.lock|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|poetry\.lock|Cargo\.lock|bun\.lockb|Gemfile\.lock|composer\.lock|go\.sum)$'
-  size=$(gh pr view "$pr" --json files --jq '.files[] | "\(.additions + .deletions) \(.path)"' \
-    | LOCKFILES="$lockfiles" awk '$2 !~ ENVIRON["LOCKFILES"] { n += $1 } END { print n + 0 }')
-  if [ "$size" -gt "$cap" ]; then
-    echo "PR #$pr: $size changed lines without lockfiles, over the $cap cap; not merging. Split it, or rerun with SIZE_CAP=<n> if the owner allowed it." >&2
-    exit 1
-  fi
-  echo "PR #$pr: $size changed lines without lockfiles (cap $cap)"
+  echo "PR #$pr: $size changed lines without lockfiles (target $target)"
 fi
 
 # Checks take a few seconds to appear after a push; a PR with no checks never merges.

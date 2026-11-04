@@ -16,7 +16,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Working state
 
-Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-03 @cbd764f); rerun it to change either, or to bring in the rig's newer rules.
+Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-04 @9a2a7bf); rerun it to change either, or to bring in the rig's newer rules.
 
 - Work lives in GitHub issues; one ticket is one PR into main.
 - Build in the main session, where every step's results stay in view. Spawn a subagent only for an independent check (the `code-review` skill, the `rig:verifier` agent) or for work that would flood the context (screenshots, a long log): it returns a verdict, not a summary to act on.
@@ -62,6 +62,7 @@ Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/dev
 3. **A bug fix only (on trial):** prove the test that catches the bug: undo the fix (from a copy), see the test go red, restore. A new feature's tests already failed first under test-first.
 4. Check it for real: the app in a browser at desktop and phone width, in light and dark, with the fake model (no paid run); an agent-only ticket through the CLI or the API.
 5. **Standards review (on trial):** run the `code-review` skill on its Standards axis only (tell it the verifier covers the spec, and list the interfaces and test levels the ticket names, which it doesn't raise), once. Skip it for a ticket that changes only how the UI looks (styles and markup, no logic). Offer "fix all" when the findings are independent; after the fixes, recheck only those findings, not a new full review.
+   - **Over 400 changed lines (on trial):** lockfiles left out, counted with `git diff --numstat <base>...HEAD`. 400 is a target, not a wall: aim under it, and propose a split when one is easy. A bigger ticket still goes on, with a deeper review instead of a stop: also run Claude Code's built-in correctness review, `/code-review high`, once, and fix its findings the same way. Name the PR and its size in the report.
 6. **Verify (on trial).** Commit step 5's fixes first: the verifier checks that commit, so what merges is what was verified. A `rig:verifier` agent checks the ticket blind, in its own worktree, and is its only check against the ticket: give it the ticket number and the commit SHA, never the implementer's report. While it runs you may start the next ticket; a failed verify brings you back to this branch. Standard: before the PR. Spec: after the ticket merges into the integration branch. Compare its verdicts with the implementer's report; each disagreement goes to the owner. At most two verify rounds per ticket: a criterion that fails twice goes to the owner.
 
 Steps marked "on trial" are being tuned to stay out of the way; `CHANGELOG.md` in the rig says what would end each trial.
@@ -96,11 +97,11 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 
 ### Review mode: Throughput
 
-- **Merge gate (no branch protection: GitHub's free plan on a private repo):** merge only with `scripts/merge-on-green.sh <pr>`, run as a background task. It refuses a PR over 400 changed lines, lockfiles left out (`SIZE_CAP=<n>` when the owner allows a bigger one), then waits for every check on the PR's current commit (limit 20 minutes, about twice the fast lane), merges with a merge commit only if all pass, and refuses a PR with no checks. Never merge a PR any other way, unless the owner says so for that PR.
+- **Merge gate (no branch protection: GitHub's free plan on a private repo):** merge only with `scripts/merge-on-green.sh <pr>`, run as a background task. It prints the PR's changed lines, lockfiles left out, and notes one over the 400 target without refusing it, then waits for every check on the PR's current commit (limit 20 minutes, about twice the fast lane), merges with a merge commit only if all pass, and refuses a PR with no checks. Never merge a PR any other way, unless the owner says so for that PR.
 - A ticket or a Fix: when the local checks pass, push, open the PR, start the merge gate, then start the next ticket. Report a red or timed-out result, not a green one.
-- A spec: its one PR into main is the owner's to merge, in every review mode. `/rig:spec-close` hands it over when every ticket is done; the owner merges with GitHub's button (merge commit) or says "merge it", which runs the merge gate with `SIZE_CAP=off`: the PR carries every ticket, each already under the cap.
+- A spec: its one PR into main is the owner's to merge, in every review mode. `/rig:spec-close` hands it over when every ticket is done; the owner merges with GitHub's button (merge commit) or says "merge it", which runs the merge gate.
 - After merges, refresh the owner's running app when it won't break what they're doing; say what changed.
-- The owner tests in batches: keep a short "ready to check" list in `STATUS.md`.
+- The owner tests in batches: keep a short "ready to check" list in `STATUS.md`, naming any PR over the 400 target and its size.
 
 
 ### Review mode: Factory (on trial)
@@ -114,9 +115,9 @@ The Throughput rules above hold. Factory adds a queue agents work through on the
   - push work worth keeping as a draft PR; leave nothing half-merged;
   - start the next ticket.
   The owner answers in the comment and puts `ready-for-agent` back; the ticket rejoins the queue and is built on from its draft PR's branch.
-- **Size cap:** the merge gate refuses a PR over 400 changed lines, lockfiles left out, so check first: `gh pr view <pr> --json additions,deletions,files` after opening it as a draft, or `git diff --shortstat origin/main...HEAD` after a fetch. Over the cap: keep it a draft, comment the vertical slices it should split into (each under the cap, with its own criteria), and park it. When the owner allows it whole, merge with `SIZE_CAP=<their number> scripts/merge-on-green.sh <pr>`.
+- **Size target, not a cap:** aim for a PR under 400 changed lines, lockfiles left out. Over it, don't park: the ticket loop's deeper review runs, the PR merges, and the report names it with its size.
 - **Fixed gates.** Factory never does these; a ticket that needs one parks: a production deploy, secrets, auth or permission changes, breaking a public contract, a destructive database change, a paid model run (a pay-per-token API call; the queue's own agents on the Claude subscription aren't one), a force push.
-- **Report when the queue stops:** when no unparked ticket can start, one message: what merged, each parked ticket with its question, anything unexplained, and last the ready-to-check list (each merged ticket and what to test by hand). That list replaces Throughput's `STATUS.md`, which Factory doesn't keep. Then stop.
+- **Report when the queue stops:** when no unparked ticket can start, one message: what merged, each parked ticket with its question, anything unexplained, and last the ready-to-check list (each merged ticket and what to test by hand, with its size when over 400). That list replaces Throughput's `STATUS.md`, which Factory doesn't keep. Then stop.
 - **A full-lane red** still becomes a Fix ticket (`ready-for-agent`); a red that breaks the deployed app is reverted first, then the queue goes on.
 
 ### This project
