@@ -24,6 +24,10 @@ Keep this file short enough to read before each UI ticket: a component gets a ro
 | Screens | **Dossier** overview is the landing page (headline and next steps, a dark readiness band, the 12 controls as cards, evidence quotes); opening a control goes to its **Working paper** (control index on the left, one row per requirement with verdict and exact quotes, review at the foot) | overview to come back to; the working paper is where documents are worked through | chat-first (Counsel), one question at a time (Docket) |
 | Chat | Patch's pattern: an "Ask Vouch" button bottom right opens a bubble; enlarged it can be pinned beside the page; Ctrl/Cmd+K opens, Esc closes the bubble but never a pinned chat; at 700px or less a full-screen sheet; it shows the page it's on | the chat stays on top of what you're looking at; pinning covers side by side | chat as its own page; a fixed side rail |
 | Look | **Tailored**: warm glen-check greys, navy for links and focus, brass for small details, oxblood (light) or champagne (dark) for sign-off actions | carries the suit-and-tie persona | Plain (cool grey, IBM Plex Serif headings) |
+| Sign-off colour (2026-11-04) | `--sign` is oxblood `#7A2232` in light (champagne in dark, unchanged); the code had copied the prototype's ink | signing off reads as a weightier act than Assess, as this file's Look row says; sheet text on it 9.3:1 | ink, the same as the primary button |
+| Verdict chip contrast (2026-11-04) | In light the chip text tokens darken one shade, same hue, backgrounds unchanged: `--evidenced` `#3B7350`, `--partly-evidenced` `#8C601D`, `--not-applicable` `#626467` | the prototype's values were 4.24, 3.70 and 3.26:1 on their backgrounds, under the 4.5:1 floor; now 4.6:1 or more. Dark already passed (6.4 to 7.9:1) | lighter backgrounds (Partly evidenced still fails on `--sheet`) |
+| Not assessed (2026-11-04) | Hollow, no colour of its own: an outline chip (1px `--rule` ring, hollow dot, `--muted` text) and a dashed `--rule` bottom edge on the card | not assessed means nothing has happened yet; not applicable is a verdict, so they mustn't share a grey; muted text on sheet 5.5:1 | borrowing the Not applicable grey (as in M0) |
+| Ask Vouch button (2026-11-04) | Light: a pale tailored pill (`--sheet`, 1px `--ink` hairline, `--ink` text). Dark: the light pill as before, with a 2px `--brass` ring | in light the ink button vanished over the ink readiness band (1.0:1); the pale pill is 15.7:1 over the band, its hairline 13.6:1 over the page. The owner liked the brass ring on the dark theme's white button (9.4:1 over the band) but not in light | ink with a brass ring in light (only a 2px line holds it apart), a 3px sheet halo (heavier than the theme's 1px rules), flipping colour over the band (changes as you scroll), navy (1.5:1, and navy means running) |
 | Type | Uppercase **Libre Caslon Display** for page and section headings; **Manrope** for body and UI; **IBM Plex Mono** for control and document ids and the agent's steps; **IBM Plex Serif** italic for quoted evidence | headings from the Atlas look; quotes read as documents, ids as references | Inter, Space Grotesk |
 | Shape | Pill buttons, pill navigation and verdict chips; panels and cards 2 to 4px; full-width bands and decision areas square, with a ruled top edge (ink for the working paper's head, sign-off colour for decision bars) | tailored, not bubbly | 14 to 16px rounded panels |
 | Texture | A thin glen-check strip under the top bar; nothing else patterned | one detail from the cloth, kept quiet | |
@@ -80,7 +84,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Component | States |
 |---|---|
 | Button (pill) | default, primary (ink), sign-off (`--sign`), ghost; hover, focus, disabled, busy |
-| Verdict chip | evidenced, partly evidenced, not evidenced, not applicable, not assessed, assessing |
+| Verdict chip | evidenced, partly evidenced, not evidenced, not applicable, not assessed (hollow outline), assessing |
 | Review state tag | proposed, accepted, rejected |
 | Evidence kind tag | documented (dashed), implemented (solid navy); stale flag |
 | Citation | quote (serif italic, brass rule), document id and version, section, kind, stale flag, "quote verified" |
@@ -88,7 +92,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Requirement row | must, should, high protection, country overlay; each verdict; override with reason; not applicable with reason |
 | Review bar | proposed (note and Accept / Reject), accepted, rejected (with "Assess again") |
 | Remediation item | draft (approve, discard), approved, discarded |
-| Control card | not assessed, assessing, proposed, accepted, rejected; the verdict as a coloured bottom edge |
+| Control card | not assessed (dashed `--rule` edge), assessing, proposed, accepted, rejected; the verdict as a coloured bottom edge |
 | Readiness bar | segments by accepted verdict, with the counts in words beside it |
 | Chat | closed (button), bubble, enlarged, pinned; the page it's on |
 
