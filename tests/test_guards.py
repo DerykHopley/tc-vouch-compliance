@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from vouch import ScriptedChatModel, assess, load_named_profile, load_profile, search_policies
 from vouch.front_matter import split_front_matter
-from vouch.graph import Judgement, Step
+from vouch.graph import EVIDENCE_TOOLS, EvidenceTool, Judgement, Step
 from vouch.guards import as_data, flagged_steps, instruction_like
 from vouch.profile import NORDLICHT_PROFILE, ProfileError
 
@@ -302,8 +302,16 @@ def test_a_profile_with_no_sources_refuses_every_tool_and_gives_not_evidenced(tm
     assert Judgement not in model.turns  # nothing to judge, so the model isn't asked
 
 
+@pytest.fixture
+def patch_not_built(monkeypatch):
+    """Every source tool is built since #24; this stands in Patch as one that isn't yet."""
+    built = EVIDENCE_TOOLS["vulnerability_status"]
+    monkeypatch.setitem(EVIDENCE_TOOLS, "vulnerability_status", EvidenceTool("patch", built.label))
+
+
+@pytest.mark.usefixtures("patch_not_built")
 def test_a_profile_allowing_only_sources_not_built_yet_gives_not_evidenced(tmp_path):
-    profile = load_profile(copy_profile(tmp_path, patch="patch"))  # no vulnerability_status yet
+    profile = load_profile(copy_profile(tmp_path, patch="patch"))
     model = recording(
         [
             {"tool": "vulnerability_status", "args": {}},
@@ -495,6 +503,7 @@ def gather_step(profile, *calls: tuple[str, dict]) -> Step:
     ],
     ids=["offered", "not-allowed", "not-built", "unknown-then-offered"],
 )
+@pytest.mark.usefixtures("patch_not_built")
 def test_the_gather_step_says_in_plain_words_what_is_about_to_be_searched(
     allowed, calls, text, tmp_path
 ):

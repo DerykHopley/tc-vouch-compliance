@@ -50,6 +50,7 @@ from vouch.guards import (
     refusal_step,
 )
 from vouch.isa import Column, IsaControl, Requirement, load_isa_control
+from vouch.patch import EVIDENCE_PENDING, TIMED_OUT, vulnerability_status
 from vouch.profile import (
     ComplianceProfile,
     ControlRequirements,
@@ -70,8 +71,9 @@ from vouch.search import (
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
+VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-overlays-kind-stale-4"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-kind-stale-patch-5"  # change it whenever a prompt below changes
 
 JudgedVerdict = Literal["evidenced", "partly-evidenced", "not-evidenced"]
 Verdict = JudgedVerdict | Literal["not-applicable"]
@@ -83,6 +85,9 @@ NOT_JUDGED = "not judged"  # the reason given when the model skipped a requireme
 NO_SOURCE = "no evidence source could be read"
 NO_SOURCES_ALLOWED = "no evidence sources allowed"
 NO_ALLOWED_SEARCH = "no allowed source was searched"  # sources were allowed; only others asked
+# A requirement left not evidenced while a source is pending: its reason, or the note added
+# to it. `sources` is the pending tools' labels.
+PENDING_REASON = "evidence pending: {sources} could not be read"
 # The reasons an evidenced or partly evidenced verdict becomes not-evidenced after the quote
 # check: nothing checked shows it (#21).
 NO_CITATION = "No citation given, so nothing checked shows it."
@@ -248,6 +253,28 @@ def _with_facts(
     ]
 
 
+VULNERABILITY_STATUS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": VULNERABILITY_STATUS,
+        "description": "Ask Patch for the company's vulnerability status: the tracked CVEs "
+        "with their CVSS scores, the assets affected, priorities, treatments, overdue items "
+        "and risk-acceptance decisions; returns passages with doc_id, heading and text.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
+def _vulnerability_status(_args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
+    return vulnerability_status(folder)
+
+
+def _for_query(args: dict[str, Any]) -> str:
+    """“ for “the query”” in a step, or nothing for a tool called without one."""
+    query = args.get("query")
+    return f" for “{query}”" if query else ""
+
+
 @dataclass(frozen=True)
 class EvidenceTool:
     """An evidence-source tool: the profile source it reads, what the compliance lead calls
@@ -265,7 +292,9 @@ class EvidenceTool:
 EVIDENCE_TOOLS: dict[str, EvidenceTool] = {
     SEARCH_POLICIES: EvidenceTool("policies", "the policies", SEARCH_POLICIES_TOOL, _search),
     SEARCH_RECORDS: EvidenceTool("records", "the records", SEARCH_RECORDS_TOOL, _search),
-    "vulnerability_status": EvidenceTool("patch", "Patch's vulnerability status"),  # #24
+    VULNERABILITY_STATUS: EvidenceTool(
+        "patch", "Patch's vulnerability status", VULNERABILITY_STATUS_TOOL, _vulnerability_status
+    ),
 }
 
 
@@ -278,7 +307,9 @@ def _asking(call: dict[str, Any], profile: ComplianceProfile | None) -> str:
         return f"Asked for {tool.label}, which this profile doesn't allow."
     if tool.run is None:
         return f"Asked for {tool.label}, which Vouch can't search yet."
-    return f"Searching {tool.label} for “{call['args'].get('query', '')}”."
+    if call["args"].get("query"):
+        return f"Searching {tool.label}{_for_query(call['args'])}."
+    return f"Asking for {tool.label}."
 
 
 @dataclass(frozen=True)
@@ -435,6 +466,16 @@ def should_score(requirements: Iterable[RequirementVerdict]) -> ShouldScore:
     return ShouldScore(evidenced=sum(r.verdict == "evidenced" for r in should), total=len(should))
 
 
+def _merge_pending(old: dict[str, str], new: dict[str, str]) -> dict[str, str]:
+    merged = {**old, **new}
+    return {label: code for label, code in merged.items() if code}
+
+
+def pending_reason(labels: Iterable[str]) -> str:
+    """The reason, or the note on a reason, for a requirement waiting on these sources."""
+    return PENDING_REASON.format(sources=" and ".join(labels))
+
+
 class AssessState(TypedDict, total=False):
     control: IsaControl
     control_requirements: ControlRequirements
@@ -444,6 +485,11 @@ class AssessState(TypedDict, total=False):
     warnings: Annotated[list[str], operator.add]
     guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
     searched: list[str]  # the last tools step's searches that ran, one sentence each
+    # The tools pending in this run, by label: EVIDENCE_PENDING or TIMED_OUT. An update of ""
+    # clears one (it answered later).
+    pending: Annotated[dict[str, str], _merge_pending]
+    pending_said: list[str]  # the last tools step's sentences about pending sources
+    pending_ids: list[str]  # requirements left not evidenced while a source was pending
     unreadable: list[str]  # the last tools step's sources that couldn't be read, by label
     searches_run: Annotated[int, operator.add]
     searches_refused: Annotated[int, operator.add]
@@ -537,7 +583,10 @@ def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage
 
 def _judge_prompt(state: AssessState) -> list[AnyMessage]:
     control = state["control"]
-    evidence = as_data(state["evidence"]) if state["evidence"] else "(none)"
+    pending = [
+        f"{label} could not be read, so its evidence is pending" for label in state["pending"]
+    ]
+    evidence = as_data(state["evidence"], pending) if state["evidence"] or pending else "(none)"
     return [
         SystemMessage(
             "Judge each requirement listed from the evidence alone, not the draft answer. "
@@ -568,11 +617,20 @@ def _not_evidenced(requirements: list[RequirementVerdict]) -> list[RequirementVe
     return [r for r in requirements if r.verdict == "not-evidenced"]
 
 
-def _remediation_prompt(state: AssessState) -> list[AnyMessage]:
-    control = state["control"]
+def _to_remediate(
+    requirements: list[RequirementVerdict], pending_ids: Iterable[str]
+) -> list[RequirementVerdict]:
+    """The not-evidenced requirements a remediation item is for: not those whose evidence is
+    pending, which would show a gap that may not be there."""
+    pending = set(pending_ids)
+    return [r for r in _not_evidenced(requirements) if r.id not in pending]
+
+
+def _remediation_prompt(
+    control: IsaControl, requirements: list[RequirementVerdict]
+) -> list[AnyMessage]:
     not_evidenced = "\n".join(
-        f"- {r.id} ({r.column}): {r.text}\n  Why: {r.reason}"
-        for r in _not_evidenced(state["requirements"])
+        f"- {r.id} ({r.column}): {r.text}\n  Why: {r.reason}" for r in requirements
     )
     return [
         SystemMessage(
@@ -627,15 +685,18 @@ def _check_overrides(
 
 
 def _reviewed_remediation(
-    requirements: list[RequirementVerdict], drafted: list[RemediationItem], today: date
+    requirements: list[RequirementVerdict],
+    drafted: list[RemediationItem],
+    today: date,
+    pending_ids: Iterable[str] = (),
 ) -> list[RemediationItem]:
-    """The remediation items after overrides: one per requirement still not evidenced. A
-    requirement overridden away from not evidenced loses its item; one overridden to it gets a
-    "not drafted" item for the lead."""
+    """The remediation items after overrides: one per requirement still not evidenced, except
+    those still pending. A requirement overridden away from not evidenced loses its item; one
+    overridden to it (pending or not) gets a "not drafted" item for the lead."""
     by_id = {item.requirement_id: item for item in drafted}
     return [
         by_id.get(r.id) or RemediationItem.not_drafted(r.id, today)
-        for r in _not_evidenced(requirements)
+        for r in _to_remediate(requirements, pending_ids)
     ]
 
 
@@ -655,6 +716,23 @@ def _apply_overrides(
         reviewed.append(replace(req, verdict=change.verdict, reason=change.reason))
         kept.append(Override(req.id, change.verdict, change.reason, req.verdict, req.reason))
     return reviewed, kept
+
+
+def _noted_pending(
+    requirements: list[RequirementVerdict], pending: dict[str, str]
+) -> tuple[list[RequirementVerdict], list[str]]:
+    """With sources pending, each not-evidenced requirement's reason notes it (unless it is
+    the pending reason already), and the ids of those requirements."""
+    if not pending:
+        return requirements, []
+    note = pending_reason(pending)
+    noted = [
+        replace(r, reason=f"{r.reason} ({note})")
+        if r.verdict == "not-evidenced" and r.reason != note
+        else r
+        for r in requirements
+    ]
+    return noted, [r.id for r in _not_evidenced(noted)]
 
 
 class JudgedRequirements(NamedTuple):
@@ -802,6 +880,8 @@ def build_graph(
         `guard` step. Passages reach the model as data, instruction-like ones flagged; a
         passage already gathered isn't added or flagged again."""
         messages, new, warnings, guards, searched, unreadable = [], [], [], [], [], []
+        said: list[str] = []  # sentences about pending sources
+        pending, changed = dict(state["pending"]), {}  # by label, as the calls run
         today = date.fromisoformat(state["today"])
         known = {_passage_key(p) for p in state["evidence"]}
         run = refused = 0
@@ -815,6 +895,10 @@ def build_graph(
                 content = json.dumps(folder)
             elif tool is None or tool.run is None:  # not a tool, or a source not built yet
                 content = f"tool {name} is not available"
+            elif pending.get(tool.label) == TIMED_OUT:  # asking again would only wait again
+                detail = f"{tool.label} is already pending in this run"
+                content = json.dumps(ErrorResult(error=EVIDENCE_PENDING, detail=detail))
+                said.append(f"{detail}, so it wasn't asked again.")
             else:
                 result = tool.run(args, folder)
                 if isinstance(result, list):
@@ -823,7 +907,9 @@ def build_graph(
                 if isinstance(result, list):
                     run += 1
                     found = _plural(len(result), "passage")
-                    searched.append(f"the {tool.source} for “{args.get('query', '')}”: {found}")
+                    searched.append(f"{tool.label}{_for_query(args)}: {found}")
+                    if pending.pop(tool.label, None):  # it answered after all
+                        changed[tool.label] = ""
                     for passage in result:
                         if _passage_key(passage) not in known:
                             known.add(_passage_key(passage))
@@ -836,6 +922,10 @@ def build_graph(
                 elif result["error"] == SOURCE_UNAVAILABLE:
                     warnings.append(SOURCE_UNAVAILABLE)
                     unreadable.append(tool.label)
+                elif result["error"] in (EVIDENCE_PENDING, TIMED_OUT):
+                    pending[tool.label] = changed[tool.label] = result["error"]
+                    why = result.get("detail", f"{tool.label} could not be read")
+                    said.append(f"{why}, so the evidence is pending.")
             messages.append(ToolMessage(content, tool_call_id=call["id"]))
         return {
             "messages": messages,
@@ -844,6 +934,8 @@ def build_graph(
             "guards": guards + flagged_steps(new),
             "searched": searched,
             "unreadable": list(dict.fromkeys(unreadable)),
+            "pending": changed,
+            "pending_said": said,
             "searches_run": run,
             "searches_refused": refused,
         }
@@ -852,9 +944,11 @@ def build_graph(
         """Why nothing could be read, so the model isn't asked to judge; None when it is.
 
         No source the profile allows can run: none allowed. A search that ran: judged on what
-        it read, any unreadable source left as a warning. Otherwise an allowed source that
-        couldn't be read (missing, or its folder now points outside) comes first: no source
-        read; then searches only of sources not allowed: none of the allowed ones searched.
+        it read, any unreadable source left as a warning and any pending one noted. Otherwise
+        an allowed source that couldn't be read (missing, or its folder now points outside)
+        comes first: no source read; then a source whose evidence is pending: every
+        requirement pending on it; then searches only of sources not allowed: none of the
+        allowed ones searched.
         """
         if not _offered_tools(profile):
             return NO_SOURCES_ALLOWED
@@ -862,6 +956,8 @@ def build_graph(
             return None
         if {SOURCE_UNAVAILABLE, FOLDER_ESCAPED} & set(state["warnings"]):
             return NO_SOURCE
+        if state["pending"]:
+            return pending_reason(state["pending"])
         if state["searches_refused"]:
             return NO_ALLOWED_SEARCH
         return None
@@ -965,15 +1061,21 @@ def build_graph(
                 requirement = replace(requirement, verdict="not-evidenced", reason=reason)
             requirement = replace(requirement, citations=tuple(kept))
             results.append(_apply_rules(requirement, requirement.id in doing))
-        return {"requirements": results, "dropped_citations": dropped}
+        results, pending_ids = _noted_pending(results, state["pending"])
+        return {"requirements": results, "dropped_citations": dropped, "pending_ids": pending_ids}
 
     def remediate(state: AssessState) -> dict[str, Any]:
         """The model drafts one remediation item per not-evidenced requirement; none of those,
         no call. A draft claiming an audit result gets the plan asked for again once, then an
         error. Before the interrupt, so it only reads and asks the model."""
-        not_evidenced = _not_evidenced(state["requirements"])
+        not_evidenced = _to_remediate(state["requirements"], state["pending_ids"])
         if not not_evidenced:
-            return {"remediation": [], "not_drafted": [], "remediate_rejected_word": None}
+            return {
+                "remediation": [],
+                "not_drafted": [],
+                "remediate_rejected_word": None,
+                "pending_ids": state["pending_ids"],
+            }
         today = date.fromisoformat(state["today"])
 
         def read(plan: RemediationPlan | None) -> tuple[Any, list[str]]:
@@ -982,7 +1084,7 @@ def build_graph(
 
         (drafts, not_drafted), usage, rejected = _ask_until_clean(
             remediation_model,
-            _remediation_prompt(state),
+            _remediation_prompt(state["control"], not_evidenced),
             read,
             what="a remediation draft",
             refusal=lambda word: (
@@ -995,6 +1097,7 @@ def build_graph(
             "not_drafted": not_drafted,
             "remediate_rejected_word": rejected,
             "usage": usage,
+            "pending_ids": state["pending_ids"],
         }
 
     def review(state: AssessState) -> dict[str, Any]:
@@ -1003,9 +1106,14 @@ def build_graph(
         decision = ReviewDecision.model_validate(interrupt({"control_id": state["control"].id}))
         requirements, overrides = _apply_overrides(state["requirements"], decision.overrides)
         today = date.fromisoformat(state["today"])
+        overridden = {o.requirement_id for o in overrides}
+        still_pending = [i for i in state["pending_ids"] if i not in overridden]
+        remediation = _reviewed_remediation(
+            requirements, state["remediation"], today, still_pending
+        )
         return {
             "requirements": requirements,
-            "remediation": _reviewed_remediation(requirements, state["remediation"], today),
+            "remediation": remediation,
             "review": Review(decision.decision, decision.note, overrides),
         }
 
@@ -1089,6 +1197,7 @@ class Step:
             )
             if unreadable:
                 text = f"{text} Could not read {' or '.join(unreadable)}.".strip()
+            text = " ".join([text, *update.get("pending_said", [])]).strip()
             return text or "No search ran."
         if self.node == "check_answer":
             word = update.get("rejected_word")
@@ -1119,10 +1228,15 @@ class Step:
                 text += " Not judged: " + ", ".join(update["not_judged"]) + "."
             return text
         if self.node == "remediate":
-            drafts = update["remediation"]
+            drafts, pending = update["remediation"], update.get("pending_ids", [])
+            waiting = f"the evidence for {', '.join(pending)} is pending"
+            if not drafts and pending:
+                return f"No remediation item drafted: {waiting}."
             if not drafts:
                 return "No requirement is not evidenced, so no remediation item was drafted."
             text = f"Drafted {_plural(len(drafts), 'remediation item')}."
+            if pending:
+                text += f" None for {', '.join(pending)}: {waiting}."
             word = update.get("remediate_rejected_word")
             if word:
                 text = (
@@ -1248,7 +1362,9 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
         should_score=should_score(requirements),
         requirements=requirements,
         answer=values["answer"],
-        warnings=list(dict.fromkeys(values["warnings"])),
+        warnings=list(
+            dict.fromkeys([*values["warnings"], *([EVIDENCE_PENDING] if values["pending"] else [])])
+        ),
         steps=steps,
         token_usage=_total_usage(values["usage"]),
         model=values["model"],
@@ -1287,6 +1403,8 @@ def assess_steps(
         "prompt_version": PROMPT_VERSION,
         "evidence": [],
         "warnings": [],
+        "pending": {},
+        "pending_ids": [],
         "searches_run": 0,
         "searches_refused": 0,
         "usage": [],
