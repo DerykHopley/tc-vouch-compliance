@@ -8,16 +8,20 @@ import logging
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, StringConstraints
 
+from vouch.allow_list import ALLOWED_TOOLS, GUARD, ToolAllowList
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.graph import Assessment, assess_steps
+from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
+from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
     DEFAULT_USER,
     DEMO_SCRIPT,
@@ -122,11 +126,19 @@ def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
         raise HTTPException(status_code=403, detail=DEVELOPERS_ONLY)
 
 
+def rate_limit(request: Request, user: CurrentUser) -> None:
+    """Security layer 1: a user over the request rate gets a 429 with a Retry-After."""
+    wait = request.app.state.rate_limit.wait_for(user.id)
+    if wait is not None:
+        headers = {"Retry-After": str(wait)}
+        raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS, headers=headers)
+
+
 public = APIRouter(prefix="/api")
 """The routes open to anyone: health alone."""
 
-router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
-"""Every other route: a route added here needs a signed-in user in clerk mode."""
+router = APIRouter(prefix="/api", dependencies=[Depends(current_user), Depends(rate_limit)])
+"""Every other route: a route added here needs a signed-in user in clerk mode, within the rate."""
 
 
 @public.get("/health")
@@ -143,23 +155,46 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
 
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)], settings: AppSettings
+    control: Annotated[Control, Depends(requested_control)],
+    settings: AppSettings,
+    request: Request,
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
     Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
     nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
+
+    Every tool call the model makes is checked against the allow-list here too (security
+    layer 2): a refused one is a `guard` step.
     """
     try:
-        for item in assess_steps(control, fake_model(settings, DEMO_SCRIPT)):
+        model = ToolAllowList(fake_model(settings, DEMO_SCRIPT), request.app.state.allowed_tools)
+        # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
+        # The graph's signature is spec M1's to change, so the cast stays until then.
+        for item in assess_steps(control, cast(BaseChatModel, model)):
             if isinstance(item, Assessment):
-                yield ServerSentEvent(event="result", data={"assessment": _api_assessment(item)})
+                yield from _redacted("result", {"assessment": _api_assessment(item)})
             else:
-                text = item.describe()
-                yield ServerSentEvent(event="step", data={"node": item.node, "text": text})
+                yield from _redacted("step", {"node": item.node, "text": item.describe()})
+            for refusal in model.take_refusals():
+                yield from _redacted("step", {"node": GUARD, "text": refusal})
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
+
+
+_REMOVED_FROM = {"result": "assessment", "step": "step"}
+"""What a guard step calls the event something was removed from."""
+
+
+def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
+    """The event with secrets and personal data removed (security layer 4); a guard step before
+    it says what was removed."""
+    clean, removed = redact_data(data)
+    if removed:
+        text = removal_step(removed, _REMOVED_FROM[event])
+        yield ServerSentEvent(event="step", data={"node": GUARD, "text": text})
+    yield ServerSentEvent(event=event, data=clean)
 
 
 def _api_assessment(assessment: Assessment) -> dict[str, Any]:
@@ -207,7 +242,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
+    app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
+    remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
+    app.state.rate_limit = RateLimit()
+    app.state.allowed_tools = ALLOWED_TOOLS
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
     frontend = settings.frontend
@@ -225,3 +264,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
+install_log_redaction()  # security layer 4, once: by import time uvicorn's handlers exist
