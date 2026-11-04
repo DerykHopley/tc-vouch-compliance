@@ -121,12 +121,123 @@ def test_requirements_with_a_broken_base_framework_exits_2_naming_the_file(
     assert captured.out == ""
 
 
+def test_requirements_with_a_profile_mark_nordlichts_5_2_4_m4_not_applicable():
+    result = run_assess("--requirements", "5.2.4", "--profile", "nordlicht")
+
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "Profile: Nordlicht Komponenten GmbH (nordlicht), normal protection\n" in out
+    applicable, excluded = out.split("Not applicable:\n")
+    listed = [line.split(" ", 1)[0] for line in applicable.splitlines() if "): " in line]
+    assert listed == ["M1", "M2", "M3", "M5", "S1", "S2", "S3"]  # no M4, no high or very high
+    assert excluded.startswith(
+        "M4 (must): When using external IT services, information on the monitoring options "
+        "is obtained and considered in the assessment.\n"
+        "  Reason: Nordlicht runs its IT systems on premises and uses no external IT services"
+    )
+    assert "CC BY-ND 4.0" in out
+
+
+def test_requirements_with_an_unknown_profile_exits_2_with_one_line_error():
+    result = run_assess("--requirements", "5.2.4", "--profile", "nobody")
+
+    assert result.returncode == 2
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert "nobody" in lines[0]
+    assert result.stdout == ""
+
+
+def test_a_profile_name_cannot_reach_outside_the_fixtures(capsys):
+    from vouch import cli
+
+    assert cli.main(["--requirements", "5.2.4", "--profile", "../fixtures/nordlicht"]) == 2
+    captured = capsys.readouterr()
+    assert "unknown profile" in captured.err
+    assert captured.out == ""
+
+
 @pytest.mark.parametrize(
     "args",
-    [["--requirements"], ["--requirements", "5.1.1", "extra"], ["--requirements=5.1.1"]],
-    ids=["no-id", "extra-arg", "equals-form"],
+    [
+        ["--profile", "nordlicht", "--requirements", "5.2.4"],
+        ["--requirements=5.2.4", "--profile=nordlicht"],
+    ],
+    ids=["profile-first", "equals-forms"],
 )
-def test_requirements_misused_exits_2_with_the_usage_line(args):
+def test_requirements_and_profile_work_in_any_order_and_with_equals(args, capsys):
+    from vouch import cli
+
+    assert cli.main(args) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("5.2.4 ")
+    assert "Not applicable:\nM4 (must)" in out
+
+
+def test_requirements_equals_form_lists_the_control(capsys):
+    from vouch import cli
+
+    assert cli.main(["--requirements=5.1.1"]) == 0
+    assert capsys.readouterr().out.startswith("5.1.1 ")
+
+
+def test_help_prints_the_usage_and_exits_0(capsys):
+    from vouch import cli
+
+    assert cli.main(["--help"]) == 0
+    out = capsys.readouterr().out
+    assert "--requirements <isa-control>" in out and "--profile <name>" in out
+
+
+def test_an_overlay_requirement_shows_its_source_and_the_isa_credit_covers_isa_text_only(
+    tmp_path, monkeypatch, capsys
+):
+    from vouch import cli, profile
+
+    folder = tmp_path / "alpen"
+    for name in ("policies", "records", "patch"):
+        (folder / name).mkdir(parents=True)
+    (folder / "profile.yaml").write_text(
+        (profile.NORDLICHT_PROFILE.read_text(encoding="utf-8"))
+        .replace("id: nordlicht", "id: alpen")
+        .replace(
+            "overlays: []",
+            "overlays:\n  - name: AT NIS2 (illustrative)\n    requirements:\n"
+            "      - {control: 1.6.2, id: O1, text: An early warning goes out within a day.}",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+
+    assert cli.main(["--requirements", "1.6.2", "--profile", "alpen"]) == 0
+    out = capsys.readouterr().out
+    assert "O1 (overlay, AT NIS2 (illustrative)): An early warning goes out within a day.\n" in out
+    assert "Source of the ISA text: VDA ISA 2027.1, (c) ENX Association, CC BY-ND 4.0" in out
+    assert "O1 is AT NIS2 (illustrative)'s, not ISA text." in out
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--requirements"],
+        ["--requirements", "5.1.1", "extra"],
+        ["--requirements", "5.1.1", "--profile"],
+        ["--requirements", "5.1.1", "--profile", "nordlicht", "extra"],
+        ["--profile", "nordlicht"],
+        ["NK-ENC-01", "--profile", "nordlicht"],
+        [],
+        ["--req", "5.1.1"],
+    ],
+    ids=[
+        "no-id", "extra-arg", "profile-without-name", "extra-after-profile",
+        "profile-alone", "profile-with-control-run", "nothing", "abbreviated-flag",
+    ],
+)
+def test_requirements_misused_exits_2_with_the_usage_line(args, capsys):
+    from vouch import cli
+
+    assert cli.main(args) == 2  # returned, not raised as SystemExit
+    capsys.readouterr()
     result = run_assess(*args)
 
     assert result.returncode == 2

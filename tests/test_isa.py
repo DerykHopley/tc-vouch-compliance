@@ -1,5 +1,8 @@
 """The base framework, VDA ISA 2027.1: the 12 controls Vouch assesses, unchanged from the Excel."""
 
+from pathlib import Path
+
+import openpyxl
 import pytest
 
 from vouch.controls import UnknownControlError
@@ -39,6 +42,18 @@ def test_all_12_controls_load_in_base_framework_order():
     assert {c.source for c in framework.controls} == {"VDA ISA 2027.1"}
 
 
+def test_each_requirement_carries_its_framework_as_source(tmp_path):
+    other = tmp_path / "controls.yaml"
+    other.write_text(
+        "source: Other ISA\ncontrols:\n- id: 5.1.1\n  question: Q?\n  iso_27001: ISO 27001\n"
+        "  requirements:\n  - {id: M1, column: must, text: T}\n"
+    )
+
+    [control] = load_base_framework(other).controls
+
+    assert [r.source for r in control.requirements] == ["Other ISA"]
+
+
 @pytest.mark.parametrize("control_id", EXPECTED_COUNTS)
 def test_requirement_counts_per_column_match_the_excel(control_id):
     control = load_isa_control(control_id)
@@ -62,7 +77,6 @@ def test_requirement_ids_number_each_column_from_1(control_id):
 @pytest.fixture(scope="module")
 def raw_rows() -> dict:
     """The Excel's rows by control number, read directly, without the extraction code."""
-    openpyxl = pytest.importorskip("openpyxl")
     workbook = openpyxl.load_workbook(EXCEL, read_only=True)
     try:
         return {r[2]: r for r in workbook["Information Security"].iter_rows(values_only=True)}
@@ -126,7 +140,6 @@ def test_a_cell_without_an_iso_27001_entry_is_a_value_error(cell):
 
 
 def test_extraction_refuses_an_excel_whose_columns_moved(tmp_path):
-    openpyxl = pytest.importorskip("openpyxl")
     from vouch.isa_extract import extract
 
     workbook = openpyxl.load_workbook(EXCEL)
@@ -137,6 +150,20 @@ def test_extraction_refuses_an_excel_whose_columns_moved(tmp_path):
 
     with pytest.raises(ValueError, match="header"):
         extract(moved)
+
+
+def test_extraction_refuses_a_control_number_that_appears_twice(tmp_path):
+    from vouch.isa_extract import extract
+
+    workbook = openpyxl.load_workbook(EXCEL)
+    sheet = workbook["Information Security"]
+    row = next(r for r in sheet.iter_rows(values_only=True) if r[2] == "5.1.1")
+    sheet.append(row)
+    twice = tmp_path / "twice.xlsx"
+    workbook.save(twice)
+
+    with pytest.raises(ValueError, match=r"5\.1\.1.*more than once"):
+        extract(twice)
 
 
 # Failures --------------------------------------------------------------------------------------
@@ -186,6 +213,45 @@ def test_a_data_file_that_fails_to_parse_is_a_base_framework_error_naming_it(cas
     assert message.startswith(f"cannot read base framework file {path}: ")
     assert "\n" not in message
     assert message.split(str(path), 1)[1].strip(": ")  # says what's wrong, not just where
+
+
+def framework_file(tmp_path, requirements: str) -> Path:
+    path = tmp_path / "controls.yaml"
+    path.write_text(f"source: VDA ISA 2027.1\ncontrols:\n{GOOD_CONTROL}  requirements:\n{requirements}")
+    return path
+
+
+BAD_IDS = {
+    "duplicate id": ("  - {id: M1, column: must, text: A}\n  - {id: M1, column: must, text: B}\n", "M1"),
+    "letter not the column's": ("  - {id: S1, column: must, text: A}\n", "S1"),
+    "numbers skip": ("  - {id: M1, column: must, text: A}\n  - {id: M3, column: must, text: B}\n", "M3"),
+    "not from 1": ("  - {id: H2, column: high, text: A}\n", "H2"),
+}
+
+
+@pytest.mark.parametrize(("requirements", "bad_id"), BAD_IDS.values(), ids=BAD_IDS.keys())
+def test_requirement_ids_are_checked_on_load_naming_control_and_requirement(
+    tmp_path, requirements, bad_id
+):
+    path = framework_file(tmp_path, requirements)
+
+    with pytest.raises(BaseFrameworkError, match=rf"control 5\.1\.1 {bad_id}: "):
+        load_base_framework(path)
+
+
+def test_a_missing_requirement_field_says_which_control_and_requirement(tmp_path):
+    path = framework_file(tmp_path, "  - {id: M1, column: must}\n")
+
+    with pytest.raises(BaseFrameworkError, match=r"control 5\.1\.1 M1: missing field 'text'"):
+        load_base_framework(path)
+
+
+def test_a_missing_control_field_says_which_control(tmp_path):
+    path = tmp_path / "controls.yaml"
+    path.write_text("source: VDA ISA 2027.1\ncontrols:\n- id: 5.1.1\n  question: Q?\n")
+
+    with pytest.raises(BaseFrameworkError, match=r"control 5\.1\.1: missing field 'iso_27001'"):
+        load_base_framework(path)
 
 
 def test_a_yaml_error_names_its_line(tmp_path):

@@ -5,7 +5,9 @@ from pathlib import Path
 
 import yaml
 
-CONTROLS_FILE = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "controls.yaml"
+from vouch.paths import FIXTURES_DIR
+
+CONTROLS_FILE = FIXTURES_DIR / "nordlicht" / "controls.yaml"
 
 
 class UnknownControlError(LookupError):
