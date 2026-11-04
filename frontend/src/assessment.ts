@@ -1,24 +1,23 @@
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
 
-export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced'
+/** A requirement's or a control's verdict, as the API sends it (`vouch.graph.Verdict`). */
+export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced' | 'not-applicable'
 
 export const VERDICT_WORDS: Record<Verdict, string> = {
   evidenced: 'Evidenced',
   'partly-evidenced': 'Partly evidenced',
   'not-evidenced': 'Not evidenced',
+  'not-applicable': 'Not applicable',
 }
+
+/** The column a requirement comes from (`vouch.isa.Column`). */
+export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 
 export type Control = { id: string; title: string; owner: string }
 
 export type Step = { node: string; text: string }
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
-export type RequirementVerdict = {
-  id: string
-  column: 'must' | 'should' | 'high' | 'very high' | 'overlay'
-  text: string
-  verdict: Verdict | 'not-applicable'
-  reason: string
-}
+export type RequirementVerdict = { id: string; column: Column; text: string; verdict: Verdict; reason: string }
 // The page reads only these of the Assessment's fields so far.
 export type Assessment = { control_id: string; verdict: Verdict; answer: string }
 

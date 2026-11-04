@@ -4,7 +4,8 @@ from importlib.metadata import version
 import pytest
 from fastapi.testclient import TestClient
 
-from vouch.api import app
+from vouch import profile
+from vouch.api import app, load_default_profile
 from vouch.settings import FAKE_SCRIPT_ENV
 
 DEMO_CONTROL = "4.1.2"
@@ -14,7 +15,33 @@ DEMO_CONTROL = "4.1.2"
 def client(monkeypatch):
     monkeypatch.delenv(FAKE_SCRIPT_ENV, raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    return TestClient(app, raise_server_exceptions=False)
+    load_default_profile.cache_clear()
+    yield TestClient(app, raise_server_exceptions=False)
+    load_default_profile.cache_clear()
+
+
+def test_a_broken_profile_is_a_500_before_any_stream(client, monkeypatch, tmp_path):
+    (tmp_path / profile.DEFAULT_PROFILE).mkdir()
+    (tmp_path / profile.DEFAULT_PROFILE / profile.PROFILE_FILE).write_text("id: [unclosed\n")
+    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+
+    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
+
+    assert response.status_code == 500
+    assert not response.headers["content-type"].startswith("text/event-stream")
+    assert response.json()["detail"].startswith("The assessment could not be completed.")
+    assert str(tmp_path) not in response.text
+
+
+def test_the_profile_is_read_once_across_requests(client, monkeypatch):
+    reads = []
+    real = profile.load_named_profile
+    monkeypatch.setattr("vouch.api.load_named_profile", lambda name: reads.append(name) or real(name))
+
+    for _ in range(2):
+        client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
+
+    assert reads == [profile.DEFAULT_PROFILE]
 
 
 def read_events(response) -> list[tuple[str, dict]]:

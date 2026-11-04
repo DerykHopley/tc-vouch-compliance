@@ -23,13 +23,18 @@ from vouch.isa import (
     UnknownControlError,
     load_isa_control,
 )
-from vouch.profile import ComplianceProfile, ProfileError, UnknownProfileError, load_named_profile
+from vouch.profile import (
+    DEFAULT_PROFILE,
+    ComplianceProfile,
+    ProfileError,
+    UnknownProfileError,
+    load_named_profile,
+)
 from vouch.settings import fake_model_from_env
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 EXIT_FAILED = 1
 EXIT_BAD_INPUT = 2
-DEFAULT_PROFILE = "nordlicht"
 USAGE = (
     "assess <control-id> [--profile <name>] | "
     "assess --requirements <isa-control> [--profile <name>]"
@@ -139,9 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.requirements is not None:
         return list_requirements(args.requirements, args.profile)
     try:
-        load_isa_control(args.control_id)
         profile = load_named_profile(args.profile or DEFAULT_PROFILE)
         model = build_model()
+        assessment = assess(args.control_id, profile, model)
     except (
         UnknownControlError,
         BaseFrameworkError,
@@ -152,10 +157,16 @@ def main(argv: list[str] | None = None) -> int:
     ) as error:
         print(f"assess: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT
-    try:
-        assessment = assess(args.control_id, profile, model)
     except OutputCheckError as error:
         print(f"assess: {error}", file=sys.stderr)
+        return EXIT_FAILED
+    # A failed model call (a provider error, a script run out): one line, no provider details,
+    # as the API's `error` event does. Any exception, since providers raise their own kinds.
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"assess: the assessment could not be completed ({type(error).__name__})",
+            file=sys.stderr,
+        )
         return EXIT_FAILED
     print(json.dumps(assessment.to_dict(), indent=2))
     return 0

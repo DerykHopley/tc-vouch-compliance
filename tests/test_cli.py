@@ -67,6 +67,19 @@ def test_an_answer_claiming_an_audit_result_twice_exits_1_with_one_line(tmp_path
     assert result.stdout == ""
 
 
+def test_a_failed_model_call_exits_1_with_one_line_and_no_details(tmp_path):
+    script = tmp_path / "short.json"  # the retry asks for a turn the script doesn't have
+    script.write_text('{"gather": [{"answer": "We are compliant."}]}')
+
+    result = run_assess("4.1.2", fake_script=script)
+
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1, result.stderr
+    assert lines[0] == "assess: the assessment could not be completed (ScriptExhaustedError)"
+    assert result.stdout == ""
+
+
 def test_requirements_lists_each_requirement_of_a_control_with_its_text():
     result = run_assess("--requirements", "5.1.1")
 

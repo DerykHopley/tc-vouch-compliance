@@ -36,6 +36,7 @@ from vouch.isa import (
 from vouch.paths import FIXTURES_DIR
 
 PROFILE_FILE = "profile.yaml"
+DEFAULT_PROFILE = "nordlicht"  # the one profile until a user can choose theirs
 NORDLICHT_PROFILE = FIXTURES_DIR / "nordlicht" / PROFILE_FILE
 
 ProtectionLevel = Literal["normal", "high", "very high"]

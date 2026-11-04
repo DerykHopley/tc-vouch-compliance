@@ -2,19 +2,28 @@ import json
 from pathlib import Path
 
 import pytest
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
-from vouch import ScriptedChatModel, assess, load_named_profile
-from vouch.graph import NOT_JUDGED, OutputCheckError
+from vouch import ScriptedChatModel, UnknownControlError, assess, load_named_profile
+from vouch.graph import NOT_JUDGED, OutputCheckError, ShouldScore, claims_audit_result
 
 SCRIPTS = Path(__file__).parent / "scripts"
 NORDLICHT = load_named_profile("nordlicht")
 
 
-def scripted(judge: list[dict], answers: tuple[str, ...] = ("Draft answer.",)) -> ScriptedChatModel:
-    """A script that searches once, answers (once per entry), and judges as given."""
+def scripted(
+    judge: list[dict] | list[list[dict]], answers: tuple[str, ...] = ("Draft answer.",)
+) -> ScriptedChatModel:
+    """A script that searches once, answers (once per entry), and judges as given: one
+    judgement's requirements, or a list of them played in turn."""
     gather: list[dict] = [{"tool": "search_policies", "args": {"query": "policy"}}]
     gather += [{"answer": answer, "cited": []} for answer in answers]
-    return ScriptedChatModel(script={"gather": gather, "judge": {"requirements": judge}})
+    if judge and isinstance(judge[0], list):
+        judgements: dict | list[dict] = [{"requirements": j} for j in judge]
+    else:
+        judgements = {"requirements": judge}
+    return ScriptedChatModel(script={"gather": gather, "judge": judgements})
 
 
 def judged(*ids: str, verdict: str = "evidenced") -> list[dict]:
@@ -37,7 +46,7 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     ]  # normal protection: H1 and V1 don't apply
     assert result.requirements[0].reason.startswith("The standard says methods follow")
     assert result.verdict == "partly-evidenced"
-    assert result.should_score == {"evidenced": 2, "total": 3}
+    assert result.should_score == ShouldScore(evidenced=2, total=3)
     assert result.answer.startswith("Sign-in methods follow each system's exposure")
     assert "authentication-standard" in {s["doc_id"] for s in result.sources}
     assert result.model == "scripted-fake"
@@ -62,6 +71,7 @@ def test_the_assessment_is_plain_json():
 
     data = json.loads(json.dumps(result.to_dict()))
     assert data["verdict"] == "partly-evidenced"
+    assert data["should_score"] == {"evidenced": 2, "total": 3}
     assert data["requirements"][0] == {
         "id": "M1",
         "column": "must",
@@ -110,7 +120,7 @@ def test_a_judgement_for_a_requirement_the_control_lacks_is_ignored():
 
     assert [r.id for r in result.requirements] == ["M1", "M2", "S1", "S2", "S3"]
     assert result.verdict == "evidenced"
-    assert result.should_score == {"evidenced": 0, "total": 3}
+    assert result.should_score == ShouldScore(evidenced=0, total=3)
 
 
 def test_an_answer_claiming_compliant_is_retried_once_and_the_new_answer_kept():
@@ -158,3 +168,102 @@ def test_a_cited_doc_no_search_returned_is_dropped():
     result = assess("4.1.2", NORDLICHT, model)
 
     assert result.sources == []
+
+
+def test_an_unknown_control_raises_before_the_model_is_called():
+    model = scripted([])
+
+    with pytest.raises(UnknownControlError, match="9.9.9"):
+        assess("9.9.9", NORDLICHT, model)
+    assert model.turn == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nordlicht is compliant.",
+        "The company is fully Compliant with ISA.",
+        "Nordlicht is certified.",
+        "Nordlicht is TISAX-certified.",
+        "Nordlicht passed the audit.",
+        "Nordlicht has PASSED.",
+    ],
+)
+def test_a_claim_of_an_audit_result_is_caught(text):
+    assert claims_audit_result(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The review lists three non-compliant supplier accounts.",
+        "Nordlicht is not compliant with S2 yet.",
+        "The supplier is not certified.",
+        "Reports are passed to the CISO within a day.",
+        "The finding was passed on to IT operations.",
+        "The standard is evidenced in practice.",
+    ],
+)
+def test_negations_and_handing_on_are_not_audit_claims(text):
+    assert claims_audit_result(text) is None
+
+
+class RecordingModel(ScriptedChatModel):
+    """Plays fixed AI messages, recording the messages each call received."""
+
+    replies: list[AIMessage]
+    received: list[list]
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        self.received.append(list(messages))
+        return ChatResult(generations=[ChatGeneration(message=self.replies.pop(0))])
+
+
+def tool_call(name: str, args: dict, call_id: str) -> dict:
+    return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
+
+
+def test_a_refused_answer_answers_every_tool_call_in_its_message():
+    first = AIMessage(
+        "",
+        tool_calls=[
+            tool_call("search_policies", {"query": "password"}, "s1"),
+            tool_call("submit_answer", {"answer": "We are compliant.", "cited": []}, "a1"),
+            tool_call("submit_answer", {"answer": "Also certified.", "cited": []}, "a2"),
+        ],
+    )
+    second = AIMessage(
+        "", tool_calls=[tool_call("submit_answer", {"answer": "Shown.", "cited": []}, "a3")]
+    )
+    model = RecordingModel(
+        script={"gather": [{"answer": "unused"}]}, replies=[first, second], received=[]
+    )
+
+    result = assess("4.1.2", NORDLICHT, model)
+
+    assert result.answer == "Shown."
+    answered = {m.tool_call_id for m in model.received[1] if isinstance(m, ToolMessage)}
+    assert answered == {"s1", "a1", "a2"}
+
+
+def test_a_judgement_reason_claiming_an_audit_result_is_asked_for_again_once():
+    bad = judged("M1", "M2", "S1", "S2", "S3")
+    bad[1]["reason"] = "Nordlicht is compliant here."
+    model = scripted([bad, judged("M1", "M2", "S1", "S2", "S3")])
+
+    result = assess("4.1.2", NORDLICHT, model)
+
+    assert {r.reason for r in result.requirements} == {"Shown."}
+    assert result.steps[-1]["text"] == (
+        "A reason claimed an audit result (“compliant”), so the judgement was asked for again. "
+        "Judged 5 of 5 requirements evidenced."
+    )
+
+
+def test_a_judgement_reason_claiming_an_audit_result_twice_fails():
+    bad = judged("M1", "M2", "S1", "S2", "S3")
+    bad[0]["reason"] = "Certified."
+    model = scripted(bad)  # the one judgement is played again on the retry
+
+    with pytest.raises(OutputCheckError, match="audit result"):
+        assess("4.1.2", NORDLICHT, model)

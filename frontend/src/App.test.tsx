@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
@@ -58,33 +58,58 @@ describe('the working paper', () => {
     expect(window.location.pathname).toBe('/')
   })
 
-  it('keeps running through requirement events, then shows the verdict and the answer', async () => {
+  /** A stream handing out one event per read; `askedForMore` settles when the reader asks past
+   * the given events, i.e. once it has handled the last of them. `finish` sends the rest. */
+  function heldStream(events: string[]) {
     const encode = (text: string) => new TextEncoder().encode(text)
-    let finish = () => {}
+    let askedForMore = () => {}
+    const asked = new Promise<void>((resolve) => { askedForMore = resolve })
+    let finish = (_rest: string[]) => {}
+    const finished = new Promise<string[]>((resolve) => { finish = resolve })
+    const queue = [...events]
     const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encode('event: step\ndata: {"node":"judge","text":"Judged 4 of 5."}\n\n'))
-        controller.enqueue(encode('event: requirement\ndata: {"requirement":{"id":"M1","column":"must",'
-          + '"text":"T","verdict":"partly-evidenced","reason":"R"}}\n\n'))
-        finish = () => {
-          controller.enqueue(encode('event: result\ndata: {"assessment":{"control_id":"4.1.2",'
-            + '"verdict":"partly-evidenced","answer":"Sign-in follows exposure."}}\n\n'))
-          controller.close()
-        }
+      async pull(controller) {
+        if (queue.length) return controller.enqueue(encode(queue.shift()!))
+        askedForMore()
+        for (const rest of await finished) controller.enqueue(encode(rest))
+        controller.close()
       },
-    })
-    vi.stubGlobal('fetch', async () => new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+    }, { highWaterMark: 0 })
+    return { body, asked, finish }
+  }
+
+  const sse = (event: string, data: object) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+
+  async function assessWith(stream: ReturnType<typeof heldStream>) {
+    vi.stubGlobal('fetch', async () => new Response(stream.body, { headers: { 'Content-Type': 'text/event-stream' } }))
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
-    await within(paper()!).findByText('Judged 4 of 5.')
-    await new Promise((resolve) => setTimeout(resolve, 20)) // let the requirement event land
+  }
+
+  it('keeps running through requirement events, then shows the verdict and the answer', async () => {
+    const stream = heldStream([
+      sse('step', { node: 'judge', text: 'Judged 4 of 5.' }),
+      sse('requirement', { requirement: { id: 'M1', column: 'must', text: 'T', verdict: 'partly-evidenced', reason: 'R' } }),
+    ])
+    await assessWith(stream)
+    await stream.asked // the requirement event has been handled
+    await act(async () => {}) // and anything it set is rendered
     expect(within(paper()!).queryByRole('alert')).toBeNull()
     expect(within(paper()!).getByRole('button', { name: 'Assessing 4.1.2' })).toBeTruthy()
 
-    finish()
+    stream.finish([sse('result', { assessment: { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Sign-in follows exposure.' } })])
     const result = await within(paper()!).findByRole('region', { name: 'Verdict and draft answer' })
     expect(within(result).getByText('Partly evidenced')).toBeTruthy()
     expect(within(result).getByText('Sign-in follows exposure.')).toBeTruthy()
+  })
+
+  it('shows a not applicable control with its own chip and words', async () => {
+    const stream = heldStream([])
+    await assessWith(stream)
+    stream.finish([sse('result', { assessment: { control_id: '4.1.2', verdict: 'not-applicable', answer: 'Excluded.' } })])
+    const result = await within(paper()!).findByRole('region', { name: 'Verdict and draft answer' })
+    const chip = within(result).getByText('Not applicable')
+    expect(chip.className).toBe('chip v-not-applicable')
   })
 
   it('leaves for the Dossier at /', async () => {

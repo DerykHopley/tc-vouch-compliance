@@ -2,7 +2,7 @@
 
 import pytest
 
-from vouch.graph import RequirementVerdict, roll_up, should_score
+from vouch.graph import RequirementVerdict, ShouldScore, roll_up, should_score
 
 COLUMNS = {"M": "must", "S": "should", "H": "high", "V": "very high", "O": "overlay"}
 E, P, N, NA = "evidenced", "partly-evidenced", "not-evidenced", "not-applicable"
@@ -18,8 +18,8 @@ def req(rid: str, verdict: str) -> RequirementVerdict:
         ([req("M1", E), req("M2", E)], E),
         ([req("M1", N), req("M2", N)], N),
         ([req("M1", E), req("M2", N)], P),
-        ([req("M1", P), req("M2", P)], P),
-        ([req("M1", P), req("M2", N)], P),
+        ([req("M1", P), req("M2", P)], N),
+        ([req("M1", P), req("M2", N)], N),
         ([req("M1", E), req("H1", E), req("V1", E), req("O1", E)], E),
         ([req("M1", E), req("H1", N)], P),
         ([req("M1", E), req("O1", N)], P),
@@ -28,14 +28,15 @@ def req(rid: str, verdict: str) -> RequirementVerdict:
         ([req("M1", N), req("S1", E)], N),
         ([req("M1", E), req("M2", NA)], E),
         ([req("M1", N), req("M2", NA)], N),
+        ([req("M1", P), req("M2", E), req("S1", N)], P),
         ([req("M1", NA), req("S1", E)], NA),
     ],
     ids=[
         "all-evidenced",
         "none-evidenced",
         "mixed",
-        "all-partly",
-        "partly-and-none",
+        "all-partly-is-none-evidenced",
+        "partly-and-not-is-none-evidenced",
         "high-very-high-overlay-count",
         "high-not-evidenced",
         "overlay-not-evidenced",
@@ -44,6 +45,7 @@ def req(rid: str, verdict: str) -> RequirementVerdict:
         "should-ignored-when-musts-not",
         "not-applicable-ignored",
         "not-applicable-ignored-none-evidenced",
+        "one-evidenced-one-partly",
         "nothing-counted",
     ],
 )
@@ -63,4 +65,4 @@ def test_the_should_score_counts_should_requirements_only():
         req("S5", NA),
     ]
 
-    assert should_score(requirements) == {"evidenced": 2, "total": 4}
+    assert should_score(requirements) == ShouldScore(evidenced=2, total=4)
