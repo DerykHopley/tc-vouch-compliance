@@ -13,6 +13,7 @@ import json
 import logging
 import operator
 import re
+import textwrap
 import threading
 import uuid
 from collections.abc import Callable, Iterable, Iterator
@@ -112,6 +113,8 @@ USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
 # A remediation item the model didn't draft, or one for a requirement the lead overrode to
 # not evidenced: the lead fills it in.
 NOT_DRAFTED = "not drafted"  # its "missing"
+LOAD_CONTROL = "load_control"  # the first step's node: the control, loaded before the graph
+QUESTION_SHOWN = 90  # the load step shortens a longer control question to this many characters
 NO_OWNER = "no owner suggested"  # its owner role
 DEFAULT_DUE_DAYS = 90  # its due date, counted from today
 MAX_DUE_DAYS = 365
@@ -1182,6 +1185,19 @@ class Step:
     def describe(self) -> str:
         """One plain sentence, in the glossary's words, saying what the step did."""
         update = self.update
+        if self.node == LOAD_CONTROL:
+            control: IsaControl = update["control"]
+            requirements: ControlRequirements = update["control_requirements"]
+            question = textwrap.shorten(control.question, QUESTION_SHOWN, placeholder="…")
+            applicable, excluded = len(requirements.applicable), len(requirements.not_applicable)
+            text = (
+                f"Loaded control {control.id}: {question} "
+                f"{_plural(applicable, 'requirement')} {'applies' if applicable == 1 else 'apply'}"
+                f" under {update['company']}'s profile"
+            )
+            if excluded:
+                text += f"; {excluded} {'is' if excluded == 1 else 'are'} not applicable"
+            return text + "."
         if self.node == "apply_overlays":
             added = _by_overlay(update["overlay_requirements"])
             if not added:
@@ -1253,7 +1269,12 @@ class Step:
                 return f"No remediation item drafted: {waiting}."
             if not drafts:
                 return "No requirement is not evidenced, so no remediation item was drafted."
-            text = f"Drafted {_plural(len(drafts), 'remediation item')}."
+            made = len(drafts) - len(update.get("not_drafted", []))  # not the placeholders
+            text = (
+                f"Drafted {_plural(made, 'remediation item')}."
+                if made
+                else "No remediation item drafted by the model."
+            )
             if pending:
                 text += f" None for {', '.join(pending)}: {waiting}."
             word = update.get("remediate_rejected_word")
@@ -1279,6 +1300,16 @@ class Step:
     def to_dict(self) -> dict[str, str]:
         """The step as the stream and the Assessment carry it."""
         return {"node": self.node, "text": self.describe()}
+
+
+def _loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
+    """The first step: the control, loaded before the graph runs, and what applies of it."""
+    update = {
+        "control": control,
+        "control_requirements": profile.requirements_for(control),
+        "company": profile.company,
+    }
+    return Step(LOAD_CONTROL, update, profile)
 
 
 def _waiting_step() -> Step:
@@ -1405,7 +1436,7 @@ def assess_steps(
     today: date | None = None,
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
-    Step per node as it finishes (and a guard Step per dropped citation), each
+    Step saying the control was loaded, a Step per node as it finishes (and a guard Step per dropped citation), each
     RequirementVerdict once its quotes are checked, a Step saying it waits for review, then the
     proposed Assessment, whose `thread_id` resumes it (see `resume`).
 
@@ -1415,6 +1446,7 @@ def assess_steps(
     judged on."""
     thread_id = uuid.uuid4().hex  # always a new thread: never piled onto an earlier run's state
     graph = build_graph(model, profile, checkpointer or memory_checkpointer())
+    loaded = _loaded_step(control, profile)
     initial = {
         "control": control,
         "profile_id": profile.id,
@@ -1427,13 +1459,14 @@ def assess_steps(
         "searches_run": 0,
         "searches_refused": 0,
         "usage": [],
-        "steps": [],
+        "steps": [loaded.to_dict()],  # kept in the thread, so the reviewed Assessment has it
         "remediation": [],
         "today": (today or date.today()).isoformat(),
         "note": note,
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
     }
     config = _config(thread_id)
+    yield loaded
     for node, update in (
         (node, update)
         for chunk in graph.stream(initial, config, stream_mode="updates")
