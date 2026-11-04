@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from vouch import ScriptedChatModel, assess, load_named_profile, load_profile, search_policies
 from vouch.front_matter import split_front_matter
-from vouch.graph import Step
+from vouch.graph import Judgement, Step
 from vouch.guards import as_data, flagged_steps, instruction_like
 from vouch.profile import NORDLICHT_PROFILE, ProfileError
 
@@ -55,6 +55,11 @@ def copy_profile(tmp_path: Path, **sources: str) -> Path:
     data["evidence_sources"] = {name: {"folder": where} for name, where in sources.items()}
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     return path
+
+
+def judge_prompt(model: RecordingModel) -> list:
+    """The messages of the model's last judge call (remediation is asked after it)."""
+    return next(m for m in reversed(model.received) if "Judge each" in str(m[0].content))
 
 
 def guard_steps(result) -> list[str]:
@@ -205,7 +210,7 @@ def test_a_folder_swapped_for_a_symlink_after_loading_is_refused_and_shown(tmp_p
     assert {(r.verdict, r.reason) for r in result.requirements} == {
         ("not-evidenced", "no evidence sources allowed")
     }
-    assert model.judge_turn == 0
+    assert Judgement not in model.turns
 
 
 def test_a_quote_cited_from_a_folder_swapped_for_a_symlink_is_dropped(tmp_path):
@@ -222,7 +227,14 @@ def test_a_quote_cited_from_a_folder_swapped_for_a_symlink_is_dropped(tmp_path):
     quote = {"doc_id": "leak", "quote": f"The {SECRET} are kept here."}
     model = recording(
         [{"answer": "Draft."}],  # no search, so the judge is asked and cites the swapped folder
-        judge=[{"requirement_id": "M1", "verdict": "evidenced", "reason": "Shown.", "citations": [quote]}],
+        judge=[
+            {
+                "requirement_id": "M1",
+                "verdict": "evidenced",
+                "reason": "Shown.",
+                "citations": [quote],
+            }
+        ],
     )
 
     result = assess("4.1.2", profile, model)
@@ -287,7 +299,7 @@ def test_a_profile_with_no_sources_refuses_every_tool_and_gives_not_evidenced(tm
         "Refused search_policies: the compliance profile doesn't allow the policies source.",
         "Refused search_records: the compliance profile doesn't allow the records source.",
     ]
-    assert model.judge_turn == 0  # nothing to judge, so the model isn't asked
+    assert Judgement not in model.turns  # nothing to judge, so the model isn't asked
 
 
 def test_a_profile_allowing_only_sources_not_built_yet_gives_not_evidenced(tmp_path):
@@ -305,7 +317,7 @@ def test_a_profile_allowing_only_sources_not_built_yet_gives_not_evidenced(tmp_p
     assert {(r.verdict, r.reason) for r in result.requirements} == {
         ("not-evidenced", "no evidence sources allowed")
     }
-    assert model.judge_turn == 0
+    assert Judgement not in model.turns
     texts = " ".join(s["text"] for s in result.steps)
     assert "Search" not in texts  # no step says a search ran that never did
 
@@ -322,8 +334,8 @@ def test_a_flagged_passage_found_twice_is_flagged_and_judged_once():
     result = assess("5.2.4", load_named_profile("nordlicht"), model)
 
     assert len(guard_steps(result)) == 1
-    judge_prompt = " ".join(str(m.content) for m in model.received[-1])
-    assert judge_prompt.count(INJECTED) == 1
+    prompt = " ".join(str(m.content) for m in judge_prompt(model))
+    assert prompt.count(INJECTED) == 1
 
 
 def test_the_draft_answer_reaches_the_judge_marked_as_data():
@@ -337,13 +349,13 @@ def test_the_draft_answer_reaches_the_judge_marked_as_data():
 
     assess("4.1.2", load_named_profile("nordlicht"), model)
 
-    judge_prompt = "\n".join(str(m.content) for m in model.received[-1])
-    before, inside = judge_prompt.split("<draft>", 1)
+    prompt = "\n".join(str(m.content) for m in judge_prompt(model))
+    before, inside = prompt.split("<draft>", 1)
     assert steered not in before
     inside, after = inside.split("</draft>", 1)
     assert steered in inside
     assert steered not in after
-    assert "draft answer" in model.received[-1][0].content  # the rule names the draft as data
+    assert "draft answer" in judge_prompt(model)[0].content  # the rule names the draft as data
 
 
 def test_an_injection_in_a_heading_is_flagged():
