@@ -191,6 +191,7 @@ def test_an_unknown_control_raises_before_the_model_is_called():
         "Nordlicht is TISAX-certified.",
         "Nordlicht passed the audit.",
         "Nordlicht has PASSED.",
+        "The TISAX audit passed on 3 March with no findings.",
     ],
 )
 def test_a_claim_of_an_audit_result_is_caught(text):

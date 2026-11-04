@@ -50,9 +50,9 @@ CITATIONS_DROPPED = (
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 # Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
 # A negation ("non-compliant", "not certified") and handing something on ("passed to the
-# CISO") are not claims. English only: German answers come with the second profile (M4).
+# CISO", "passed on to IT") are not claims; "passed on 3 March" is. English only: German answers come with the second profile (M4).
 AUDIT_RESULT = re.compile(
-    r"(?<!non-)(?<!non )(?<!not )\b(compliant|certified|passed(?!\s+(?:to|on)\b))\b",
+    r"(?<!non-)(?<!non )(?<!not )\b(compliant|certified|passed(?!\s+(?:on\s+)?to\b))\b",
     re.IGNORECASE,
 )
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
