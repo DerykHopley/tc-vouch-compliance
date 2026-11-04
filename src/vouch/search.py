@@ -5,7 +5,10 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-DEFAULT_POLICY_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "policies"
+from vouch.front_matter import split_front_matter
+from vouch.paths import FIXTURES_DIR
+
+DEFAULT_POLICY_DIR = FIXTURES_DIR / "nordlicht" / "policies"
 POLICY_DIR_ENV = "ASSESS_POLICY_DIR"
 MAX_QUERY_CHARS = 200
 DEFAULT_LIMIT = 5
@@ -82,7 +85,8 @@ def _passages(doc: Path) -> list[Passage]:
             passages.append(Passage(doc_id=doc.stem, heading=heading, text="\n".join(paragraph)))
             paragraph.clear()
 
-    for line in doc.read_text(encoding="utf-8").splitlines():
+    _, body = split_front_matter(doc.read_text(encoding="utf-8"))
+    for line in body.splitlines():
         match = _HEADING.match(line)
         if match or not line.strip():
             close_paragraph()

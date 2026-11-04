@@ -31,7 +31,7 @@ def test_assess_prints_assessment_json():
     assert assessment["answer"] == (
         "Laptops use full-disk encryption with centrally stored recovery keys."
     )
-    assert "encryption-policy" in {s["doc_id"] for s in assessment["sources"]}
+    assert "encryption-standard" in {s["doc_id"] for s in assessment["sources"]}
     assert assessment["covered_points"] == ["ENC-1", "ENC-2", "ENC-3"]
     assert assessment["missing_points"] == []
     assert assessment["gap_note"] is None
