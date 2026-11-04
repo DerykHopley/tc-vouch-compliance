@@ -64,6 +64,12 @@ class ControlRequirements:
     applicable: tuple[Requirement, ...]
     not_applicable: tuple[NotApplicableRequirement, ...]
 
+    @property
+    def overlay(self) -> tuple[Requirement, ...]:
+        """The requirements the country overlays add: the applicable ones, then the rest."""
+        every = self.applicable + tuple(n.requirement for n in self.not_applicable)
+        return tuple(r for r in every if r.column == "overlay")
+
 
 class ProfileError(ValueError):
     """A compliance profile is missing or invalid; the message names the file and the field."""

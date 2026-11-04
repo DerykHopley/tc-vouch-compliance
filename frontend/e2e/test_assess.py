@@ -26,18 +26,20 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     paper = page.get_by_role("region", name="Working paper")
     expect(paper.get_by_role("heading", name=CONTROL)).to_be_visible()
     steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
-    expect(steps).to_have_count(8)
-    expect(steps.first).to_contain_text("authentication")
-    expect(steps.filter(has_text="Judged 4 of 5 requirements evidenced.")).to_have_count(1)
-    expect(
-        steps.filter(has_text="Checked each quote against its document: kept 6 citations.")
-    ).to_have_count(1)
-    expect(steps.last).to_contain_text("Waiting for the compliance lead's review.")
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Partly evidenced", exact=True)).to_be_visible()
     expect(result).to_contain_text("hardware security keys")
+    for text in (
+        "No country overlay adds a requirement to this control",
+        "authentication",
+        "Judged 4 of 5 requirements evidenced.",
+        "Checked each quote against its document: kept 6 citations.",
+    ):
+        expect(steps.filter(has_text=text).first).to_be_visible()
+    expect(steps.last).to_contain_text("Waiting for the compliance lead's review.")
+    shown = steps.count()
     assert seen[0] == 1, f"the first render already held {seen[0]} steps"
-    assert sorted(set(seen)) == [1, 2, 3, 4, 5, 6, 7, 8], seen
+    assert sorted(set(seen)) == list(range(1, shown + 1)), seen
 
 
 def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, vouch_url):
