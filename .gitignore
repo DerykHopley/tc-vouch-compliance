@@ -2,3 +2,11 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+*.pyc
+.ruff_cache/
+dist/
+.dev.vars
+node_modules/
+
+# The deploy wizard's plain answers (project id, region, image tag): DEPLOY.md
+deploy/cloudrun/wizard.env

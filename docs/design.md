@@ -48,6 +48,7 @@ Names and uses come from the prototype's Tailored block; M0 copies the values in
 | `--band`, `--band-fg` | `tokens.css` `:root` | the dark full-width bands (readiness, Ask Vouch) | panels |
 | `--evidenced`, `--partly-evidenced`, `--not-evidenced`, `--not-applicable` (each with a `-bg`) | `tokens.css` `:root` | verdict chips, the readiness bar, card edges | anything else (they are semantic, not accents) |
 | `--check-a`, `--check-b` | `tokens.css` `:root` | the glen-check strip | anything else |
+| `--shadow` | `tokens.css` `:root` | the shadow colour of floating things (the Ask Vouch button and bubble) | panels and cards, which sit flat |
 | `--f-display`, `--f-body`, `--f-mono`, `--f-quote` | `tokens.css` `:root` | the four type roles above | |
 
 Type, spacing, radius, shadow and motion get rows here once the CSS names them as tokens. Dark mode redefines the same tokens; it never adds new ones. Dark is near-black with warm off-white text, champagne for `--sign` and `--brass`.
