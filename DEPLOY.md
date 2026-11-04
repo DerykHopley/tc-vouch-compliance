@@ -251,9 +251,10 @@ from Secret Manager as `VOUCH_DATABASE_URL` (the wizard does both, "Secrets and 
 wizard's health check (step 11) passes only on `"status": "ok"` *and* `"database": "reachable"`
 (*checked*, `tests/test_deploy_wizard.py`). A deploy without the database URL or the instance
 flag fails there, with the logs command. The wizard's deploy carries both (#118). On
-`"needs-setup"` it stops with the two `vouch-db-setup` commands. It says Done only when this run
-deployed: answering n to the deploy ends with "Nothing was deployed" and a non-zero exit, since
-health would pass on the old revision (#123).
+`"needs-setup"` it stops with the two `vouch-db-setup` commands (*checked*,
+`tests/test_deploy_wizard.py`). It says Done only when this run deployed: answering n to the
+deploy ends with "Nothing was deployed" and a non-zero exit, since health would pass on the old
+revision (#123; *checked*, `tests/test_deploy_wizard.py`).
 
 The app holds a small pool (at most 4 connections; db-f1-micro allows 25, *checked* on Cloud SQL's
 flags page for ~0.5 GB instances). It checks each connection before use and reconnects after an

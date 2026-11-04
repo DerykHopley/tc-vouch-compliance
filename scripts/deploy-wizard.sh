@@ -332,12 +332,13 @@ setup_commands() {
   printf '    %-52s # terminal 1: leave it running\n' "cloud-sql-proxy $SQL_INSTANCE --port 5432"
   printf '    %-52s # terminal 2: .envrc gives VOUCH_DATABASE_URL\n' "uv run vouch-db-setup"
 }
+RERUN_DB_READY="scripts/deploy-wizard.sh --db-ready   (it skips what is done)"
 say "The app needs vouch-db-setup to have run once against it (and after a LangGraph upgrade)."
 say "From your machine, through the Cloud SQL Auth Proxy (DEPLOY.md, The database):"
 setup_commands
 if [[ $DB_READY == yes ]]; then ok "vouch-db-setup has run (--db-ready)"
 elif [[ $DRY == no ]]; then
-  stop "Run vouch-db-setup (above), then: scripts/deploy-wizard.sh --db-ready   (it skips what is done)"
+  stop "Run vouch-db-setup (above), then: $RERUN_DB_READY"
 fi
 
 step  # Deploy
@@ -382,7 +383,7 @@ else
     [[ "$body" =~ \"database\"[[:space:]]*:[[:space:]]*\"needs-setup\" ]] \
       && stop "The database answers, but vouch-db-setup hasn't run on it, so every assessment would fail. Run it:
 $(setup_commands)
-    then: scripts/deploy-wizard.sh --db-ready   (it skips what is done)"
+    then: $RERUN_DB_READY"
   done
   [[ $healthy == yes ]] || stop "$URL/api/health didn't answer ok with the database reachable. The log says why: $(quoted "${LOGS[@]}")"
   ok "$URL/api/health answers ok, the database reachable"
