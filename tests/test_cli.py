@@ -35,7 +35,8 @@ def test_assess_prints_assessment_json(profile_args):
         ("M2", "evidenced"),
     ]
     assert assessment["should_score"] == {"evidenced": 2, "total": 3}
-    assert "authentication-standard" in {s["doc_id"] for s in assessment["sources"]}
+    cited = {c["doc_id"] for r in assessment["requirements"] for c in r["citations"]}
+    assert cited == {"authentication-standard"}
 
 
 @pytest.mark.parametrize(
