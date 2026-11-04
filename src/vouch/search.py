@@ -31,16 +31,20 @@ class ErrorResult(TypedDict):
     detail: NotRequired[str]
 
 
-def search_policies(query: str, limit: int = DEFAULT_LIMIT) -> list[Passage] | ErrorResult:
+def search_policies(
+    query: str, limit: int = DEFAULT_LIMIT, folder: Path | None = None
+) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
-    Errors come back as a dict with an `error` key; nothing is raised.
+    `folder` is the policy folder the compliance profile allows; without one, the folder in
+    ASSESS_POLICY_DIR or Nordlicht's. Errors come back as a dict with an `error` key; nothing
+    is raised.
     """
     problem = _check_input(query, limit)
     if problem:
         return ErrorResult(error=INVALID_INPUT, detail=problem)
     try:
-        passages = [p for doc in _policy_files(_policy_dir()) for p in _passages(doc)]
+        passages = [p for doc in _policy_files(folder or _policy_dir()) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}

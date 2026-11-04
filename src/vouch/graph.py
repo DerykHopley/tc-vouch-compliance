@@ -1,8 +1,9 @@
 """The assessment graph: one VDA ISA control under one compliance profile in, one Assessment out.
 
-The agent gathers evidence (ReAct over `search_policies`), drafts an answer, and judges each
-applicable requirement. The control's verdict rolls up from those verdicts in code, never from
-the model.
+The agent gathers evidence (ReAct over the evidence-source tools the profile allows), drafts
+an answer, and judges each applicable requirement. Every evidence-source tool call passes the
+guards first (`vouch.guards`), and document text reaches the model only as data. The
+control's verdict rolls up from those verdicts in code, never from the model.
 """
 
 import json
@@ -18,6 +19,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
+from vouch.guards import (
+    DATA_RULE,
+    EVIDENCE_TOOLS,
+    NO_SOURCES_ALLOWED,
+    allowed_folder,
+    as_data,
+    flagged_steps,
+    refusal_step,
+)
 from vouch.isa import Column, IsaControl, Requirement, load_isa_control
 from vouch.profile import ComplianceProfile, ControlRequirements
 from vouch.search import (
@@ -31,7 +41,9 @@ from vouch.search import (
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
-PROMPT_VERSION = "m1-judge-requirements-1"  # change it whenever a prompt below changes
+SEARCH_RECORDS = "search_records"
+SEARCHED_SOURCE = {SEARCH_POLICIES: "policies", SEARCH_RECORDS: "records"}  # for step sentences
+PROMPT_VERSION = "m1-guards-1"  # change it whenever a prompt below changes
 
 Verdict = Literal["evidenced", "partly-evidenced", "not-evidenced", "not-applicable"]
 JUDGED_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced")
@@ -180,6 +192,7 @@ class AssessState(TypedDict, total=False):
     control_requirements: ControlRequirements
     evidence: Annotated[list[Passage], operator.add]
     warnings: Annotated[list[str], operator.add]
+    guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
     usage: Annotated[list[dict[str, int]], operator.add]
     answer: str | None
     answer_retries: int
@@ -196,17 +209,32 @@ def _format_requirements(requirements: Iterable[Requirement]) -> str:
     return "\n".join(f"- {r.id} ({r.column}): {r.text}" for r in requirements)
 
 
+def _offered_tools(profile: ComplianceProfile) -> list[dict[str, Any]]:
+    """The evidence-source tools built so far that the profile allows (the guards still check
+    every call, whatever the model asks for)."""
+    built = {SEARCH_POLICIES: SEARCH_POLICIES_TOOL}
+    return [
+        spec for name, spec in built.items() if EVIDENCE_TOOLS[name] in profile.evidence_sources
+    ]
+
+
 def _prompt(
     control: IsaControl, control_requirements: ControlRequirements, profile: ComplianceProfile
 ) -> list[AnyMessage]:
+    offered = [t["function"]["name"] for t in _offered_tools(profile)]
+    search = (
+        f"Use {' and '.join(offered)} to find evidence."
+        if offered
+        else "No evidence source is allowed, so there is no evidence to find."
+    )
     return [
         SystemMessage(
             f"You assess one {control.source} control for {profile.company} against the "
-            f"company's own evidence. Use {SEARCH_POLICIES} to find evidence. When you are "
+            f"company's own evidence. {search} When you are "
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
             f"the language with ISO 639-1 code '{profile.answer_language}', and the doc_ids "
             "you cite. Say what the evidence shows; never call the company compliant, "
-            "certified or passed."
+            f"certified or passed. {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -217,18 +245,18 @@ def _prompt(
 
 def _judge_prompt(state: AssessState) -> list[AnyMessage]:
     control = state["control"]
-    evidence = "\n".join(f"[{p['doc_id']} / {p['heading']}] {p['text']}" for p in state["evidence"])
+    evidence = as_data(state["evidence"]) if state["evidence"] else "(none)"
     return [
         SystemMessage(
             "Judge each requirement listed from the evidence alone, not the draft answer. "
             "Give each one verdict: evidenced (the evidence fully shows it), partly-evidenced "
             "(it shows some of it) or not-evidenced (it shows none of it), and one sentence "
-            "saying why."
+            f"saying why. {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
             f"Requirements:\n{_format_requirements(state['control_requirements'].applicable)}\n\n"
-            f"Evidence:\n{evidence or '(none)'}\n\nDraft answer: {state.get('answer', '')}"
+            f"Evidence:\n{evidence}\n\nDraft answer: {state.get('answer', '')}"
         ),
     ]
 
@@ -273,9 +301,9 @@ def _usage_of(message: Any) -> list[dict[str, int]]:
     return [{k: usage[k] for k in USAGE_KEYS}]
 
 
-def build_graph(model: BaseChatModel):
-    """Compile the graph around a model passed in by the caller."""
-    bound = model.bind_tools([SEARCH_POLICIES_TOOL, SUBMIT_ANSWER_TOOL])
+def build_graph(model: BaseChatModel, profile: ComplianceProfile):
+    """Compile the graph around a model and the compliance profile whose sources it may use."""
+    bound = model.bind_tools([*_offered_tools(profile), SUBMIT_ANSWER_TOOL])
     judge_model = model.with_structured_output(Judgement, include_raw=True)
 
     def gather(state: AssessState) -> dict[str, Any]:
@@ -288,20 +316,32 @@ def build_graph(model: BaseChatModel):
         return update
 
     def tools(state: AssessState) -> dict[str, Any]:
-        messages, evidence, warnings = [], [], []
+        """Run each tool call the guards let through; a refusal is the call's reply and a
+        `guard` step. Passages reach the model as data, instruction-like ones flagged."""
+        messages, evidence, warnings, guards = [], [], [], []
         for call in state["messages"][-1].tool_calls:
-            if call["name"] == SEARCH_POLICIES:
+            name = call["name"]
+            folder = allowed_folder(profile, name) if name in EVIDENCE_TOOLS else None
+            if isinstance(folder, dict):  # refused before it runs
+                guards.append(refusal_step(name, folder))
+                content = json.dumps(folder)
+            elif name == SEARCH_POLICIES:
                 args = call["args"]
-                result = search_policies(args.get("query"), args.get("limit", DEFAULT_LIMIT))
+                result = search_policies(
+                    args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder
+                )
                 if isinstance(result, list):
                     evidence.extend(result)
-                elif result["error"] == SOURCE_UNAVAILABLE:
-                    warnings.append(SOURCE_UNAVAILABLE)
-                content = json.dumps(result)
+                    content = as_data(result)
+                else:
+                    if result["error"] == SOURCE_UNAVAILABLE:
+                        warnings.append(SOURCE_UNAVAILABLE)
+                    content = json.dumps(result)
             else:
-                content = f"tool {call['name']} is not available"
+                content = f"tool {name} is not available"
             messages.append(ToolMessage(content, tool_call_id=call["id"]))
-        return {"messages": messages, "evidence": evidence, "warnings": warnings}
+        guards += flagged_steps(evidence)
+        return {"messages": messages, "evidence": evidence, "warnings": warnings, "guards": guards}
 
     def check_answer(state: AssessState) -> dict[str, Any]:
         """The answer may not claim an audit result: asked for again once, then an error.
@@ -349,6 +389,9 @@ def build_graph(model: BaseChatModel):
         A reason claiming an audit result gets the judgement asked for again once, then an error.
         """
         control_requirements = state["control_requirements"]
+        if not profile.evidence_sources:  # every evidence tool was refused, so nothing shown
+            results, _ = _judged_requirements(control_requirements, None, NO_SOURCES_ALLOWED)
+            return {"requirements": results, "not_judged": []}
         if SOURCE_UNAVAILABLE in state["warnings"]:  # nothing could be read, so nothing shown
             results, _ = _judged_requirements(control_requirements, None, NO_SOURCE)
             return {"requirements": results, "not_judged": []}
@@ -413,9 +456,13 @@ class Step:
         update = self.update
         if self.node == "gather":
             calls = update["messages"][-1].tool_calls if update.get("messages") else []
-            queries = [c["args"].get("query", "") for c in calls if c["name"] == SEARCH_POLICIES]
-            if queries:
-                return "Searching the policies for " + ", ".join(f"“{q}”" for q in queries) + "."
+            searches = [
+                f"the {SEARCHED_SOURCE[c['name']]} for “{c['args'].get('query', '')}”"
+                for c in calls
+                if c["name"] in SEARCHED_SOURCE
+            ]
+            if searches:
+                return "Searching " + ", ".join(searches) + "."
             if any(c["name"] == SUBMIT_ANSWER for c in calls):
                 cited = _plural(len(update.get("cited", [])), "document")
                 return f"Drafted an answer citing {cited}."
@@ -443,6 +490,8 @@ class Step:
             if update.get("not_judged"):
                 text += " Not judged: " + ", ".join(update["not_judged"]) + "."
             return text
+        if self.node == "guard":
+            return update["text"]
         return f"Finished the {self.node} step."
 
 
@@ -474,7 +523,8 @@ def assess_steps(
     }
     final: dict[str, Any] = {}
     steps: list[dict[str, str]] = []
-    for mode, chunk in build_graph(model).stream(initial, stream_mode=["updates", "values"]):
+    graph = build_graph(model, profile)
+    for mode, chunk in graph.stream(initial, stream_mode=["updates", "values"]):
         if mode == "values":
             final = chunk
             continue
@@ -482,6 +532,9 @@ def assess_steps(
             step = Step(node, update or {})
             steps.append({"node": node, "text": step.describe()})
             yield step
+            for text in (update or {}).get("guards", []):  # one per refusal or flagged passage
+                steps.append({"node": "guard", "text": text})
+                yield Step("guard", {"text": text})
             if node == "judge":
                 yield from update["requirements"]
     requirements = final["requirements"]
