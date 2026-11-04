@@ -5,12 +5,15 @@ opens no socket itself (pytest runs with --disable-socket): its child processes 
 `curl` for HTTP and a short `python3` for a port's state, the way the script itself checks.
 """
 
+import fcntl
+import json
 import os
 import select
 import shutil
 import signal
 import subprocess
 import sys
+import termios
 import time
 from pathlib import Path
 
@@ -44,12 +47,20 @@ s.listen()
 print("held", flush=True)
 time.sleep(120)
 """
-# A stand-in for `uv run uvicorn ...` or `npm run dev -- ...`: it answers /api/health on its
-# --port. CRASH_AFTER=<n> makes it exit 3 after n answers (a negative n: at once); 0, never.
+# A stand-in for `uv run uvicorn ...` or `npm run dev -- ...`: it records the environment it got
+# in $FAKE_ENV_LOG/<tool>.json, then answers /api/health on its --port. CRASH_AFTER=<n> makes it
+# exit 3 after n answers (a negative n: at once; 0: never); CRASH_AFTER=hang, never listen.
 FAKE_SERVER = """
-import http.server, os, sys
+import http.server, json, os, sys, time
+env = {k: os.environ.get(k) for k in ("ASSESS_FAKE_SCRIPT", "OPENROUTER_API_KEY", "VOUCH_API")}
+log = os.path.join(os.environ["FAKE_ENV_LOG"], os.environ["FAKE_TOOL"] + ".json")
+with open(log + ".tmp", "w") as f:
+    json.dump(env, f)
+os.replace(log + ".tmp", log)
+if os.environ["CRASH_AFTER"] == "hang":
+    time.sleep(600)
 port = int(sys.argv[sys.argv.index("--port") + 1])
-left = int(os.environ.get("CRASH_AFTER", "0")) or None
+left = int(os.environ["CRASH_AFTER"]) or None
 if left is not None and left < 0:
     sys.exit(3)
 class Health(http.server.BaseHTTPRequestHandler):
@@ -112,7 +123,8 @@ def test_starts_both_servers_and_ctrl_c_stops_both(tmp_path: Path) -> None:
         proc = subprocess.Popen(
             [BASH, str(DEV), "--api-port", str(api_port), "--web-port", str(web_port)],
             cwd=ROOT,
-            env=dev_env(),
+            # A key in the environment, as in the owner's shell: the dev API still runs the fake.
+            env=dev_env() | {"OPENROUTER_API_KEY": "sk-or-fake-not-a-key"},
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -120,7 +132,7 @@ def test_starts_both_servers_and_ctrl_c_stops_both(tmp_path: Path) -> None:
         )
     url = f"http://127.0.0.1:{web_port}/"
     try:
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + 90  # past the script's own 60 s, so it diagnoses first
         while f"Vouch is running: {url}" not in (tmp_path / "dev.log").read_text():
             assert proc.poll() is None, (tmp_path / "dev.log").read_text()
             assert time.monotonic() < deadline, (tmp_path / "dev.log").read_text()
@@ -130,6 +142,14 @@ def test_starts_both_servers_and_ctrl_c_stops_both(tmp_path: Path) -> None:
         assert code == 200 and '<div id="root">' in body
         code, body = fetch(url + "api/health")
         assert code == 200 and '"status":"ok"' in body.replace(" ", "")
+        stream = subprocess.run(
+            ["curl", "-sS", "-N", "--max-time", "30", "-X", "POST", url + "api/assessments"]
+            + ["-H", "content-type: application/json", "-d", '{"control_id": "NK-ENC-01"}'],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "event: result" in stream and "event: error" not in stream, stream
 
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=30) == 130
@@ -154,11 +174,27 @@ def kill_session(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
-def fake_checkout(tmp_path: Path, crash_after: dict[str, int]) -> tuple[Path, dict[str, str]]:
-    """A copy of dev.sh in a tree with frontend/node_modules, and fake servers for uv and npm.
+def start_fake(
+    tmp_path: Path,
+    crash_after: dict[str, int | str],
+    cwd: Path | None = None,
+    tty: bool = False,
+    **env: str,
+) -> subprocess.Popen[str]:
+    """dev.sh copied into a tree with frontend/node_modules, with fake servers for uv and npm.
 
     The run gets past its deps check without a real npm ci, so these tests run in the fast lane.
+    It leads a new session, which holds every server it starts, for session_left and kill_session.
+    With tty, that session's terminal is a pty, whose other end is the returned process's `pty`.
     """
+    if tty:
+        master, slave = os.openpty()
+        streams: dict = {"stdin": slave, "stdout": slave, "stderr": slave}
+        # After the setsid of start_new_session: the pty becomes the controlling terminal.
+        streams["preexec_fn"] = lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    else:
+        streams = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE}
+        streams["stderr"] = subprocess.STDOUT
     (tmp_path / "scripts").mkdir()
     shutil.copy(DEV, tmp_path / "scripts" / "dev.sh")
     (tmp_path / "frontend" / "node_modules").mkdir(parents=True)
@@ -167,32 +203,90 @@ def fake_checkout(tmp_path: Path, crash_after: dict[str, int]) -> tuple[Path, di
     (tmp_path / "fake_server.py").write_text(FAKE_SERVER)
     for tool in ("uv", "npm"):
         (bin_dir / tool).write_text(
-            f"#!/bin/sh\nCRASH_AFTER={crash_after.get(tool, 0)} "
+            f"#!/bin/sh\nCRASH_AFTER={crash_after.get(tool, 0)} FAKE_TOOL={tool} "
             f'exec "{sys.executable}" "{tmp_path / "fake_server.py"}" "$@"\n'
         )
         (bin_dir / tool).chmod(0o755)
-    return tmp_path / "scripts" / "dev.sh", dev_env() | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
-
-
-def run_fake(tmp_path: Path, crash_after: dict[str, int]) -> tuple[int, str, str]:
-    """Run the copied dev.sh to its end: its exit code, its output, and what it left running."""
-    script, env = fake_checkout(tmp_path, crash_after)
     api_port, web_port = free_ports(2)
     proc = subprocess.Popen(
-        [BASH, str(script), "--api-port", str(api_port), "--web-port", str(web_port)],
-        cwd=tmp_path,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        [BASH, str(tmp_path / "scripts" / "dev.sh"), "--api-port", str(api_port)]
+        + ["--web-port", str(web_port)],
+        cwd=cwd or tmp_path,
+        env=dev_env()
+        | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_ENV_LOG": str(tmp_path)}
+        | env,
         text=True,
         start_new_session=True,
+        **streams,
     )
+    if tty:
+        os.close(slave)
+        proc.pty = master  # type: ignore[attr-defined]
+    return proc
+
+
+def run_fake(
+    tmp_path: Path, crash_after: dict[str, int | str], cwd: Path | None = None, **env: str
+) -> tuple[int, str, str]:
+    """Run the copied dev.sh to its end: its exit code, its output, and what it left running."""
+    proc = start_fake(tmp_path, crash_after, cwd, **env)
     try:
         out, _ = proc.communicate(timeout=60)
         return proc.returncode, out, session_left(proc.pid)
     finally:
         kill_session(proc)
+
+
+def seen_env(tmp_path: Path, tool: str) -> dict[str, str | None]:
+    return json.loads((tmp_path / f"{tool}.json").read_text())
+
+
+def test_ctrl_c_in_a_terminal_during_startup_stops_both(tmp_path: Path) -> None:
+    # The API never answers, so the script is still waiting for it. Ctrl-C is typed into a real
+    # terminal (a pty): the terminal signals its foreground process group, which must hold the
+    # script, not only the curl or sleep it is running at that moment.
+    proc = start_fake(tmp_path, {"uv": "hang"}, tty=True)
+    try:
+        deadline = time.monotonic() + 30
+        while not all((tmp_path / f"{t}.json").exists() for t in ("uv", "npm")):
+            assert proc.poll() is None and time.monotonic() < deadline
+            time.sleep(0.1)
+        time.sleep(0.5)  # into the readiness loop
+        os.write(proc.pty, b"\x03")
+        assert proc.wait(timeout=30) == 130
+        assert not session_left(proc.pid), "a process outlived Ctrl-C"
+    finally:
+        kill_session(proc)
+        os.close(proc.pty)
+
+
+def test_the_api_gets_no_key_and_an_absolute_fake_script(tmp_path: Path) -> None:
+    # Run from a subdirectory with a relative script path; the API starts in the repo root.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _, output, _ = run_fake(
+        tmp_path,
+        {"npm": 1},
+        cwd=elsewhere,
+        ASSESS_FAKE_SCRIPT="scripts/demo.json",
+        OPENROUTER_API_KEY="sk-or-fake-not-a-key",
+    )
+    assert "Vouch is running" in output
+    api = seen_env(tmp_path, "uv")
+    assert api["ASSESS_FAKE_SCRIPT"] == str(elsewhere / "scripts" / "demo.json")
+    assert api["OPENROUTER_API_KEY"] is None
+    assert seen_env(tmp_path, "npm")["VOUCH_API"].startswith("http://127.0.0.1:")
+
+
+def test_a_missing_tool_stops_with_a_clear_message(tmp_path: Path) -> None:
+    # Only what the script needs before its tool check, and python3: no curl.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("dirname", "python3"):
+        (bin_dir / tool).symlink_to(shutil.which(tool) or tool)
+    result = run_dev("--api-port", "18001", "--web-port", "18002", path=str(bin_dir))
+    assert result.returncode == 1
+    assert "scripts/dev.sh needs curl on PATH." in result.stderr
 
 
 def test_a_server_that_stops_stops_the_other(tmp_path: Path) -> None:

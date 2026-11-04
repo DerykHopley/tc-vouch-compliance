@@ -42,13 +42,15 @@ jobs:
       - name: design lint, every colour a token
         run: python3 -I -B scripts/design-lint.py frontend/src
         working-directory: .
-      # The dev command starts real servers, so it needs the front-end deps installed above
-      # (the fast lane, without them, skips that test).
+      # The dev command's real-server test needs the front-end deps installed above (the fast
+      # lane, without them, skips it and runs the rest of the file).
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - name: the dev command (scripts/dev.sh), on spare ports
-        run: uv sync --locked && env -u OPENROUTER_API_KEY uv run pytest tests/test_dev_command.py
+      - name: the dev command (scripts/dev.sh) with real servers, on spare ports
+        run: >-
+          uv sync --locked && env -u OPENROUTER_API_KEY uv run pytest tests/test_dev_command.py
+          -k test_starts_both_servers_and_ctrl_c_stops_both
         working-directory: .
 
   browser:
