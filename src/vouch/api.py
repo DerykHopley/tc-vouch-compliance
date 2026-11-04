@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
+from vouch.auth import ClerkAuth, ClerkUnavailable, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.graph import Assessment, assess_steps
 from vouch.settings import (
@@ -31,8 +32,8 @@ log = logging.getLogger(__name__)
 # The trial's verdicts, as the API names them (GLOSSARY.md, "Verdict"). #20 renames them inside.
 VERDICTS = {"found": "evidenced", "partial": "partly-evidenced", "gap": "not-evidenced"}
 FAILED = "The assessment could not be completed. Please try again later."
-
-router = APIRouter(prefix="/api")
+SIGNED_OUT = "Sign in to use Vouch."
+CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 
 
 class AssessmentRequest(BaseModel):
@@ -55,21 +56,42 @@ def app_settings(request: Request) -> Settings:
 AppSettings = Annotated[Settings, Depends(app_settings)]
 
 
-def current_user(settings: AppSettings) -> User:
-    """The request's user: local mode's default user; in clerk mode, refused until #32 signs in."""
+def current_user(request: Request, settings: AppSettings) -> User:
+    """The request's user: local mode's default user; in clerk mode, the verified token's (auth.py).
+
+    No valid token is a 401; sign-in that can't be checked (Clerk unreachable) a 503, never access.
+    """
     if settings.auth_mode == "local":
         return DEFAULT_USER
-    raise HTTPException(status_code=401, detail="Sign in to use Vouch.")
+    auth: ClerkAuth | None = getattr(request.app.state, "auth", None)
+    try:
+        if auth is None:
+            raise SignedOut()
+        return auth.user(request)
+    except SignedOut:
+        raise HTTPException(
+            status_code=401, detail=SIGNED_OUT, headers={"WWW-Authenticate": "Bearer"}
+        ) from None
+    except ClerkUnavailable:
+        raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
 
 
-@router.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "version": version("vouch")}
+public = APIRouter(prefix="/api")
+"""The routes open to anyone: health alone."""
+
+router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
+"""Every other route: a route added here needs a signed-in user in clerk mode."""
 
 
-@router.post(
-    "/assessments", response_class=EventSourceResponse, dependencies=[Depends(current_user)]
-)
+@public.get("/health")
+def health(settings: AppSettings) -> dict[str, Any]:
+    """Also tells the front end how to sign in: Clerk's publishable key is public."""
+    publishable_key = settings.clerk.publishable_key if settings.clerk else None
+    auth = {"mode": settings.auth_mode, "publishable_key": publishable_key}
+    return {"status": "ok", "version": version("vouch"), "auth": auth}
+
+
+@router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
     control: Annotated[Control, Depends(requested_control)], settings: AppSettings
 ) -> Iterable[ServerSentEvent]:
@@ -109,14 +131,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     A path that is neither a route nor a built file gets the front end's index.html when a
     browser asks for a page, so a deep link survives a refresh (client routing).
     """
-    app = FastAPI(title="Vouch")
     if settings is None:
         try:
             settings = load_settings()
         except SettingsError as error:
             raise SystemExit(f"Vouch cannot start: {error}.") from None
+    signed_in = settings.auth_mode == "clerk"
+    # In clerk mode the API's own map (/docs, /openapi.json) isn't served: it'd map it for anyone.
+    no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    app = FastAPI(title="Vouch", **(no_map if signed_in else {}))
     app.state.settings = settings
+    app.state.auth = ClerkAuth(settings.clerk) if settings.clerk and signed_in else None
     frontend = settings.frontend
+    app.include_router(public)
     app.include_router(router)
     if frontend is not None:
         if not (frontend / "index.html").is_file():

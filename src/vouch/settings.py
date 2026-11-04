@@ -19,6 +19,7 @@ if TYPE_CHECKING:  # imported when called: the model's modules read settings the
     from vouch.fake_model import ScriptedChatModel
 
 AuthMode = Literal["local", "clerk"]
+Role = Literal["compliance-lead", "developer"]
 
 AUTH_MODE_ENV = "VOUCH_AUTH_MODE"
 CLERK_SECRET_KEY_ENV = "CLERK_SECRET_KEY"
@@ -46,9 +47,10 @@ class SettingsError(RuntimeError):
 
 @dataclass(frozen=True)
 class User:
-    """Who a request is for; their id scopes what they store."""
+    """Who a request is for; their id scopes what they store (GLOSSARY.md, "User")."""
 
     id: str
+    role: Role = "compliance-lead"
 
 
 DEFAULT_USER = User(id="local-user")

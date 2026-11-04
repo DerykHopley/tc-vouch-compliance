@@ -38,7 +38,11 @@ def test_health_answers_ok_with_the_version(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": version("vouch")}
+    assert response.json() == {
+        "status": "ok",
+        "version": version("vouch"),
+        "auth": {"mode": "local", "publishable_key": None},
+    }
 
 
 def test_demo_control_streams_steps_then_one_result_with_a_decided_verdict(client):
