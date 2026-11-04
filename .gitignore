@@ -2,3 +2,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+*.pyc
+.ruff_cache/
+dist/
+.dev.vars
