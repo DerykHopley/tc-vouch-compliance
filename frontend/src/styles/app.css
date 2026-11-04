@@ -29,6 +29,13 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 /* Not assessed: --muted text, as --not-applicable on its -bg is 3.3:1 in light, under the 4.5:1 floor. */
 .v-none { color: var(--muted); background: var(--not-applicable-bg); }
+.v-evidenced { color: var(--evidenced); background: var(--evidenced-bg); }
+.v-partly-evidenced { color: var(--partly-evidenced); background: var(--partly-evidenced-bg); }
+.v-not-evidenced { color: var(--not-evidenced); background: var(--not-evidenced-bg); }
+.v-assessing { color: var(--navy); background: color-mix(in srgb, var(--navy) 12%, var(--sheet)); }
+.btn-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.btn:disabled { opacity: .6; }
+.btn[aria-busy="true"] { cursor: progress; }
 .pill { display: inline-block; background: var(--sheet); border: 1px solid var(--rule); color: var(--muted); border-radius: 999px; padding: 2px 12px; font-size: 12px; font-weight: 600; }
 
 /* Dossier */
@@ -53,6 +60,20 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .card-head b { font: 400 24px/1 var(--f-display); }
 .control-title { font-size: 13px; line-height: 1.4; }
 .card-meta { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+
+/* Working paper (minimal until M2): head ruled in ink, the agent's steps in mono, then the verdict and draft answer */
+.paper { max-width: 900px; margin: 0 auto; padding-block: 24px 110px; display: grid; gap: 16px; }
+.paper-head { display: grid; gap: 6px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+.paper-head h2 { font-size: clamp(22px, 3vw, 30px); overflow-wrap: anywhere; }
+.paper-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.mono { font-family: var(--f-mono); text-transform: none; }
+.sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 16px; display: grid; gap: 8px; justify-items: start; margin: 0; }
+.trace { font: 12px/1.5 var(--f-mono); list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.trace li { animation: rise .18s ease-out; }
+.trace b { font-weight: 500; color: var(--navy); margin-right: 6px; }
+.answer { margin: 0; max-width: 72ch; }
+.notice { border-left: 3px solid var(--ink); }
 
 /* Ask Vouch: button and bubble */
 .fab, .bubble { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; }

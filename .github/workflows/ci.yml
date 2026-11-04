@@ -41,3 +41,31 @@ jobs:
       - name: design lint, every colour a token
         run: python3 -I -B scripts/design-lint.py frontend/src
         working-directory: .
+
+  browser:
+    # The browser check (frontend/e2e) on the dev server and the fake model. #13 moves it to the built front end.
+    name: Browser check (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --locked
+      - run: npm ci
+        working-directory: frontend
+      - run: uv run --locked --project frontend/e2e playwright install --with-deps chromium
+      - run: frontend/e2e/run.sh --browser chromium
+        env:
+          E2E_LOG_DIR: ${{ runner.temp }}
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: ${{ runner.temp }}/*.log
