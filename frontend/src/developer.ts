@@ -1,4 +1,4 @@
-import { UNREACHABLE } from './assessment.ts'
+import { UNREACHABLE, type Usage } from './assessment.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The developer page's API (#34). Only a developer gets an answer; anyone else gets a 403, and no page. */
@@ -11,11 +11,18 @@ export type DeveloperSettings = {
   fake_reason: 'no_key' | 'fake_script' | null
   prompt_version: string
   usage_url: string
-  /** Where the model choice is kept: `memory` (no database) lasts until the server restarts. */
+  /** Where the model choice, the daily counts and the usage are kept: `memory` (no database) lasts until the server
+   * restarts. */
   kept_in: 'database' | 'memory'
+  /** Assessments each user may start in a UTC day (#35). */
+  daily_limit: number
+  /** Every assessment's usage added up; `unpriced` ones have no cost in `cost_usd`. */
+  usage: UsageTotals
 }
 
-export type ModelChange = { ok: true; settings: DeveloperSettings } | { ok: false; message: string }
+export type UsageTotals = Omit<Usage, 'model' | 'cost_usd'> & { assessments: number; cost_usd: number; unpriced: number }
+
+export type SettingChange = { ok: true; settings: DeveloperSettings } | { ok: false; message: string }
 
 const BAD_FORM = 'A model id is written author/model, such as anthropic/claude-haiku-5.5.'
 const REFUSED = 'The model could not be changed. Please try again later.'
@@ -43,14 +50,26 @@ export async function developerSettings(): Promise<DeveloperSettings | typeof UN
   }
 }
 
+const BAD_LIMIT = 'The daily limit is a whole number of assessments, from 1 to 10,000.'
+const LIMIT_REFUSED = 'The daily limit could not be changed. Please try again later.'
+
 /** Asks for the next assessments to run on `model`; the API checks the id with OpenRouter first. */
-export async function changeModel(model: string): Promise<ModelChange> {
+export function changeModel(model: string): Promise<SettingChange> {
+  return put('/api/developer/model', { model }, BAD_FORM, REFUSED)
+}
+
+/** Asks for each user's daily limit to be `limit` assessments, from the next one on. */
+export function changeDailyLimit(limit: number): Promise<SettingChange> {
+  return put('/api/developer/daily-limit', { daily_limit: limit }, BAD_LIMIT, LIMIT_REFUSED)
+}
+
+async function put(path: string, body: object, badForm: string, refused: string): Promise<SettingChange> {
   let response: Response
   try {
-    response = await fetch('/api/developer/model', {
+    response = await fetch(path, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-      body: JSON.stringify({ model }),
+      body: JSON.stringify(body),
     })
   } catch {
     return { ok: false, message: UNREACHABLE }
@@ -61,5 +80,5 @@ export async function changeModel(model: string): Promise<ModelChange> {
   }
   const detail = await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
   if (typeof detail === 'string') return { ok: false, message: detail }
-  return { ok: false, message: response.status === 422 ? BAD_FORM : REFUSED } // 422 with a list: pydantic's shape check
+  return { ok: false, message: response.status === 422 ? badForm : refused } // 422 with a list: pydantic's shape check
 }

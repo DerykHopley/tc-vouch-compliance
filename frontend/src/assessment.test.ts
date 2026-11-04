@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assess, readEvents } from './assessment.ts'
+import { assess, readEvents, usageWords } from './assessment.ts'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
 function streamOf(...chunks: string[]): ReadableStream<Uint8Array> {
@@ -84,6 +84,42 @@ describe('assess, signed in', () => {
     expect(await sentHeaders()).not.toHaveProperty('Authorization')
     setTokenSource(async () => null)
     expect(await sentHeaders()).not.toHaveProperty('Authorization')
+  })
+})
+
+describe('usageWords', () => {
+  it('puts the tokens and the cost in words, saying when the cost is estimated', () => {
+    expect(usageWords({ input_tokens: 1234, output_tokens: 56, cost_usd: 0.000325, estimated: true })).toBe(
+      '1,234 tokens in · 56 tokens out · $0.0003 (estimated)',
+    )
+    expect(usageWords({ input_tokens: 10, output_tokens: 5, cost_usd: 1.5, estimated: false })).toBe(
+      '10 tokens in · 5 tokens out · $1.50',
+    )
+    expect(usageWords({ input_tokens: 10, output_tokens: 5, cost_usd: null, estimated: true })).toBe(
+      '10 tokens in · 5 tokens out · cost unknown',
+    )
+  })
+})
+
+describe('assess, when a limit refuses it (429)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const events = async (body: string) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(body, { status: 429 })))
+    const seen = []
+    for await (const item of assess('NK-ENC-01')) seen.push(item)
+    return seen
+  }
+
+  it("says the daily limit's message, with its reset time", async () => {
+    const detail = "You have reached today's limit of 30 assessments. It resets at 00:00 UTC on 5 November 2026."
+    expect(await events(JSON.stringify({ detail, limit: 'daily' }))).toEqual([{ event: 'error', data: { message: detail } }])
+  })
+
+  it('falls back to the plain refusal when the 429 has no message', async () => {
+    expect(await events('not json')).toEqual([
+      { event: 'error', data: { message: 'The assessment could not be started. Please try again later.' } },
+    ])
   })
 })
 

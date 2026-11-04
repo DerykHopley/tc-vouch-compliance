@@ -34,6 +34,21 @@ def test_a_developer_opens_the_page_and_sees_the_model_the_prompt_version_and_th
     expect(usage).to_have_attribute("href", "https://openrouter.ai/activity")
 
 
+def test_a_developer_sees_the_daily_limit_and_every_assessments_usage_totalled(
+    page: Page, vouch_url
+):
+    """#35. The servers are shared by the tests, so the totals hold whatever ran before."""
+    page.request.post(f"{vouch_url}/api/assessments", data={"control_id": "NK-ENC-01"})
+    page.goto(f"{vouch_url}/developer")
+
+    settings = page.get_by_role("region", name="Developer settings")
+    expect(settings).to_contain_text("30 assessments per user per day (UTC)")
+    expect(settings.get_by_role("region", name="Usage")).to_contain_text(
+        re.compile(r"[\d,]+ assessments? · [\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ \(estimated\)")
+    )
+    expect(settings).to_contain_text("kept until the server restarts")
+
+
 def test_without_a_key_a_change_is_refused_with_the_apis_message(page: Page, vouch_url):
     page.goto(f"{vouch_url}/developer")
     settings = page.get_by_role("region", name="Developer settings")

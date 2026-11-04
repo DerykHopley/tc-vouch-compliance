@@ -16,9 +16,29 @@ export type Step = { node: string; text: string }
 // The trial's assessment shape until M1 renames its fields (#20, #21, #26); the page reads only these.
 export type Assessment = { control_id: string; verdict: Verdict; answer: string }
 
+/** One assessment's tokens and cost (#35); `cost_usd` null when no price is known, `estimated` unless OpenRouter
+ * reported it. */
+export type Usage = {
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number | null
+  estimated: boolean
+}
+
+const count = (n: number) => n.toLocaleString('en-US')
+const dollars = (n: number) =>
+  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 })
+
+/** Tokens and cost in words, as the working paper and the developer page show them. */
+export function usageWords({ input_tokens, output_tokens, cost_usd, estimated }: Omit<Usage, 'model'>): string {
+  const cost = cost_usd === null ? 'cost unknown' : `${dollars(cost_usd)}${estimated ? ' (estimated)' : ''}`
+  return `${count(input_tokens)} tokens in · ${count(output_tokens)} tokens out · ${cost}`
+}
+
 export type AssessmentEvent =
   | { event: 'step'; data: Step }
-  | { event: 'result'; data: { assessment: Assessment } }
+  | { event: 'result'; data: { assessment: Assessment; usage?: Usage } }
   | { event: 'error'; data: { message: string } }
 
 /** Shown, with Retry, for any throw from `assess`. */
@@ -69,7 +89,11 @@ export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent
     return
   }
   if (!response.ok) {
-    yield { event: 'error', data: { message: NOT_STARTED } }
+    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why; any other refusal doesn't.
+    const detail = response.status === 429
+      ? await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
+      : undefined
+    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : NOT_STARTED } }
     return
   }
   for await (const item of readEvents(response.body)) {

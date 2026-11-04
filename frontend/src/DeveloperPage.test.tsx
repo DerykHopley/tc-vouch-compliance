@@ -12,15 +12,17 @@ const SETTINGS: DeveloperSettings = {
   prompt_version: '1',
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
+  daily_limit: 30,
+  usage: { assessments: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0, estimated: false, unpriced: 0 },
 }
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
-function api(settingsStatus = 200, put?: (body: { model: string }) => [number, unknown], refusal?: unknown) {
+function api(settingsStatus = 200, put?: (body: Record<string, unknown>) => [number, unknown], refusal?: unknown) {
   const body = settingsStatus === 200 ? SETTINGS : (refusal ?? { detail: 'This is available to developers only.' })
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === '/api/developer/settings')
       return Promise.resolve(new Response(JSON.stringify(body), { status: settingsStatus }))
-    if (url === '/api/developer/model' && put) {
+    if ((url === '/api/developer/model' || url === '/api/developer/daily-limit') && put) {
       const [status, body] = put(JSON.parse(init!.body as string))
       return Promise.resolve(new Response(JSON.stringify(body), { status }))
     }
@@ -47,6 +49,48 @@ describe('the developer page', () => {
     const usage = within(region).getByRole('link', { name: /usage and costs/i })
     expect(usage.getAttribute('href')).toBe('https://openrouter.ai/activity')
     expect(within(region).queryByText(/fake model/i)).toBeNull()
+  })
+
+  it("totals every assessment's tokens and cost, and says when the cost is estimated", () => {
+    const usage = { assessments: 3, input_tokens: 12_345, output_tokens: 678, cost_usd: 0.0016, estimated: true, unpriced: 0 }
+    render(<DeveloperPage settings={{ ...SETTINGS, usage }} onChange={() => {}} />)
+    const totals = screen.getByRole('region', { name: 'Usage' })
+    expect(within(totals).getByText('3 assessments · 12,345 tokens in · 678 tokens out · $0.0016 (estimated)')).toBeTruthy()
+    expect(within(totals).queryByText(/without a known price/)).toBeNull()
+  })
+
+  it('says how many assessments the cost leaves out for want of a price', () => {
+    const usage = { assessments: 2, input_tokens: 10, output_tokens: 2, cost_usd: 0.5, estimated: false, unpriced: 1 }
+    render(<DeveloperPage settings={{ ...SETTINGS, usage }} onChange={() => {}} />)
+    expect(screen.getByText(/1 of them ran on a model without a known price/)).toBeTruthy()
+  })
+
+  it('shows the daily limit, changes it, and says the new limit applies', async () => {
+    const put = vi.fn((body: Record<string, unknown>) => [200, { ...SETTINGS, daily_limit: body.daily_limit }] as [number, unknown])
+    api(200, put)
+    const onChange = vi.fn()
+    render(<DeveloperPage settings={SETTINGS} onChange={onChange} />)
+    expect(screen.getByText('30 assessments per user per day (UTC)')).toBeTruthy()
+    const field = screen.getByRole('textbox', { name: 'Assessments per day' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '5')
+    await userEvent.click(screen.getByRole('button', { name: 'Change limit' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...SETTINGS, daily_limit: 5 }))
+    expect(put).toHaveBeenCalledWith({ daily_limit: 5 })
+    expect(screen.getByRole('status').textContent).toBe('Each user may now start 5 assessments a day.')
+  })
+
+  it('shows a refused daily limit in place', async () => {
+    api(200, () => [422, { detail: [{ msg: 'Input should be greater than or equal to 1' }] }])
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    const field = screen.getByRole('textbox', { name: 'Assessments per day' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '0')
+    await userEvent.click(screen.getByRole('button', { name: 'Change limit' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'The daily limit is a whole number of assessments, from 1 to 10,000.',
+    )
+    expect(field.getAttribute('aria-invalid')).toBe('true')
   })
 
   it('says when no key makes assessments run on the fake model, and when the choice lasts only until a restart', () => {

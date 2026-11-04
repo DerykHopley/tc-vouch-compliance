@@ -1,4 +1,4 @@
-import { type Control, VERDICT_WORDS } from './assessment.ts'
+import { type Control, usageWords, VERDICT_WORDS } from './assessment.ts'
 import type { Run } from './useAssessment.ts'
 
 /** The assess button's words for each state of the run; `running` is also the chip's and the steps' label. */
@@ -55,6 +55,7 @@ export default function WorkingPaper({ company, control, run, onAssess }: PaperP
           <span className="lbl">Draft answer</span>
           <RunChip run={run} />
           <p className="answer">{run.assessment.answer}</p>
+          {run.usage && <p className="field-note mono" aria-label="Usage">{usageWords(run.usage)}</p>}
         </section>
       )}
       {(run.status === 'failed' || run.status === 'unreachable') && (

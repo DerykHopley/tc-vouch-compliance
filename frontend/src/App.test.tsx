@@ -66,6 +66,23 @@ describe('the working paper', () => {
     expect(paper()).toBeNull()
   })
 
+  it("shows the assessment's tokens and cost beside its answer", async () => {
+    const result = {
+      assessment: { control_id: 'NK-ENC-01', verdict: 'evidenced', answer: 'Laptops are encrypted.' },
+      usage: { model: 'fake', input_tokens: 1530, output_tokens: 98, cost_usd: 0.000202, estimated: true },
+    }
+    const stream = `event: result\ndata: ${JSON.stringify(result)}\n\n`
+    vi.stubGlobal('fetch', (url: string) =>
+      url === '/api/assessments' ? Promise.resolve(new Response(stream, { status: 200 })) : new Promise(() => {}))
+    window.history.replaceState(null, '', '/controls/NK-ENC-01')
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assess NK-ENC-01' }))
+    const answer = await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    expect(within(answer).getByLabelText('Usage').textContent).toBe(
+      '1,530 tokens in · 98 tokens out · $0.0002 (estimated)',
+    )
+  })
+
   it('shows the Dossier for an address it does not know', () => {
     window.history.replaceState(null, '', '/controls/NK-XXX-99')
     render(<App />)

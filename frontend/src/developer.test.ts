@@ -9,6 +9,8 @@ const SETTINGS: DeveloperSettings = {
   prompt_version: '1',
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
+  daily_limit: 30,
+  usage: { assessments: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0, estimated: false, unpriced: 0 },
 }
 
 const answer = (status: number, body: unknown) => () => Promise.resolve(new Response(JSON.stringify(body), { status }))
