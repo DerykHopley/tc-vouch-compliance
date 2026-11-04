@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assess, readEvents } from './assessment.ts'
-import { setSessionToken } from './session.ts'
+import { setOnSignedOut, setTokenSource } from './session.ts'
 
 function streamOf(...chunks: string[]): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder()
@@ -69,20 +69,54 @@ describe('assess, signed in', () => {
   }
 
   afterEach(() => {
-    setSessionToken(null)
+    setTokenSource(null)
     vi.unstubAllGlobals()
   })
 
   it('sends a fresh session token from the token source on each call', async () => {
     let n = 0
-    setSessionToken(async () => `token-${++n}`)
+    setTokenSource(async () => `token-${++n}`)
     expect((await sentHeaders()).Authorization).toBe('Bearer token-1')
     expect((await sentHeaders()).Authorization).toBe('Bearer token-2')
   })
 
   it('sends no Authorization header without a token source (local mode) or a token', async () => {
     expect(await sentHeaders()).not.toHaveProperty('Authorization')
-    setSessionToken(async () => null)
+    setTokenSource(async () => null)
     expect(await sentHeaders()).not.toHaveProperty('Authorization')
+  })
+})
+
+describe('assess, when the API says signed out (401)', () => {
+  const refuse = () =>
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(new Response(JSON.stringify({ detail: 'Sign in to use Vouch.' }), { status: 401 })),
+    )
+  const events = async () => {
+    const seen = []
+    for await (const item of assess('NK-ENC-01')) seen.push(item)
+    return seen
+  }
+
+  afterEach(() => {
+    setOnSignedOut(null)
+    vi.unstubAllGlobals()
+  })
+
+  it('sends the user back to sign-in, and says why', async () => {
+    const signedOut = vi.fn()
+    setOnSignedOut(signedOut)
+    refuse()
+    expect(await events()).toEqual([
+      { event: 'error', data: { message: 'Your sign-in has ended. Please sign in again.' } },
+    ])
+    expect(signedOut).toHaveBeenCalledOnce()
+  })
+
+  it('still says why with nothing to send back to (local mode)', async () => {
+    refuse()
+    expect(await events()).toEqual([
+      { event: 'error', data: { message: 'Your sign-in has ended. Please sign in again.' } },
+    ])
   })
 })

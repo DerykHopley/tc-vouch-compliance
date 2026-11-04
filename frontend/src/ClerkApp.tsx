@@ -1,11 +1,33 @@
 import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk } from '@clerk/react'
 import { useLayoutEffect } from 'react'
 import App from './App.tsx'
-import { setSessionToken } from './session.ts'
+import Invitation, { SignInFailed } from './Invitation.tsx'
+import { setOnSignedOut, setTokenSource } from './session.ts'
 
-// Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (main.tsx), so local
+// Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
 // mode fetches nothing of Clerk's. Signed out: the invitation page with Clerk's sign-in (the instance is invitation
-// only, so an account without an invitation never gets past it). Signed in: the app, each API call with a fresh token.
+// only, so an account without an invitation never gets past it). Signed in: the app, each API call with a fresh token;
+// an API 401 signs out, back to the invitation page.
+
+/** Clerk's form in Vouch's tokens (docs/design.md), read from the page's CSS, so it follows light and dark. */
+const APPEARANCE = {
+  variables: {
+    colorPrimary: 'var(--ink)',
+    colorPrimaryForeground: 'var(--sheet)',
+    colorBackground: 'var(--sheet)',
+    colorForeground: 'var(--ink)',
+    colorMuted: 'var(--paper)',
+    colorMutedForeground: 'var(--muted)',
+    colorInput: 'var(--sheet)',
+    colorInputForeground: 'var(--ink)',
+    colorBorder: 'var(--rule)',
+    colorNeutral: 'var(--ink)',
+    colorRing: 'var(--navy)',
+    colorShadow: 'var(--shadow)',
+    fontFamily: 'var(--f-body)',
+    borderRadius: '4px', // docs/design.md, Shape: panels 2 to 4px
+  },
+}
 
 export default function ClerkApp({ publishableKey }: { publishableKey: string }) {
   return (
@@ -17,7 +39,7 @@ export default function ClerkApp({ publishableKey }: { publishableKey: string })
 
 function Gate() {
   const { isSignedIn } = useAuth()
-  return isSignedIn ? <SignedInApp /> : <Invitation />
+  return isSignedIn ? <SignedInApp /> : <SignedOut />
 }
 
 function SignedInApp() {
@@ -25,41 +47,25 @@ function SignedInApp() {
   const { signOut } = useClerk()
   // A layout effect runs before the app's own effects make their first API calls.
   useLayoutEffect(() => {
-    setSessionToken(() => getToken())
-    return () => setSessionToken(null)
-  }, [getToken])
+    setTokenSource(() => getToken())
+    setOnSignedOut(() => void signOut())
+    return () => {
+      setTokenSource(null)
+      setOnSignedOut(null)
+    }
+  }, [getToken, signOut])
   return <App onSignOut={() => void signOut()} />
 }
 
-/** The page every visitor sees until signed in. */
-function Invitation() {
+function SignedOut() {
   return (
-    <>
-      <header className="top">
-        <div className="top-in wrap">
-          <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
-        </div>
-      </header>
-      <main className="dossier wrap">
-        <section className="hero">
-          <span className="pill">By invitation</span>
-          <h1>Access is by invitation</h1>
-          <p>
-            Vouch is available to invited reviewers only. If you have received an invitation, sign in with the
-            e-mail address it was sent to.
-          </p>
-        </section>
-        <section className="signin" aria-label="Sign in">
-          <ClerkLoading><p className="signin-note">Opening Vouch…</p></ClerkLoading>
-          <ClerkFailed>
-            <p className="signin-note" role="alert">Sign-in could not be loaded. Please try again shortly.</p>
-          </ClerkFailed>
-          <ClerkLoaded>
-            {/* Hash routing: the app's own paths stay the app's. */}
-            <SignIn routing="hash" />
-          </ClerkLoaded>
-        </section>
-      </main>
-    </>
+    <Invitation>
+      <ClerkLoading><p className="signin-note">Opening Vouch…</p></ClerkLoading>
+      <ClerkFailed><SignInFailed /></ClerkFailed>
+      <ClerkLoaded>
+        {/* Hash routing: the app's own paths stay the app's. */}
+        <SignIn routing="hash" appearance={APPEARANCE} />
+      </ClerkLoaded>
+    </Invitation>
   )
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { authConfig } from './boot.ts'
+import { authConfig } from './authConfig.ts'
 
 const health = (body: unknown, status = 200) =>
   vi.stubGlobal('fetch', (url: string) => {
@@ -20,15 +20,19 @@ describe('authConfig', () => {
     expect(await authConfig()).toEqual({ mode: 'local' })
   })
 
-  it('is local when health cannot be read: the API still refuses what needs sign-in', async () => {
+  it('is unreachable, never local, when health cannot be read', async () => {
     health({}, 503)
-    expect(await authConfig()).toEqual({ mode: 'local' })
+    expect(await authConfig()).toEqual({ mode: 'unreachable' })
     vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')))
-    expect(await authConfig()).toEqual({ mode: 'local' })
+    expect(await authConfig()).toEqual({ mode: 'unreachable' })
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('<html>', { status: 200 })))
+    expect(await authConfig()).toEqual({ mode: 'unreachable' })
   })
 
-  it('is local when clerk mode comes without a key', async () => {
+  it('is unreachable when health names no mode it knows, or clerk mode without a key', async () => {
     health({ status: 'ok', auth: { mode: 'clerk', publishable_key: null } })
-    expect(await authConfig()).toEqual({ mode: 'local' })
+    expect(await authConfig()).toEqual({ mode: 'unreachable' })
+    health({ status: 'ok' })
+    expect(await authConfig()).toEqual({ mode: 'unreachable' })
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Control } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
+import TopBar from './TopBar.tsx'
 import { useAssessment } from './useAssessment.ts'
 import WorkingPaper, { AssessButton, RunChip } from './WorkingPaper.tsx'
 
@@ -50,19 +51,16 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
 
   return (
     <>
-      <header className="top">
-        <div className="top-in wrap">
-          <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
-          <nav className="nav" aria-label="Main">
-            <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
-          </nav>
-          <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
-            {other === 'dark' ? 'Dark theme' : 'Light theme'}
-          </button>
-          {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
-        </div>
-      </header>
+      <TopBar>
+        <nav className="nav" aria-label="Main">
+          <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
+            onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
+        </nav>
+        <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
+          {other === 'dark' ? 'Dark theme' : 'Light theme'}
+        </button>
+        {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
+      </TopBar>
       {view === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
       <main className="dossier wrap">
         <section className="hero">

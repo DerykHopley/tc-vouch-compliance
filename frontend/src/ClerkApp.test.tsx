@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ClerkApp from './ClerkApp.tsx'
-import { authHeaders, setSessionToken } from './session.ts'
+import { authHeaders, setTokenSource, signedOut } from './session.ts'
 
 // Clerk's React package, faked: these tests cover what Vouch does with each of its states.
 const clerk = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ const clerk = vi.hoisted(() => ({
   failed: false,
   signOut: vi.fn(),
   provider: { publishableKey: '' },
+  signInProps: {} as { appearance?: { variables?: Record<string, string> } },
 }))
 
 vi.mock('@clerk/react', () => ({
@@ -22,7 +23,10 @@ vi.mock('@clerk/react', () => ({
     clerk.auth.isLoaded || clerk.failed ? null : <>{children}</>,
   ClerkLoaded: ({ children }: { children: ReactNode }) => (clerk.auth.isLoaded ? <>{children}</> : null),
   ClerkFailed: ({ children }: { children: ReactNode }) => (clerk.failed ? <>{children}</> : null),
-  SignIn: () => <form aria-label="Clerk sign-in" />,
+  SignIn: (props: { appearance?: { variables?: Record<string, string> } }) => {
+    clerk.signInProps = props
+    return <form aria-label="Clerk sign-in" />
+  },
   useAuth: () => clerk.auth,
   useClerk: () => ({ signOut: clerk.signOut }),
 }))
@@ -36,7 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  setSessionToken(null)
+  setTokenSource(null)
 })
 
 describe('signed out', () => {
@@ -44,9 +48,21 @@ describe('signed out', () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
     expect(clerk.provider.publishableKey).toBe('pk_test_x')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Access is by invitation')
+    expect(screen.getByText(/available to invited users only/i)).toBeTruthy()
     expect(screen.getByText(/sign in with the e-mail address it was sent to/i)).toBeTruthy()
     expect(screen.getByRole('form', { name: 'Clerk sign-in' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+  })
+
+  it("draws Clerk's form in Vouch's colour tokens, so it follows light and dark", () => {
+    render(<ClerkApp publishableKey="pk_test_x" />)
+    const variables = clerk.signInProps.appearance?.variables ?? {}
+    expect(variables.colorBackground).toBe('var(--sheet)')
+    expect(variables.colorForeground).toBe('var(--ink)')
+    expect(variables.colorPrimary).toBe('var(--ink)')
+    const colours = Object.entries(variables).filter(([name]) => name.startsWith('color'))
+    expect(colours.length).toBeGreaterThan(5)
+    for (const [, value] of colours) expect(value).toMatch(/^var\(--[a-z-]+\)$/)
   })
 
   it('sends no session token', async () => {
@@ -87,5 +103,14 @@ describe('signed in', () => {
     const { unmount } = render(<ClerkApp publishableKey="pk_test_x" />)
     unmount()
     expect(await authHeaders()).toEqual({})
+  })
+
+  it('signs out, back to the sign-in, when the API says the session is no longer valid', () => {
+    const { unmount } = render(<ClerkApp publishableKey="pk_test_x" />)
+    signedOut()
+    expect(clerk.signOut).toHaveBeenCalledOnce()
+    unmount()
+    signedOut() // gone: nothing left to sign out
+    expect(clerk.signOut).toHaveBeenCalledOnce()
   })
 })
