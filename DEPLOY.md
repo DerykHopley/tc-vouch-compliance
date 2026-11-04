@@ -61,27 +61,15 @@ export REGION=europe-west1
 export IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/vouch/vouch
 ```
 
-## 1. Sign in
+## 1 to 3. Sign in, the project's APIs, Artifact Registry
 
 ```bash
 gcloud auth list --filter=status:ACTIVE --format='value(account)'   # empty: gcloud auth login
-```
-
-## 2. The project and its APIs
-
-```bash
 gcloud projects describe $PROJECT_ID
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com --project=$PROJECT_ID
-```
-
-## 3. Artifact Registry
-
-```bash
 gcloud artifacts repositories create vouch --repository-format=docker --location=$REGION --project=$PROJECT_ID
-gcloud auth configure-docker $REGION-docker.pkg.dev
+gcloud auth configure-docker $REGION-docker.pkg.dev   # lets docker push there (~/.docker/config.json)
 ```
-
-The second command lets docker push to the registry (it adds the host to `~/.docker/config.json`).
 
 ## 4. Build and push the image
 
@@ -101,20 +89,14 @@ gcloud run deploy vouch --image=$IMAGE:v1 --region=$REGION --project=$PROJECT_ID
 
 No environment variables and no secrets: the image sets `VOUCH_FRONTEND` and `PORT`.
 
-## 6. The URL
+## 6 and 7. The URL, and the health check
 
 ```bash
-gcloud run services describe vouch --region=$REGION --project=$PROJECT_ID --format='value(status.url)'
+URL=$(gcloud run services describe vouch --region=$REGION --project=$PROJECT_ID --format='value(status.url)')
+curl -fsS $URL/api/health          # {"status":"ok","version":"..."}
 ```
 
-## 7. Health check
-
-```bash
-curl -fsS https://<the URL>/api/health          # {"status":"ok","version":"..."}
-```
-
-The first answer can take 10 to 30 seconds: it starts the container. If it doesn't answer, the log
-says why:
+The first answer can take 10 to 30 s (a cold start). If it doesn't answer, the log says why:
 
 ```bash
 gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="vouch"' \

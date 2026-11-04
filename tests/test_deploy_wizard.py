@@ -1,7 +1,4 @@
-"""The deploy wizard (scripts/deploy-wizard.sh), driven from outside with fake gcloud, docker and curl.
-
-The fakes record every call, so a dry run can prove it ran nothing; nothing reaches Google Cloud.
-"""
+"""The deploy wizard, with fake gcloud, docker and curl that log each call: nothing reaches Google."""
 
 import subprocess
 from pathlib import Path
@@ -47,8 +44,8 @@ def run_wizard(tmp_path: Path, *args: str, answers: str = "", signed_in: bool = 
         cwd=ROOT,
         timeout=60,
     )
-    calls = (tmp_path / "calls.log").read_text() if (tmp_path / "calls.log").exists() else ""
-    return result, calls
+    log = tmp_path / "calls.log"
+    return result, log.read_text() if log.exists() else ""
 
 
 def test_the_script_parses():
@@ -97,10 +94,8 @@ def test_the_project_id_is_asked_once(tmp_path):
 
 
 def test_the_answers_file_is_git_ignored():
-    ignored = subprocess.run(
-        ["git", "check-ignore", "-q", "deploy/cloudrun/wizard.env"], check=False, cwd=ROOT
-    )
-    assert ignored.returncode == 0
+    ignored = ["git", "check-ignore", "-q", "deploy/cloudrun/wizard.env"]
+    assert subprocess.run(ignored, check=False, cwd=ROOT).returncode == 0
 
 
 def test_not_signed_in_stops_with_the_sign_in_command(tmp_path):
