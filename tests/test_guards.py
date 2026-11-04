@@ -208,6 +208,30 @@ def test_a_folder_swapped_for_a_symlink_after_loading_is_refused_and_shown(tmp_p
     assert model.judge_turn == 0
 
 
+def test_a_quote_cited_from_a_folder_swapped_for_a_symlink_is_dropped(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leak.md").write_text(
+        f'---\nid: leak\nversion: "1.0"\n---\n# Leak\n\nThe {SECRET} are kept here.\n',
+        encoding="utf-8",
+    )
+    profile = load_profile(copy_profile(tmp_path, policies="policies"))
+    policies = profile.evidence_sources["policies"].folder
+    shutil.rmtree(policies)
+    policies.symlink_to(outside, target_is_directory=True)
+    quote = {"doc_id": "leak", "quote": f"The {SECRET} are kept here."}
+    model = recording(
+        [{"answer": "Draft."}],  # no search, so the judge is asked and cites the swapped folder
+        judge=[{"requirement_id": "M1", "verdict": "evidenced", "reason": "Shown.", "citations": [quote]}],
+    )
+
+    result = assess("4.1.2", profile, model)
+
+    m1 = result.requirements[0]
+    assert (m1.id, m1.verdict, m1.citations) == ("M1", "not-evidenced", ())
+    assert guard_steps(result) == ["Dropped a citation for M1 from leak: no such document."]
+
+
 def test_a_folder_swapped_between_the_guard_and_the_read_is_refused(tmp_path):
     outside = outside_folder(tmp_path)
     folder = tmp_path / "policies"
