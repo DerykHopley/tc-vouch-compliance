@@ -1,19 +1,20 @@
-"""search_policies: keyword search over the company's policy folder, within an allow-list."""
+"""One keyword search over an evidence folder a compliance profile allows: the policies'
+(search_policies) or the records' (search_records)."""
 
 import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from vouch.settings import DEFAULT_POLICY_DIR, policy_dir
+from vouch.documents import escaped, paragraphs
+from vouch.front_matter import split_front_matter
 
-__all__ = ["DEFAULT_POLICY_DIR", "search_policies"]
 MAX_QUERY_CHARS = 200
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 10
 SOURCE_UNAVAILABLE = "source_unavailable"
 INVALID_INPUT = "invalid_input"
+FOLDER_ESCAPED = "folder_escaped"
 
-_HEADING = re.compile(r"^#{1,6}\s+(.*\S)\s*$")
 _WORD = re.compile(r"\w+")
 
 
@@ -28,16 +29,23 @@ class ErrorResult(TypedDict):
     detail: NotRequired[str]
 
 
-def search_policies(query: str, limit: int = DEFAULT_LIMIT) -> list[Passage] | ErrorResult:
+def search_folder(
+    query: str, limit: int = DEFAULT_LIMIT, *, folder: Path
+) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
-    Errors come back as a dict with an `error` key; nothing is raised.
+    `folder` is the evidence folder the compliance profile allows, resolved as the profile
+    resolved it on load. It is resolved again here, on the path actually read: one that now
+    resolves elsewhere (swapped for a symlink) is refused with `folder_escaped`. Errors come
+    back as a dict with an `error` key; nothing is raised.
     """
     problem = _check_input(query, limit)
     if problem:
         return ErrorResult(error=INVALID_INPUT, detail=problem)
+    if escaped(folder):
+        return folder_escaped()
     try:
-        passages = [p for doc in _policy_files(policy_dir()) for p in _passages(doc)]
+        passages = [p for doc in _document_files(folder) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}
@@ -45,6 +53,22 @@ def search_policies(query: str, limit: int = DEFAULT_LIMIT) -> list[Passage] | E
     hits = [(passage, score) for passage, score in scored if score > 0]
     hits.sort(key=lambda hit: hit[1], reverse=True)  # stable: ties keep folder order
     return [passage for passage, _ in hits[:limit]]
+
+
+def folder_escaped() -> ErrorResult:
+    """The refusal for a source folder that has `escaped` since the profile loaded."""
+    return ErrorResult(
+        error=FOLDER_ESCAPED, detail="the folder now resolves outside where it was allowed"
+    )
+
+
+def passages_of(doc_id: str, body: str) -> list[Passage]:
+    """The body's passages: one per paragraph, under the nearest heading above it."""
+    return [Passage(doc_id=doc_id, heading=h, text=t) for h, t in paragraphs(body)]
+
+
+# The names the tools go by; an empty folder gives no passages, not an error.
+search_policies = search_records = search_folder
 
 
 def _check_input(query: Any, limit: Any) -> str | None:
@@ -55,39 +79,20 @@ def _check_input(query: Any, limit: Any) -> str | None:
     return None
 
 
-def _policy_files(folder: Path) -> list[Path]:
-    """The .md files directly in the folder; a link pointing elsewhere is left out."""
-    if not folder.is_dir():
-        raise FileNotFoundError(folder)
-    root = folder.resolve()
+def _document_files(root: Path) -> list[Path]:
+    """The .md files directly in the resolved folder; a link pointing elsewhere is left out."""
+    if not root.is_dir():
+        raise FileNotFoundError(root)
     return sorted(
         f
-        for f in folder.iterdir()
+        for f in root.iterdir()
         if f.suffix == ".md" and f.is_file() and f.resolve().parent == root
     )
 
 
 def _passages(doc: Path) -> list[Passage]:
-    """One passage per paragraph, each under the nearest heading above it."""
-    passages: list[Passage] = []
-    heading = ""
-    paragraph: list[str] = []
-
-    def close_paragraph() -> None:
-        if paragraph:
-            passages.append(Passage(doc_id=doc.stem, heading=heading, text="\n".join(paragraph)))
-            paragraph.clear()
-
-    for line in doc.read_text(encoding="utf-8").splitlines():
-        match = _HEADING.match(line)
-        if match or not line.strip():
-            close_paragraph()
-            if match:
-                heading = match.group(1)
-        else:
-            paragraph.append(line.strip())
-    close_paragraph()
-    return passages
+    _, body = split_front_matter(doc.read_text(encoding="utf-8"))
+    return passages_of(doc.stem, body)
 
 
 def _score(passage: Passage, terms: set[str]) -> int:

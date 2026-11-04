@@ -191,7 +191,7 @@ def test_a_token_from_each_authorised_origin_is_accepted(client):
 
 
 def test_a_refusal_says_to_sign_in_and_names_bearer(client):
-    response = client.post("/api/assessments", json={"control_id": "NK-ENC-01"})
+    response = client.post("/api/assessments", json={"control_id": "4.1.2"})
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Sign in to use Vouch."}
@@ -208,7 +208,7 @@ def test_a_session_cookie_alone_is_not_enough(client):
 
 def test_a_valid_token_reaches_the_assessment_without_asking_clerk(client, clerk):
     response = client.post(
-        "/api/assessments", json={"control_id": "NK-ENC-01"}, headers=bearer(token())
+        "/api/assessments", json={"control_id": "4.1.2"}, headers=bearer(token())
     )
 
     assert response.status_code == 200
@@ -324,7 +324,7 @@ def test_clerk_failing_never_stops_a_route_that_needs_no_role(client, clerk):
     clerk.fail = unreachable
 
     response = client.post(
-        "/api/assessments", json={"control_id": "NK-ENC-01"}, headers=bearer(token("user_dev"))
+        "/api/assessments", json={"control_id": "4.1.2"}, headers=bearer(token("user_dev"))
     )
 
     assert response.status_code == 200

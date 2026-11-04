@@ -20,7 +20,9 @@ REMOVED = "[removed]"
 PROFILE_EMAILS = frozenset({"security@nordlicht.example"})
 """The profile's own listed addresses, kept because they are evidence (the security desk's, in
 the reporting procedure). Any other address is removed, a personal one on the company's own
-domain too. Once spec M1's compliance profile lands, it should own this list."""
+domain too. The compliance profile (vouch.profile) has no field for a company's listed
+addresses yet, and redaction runs on every event without one; when it gets one, this list
+moves there."""
 MIN_SECRET_CHARS = 8
 """A remembered secret shorter than this is left to the patterns: removing every match of a
 short value would remove ordinary words."""
@@ -136,7 +138,9 @@ def redact(text: str) -> tuple[str, list[str]]:
 
 
 def redact_data(value: Any) -> tuple[Any, list[str]]:
-    """`redact` through every string in a JSON-like value (dicts, lists, strings)."""
+    """`redact` through every string in a JSON-like value (dicts, lists, tuples, strings). A
+    tuple comes back a list, as JSON has it: `dataclasses.asdict` keeps tuples (the citations
+    on an Assessment's requirements)."""
     if isinstance(value, str):
         return redact(value)
     found: list[str] = []
@@ -146,7 +150,7 @@ def redact_data(value: Any) -> tuple[Any, list[str]]:
             clean[key], labels = redact_data(item)
             _merge(found, labels)
         return clean, found
-    if isinstance(value, list):
+    if isinstance(value, list | tuple):
         items = []
         for item in value:
             clean_item, labels = redact_data(item)

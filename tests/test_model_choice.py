@@ -42,7 +42,7 @@ from vouch.spending import MemorySpendingStore
 pytestmark = pytest.mark.filterwarnings("ignore:A test tried to use socket.socket")
 
 KEY = "sk-or-v1-test-key-34"
-CONTROL = "NK-ENC-01"
+CONTROL = "4.1.2"
 OTHER_MODEL = "anthropic/claude-sonnet-5.5"
 UNREACHABLE_DB = "postgresql://vouch:pw@/vouch?host=/nonexistent-34"
 
@@ -87,7 +87,7 @@ class FakeChat:
             }
             message = {"role": "assistant", "content": None, "tool_calls": [call]}
         elif "response_format" in body:
-            judged = {"covered_points": ["ENC-1", "ENC-2", "ENC-3"]}
+            judged = {"requirements": []}  # nothing judged, as a judge that skips them all
             message = {"role": "assistant", "content": json.dumps(judged)}
         else:
             args = {"answer": "Laptops use full-disk encryption.", "cited": []}
@@ -466,7 +466,8 @@ def test_an_openrouter_error_is_retried_with_backoff_then_one_error_event(
 
     response = assess(client)
 
-    assert events(response) == ["error"]
+    # The control loaded and the overlays applied come before the first model call.
+    assert events(response) == ["step", "step", "error"]
     assert "could not be completed" in response.text
     assert len(chat.requests) == 1 + MAX_RETRIES
     assert len(quick_backoff) == MAX_RETRIES == 1
@@ -482,7 +483,8 @@ def test_an_openrouter_timeout_is_retried_then_one_error_event(client, chat, qui
 
     response = assess(client)
 
-    assert events(response) == ["error"]
+    # The control loaded and the overlays applied come before the first model call.
+    assert events(response) == ["step", "step", "error"]
     assert len(chat.requests) == 1 + MAX_RETRIES
 
 
@@ -515,7 +517,7 @@ def test_on_openrouter_a_tool_outside_the_allow_list_is_refused_and_counts_towar
 ):
     """#36's allow-list wraps the real model too; the budget counts the refused call's turn."""
     ran = []
-    monkeypatch.setattr("vouch.graph.search_policies", lambda *a, **k: ran.append(a) or [])
+    monkeypatch.setattr("vouch.graph.search_folder", lambda *a, **k: ran.append(a) or [])
     chat.first_tool = "read_file"
 
     response = assess(client)
@@ -525,7 +527,7 @@ def test_on_openrouter_a_tool_outside_the_allow_list_is_refused_and_counts_towar
     assert ran == []
     told = [m for m in json.loads(chat.requests[1].content)["messages"] if m["role"] == "tool"]
     assert told and all("is not available" in m["content"] for m in told)
-    assert len(chat.requests) == 3  # the refused turn, the answer, the judge
+    assert len(chat.requests) == 4  # the refused turn, the answer, the judge, the remediation
 
 
 def test_each_assessment_has_its_own_call_budget(client):

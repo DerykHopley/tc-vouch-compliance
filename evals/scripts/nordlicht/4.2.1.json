@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "assigned managed access extent"}},
+    {"tool": "search_records", "args": {"query": "assigned managed access extent"}},
+    {"answer": "Draft answer for 4.2.1, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Request, approval, least privilege and removal are defined, and the tickets show them followed.", "citations": [{"doc_id": "access-control-policy", "quote": "Rights that are no longer needed are removed within five working days of the manager telling IT."}, {"doc_id": "joiner-leaver-record", "quote": "January to September 2026: 12 joiners, 7 movers and 9 leavers."}]},
+      {"requirement_id": "M2", "verdict": "partly-evidenced", "reason": "User, administrator and technical accounts are reviewed, but not rights in customers' systems.", "citations": [{"doc_id": "access-control-policy", "quote": "The access rights of all accounts, including administrator and technical accounts, are reviewed every six months by the role owners."}, {"doc_id": "access-review-record", "quote": "All accounts in the directory, the ERP and the CAD system: 171 employee accounts, 9 administrator accounts, 14 supplier accounts and 6 technical accounts."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Access starts from none and follows the job.", "citations": [{"doc_id": "access-control-policy", "quote": "Access to information is granted on the basis of the job a person does."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Rights are bundled into owned roles, and the role owners review them.", "citations": [{"doc_id": "access-control-policy", "quote": "Rights are bundled into roles, such as purchasing, engineering, production planning and finance."}, {"doc_id": "access-review-record", "quote": "Roles and their rights | Role owners | 2026-06-27 | 14 roles | n/a | 6"}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Only what the job needs is granted; other requests are refused.", "citations": [{"doc_id": "access-control-policy", "quote": "We start from no access and add only what the job needs."}]},
+      {"requirement_id": "S4", "verdict": "evidenced", "reason": "Administrator rights only on separate administrator accounts, as the rollout record shows.", "citations": [{"doc_id": "access-control-policy", "quote": "Administrator rights are given only to separate administrator accounts."}, {"doc_id": "mfa-rollout-record", "quote": "All 9 administrator accounts are separate from their owners' everyday accounts and require a hardware security key since 15 April 2026."}]},
+      {"requirement_id": "S5", "verdict": "evidenced", "reason": "Old-role rights go when new ones are granted; ticket IT-2026-0231 shows it.", "citations": [{"doc_id": "access-control-policy", "quote": "When someone moves to a new job, IT removes the rights of the old role at the same time as it grants the new one."}, {"doc_id": "joiner-leaver-record", "quote": "IT-2026-0231 | Mover | Head of engineering | CAD owner | 2026-03-16 | Engineering role granted, production planning role removed the same day"}]}
+    ]
+  }
+}

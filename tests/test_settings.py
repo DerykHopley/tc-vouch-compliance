@@ -71,7 +71,7 @@ def test_clerk_mode_with_its_keys_starts_and_refuses_a_request_without_sign_in()
     client = client_seeing_the_user({"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS)
 
     assert client.get("/whoami").status_code == 401
-    assert client.post("/api/assessments", json={"control_id": "NK-ENC-01"}).status_code == 401
+    assert client.post("/api/assessments", json={"control_id": "4.1.2"}).status_code == 401
     assert client.get("/api/health").status_code == 200
 
 
@@ -153,10 +153,10 @@ def test_a_secret_value_never_reaches_a_log_or_an_error(caplog, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("ASSESS_FAKE_SCRIPT", str(ROOT / "tests" / "scripts" / "broken.json"))
     client = TestClient(create_app(settings=load_settings()), raise_server_exceptions=False)
-    seen.append(client.post("/api/assessments", json={"control_id": "NK-ENC-01"}).text)
+    seen.append(client.post("/api/assessments", json={"control_id": "4.1.2"}).text)
     seen.append(caplog.text)
 
-    assert "assessment of NK-ENC-01 failed" in caplog.text  # the log was written
+    assert "assessment of 4.1.2 failed" in caplog.text  # the log was written
     assert all(marker not in text for text in seen)
 
 

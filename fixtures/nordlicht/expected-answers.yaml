@@ -1,0 +1,385 @@
+# Expected answers for Nordlicht Komponenten GmbH: DRAFT, for the owner's review (#19).
+#
+# Per applicable requirement of the 12 ISA questions (normal protection: must and should;
+# 5.1.2 S3 is not applicable in Nordlicht's profile, so it is left out): the verdict a good
+# assessment gives, and the evidence documents a good answer cites (ids from policies/ and
+# records/, or patch-vulnerability-status, the recorded Patch response added in #24).
+# `why` is our own one-line reasoning, never ISA text.
+#
+# Rules applied (spec #2): a requirement about doing something needs implemented evidence
+# to be evidenced; stale evidence caps a requirement at partly-evidenced.
+profile: nordlicht
+as_of: 2026-11-04 # the date staleness is judged on
+status: draft
+controls:
+  - id: "1.1.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy says how requirements are derived each year from the business plan, contracts and law, and where they are listed.
+      - id: M2
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy exists and records management's approval on 14 July 2026.
+      - id: M3
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: Purpose and objectives sections state the aims and why security matters to the business.
+      - id: M4
+        verdict: evidenced
+        cites: [information-security-policy, policy-publication-record]
+        why: Published on the intranet; the export shows the page and its views.
+      - id: M5
+        verdict: evidenced
+        cites: [information-security-policy, policy-publication-record]
+        why: Change notices went to employees and, via the supplier portal, to suppliers.
+      - id: S1
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: Requirements come from the business plan, customer contracts and German law.
+      - id: S2
+        verdict: not-evidenced
+        cites: []
+        why: No document says what happens when someone breaks the policy.
+      - id: S3
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy names nine supporting standards and procedures, each with an owner.
+      - id: S4
+        verdict: partly-evidenced
+        cites: [information-security-policy, policy-publication-record, encryption-standard]
+        why: A review process exists and the policy's July 2026 review is recorded, but the encryption standard it names has missed three yearly reviews since March 2022.
+
+  - id: "1.6.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [security-event-reporting-procedure, training-attendance-record]
+        why: The procedure lists what to report across personnel, physical, IT and supplier events; training covers it and attendance is recorded.
+      - id: M2
+        verdict: evidenced
+        cites: [security-event-reporting-procedure, security-event-register]
+        why: Email, ticket and hotline are defined, and the register shows reports arriving by each.
+      - id: M3
+        verdict: evidenced
+        cites: [security-event-reporting-procedure]
+        why: The security desk is reachable by email, ticket and phone.
+      - id: S1
+        verdict: evidenced
+        cites: [security-event-reporting-procedure]
+        why: The security desk is the single point of contact.
+      - id: S2
+        verdict: evidenced
+        cites: [security-event-reporting-procedure]
+        why: A hotline for urgent events, email or ticket for the rest.
+      - id: S3
+        verdict: evidenced
+        cites: [security-event-reporting-procedure, training-attendance-record]
+        why: The duty to report is in the employment contract and the yearly training, which 97 percent completed.
+      - id: S4
+        verdict: not-evidenced
+        cites: []
+        why: Nothing describes how outside parties report events to Nordlicht; the supplier report in the register came in by chance, not by a defined channel.
+      - id: S5
+        verdict: evidenced
+        cites: [security-event-reporting-procedure]
+        why: Contact details are on the intranet start page and posters by the time clocks.
+      - id: S6
+        verdict: evidenced
+        cites: [security-event-reporting-procedure, security-event-register]
+        why: Feedback within two working days is required and recorded per report.
+
+  - id: "1.6.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [security-event-reporting-procedure, security-event-register]
+        why: Reports are recorded within a working day; the register shows a 3-hour median to first action.
+      - id: M2
+        verdict: evidenced
+        cites: [security-event-register]
+        why: Each register entry records the action taken and its closing date.
+      - id: M3
+        verdict: partly-evidenced
+        cites: [security-event-reporting-procedure, security-event-register]
+        why: The procedure requires a review after serious incidents, but the register shows none held for 2026-007 or 2026-031.
+      - id: S1
+        verdict: evidenced
+        cites: [security-event-reporting-procedure, security-event-register]
+        why: Reports are sorted by area, type and priority, and the register carries all three.
+      - id: S2
+        verdict: evidenced
+        cites: [security-event-reporting-procedure]
+        why: Owners per area, coordination across areas and named deputies.
+      - id: S3
+        verdict: not-evidenced
+        cites: []
+        why: No document covers involving the authorities.
+
+  - id: "2.1.3"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [training-attendance-record]
+        why: 166 of 171 completed the 2026 course; the rest are scheduled.
+      - id: S1
+        verdict: evidenced
+        cites: [awareness-training-concept]
+        why: The concept lists the policy, reporting, malware, login rules, NDAs and keeping company information on company systems.
+      - id: S2
+        verdict: evidenced
+        cites: [awareness-training-concept, training-attendance-record]
+        why: Administrators, managers and customer-network staff get their own sessions.
+      - id: S3
+        verdict: evidenced
+        cites: [awareness-training-concept]
+        why: Management approved the concept on 16 February 2026.
+      - id: S4
+        verdict: evidenced
+        cites: [awareness-training-concept, training-attendance-record]
+        why: A yearly course, and a briefing after the February phishing incident.
+      - id: S5
+        verdict: evidenced
+        cites: [training-attendance-record]
+        why: The training platform export records completion per person.
+      - id: S6
+        verdict: evidenced
+        cites: [awareness-training-concept]
+        why: The information security officer and the security desk are named in every course and on the intranet.
+
+  - id: "4.1.2"
+    requirements:
+      - id: M1
+        verdict: partly-evidenced
+        cites: [authentication-standard]
+        why: The standard says sign-in methods follow each system's exposure, but no record shows that assessment was done.
+      - id: M2
+        verdict: evidenced
+        cites: [authentication-standard, mfa-rollout-record]
+        why: Long passwords with a breach check and a second factor online, as the directory settings show.
+      - id: S1
+        verdict: evidenced
+        cites: [authentication-standard, mfa-rollout-record]
+        why: Methods are defined per exposure and enforced as the rollout table shows.
+      - id: S2
+        verdict: evidenced
+        cites: [authentication-standard, mfa-rollout-record]
+        why: At least 12 characters and a breached-password check, set in the directory.
+      - id: S3
+        verdict: evidenced
+        cites: [authentication-standard, mfa-rollout-record]
+        why: Separate administrator accounts with hardware keys since April 2026.
+
+  - id: "4.1.3"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [account-management-procedure, joiner-leaver-record]
+        why: Joiner, mover and leaver tickets show accounts created, changed and removed.
+      - id: M2
+        verdict: evidenced
+        cites: [account-management-procedure, access-review-record]
+        why: One named account per person; the review covers every account.
+      - id: M3
+        verdict: evidenced
+        cites: [account-management-procedure]
+        why: Shared accounts only for read-only display terminals, each registered with a reason.
+      - id: M4
+        verdict: evidenced
+        cites: [account-management-procedure, joiner-leaver-record]
+        why: Leaver accounts are disabled by the end of the last day, as the tickets show.
+      - id: M5
+        verdict: evidenced
+        cites: [account-management-procedure, access-review-record]
+        why: Six-monthly reviews; the first-half 2026 review is recorded.
+      - id: M6
+        verdict: partly-evidenced
+        cites: [account-management-procedure]
+        why: The procedure says how starting passwords are handed over, but nothing shows it happens.
+      - id: M7
+        verdict: partly-evidenced
+        cites: [acceptable-use-policy, authentication-standard, mfa-rollout-record]
+        why: Login rules are defined, but only the password-quality part is shown in practice; changing a first password is required but not shown.
+      - id: S1
+        verdict: evidenced
+        cites: [account-management-procedure, joiner-leaver-record]
+        why: New accounts start with the standard employee role, as the joiner tickets show.
+      - id: S2
+        verdict: not-evidenced
+        cites: []
+        why: Nothing covers manufacturers' default accounts.
+      - id: S3
+        verdict: evidenced
+        cites: [account-management-procedure, joiner-leaver-record]
+        why: The system owner approves each new account.
+      - id: S4
+        verdict: evidenced
+        cites: [account-management-procedure, joiner-leaver-record]
+        why: The manager requests and the system owner approves, and the tickets show both.
+      - id: S5
+        verdict: partly-evidenced
+        cites: [account-management-procedure, access-review-record]
+        why: Provider accounts get an end date, but the review found three supplier accounts still active after their jobs had ended.
+      - id: S6
+        verdict: evidenced
+        cites: [account-management-procedure]
+        why: Disabled on the last working day, deleted after 90 days.
+      - id: S7
+        verdict: not-evidenced
+        cites: []
+        why: Nothing shows default passwords are blocked technically; a forced change at first sign-in is a rule, not a block.
+      - id: S8
+        verdict: not-evidenced
+        cites: []
+        why: Nothing covers how authenticator phones or hardware keys are protected.
+      - id: S9
+        verdict: partly-evidenced
+        cites: [access-review-record]
+        why: Own systems are reviewed, but accounts in customers' systems were left out.
+      - id: S10
+        verdict: not-evidenced
+        cites: []
+        why: Nothing covers interactive sign-in for technical accounts.
+
+  - id: "4.2.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [access-control-policy, joiner-leaver-record]
+        why: Request, approval, least privilege and removal are defined, and the tickets show them followed.
+      - id: M2
+        verdict: partly-evidenced
+        cites: [access-control-policy, access-review-record]
+        why: User, administrator and technical accounts are reviewed, but not rights in customers' systems.
+      - id: S1
+        verdict: evidenced
+        cites: [access-control-policy]
+        why: Access starts from none and follows the job.
+      - id: S2
+        verdict: evidenced
+        cites: [access-control-policy, access-review-record]
+        why: Rights are bundled into owned roles, and the role owners review them.
+      - id: S3
+        verdict: evidenced
+        cites: [access-control-policy]
+        why: Only what the job needs is granted; other requests are refused.
+      - id: S4
+        verdict: evidenced
+        cites: [access-control-policy, mfa-rollout-record]
+        why: Administrator rights only on separate administrator accounts, as the rollout record shows.
+      - id: S5
+        verdict: evidenced
+        cites: [access-control-policy, joiner-leaver-record]
+        why: Old-role rights go when new ones are granted; ticket IT-2026-0231 shows it.
+
+  - id: "5.1.1"
+    requirements:
+      - id: M1
+        verdict: partly-evidenced
+        cites: [encryption-standard]
+        why: The approved methods match current guidance, but the standard was approved in March 2022 with a yearly review, so it is stale.
+      - id: S1
+        verdict: partly-evidenced
+        cites: [encryption-standard]
+        why: Methods, key strengths and key handling are covered, but the standard is stale.
+
+  - id: "5.1.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [network-transfer-standard, network-services-register]
+        why: The register lists every transfer service with its use and protection.
+      - id: M2
+        verdict: evidenced
+        cites: [network-transfer-standard, network-services-register]
+        why: Rules per classification are defined, and the register sets each service's highest classification.
+      - id: M3
+        verdict: evidenced
+        cites: [network-transfer-standard, network-services-register]
+        why: Encryption in transit on every service, confirmed by the September scan.
+      - id: S1
+        verdict: not-evidenced
+        cites: []
+        why: Nothing covers sending information to the right recipient.
+      - id: S2
+        verdict: evidenced
+        cites: [network-transfer-standard, network-services-register]
+        why: Confidential data goes only by the platform or end-to-end encrypted email.
+
+  - id: "5.2.4"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [logging-standard, log-review-record]
+        why: Logging rules agreed with the works council, and the scope list and reviews show them in use.
+      - id: M2
+        verdict: evidenced
+        cites: [logging-standard, log-review-record]
+        why: Sign-ins, rights changes and administrator actions are logged, as the scope list shows.
+      - id: M3
+        verdict: evidenced
+        cites: [logging-standard, log-review-record]
+        why: Each system's need for logging is decided and recorded in the March scope list.
+      - id: M4
+        verdict: partly-evidenced
+        cites: [cloud-services-register]
+        why: The services were approved on each provider's report or certificate, but the monitoring the providers offer was not looked at when they were approved, and nobody has been given the job of watching it.
+      - id: M5
+        verdict: evidenced
+        cites: [logging-standard, log-review-record]
+        why: Monthly reviews from June to September are recorded with findings.
+      - id: S1
+        verdict: evidenced
+        cites: [logging-standard, log-review-record]
+        why: Findings go to the security desk, and two did.
+      - id: S2
+        verdict: partly-evidenced
+        cites: [logging-standard]
+        why: The standard says other administrators can't change logs, but nothing shows it.
+      - id: S3
+        verdict: not-evidenced
+        cites: []
+        why: Logging covers systems, not network traffic.
+
+  - id: "5.2.5"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Patch tracks CVEs for the systems in use, each with a CVSS score.
+      - id: M2
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Patch lists the affected assets per CVE and gives each a priority.
+      - id: M3
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Each tracked CVE is fixed, scheduled, or covered by a recorded risk-acceptance decision.
+      - id: S1
+        verdict: partly-evidenced
+        cites: [patch-vulnerability-status]
+        why: Patching happens, as Patch shows, but no document defines patch management.
+      - id: S2
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Risk-acceptance decisions record the mitigation for unpatched items.
+      - id: S3
+        verdict: not-evidenced
+        cites: []
+        why: Patch shows tickets closed, not that installation was checked.
+
+  - id: "5.2.9"
+    requirements:
+      - id: M1
+        verdict: not-evidenced
+        cites: []
+        why: No document covers it.
+      - id: M2
+        verdict: not-evidenced
+        cites: []
+        why: No document covers it.
+      - id: S1
+        verdict: not-evidenced
+        cites: []
+        why: No document covers it.

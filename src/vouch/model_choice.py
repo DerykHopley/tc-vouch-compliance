@@ -49,7 +49,9 @@ DEFAULT_MODEL = "anthropic/claude-haiku-5.5"
 USAGE_URL = "https://openrouter.ai/activity"
 """OpenRouter's own usage and cost per request, beside Vouch's totals (vouch.spending)."""
 CALL_BUDGET = 8
-"""Model calls one assessment may make; a run on the demo script makes 3 (2 gather, 1 judge)."""
+"""Model calls one assessment may make; a run on the demo script makes 3 (2 gather, 1 judge).
+The judge and the remediation drafts are calls too (the drafts only when a requirement is not
+evidenced), and each, like the answer, may be asked for once more by the output check."""
 MAX_RETRIES = 1
 """Retries of one call after the first try: each may be billed (a timeout too)."""
 TIMEOUT_SECONDS = 120.0

@@ -48,7 +48,7 @@ from vouch.spending import (
 
 pytestmark = pytest.mark.filterwarnings("ignore:A test tried to use socket.socket")
 
-CONTROL = "NK-ENC-01"
+CONTROL = "4.1.2"
 UNREACHABLE_DB = "postgresql://vouch:pw@/vouch?host=/nonexistent-35"
 NOV_4_AFTERNOON = datetime(2026, 11, 4, 15, 30, tzinfo=UTC)
 UNPRICED_MODEL = "google/gemini-3-flash"
@@ -272,6 +272,26 @@ def test_a_fake_run_meters_its_gather_turns_and_its_judge():
     assess(TestClient(app))
 
     assert len(seen.ended) == len(script.gather) + 1
+
+
+def test_a_fake_run_meters_its_remediation_drafts_too(tmp_path):
+    """Nothing searched, so every requirement is not evidenced and the drafts are asked for."""
+    script_path = tmp_path / "nothing.json"
+    script_path.write_text('{"gather": [{"answer": "Nothing found."}]}')
+    app, _ = app_at(NOV_4_AFTERNOON, Settings(fake_script=script_path))
+    seen = CallsSeen()
+    real_for_assessment = app.state.models.for_assessment
+    app.state.models.for_assessment = lambda chosen, callbacks: real_for_assessment(
+        chosen, [*callbacks, seen]
+    )
+
+    result = result_of(assess(TestClient(app)))
+
+    assert result["assessment"]["remediation"]  # the drafts were asked for
+    assert len(seen.ended) == 3  # the answer, the judge, the remediation drafts
+    assert result["usage"]["input_tokens"] == sum(
+        r.generations[0][0].message.usage_metadata["input_tokens"] for r in seen.ended
+    )
 
 
 class CostingChat(FakeChat):

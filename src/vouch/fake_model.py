@@ -12,7 +12,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
 
-from vouch.graph import SUBMIT_ANSWER, Judgement, SubmitAnswer, Verdict
+from vouch.graph import SUBMIT_ANSWER, Judgement, RemediationPlan, SubmitAnswer
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -32,13 +32,7 @@ class ToolTurn(BaseModel):
 
 
 class AnswerTurn(SubmitAnswer):
-    """The answer the model hands back, plus the script's `verdict`.
-
-    The graph ignores `verdict` (the judge step decides it), but the script
-    format still allows only found, partial or gap there.
-    """
-
-    verdict: Verdict | None = None
+    """The answer the model hands back. The judge step, not the answer, decides verdicts."""
 
 
 def _turn_kind(turn: Any) -> str:
@@ -54,19 +48,36 @@ Turn = Annotated[
 
 
 class Script(BaseModel):
-    """The script format: tool turns, then one answer turn last; an optional judge.
+    """The script format: tool turns and answer turns, an answer last; an optional judge and
+    an optional remediation plan.
 
-    Keys the format doesn't name are ignored, as they always were.
+    An answer turn before the last one is played when the graph asks for the answer again
+    (the output check refused it). `judge` is one judgement, or a list played in turn when the
+    graph asks for a judgement again; the last one repeats. Its verdicts are any strings, as a
+    real model's can be; the graph decides what an unknown one means. Keys the format doesn't
+    name are ignored, as they always were. `remediate` works as `judge` does, for the drafts of
+    remediation items.
     """
 
     gather: list[Turn] = Field(min_length=1)
-    judge: Judgement = Field(default_factory=Judgement)
+    judge: Judgement | list[Judgement] = Field(default_factory=Judgement)
+    remediate: RemediationPlan | list[RemediationPlan] = Field(default_factory=RemediationPlan)
+
+    def replies_for(self, schema: type[BaseModel]) -> list[BaseModel]:
+        """The structured replies scripted for a schema: the plans for a RemediationPlan, the
+        judgements for anything else (the judge's)."""
+        replies = self.remediate if schema is RemediationPlan else self.judge
+        return replies if isinstance(replies, list) else [replies]
 
     @model_validator(mode="after")
-    def _answer_comes_last_and_only_last(self) -> "Script":
-        is_answer = [isinstance(turn, AnswerTurn) for turn in self.gather]
-        if not is_answer[-1] or any(is_answer[:-1]):
-            raise ValueError("the last gather turn, and only the last, must be the answer")
+    def _answer_comes_last(self) -> "Script":
+        ends_with_answer = isinstance(self.gather[-1], AnswerTurn)
+        if not ends_with_answer:  # a ValueError, so pydantic reports it as a validation error
+            raise ValueError("the last gather turn must be an answer")
+        if not self.replies_for(Judgement):
+            raise ValueError("judge: a list of judgements needs at least one")
+        if not self.replies_for(RemediationPlan):
+            raise ValueError("remediate: a list of plans needs at least one")
         return self
 
 
@@ -97,25 +108,7 @@ def _usage(messages: list[BaseMessage], written: str) -> UsageMetadata:
     """Token counts for one call, as a real model reports them (#35: usage and cost)."""
     sent = _tokens("".join(str(m.content) for m in messages))
     out = _tokens(written)
-    return {"input_tokens": sent, "output_tokens": out, "total_tokens": sent + out}
-
-
-class ScriptedJudge(BaseChatModel):
-    """The judge's call: answers with the script's `judge` entry as JSON, a model call like any
-    other, so its callbacks (the usage meter) see it."""
-
-    script: Script
-
-    @property
-    def _llm_type(self) -> str:
-        return "scripted-fake-judge"
-
-    def _generate(
-        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
-    ) -> ChatResult:
-        content = self.script.judge.model_dump_json()
-        reply = AIMessage(content, usage_metadata=_usage(messages, content))
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+    return UsageMetadata(input_tokens=sent, output_tokens=out, total_tokens=sent + out)
 
 
 class ScriptedChatModel(BaseChatModel):
@@ -128,6 +121,8 @@ class ScriptedChatModel(BaseChatModel):
 
     script: Script
     turn: int = 0
+    turns: dict[Any, int] = Field(default_factory=dict)  # structured replies given, per schema
+    prompts: list[list[BaseMessage]] = Field(default_factory=list)  # each call's messages, in order
 
     @classmethod
     def from_file(cls, path: str | Path) -> "ScriptedChatModel":
@@ -142,15 +137,34 @@ class ScriptedChatModel(BaseChatModel):
         """The script already says which tool each turn calls, so the tools offered are ignored."""
         return self
 
-    def with_structured_output(self, schema: type[BaseModel], **kwargs: Any) -> Runnable:
-        """The judge's structured output is the script's `judge` entry, from a model call made
-        with this model's callbacks."""
-        judge = ScriptedJudge(script=self.script, callbacks=self.callbacks)
-        return judge | RunnableLambda(lambda reply: schema.model_validate_json(reply.content))
+    def with_structured_output(
+        self, schema: type[BaseModel], *, include_raw: bool = False, **kwargs: Any
+    ) -> Runnable:
+        """The structured output is the script's next judgement, or for a RemediationPlan its
+        next plan (the last repeats), from a model call made with this model's callbacks (so the
+        usage meter sees it); with `include_raw`, a dict with the raw message (carrying token
+        usage), as LangChain's models give."""
+        call = ScriptedReply(source=self, reply_schema=schema, callbacks=self.callbacks)
+
+        def reply(messages: list[BaseMessage]) -> Any:
+            raw = call.invoke(messages)
+            parsed = schema.model_validate_json(raw.content)
+            return {"raw": raw, "parsed": parsed, "parsing_error": None} if include_raw else parsed
+
+        return RunnableLambda(reply)
+
+    def next_reply(self, schema: type[BaseModel], messages: list[BaseMessage]) -> BaseModel:
+        """The script's next structured reply for `schema`; the last one repeats."""
+        self.prompts.append(list(messages))
+        replies = self.script.replies_for(schema)
+        turn = self.turns.get(schema, 0)
+        self.turns[schema] = turn + 1
+        return schema.model_validate(replies[min(turn, len(replies) - 1)].model_dump())
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> ChatResult:
+        self.prompts.append(list(messages))
         gather = self.script.gather
         if self.turn >= len(gather):
             raise ScriptExhaustedError(f"script has {len(gather)} gather turns")
@@ -162,4 +176,24 @@ class ScriptedChatModel(BaseChatModel):
             name, args = SUBMIT_ANSWER, step.model_dump(include=set(SubmitAnswer.model_fields))
         call = {"name": name, "args": args, "id": f"call_{self.turn}", "type": "tool_call"}
         reply = AIMessage("", tool_calls=[call], usage_metadata=_usage(messages, json.dumps(args)))
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+
+class ScriptedReply(BaseChatModel):
+    """A structured-output call (the judge's, the remediation drafts'): answers with the
+    source model's next scripted reply for `reply_schema` as JSON, a model call like any other,
+    so its callbacks (the usage meter) see it."""
+
+    source: ScriptedChatModel
+    reply_schema: type[BaseModel]
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-fake-judge"
+
+    def _generate(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        content = self.source.next_reply(self.reply_schema, messages).model_dump_json()
+        reply = AIMessage(content, usage_metadata=_usage(messages, content))
         return ChatResult(generations=[ChatGeneration(message=reply)])

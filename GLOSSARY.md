@@ -97,7 +97,7 @@ The agent's proposed judgement of a requirement's or control's evidence: evidenc
 _Avoid_: Status, result, score, found / partial / gap
 
 **Guard step**:
-A step in an assessment saying a guard, in code outside the model, refused or removed something: a refused tool call, a flagged passage, a dropped quote, or a secret or personal data removed.
+A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, or a secret or personal data removed from what is shown.
 _Avoid_: Alert, block, filter step (a warning is something else: a source that could not be read)
 
 **Reviewed verdict**:
@@ -131,3 +131,15 @@ _Avoid_: Audit report, self-assessment, export
 **Eval**:
 A measured run of assessments against cases with known expected verdicts and citations, used to compare models.
 _Avoid_: Test (for model-graded runs), benchmark
+
+**Eval case**:
+One control of a compliance profile in an eval, with the expected verdict and expected cited documents for each of its applicable requirements.
+_Avoid_: Test case, sample
+
+**Bad case**:
+An eval case that doesn't fit the compliance profile (an unknown control, a requirement that doesn't apply, one left out or named twice), so it is reported and not run.
+_Avoid_: Invalid test
+
+**Failed case**:
+An eval case whose assessment raised an error; every requirement and its control count as wrong.
+_Avoid_: Flaky case, crash

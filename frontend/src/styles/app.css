@@ -32,6 +32,7 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .v-evidenced { color: var(--evidenced); background: var(--evidenced-bg); }
 .v-partly-evidenced { color: var(--partly-evidenced); background: var(--partly-evidenced-bg); }
 .v-not-evidenced { color: var(--not-evidenced); background: var(--not-evidenced-bg); }
+.v-not-applicable { color: var(--not-applicable); background: var(--not-applicable-bg); }
 .v-assessing { color: var(--navy); background: color-mix(in srgb, var(--navy) 12%, var(--sheet)); }
 .btn-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .btn:disabled { opacity: .6; }

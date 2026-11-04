@@ -11,20 +11,29 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable, RunnableLambda
 
-from vouch.graph import SEARCH_POLICIES, SUBMIT_ANSWER
+from vouch.graph import EVIDENCE_TOOLS, GUARD, SUBMIT_ANSWER
+from vouch.guards import refusal_step
+from vouch.profile import ComplianceProfile
 
-ALLOWED_TOOLS = frozenset({SEARCH_POLICIES, SUBMIT_ANSWER})
-"""The compliance profile's allow-list as tool names: the policy search, and the answer. Spec M1
-(#23) brings the profile's evidence sources; this then follows them."""
+__all__ = ["GUARD", "NOT_ALLOWED", "REFUSED_TOOL", "ToolAllowList", "allowed_tools"]
+
 REFUSED_TOOL = "refused_tool"
 """A refused call's new name. The graph's tools node answers a call to a name it doesn't know
-with "tool <name> is not available" and runs nothing (vouch.graph, build_graph's `tools`; M1's
-graph does the same), so the model still gets its call answered."""
-GUARD = "guard"
-"""The node a guard step names (GLOSSARY.md, "Guard step"), as the graph's own do in M1."""
+with "tool <name> is not available" and runs nothing (vouch.graph, build_graph's `tools`), so
+the model still gets its call answered."""
 NOT_ALLOWED = "it isn't on the compliance profile's allow-list"
 _UNSAFE_NAME = re.compile(r"[^\w.-]")
 """A tool name is the model's own text: shown in a step, it keeps to word characters."""
+
+
+def allowed_tools(profile: ComplianceProfile) -> frozenset[str]:
+    """The compliance profile's allow-list as tool names: each evidence-source tool whose
+    source the profile allows, and the answer. The graph's own guard (vouch.guards,
+    allowed_folder) asks the same question of the same table (vouch.graph.EVIDENCE_TOOLS), so
+    the two checks agree."""
+    sources = profile.evidence_sources
+    evidence = {name for name, tool in EVIDENCE_TOOLS.items() if tool.source in sources}
+    return frozenset({*evidence, SUBMIT_ANSWER})
 
 
 class ToolAllowList:
@@ -42,6 +51,11 @@ class ToolAllowList:
     def bind_tools(self, tools: Any, **kwargs: Any) -> Runnable:
         return self._model.bind_tools(tools, **kwargs) | RunnableLambda(self._checked)
 
+    @property
+    def model_name(self) -> str:
+        """The wrapped model's name, which the Assessment records (vouch.graph, _model_name)."""
+        return getattr(self._model, "model_name", None) or self._model._llm_type
+
     def with_structured_output(self, schema: Any, **kwargs: Any) -> Runnable:
         """Structured output (the judge) runs no tool, so there's nothing to check."""
         return self._model.with_structured_output(schema, **kwargs)
@@ -58,7 +72,7 @@ class ToolAllowList:
                 calls.append(call)
             else:
                 name = _UNSAFE_NAME.sub("?", call["name"])[:64]
-                self._refusals.append(f"Refused {name}: {NOT_ALLOWED}.")
+                self._refusals.append(refusal_step(name, NOT_ALLOWED))
                 calls.append({**call, "name": REFUSED_TOOL})
         if calls == reply.tool_calls:
             return reply
