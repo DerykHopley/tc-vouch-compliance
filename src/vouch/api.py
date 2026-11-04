@@ -4,7 +4,9 @@ Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONT
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
 """
 
+import asyncio
 import logging
+import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
@@ -32,6 +34,7 @@ from vouch.model_choice import (
 )
 from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
+    DATABASE_URL_ENV,
     DEFAULT_USER,
     FRONTEND_ENV,
     Settings,
@@ -42,7 +45,9 @@ from vouch.settings import (
 from vouch.spending import (
     MAX_DAILY_LIMIT,
     DailyLimitReached,
+    NoSharedCounter,
     SpendingGuard,
+    Usage,
     UsageMeter,
     spending_store,
 )
@@ -204,10 +209,40 @@ def app_spending(request: Request) -> SpendingGuard:
 AppSpending = Annotated[SpendingGuard, Depends(app_spending)]
 
 
-def within_daily_limit(user: CurrentUser, spending: AppSpending) -> None:
-    """Counts the assessment against the user's daily limit before the stream starts: over it,
-    a 429 saying when it resets (daily_limit_reached); the counter unavailable, a 503."""
-    spending.start(user.id)
+def within_daily_limit(
+    user: CurrentUser,
+    spending: AppSpending,
+    control: Annotated[Control, Depends(requested_control)],
+    chosen: Annotated[str | None, Depends(chosen_model)],
+) -> None:
+    """Counts the assessment against the user's daily limit before the stream starts, and only
+    once the control and the model are known: FastAPI skips a dependency whose own dependencies
+    failed, so a 422, a 404 or the model choice's 503 takes no count. Over the limit, a 429
+    saying when it resets (daily_limit_reached); the counter unavailable, or only in memory for
+    a paid model, a 503."""
+    try:
+        spending.start(user.id, paid=chosen is not None)
+    except NoSharedCounter as error:
+        log.error("assessments on OpenRouter need %s for the daily limit", DATABASE_URL_ENV)
+        raise HTTPException(status_code=503, detail=str(error)) from None
+
+
+def record_off_the_event_loop(
+    spending: SpendingGuard, user_id: str, control_id: str, usage: Usage
+) -> None:
+    """Keep the usage without blocking the event loop. The stream's generator records as it
+    ends, in the threadpool that runs it; but a stream the client abandons is closed when it's
+    collected, which may be on the event loop, where a slow database would stall every request
+    for up to the pool's timeout. There, a thread of its own records it."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:  # no loop in this thread: the threadpool, or the CLI
+        spending.record(user_id, control_id, usage)
+        return
+    thread = threading.Thread(
+        target=spending.record, args=(user_id, control_id, usage), name="vouch-usage", daemon=True
+    )
+    thread.start()
 
 
 def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
@@ -227,7 +262,8 @@ def create_assessment(
     control: Annotated[Control, Depends(requested_control)],
     models: AppModels,
     chosen: Annotated[str | None, Depends(chosen_model)],
-    counted: Annotated[None, Depends(within_daily_limit)],
+    # Counted only once the control and the model passed (within_daily_limit depends on both).
+    _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
     user: CurrentUser,
     spending: AppSpending,
     request: Request,
@@ -263,7 +299,7 @@ def create_assessment(
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
     finally:
-        spending.record(user.id, control.id, meter.usage())
+        record_off_the_event_loop(spending, user.id, control.id, meter.usage())
 
 
 _REMOVED_FROM = {"result": "assessment", "step": "step"}
@@ -314,8 +350,7 @@ def change_daily_limit(
     request: DailyLimitRequest, models: AppModels, spending: AppSpending
 ) -> dict[str, Any]:
     """Each user may start `daily_limit` assessments a day, from the next one on."""
-    spending.store.set_daily_limit(request.daily_limit)
-    log.info("the daily limit is now %d assessments", request.daily_limit)
+    spending.set_daily_limit(request.daily_limit)
     return _developer_page(models, spending)
 
 

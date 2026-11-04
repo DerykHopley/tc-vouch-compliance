@@ -28,11 +28,13 @@ from vouch.model_choice import (
     DEFAULT_MODEL,
     MAX_RETRIES,
     USAGE_URL,
+    KeptIn,
     MemoryModelStore,
     ModelChoice,
     OpenRouter,
 )
 from vouch.settings import Settings
+from vouch.spending import MemorySpendingStore
 
 # langchain-openai probes which TCP keep-alive options the OS takes by opening (never
 # connecting) a socket when it builds ChatOpenAI; pytest-socket warns. A real connection would
@@ -142,11 +144,21 @@ def fake_openrouter(chat: FakeChat, catalogue: FakeCatalogue) -> OpenRouter:
     )
 
 
+class SharedMemorySpendingStore(MemorySpendingStore):
+    """Stands in for the database's spending tables: OpenRouter needs a store every instance
+    shares (vouch.spending), and these tests need no Postgres."""
+
+    kept_in: KeptIn = "database"
+
+
 def app_with_key(chat: FakeChat, catalogue: FakeCatalogue, settings: Settings | None = None):
-    """The app with an OpenRouter key set (local mode unless `settings` says), OpenRouter faked."""
+    """The app with an OpenRouter key set (local mode unless `settings` says), OpenRouter faked;
+    without a database URL, its spending kept in a stand-in for the database's tables."""
     settings = settings or Settings(openrouter_api_key=SecretStr(KEY))
     app = create_app(settings)
     app.state.models.openrouter = fake_openrouter(chat, catalogue)
+    if settings.database_url is None:
+        app.state.spending.store = SharedMemorySpendingStore()
     return app
 
 
@@ -211,6 +223,16 @@ def test_without_a_key_an_assessment_runs_on_the_fake_model_and_nothing_reaches_
     assert client.app.state.models.openrouter is None
 
 
+NO_USAGE = {
+    "assessments": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "reported_cost_usd": 0.0,
+    "estimated_cost_usd": 0.0,
+    "incomplete": 0,
+}
+
+
 # --- A developer changes the model, and the next assessment uses it ---------------------------
 
 
@@ -226,14 +248,7 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "usage_url": USAGE_URL,
         "kept_in": "memory",
         "daily_limit": 30,  # vouch.spending (#35)
-        "usage": {
-            "assessments": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cost_usd": 0.0,
-            "estimated": False,
-            "unpriced": 0,
-        },
+        "usage": {"openrouter": NO_USAGE, "fake": NO_USAGE},
     }
 
 

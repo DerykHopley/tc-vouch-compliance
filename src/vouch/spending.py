@@ -2,22 +2,26 @@
 
 Before an assessment starts, the user's count for the day (a UTC day) is taken against the daily
 limit, DAILY_LIMIT unless a developer changed it; over it, the request is refused with the time
-the count resets. The count is taken in one step, so two requests at once can't both slip under
-the limit. Counts, usage and the limit are kept in the database when VOUCH_DATABASE_URL is set
-(vouch.database), else in memory until the server restarts, as the model choice is. When the
-counter can't be read, no assessment starts (fail closed): DatabaseUnavailable, a 503.
+the count resets. The limit is read and the count taken in one step, so two requests at once
+can't both slip under it. Counts, usage and the limit are kept in the database when
+VOUCH_DATABASE_URL is set (vouch.database), else in memory until the server restarts. Memory
+serves the fake model only: Cloud Run scales to zero, so a count in memory could reset during
+the day, and a paid model needs a limit that holds (SpendingGuard.start). When the counter can't
+be read, no assessment starts (fail closed): DatabaseUnavailable, a 503.
 
 Each model call's tokens are measured (UsageMeter, a LangChain callback on the assessment's
 model). Its cost is OpenRouter's reported `usage.cost` (in credits, one credit a US dollar)
-when it gives one, else computed from PRICES and marked estimated. The fake model's tokens are
-priced as DEFAULT_MODEL: what the run would have cost there.
+when it gives one, else computed from PRICES and marked estimated. A call whose cost can't be
+known (no usage, no price, or a failure carrying none) leaves the assessment's cost incomplete:
+the known part stays, and nothing counts as $0. The fake model's tokens are priced as
+DEFAULT_MODEL, what the run would have cost there, and totalled apart from real spend.
 """
 
 import logging
 import math
 import threading
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
 
@@ -25,7 +29,8 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
 from vouch.database import Database, DatabaseUnavailable
-from vouch.model_choice import DEFAULT_MODEL, KeptIn
+from vouch.model_choice import DEFAULT_MODEL, CallBudgetSpent, KeptIn
+from vouch.settings import DATABASE_URL_ENV
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +40,14 @@ MAX_DAILY_LIMIT = 10_000
 DAILY_LIMIT_SETTING = "daily_limit"
 FAKE = "fake"
 """The model a usage names when the scripted fake ran."""
+NO_SHARED_COUNTER = (
+    "Assessments on OpenRouter need a database to hold each user's daily limit. "
+    f"Set {DATABASE_URL_ENV}."
+)
+
+
+class NoSharedCounter(RuntimeError):
+    """A paid model, with only memory to count in."""
 
 
 @dataclass(frozen=True)
@@ -51,31 +64,73 @@ class Price:
 
 PRICES = {DEFAULT_MODEL: Price(0.10, 0.50)}
 """For a cost OpenRouter doesn't report. From openrouter.ai/anthropic/claude-haiku-5.5,
-2026-11-04: $0.10/M input, $0.50/M output. A model missing here has no computed cost."""
+2026-11-04: $0.10/M input, $0.50/M output (EU in-region providers charge $0.11/M and $0.55/M).
+A model missing here has no computed cost."""
 
 
 @dataclass(frozen=True)
 class Usage:
-    """One assessment's tokens and cost; `cost_usd` None when no price is known."""
+    """One assessment's tokens and cost: OpenRouter's reported part and the computed part.
+    `cost_complete` is False when some call's cost couldn't be known."""
 
     model: str
     input_tokens: int
     output_tokens: int
-    cost_usd: float | None
+    reported_cost_usd: float
+    estimated_cost_usd: float
     estimated: bool
+    cost_complete: bool
+
+    @property
+    def cost_usd(self) -> float:
+        return self.reported_cost_usd + self.estimated_cost_usd
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return asdict(self) | {"cost_usd": self.cost_usd}
 
 
 @dataclass(frozen=True)
-class Spent:
+class UsageRecord:
     """A usage, kept: whose assessment of which control, and when it ended."""
 
     user_id: str
     control_id: str
     usage: Usage
     at: datetime
+
+
+@dataclass(frozen=True)
+class RunTotals:
+    """Some assessments' usage added up; `incomplete` of them have a cost not wholly known."""
+
+    assessments: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reported_cost_usd: float = 0.0
+    estimated_cost_usd: float = 0.0
+    incomplete: int = 0
+
+    def add(self, usage: Usage) -> "RunTotals":
+        return RunTotals(
+            self.assessments + 1,
+            self.input_tokens + usage.input_tokens,
+            self.output_tokens + usage.output_tokens,
+            self.reported_cost_usd + usage.reported_cost_usd,
+            self.estimated_cost_usd + usage.estimated_cost_usd,
+            self.incomplete + (not usage.cost_complete),
+        )
+
+
+@dataclass(frozen=True)
+class UsageTotals:
+    """Every assessment's usage, as the developer page shows it: real spend on OpenRouter, and
+    the fake model's estimates apart, so they never blur the spending figure."""
+
+    openrouter: RunTotals = field(default_factory=RunTotals)
+    fake: RunTotals = field(default_factory=RunTotals)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class UsageMeter(BaseCallbackHandler):
@@ -87,45 +142,80 @@ class UsageMeter(BaseCallbackHandler):
         self._price = PRICES.get(model or DEFAULT_MODEL)
         self._lock = threading.Lock()
         self._input = self._output = 0
-        self._cost = 0.0
-        self._estimated = self._unpriced = False
+        self._reported = self._computed = 0.0
+        self._estimated = False
+        self._complete = True
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
-        input_tokens = output_tokens = 0
-        for generations in response.generations:
-            for generation in generations:
-                meta = getattr(getattr(generation, "message", None), "usage_metadata", None)
-                if meta:
-                    input_tokens += meta["input_tokens"]
-                    output_tokens += meta["output_tokens"]
+        tokens = _tokens(response)
         reported = ((response.llm_output or {}).get("token_usage") or {}).get("cost")
+        self._add(tokens, reported)
+
+    def on_llm_error(
+        self, error: BaseException, *, response: LLMResult | None = None, **kwargs: Any
+    ) -> None:
+        """A failed call may still have been billed: what its error's body carries is counted;
+        carrying nothing, the assessment's cost is incomplete. A call the call budget stopped
+        was never sent."""
+        if isinstance(error, CallBudgetSpent):
+            return
+        usage = _error_usage(response)
+        if usage is None:
+            with self._lock:
+                self._complete = False
+            return
+        tokens = (usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0)
+        self._add(tokens, usage.get("cost"))
+
+    def _add(self, tokens: tuple[int, int] | None, reported: Any) -> None:
         with self._lock:
-            self._input += input_tokens
-            self._output += output_tokens
+            if tokens is not None:
+                self._input += tokens[0]
+                self._output += tokens[1]
             if isinstance(reported, int | float) and not isinstance(reported, bool):
-                self._cost += reported
-                return
-            self._estimated = True
-            if self._price is None:
-                self._unpriced = True
-            else:
-                self._cost += self._price.cost(input_tokens, output_tokens)
+                self._reported += reported
+            elif tokens is not None and self._price is not None:
+                self._estimated = True
+                self._computed += self._price.cost(*tokens)
+            else:  # no cost reported, and no tokens or no price to compute one
+                self._complete = False
 
     def usage(self) -> Usage:
         with self._lock:
-            cost = None if self._unpriced else self._cost
-            return Usage(self.model, self._input, self._output, cost, self._estimated)
+            return Usage(
+                self.model,
+                self._input,
+                self._output,
+                self._reported,
+                self._computed,
+                self._estimated,
+                self._complete,
+            )
 
 
-def no_usage() -> dict[str, Any]:
-    return {
-        "assessments": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cost_usd": 0.0,
-        "estimated": False,
-        "unpriced": 0,
-    }
+def _tokens(response: LLMResult) -> tuple[int, int] | None:
+    """The call's input and output tokens; None when it reports none."""
+    found = None
+    for generations in response.generations:
+        for generation in generations:
+            meta = getattr(getattr(generation, "message", None), "usage_metadata", None)
+            if meta:
+                found = found or (0, 0)
+                found = (found[0] + meta["input_tokens"], found[1] + meta["output_tokens"])
+    return found
+
+
+def _error_usage(response: LLMResult | None) -> dict[str, Any] | None:
+    """The `usage` in a failed call's response body (langchain-core puts it in the
+    generation's response_metadata), if it carries one."""
+    for generations in response.generations if response else []:
+        for generation in generations:
+            metadata = getattr(getattr(generation, "message", None), "response_metadata", {})
+            body = metadata.get("body")
+            usage = body.get("usage") if isinstance(body, dict) else None
+            if isinstance(usage, dict):
+                return usage
+    return None
 
 
 class SpendingStore(Protocol):
@@ -138,65 +228,60 @@ class SpendingStore(Protocol):
 
     def set_daily_limit(self, limit: int) -> None: ...
 
-    def take(self, user_id: str, day: date, limit: int) -> bool:
-        """Count one assessment for the user's day, if they're under `limit`; else False."""
+    def take(self, user_id: str, day: date) -> tuple[bool, int]:
+        """Count one assessment for the user's day if they're under the daily limit, the limit
+        read in the same step: (counted, the limit)."""
         ...
 
-    def record(self, user_id: str, control_id: str, usage: Usage, at: datetime) -> None: ...
+    def record(self, record: UsageRecord) -> None: ...
 
-    def totals(self) -> dict[str, Any]:
-        """Every user's usage added up, as the developer page shows it."""
-        ...
+    def totals(self) -> UsageTotals: ...
 
 
 class MemorySpendingStore:
-    """No database: kept until the server restarts, which only ever lets a user in sooner. One
-    Cloud Run instance at most (spec #3), so one process holds every count."""
+    """No database: kept until the server restarts, for the fake model only."""
 
     kept_in: KeptIn = "memory"
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._limit: int | None = None
-        self._counts: dict[tuple[str, date], int] = {}
-        self._spent: list[Spent] = []
+        self._limit = DAILY_LIMIT
+        self._day: date | None = None
+        self._counts: dict[str, int] = {}
+        self._records: list[UsageRecord] = []
 
     def daily_limit(self) -> int:
-        return self._limit or DAILY_LIMIT
+        return self._limit
 
     def set_daily_limit(self, limit: int) -> None:
         self._limit = limit
 
-    def take(self, user_id: str, day: date, limit: int) -> bool:
+    def take(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            self._counts = {k: v for k, v in self._counts.items() if k[1] >= day}  # past days
-            count = self._counts.get((user_id, day), 0)
-            if count >= limit:
-                return False
-            self._counts[(user_id, day)] = count + 1
-            return True
+            if day != self._day:  # a new day: yesterday's counts go
+                self._day, self._counts = day, {}
+            count = self._counts.get(user_id, 0)
+            if count >= self._limit:
+                return False, self._limit
+            self._counts[user_id] = count + 1
+            return True, self._limit
 
-    def record(self, user_id: str, control_id: str, usage: Usage, at: datetime) -> None:
+    def record(self, record: UsageRecord) -> None:
         with self._lock:
-            self._spent.append(Spent(user_id, control_id, usage, at))
+            self._records.append(record)
 
-    def records(self) -> list[Spent]:
+    def records(self) -> list[UsageRecord]:
         with self._lock:
-            return list(self._spent)
+            return list(self._records)
 
-    def totals(self) -> dict[str, Any]:
-        totals = no_usage()
-        for spent in self.records():
-            usage = spent.usage
-            totals["assessments"] += 1
-            totals["input_tokens"] += usage.input_tokens
-            totals["output_tokens"] += usage.output_tokens
-            totals["estimated"] |= usage.estimated
-            if usage.cost_usd is None:
-                totals["unpriced"] += 1
+    def totals(self) -> UsageTotals:
+        openrouter, fake = RunTotals(), RunTotals()
+        for record in self.records():
+            if record.usage.model == FAKE:
+                fake = fake.add(record.usage)
             else:
-                totals["cost_usd"] += usage.cost_usd
-        return totals
+                openrouter = openrouter.add(record.usage)
+        return UsageTotals(openrouter, fake)
 
 
 class DatabaseSpendingStore:
@@ -214,14 +299,30 @@ class DatabaseSpendingStore:
     def set_daily_limit(self, limit: int) -> None:
         self.db.set_setting(DAILY_LIMIT_SETTING, str(limit))
 
-    def take(self, user_id: str, day: date, limit: int) -> bool:
-        return self.db.take_assessment(user_id, day, limit)
+    def take(self, user_id: str, day: date) -> tuple[bool, int]:
+        return self.db.take_assessment(user_id, day, DAILY_LIMIT_SETTING, DAILY_LIMIT)
 
-    def record(self, user_id: str, control_id: str, usage: Usage, at: datetime) -> None:
-        self.db.record_usage(user_id=user_id, control_id=control_id, at=at, **usage.to_dict())
+    def record(self, record: UsageRecord) -> None:
+        usage = record.usage
+        self.db.record_usage(
+            user_id=record.user_id,
+            control_id=record.control_id,
+            model=usage.model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            reported_cost_usd=usage.reported_cost_usd,
+            estimated_cost_usd=usage.estimated_cost_usd,
+            estimated=usage.estimated,
+            cost_complete=usage.cost_complete,
+            at=record.at,
+        )
 
-    def totals(self) -> dict[str, Any]:
-        return self.db.usage_totals()
+    def totals(self) -> UsageTotals:
+        rows = self.db.usage_totals(fake_model=FAKE)
+        return UsageTotals(
+            openrouter=RunTotals(**rows["openrouter"]) if "openrouter" in rows else RunTotals(),
+            fake=RunTotals(**rows["fake"]) if "fake" in rows else RunTotals(),
+        )
 
 
 def spending_store(db: Database | None) -> SpendingStore:
@@ -254,24 +355,32 @@ class SpendingGuard:
         self.store = store
         self.clock = clock
 
-    def start(self, user_id: str) -> None:
-        """Count one assessment for the user. Raises DailyLimitReached, or DatabaseUnavailable
-        (then no assessment starts)."""
+    def start(self, user_id: str, paid: bool) -> None:
+        """Count one assessment for the user; `paid`: it runs on OpenRouter. Raises
+        NoSharedCounter (a paid model, counted only in memory), DailyLimitReached, or
+        DatabaseUnavailable: then no assessment starts."""
+        if paid and self.store.kept_in == "memory":
+            raise NoSharedCounter(NO_SHARED_COUNTER)
         now = self.clock().astimezone(UTC)
-        limit = self.store.daily_limit()
-        if not self.store.take(user_id, now.date(), limit):
+        taken, limit = self.store.take(user_id, now.date())
+        if not taken:
             resets_at = datetime.combine(now.date() + timedelta(days=1), time(), tzinfo=UTC)
             log.info("a user reached the daily limit of %d assessments", limit)
             raise DailyLimitReached(limit, resets_at, now)
+
+    def set_daily_limit(self, limit: int) -> None:
+        """Raises DatabaseUnavailable."""
+        self.store.set_daily_limit(limit)
+        log.info("the daily limit is now %d assessments", limit)
 
     def record(self, user_id: str, control_id: str, usage: Usage) -> None:
         """Keep the assessment's usage; when the database can't take it, the log says so and
         the assessment's answer still stands."""
         try:
-            self.store.record(user_id, control_id, usage, self.clock())
+            self.store.record(UsageRecord(user_id, control_id, usage, self.clock()))
         except DatabaseUnavailable:
             log.warning("the usage of an assessment of %s could not be kept", control_id)
 
     def settings(self) -> dict[str, Any]:
         """What the developer page shows. Raises DatabaseUnavailable."""
-        return {"daily_limit": self.store.daily_limit(), "usage": self.store.totals()}
+        return {"daily_limit": self.store.daily_limit(), "usage": self.store.totals().to_dict()}

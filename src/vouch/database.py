@@ -26,7 +26,7 @@ import time
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Protocol, Self
 
 import psycopg
@@ -71,8 +71,9 @@ CREATE_COUNTS = (
 CREATE_USAGE = (
     f"CREATE TABLE IF NOT EXISTS {USAGE_TABLE} (id bigserial PRIMARY KEY, "
     "user_id text NOT NULL, control_id text NOT NULL, model text NOT NULL, "
-    "input_tokens integer NOT NULL, output_tokens integer NOT NULL, cost_usd double precision, "
-    "estimated boolean NOT NULL, at timestamptz NOT NULL)"
+    "input_tokens bigint NOT NULL, output_tokens bigint NOT NULL, "
+    "reported_cost_usd double precision NOT NULL, estimated_cost_usd double precision NOT NULL, "
+    "estimated boolean NOT NULL, cost_complete boolean NOT NULL, at timestamptz NOT NULL)"
 )
 
 Connection = psycopg.Connection[DictRow]
@@ -180,56 +181,88 @@ class Database:
 
     def set_setting(self, name: str, value: str) -> None:
         """Store `value` as setting `name`, replacing any before. Raises DatabaseUnavailable."""
-        with self.connection() as conn:
-            try:
-                conn.execute(
-                    f"INSERT INTO {SETTINGS_TABLE} (name, value) VALUES (%s, %s) "
-                    "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
-                    (name, value),
-                )
-            except psycopg.errors.UndefinedTable:
-                log.error("no %s table: run vouch-db-setup on this database", SETTINGS_TABLE)
-                raise DatabaseUnavailable(
-                    f"no {SETTINGS_TABLE} table: run vouch-db-setup"
-                ) from None
+        with self.connection() as conn, self._needs_setup(SETTINGS_TABLE):
+            conn.execute(
+                f"INSERT INTO {SETTINGS_TABLE} (name, value) VALUES (%s, %s) "
+                "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
+                (name, value),
+            )
 
-    def take_assessment(self, user_id: str, day: date, limit: int) -> bool:
-        """Count one assessment for the user's day if they started fewer than `limit`, in one
-        statement, so two at once can't both slip under it. Raises DatabaseUnavailable."""
+    def take_assessment(
+        self, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Count one assessment for the user's day if they started fewer than the limit (setting
+        `limit_setting`, else `default_limit`): the limit read and the count taken in one
+        statement, so nothing changes between them and two at once can't both slip under it.
+        (counted, the limit). Raises DatabaseUnavailable."""
         with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
             row = conn.execute(
-                f"INSERT INTO {COUNTS_TABLE} AS c (user_id, day, count) VALUES (%s, %s, 1) "
+                "WITH lim AS (SELECT coalesce((SELECT value::integer FROM "
+                f"{SETTINGS_TABLE} WHERE name = %(setting)s), %(default)s) AS n), "
+                f"taken AS (INSERT INTO {COUNTS_TABLE} AS c (user_id, day, count) "
+                "SELECT %(user_id)s, %(day)s, 1 FROM lim WHERE lim.n >= 1 "
                 "ON CONFLICT (user_id, day) DO UPDATE SET count = c.count + 1 "
-                "WHERE c.count < %s RETURNING c.count",
-                (user_id, day, limit),
+                "WHERE c.count < (SELECT n FROM lim) RETURNING c.count) "
+                "SELECT (SELECT n FROM lim) AS lim, EXISTS (SELECT 1 FROM taken) AS taken",
+                {
+                    "setting": limit_setting,
+                    "default": default_limit,
+                    "user_id": user_id,
+                    "day": day,
+                },
             ).fetchone()
-        return row is not None
+        assert row is not None  # a SELECT of two values always gives one row
+        return row["taken"], row["lim"]
 
-    def record_usage(self, **usage: Any) -> None:
-        """Keep one assessment's usage (vouch.spending's Usage, and whose and when). Raises
+    def record_usage(
+        self,
+        *,
+        user_id: str,
+        control_id: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        reported_cost_usd: float,
+        estimated_cost_usd: float,
+        estimated: bool,
+        cost_complete: bool,
+        at: datetime,
+    ) -> None:
+        """Keep one assessment's usage (vouch.spending's UsageRecord). Raises
         DatabaseUnavailable."""
         with self.connection() as conn, self._needs_setup(USAGE_TABLE):
             conn.execute(
                 f"INSERT INTO {USAGE_TABLE} (user_id, control_id, model, input_tokens, "
-                "output_tokens, cost_usd, estimated, at) VALUES (%(user_id)s, %(control_id)s, "
-                "%(model)s, %(input_tokens)s, %(output_tokens)s, %(cost_usd)s, %(estimated)s, "
-                "%(at)s)",
-                usage,
+                "output_tokens, reported_cost_usd, estimated_cost_usd, estimated, cost_complete, "
+                "at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    user_id,
+                    control_id,
+                    model,
+                    input_tokens,
+                    output_tokens,
+                    reported_cost_usd,
+                    estimated_cost_usd,
+                    estimated,
+                    cost_complete,
+                    at,
+                ),
             )
 
-    def usage_totals(self) -> dict[str, Any]:
-        """Every assessment's usage added up. Raises DatabaseUnavailable."""
+    def usage_totals(self, fake_model: str) -> dict[str, dict[str, Any]]:
+        """Every assessment's usage added up, by "openrouter" and "fake" (runs on `fake_model`);
+        a kind with no runs is left out. Raises DatabaseUnavailable."""
         with self.connection() as conn, self._needs_setup(USAGE_TABLE):
-            row = conn.execute(
-                "SELECT count(*) AS assessments, "
-                "coalesce(sum(input_tokens), 0) AS input_tokens, "
-                "coalesce(sum(output_tokens), 0) AS output_tokens, "
-                "coalesce(sum(cost_usd), 0) AS cost_usd, "
-                "coalesce(bool_or(estimated), false) AS estimated, "
-                f"count(*) FILTER (WHERE cost_usd IS NULL) AS unpriced FROM {USAGE_TABLE}"
-            ).fetchone()
-        assert row is not None  # an aggregate always gives one row
-        return {key: (float(v) if key == "cost_usd" else v) for key, v in row.items()}
+            rows = conn.execute(
+                "SELECT CASE WHEN model = %s THEN 'fake' ELSE 'openrouter' END AS kind, "
+                "count(*) AS assessments, sum(input_tokens)::bigint AS input_tokens, "
+                "sum(output_tokens)::bigint AS output_tokens, sum(reported_cost_usd) AS reported_cost_usd, "
+                "sum(estimated_cost_usd) AS estimated_cost_usd, "
+                "count(*) FILTER (WHERE NOT cost_complete) AS incomplete "
+                f"FROM {USAGE_TABLE} GROUP BY kind",
+                (fake_model,),
+            ).fetchall()
+        return {row.pop("kind"): row for row in rows}
 
     @contextmanager
     def _needs_setup(self, table: str) -> Iterator[None]:
