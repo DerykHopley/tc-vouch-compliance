@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Control } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
-import { developerSettings, type DeveloperSettings } from './developer.ts'
+import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
 import TopBar from './TopBar.tsx'
 import { useAssessment } from './useAssessment.ts'
@@ -45,8 +45,9 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
     if (window.location.pathname !== PATHS[next]) window.history.pushState(null, '', PATHS[next])
     setView(next)
   }
-  // A developer's settings, or null: then there's no Developer link, and /developer shows the Dossier.
-  const [developer, setDeveloper] = useState<DeveloperSettings | null>(null)
+  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
+  // shows the Dossier.
+  const [developer, setDeveloper] = useState<DeveloperSettings | typeof UNAVAILABLE | null>(null)
   useEffect(() => {
     let current = true
     void developerSettings().then((settings) => current && setDeveloper(settings))

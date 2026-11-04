@@ -1,5 +1,5 @@
 import { UNREACHABLE } from './assessment.ts'
-import { authHeaders, signedOut } from './session.ts'
+import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The developer page's API (#34). Only a developer gets an answer; anyone else gets a 403, and no page. */
 
@@ -7,6 +7,8 @@ export type DeveloperSettings = {
   model: string
   /** Where assessments run: `fake` when no OpenRouter key is set. */
   runs_on: 'openrouter' | 'fake'
+  /** Why the fake runs: no key, or ASSESS_FAKE_SCRIPT set; null on OpenRouter. */
+  fake_reason: 'no_key' | 'fake_script' | null
   prompt_version: string
   usage_url: string
   /** Where the model choice is kept: `memory` (no database) lasts until the server restarts. */
@@ -17,16 +19,20 @@ export type ModelChange = { ok: true; settings: DeveloperSettings } | { ok: fals
 
 const BAD_FORM = 'A model id is written author/model, such as anthropic/claude-haiku-5.5.'
 const REFUSED = 'The model could not be changed. Please try again later.'
-const SESSION_ENDED = 'Your sign-in has ended. Please sign in again.'
+
+/** The developer page while its settings can't be read (a 503: the database is down): it says so. */
+export const UNAVAILABLE = 'unavailable'
 
 /**
- * The developer settings, or null when this user has no developer page: a compliance lead (403), signed out, or the
- * API unreachable. The answer itself is the only sign of the role the browser gets.
+ * The developer settings; UNAVAILABLE when the API answered but couldn't give them; or null when this user has no
+ * developer page: a compliance lead (403), signed out (401), or the API unreachable. The answer itself is the only
+ * sign of the role the browser gets.
  */
-export async function developerSettings(): Promise<DeveloperSettings | null> {
+export async function developerSettings(): Promise<DeveloperSettings | typeof UNAVAILABLE | null> {
   try {
     const response = await fetch('/api/developer/settings', { headers: await authHeaders() })
-    return response.ok ? ((await response.json()) as DeveloperSettings) : null
+    if (response.status === 401 || response.status === 403) return null
+    return response.ok ? ((await response.json()) as DeveloperSettings) : UNAVAILABLE
   } catch {
     return null
   }
@@ -45,8 +51,7 @@ export async function changeModel(model: string): Promise<ModelChange> {
     return { ok: false, message: UNREACHABLE }
   }
   if (response.ok) return { ok: true, settings: (await response.json()) as DeveloperSettings }
-  if (response.status === 401) {
-    signedOut()
+  if (sessionEnded(response)) {
     return { ok: false, message: SESSION_ENDED }
   }
   const detail = await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)

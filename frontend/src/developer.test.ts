@@ -5,6 +5,7 @@ import { setOnSignedOut, setTokenSource } from './session.ts'
 const SETTINGS: DeveloperSettings = {
   model: 'anthropic/claude-haiku-5.5',
   runs_on: 'openrouter',
+  fake_reason: null,
   prompt_version: '1',
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
@@ -27,9 +28,14 @@ describe('developerSettings', () => {
     expect(fetch).toHaveBeenCalledWith('/api/developer/settings', { headers: { Authorization: 'Bearer tok' } })
   })
 
-  it.each([403, 401, 404, 503])('is null when the API answers %i: no developer page', async (status) => {
+  it.each([403, 401])('is null when the API answers %i: no developer page', async (status) => {
     vi.stubGlobal('fetch', answer(status, { detail: 'This is available to developers only.' }))
     expect(await developerSettings()).toBeNull()
+  })
+
+  it.each([503, 500, 404])('is unavailable when the API answers %i: the page says so', async (status) => {
+    vi.stubGlobal('fetch', answer(status, { detail: 'The database is unavailable just now.' }))
+    expect(await developerSettings()).toBe('unavailable')
   })
 
   it('is null when the API cannot be reached', async () => {

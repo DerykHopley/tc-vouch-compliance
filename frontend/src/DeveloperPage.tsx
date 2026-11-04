@@ -1,7 +1,12 @@
 import { type FormEvent, useId, useState } from 'react'
-import { changeModel, type DeveloperSettings } from './developer.ts'
+import { changeModel, type DeveloperSettings, UNAVAILABLE } from './developer.ts'
 
-type Props = { settings: DeveloperSettings; onChange: (settings: DeveloperSettings) => void }
+type Props = { settings: DeveloperSettings | typeof UNAVAILABLE; onChange: (settings: DeveloperSettings) => void }
+
+const FAKE_BECAUSE: Record<NonNullable<DeveloperSettings['fake_reason']>, string> = {
+  no_key: 'No OpenRouter key is set: assessments run on the fake model.',
+  fake_script: 'ASSESS_FAKE_SCRIPT is set: assessments run on the scripted fake model.',
+}
 
 type Saving = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; model: string } | { status: 'refused'; message: string }
 
@@ -10,6 +15,22 @@ type Saving = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; mod
  * usage and costs. Only a developer reaches it (App.tsx); the compliance lead never sees it.
  */
 export default function DeveloperPage({ settings, onChange }: Props) {
+  return (
+    <section className="paper wrap" aria-label="Developer settings">
+      <div className="paper-head">
+        <span className="lbl">Developers only</span>
+        <h2>Developer settings</h2>
+      </div>
+      {settings === UNAVAILABLE ? (
+        <p className="sheet notice" role="alert">
+          The developer settings are unavailable just now. Please try again shortly.
+        </p>
+      ) : <Settings settings={settings} onChange={onChange} />}
+    </section>
+  )
+}
+
+function Settings({ settings, onChange }: { settings: DeveloperSettings; onChange: Props['onChange'] }) {
   const [model, setModel] = useState(settings.model)
   const [saving, setSaving] = useState<Saving>({ status: 'idle' })
   const fieldId = useId()
@@ -30,14 +51,8 @@ export default function DeveloperPage({ settings, onChange }: Props) {
 
   const refused = saving.status === 'refused'
   return (
-    <section className="paper wrap" aria-label="Developer settings">
-      <div className="paper-head">
-        <span className="lbl">Developers only</span>
-        <h2>Developer settings</h2>
-      </div>
-      {settings.runs_on === 'fake' && (
-        <p className="sheet notice">No OpenRouter key is set: assessments run on the fake model.</p>
-      )}
+    <>
+      {settings.fake_reason && <p className="sheet notice">{FAKE_BECAUSE[settings.fake_reason]}</p>}
       <div className="sheet">
         <span className="lbl">Model</span>
         <span className="mono">{settings.model}</span>
@@ -65,6 +80,6 @@ export default function DeveloperPage({ settings, onChange }: Props) {
         <span className="lbl">Usage</span>
         <a href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>
       </div>
-    </section>
+    </>
   )
 }

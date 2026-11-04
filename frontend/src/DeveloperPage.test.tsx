@@ -8,6 +8,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 const SETTINGS: DeveloperSettings = {
   model: 'anthropic/claude-haiku-5.5',
   runs_on: 'openrouter',
+  fake_reason: null,
   prompt_version: '1',
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
@@ -15,9 +16,10 @@ const SETTINGS: DeveloperSettings = {
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
 function api(settingsStatus = 200, put?: (body: { model: string }) => [number, unknown]) {
+  const body = settingsStatus === 200 ? SETTINGS : { detail: 'The database is unavailable just now.' }
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === '/api/developer/settings')
-      return Promise.resolve(new Response(JSON.stringify(SETTINGS), { status: settingsStatus }))
+      return Promise.resolve(new Response(JSON.stringify(body), { status: settingsStatus }))
     if (url === '/api/developer/model' && put) {
       const [status, body] = put(JSON.parse(init!.body as string))
       return Promise.resolve(new Response(JSON.stringify(body), { status }))
@@ -47,10 +49,25 @@ describe('the developer page', () => {
     expect(within(region).queryByText(/fake model/i)).toBeNull()
   })
 
-  it('says when assessments run on the fake model, and when the choice lasts only until a restart', () => {
-    render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', kept_in: 'memory' }} onChange={() => {}} />)
-    expect(screen.getByText(/no OpenRouter key is set: assessments run on the fake model/i)).toBeTruthy()
+  it('says when no key makes assessments run on the fake model, and when the choice lasts only until a restart', () => {
+    render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', fake_reason: 'no_key', kept_in: 'memory' }}
+      onChange={() => {}} />)
+    expect(screen.getByText('No OpenRouter key is set: assessments run on the fake model.')).toBeTruthy()
     expect(screen.getByText(/until the server restarts/i)).toBeTruthy()
+  })
+
+  it('says a fake script, not a missing key, makes assessments run on the fake model', () => {
+    render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', fake_reason: 'fake_script' }} onChange={() => {}} />)
+    expect(screen.getByText('ASSESS_FAKE_SCRIPT is set: assessments run on the scripted fake model.')).toBeTruthy()
+    expect(screen.queryByText(/no OpenRouter key/i)).toBeNull()
+  })
+
+  it('says when the settings are unavailable, with nothing else to act on', () => {
+    render(<DeveloperPage settings="unavailable" onChange={() => {}} />)
+    expect(within(page()!).getByRole('alert').textContent).toBe(
+      'The developer settings are unavailable just now. Please try again shortly.',
+    )
+    expect(screen.queryByRole('textbox')).toBeNull()
   })
 
   it('changes the model, and says the next assessment runs on it', async () => {
@@ -106,6 +123,15 @@ describe('the Developer link', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/prepared for audit/i)
+  })
+
+  it('stays, with the page saying the settings are unavailable, when the API answers 503', async () => {
+    window.history.replaceState(null, '', '/developer')
+    api(503)
+    render(<App />)
+    expect(await screen.findByRole('link', { name: 'Developer' })).toBeTruthy()
+    const region = await screen.findByRole('region', { name: 'Developer settings' })
+    expect(within(region).getByRole('alert').textContent).toMatch(/unavailable just now/)
   })
 
   it('opens straight at /developer for a developer, as after a refresh', async () => {

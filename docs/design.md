@@ -45,8 +45,8 @@ Names and uses come from the prototype's Tailored block; M0 copies the values in
 | `--paper` | `tokens.css` `:root` | page background (glen-check grey) | panels |
 | `--sheet` | `tokens.css` `:root` | panels, cards, inputs | page background |
 | `--ink` | `tokens.css` `:root` | body text; primary buttons; the working paper's head rule | large fills other than buttons and bands |
-| `--muted` | `tokens.css` `:root` | secondary text, labels | anything that must be read to act |
-| `--rule` | `tokens.css` `:root` | borders and table rules | text |
+| `--muted` | `tokens.css` `:root` | secondary text, labels; the edge of input fields (5.45:1 on `--sheet` in light, 6.17:1 in dark, measured with `scripts/contrast.py`) | anything that must be read to act |
+| `--rule` | `tokens.css` `:root` | borders and table rules | text; the edge of an input field (1.47:1 on `--sheet` in light, 1.27:1 in dark, under the 3:1 a control's edge needs) |
 | `--navy` | `tokens.css` `:root` | links, focus ring, the running state | sign-off actions |
 | `--sign` | `tokens.css` `:root` | sign-off actions (Accept verdict, approve), decision-bar rule | links, decoration |
 | `--brass` | `tokens.css` `:root` | small details: active tab edge, quote rule, the brand mark, the top strip | text, buttons |

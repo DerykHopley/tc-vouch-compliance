@@ -25,3 +25,13 @@ export function setOnSignedOut(next: (() => void) | null) {
 export function signedOut() {
   onSignedOut?.()
 }
+
+/** Shown where an API call found the sign-in ended. */
+export const SESSION_ENDED = 'Your sign-in has ended. Please sign in again.'
+
+/** True, after signing out, when `response` is a 401: the caller then shows SESSION_ENDED. */
+export function sessionEnded(response: Response): boolean {
+  if (response.status !== 401) return false
+  signedOut()
+  return true
+}
