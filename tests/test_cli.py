@@ -121,10 +121,52 @@ def test_requirements_with_a_broken_base_framework_exits_2_naming_the_file(
     assert captured.out == ""
 
 
+def test_requirements_with_a_profile_mark_nordlichts_5_2_4_m4_not_applicable():
+    result = run_assess("--requirements", "5.2.4", "--profile", "nordlicht")
+
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "Profile: Nordlicht Komponenten GmbH (nordlicht), normal protection\n" in out
+    applicable, excluded = out.split("Not applicable:\n")
+    listed = [line.split(" ", 1)[0] for line in applicable.splitlines() if "): " in line]
+    assert listed == ["M1", "M2", "M3", "M5", "S1", "S2", "S3"]  # no M4, no high or very high
+    assert excluded.startswith(
+        "M4 (must): When using external IT services, information on the monitoring options "
+        "is obtained and considered in the assessment.\n"
+        "  Reason: Nordlicht runs its IT systems on premises and uses no external IT services"
+    )
+    assert "CC BY-ND 4.0" in out
+
+
+def test_requirements_with_an_unknown_profile_exits_2_with_one_line_error():
+    result = run_assess("--requirements", "5.2.4", "--profile", "nobody")
+
+    assert result.returncode == 2
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert "nobody" in lines[0]
+    assert result.stdout == ""
+
+
+def test_a_profile_name_cannot_reach_outside_the_fixtures(capsys):
+    from vouch import cli
+
+    assert cli.main(["--requirements", "5.2.4", "--profile", "../fixtures/nordlicht"]) == 2
+    captured = capsys.readouterr()
+    assert "unknown profile" in captured.err
+    assert captured.out == ""
+
+
 @pytest.mark.parametrize(
     "args",
-    [["--requirements"], ["--requirements", "5.1.1", "extra"], ["--requirements=5.1.1"]],
-    ids=["no-id", "extra-arg", "equals-form"],
+    [
+        ["--requirements"],
+        ["--requirements", "5.1.1", "extra"],
+        ["--requirements=5.1.1"],
+        ["--requirements", "5.1.1", "--profile"],
+        ["--requirements", "5.1.1", "--profile", "nordlicht", "extra"],
+    ],
+    ids=["no-id", "extra-arg", "equals-form", "profile-without-name", "extra-after-profile"],
 )
 def test_requirements_misused_exits_2_with_the_usage_line(args):
     result = run_assess(*args)

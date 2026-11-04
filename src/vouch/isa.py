@@ -18,8 +18,9 @@ CONTROLS_FILE = FRAMEWORK_DIR / "controls.yaml"
 NOTICE_FILE = FRAMEWORK_DIR / "NOTICE.md"
 SOURCE = "VDA ISA 2027.1"
 
-Column = Literal["must", "should", "high", "very high"]
-# Each column and the letter its requirement ids start with, in the Excel's order.
+Column = Literal["must", "should", "high", "very high", "overlay"]
+# Each base framework column and the letter its requirement ids start with, in the Excel's
+# order. Overlay requirements (O1, ...) come from a compliance profile, never from the Excel.
 COLUMN_PREFIX: dict[Column, str] = {"must": "M", "should": "S", "high": "H", "very high": "V"}
 
 
@@ -33,9 +34,10 @@ class BaseFrameworkError(RuntimeError):
 
 @dataclass(frozen=True)
 class Requirement:
-    id: str  # M1, S2, H1, V1: the column's letter and its bullet's position
+    id: str  # M1, S2, H1, V1: the column's letter and its bullet's position; O1 for an overlay
     column: Column
-    text: str  # unchanged from the ISA
+    text: str  # unchanged from the ISA, or the overlay's own words
+    source: str = SOURCE  # the base framework, or the overlay's name
 
 
 @dataclass(frozen=True)
@@ -75,7 +77,8 @@ def _parse(data: object) -> BaseFramework:
             column = _field(req, "column", str, f"{where} {req_id}")
             if column not in COLUMN_PREFIX:
                 raise ValueError(f"{where} {req_id}: unknown column {column!r}")
-            requirements.append(Requirement(req_id, column, _field(req, "text", str, f"{where} {req_id}")))
+            text = _field(req, "text", str, f"{where} {req_id}")
+            requirements.append(Requirement(req_id, column, text, source))
         controls.append(IsaControl(
             control_id,
             _field(entry, "question", str, where),

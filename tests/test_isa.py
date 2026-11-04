@@ -39,6 +39,18 @@ def test_all_12_controls_load_in_base_framework_order():
     assert {c.source for c in framework.controls} == {"VDA ISA 2027.1"}
 
 
+def test_each_requirement_carries_its_framework_as_source(tmp_path):
+    other = tmp_path / "controls.yaml"
+    other.write_text(
+        "source: Other ISA\ncontrols:\n- id: 5.1.1\n  question: Q?\n  iso_27001: ISO 27001\n"
+        "  requirements:\n  - {id: M1, column: must, text: T}\n"
+    )
+
+    [control] = load_base_framework(other).controls
+
+    assert [r.source for r in control.requirements] == ["Other ISA"]
+
+
 @pytest.mark.parametrize("control_id", EXPECTED_COUNTS)
 def test_requirement_counts_per_column_match_the_excel(control_id):
     control = load_isa_control(control_id)

@@ -1,0 +1,25 @@
+# Compliance profile for the fictional Nordlicht Komponenten GmbH (invented; not a real company).
+# Validated on load by vouch.profile; folders are relative to this file.
+id: nordlicht
+company: Nordlicht Komponenten GmbH
+country: Germany
+answer_language: en
+protection_level: normal  # normal, high or very high
+base_framework: VDA ISA 2027.1
+overlays: []
+not_applicable:
+  - control: 5.2.4
+    requirement: M4
+    reason: >-
+      Nordlicht runs its IT systems on premises and uses no external IT services,
+      so there are no external monitoring options to assess.
+evidence_sources:
+  policies:
+    folder: policies
+  records:
+    folder: records
+  patch:
+    folder: patch
+# Room for risk management later (docs/requirements.md, 2026-11-03); unused for now.
+asset_register: []
+risks: []
