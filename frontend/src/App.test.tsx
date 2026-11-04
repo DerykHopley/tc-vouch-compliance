@@ -3,9 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from './App.tsx'
 
-function systemPrefers(dark: boolean | null) {
-  window.matchMedia = (query: string) =>
-    ({ matches: dark === true && query === '(prefers-color-scheme: dark)', media: query }) as MediaQueryList
+function systemPrefers(dark: boolean | null, width = 1400) {
+  window.matchMedia = (query: string) => {
+    const maxWidth = /^\(max-width: (\d+)px\)$/.exec(query)
+    const matches = maxWidth ? width <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
+    return { matches, media: query } as MediaQueryList
+  }
 }
 
 beforeEach(() => systemPrefers(null))
@@ -70,6 +73,32 @@ describe('Ask Vouch', () => {
     await userEvent.keyboard('{Escape}')
     expect(bubble()).toBeNull()
     expect(document.activeElement?.textContent).toMatch(/ask vouch/i)
+  })
+
+  it('keeps Tab and Shift+Tab inside the full-screen sheet at 400px', async () => {
+    systemPrefers(null, 400)
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+    const sheet = bubble()!
+    for (const shift of [false, true]) {
+      for (let i = 0; i < 4; i++) {
+        await userEvent.tab({ shift })
+        expect(sheet.contains(document.activeElement)).toBe(true)
+      }
+    }
+  })
+
+  it('leaves the page reachable by Tab beside the bubble at 1400px', async () => {
+    systemPrefers(null, 1400)
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+    const reached = new Set<Element | null>()
+    for (let i = 0; i < 4; i++) {
+      await userEvent.tab()
+      reached.add(document.activeElement)
+    }
+    expect(reached.has(screen.getByRole('link', { name: 'Dossier' }))).toBe(true)
+    expect(reached.has(screen.getByRole('button', { name: /theme/i }))).toBe(true)
   })
 
   it('opens with Ctrl+K', async () => {
