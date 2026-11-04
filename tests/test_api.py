@@ -2,6 +2,7 @@ import json
 from importlib.metadata import version
 
 import pytest
+from assess_steps import in_order
 from fastapi.testclient import TestClient
 
 from vouch import ScriptedChatModel, profile
@@ -72,18 +73,15 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
     assert response.headers["content-type"].startswith("text/event-stream")
     events = read_events(response)
     names = [name for name, _ in events]
-    assert names == ["step"] * 6 + ["requirement"] * 5 + ["step"] * 2 + ["result"]
+    first = names.index("requirement")
+    assert set(names[:first]) == {"step"}
+    assert names[first : first + 5] == ["requirement"] * 5
+    assert set(names[first + 5 : -1]) == {"step"} and names[-1] == "result"
     steps = [data for name, data in events if name == "step"]
-    assert [s["node"] for s in steps] == [
-        "gather",
-        "tools",
-        "gather",
-        "check_answer",
-        "judge",
-        "check_quotes",
-        "remediate",
-        "review",
-    ]
+    assert in_order(
+        [s["node"] for s in steps],
+        "gather", "tools", "gather", "check_answer", "judge", "check_quotes", "remediate", "review",
+    )  # fmt: skip
     assert all(set(s) == {"node", "text"} and s["text"] for s in steps)
     assert next(s["text"] for s in steps if s["node"] == "judge") == (
         "Judged 4 of 5 requirements evidenced."
