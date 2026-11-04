@@ -66,12 +66,13 @@ def test_a_compliance_lead_has_no_developer_link_and_gets_the_dossier_at_its_add
     page: Page, vouch_url
 ):
     as_compliance_lead(page)
-    answered = []
-    page.on("response", lambda r: "/api/developer/" in r.url and answered.append(r.status))
 
-    page.goto(f"{vouch_url}/developer")
+    # The Dossier shows before the developer API answers, so wait for that answer first;
+    # otherwise the checks below can pass before the page has decided (a race, #121's CI).
+    with page.expect_response(lambda r: "/api/developer/" in r.url) as answer:
+        page.goto(f"{vouch_url}/developer")
+    assert answer.value.status == 403
 
     expect(page.get_by_role("heading", level=1)).to_contain_text("Prepared for audit")
     expect(page.get_by_role("navigation", name="Main").get_by_role("link")).to_have_text(["Dossier"])
     expect(page.get_by_role("region", name="Developer settings")).to_have_count(0)
-    assert answered == [403]
