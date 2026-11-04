@@ -13,7 +13,7 @@ dependencies = [
     "clerk-backend-api>=7.0.0,<7.1",
     "httpx>=0.28.1",
     "langgraph-checkpoint-postgres>=3.2.0",
-    "psycopg[binary]>=3.3.8",
+    "psycopg[binary]>=3.3.8,<3.4",  # vouch.database.BoundedConnection reads a private name (#119)
     "pydantic>=2.14.2",
 ]
 
