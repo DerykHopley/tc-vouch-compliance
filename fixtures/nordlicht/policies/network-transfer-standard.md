@@ -5,7 +5,7 @@ kind: documented
 version: "2.0"
 owner: IT operations lead
 approval_date: 2026-05-19
-review_cycle: yearly
+review_cycle: two-yearly
 language: en
 ---
 # Network and transfer standard

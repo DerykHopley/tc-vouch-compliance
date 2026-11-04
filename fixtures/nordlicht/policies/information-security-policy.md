@@ -4,7 +4,7 @@ title: Information security policy
 kind: documented
 version: "4.0"
 owner: Managing director
-approval_date: 2026-01-20
+approval_date: 2026-07-14
 review_cycle: yearly
 language: en
 ---
@@ -24,7 +24,7 @@ The information security officer works out our security requirements each year f
 
 ## Approval
 
-Management approved this policy on 20 January 2026. It is signed by both managing directors.
+Management approved this policy on 14 July 2026. It is signed by both managing directors.
 
 ## Supporting standards
 

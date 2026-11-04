@@ -4,7 +4,7 @@ from vouch import search_policies
 from vouch.search import DEFAULT_POLICY_DIR as POLICY_DIR
 
 
-def test_encrypt_finds_the_encryption_policy_under_a_heading():
+def test_encrypt_finds_the_encryption_standard_under_a_heading():
     passages = search_policies("encrypt")
 
     hits = [p for p in passages if p["doc_id"] == "encryption-standard"]
@@ -76,6 +76,24 @@ def test_front_matter_is_never_a_passage(monkeypatch, tmp_path):
     passages = search_policies("encrypt policy version")
 
     assert passages == [{"doc_id": "policy", "heading": "Top", "text": "We encrypt laptops."}]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "﻿---\nid: policy\ntitle: Encrypt\n---\n# Top\n\nWe encrypt laptops.\n",
+            [{"doc_id": "policy", "heading": "Top", "text": "We encrypt laptops."}],
+        ),
+        ("---\nid: policy\ntitle: Encrypt\n---", []),
+    ],
+    ids=["byte-order-mark", "ends-at-closing-line"],
+)
+def test_front_matter_is_never_a_passage_at_the_edges(text, expected, monkeypatch, tmp_path):
+    (tmp_path / "policy.md").write_text(text, encoding="utf-8")
+    monkeypatch.setenv("ASSESS_POLICY_DIR", str(tmp_path))
+
+    assert search_policies("encrypt policy") == expected
 
 
 def test_a_heading_without_a_blank_line_after_it_still_heads_its_passage(monkeypatch, tmp_path):

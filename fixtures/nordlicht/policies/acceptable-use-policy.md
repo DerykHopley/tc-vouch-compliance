@@ -5,7 +5,7 @@ kind: documented
 version: "3.0"
 owner: HR manager
 approval_date: 2026-02-03
-review_cycle: yearly
+review_cycle: two-yearly
 language: en
 ---
 # Acceptable use policy

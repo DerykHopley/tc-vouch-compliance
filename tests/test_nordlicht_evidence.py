@@ -1,7 +1,10 @@
 """Nordlicht's evidence folder: every document's front matter, the planted cases, and the
 expected-answers draft (#18)."""
 
+import calendar
 import datetime
+import re
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -9,6 +12,8 @@ import pytest
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from vouch.api import VERDICTS as API_VERDICTS
+from vouch.front_matter import split_front_matter
 from vouch.isa import load_isa_control
 
 NORDLICHT = Path(__file__).resolve().parents[1] / "fixtures" / "nordlicht"
@@ -18,6 +23,9 @@ EXPECTED_ANSWERS = NORDLICHT / "expected-answers.yaml"
 TWELVE = ["1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
           "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9"]  # fmt: skip
 PATCH = "patch-vulnerability-status"  # the recorded Patch response's id (#24)
+VERDICTS = set(API_VERDICTS.values())  # the draft speaks the API's verdict words
+CYCLE_MONTHS = {"quarterly": 3, "half-yearly": 6, "yearly": 12, "two-yearly": 24}
+DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date once #22 lands
 
 
 class FrontMatter(BaseModel):
@@ -35,19 +43,57 @@ class FrontMatter(BaseModel):
     language: Literal["en"]
 
 
-def front_matter(path: Path) -> tuple[dict, str]:
-    """The YAML between the opening `---` lines, and the body after it."""
-    text = path.read_text(encoding="utf-8")
-    assert text.startswith("---\n"), f"{path.name} has no front matter"
-    head, sep, body = text[4:].partition("\n---\n")
-    assert sep, f"{path.name}'s front matter isn't closed"
-    return yaml.safe_load(head), body
+def read(path: Path) -> tuple[FrontMatter, str]:
+    data, body = split_front_matter(path.read_text(encoding="utf-8"))
+    assert data is not None, f"{path.name} has no front matter"
+    return FrontMatter.model_validate(data), body
 
 
 def document(doc_id: str) -> tuple[FrontMatter, str]:
     [path] = [p for p in DOCUMENTS if p.stem == doc_id]
-    data, body = front_matter(path)
-    return FrontMatter.model_validate(data), body
+    return read(path)
+
+
+def mentioning(pattern: str) -> list[str]:
+    """The documents whose text matches this regular expression, ignoring case."""
+    return [
+        p.stem
+        for p in DOCUMENTS
+        if re.search(pattern, p.read_text(encoding="utf-8"), re.IGNORECASE)
+    ]
+
+
+@cache
+def draft() -> dict:
+    return yaml.safe_load(EXPECTED_ANSWERS.read_text(encoding="utf-8"))
+
+
+def expected_answers() -> dict[str, dict[str, dict]]:
+    """The draft as {control id: {requirement id: entry}}."""
+    return {c["id"]: {r["id"]: r for r in c["requirements"]} for c in draft()["controls"]}
+
+
+def review_due(approved: datetime.date, cycle: str) -> datetime.date:
+    """The approval date plus the review cycle, clamped to the month's last day.
+
+    The staleness rule lives here until #22 moves it into vouch.
+    """
+    months = approved.month - 1 + CYCLE_MONTHS[cycle]
+    year, month = approved.year + months // 12, months % 12 + 1
+    return approved.replace(
+        year=year, month=month, day=min(approved.day, calendar.monthrange(year, month)[1])
+    )
+
+
+def stale_on(day: datetime.date) -> list[str]:
+    return [
+        p.stem
+        for p in DOCUMENTS
+        if review_due(read(p)[0].approval_date, read(p)[0].review_cycle) < day
+    ]
+
+
+# Front matter.
 
 
 def test_the_folder_holds_policies_and_records():
@@ -56,19 +102,27 @@ def test_the_folder_holds_policies_and_records():
 
 @pytest.mark.parametrize("path", DOCUMENTS, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_every_document_has_valid_front_matter_with_all_fields(path):
-    data, body = front_matter(path)
-
-    meta = FrontMatter.model_validate(data)
+    meta, body = read(path)
 
     assert meta.id == path.stem
     assert meta.kind == FOLDERS[path.parent.name]
     assert body.strip()
 
 
-def expected_answers() -> dict[str, dict[str, dict]]:
-    """The draft as {control id: {requirement id: entry}}."""
-    data = yaml.safe_load(EXPECTED_ANSWERS.read_text(encoding="utf-8"))
-    return {c["id"]: {r["id"]: r for r in c["requirements"]} for c in data["controls"]}
+@pytest.mark.parametrize(
+    ("approved", "cycle", "due"),
+    [
+        (datetime.date(2022, 3, 14), "yearly", datetime.date(2023, 3, 14)),
+        (datetime.date(2026, 11, 20), "quarterly", datetime.date(2027, 2, 20)),
+        (datetime.date(2026, 1, 31), "quarterly", datetime.date(2026, 4, 30)),
+        (datetime.date(2026, 8, 31), "half-yearly", datetime.date(2027, 2, 28)),
+        (datetime.date(2024, 2, 29), "yearly", datetime.date(2025, 2, 28)),
+        (datetime.date(2026, 7, 14), "two-yearly", datetime.date(2028, 7, 14)),
+    ],
+    ids=["plain", "across-a-year", "31st-to-30th", "31st-to-february", "leap-day", "two-yearly"],
+)
+def test_review_due_clamps_to_the_months_last_day(approved, cycle, due):
+    assert review_due(approved, cycle) == due
 
 
 # Planted cases.
@@ -81,18 +135,11 @@ def test_the_encryption_standard_is_stale():
     assert meta.review_cycle == "yearly"
 
 
-def test_only_the_encryption_standard_is_stale_on_the_drafts_date():
-    as_of = yaml.safe_load(EXPECTED_ANSWERS.read_text(encoding="utf-8"))["as_of"]
-    months = {"quarterly": 3, "half-yearly": 6, "yearly": 12, "two-yearly": 24}
+@pytest.mark.parametrize("day", ["draft", "horizon"])
+def test_only_the_encryption_standard_is_stale(day):
+    as_of = draft()["as_of"] if day == "draft" else DEMO_HORIZON
 
-    def due(meta: FrontMatter) -> datetime.date:
-        total = meta.approval_date.month - 1 + months[meta.review_cycle]
-        return meta.approval_date.replace(
-            year=meta.approval_date.year + total // 12, month=total % 12 + 1
-        )
-
-    stale = [p.stem for p in DOCUMENTS if due(document(p.stem)[0]) < as_of]
-    assert stale == ["encryption-standard"]
+    assert stale_on(as_of) == ["encryption-standard"]
 
 
 def test_the_logging_standard_holds_the_injected_instruction():
@@ -102,7 +149,7 @@ def test_the_logging_standard_holds_the_injected_instruction():
 
 
 def test_no_document_covers_backup():
-    assert not [p.name for p in DOCUMENTS if "backup" in p.read_text(encoding="utf-8").lower()]
+    assert mentioning(r"backup") == []
     answers = expected_answers()["5.2.9"]
     assert {r["verdict"] for r in answers.values()} == {"not-evidenced"}
     assert all(r["cites"] == [] for r in answers.values())
@@ -117,9 +164,14 @@ def test_4_1_2_risk_assessment_has_documented_evidence_only():
     assert m1["verdict"] == "partly-evidenced"
 
 
-# The expected-answers draft.
+def test_5_2_5_rests_on_patch_alone():
+    answers = expected_answers()["5.2.5"]
 
-VERDICTS = {"evidenced", "partly-evidenced", "not-evidenced"}
+    assert {d for r in answers.values() for d in r["cites"]} == {PATCH}
+    assert mentioning(r"\bpatch|\bvulnerab|\bcve\b|\b(software|security|system) updates?\b") == []
+
+
+# The expected-answers draft.
 
 
 def test_the_draft_covers_must_and_should_of_the_12_questions_but_5_2_4_m4():
@@ -150,12 +202,3 @@ def test_5_1_1_is_capped_by_the_stale_encryption_standard():
 
     assert {r["verdict"] for r in answers.values()} == {"partly-evidenced"}
     assert all("encryption-standard" in r["cites"] for r in answers.values())
-
-
-def test_5_2_5_rests_on_patch_alone():
-    answers = expected_answers()["5.2.5"]
-
-    assert {d for r in answers.values() for d in r["cites"]} == {PATCH}
-    assert not [
-        p.name for p in DOCUMENTS if "vulnerabilit" in p.read_text(encoding="utf-8").lower()
-    ]

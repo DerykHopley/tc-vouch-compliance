@@ -5,7 +5,7 @@ kind: documented
 version: "1.5"
 owner: IT operations lead
 approval_date: 2026-01-12
-review_cycle: yearly
+review_cycle: two-yearly
 language: en
 ---
 # Access control policy

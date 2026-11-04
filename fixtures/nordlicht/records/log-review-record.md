@@ -16,10 +16,10 @@ Checked on 9 March 2026 by the IT operations lead.
 
 | System | Holds | Exposure | Logging |
 |---|---|---|---|
-| Directory | Accounts and rights | Office network | Yes: sign-ins, account and rights changes, administrator actions |
-| Email | Customer correspondence | Internet | Yes: sign-ins, forwarding rules |
-| ERP | Orders, prices | Office network | Yes: sign-ins, rights changes |
-| CAD vault | Customer drawings | Office network | Yes: sign-ins, downloads |
+| Directory | Accounts and rights | Office network | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions |
+| Email | Customer correspondence | Internet | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions, forwarding rules |
+| ERP | Orders, prices | Office network | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions |
+| CAD vault | Customer drawings | Office network | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions, downloads |
 | Canteen menu screen | Nothing confidential | Office network | No: holds no protected data |
 
 ## Monthly reviews

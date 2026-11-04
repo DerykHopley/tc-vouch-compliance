@@ -5,7 +5,7 @@ kind: documented
 version: "1.3"
 owner: Information security officer
 approval_date: 2026-02-16
-review_cycle: yearly
+review_cycle: two-yearly
 language: en
 ---
 # Awareness and training concept

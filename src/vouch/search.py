@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
+from vouch.front_matter import split_front_matter
+
 DEFAULT_POLICY_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "nordlicht" / "policies"
 POLICY_DIR_ENV = "ASSESS_POLICY_DIR"
 MAX_QUERY_CHARS = 200
@@ -82,7 +84,8 @@ def _passages(doc: Path) -> list[Passage]:
             passages.append(Passage(doc_id=doc.stem, heading=heading, text="\n".join(paragraph)))
             paragraph.clear()
 
-    for line in _body(doc.read_text(encoding="utf-8")).splitlines():
+    _, body = split_front_matter(doc.read_text(encoding="utf-8"))
+    for line in body.splitlines():
         match = _HEADING.match(line)
         if match or not line.strip():
             close_paragraph()
@@ -92,15 +95,6 @@ def _passages(doc: Path) -> list[Passage]:
             paragraph.append(line.strip())
     close_paragraph()
     return passages
-
-
-def _body(text: str) -> str:
-    """The text after a leading front matter block (between `---` lines); all of it if none."""
-    if text.startswith("---\n"):
-        _, closed, body = text[4:].partition("\n---\n")
-        if closed:
-            return body
-    return text
 
 
 def _score(passage: Passage, terms: set[str]) -> int:

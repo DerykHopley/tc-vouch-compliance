@@ -5,7 +5,7 @@ kind: documented
 version: "1.4"
 owner: IT operations lead
 approval_date: 2026-06-23
-review_cycle: yearly
+review_cycle: two-yearly
 language: en
 ---
 # Logging standard

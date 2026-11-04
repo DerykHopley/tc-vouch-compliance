@@ -5,7 +5,7 @@ kind: documented
 version: "2.0"
 owner: Information security officer
 approval_date: 2026-03-02
-review_cycle: yearly
+review_cycle: two-yearly
 language: en
 ---
 # Security event reporting procedure
