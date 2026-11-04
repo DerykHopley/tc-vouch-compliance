@@ -7,7 +7,7 @@ from vouch.search import DEFAULT_POLICY_DIR as POLICY_DIR
 def test_encrypt_finds_the_encryption_policy_under_a_heading():
     passages = search_policies("encrypt")
 
-    hits = [p for p in passages if p["doc_id"] == "encryption-policy"]
+    hits = [p for p in passages if p["doc_id"] == "encryption-standard"]
     assert hits
     assert all(p["heading"] for p in hits)
 
@@ -65,6 +65,17 @@ def test_a_file_that_is_not_utf8_is_source_unavailable(monkeypatch, tmp_path):
     monkeypatch.setenv("ASSESS_POLICY_DIR", str(tmp_path))
 
     assert search_policies("encrypt") == {"error": "source_unavailable"}
+
+
+def test_front_matter_is_never_a_passage(monkeypatch, tmp_path):
+    (tmp_path / "policy.md").write_text(
+        '---\nid: policy\ntitle: Encrypt policy\nversion: "1.0"\n---\n# Top\n\nWe encrypt laptops.\n'
+    )
+    monkeypatch.setenv("ASSESS_POLICY_DIR", str(tmp_path))
+
+    passages = search_policies("encrypt policy version")
+
+    assert passages == [{"doc_id": "policy", "heading": "Top", "text": "We encrypt laptops."}]
 
 
 def test_a_heading_without_a_blank_line_after_it_still_heads_its_passage(monkeypatch, tmp_path):

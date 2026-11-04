@@ -53,7 +53,7 @@ def test_demo_control_streams_steps_then_one_result_with_a_decided_verdict(clien
     assert assessment["control_id"] == DEMO_CONTROL
     assert assessment["verdict"] == "evidenced"
     assert assessment["answer"]
-    assert "encryption-policy" in {s["doc_id"] for s in assessment["sources"]}
+    assert "encryption-standard" in {s["doc_id"] for s in assessment["sources"]}
 
 
 def test_a_gap_maps_to_not_evidenced(client, monkeypatch):
