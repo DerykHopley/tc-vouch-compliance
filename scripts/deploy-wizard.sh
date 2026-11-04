@@ -11,32 +11,40 @@ STEPS=("Sign in" "Keyring" "Project" "Artifact Registry" "Build and push" "Secre
   "Database" "Deploy" "URL" "Health check")
 WHAT=(
   "gcloud is signed in (or it stops with the sign-in command)"
-  "every keyring entry the deploy needs is there (or it stops, naming them, before anything changes)"
+  "every keyring entry the deploy needs holds a usable value (or it stops, naming them, before anything changes)"
   "the project id, asked once; the Cloud Run, Artifact Registry, Secret Manager and Cloud SQL Admin APIs on"
   "the image registry \"vouch\" in the region, and docker allowed to push to it"
   "the image from the Dockerfile, tagged v1, v2, ..."
   "a secret each for the four secret settings, a new version only when the keyring's value changed"
   "the service's account may read those secrets (Secret Accessor) and reach Cloud SQL (Cloud SQL Client)"
-  "you confirm vouch-db-setup has run against the instance (it says how)"
-  "Cloud Run service \"vouch\": public, min 0 and max 1 instance, the secrets and the Cloud SQL instance"
+  "with --db-ready, go on; without, print how to run vouch-db-setup and stop"
+  "Cloud Run service \"vouch\": public, min 0 and max 1 instance, each secret's version pinned, the Cloud SQL instance"
   "print the service's address"
   "GET /api/health answers {\"status\": \"ok\", \"database\": \"reachable\"} (or it stops with the logs command)"
 )
 
-# The secret settings: env var (also the secret's name in Secret Manager) and its keyring entry.
-SECRET_ENVS=(CLERK_SECRET_KEY CLERK_JWT_KEY OPENROUTER_API_KEY VOUCH_DATABASE_URL)
-SECRET_ENTRIES=(clerk-vouch-secret clerk-vouch-jwt-key openrouter cloudsql-vouch-run-url)
+# The secret settings, as ENV:entry: the env var (also the secret's name in Secret Manager) and the
+# keyring entry its value comes from.
+SECRETS=(CLERK_SECRET_KEY:clerk-vouch-secret CLERK_JWT_KEY:clerk-vouch-jwt-key
+  OPENROUTER_API_KEY:openrouter VOUCH_DATABASE_URL:cloudsql-vouch-run-url)
 # Not a secret (the browser gets it), so a plain env var; it still comes from the keyring.
 PUBLISHABLE_ENTRY=clerk-vouch-publishable
+PUBLISHABLE_FORM='^pk_(test|live)_[A-Za-z0-9+/=_$-]+$'
+
+# gcloud's HTTP log would hold a secret's payload, on the screen or in ~/.config/gcloud/logs. This
+# env var beats a `gcloud config set core/log_http true` (cloud.google.com/sdk/docs/properties).
+export CLOUDSDK_CORE_LOG_HTTP=false
 
 usage() {
   cat <<'EOF'
 Deploy Vouch to Google Cloud Run, step by step (DEPLOY.md has the same steps by hand).
 
   scripts/deploy-wizard.sh             # each step: what it does, the command, then "Run it?"
+  scripts/deploy-wizard.sh --db-ready  # the same, once vouch-db-setup has run against the instance
   scripts/deploy-wizard.sh --dry-run   # print every command; run none, write nothing
   scripts/deploy-wizard.sh --help
 
+Without --db-ready it stops at the Database step and prints how to run vouch-db-setup.
 It skips what already exists, so it is safe to run again. Its plain answers (project id, region,
 image tag) stay in deploy/cloudrun/wizard.env, git-ignored. Secrets go from the keyring to Secret
 Manager through a pipe: never shown, never an argument, never in a file.
@@ -48,12 +56,15 @@ EOF
 }
 
 DRY=no
-case "${1:-}" in
-  --dry-run) DRY=yes ;;
-  -h|--help) usage; exit 0 ;;
-  "") ;;
-  *) printf 'Unknown option %s (see --help).\n' "$1" >&2; exit 2 ;;
-esac
+DB_READY=no
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY=yes ;;
+    --db-ready) DB_READY=yes ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option %s (see --help).\n' "$arg" >&2; exit 2 ;;
+  esac
+done
 
 # Only bash builtins up to the first real command, so a dry run works with no gcloud, docker or curl.
 HERE="${BASH_SOURCE[0]%/*}"; [[ "$HERE" == "${BASH_SOURCE[0]}" ]] && HERE=.
@@ -93,7 +104,7 @@ save() {
 }
 
 # confirm "what it does" "the command as shown": prints both and asks. True to go ahead; otherwise
-# it sets RAN to no (skipped) or dry.
+# it sets RAN to no (skipped) or dry. The wizard's one yes/no prompt.
 confirm() {
   printf '\n  %s%s%s\n' "$B" "$1" "$N"; printf '  %s$ %s%s\n' "$D" "$2" "$N"
   if [[ $DRY == yes ]]; then say "(dry run: not run)"; RAN=dry; return 1; fi
@@ -123,22 +134,44 @@ query() {
   "$@" 2>/dev/null || true
 }
 
-# in_keyring ENTRY: true when the keyring holds a value for it. Only its length leaves the pipe.
-in_keyring() {
-  local bytes
-  bytes=$(secret-tool lookup service "$1" 2>/dev/null | wc -c) || true
-  (( ${bytes:-0} > 0 ))
+# service_field FIELD: one field of the Cloud Run service (empty when there is no service yet).
+service_field() {
+  query gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format="value($1)"
 }
 
-# unchanged ENTRY SECRET: true when the secret's latest version holds the keyring entry's value.
+# keyring_holds ENTRY: true when the keyring's value for ENTRY looks usable: something besides
+# whitespace; for the JWT key, a "-----BEGIN PUBLIC KEY-----" line; for the publishable key, one
+# line of pk_test_ or pk_live_. The value stays in the pipe: awk prints only yes or no.
+keyring_holds() {
+  local kind=secret verdict
+  [[ $1 == clerk-vouch-jwt-key ]] && kind=pem
+  [[ $1 == "$PUBLISHABLE_ENTRY" ]] && kind=publishable
+  verdict=$(secret-tool lookup service "$1" 2>/dev/null | awk -v kind="$kind" -v form="$PUBLISHABLE_FORM" '
+    { sub(/\r$/, "") }
+    /[^[:space:]]/ { any = 1 }
+    $0 == "-----BEGIN PUBLIC KEY-----" { pem = 1 }
+    NR == 1 && $0 ~ form { pk = 1 }
+    END {
+      ok = any
+      if (kind == "pem") ok = any && pem
+      if (kind == "publishable") ok = pk && NR == 1
+      print (ok ? "yes" : "no")
+    }') || verdict=no
+  [[ $verdict == yes ]]
+}
+
+# secret_matches_keyring ENTRY SECRET VERSION: true when that version holds the keyring entry's value.
 # Both values go only through pipes into sha256sum: the wizard compares digests, never the values.
-unchanged() {
+secret_matches_keyring() {
   local mine theirs
   mine=$(secret-tool lookup service "$1" 2>/dev/null | sha256sum) || return 1
-  theirs=$(gcloud secrets versions access latest --secret="$2" --project="$PROJECT_ID" 2>/dev/null \
+  theirs=$(gcloud secrets versions access "$3" --secret="$2" --project="$PROJECT_ID" 2>/dev/null \
     | sha256sum) || return 1
   [[ "$mine" == "$theirs" ]]
 }
+
+# version_number NAME: the number at the end of a version's name (projects/.../versions/3), or nothing.
+version_number() { [[ $1 =~ /versions/([0-9]+)$ ]] && printf '%s' "${BASH_REMATCH[1]}"; return 0; }
 
 printf '%sDeploy Vouch to Google Cloud Run%s%s\n' "$B" "$N" "$([[ $DRY == yes ]] && echo '  (dry run: nothing runs)')"
 if [[ $DRY == no ]]; then
@@ -155,18 +188,23 @@ if [[ $DRY == no ]]; then
 fi
 
 step  # Keyring: before anything changes, so a missing entry stops a run that has done nothing.
+ENTRIES=()
+for pair in "${SECRETS[@]}"; do ENTRIES+=("${pair#*:}"); done
+ENTRIES+=("$PUBLISHABLE_ENTRY")
 if [[ $DRY == yes ]]; then
-  for entry in "${SECRET_ENTRIES[@]}" "$PUBLISHABLE_ENTRY"; do
-    printf '  %scheck:%s' "$D" "$N"; printf '  %s$ secret-tool lookup service %s | wc -c%s\n' "$D" "$entry" "$N"
-  done
+  for entry in "${ENTRIES[@]}"; do printf '  %scheck:%s' "$D" "$N"; show secret-tool lookup service "$entry"; done
   PUBLISHABLE="<from $PUBLISHABLE_ENTRY>"
 else
-  MISSING=()
-  for entry in "${SECRET_ENTRIES[@]}" "$PUBLISHABLE_ENTRY"; do in_keyring "$entry" || MISSING+=("$entry"); done
-  (( ${#MISSING[@]} == 0 )) || stop "The keyring has no ${MISSING[*]}. Nothing has changed. Store each with
-    secret-tool store --label=<entry> service <entry>   (it reads the value; #28, #30), then run this again."
+  BAD=()
+  for entry in "${ENTRIES[@]}"; do keyring_holds "$entry" || BAD+=("$entry"); done
+  (( ${#BAD[@]} == 0 )) || stop "The keyring has nothing usable under ${BAD[*]}. Nothing has changed.
+    Each needs a value; clerk-vouch-jwt-key a -----BEGIN PUBLIC KEY----- line; clerk-vouch-publishable
+    one pk_test_ or pk_live_ key. Store each with secret-tool store --label=<entry> service <entry>
+    (it reads the value; #28, #30), then run this again."
   PUBLISHABLE=$(secret-tool lookup service "$PUBLISHABLE_ENTRY")
-  ok "the keyring has all ${#SECRET_ENTRIES[@]} secrets and the publishable key"
+  [[ $PUBLISHABLE =~ $PUBLISHABLE_FORM ]] \
+    || stop "$PUBLISHABLE_ENTRY changed since the check and isn't a pk_test_ or pk_live_ key now (not shown). Run this again."
+  ok "the keyring has all ${#SECRETS[@]} secrets and the publishable key"
 fi
 
 step  # Project
@@ -216,34 +254,65 @@ fi
 
 step  # Secret Manager
 say "Each value goes from the keyring to Secret Manager through a pipe: it is never shown."
-for i in "${!SECRET_ENVS[@]}"; do
-  secret="${SECRET_ENVS[i]}"; entry="${SECRET_ENTRIES[i]}"
-  if has gcloud secrets describe "$secret" --project="$PROJECT_ID"; then ok "secret $secret exists"
+say "The deploy pins the version each secret ends with, so a new value reaches the app only through it."
+PINNED=()
+for pair in "${SECRETS[@]}"; do
+  secret="${pair%%:*}"; entry="${pair#*:}"; version=""
+  if [[ $DRY == yes ]]; then has gcloud secrets describe "$secret" --project="$PROJECT_ID" || true; found=no
+  elif err=$(gcloud secrets describe "$secret" --project="$PROJECT_ID" 2>&1 >/dev/null); then found=yes
+  elif [[ $err == *NOT_FOUND* ]]; then found=no
   else
+    stop "Couldn't check the secret $secret: ${err%%$'\n'*}
+    If Secret Manager's API was just turned on, wait a minute and run scripts/deploy-wizard.sh again."
+  fi
+  if [[ $found == no ]]; then
     run "Create the secret $secret (empty until the next command)" \
       gcloud secrets create "$secret" --replication-policy=automatic --project="$PROJECT_ID"
-    [[ $RAN == no ]] && { say "Not created, so $entry's value isn't put in."; continue; }
+    [[ $RAN == no ]] && stop "$secret wasn't created, and the deploy needs it. Run the wizard again and answer y."
+  else
+    version=$(version_number "$(query gcloud secrets versions describe latest --secret="$secret" \
+      --project="$PROJECT_ID" --format='value(name)')")
+    if [[ -n $version ]] && secret_matches_keyring "$entry" "$secret" "$version"; then
+      ok "$secret version $version already holds $entry's value"; PINNED+=("$secret=$secret:$version"); continue
+    fi
+    version=""
   fi
-  if [[ $DRY == no ]] && unchanged "$entry" "$secret"; then ok "$secret already holds $entry's value"; continue; fi
-  add=(gcloud secrets versions add "$secret" --data-file=- --project="$PROJECT_ID")
+  if [[ $DRY == no ]]; then
+    keyring_holds "$entry" || stop "The keyring's $entry is empty or unreadable now (locked?). Nothing was added to $secret. Unlock or fix it, then run this again."
+  fi
+  add=(gcloud secrets versions add "$secret" --data-file=- --project="$PROJECT_ID" --format='value(name)')
   if confirm "Put $entry's value in $secret (a new version)" "secret-tool lookup service $entry | $(quoted "${add[@]}")"; then
-    secret-tool lookup service "$entry" | "${add[@]}" || failed
-    ok "done"; RAN=yes
+    if ! added=$(secret-tool lookup service "$entry" | "${add[@]}"); then
+      # The pipe broke: a version made from it may hold part of the value, or nothing. Disable it.
+      bad=$(version_number "$added")
+      [[ -n $bad ]] || failed
+      gcloud secrets versions disable "$bad" --secret="$secret" --project="$PROJECT_ID" --quiet \
+        || stop "Putting $entry's value in $secret failed, and disabling version $bad failed too. Disable it by hand:
+    gcloud secrets versions disable $bad --secret=$secret --project=$PROJECT_ID"
+      stop "Putting $entry's value in $secret failed (above), so its version $bad is disabled. Fix it, then run scripts/deploy-wizard.sh again."
+    fi
+    version=$(version_number "$added")
+    [[ -n $version ]] || version=$(version_number "$(gcloud secrets versions describe latest --secret="$secret" \
+      --project="$PROJECT_ID" --format='value(name)')")
+    [[ -n $version ]] || failed
+    ok "done: $secret version $version"
+  elif [[ $RAN == dry ]]; then version="<version>"
+  else stop "Nothing was put in $secret, and the deploy needs it. Run the wizard again and answer y."
   fi
+  PINNED+=("$secret=$secret:$version")
 done
 
 step  # Access
 PROJECT_NUMBER=$(query gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 [[ $DRY == yes ]] && PROJECT_NUMBER=PROJECT_NUMBER
 [[ -n "$PROJECT_NUMBER" ]] || stop "gcloud didn't give project $PROJECT_ID's number. Run this again; if it repeats, check: gcloud projects describe $PROJECT_ID"
-ACCOUNT_NOW=$(query gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" \
-  --format='value(spec.template.spec.serviceAccountName)')
+ACCOUNT_NOW=$(service_field spec.template.spec.serviceAccountName)
 # A service with no account of its own runs as Compute Engine's default one (Cloud Run's service identity page).
 RUN_AS="${ACCOUNT_NOW:-$PROJECT_NUMBER-compute@developer.gserviceaccount.com}"
 say "The service runs as $RUN_AS. Granting a role it already has changes nothing."
-for secret in "${SECRET_ENVS[@]}"; do
-  run "Let it read $secret (Secret Manager Secret Accessor, on this secret only)" \
-    gcloud secrets add-iam-policy-binding "$secret" --member="serviceAccount:$RUN_AS" \
+for pair in "${SECRETS[@]}"; do
+  run "Let it read ${pair%%:*} (Secret Manager Secret Accessor, on this secret only)" \
+    gcloud secrets add-iam-policy-binding "${pair%%:*}" --member="serviceAccount:$RUN_AS" \
     --role=roles/secretmanager.secretAccessor --project="$PROJECT_ID" --quiet
 done
 run "Let it connect to Cloud SQL (Cloud SQL Client, on the project)" \
@@ -259,35 +328,33 @@ say "The app needs vouch-db-setup to have run once against it (and after a LangG
 say "From your machine, through the Cloud SQL Auth Proxy (DEPLOY.md, The database):"
 printf '    %-52s # terminal 1: leave it running\n' "cloud-sql-proxy $SQL_INSTANCE --port 5432"
 printf '    %-52s # terminal 2: .envrc gives VOUCH_DATABASE_URL\n' "uv run vouch-db-setup"
-if [[ $DRY == no ]]; then
-  reply=""
-  printf '  %s? Has vouch-db-setup run against %s? [y/N]%s ' "$Y" "$SQL_INSTANCE" "$N"; read -r reply || true
-  [[ "$reply" =~ ^[Yy] ]] || stop "Run vouch-db-setup (above) first, then this wizard again: it skips what is done."
+if [[ $DB_READY == yes ]]; then ok "vouch-db-setup has run (--db-ready)"
+elif [[ $DRY == no ]]; then
+  stop "Run vouch-db-setup (above), then: scripts/deploy-wizard.sh --db-ready   (it skips what is done)"
 fi
 
 step  # Deploy
 # Sign-in accepts session tokens only from the service's own address: the one it has, or for a new
 # service the address Cloud Run will give it (https://SERVICE-PROJECT_NUMBER.REGION.run.app).
-URL_NOW=$(query gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')
-PARTIES="${URL_NOW:-https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app}"
-SECRETS_ARG=""
-for secret in "${SECRET_ENVS[@]}"; do SECRETS_ARG+="${SECRETS_ARG:+,}$secret=$secret:latest"; done
+URL_NOW=$(service_field status.url)
+AUTHORIZED_PARTIES="${URL_NOW:-https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app}"
+SECRETS_ARG=$(IFS=,; printf '%s' "${PINNED[*]}")
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on OpenRouter, signed in"
-say "through Clerk. The secrets come from Secret Manager as env vars; sign-in accepts $PARTIES."
+say "through Clerk. Each secret's version is pinned; sign-in accepts $AUTHORIZED_PARTIES."
 run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --region="$REGION" \
   --project="$PROJECT_ID" --allow-unauthenticated --min-instances=0 --max-instances=1 --max=1 \
   --set-secrets="$SECRETS_ARG" \
-  --set-env-vars="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$PARTIES" \
+  --set-env-vars="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZED_PARTIES" \
   --add-cloudsql-instances="$SQL_INSTANCE" --quiet
 
 step  # URL
 LOGS=(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\"" \
   --project="$PROJECT_ID" --limit=50 --freshness=1h)
-URL=$(query gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')
+URL=$(service_field status.url)
 if [[ $DRY == yes ]]; then URL="https://the-service-address"
 else
   [[ -n "$URL" ]] || stop "Cloud Run has no address for $SERVICE: was it deployed? The log: $(quoted "${LOGS[@]}")"
-  [[ "$URL" == "$PARTIES" ]] || stop "Cloud Run gave the service $URL, but sign-in was set to accept $PARTIES. Run scripts/deploy-wizard.sh again: it uses the service's own address."
+  [[ "$URL" == "$AUTHORIZED_PARTIES" ]] || stop "Cloud Run gave the service $URL, but sign-in was set to accept $AUTHORIZED_PARTIES. Run scripts/deploy-wizard.sh again: it uses the service's own address."
 fi
 ok "Vouch is at $URL"
 
