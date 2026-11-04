@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from assess_steps import step_texts
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
@@ -18,7 +19,7 @@ def scripted(
     """A script that searches once, answers (once per entry), and judges as given: one
     judgement's requirements, or a list of them played in turn."""
     gather: list[dict] = [{"tool": "search_policies", "args": {"query": "policy"}}]
-    gather += [{"answer": answer, "cited": []} for answer in answers]
+    gather += [{"answer": answer} for answer in answers]
     if judge and isinstance(judge[0], list):
         judgements: dict | list[dict] = [{"requirements": j} for j in judge]
     else:
@@ -27,7 +28,12 @@ def scripted(
 
 
 def judged(*ids: str, verdict: str = "evidenced") -> list[dict]:
-    return [{"requirement_id": r, "verdict": verdict, "reason": "Shown."} for r in ids]
+    """Judgements for these ids, each citing a true quote (a verdict needs one to stand)."""
+    quote = {"doc_id": "authentication-standard", "quote": "Passwords have at least 12 characters."}
+    return [
+        {"requirement_id": r, "verdict": verdict, "reason": "Shown.", "citations": [quote]}
+        for r in ids
+    ]
 
 
 def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evidenced():
@@ -48,13 +54,19 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     assert result.verdict == "partly-evidenced"
     assert result.should_score == ShouldScore(evidenced=2, total=3)
     assert result.answer.startswith("Sign-in methods follow each system's exposure")
-    assert "authentication-standard" in {s["doc_id"] for s in result.sources}
+    assert {c.doc_id for r in result.requirements for c in r.citations} == {
+        "authentication-standard"
+    }
     assert result.model == "scripted-fake"
     assert result.prompt_version
     assert [s["node"] for s in result.steps] == [
-        "gather", "tools", "gather", "check_answer", "cite", "judge"
+        "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
     ]
-    assert result.steps[-1]["text"] == "Judged 3 of 5 requirements evidenced."
+    assert step_texts(result, "gather")[-1] == "Drafted an answer."
+    assert step_texts(result, "judge") == ["Judged 3 of 5 requirements evidenced."]
+    assert step_texts(result, "check_quotes") == [
+        "Checked each quote against its document: kept 6 citations."
+    ]
 
 
 def test_the_assessment_reports_the_models_token_usage():
@@ -78,6 +90,15 @@ def test_the_assessment_is_plain_json():
         "text": result.requirements[0].text,
         "verdict": "partly-evidenced",
         "reason": result.requirements[0].reason,
+        "citations": [
+            {
+                "doc_id": "authentication-standard",
+                "version": "3.1",
+                "section": "How we chose our sign-in methods",
+                "quote": "We decide how people sign in to a system by looking at what could go "
+                "wrong with it.",
+            }
+        ],
     }
 
 
@@ -112,7 +133,7 @@ def test_an_unknown_verdict_or_a_skipped_requirement_is_not_evidenced_not_judged
     assert (m1.id, m1.verdict, m1.reason) == ("M1", "not-evidenced", "not judged")
     assert NOT_JUDGED == "not judged"
     assert result.verdict == "partly-evidenced"
-    assert result.steps[-1]["text"] == "Judged 4 of 5 requirements evidenced. Not judged: M1."
+    assert step_texts(result, "judge")[-1] == "Judged 4 of 5 requirements evidenced. Not judged: M1."
 
 
 def test_a_judgement_for_a_requirement_the_control_lacks_is_ignored():
@@ -153,21 +174,6 @@ def test_missing_policy_folder_gives_not_evidenced_and_a_warning(monkeypatch, tm
     assert result.verdict == "not-evidenced"
     assert {r.verdict for r in result.requirements} == {"not-evidenced"}
     assert "source_unavailable" in result.warnings
-
-
-def test_a_cited_doc_no_search_returned_is_dropped():
-    model = ScriptedChatModel(
-        script={
-            "gather": [
-                {"tool": "search_policies", "args": {"query": "password"}},
-                {"answer": "Backups are tested.", "cited": ["backup-policy"]},
-            ]
-        }
-    )
-
-    result = assess("4.1.2", NORDLICHT, model)
-
-    assert result.sources == []
 
 
 def test_an_unknown_control_raises_before_the_model_is_called():
@@ -229,12 +235,12 @@ def test_a_refused_answer_answers_every_tool_call_in_its_message():
         "",
         tool_calls=[
             tool_call("search_policies", {"query": "password"}, "s1"),
-            tool_call("submit_answer", {"answer": "We are compliant.", "cited": []}, "a1"),
-            tool_call("submit_answer", {"answer": "Also certified.", "cited": []}, "a2"),
+            tool_call("submit_answer", {"answer": "We are compliant."}, "a1"),
+            tool_call("submit_answer", {"answer": "Also certified."}, "a2"),
         ],
     )
     second = AIMessage(
-        "", tool_calls=[tool_call("submit_answer", {"answer": "Shown.", "cited": []}, "a3")]
+        "", tool_calls=[tool_call("submit_answer", {"answer": "Shown."}, "a3")]
     )
     model = RecordingModel(
         script={"gather": [{"answer": "unused"}]}, replies=[first, second], received=[]
@@ -255,7 +261,7 @@ def test_a_judgement_reason_claiming_an_audit_result_is_asked_for_again_once():
     result = assess("4.1.2", NORDLICHT, model)
 
     assert {r.reason for r in result.requirements} == {"Shown."}
-    assert result.steps[-1]["text"] == (
+    assert step_texts(result, "judge")[-1] == (
         "A reason claimed an audit result (“compliant”), so the judgement was asked for again. "
         "Judged 5 of 5 requirements evidenced."
     )

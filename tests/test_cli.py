@@ -35,7 +35,8 @@ def test_assess_prints_assessment_json(profile_args):
         ("M2", "evidenced"),
     ]
     assert assessment["should_score"] == {"evidenced": 2, "total": 3}
-    assert "authentication-standard" in {s["doc_id"] for s in assessment["sources"]}
+    cited = {c["doc_id"] for r in assessment["requirements"] for c in r["citations"]}
+    assert cited == {"authentication-standard"}
 
 
 @pytest.mark.parametrize(
@@ -272,9 +273,9 @@ BAD_SCRIPTS = {
     "missing-file": None,
     "malformed-json": '{"gather": [',
     "no-answer-turn": '{"gather": [{"tool": "search_policies", "args": {"query": "x"}}]}',
-    "judgement-without-verdict": '{"gather": [{"answer": "A.", "cited": []}],'
+    "judgement-without-verdict": '{"gather": [{"answer": "A."}],'
     ' "judge": {"requirements": [{"requirement_id": "M1", "reason": "R."}]}}',
-    "bad-judge": '{"gather": [{"answer": "A.", "cited": []}], "judge": {"requirements": "M1"}}',
+    "bad-judge": '{"gather": [{"answer": "A."}], "judge": {"requirements": "M1"}}',
 }
 
 

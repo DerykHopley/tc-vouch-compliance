@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
+from vouch.documents import sections
 from vouch.front_matter import split_front_matter
 from vouch.paths import FIXTURES_DIR
 
@@ -16,7 +17,6 @@ MAX_LIMIT = 10
 SOURCE_UNAVAILABLE = "source_unavailable"
 INVALID_INPUT = "invalid_input"
 
-_HEADING = re.compile(r"^#{1,6}\s+(.*\S)\s*$")
 _WORD = re.compile(r"\w+")
 
 
@@ -77,24 +77,16 @@ def _policy_files(folder: Path) -> list[Path]:
 def _passages(doc: Path) -> list[Passage]:
     """One passage per paragraph, each under the nearest heading above it."""
     passages: list[Passage] = []
-    heading = ""
-    paragraph: list[str] = []
-
-    def close_paragraph() -> None:
-        if paragraph:
-            passages.append(Passage(doc_id=doc.stem, heading=heading, text="\n".join(paragraph)))
-            paragraph.clear()
-
     _, body = split_front_matter(doc.read_text(encoding="utf-8"))
-    for line in body.splitlines():
-        match = _HEADING.match(line)
-        if match or not line.strip():
-            close_paragraph()
-            if match:
-                heading = match.group(1)
-        else:
-            paragraph.append(line.strip())
-    close_paragraph()
+    for section in sections(body):
+        paragraph: list[str] = []
+        for line in (*section.lines, ""):  # a blank line closes the last paragraph
+            if line.strip():
+                paragraph.append(line.strip())
+            elif paragraph:
+                text = "\n".join(paragraph)
+                passages.append(Passage(doc_id=doc.stem, heading=section.heading, text=text))
+                paragraph = []
     return passages
 
 
