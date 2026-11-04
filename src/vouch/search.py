@@ -1,21 +1,18 @@
-"""search_policies: keyword search over the company's policy folder, within an allow-list."""
+"""search_policies: keyword search over the policy folder a compliance profile allows."""
 
-import os
 import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
 from vouch.documents import sections
 from vouch.front_matter import split_front_matter
-from vouch.paths import FIXTURES_DIR
 
-DEFAULT_POLICY_DIR = FIXTURES_DIR / "nordlicht" / "policies"
-POLICY_DIR_ENV = "ASSESS_POLICY_DIR"
 MAX_QUERY_CHARS = 200
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 10
 SOURCE_UNAVAILABLE = "source_unavailable"
 INVALID_INPUT = "invalid_input"
+FOLDER_ESCAPED = "folder_escaped"
 
 _WORD = re.compile(r"\w+")
 
@@ -31,16 +28,26 @@ class ErrorResult(TypedDict):
     detail: NotRequired[str]
 
 
-def search_policies(query: str, limit: int = DEFAULT_LIMIT) -> list[Passage] | ErrorResult:
+def search_policies(
+    query: str, limit: int = DEFAULT_LIMIT, *, folder: Path
+) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
-    Errors come back as a dict with an `error` key; nothing is raised.
+    `folder` is the policy folder the compliance profile allows, resolved as the profile
+    resolved it on load. It is resolved again here, on the path actually read: one that now
+    resolves elsewhere (swapped for a symlink) is refused with `folder_escaped`. Errors come
+    back as a dict with an `error` key; nothing is raised.
     """
     problem = _check_input(query, limit)
     if problem:
         return ErrorResult(error=INVALID_INPUT, detail=problem)
+    root = folder.resolve()
+    if root != folder:
+        return ErrorResult(
+            error=FOLDER_ESCAPED, detail="the folder now resolves outside where it was allowed"
+        )
     try:
-        passages = [p for doc in _policy_files(_policy_dir()) for p in _passages(doc)]
+        passages = [p for doc in _policy_files(root) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}
@@ -58,18 +65,13 @@ def _check_input(query: Any, limit: Any) -> str | None:
     return None
 
 
-def _policy_dir() -> Path:
-    return Path(os.environ.get(POLICY_DIR_ENV) or DEFAULT_POLICY_DIR)
-
-
-def _policy_files(folder: Path) -> list[Path]:
-    """The .md files directly in the folder; a link pointing elsewhere is left out."""
-    if not folder.is_dir():
-        raise FileNotFoundError(folder)
-    root = folder.resolve()
+def _policy_files(root: Path) -> list[Path]:
+    """The .md files directly in the resolved folder; a link pointing elsewhere is left out."""
+    if not root.is_dir():
+        raise FileNotFoundError(root)
     return sorted(
         f
-        for f in folder.iterdir()
+        for f in root.iterdir()
         if f.suffix == ".md" and f.is_file() and f.resolve().parent == root
     )
 

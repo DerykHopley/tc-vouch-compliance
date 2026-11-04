@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -6,8 +7,9 @@ from assess_steps import step_texts
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from vouch import ScriptedChatModel, UnknownControlError, assess, load_named_profile
+from vouch import ScriptedChatModel, UnknownControlError, assess, load_named_profile, load_profile
 from vouch.graph import NOT_JUDGED, OutputCheckError, ShouldScore, claims_audit_result
+from vouch.profile import NORDLICHT_PROFILE
 
 SCRIPTS = Path(__file__).parent / "scripts"
 NORDLICHT = load_named_profile("nordlicht")
@@ -165,11 +167,13 @@ def test_an_answer_claiming_an_audit_result_twice_fails(word):
         assess("4.1.2", NORDLICHT, model)
 
 
-def test_missing_policy_folder_gives_not_evidenced_and_a_warning(monkeypatch, tmp_path):
-    monkeypatch.setenv("ASSESS_POLICY_DIR", str(tmp_path / "nowhere"))
+def test_missing_policy_folder_gives_not_evidenced_and_a_warning(tmp_path):
+    shutil.copytree(NORDLICHT_PROFILE.parent, tmp_path / "nordlicht")
+    profile = load_profile(tmp_path / "nordlicht" / "profile.yaml")
+    shutil.rmtree(profile.evidence_sources["policies"].folder)  # gone since the profile loaded
     model = ScriptedChatModel.from_file(SCRIPTS / "isa_4_1_2.json")
 
-    result = assess("4.1.2", NORDLICHT, model)
+    result = assess("4.1.2", profile, model)
 
     assert result.verdict == "not-evidenced"
     assert {r.verdict for r in result.requirements} == {"not-evidenced"}
