@@ -1,7 +1,7 @@
 {
   "gather": [
     {"tool": "search_policies", "args": {"query": "authentication password second factor administrator"}},
-    {"answer": "Sign-in methods are chosen by each system's exposure: passwords of at least 12 characters checked against breach lists, an authenticator app on internet-facing systems, and hardware security keys for separate administrator accounts.", "cited": ["authentication-standard"]}
+    {"answer": "Sign-in methods are chosen by each system's exposure: passwords of at least 12 characters checked against breach lists, an authenticator app on internet-facing systems, and hardware security keys for separate administrator accounts."}
   ],
   "judge": {
     "requirements": [

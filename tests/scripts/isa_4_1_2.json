@@ -1,7 +1,7 @@
 {
   "gather": [
     {"tool": "search_policies", "args": {"query": "authentication password second factor"}},
-    {"answer": "Sign-in methods follow each system's exposure: long passwords checked against breach lists, an authenticator app for internet-facing systems, and hardware keys for administrator accounts.", "cited": ["authentication-standard"]}
+    {"answer": "Sign-in methods follow each system's exposure: long passwords checked against breach lists, an authenticator app for internet-facing systems, and hardware keys for administrator accounts."}
   ],
   "judge": {
     "requirements": [

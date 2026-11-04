@@ -273,9 +273,9 @@ BAD_SCRIPTS = {
     "missing-file": None,
     "malformed-json": '{"gather": [',
     "no-answer-turn": '{"gather": [{"tool": "search_policies", "args": {"query": "x"}}]}',
-    "judgement-without-verdict": '{"gather": [{"answer": "A.", "cited": []}],'
+    "judgement-without-verdict": '{"gather": [{"answer": "A."}],'
     ' "judge": {"requirements": [{"requirement_id": "M1", "reason": "R."}]}}',
-    "bad-judge": '{"gather": [{"answer": "A.", "cited": []}], "judge": {"requirements": "M1"}}',
+    "bad-judge": '{"gather": [{"answer": "A."}], "judge": {"requirements": "M1"}}',
 }
 
 

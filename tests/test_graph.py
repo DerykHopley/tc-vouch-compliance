@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from assess_steps import step_texts
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
@@ -18,7 +19,7 @@ def scripted(
     """A script that searches once, answers (once per entry), and judges as given: one
     judgement's requirements, or a list of them played in turn."""
     gather: list[dict] = [{"tool": "search_policies", "args": {"query": "policy"}}]
-    gather += [{"answer": answer, "cited": []} for answer in answers]
+    gather += [{"answer": answer} for answer in answers]
     if judge and isinstance(judge[0], list):
         judgements: dict | list[dict] = [{"requirements": j} for j in judge]
     else:
@@ -27,12 +28,12 @@ def scripted(
 
 
 def judged(*ids: str, verdict: str = "evidenced") -> list[dict]:
-    return [{"requirement_id": r, "verdict": verdict, "reason": "Shown."} for r in ids]
-
-
-def step_text(result, node: str) -> str:
-    """The text of the last step this node made."""
-    return [s["text"] for s in result.steps if s["node"] == node][-1]
+    """Judgements for these ids, each citing a true quote (a verdict needs one to stand)."""
+    quote = {"doc_id": "authentication-standard", "quote": "Passwords have at least 12 characters."}
+    return [
+        {"requirement_id": r, "verdict": verdict, "reason": "Shown.", "citations": [quote]}
+        for r in ids
+    ]
 
 
 def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evidenced():
@@ -61,10 +62,11 @@ def test_a_scripted_run_on_4_1_2_judges_each_requirement_and_rolls_up_partly_evi
     assert [s["node"] for s in result.steps] == [
         "gather", "tools", "gather", "check_answer", "judge", "check_quotes"
     ]
-    assert step_text(result, "judge") == "Judged 3 of 5 requirements evidenced."
-    assert step_text(result, "check_quotes") == (
+    assert step_texts(result, "gather")[-1] == "Drafted an answer."
+    assert step_texts(result, "judge") == ["Judged 3 of 5 requirements evidenced."]
+    assert step_texts(result, "check_quotes") == [
         "Checked each quote against its document: kept 6 citations."
-    )
+    ]
 
 
 def test_the_assessment_reports_the_models_token_usage():
@@ -131,7 +133,7 @@ def test_an_unknown_verdict_or_a_skipped_requirement_is_not_evidenced_not_judged
     assert (m1.id, m1.verdict, m1.reason) == ("M1", "not-evidenced", "not judged")
     assert NOT_JUDGED == "not judged"
     assert result.verdict == "partly-evidenced"
-    assert step_text(result, "judge") == "Judged 4 of 5 requirements evidenced. Not judged: M1."
+    assert step_texts(result, "judge")[-1] == "Judged 4 of 5 requirements evidenced. Not judged: M1."
 
 
 def test_a_judgement_for_a_requirement_the_control_lacks_is_ignored():
@@ -233,12 +235,12 @@ def test_a_refused_answer_answers_every_tool_call_in_its_message():
         "",
         tool_calls=[
             tool_call("search_policies", {"query": "password"}, "s1"),
-            tool_call("submit_answer", {"answer": "We are compliant.", "cited": []}, "a1"),
-            tool_call("submit_answer", {"answer": "Also certified.", "cited": []}, "a2"),
+            tool_call("submit_answer", {"answer": "We are compliant."}, "a1"),
+            tool_call("submit_answer", {"answer": "Also certified."}, "a2"),
         ],
     )
     second = AIMessage(
-        "", tool_calls=[tool_call("submit_answer", {"answer": "Shown.", "cited": []}, "a3")]
+        "", tool_calls=[tool_call("submit_answer", {"answer": "Shown."}, "a3")]
     )
     model = RecordingModel(
         script={"gather": [{"answer": "unused"}]}, replies=[first, second], received=[]
@@ -259,7 +261,7 @@ def test_a_judgement_reason_claiming_an_audit_result_is_asked_for_again_once():
     result = assess("4.1.2", NORDLICHT, model)
 
     assert {r.reason for r in result.requirements} == {"Shown."}
-    assert step_text(result, "judge") == (
+    assert step_texts(result, "judge")[-1] == (
         "A reason claimed an audit result (“compliant”), so the judgement was asked for again. "
         "Judged 5 of 5 requirements evidenced."
     )

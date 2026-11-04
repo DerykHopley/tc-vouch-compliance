@@ -20,7 +20,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
-from vouch.citations import Citation, CitationClaim, check_citation
+from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.isa import Column, IsaControl, Requirement, load_isa_control
 from vouch.profile import ComplianceProfile, ControlRequirements
 from vouch.search import (
@@ -42,10 +42,13 @@ JUDGED_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-ev
 NOT_APPLICABLE: Verdict = "not-applicable"
 NOT_JUDGED = "not judged"  # the reason given when the model skipped a requirement or misnamed it
 NO_SOURCE = "no evidence source could be read"
-# The reason given when every citation for a requirement failed the quote check (#21).
+# The reasons an evidenced or partly evidenced verdict becomes not-evidenced after the quote
+# check: nothing checked shows it (#21).
+NO_CITATION = "No citation given, so nothing checked shows it."
 CITATIONS_DROPPED = (
     "Every citation given for it was dropped by the quote check, so nothing checked shows it."
 )
+SHOWN_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced")  # need a citation
 # The columns the roll-up counts: should requirements only give the should score.
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 # Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
@@ -75,7 +78,6 @@ class SubmitAnswer(BaseModel):
     """Hand back the final answer for the control. The verdicts are decided by the judge step."""
 
     answer: str = Field(description="A short draft answer for an auditor.")
-    cited: list[str] = Field(default_factory=list, description="doc_ids the answer relies on.")
 
 
 class RequirementJudgement(BaseModel):
@@ -135,6 +137,15 @@ class RequirementVerdict:
     verdict: Verdict
     reason: str
     citations: tuple[Citation, ...] = ()  # only quotes found in the cited document
+
+
+@dataclass(frozen=True)
+class DroppedCitation:
+    """A citation the quote check dropped, and why."""
+
+    requirement_id: str
+    doc_id: str
+    reason: DropReason
 
 
 @dataclass(frozen=True)
@@ -198,12 +209,11 @@ class AssessState(TypedDict, total=False):
     answer_retries: int
     rejected_word: str | None  # the audit-result word that made check_answer refuse the answer
     judge_rejected_word: str | None  # the one that made the judge ask for a new judgement
-    cited: list[str]
     requirements: list[RequirementVerdict]
     not_judged: list[str]
     claims: dict[str, list[CitationClaim]]  # the judge's citations per requirement, unchecked
     document_folders: list[str]  # where cited documents are looked up: the profile's sources
-    dropped_citations: list[dict[str, str]]
+    dropped_citations: list[DroppedCitation]
     messages: Annotated[list[AnyMessage], add_messages]
 
 
@@ -219,8 +229,8 @@ def _prompt(
             f"You assess one {control.source} control for {profile.company} against the "
             f"company's own evidence. Use {SEARCH_POLICIES} to find evidence. When you are "
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
-            f"the language with ISO 639-1 code '{profile.answer_language}', and the doc_ids "
-            "you cite. Say what the evidence shows; never call the company compliant, "
+            f"the language with ISO 639-1 code '{profile.answer_language}'. "
+            "Say what the evidence shows; never call the company compliant, "
             "certified or passed."
         ),
         HumanMessage(
@@ -239,8 +249,9 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
             "Give each one verdict: evidenced (the evidence fully shows it), partly-evidenced "
             "(it shows some of it) or not-evidenced (it shows none of it), and one sentence "
             "saying why. For each verdict other than not-evidenced, give the citations it "
-            "relies on: the doc_id and a passage copied word for word from that document. A "
-            "quote that isn't in the document is dropped."
+            "relies on: the doc_id and a passage copied word for word from that document, at "
+            "least four words from one paragraph, list item or table row. A quote that isn't "
+            "in the document is dropped, and a verdict with no citation left is not-evidenced."
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -254,22 +265,24 @@ def _judged_requirements(
     control_requirements: ControlRequirements,
     judgement: Judgement | None,
     unjudged_reason: str = NOT_JUDGED,
-) -> tuple[list[RequirementVerdict], list[str]]:
-    """Each of the control's requirements with its verdict, and the ids the model didn't judge
-    validly.
+) -> tuple[list[RequirementVerdict], list[str], dict[str, list[CitationClaim]]]:
+    """Each of the control's requirements with its verdict, the ids the model didn't judge
+    validly, and the citations given for each one it did (unchecked).
 
     A requirement the model skipped, or gave a verdict outside JUDGED_VERDICTS, is
     not-evidenced with `unjudged_reason`. Judgements for ids the control doesn't apply are
-    ignored. Not applicable requirements follow, with the profile's reason.
+    ignored; for an id judged twice, the first counts. Not applicable requirements follow,
+    with the profile's reason.
     """
     given: dict[str, RequirementJudgement] = {}
     for item in judgement.requirements if judgement else []:
         given.setdefault(item.requirement_id, item)
-    results, not_judged = [], []
+    results, not_judged, claims = [], [], {}
     for req in control_requirements.applicable:
         item = given.get(req.id)
         if item is not None and item.verdict in JUDGED_VERDICTS:
             verdict, reason = item.verdict, item.reason
+            claims[req.id] = item.citations
         else:
             verdict, reason = "not-evidenced", unjudged_reason
             not_judged.append(req.id)
@@ -279,7 +292,7 @@ def _judged_requirements(
         results.append(
             RequirementVerdict(req.id, req.column, req.text, NOT_APPLICABLE, excluded.reason)
         )
-    return results, not_judged
+    return results, not_judged, claims
 
 
 def _usage_of(message: Any) -> list[dict[str, int]]:
@@ -301,7 +314,7 @@ def build_graph(model: BaseChatModel):
         for call in reply.tool_calls:
             if call["name"] == SUBMIT_ANSWER:
                 answer = SubmitAnswer.model_validate(call["args"])
-                update.update(answer=answer.answer, cited=answer.cited)
+                update["answer"] = answer.answer
         return update
 
     def tools(state: AssessState) -> dict[str, Any]:
@@ -357,13 +370,15 @@ def build_graph(model: BaseChatModel):
         """
         control_requirements = state["control_requirements"]
         if SOURCE_UNAVAILABLE in state["warnings"]:  # nothing could be read, so nothing shown
-            results, _ = _judged_requirements(control_requirements, None, NO_SOURCE)
+            results, _, _ = _judged_requirements(control_requirements, None, NO_SOURCE)
             return {"requirements": results, "not_judged": [], "claims": {}}
         prompt, usage, rejected = _judge_prompt(state), [], None
         for attempt in range(OUTPUT_RETRIES + 1):
             reply = judge_model.invoke(prompt)
             usage += _usage_of(reply["raw"])
-            results, not_judged = _judged_requirements(control_requirements, reply["parsed"])
+            results, not_judged, claims = _judged_requirements(
+                control_requirements, reply["parsed"]
+            )
             judged = [r for r in results if r.verdict != NOT_APPLICABLE]
             word = next((w for r in judged if (w := claims_audit_result(r.reason))), None)
             if word is None:
@@ -383,7 +398,7 @@ def build_graph(model: BaseChatModel):
         return {
             "requirements": results,
             "not_judged": not_judged,
-            "claims": _claims(results, not_judged, reply["parsed"]),
+            "claims": claims,
             "judge_rejected_word": rejected,
             "usage": usage,
         }
@@ -391,15 +406,17 @@ def build_graph(model: BaseChatModel):
     def check_quotes(state: AssessState) -> dict[str, Any]:
         """Keep each citation whose quote is in the document it cites; drop and log the rest.
 
-        A requirement judged evidenced or partly evidenced whose every citation was dropped
-        becomes not-evidenced: nothing checked shows it.
+        A requirement judged evidenced or partly evidenced with no citation left (none given,
+        or every one dropped) becomes not-evidenced: nothing checked shows it. Each document
+        is read once.
         """
-        claims, folders = state.get("claims", {}), state["document_folders"]
+        claims, checker = state.get("claims", {}), QuoteChecker(state["document_folders"])
         results, dropped = [], []
         for requirement in state["requirements"]:
             kept: list[Citation] = []
-            for claim in claims.get(requirement.id, []):
-                checked = check_citation(claim, folders)
+            given = claims.get(requirement.id, [])
+            for claim in given:
+                checked = checker.check(claim)
                 if isinstance(checked, Citation):
                     if checked not in kept:
                         kept.append(checked)
@@ -411,11 +428,10 @@ def build_graph(model: BaseChatModel):
                     checked,
                     claim.quote,
                 )
-                dropped.append(
-                    {"requirement_id": requirement.id, "doc_id": claim.doc_id, "problem": checked}
-                )
-            if claims.get(requirement.id) and not kept and requirement.verdict in JUDGED_VERDICTS:
-                requirement = replace(requirement, verdict="not-evidenced", reason=CITATIONS_DROPPED)
+                dropped.append(DroppedCitation(requirement.id, claim.doc_id, checked))
+            if not kept and requirement.verdict in SHOWN_VERDICTS:
+                reason = CITATIONS_DROPPED if given else NO_CITATION
+                requirement = replace(requirement, verdict="not-evidenced", reason=reason)
             results.append(replace(requirement, citations=tuple(kept)))
         return {"requirements": results, "dropped_citations": dropped}
 
@@ -456,8 +472,7 @@ class Step:
             if queries:
                 return "Searching the policies for " + ", ".join(f"“{q}”" for q in queries) + "."
             if any(c["name"] == SUBMIT_ANSWER for c in calls):
-                cited = _plural(len(update.get("cited", [])), "document")
-                return f"Drafted an answer citing {cited}."
+                return "Drafted an answer."
         if self.node == "tools":
             if update.get("warnings"):
                 return "The policy folder could not be read."
@@ -473,11 +488,8 @@ class Step:
             text = f"Checked each quote against its document: kept {_plural(kept, 'citation')}"
             return text + (f", dropped {dropped}." if dropped else ".")
         if self.node == GUARD:
-            d = update["dropped_citation"]
-            return (
-                f"Dropped a citation for {d['requirement_id']} from {d['doc_id']}: "
-                f"{d['problem']}."
-            )
+            d: DroppedCitation = update["dropped_citation"]
+            return f"Dropped a citation for {d.requirement_id} from {d.doc_id}: {d.reason}."
         if self.node == "judge":
             judged = [r for r in update["requirements"] if r.verdict != NOT_APPLICABLE]
             evidenced = sum(r.verdict == "evidenced" for r in judged)
@@ -492,21 +504,6 @@ class Step:
                 text += " Not judged: " + ", ".join(update["not_judged"]) + "."
             return text
         return f"Finished the {self.node} step."
-
-
-def _claims(
-    results: list[RequirementVerdict], not_judged: list[str], judgement: Judgement | None
-) -> dict[str, list[CitationClaim]]:
-    """The citations the judge gave for each requirement it judged validly (its first
-    judgement of an id, as `_judged_requirements` keeps)."""
-    given: dict[str, RequirementJudgement] = {}
-    for item in judgement.requirements if judgement else []:
-        given.setdefault(item.requirement_id, item)
-    return {
-        r.id: given[r.id].citations
-        for r in results
-        if r.verdict != NOT_APPLICABLE and r.id not in not_judged and given[r.id].citations
-    }
 
 
 def _plural(count: int, noun: str) -> str:
