@@ -61,8 +61,19 @@ REDACTIONS = (
         re.compile(r"\b([A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)([^\s@/]+)@"),
         lambda m: f"{m.group(1)}{REMOVED}@",
     ),
-    # Bearer before the JWT, so a bearer JWT is one token removed, "Bearer" kept.
-    Redaction(TOKEN, re.compile(r"\bBearer\s+[\w.~+/=-]{4,}"), lambda _: f"Bearer {REMOVED}"),
+    # Bearer before the JWT, so a bearer JWT is one token removed, "Bearer" kept as written. The
+    # scheme name is case-insensitive. After "Authorization:" anything is a token; elsewhere only
+    # a token-like word (a digit, or 16+ characters), so prose ("Bearer instruments") is kept.
+    Redaction(
+        TOKEN,
+        re.compile(r"(?i)\b(authorization:\s*bearer)\s+[\w.~+/=-]{4,}"),
+        lambda m: f"{m.group(1)} {REMOVED}",
+    ),
+    Redaction(
+        TOKEN,
+        re.compile(r"(?i)\b(bearer)\s+(?:(?=[\w.~+/=-]*\d)[\w.~+/=-]{4,}|[\w.~+/=-]{16,})"),
+        lambda m: f"{m.group(1)} {REMOVED}",
+    ),
     Redaction(TOKEN, re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+")),
     Redaction(
         KEY,

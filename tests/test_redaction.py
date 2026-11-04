@@ -29,6 +29,9 @@ JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyXzEifQ.c2lnbmF0dXJl"
         ("signing secret whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", ["a key"]),
         ("Authorization: Bearer abcd", ["a token"]),  # any bearer token
         (f"Authorization: Bearer {JWT}", ["a token"]),
+        ("authorization: bearer abcd", ["a token"]),  # the scheme name is case-insensitive
+        ("token: bearer abcdefghijklmnop", ["a token"]),  # 16+ characters
+        ("token: BEARER a1b2", ["a token"]),  # has a digit
         (f"the session token {JWT} expired", ["a token"]),  # a bare JWT
         ("postgresql://vouch:s3cret@db/vouch", ["a password"]),  # no TLD on the host
         ("redis://default:pa55@cache.internal:6379", ["a password"]),
@@ -59,6 +62,8 @@ def test_a_password_in_a_url_is_removed_and_the_rest_kept():
         "The task-force asks the security hotline on extension 4400.",
         "Disks use AES-256 and keys rotate every 90 days; risk-based, see sk-1.",
         "Bearer of the badge must show it.",
+        "Bearer instruments are rare.",  # a prose word after Bearer isn't a token
+        "The bearer token is checked offline.",
         "Valid 01/2024-12/2024, see doc 0815/2023, staffed 0800-1700.",
         "Call +49 30 12345678.",  # phone numbers aren't redacted (the owner, #36 review)
     ],
