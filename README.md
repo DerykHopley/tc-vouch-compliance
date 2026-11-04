@@ -21,6 +21,20 @@ To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTE
 `ASSESS_MODEL`. That is a paid call: load the key from the system keyring, never from a file in
 the repo.
 
+### The API
+
+```sh
+uv run uvicorn vouch.api:app --port 8000
+curl localhost:8000/api/health
+curl -N -X POST localhost:8000/api/assessments \
+  -H 'content-type: application/json' -d '{"control_id": "NK-ENC-01"}'
+```
+
+`POST /api/assessments` streams server-sent events: a `step` per agent step, one `result`, then
+the stream closes (or one `error`). The API runs only the scripted fake model: the bundled demo
+script, or the one `ASSESS_FAKE_SCRIPT` names. It never builds the real model until sign-in
+exists.
+
 ## Checks
 
 ```sh

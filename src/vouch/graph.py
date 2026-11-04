@@ -2,6 +2,7 @@
 
 import json
 import operator
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -224,12 +225,53 @@ def build_graph(model: BaseChatModel):
     return graph.compile()
 
 
-def assess(control: Control, model: BaseChatModel) -> Assessment:
-    """Run the graph for one control and return its Assessment."""
-    final = build_graph(model).invoke(
-        {"control": control, "evidence": [], "warnings": [], "messages": _prompt(control)}
-    )
-    return Assessment(
+@dataclass(frozen=True)
+class Step:
+    """One node of the graph finished: its name and the state update it made."""
+
+    node: str
+    update: dict[str, Any]
+
+    def describe(self) -> str:
+        """One plain sentence, in the glossary's words, saying what the step did."""
+        update = self.update
+        if self.node == "gather":
+            calls = update["messages"][-1].tool_calls if update.get("messages") else []
+            queries = [c["args"].get("query", "") for c in calls if c["name"] == SEARCH_POLICIES]
+            if queries:
+                return "Searching the policies for " + ", ".join(f"“{q}”" for q in queries) + "."
+            if any(c["name"] == SUBMIT_ANSWER for c in calls):
+                cited = _plural(len(update.get("cited", [])), "document")
+                return f"Drafted an answer citing {cited}."
+        if self.node == "tools":
+            if update.get("warnings"):
+                return "The policy folder could not be read."
+            return f"Found {_plural(len(update.get('evidence', [])), 'passage')}."
+        if self.node == "cite":
+            return f"Kept {_plural(len(update['sources']), 'cited passage')}."
+        if self.node == "judge":
+            covered, missing = len(update["covered_points"]), len(update["missing_points"])
+            return f"Judged {covered} of {covered + missing} requirements evidenced."
+        if self.node == "escalate":
+            return f"Drafted a remediation item for the {update['gap_note']['owner_role']}."
+        return f"Finished the {self.node} step."
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def assess_steps(control: Control, model: BaseChatModel) -> Iterator[Step | Assessment]:
+    """Run the graph for one control: a Step per node as it finishes, then the Assessment."""
+    initial = {"control": control, "evidence": [], "warnings": [], "messages": _prompt(control)}
+    final: dict[str, Any] = {}
+    for mode, chunk in build_graph(model).stream(initial, stream_mode=["updates", "values"]):
+        if mode == "values":
+            final = chunk
+        else:
+            for node, update in chunk.items():
+                yield Step(node, update or {})
+    yield Assessment(
         control_id=control.id,
         verdict=final["verdict"],
         answer=final["answer"],
@@ -239,3 +281,11 @@ def assess(control: Control, model: BaseChatModel) -> Assessment:
         missing_points=final["missing_points"],
         gap_note=final.get("gap_note"),
     )
+
+
+def assess(control: Control, model: BaseChatModel) -> Assessment:
+    """Run the graph for one control and return its Assessment."""
+    *_, assessment = assess_steps(control, model)
+    if not isinstance(assessment, Assessment):
+        raise TypeError(f"the graph ended without an Assessment for {control.id}")
+    return assessment
