@@ -5,6 +5,7 @@ Read from `data/vda-isa-2027.1/controls.yaml`, extracted unchanged from the ISA 
 """
 
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -12,18 +13,21 @@ import yaml
 
 from vouch.controls import UnknownControlError
 
-CATALOGUE_DIR = Path(__file__).resolve().parent / "data" / "vda-isa-2027.1"
-CONTROLS_FILE = CATALOGUE_DIR / "controls.yaml"
+FRAMEWORK_DIR = Path(__file__).resolve().parent / "data" / "vda-isa-2027.1"
+CONTROLS_FILE = FRAMEWORK_DIR / "controls.yaml"
+NOTICE_FILE = FRAMEWORK_DIR / "NOTICE.md"
+SOURCE = "VDA ISA 2027.1"
 
 Column = Literal["must", "should", "high", "very high"]
-COLUMNS: tuple[Column, ...] = ("must", "should", "high", "very high")
+# Each column and the letter its requirement ids start with, in the Excel's order.
+COLUMN_PREFIX: dict[Column, str] = {"must": "M", "should": "S", "high": "H", "very high": "V"}
 
 
-class CatalogueError(RuntimeError):
-    """A catalogue data file is missing or doesn't parse; the message names the file."""
+class BaseFrameworkError(RuntimeError):
+    """A base framework data file is missing or doesn't parse; the message names the file."""
 
     def __init__(self, path: Path, problem: str):
-        super().__init__(f"cannot read ISA catalogue {path}: {problem}")
+        super().__init__(f"cannot read base framework file {path}: {problem}")
         self.path = path
 
 
@@ -32,7 +36,6 @@ class Requirement:
     id: str  # M1, S2, H1, V1: the column's letter and its bullet's position
     column: Column
     text: str  # unchanged from the ISA
-    source: str  # "VDA ISA 2027.1"
 
 
 @dataclass(frozen=True)
@@ -41,49 +44,74 @@ class IsaControl:
     question: str  # ISA's control question, unchanged
     iso_27001: str  # ISA's ISO 27001 reference, as written (e.g. "ISO 27001:2022: A.8.24")
     requirements: tuple[Requirement, ...]
+    source: str  # "VDA ISA 2027.1"
 
 
 @dataclass(frozen=True)
-class Catalogue:
+class BaseFramework:
     source: str
     controls: tuple[IsaControl, ...]
 
 
-def _parse(data: object) -> Catalogue:
-    if not isinstance(data, dict):
-        raise TypeError("expected a mapping with 'source' and 'controls'")
-    source = data["source"]
+def _field(mapping: object, key: str, kind: type, where: str):
+    """mapping[key], checked to be of this kind; KeyError or TypeError saying where."""
+    if not isinstance(mapping, dict):
+        raise TypeError(f"{where}: expected a mapping, found {type(mapping).__name__}")
+    value = mapping[key]
+    if not isinstance(value, kind):
+        raise TypeError(f"{where}: '{key}' must be a {kind.__name__}, found {value!r}")
+    return value
+
+
+def _parse(data: object) -> BaseFramework:
+    source = _field(data, "source", str, "top level")
     controls = []
-    for entry in data["controls"]:
+    for entry in _field(data, "controls", list, "top level"):
+        control_id = _field(entry, "id", str, "a control")
+        where = f"control {control_id}"
         requirements = []
-        for req in entry["requirements"]:
-            if req["column"] not in COLUMNS:
-                raise ValueError(f"control {entry['id']}: unknown column {req['column']!r}")
-            requirements.append(Requirement(req["id"], req["column"], req["text"], source))
-        controls.append(
-            IsaControl(entry["id"], entry["question"], entry["iso_27001"], tuple(requirements))
-        )
-    return Catalogue(source, tuple(controls))
+        for req in _field(entry, "requirements", list, where):
+            req_id = _field(req, "id", str, f"{where}, a requirement")
+            column = _field(req, "column", str, f"{where} {req_id}")
+            if column not in COLUMN_PREFIX:
+                raise ValueError(f"{where} {req_id}: unknown column {column!r}")
+            requirements.append(Requirement(req_id, column, _field(req, "text", str, f"{where} {req_id}")))
+        controls.append(IsaControl(
+            control_id,
+            _field(entry, "question", str, where),
+            _field(entry, "iso_27001", str, where),
+            tuple(requirements),
+            source,
+        ))  # fmt: skip
+    return BaseFramework(source, tuple(controls))
 
 
-def load_catalogue(path: Path | None = None) -> Catalogue:
-    """The catalogue, or CatalogueError naming the file."""
-    path = CONTROLS_FILE if path is None else path
+@cache
+def _load(path: Path) -> BaseFramework:
     try:
         return _parse(yaml.safe_load(path.read_text(encoding="utf-8")))
     except OSError as error:
-        raise CatalogueError(path, error.strerror or str(error)) from error
+        raise BaseFrameworkError(path, error.strerror or str(error)) from error
     except yaml.YAMLError as error:
-        raise CatalogueError(path, f"not valid YAML ({error.__class__.__name__})") from error
+        mark = getattr(error, "problem_mark", None)
+        at = f" at line {mark.line + 1}" if mark is not None else ""
+        raise BaseFrameworkError(
+            path, f"not valid YAML{at} ({error.__class__.__name__})"
+        ) from error
     except KeyError as error:
-        raise CatalogueError(path, f"missing field {error}") from error
+        raise BaseFrameworkError(path, f"missing field {error}") from error
     except (TypeError, ValueError) as error:
-        raise CatalogueError(path, str(error)) from error
+        raise BaseFrameworkError(path, str(error)) from error
 
 
-def get_control(control_id: str, path: Path | None = None) -> IsaControl:
+def load_base_framework(path: Path | None = None) -> BaseFramework:
+    """The base framework (read once per file), or BaseFrameworkError naming the file."""
+    return _load(CONTROLS_FILE if path is None else path)
+
+
+def load_isa_control(control_id: str) -> IsaControl:
     """The control with this ISA number, or UnknownControlError."""
-    for control in load_catalogue(path).controls:
+    for control in load_base_framework().controls:
         if control.id == control_id:
             return control
     raise UnknownControlError(control_id)

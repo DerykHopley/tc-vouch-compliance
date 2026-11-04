@@ -94,17 +94,47 @@ def test_requirements_of_an_unknown_control_exits_2_with_one_line_error():
     assert result.stdout == ""
 
 
-def test_requirements_with_a_broken_catalogue_exits_2_naming_the_file(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "content",
+    [
+        "controls: [\n",
+        (
+            "source: VDA ISA 2027.1\ncontrols:\n- id: 5.1.1\n  question: Q?\n"
+            "  iso_27001: ISO 27001\n  requirements:\n  - {id: M1, column: must, text: null}\n"
+        ),
+    ],
+    ids=["malformed-yaml", "null-text"],
+)
+def test_requirements_with_a_broken_base_framework_exits_2_naming_the_file(
+    content, tmp_path, monkeypatch, capsys
+):
     from vouch import cli, isa
 
     broken = tmp_path / "controls.yaml"
-    broken.write_text("controls: [\n")
+    broken.write_text(content)
     monkeypatch.setattr(isa, "CONTROLS_FILE", broken)
 
     assert cli.main(["--requirements", "5.1.1"]) == 2
-    err = capsys.readouterr().err
-    assert len(err.splitlines()) == 1
-    assert str(broken) in err
+    captured = capsys.readouterr()
+    assert len(captured.err.splitlines()) == 1
+    assert str(broken) in captured.err
+    assert captured.out == ""
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["--requirements"], ["--requirements", "5.1.1", "extra"], ["--requirements=5.1.1"]],
+    ids=["no-id", "extra-arg", "equals-form"],
+)
+def test_requirements_misused_exits_2_with_the_usage_line(args):
+    result = run_assess(*args)
+
+    assert result.returncode == 2
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("usage: ")
+    assert "--requirements <isa-control>" in lines[0]
+    assert result.stdout == ""
 
 
 BAD_SCRIPTS = {
