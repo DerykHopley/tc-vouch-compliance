@@ -1,16 +1,19 @@
 """The assessment graph: one VDA ISA control under one compliance profile in, one Assessment out.
 
 The agent gathers evidence (ReAct over the evidence-source tools the profile allows), drafts
-an answer, and judges each applicable requirement. Every evidence-source tool call passes the
-guards first (`vouch.guards`), and document text reaches the model only as data. The
-control's verdict rolls up from those verdicts in code, never from the model.
+an answer, and judges each applicable requirement, quoting the passages each verdict relies
+on. Every evidence-source tool call passes the guards first (`vouch.guards`), and document
+text reaches the model only as data. Each quote is checked in code against the document it
+cites; one that fails is dropped, shown as a guard step. The control's verdict rolls up from
+the verdicts in code, never from the model.
 """
 
 import json
+import logging
 import operator
 import re
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -20,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
+from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.guards import (
     DATA_RULE,
     allowed_folder,
@@ -43,7 +47,8 @@ from vouch.search import (
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
-PROMPT_VERSION = "m1-guards-2"  # change it whenever a prompt below changes
+GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
+PROMPT_VERSION = "m1-guards-3"  # change it whenever a prompt below changes
 
 Verdict = Literal["evidenced", "partly-evidenced", "not-evidenced", "not-applicable"]
 JUDGED_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced")
@@ -52,6 +57,13 @@ NOT_JUDGED = "not judged"  # the reason given when the model skipped a requireme
 # The reasons every requirement is not-evidenced, without asking the model, when nothing was read.
 NO_SOURCE = "no evidence source could be read"
 NO_SOURCES_ALLOWED = "no evidence sources allowed"
+# The reasons an evidenced or partly evidenced verdict becomes not-evidenced after the quote
+# check: nothing checked shows it (#21).
+NO_CITATION = "No citation given, so nothing checked shows it."
+CITATIONS_DROPPED = (
+    "Every citation given for it was dropped by the quote check, so nothing checked shows it."
+)
+SHOWN_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced")  # need a citation
 # The columns the roll-up counts: should requirements only give the should score.
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 # Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
@@ -63,6 +75,8 @@ AUDIT_RESULT = re.compile(
 )
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
 USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
+
+log = logging.getLogger(__name__)
 
 
 class OutputCheckError(RuntimeError):
@@ -79,13 +93,15 @@ class SubmitAnswer(BaseModel):
     """Hand back the final answer for the control. The verdicts are decided by the judge step."""
 
     answer: str = Field(description="A short draft answer for an auditor.")
-    cited: list[str] = Field(default_factory=list, description="doc_ids the answer relies on.")
 
 
 class RequirementJudgement(BaseModel):
     requirement_id: str = Field(description="The requirement's id, such as M1 or S2.")
     verdict: str = Field(description="evidenced, partly-evidenced or not-evidenced.")
     reason: str = Field(description="One sentence saying why, from the evidence.")
+    citations: list[CitationClaim] = Field(
+        default_factory=list, description="The passages the verdict relies on, quoted exactly."
+    )
 
 
 class Judgement(BaseModel):
@@ -175,6 +191,16 @@ class RequirementVerdict:
     text: str
     verdict: Verdict
     reason: str
+    citations: tuple[Citation, ...] = ()  # only quotes found in the cited document
+
+
+@dataclass(frozen=True)
+class DroppedCitation:
+    """A citation the quote check dropped, and why."""
+
+    requirement_id: str
+    doc_id: str
+    reason: DropReason
 
 
 @dataclass(frozen=True)
@@ -193,7 +219,6 @@ class Assessment:
     should_score: ShouldScore
     requirements: list[RequirementVerdict]
     answer: str
-    sources: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     steps: list[dict[str, str]] = field(default_factory=list)
     token_usage: dict[str, int] = field(default_factory=dict)
@@ -243,10 +268,11 @@ class AssessState(TypedDict, total=False):
     answer_retries: int
     rejected_word: str | None  # the audit-result word that made check_answer refuse the answer
     judge_rejected_word: str | None  # the one that made the judge ask for a new judgement
-    cited: list[str]
-    sources: list[dict[str, str]]
     requirements: list[RequirementVerdict]
     not_judged: list[str]
+    claims: dict[str, list[CitationClaim]]  # the judge's citations per requirement, unchecked
+    document_folders: list[str]  # where cited documents are looked up: the profile's sources
+    dropped_citations: list[DroppedCitation]
     messages: Annotated[list[AnyMessage], add_messages]
 
 
@@ -282,8 +308,8 @@ def _prompt(
             f"You assess one {control.source} control for {profile.company} against the "
             f"company's own evidence. {search} When you are "
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
-            f"the language with ISO 639-1 code '{profile.answer_language}', and the doc_ids "
-            "you cite. Say what the evidence shows; never call the company compliant, "
+            f"the language with ISO 639-1 code '{profile.answer_language}'. "
+            "Say what the evidence shows; never call the company compliant, "
             f"certified or passed. {DATA_RULE}"
         ),
         HumanMessage(
@@ -301,7 +327,11 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
             "Judge each requirement listed from the evidence alone, not the draft answer. "
             "Give each one verdict: evidenced (the evidence fully shows it), partly-evidenced "
             "(it shows some of it) or not-evidenced (it shows none of it), and one sentence "
-            f"saying why. {DATA_RULE}"
+            "saying why. For each verdict other than not-evidenced, give the citations it "
+            "relies on: the doc_id and a passage copied word for word from that document, at "
+            "least four words from one paragraph, list item or table row. A quote that isn't "
+            f"in the document is dropped, and a verdict with no citation left is not-evidenced. "
+            f"{DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -316,22 +346,24 @@ def _judged_requirements(
     control_requirements: ControlRequirements,
     judgement: Judgement | None,
     unjudged_reason: str = NOT_JUDGED,
-) -> tuple[list[RequirementVerdict], list[str]]:
-    """Each of the control's requirements with its verdict, and the ids the model didn't judge
-    validly.
+) -> tuple[list[RequirementVerdict], list[str], dict[str, list[CitationClaim]]]:
+    """Each of the control's requirements with its verdict, the ids the model didn't judge
+    validly, and the citations given for each one it did (unchecked).
 
     A requirement the model skipped, or gave a verdict outside JUDGED_VERDICTS, is
     not-evidenced with `unjudged_reason`. Judgements for ids the control doesn't apply are
-    ignored. Not applicable requirements follow, with the profile's reason.
+    ignored; for an id judged twice, the first counts. Not applicable requirements follow,
+    with the profile's reason.
     """
     given: dict[str, RequirementJudgement] = {}
     for item in judgement.requirements if judgement else []:
         given.setdefault(item.requirement_id, item)
-    results, not_judged = [], []
+    results, not_judged, claims = [], [], {}
     for req in control_requirements.applicable:
         item = given.get(req.id)
         if item is not None and item.verdict in JUDGED_VERDICTS:
             verdict, reason = item.verdict, item.reason
+            claims[req.id] = item.citations
         else:
             verdict, reason = "not-evidenced", unjudged_reason
             not_judged.append(req.id)
@@ -341,7 +373,7 @@ def _judged_requirements(
         results.append(
             RequirementVerdict(req.id, req.column, req.text, NOT_APPLICABLE, excluded.reason)
         )
-    return results, not_judged
+    return results, not_judged, claims
 
 
 def _usage_of(message: Any) -> list[dict[str, int]]:
@@ -363,7 +395,7 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         for call in reply.tool_calls:
             if call["name"] == SUBMIT_ANSWER:
                 answer = SubmitAnswer.model_validate(call["args"])
-                update.update(answer=answer.answer, cited=answer.cited)
+                update["answer"] = answer.answer
         return update
 
     def tools(state: AssessState) -> dict[str, Any]:
@@ -452,16 +484,6 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
             "messages": replies,
         }
 
-    def cite(state: AssessState) -> dict[str, Any]:
-        """Keep only cited passages a search returned."""
-        cited = set(state.get("cited", []))
-        sources: list[dict[str, str]] = []
-        for passage in state["evidence"]:
-            source = {"doc_id": passage["doc_id"], "heading": passage["heading"]}
-            if passage["doc_id"] in cited and source not in sources:
-                sources.append(source)
-        return {"sources": sources}
-
     def judge(state: AssessState) -> dict[str, Any]:
         """The model judges each requirement; the code keeps only valid verdicts for them.
 
@@ -470,13 +492,15 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
         if reason is not None:  # nothing could be read, so nothing is shown
-            results, _ = _judged_requirements(control_requirements, None, reason)
-            return {"requirements": results, "not_judged": []}
+            results, _, _ = _judged_requirements(control_requirements, None, reason)
+            return {"requirements": results, "not_judged": [], "claims": {}}
         prompt, usage, rejected = _judge_prompt(state), [], None
         for attempt in range(OUTPUT_RETRIES + 1):
             reply = judge_model.invoke(prompt)
             usage += _usage_of(reply["raw"])
-            results, not_judged = _judged_requirements(control_requirements, reply["parsed"])
+            results, not_judged, claims = _judged_requirements(
+                control_requirements, reply["parsed"]
+            )
             judged = [r for r in results if r.verdict != NOT_APPLICABLE]
             word = next((w for r in judged if (w := claims_audit_result(r.reason))), None)
             if word is None:
@@ -496,28 +520,61 @@ def build_graph(model: BaseChatModel, profile: ComplianceProfile):
         return {
             "requirements": results,
             "not_judged": not_judged,
+            "claims": claims,
             "judge_rejected_word": rejected,
             "usage": usage,
         }
+
+    def check_quotes(state: AssessState) -> dict[str, Any]:
+        """Keep each citation whose quote is in the document it cites; drop and log the rest.
+
+        A requirement judged evidenced or partly evidenced with no citation left (none given,
+        or every one dropped) becomes not-evidenced: nothing checked shows it. Each document
+        is read once.
+        """
+        claims, checker = state.get("claims", {}), QuoteChecker(state["document_folders"])
+        results, dropped = [], []
+        for requirement in state["requirements"]:
+            kept: list[Citation] = []
+            given = claims.get(requirement.id, [])
+            for claim in given:
+                checked = checker.check(claim)
+                if isinstance(checked, Citation):
+                    if checked not in kept:
+                        kept.append(checked)
+                    continue
+                log.warning(
+                    "dropped a citation for %s from %s (%s): %r",
+                    requirement.id,
+                    claim.doc_id,
+                    checked,
+                    claim.quote,
+                )
+                dropped.append(DroppedCitation(requirement.id, claim.doc_id, checked))
+            if not kept and requirement.verdict in SHOWN_VERDICTS:
+                reason = CITATIONS_DROPPED if given else NO_CITATION
+                requirement = replace(requirement, verdict="not-evidenced", reason=reason)
+            results.append(replace(requirement, citations=tuple(kept)))
+        return {"requirements": results, "dropped_citations": dropped}
 
     def after_gather(state: AssessState) -> str:
         return "check_answer" if state.get("answer") is not None else "tools"
 
     def after_check(state: AssessState) -> str:
-        return "cite" if state.get("answer") is not None else "gather"
+        return "judge" if state.get("answer") is not None else "gather"
 
     graph = StateGraph(AssessState)
     graph.add_node("gather", gather)
     graph.add_node("tools", tools)
     graph.add_node("check_answer", check_answer)
-    graph.add_node("cite", cite)
     graph.add_node("judge", judge)
+    graph.add_node("check_quotes", check_quotes)
     graph.add_edge(START, "gather")
     graph.add_conditional_edges("gather", after_gather, ["tools", "check_answer"])
     graph.add_edge("tools", "gather")
-    graph.add_conditional_edges("check_answer", after_check, ["gather", "cite"])
-    graph.add_edge("cite", "judge")
-    graph.add_edge("judge", END)
+    graph.add_conditional_edges("check_answer", after_check, ["gather", "judge"])
+    graph.add_edge("judge", "check_quotes")
+    graph.add_edge("check_quotes", END)
     return graph.compile()
 
 
@@ -536,8 +593,7 @@ class Step:
         if self.node == "gather":
             calls = update["messages"][-1].tool_calls if update.get("messages") else []
             if any(c["name"] == SUBMIT_ANSWER for c in calls):
-                cited = _plural(len(update.get("cited", [])), "document")
-                return f"Drafted an answer citing {cited}."
+                return "Drafted an answer."
             if calls:
                 return " ".join(_asking(call, self.profile) for call in calls)
         if self.node == "tools":
@@ -551,8 +607,16 @@ class Step:
             if word:
                 return f"The answer claimed an audit result (“{word}”), so it was asked for again."
             return "Checked the answer: it claims no audit result."
-        if self.node == "cite":
-            return f"Kept {_plural(len(update['sources']), 'cited passage')}."
+        if self.node == "check_quotes":
+            kept = sum(len(r.citations) for r in update["requirements"])
+            dropped = len(update["dropped_citations"])
+            text = f"Checked each quote against its document: kept {_plural(kept, 'citation')}"
+            return text + (f", dropped {dropped}." if dropped else ".")
+        if self.node == GUARD:
+            if "text" in update:  # a refused tool call or a flagged passage
+                return update["text"]
+            d: DroppedCitation = update["dropped_citation"]
+            return f"Dropped a citation for {d.requirement_id} from {d.doc_id}: {d.reason}."
         if self.node == "judge":
             judged = [r for r in update["requirements"] if r.verdict != NOT_APPLICABLE]
             evidenced = sum(r.verdict == "evidenced" for r in judged)
@@ -566,8 +630,6 @@ class Step:
             if update.get("not_judged"):
                 text += " Not judged: " + ", ".join(update["not_judged"]) + "."
             return text
-        if self.node == "guard":
-            return update["text"]
         return f"Finished the {self.node} step."
 
 
@@ -586,8 +648,9 @@ def _total_usage(usage: list[dict[str, int]]) -> dict[str, int]:
 def assess_steps(
     control: IsaControl, profile: ComplianceProfile, model: BaseChatModel
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
-    """Run the graph for one loaded control: a Step per node as it finishes, each
-    RequirementVerdict once judged, then the Assessment."""
+    """Run the graph for one loaded control: a Step per node as it finishes (and a guard Step
+    per dropped citation), each RequirementVerdict once its quotes are checked, then the
+    Assessment."""
     control_requirements = profile.requirements_for(control)
     initial = {
         "control": control,
@@ -597,6 +660,7 @@ def assess_steps(
         "searches_run": 0,
         "searches_refused": 0,
         "usage": [],
+        "document_folders": [str(s.folder) for s in profile.evidence_sources.values()],
         "messages": _prompt(control, control_requirements, profile),
     }
     final: dict[str, Any] = {}
@@ -611,9 +675,13 @@ def assess_steps(
             steps.append({"node": node, "text": step.describe()})
             yield step
             for text in (update or {}).get("guards", []):  # one per refusal or flagged passage
-                steps.append({"node": "guard", "text": text})
-                yield Step("guard", {"text": text}, profile)
-            if node == "judge":
+                steps.append({"node": GUARD, "text": text})
+                yield Step(GUARD, {"text": text}, profile)
+            if node == "check_quotes":
+                for dropped in update["dropped_citations"]:
+                    guard = Step(GUARD, {"dropped_citation": dropped}, profile)
+                    steps.append({"node": GUARD, "text": guard.describe()})
+                    yield guard
                 yield from update["requirements"]
     requirements = final["requirements"]
     yield Assessment(
@@ -623,7 +691,6 @@ def assess_steps(
         should_score=should_score(requirements),
         requirements=requirements,
         answer=final["answer"],
-        sources=final["sources"],
         warnings=list(dict.fromkeys(final["warnings"])),
         steps=steps,
         token_usage=_total_usage(final["usage"]),
