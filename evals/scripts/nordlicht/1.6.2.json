@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "security reported managed events"}},
+    {"tool": "search_records", "args": {"query": "security reported managed events"}},
+    {"answer": "Draft answer for 1.6.2, from the policies and records found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Reports are recorded within a working day; the register shows a 3-hour median to first action.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "The security desk records every report in the security event register within one working day."}, {"doc_id": "security-event-register", "quote": "Every report was recorded within one working day; the median time from report to first action was 3 hours."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Each register entry records the action taken and its closing date.", "citations": [{"doc_id": "security-event-register", "quote": "43 reports received: 31 by email or ticket, 12 by the security hotline."}]},
+      {"requirement_id": "M3", "verdict": "partly-evidenced", "reason": "The procedure requires a review after serious incidents, but the register shows none held for 2026-007 or 2026-031.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "After every incident of high or critical priority, the information security officer holds a short review with those involved and records what we will change."}, {"doc_id": "security-event-register", "quote": "No review meeting has been recorded yet for incidents 2026-007 and 2026-031."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Reports are sorted by area, type and priority, and the register carries all three.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "It sorts each report into personnel, physical or IT, decides whether it is a mere observation, a weakness or an incident, and gives it a priority of low, medium, high or critical."}, {"doc_id": "security-event-register", "quote": "43 reports received: 31 by email or ticket, 12 by the security hotline."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Owners per area, coordination across areas and named deputies.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "It sorts each report into personnel, physical or IT, decides whether it is a mere observation, a weakness or an incident, and gives it a priority of low, medium, high or critical."}]},
+      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "No document covers involving the authorities.", "citations": []}
+    ]
+  }
+}

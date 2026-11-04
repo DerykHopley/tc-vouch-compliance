@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "vulnerabilities identified addressed extent"}},
+    {"tool": "search_records", "args": {"query": "vulnerabilities identified addressed extent"}},
+    {"answer": "Draft answer for 5.2.5, from the policies and records found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Patch tracks CVEs for the systems in use, each with a CVSS score. (The", "citations": []},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Patch lists the affected assets per CVE and gives each a priority. (The", "citations": []},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Each tracked CVE is fixed, scheduled, or covered by a recorded risk-acceptance decision. (The", "citations": []},
+      {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "Patching happens, as Patch shows, but no document defines patch management.", "citations": []},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Risk-acceptance decisions record the mitigation for unpatched items. (The", "citations": []},
+      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "Patch shows tickets closed, not that installation was checked. (The", "citations": []}
+    ]
+  }
+}
