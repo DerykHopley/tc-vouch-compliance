@@ -16,11 +16,15 @@ export type DeveloperSettings = {
   kept_in: 'database' | 'memory'
   /** Assessments each user may start in a UTC day (#35). */
   daily_limit: number
-  /** Every assessment's usage added up; `unpriced` ones have no cost in `cost_usd`. */
-  usage: UsageTotals
+  /** Every assessment's usage added up: real spend on OpenRouter, and the fake model's estimates apart. */
+  usage: { openrouter: RunTotals; fake: RunTotals }
 }
 
-export type UsageTotals = Omit<Usage, 'model' | 'cost_usd'> & { assessments: number; cost_usd: number; unpriced: number }
+/** Some assessments' usage added up; `incomplete` of them have a cost not wholly known. */
+export type RunTotals = Pick<Usage, 'input_tokens' | 'output_tokens' | 'reported_cost_usd' | 'estimated_cost_usd'> & {
+  assessments: number
+  incomplete: number
+}
 
 export type SettingChange = { ok: true; settings: DeveloperSettings } | { ok: false; message: string }
 

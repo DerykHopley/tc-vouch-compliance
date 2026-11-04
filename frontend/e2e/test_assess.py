@@ -34,7 +34,7 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Evidenced", exact=True)).to_be_visible()
     expect(result).to_contain_text("full-disk encryption")
-    expect(result.get_by_label("Usage")).to_have_text(  # #35: the fake's tokens, priced
+    expect(result.get_by_role("region", name="Usage")).to_have_text(  # #35: the fake's tokens, priced
         re.compile(r"^[\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ \(estimated\)$")
     )
     assert seen[0] == 1, f"the first render already held {seen[0]} steps"

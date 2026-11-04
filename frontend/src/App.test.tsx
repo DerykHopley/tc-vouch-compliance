@@ -69,7 +69,8 @@ describe('the working paper', () => {
   it("shows the assessment's tokens and cost beside its answer", async () => {
     const result = {
       assessment: { control_id: 'NK-ENC-01', verdict: 'evidenced', answer: 'Laptops are encrypted.' },
-      usage: { model: 'fake', input_tokens: 1530, output_tokens: 98, cost_usd: 0.000202, estimated: true },
+      usage: { model: 'fake', input_tokens: 1530, output_tokens: 98, reported_cost_usd: 0, estimated_cost_usd: 0.000202,
+        cost_usd: 0.000202, estimated: true, cost_complete: true },
     }
     const stream = `event: result\ndata: ${JSON.stringify(result)}\n\n`
     vi.stubGlobal('fetch', (url: string) =>
@@ -78,7 +79,7 @@ describe('the working paper', () => {
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: 'Assess NK-ENC-01' }))
     const answer = await screen.findByRole('region', { name: 'Verdict and draft answer' })
-    expect(within(answer).getByLabelText('Usage').textContent).toBe(
+    expect(within(answer).getByRole('region', { name: 'Usage' }).textContent).toBe(
       '1,530 tokens in · 98 tokens out · $0.0002 (estimated)',
     )
   })

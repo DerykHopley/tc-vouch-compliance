@@ -44,7 +44,7 @@ def test_a_developer_sees_the_daily_limit_and_every_assessments_usage_totalled(
     settings = page.get_by_role("region", name="Developer settings")
     expect(settings).to_contain_text("30 assessments per user per day (UTC)")
     expect(settings.get_by_role("region", name="Usage")).to_contain_text(
-        re.compile(r"[\d,]+ assessments? · [\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ \(estimated\)")
+        re.compile(r"Fake model: [\d,]+ assessments? · [\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ estimated, not spent")
     )
     expect(settings).to_contain_text("kept until the server restarts")
 

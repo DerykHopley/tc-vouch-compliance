@@ -55,7 +55,9 @@ export default function WorkingPaper({ company, control, run, onAssess }: PaperP
           <span className="lbl">Draft answer</span>
           <RunChip run={run} />
           <p className="answer">{run.assessment.answer}</p>
-          {run.usage && <p className="field-note mono" aria-label="Usage">{usageWords(run.usage)}</p>}
+          {run.usage && (
+            <section aria-label="Usage"><p className="field-note mono">{usageWords(run.usage)}</p></section>
+          )}
         </section>
       )}
       {(run.status === 'failed' || run.status === 'unreachable') && (

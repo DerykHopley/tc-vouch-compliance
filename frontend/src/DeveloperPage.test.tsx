@@ -5,6 +5,8 @@ import App from './App.tsx'
 import type { DeveloperSettings } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
 
+const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
+
 const SETTINGS: DeveloperSettings = {
   model: 'anthropic/claude-haiku-5.5',
   runs_on: 'openrouter',
@@ -13,7 +15,7 @@ const SETTINGS: DeveloperSettings = {
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
   daily_limit: 30,
-  usage: { assessments: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0, estimated: false, unpriced: 0 },
+  usage: { openrouter: NO_RUNS, fake: NO_RUNS },
 }
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
@@ -51,18 +53,25 @@ describe('the developer page', () => {
     expect(within(region).queryByText(/fake model/i)).toBeNull()
   })
 
-  it("totals every assessment's tokens and cost, and says when the cost is estimated", () => {
-    const usage = { assessments: 3, input_tokens: 12_345, output_tokens: 678, cost_usd: 0.0016, estimated: true, unpriced: 0 }
-    render(<DeveloperPage settings={{ ...SETTINGS, usage }} onChange={() => {}} />)
+  it("totals OpenRouter's tokens and cost, reported and estimated apart, and keeps the fake's apart", () => {
+    const openrouter = { ...NO_RUNS, assessments: 3, input_tokens: 12_345, output_tokens: 678, reported_cost_usd: 0.0016, estimated_cost_usd: 0.0002 }
+    const fake = { ...NO_RUNS, assessments: 1, input_tokens: 900, output_tokens: 40, estimated_cost_usd: 0.0001 }
+    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake } }} onChange={() => {}} />)
     const totals = screen.getByRole('region', { name: 'Usage' })
-    expect(within(totals).getByText('3 assessments · 12,345 tokens in · 678 tokens out · $0.0016 (estimated)')).toBeTruthy()
-    expect(within(totals).queryByText(/without a known price/)).toBeNull()
+    expect(within(totals).getByText(
+      'OpenRouter: 3 assessments · 12,345 tokens in · 678 tokens out · $0.0016 reported · $0.0002 estimated',
+    )).toBeTruthy()
+    expect(within(totals).getByText(
+      'Fake model: 1 assessment · 900 tokens in · 40 tokens out · $0.0001 estimated, not spent',
+    )).toBeTruthy()
+    expect(within(totals).queryByText(/incomplete/)).toBeNull()
   })
 
-  it('says how many assessments the cost leaves out for want of a price', () => {
-    const usage = { assessments: 2, input_tokens: 10, output_tokens: 2, cost_usd: 0.5, estimated: false, unpriced: 1 }
-    render(<DeveloperPage settings={{ ...SETTINGS, usage }} onChange={() => {}} />)
-    expect(screen.getByText(/1 of them ran on a model without a known price/)).toBeTruthy()
+  it('says how many assessments have an incomplete cost, and shows no fake line without fake runs', () => {
+    const openrouter = { ...NO_RUNS, assessments: 2, input_tokens: 10, output_tokens: 2, reported_cost_usd: 0.5, incomplete: 1 }
+    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake: NO_RUNS } }} onChange={() => {}} />)
+    expect(screen.getByText("1 of them has an incomplete cost: some calls' cost could not be known.")).toBeTruthy()
+    expect(screen.queryByText(/Fake model:/)).toBeNull()
   })
 
   it('shows the daily limit, changes it, and says the new limit applies', async () => {

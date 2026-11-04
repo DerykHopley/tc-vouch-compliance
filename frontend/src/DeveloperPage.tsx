@@ -1,6 +1,6 @@
 import { type FormEvent, useId, useState } from 'react'
-import { usageWords } from './assessment.ts'
-import { changeDailyLimit, changeModel, type DeveloperSettings, type SettingChange, UNAVAILABLE } from './developer.ts'
+import { count, dollars, plural } from './assessment.ts'
+import { changeDailyLimit, changeModel, type DeveloperSettings, type RunTotals, type SettingChange, UNAVAILABLE } from './developer.ts'
 
 type Props = { settings: DeveloperSettings | typeof UNAVAILABLE; onChange: (settings: DeveloperSettings) => void }
 
@@ -32,9 +32,12 @@ export default function DeveloperPage({ settings, onChange }: Props) {
   )
 }
 
+/** Some assessments' totals in words: assessments, tokens in and out. */
+const runWords = (t: RunTotals) =>
+  `${plural(t.assessments, 'assessment')} · ${count(t.input_tokens)} tokens in · ${count(t.output_tokens)} tokens out`
+
 function Settings({ settings, onChange }: { settings: DeveloperSettings; onChange: Props['onChange'] }) {
-  const { usage } = settings
-  const assessments = `${usage.assessments.toLocaleString('en-US')} ${usage.assessments === 1 ? 'assessment' : 'assessments'}`
+  const { openrouter, fake } = settings.usage
   return (
     <>
       {settings.fake_reason && <p className="sheet notice">{FAKE_BECAUSE[settings.fake_reason]}</p>}
@@ -50,17 +53,26 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
       </div>
       <div className="sheet">
         <span className="lbl">Daily limit</span>
-        <span>{settings.daily_limit.toLocaleString('en-US')} assessments per user per day (UTC)</span>
+        <span>{plural(settings.daily_limit, 'assessment')} per user per day (UTC)</span>
         <SettingForm label="Assessments per day" button="Change limit" initial={String(settings.daily_limit)}
           inputMode="numeric" save={(value) => changeDailyLimit(Number(value))}
-          saved={(s) => `Each user may now start ${s.daily_limit.toLocaleString('en-US')} assessments a day.`}
+          saved={(s) => `Each user may now start ${plural(s.daily_limit, 'assessment')} a day.`}
           onChange={onChange} />
       </div>
       <section className="sheet" aria-label="Usage">
         <span className="lbl">Usage</span>
-        <p className="mono">{assessments} · {usageWords(usage)}</p>
-        {usage.unpriced > 0 && (
-          <p className="field-note">{usage.unpriced} of them ran on a model without a known price: the cost leaves them out.</p>
+        <p className="mono">
+          OpenRouter: {runWords(openrouter)} · {dollars(openrouter.reported_cost_usd)} reported
+          {' · '}{dollars(openrouter.estimated_cost_usd)} estimated
+        </p>
+        {openrouter.incomplete > 0 && (
+          <p className="field-note">
+            {count(openrouter.incomplete)} of them {openrouter.incomplete === 1 ? 'has' : 'have'} an incomplete cost: some
+            calls' cost could not be known.
+          </p>
+        )}
+        {fake.assessments > 0 && (
+          <p className="mono">Fake model: {runWords(fake)} · {dollars(fake.estimated_cost_usd)} estimated, not spent</p>
         )}
         <a href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>
       </section>

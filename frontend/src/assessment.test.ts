@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assess, readEvents, usageWords } from './assessment.ts'
+import { assess, count, plural, readEvents, usageWords } from './assessment.ts'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
 function streamOf(...chunks: string[]): ReadableStream<Uint8Array> {
@@ -88,16 +88,24 @@ describe('assess, signed in', () => {
 })
 
 describe('usageWords', () => {
+  const usage = { input_tokens: 10, output_tokens: 5, cost_usd: 1.5, estimated: false, cost_complete: true }
+
   it('puts the tokens and the cost in words, saying when the cost is estimated', () => {
-    expect(usageWords({ input_tokens: 1234, output_tokens: 56, cost_usd: 0.000325, estimated: true })).toBe(
+    expect(usageWords({ ...usage, input_tokens: 1234, output_tokens: 56, cost_usd: 0.000325, estimated: true })).toBe(
       '1,234 tokens in · 56 tokens out · $0.0003 (estimated)',
     )
-    expect(usageWords({ input_tokens: 10, output_tokens: 5, cost_usd: 1.5, estimated: false })).toBe(
-      '10 tokens in · 5 tokens out · $1.50',
-    )
-    expect(usageWords({ input_tokens: 10, output_tokens: 5, cost_usd: null, estimated: true })).toBe(
-      '10 tokens in · 5 tokens out · cost unknown',
-    )
+    expect(usageWords(usage)).toBe('10 tokens in · 5 tokens out · $1.50')
+  })
+
+  it('says an incomplete cost is at least its known part, and unknown with none known', () => {
+    expect(usageWords({ ...usage, cost_complete: false })).toBe('10 tokens in · 5 tokens out · at least $1.50')
+    expect(usageWords({ ...usage, cost_usd: 0, cost_complete: false })).toBe('10 tokens in · 5 tokens out · cost unknown')
+  })
+
+  it('counts and plurals in words', () => {
+    expect(count(12345)).toBe('12,345')
+    expect(plural(1, 'assessment')).toBe('1 assessment')
+    expect(plural(1200, 'assessment')).toBe('1,200 assessments')
   })
 })
 
