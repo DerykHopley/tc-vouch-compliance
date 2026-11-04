@@ -104,3 +104,16 @@ def test_with_reduced_motion_steps_appear_without_animation(page: Page, ui_url, 
         assert step_animation(reduced.new_page()) == "none"
     finally:
         reduced.close()
+
+
+def test_the_controls_page_survives_a_refresh_and_opens_from_its_address(page: Page, ui_url):
+    start_assessment(page, ui_url)
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("region", name="Verdict and draft answer")).to_be_visible()
+    expect(page).to_have_url(f"{ui_url}/controls/{CONTROL}")
+
+    page.reload()
+    expect(paper.get_by_role("heading", name=CONTROL)).to_be_visible()
+
+    page.goto(f"{ui_url}/controls/{CONTROL}")
+    expect(paper.get_by_role("button", name=f"Assess {CONTROL}", exact=True)).to_be_enabled()

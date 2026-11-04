@@ -1,6 +1,6 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 
 function systemPrefers(dark: boolean | null, width = 1400) {
@@ -16,6 +16,8 @@ beforeEach(() => systemPrefers(null))
 afterEach(() => {
   cleanup()
   delete document.documentElement.dataset.theme
+  window.history.replaceState(null, '', '/')
+  vi.unstubAllGlobals()
 })
 
 describe('Dossier landing', () => {
@@ -30,6 +32,45 @@ describe('Dossier landing', () => {
     expect(cards).toHaveLength(1)
     expect(within(cards[0]).getByText('NK-ENC-01')).toBeTruthy()
     expect(within(cards[0]).getByText('Not assessed')).toBeTruthy()
+  })
+})
+
+describe("the control's page", () => {
+  const paper = () => screen.queryByRole('region', { name: 'Working paper' })
+
+  it('opens straight at its address, as after a refresh', () => {
+    window.history.replaceState(null, '', '/controls/NK-ENC-01')
+    render(<App />)
+    expect(within(paper()!).getByRole('heading', { name: /NK-ENC-01/ })).toBeTruthy()
+    expect(within(paper()!).getByRole('button', { name: 'Assess NK-ENC-01' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('gets its address when assessed from the card, and Back returns to the Dossier', async () => {
+    vi.stubGlobal('fetch', () => new Promise(() => {})) // never answers: only the address matters here
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assess NK-ENC-01' }))
+    expect(window.location.pathname).toBe('/controls/NK-ENC-01')
+    expect(paper()).toBeTruthy()
+
+    window.history.back()
+    await waitFor(() => expect(paper()).toBeNull())
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('leaves for the Dossier at /', async () => {
+    window.history.replaceState(null, '', '/controls/NK-ENC-01')
+    render(<App />)
+    await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
+    expect(window.location.pathname).toBe('/')
+    expect(paper()).toBeNull()
+  })
+
+  it('shows the Dossier for an address it does not know', () => {
+    window.history.replaceState(null, '', '/controls/NK-XXX-99')
+    render(<App />)
+    expect(paper()).toBeNull()
+    expect(screen.getAllByRole('article')).toHaveLength(1)
   })
 })
 

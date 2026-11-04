@@ -15,16 +15,33 @@ function systemTheme(): Theme {
 const COMPANY = 'Nordlicht Komponenten GmbH'
 const CONTROL: Control = { id: 'NK-ENC-01', title: 'Laptops are encrypted', owner: 'Information security officer' }
 
+type View = 'dossier' | 'paper'
+
+/** The view an address shows: the control's working paper at /controls/<id>, else the Dossier. */
+const PAPER_PATH = `/controls/${CONTROL.id}`
+const viewAt = (path: string): View => (path === PAPER_PATH ? 'paper' : 'dossier')
+
 export default function App() {
   const [theme, setTheme] = useState<Theme>(systemTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
   const other: Theme = theme === 'light' ? 'dark' : 'light'
-  const [view, setView] = useState<'dossier' | 'paper'>('dossier')
+  const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  useEffect(() => {
+    const onBack = () => setView(viewAt(window.location.pathname))
+    window.addEventListener('popstate', onBack)
+    return () => window.removeEventListener('popstate', onBack)
+  }, [])
+  /** Shows a view and gives it its address, so a refresh or a shared link opens it again. */
+  const go = (next: View) => {
+    const path = next === 'paper' ? PAPER_PATH : '/'
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
+    setView(next)
+  }
   const { run, start } = useAssessment(CONTROL.id)
   const assess = () => {
-    setView('paper')
+    go('paper')
     void start()
   }
 
@@ -35,7 +52,7 @@ export default function App() {
           <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
           <nav className="nav" aria-label="Main">
             <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); setView('dossier') }}>Dossier</a>
+              onClick={(e) => { e.preventDefault(); go('dossier') }}>Dossier</a>
           </nav>
           <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
             {other === 'dark' ? 'Dark theme' : 'Light theme'}

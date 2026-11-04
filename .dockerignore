@@ -1,0 +1,15 @@
+# Only what the image needs (Dockerfile); everything else stays out, local .venv and node_modules first.
+*
+!pyproject.toml
+!uv.lock
+!src/
+!fixtures/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/tsconfig.json
+!frontend/vite.config.ts
+!frontend/src/
+**/__pycache__
+**/*.test.ts
+**/*.test.tsx
