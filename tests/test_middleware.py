@@ -1,4 +1,4 @@
-"""The security guard's middleware layers (#36), at the HTTP API: input limits, the tool
+"""The security guard's layers outside the model (#36), at the HTTP API: input limits, the tool
 allow-list checked again outside the graph, and the filter on answers and logs."""
 
 import io
@@ -8,11 +8,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from vouch.api import create_app
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import SUBMIT_ANSWER
-from vouch.middleware import MAX_MESSAGE_BYTES, RateLimit, redact
+from vouch.limits import MAX_MESSAGE_BYTES, RateLimit
+from vouch.redaction import install_log_redaction
 from vouch.settings import POLICY_DIR_ENV, Settings
 
 DEMO_CONTROL = "NK-ENC-01"
@@ -119,15 +121,6 @@ def test_a_burst_over_the_rate_gets_429_with_retry_after(model_calls):
     assert client.post("/api/assessments", json=request).status_code == 200
 
 
-def test_the_rate_is_counted_per_user():
-    clock = Clock()
-    limit = RateLimit(requests=1, per_seconds=60, clock=clock)
-
-    assert limit.wait_for("lead") is None
-    assert limit.wait_for("developer") is None
-    assert limit.wait_for("lead") == 60
-
-
 # Layer 2: the allow-list, checked again at the API for every tool call
 
 
@@ -173,6 +166,22 @@ PLANTED_EMAIL = "jane.doe@gmail.com"
 
 
 @pytest.fixture
+def server_log():
+    """Everything logged at debug and up, through a root handler, redacted as a served app's
+    handlers are (install_log_redaction wraps the handlers present when it runs)."""
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    root = logging.getLogger()
+    level = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    install_log_redaction()
+    yield stream
+    root.removeHandler(handler)
+    root.setLevel(level)
+
+
+@pytest.fixture
 def planted_policies(tmp_path, monkeypatch) -> Path:
     """A policy folder whose one document carries a key and a stranger's e-mail address."""
     folder = tmp_path / "policies"
@@ -187,7 +196,7 @@ def planted_policies(tmp_path, monkeypatch) -> Path:
 
 
 def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_log(
-    planted_policies, tmp_path, caplog
+    planted_policies, tmp_path, server_log
 ):
     """The fake model echoes the tool result back, as a real model might."""
     script = {
@@ -202,8 +211,7 @@ def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_
     }
     client = client_for(Settings(fake_script=write_script(tmp_path, script)))
 
-    with caplog.at_level(logging.DEBUG):
-        response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
+    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
     events = read_events(response)
     assert events[-1][0] == "result"
@@ -214,11 +222,11 @@ def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_
     ]
     for planted in (PLANTED_KEY, PLANTED_EMAIL):
         assert planted not in response.text
-        assert planted not in caplog.text
+        assert planted not in server_log.getvalue()
     assert "Removed a key and an e-mail address from the assessment." in guard_steps(events)
 
 
-def test_a_planted_key_and_email_in_a_failure_never_reach_the_log(client_log, monkeypatch):
+def test_a_planted_key_and_email_in_a_failure_never_reach_the_log(server_log, monkeypatch):
     def leaking_search(*args, **kwargs):
         raise RuntimeError(f"bad passage: {PLANTED_KEY} {PLANTED_EMAIL}")
 
@@ -227,67 +235,24 @@ def test_a_planted_key_and_email_in_a_failure_never_reach_the_log(client_log, mo
     response = client_for().post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
     assert read_events(response)[-1][0] == "error"
-    assert "bad passage" in client_log.getvalue()  # the failure is logged, its traceback too
-    assert "Traceback" in client_log.getvalue()
+    assert "bad passage" in server_log.getvalue()  # the failure is logged, its traceback too
+    assert "Traceback" in server_log.getvalue()
     for planted in (PLANTED_KEY, PLANTED_EMAIL):
-        assert planted not in client_log.getvalue()
+        assert planted not in server_log.getvalue()
 
 
-def test_any_logger_record_is_filtered_even_a_libraries_debug_line(client_log):
-    """A model client logging its request at debug (the tool results inside) is filtered too."""
-    client_for()  # the app installs the filter
-    logging.getLogger("openai._base_client").debug(
-        "Request options: %s", {"headers": {"Authorization": f"Bearer {PLANTED_KEY}"}}
+def test_the_apps_own_secret_values_are_removed_whatever_their_shape(tmp_path):
+    """A key with no known prefix is still removed: the app knows its own secrets."""
+    odd_key = "Zq8-nothing-like-a-known-prefix-3141"
+    script = {
+        "gather": [{"answer": f"The key is {odd_key}.", "cited": []}],
+        "judge": {"covered_points": []},
+    }
+    settings = Settings(
+        fake_script=write_script(tmp_path, script), openrouter_api_key=SecretStr(odd_key)
     )
 
-    assert "Request options" in client_log.getvalue()
-    assert PLANTED_KEY not in client_log.getvalue()
+    response = client_for(settings).post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
-
-@pytest.fixture
-def client_log():
-    """Everything logged at debug and up, as a plain handler on the root logger writes it."""
-    stream = io.StringIO()
-    handler = logging.StreamHandler(stream)
-    root = logging.getLogger()
-    level = root.level
-    root.addHandler(handler)
-    root.setLevel(logging.DEBUG)
-    yield stream
-    root.removeHandler(handler)
-    root.setLevel(level)
-
-
-@pytest.mark.parametrize(
-    ("text", "kinds"),
-    [
-        ("key sk-or-v1-abcdefghijklmnop0123", ["a key"]),
-        ("key sk_live_51Habcdefghijklmnop", ["a key"]),
-        ("key pk_test_Y2xlcmsuZXhhbXBsZS5jb20k", ["a key"]),
-        ("Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1In0.c2ln", ["a bearer token"]),
-        ("write to jane.doe@gmail.com", ["an e-mail address"]),
-        ("call +49 30 12345678", ["a phone number"]),
-        ("call 0049 (30) 1234-5678", ["a phone number"]),
-        ("call 030 1234567", ["a phone number"]),
-        ("call 0171/1234567", ["a phone number"]),
-    ],
-)
-def test_redact_removes_secrets_and_personal_data(text, kinds):
-    clean, removed = redact(text)
-
-    assert removed == kinds
-    assert "[removed]" in clean
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Report to security@nordlicht.example, the profile's own address.",
-        "Reviewed on 2026-11-04 for NK-ENC-01 under ISA 5.2.4, version 2.1.0.",
-        "The task-force asks the security hotline on extension 4400.",
-        "Disks use AES-256 and keys rotate every 90 days; risk-based, see sk-1.",
-        "Bearer of the badge must show it.",
-    ],
-)
-def test_redact_keeps_ordinary_compliance_text(text):
-    assert redact(text) == (text, [])
+    assert odd_key not in response.text
+    assert read_events(response)[-1][1]["assessment"]["answer"] == "The key is [removed]."

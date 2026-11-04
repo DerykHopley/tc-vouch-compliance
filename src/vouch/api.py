@@ -15,21 +15,13 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, StringConstraints
 
+from vouch.allow_list import ALLOWED_TOOLS, GUARD, ToolAllowList
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.controls import Control, UnknownControlError, load_control
 from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.graph import Assessment, assess_steps
-from vouch.middleware import (
-    ALLOWED_TOOLS,
-    GUARD,
-    TOO_MANY_REQUESTS,
-    MessageLimit,
-    RateLimit,
-    ToolAllowList,
-    install_log_filter,
-    redact_data,
-    removal_step,
-)
+from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
+from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
     DEFAULT_USER,
     DEMO_SCRIPT,
@@ -177,24 +169,30 @@ def create_assessment(
     """
     try:
         model = ToolAllowList(fake_model(settings, DEMO_SCRIPT), request.app.state.allowed_tools)
+        # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
+        # The graph's signature is spec M1's to change, so the cast stays until then.
         for item in assess_steps(control, cast(BaseChatModel, model)):
             if isinstance(item, Assessment):
-                yield from _redacted("result", {"assessment": _api_assessment(item)}, "assessment")
+                yield from _redacted("result", {"assessment": _api_assessment(item)})
             else:
-                yield from _redacted("step", {"node": item.node, "text": item.describe()}, "step")
+                yield from _redacted("step", {"node": item.node, "text": item.describe()})
             for refusal in model.take_refusals():
-                yield from _redacted("step", {"node": GUARD, "text": refusal}, "step")
+                yield from _redacted("step", {"node": GUARD, "text": refusal})
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
 
 
-def _redacted(event: str, data: dict[str, Any], where: str) -> Iterator[ServerSentEvent]:
+_REMOVED_FROM = {"result": "assessment", "step": "step"}
+"""What a guard step calls the event something was removed from."""
+
+
+def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
     """The event with secrets and personal data removed (security layer 4); a guard step before
     it says what was removed."""
     clean, removed = redact_data(data)
     if removed:
-        text = removal_step(removed, where)
+        text = removal_step(removed, _REMOVED_FROM[event])
         yield ServerSentEvent(event="step", data={"node": GUARD, "text": text})
     yield ServerSentEvent(event=event, data=clean)
 
@@ -245,7 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
-    install_log_filter()  # security layer 4: no secret or personal data in any log line
+    remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
     app.state.rate_limit = RateLimit()
     app.state.allowed_tools = ALLOWED_TOOLS
@@ -266,3 +264,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
+install_log_redaction()  # security layer 4, once: by import time uvicorn's handlers exist
