@@ -11,7 +11,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, get_args, overload
+from typing import TYPE_CHECKING, Literal, cast, get_args, overload
 
 from pydantic import SecretStr
 
@@ -81,6 +81,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     def read(name: str) -> str | None:
         return env.get(name) or None  # set but empty is unset, as `.envrc` leaves a missing key
 
+    def read_path(name: str) -> Path | None:
+        value = read(name)
+        return Path(value) if value else None
+
     auth_mode = read(AUTH_MODE_ENV) or "local"
     if auth_mode not in get_args(AuthMode):
         raise SettingsError(f"{AUTH_MODE_ENV} must be one of: {', '.join(get_args(AuthMode))}")
@@ -95,30 +99,27 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             jwt_key=SecretStr(env[CLERK_JWT_KEY_ENV]),
         )
     api_key = read(OPENROUTER_API_KEY_ENV)
-    fake_script, policy_dir, frontend = (
-        read(n) for n in (FAKE_SCRIPT_ENV, POLICY_DIR_ENV, FRONTEND_ENV)
-    )
     return Settings(
-        auth_mode=auth_mode,  # type: ignore[arg-type]  # checked against AuthMode above
+        auth_mode=cast(AuthMode, auth_mode),  # checked against AuthMode above
         clerk=clerk,
         openrouter_api_key=SecretStr(api_key) if api_key else None,
         model=read(MODEL_ENV),
-        fake_script=Path(fake_script) if fake_script else None,
-        policy_dir=Path(policy_dir) if policy_dir else None,
-        frontend=Path(frontend) if frontend else None,
+        fake_script=read_path(FAKE_SCRIPT_ENV),
+        policy_dir=read_path(POLICY_DIR_ENV),
+        frontend=read_path(FRONTEND_ENV),
     )
 
 
 @overload
-def fake_model_from_env(default: Path) -> "ScriptedChatModel": ...
+def fake_model(settings: Settings, default: Path) -> "ScriptedChatModel": ...
 @overload
-def fake_model_from_env(default: None = None) -> "ScriptedChatModel | None": ...
-def fake_model_from_env(default: Path | None = None) -> "ScriptedChatModel | None":
-    """The scripted fake model playing ASSESS_FAKE_SCRIPT's script, else `default`'s.
+def fake_model(settings: Settings, default: None = None) -> "ScriptedChatModel | None": ...
+def fake_model(settings: Settings, default: Path | None = None) -> "ScriptedChatModel | None":
+    """The scripted fake model playing `settings.fake_script`, else `default`'s script.
 
     None when neither names a script. A bad script raises ScriptError.
     """
     from vouch.fake_model import ScriptedChatModel
 
-    script = load_settings().fake_script or default
+    script = settings.fake_script or default
     return ScriptedChatModel.from_file(script) if script else None

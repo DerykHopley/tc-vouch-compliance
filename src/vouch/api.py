@@ -7,7 +7,6 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 import logging
 from collections.abc import Iterable
 from importlib.metadata import version
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
@@ -23,7 +22,7 @@ from vouch.settings import (
     Settings,
     SettingsError,
     User,
-    fake_model_from_env,
+    fake_model,
     load_settings,
 )
 
@@ -65,15 +64,16 @@ def health() -> dict[str, str]:
     "/assessments", response_class=EventSourceResponse, dependencies=[Depends(current_user)]
 )
 def create_assessment(
-    control: Annotated[Control, Depends(requested_control)],
+    control: Annotated[Control, Depends(requested_control)], request: Request
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, one `result`, then close; or one `error`, then close.
 
     Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
     nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
     """
+    settings: Settings = request.app.state.settings
     try:
-        for item in assess_steps(control, fake_model_from_env(DEMO_SCRIPT)):
+        for item in assess_steps(control, fake_model(settings, DEMO_SCRIPT)):
             if isinstance(item, Assessment):
                 yield ServerSentEvent(event="result", data={"assessment": _api_assessment(item)})
             else:
@@ -94,8 +94,8 @@ def unknown_api_path(path: str) -> None:
     raise HTTPException(status_code=404)
 
 
-def create_app(frontend: Path | None = None, settings: Settings | None = None) -> FastAPI:
-    """The API under /api; given the built front end, that on every other path.
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """The API under /api; given the built front end (`settings.frontend`), that on every other path.
 
     `settings` defaults to the environment's (load_settings).
 
@@ -103,7 +103,9 @@ def create_app(frontend: Path | None = None, settings: Settings | None = None) -
     browser asks for a page, so a deep link survives a refresh (client routing).
     """
     app = FastAPI(title="Vouch")
-    app.state.settings = settings or load_settings()
+    settings = settings or load_settings()
+    app.state.settings = settings
+    frontend = settings.frontend
     app.include_router(router)
     if frontend is not None:
         if not (frontend / "index.html").is_file():
@@ -121,7 +123,7 @@ def _app_from_env() -> FastAPI:
         settings = load_settings()
     except SettingsError as error:
         raise SystemExit(f"Vouch cannot start: {error}.") from None
-    return create_app(settings.frontend, settings)
+    return create_app(settings)
 
 
 app = _app_from_env()

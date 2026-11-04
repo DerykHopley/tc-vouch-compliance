@@ -26,7 +26,7 @@ Cloud Run" and "the walking skeleton has no secrets").
   `gcloud run deploy --help`, SDK 589, and Cloud Run's "maximum instances" page; the lower limit
   wins). Max 1 caps what the free tier has to cover; that it stays inside is *unverified*.
 - **The scripted fake model only** (*checked* in `vouch.api`: the assessment route always uses
-  `fake_model_from_env`), so the deploy needs no secret and an open URL costs no model calls.
+  `fake_model`), so the deploy needs no secret and an open URL costs no model calls.
   Secrets come with sign-in (M3), through Secret Manager.
 - **Public** (`--allow-unauthenticated`, *checked* in the `gcloud run deploy` reference): anyone
   with the URL can use it until sign-in lands.
