@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Control } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
+import TopBar from './TopBar.tsx'
 import { useAssessment } from './useAssessment.ts'
 import WorkingPaper, { AssessButton, RunChip } from './WorkingPaper.tsx'
 
@@ -24,7 +25,8 @@ const PATHS: Record<View, string> = { dossier: '/', paper: `/controls/${CONTROL.
 const viewAt = (path: string): View =>
   (Object.keys(PATHS) as View[]).find((view) => PATHS[view] === path) ?? 'dossier'
 
-export default function App() {
+/** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out. */
+export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   const [theme, setTheme] = useState<Theme>(systemTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -49,18 +51,16 @@ export default function App() {
 
   return (
     <>
-      <header className="top">
-        <div className="top-in wrap">
-          <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
-          <nav className="nav" aria-label="Main">
-            <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
-          </nav>
-          <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
-            {other === 'dark' ? 'Dark theme' : 'Light theme'}
-          </button>
-        </div>
-      </header>
+      <TopBar>
+        <nav className="nav" aria-label="Main">
+          <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
+            onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
+        </nav>
+        <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
+          {other === 'dark' ? 'Dark theme' : 'Light theme'}
+        </button>
+        {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
+      </TopBar>
       {view === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
       <main className="dossier wrap">
         <section className="hero">

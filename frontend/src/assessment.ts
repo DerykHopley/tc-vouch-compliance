@@ -1,3 +1,5 @@
+import { authHeaders, signedOut } from './session.ts'
+
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
 
 export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced'
@@ -22,6 +24,7 @@ export type AssessmentEvent =
 /** Shown, with Retry, for any throw from `assess`. */
 export const UNREACHABLE = 'Vouch could not reach its service. Try again shortly.'
 const NOT_STARTED = 'The assessment could not be started. Please try again later.'
+const SESSION_ENDED = 'Your sign-in has ended. Please sign in again.'
 
 /** Each event in a stream of server-sent events, with its data parsed as JSON. Comments are skipped. */
 export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: unknown }> {
@@ -57,10 +60,16 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
 export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent> {
   const response = await fetch('/api/assessments', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(await authHeaders()) },
     body: JSON.stringify({ control_id: controlId }),
   })
   if (response.status >= 500 || !response.body) throw new Error(`service answered ${response.status}`)
+  if (response.status === 401) {
+    // No valid session (expired, or signed out elsewhere): back to the sign-in (session.ts).
+    signedOut()
+    yield { event: 'error', data: { message: SESSION_ENDED } }
+    return
+  }
   if (!response.ok) {
     yield { event: 'error', data: { message: NOT_STARTED } }
     return

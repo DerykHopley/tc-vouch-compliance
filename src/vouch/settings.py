@@ -4,10 +4,12 @@ Locally the committed `.envrc` fills the secrets from the keyring; on Cloud Run,
 does. `.env.example` lists every name in ENV_NAMES (checked by tests/test_settings.py).
 
 Auth mode `local`, the default, is for a developer's machine: no sign-in, one default user. The
-container sets `clerk` (Dockerfile), and then the Clerk keys are required.
+container sets `clerk` (Dockerfile), and then the Clerk keys and CLERK_AUTHORIZED_PARTIES (the
+origins Vouch's pages are served from; not secret, so not in `.envrc`) are required.
 """
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +26,7 @@ AUTH_MODE_ENV = "VOUCH_AUTH_MODE"
 CLERK_SECRET_KEY_ENV = "CLERK_SECRET_KEY"
 CLERK_PUBLISHABLE_KEY_ENV = "CLERK_PUBLISHABLE_KEY"
 CLERK_JWT_KEY_ENV = "CLERK_JWT_KEY"
+CLERK_AUTHORIZED_PARTIES_ENV = "CLERK_AUTHORIZED_PARTIES"
 OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
@@ -32,8 +35,11 @@ FRONTEND_ENV = "VOUCH_FRONTEND"
 DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
+CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
+"""What clerk mode needs: the three keys, and the origins its pages are served from (not secret)."""
+ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?")
 ENV_NAMES = frozenset(
-    {AUTH_MODE_ENV, *CLERK_KEY_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
+    {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {POLICY_DIR_ENV, FRONTEND_ENV}
     | {DATABASE_URL_ENV}
 )
@@ -48,7 +54,7 @@ class SettingsError(RuntimeError):
 
 @dataclass(frozen=True)
 class User:
-    """Who a request is for; their id scopes what they store."""
+    """Who a request is for; their id scopes what they store (GLOSSARY.md, "User")."""
 
     id: str
 
@@ -59,9 +65,12 @@ DEFAULT_USER = User(id="local-user")
 
 @dataclass(frozen=True)
 class ClerkKeys:
+    """Clerk mode's settings: the keys, and the origins a session token may come from (`azp`)."""
+
     secret_key: SecretStr
     publishable_key: str
     jwt_key: SecretStr
+    authorized_parties: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -98,6 +107,17 @@ def policy_dir(env: Mapping[str, str] | None = None) -> Path:
     return _read_path(os.environ if env is None else env, POLICY_DIR_ENV) or DEFAULT_POLICY_DIR
 
 
+def _origins(value: str) -> tuple[str, ...]:
+    """Comma-separated origins (scheme and host, a port if any; no path). Raises SettingsError."""
+    origins = tuple(part.strip() for part in value.split(",") if part.strip())
+    if not origins or not all(ORIGIN.fullmatch(origin) for origin in origins):
+        raise SettingsError(
+            f"{CLERK_AUTHORIZED_PARTIES_ENV} must be comma-separated origins, such as "
+            "https://vouch.example.com,http://localhost:5173 (no path, no trailing /)"
+        )
+    return origins
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """The settings in `env` (the process environment by default). Raises SettingsError."""
     env = os.environ if env is None else env
@@ -113,13 +133,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         raise SettingsError(f"{AUTH_MODE_ENV} must be one of: {', '.join(get_args(AuthMode))}")
     clerk = None
     if auth_mode == "clerk":
-        missing = [name for name in CLERK_KEY_ENVS if not read(name)]
+        missing = [name for name in CLERK_ENVS if not read(name)]
         if missing:
             raise SettingsError(f"{AUTH_MODE_ENV}=clerk needs {', '.join(missing)}, not set")
         clerk = ClerkKeys(
             secret_key=SecretStr(env[CLERK_SECRET_KEY_ENV].strip()),
             publishable_key=env[CLERK_PUBLISHABLE_KEY_ENV].strip(),
             jwt_key=SecretStr(env[CLERK_JWT_KEY_ENV].strip()),
+            authorized_parties=_origins(env[CLERK_AUTHORIZED_PARTIES_ENV]),
         )
     api_key = read(OPENROUTER_API_KEY_ENV)
     database_url = read(DATABASE_URL_ENV)
