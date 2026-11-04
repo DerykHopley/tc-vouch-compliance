@@ -2,7 +2,9 @@
 
 The judge names a document and a quote; a QuoteChecker finds the quote in that document and
 fills in the document's version and the section the quote sits in. A quote it can't find is
-never kept, so Vouch never invents evidence.
+never kept, so Vouch never invents evidence. Each citation also carries its document's kind
+(documented or implemented, from its front matter) and whether it is stale on the day the
+checker is given.
 
 A quote matches when, after whitespace is collapsed, Unicode put in one form (NFC) and
 zero-width characters removed on both sides, it appears whole-word inside one block of the
@@ -11,16 +13,17 @@ stitched together across rows or paragraphs. It needs at least MIN_QUOTE_WORDS w
 "Yes" or "at least 1" can't pass for evidence.
 """
 
+import datetime
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from vouch.documents import Section, document_path, sections
+from vouch.documents import EvidenceKind, Section, document_path, facts_of, sections
 from vouch.front_matter import split_front_matter
 
 MIN_QUOTE_WORDS = 4
@@ -37,6 +40,7 @@ class DropReason(StrEnum):
     EMPTY_QUOTE = "the quote is empty"
     TOO_SHORT = f"the quote is shorter than {MIN_QUOTE_WORDS} words"
     NOT_FOUND = "the quote isn't in that document"
+    IN_TWO_SOURCES = "the id names a document in more than one source"
 
 
 class CitationClaim(BaseModel):
@@ -51,18 +55,24 @@ class CitationClaim(BaseModel):
 
 @dataclass(frozen=True)
 class Citation:
-    """A checked quote: it appears in this version of the document, under this section."""
+    """A checked quote: it appears in this version of the document, under this section. The
+    document is documented or implemented evidence, and may be stale."""
 
     doc_id: str
     version: str
     section: str
     quote: str
+    kind: EvidenceKind
+    stale: bool
+    stale_because: str | None  # why it is stale (None: not stale)
 
 
 @dataclass(frozen=True)
 class _Document:
     doc_id: str
     version: str
+    kind: EvidenceKind
+    stale_because: str | None  # None: not stale
     blocks: tuple[tuple[str, str], ...]  # (section heading, normalised block text)
 
 
@@ -94,10 +104,13 @@ def _occurs(quote: str, text: str) -> bool:
     return re.search(start + re.escape(quote) + end, text) is not None
 
 
-def _load(doc_id: str, folders: list[Path]) -> _Document | DropReason:
-    path = next((p for f in folders if (p := document_path(f, doc_id))), None)
-    if path is None:
+def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Document | DropReason:
+    found = [(s, p) for s, f in sources.items() if (p := document_path(f, doc_id))]
+    if not found:
         return DropReason.NO_DOCUMENT
+    if len(found) > 1:  # which one the judge read can't be told, so neither is taken
+        return DropReason.IN_TWO_SOURCES
+    [(source, path)] = found
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -106,23 +119,29 @@ def _load(doc_id: str, folders: list[Path]) -> _Document | DropReason:
     version = str((data or {}).get("version") or "").strip()
     if not version:
         return DropReason.NO_VERSION
+    facts = facts_of(data, source, path.stem, today)
     blocks = tuple((s.heading, block) for s in sections(body) for block in _blocks(s))
-    return _Document(path.stem, version, blocks)
+    return _Document(path.stem, version, facts.kind, facts.stale_because, blocks)
 
 
 class QuoteChecker:
-    """Checks citations against the documents in these folders, reading each document once."""
+    """Checks citations against the documents in these sources' folders (source name to
+    folder), reading each document once; staleness is judged on `today`."""
 
-    def __init__(self, folders: Iterable[str]):
-        self._folders = [Path(f) for f in folders]
+    def __init__(self, sources: Mapping[str, str | Path], *, today: datetime.date):
+        self._sources = {name: Path(folder) for name, folder in sources.items()}
+        self._today = today
         self._documents: dict[str, _Document | DropReason] = {}
+
+    def _document(self, doc_id: str) -> _Document | DropReason:
+        key = doc_id.removesuffix(".md")
+        if key not in self._documents:
+            self._documents[key] = _load(key, self._sources, self._today)
+        return self._documents[key]
 
     def check(self, claim: CitationClaim) -> Citation | DropReason:
         """The checked Citation, or why it is dropped."""
-        key = claim.doc_id.removesuffix(".md")
-        if key not in self._documents:
-            self._documents[key] = _load(key, self._folders)
-        document = self._documents[key]
+        document = self._document(claim.doc_id)
         if isinstance(document, DropReason):
             return document
         quote = normalise(claim.quote)
@@ -132,5 +151,13 @@ class QuoteChecker:
             return DropReason.TOO_SHORT
         for heading, block in document.blocks:
             if _occurs(quote, block):
-                return Citation(document.doc_id, document.version, heading, quote)
+                return Citation(
+                    document.doc_id,
+                    document.version,
+                    heading,
+                    quote,
+                    kind=document.kind,
+                    stale=document.stale_because is not None,
+                    stale_because=document.stale_because,
+                )
         return DropReason.NOT_FOUND

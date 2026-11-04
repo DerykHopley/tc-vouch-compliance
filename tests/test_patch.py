@@ -2,6 +2,7 @@
 a recorded Patch response from the folder the profile allows; when it can't (missing,
 malformed, too slow) the evidence is pending, and nothing crashes (spec #2, ticket #24)."""
 
+import datetime
 import logging
 import shutil
 import threading
@@ -126,14 +127,16 @@ def test_the_recorded_response_never_shows_that_installation_was_checked():
 
 
 def test_5_2_5_is_assessed_with_patchs_response_cited_as_implemented_evidence():
-    result = assess("5.2.5", load_named_profile("nordlicht"), patch_model())
+    horizon = datetime.date(2027, 6, 30)  # the demo's horizon: the response is current then
+    result = assess("5.2.5", load_named_profile("nordlicht"), patch_model(), today=horizon)
 
     verdicts = {r.id: r.verdict for r in result.requirements}
     assert verdicts == expected_5_2_5()
     assert result.verdict == "evidenced"
     assert result.should_score == ShouldScore(evidenced=1, total=3)
-    cited = {c.doc_id for r in result.requirements for c in r.citations}
-    assert cited == {PATCH}
+    citations = [c for r in result.requirements for c in r.citations]
+    assert {c.doc_id for c in citations} == {PATCH}
+    assert {(c.kind, c.stale) for c in citations} == {("implemented", False)}
     m1 = next(r for r in result.requirements if r.id == "M1")
     assert m1.citations[0].section == "Tracked vulnerabilities"
     assert m1.citations[0].version == "2026-11-03T07:00Z"
@@ -167,6 +170,7 @@ def test_the_response_reaches_the_judge_as_evidence_data():
     judge_input = str(model.received[0][-1].content)
     assert "<evidence>" in judge_input
     assert "CVE-2026-31244" in judge_input
+    assert '"source": "patch", "kind": "implemented", "stale": false' in judge_input
 
 
 # Evidence pending: no crash; with nothing else read, every requirement waits for Patch.

@@ -104,6 +104,9 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
             "version": "3.1",
             "section": "Passwords",
             "quote": "Passwords have at least 12 characters.",
+            "kind": "documented",
+            "stale": False,
+            "stale_because": None,
         }
     ]
     assessment = events[-1][1]["assessment"]
@@ -277,7 +280,7 @@ def test_a_tool_failure_mid_run_ends_with_one_error_event(client, monkeypatch):
     def broken_search(*args, **kwargs):
         raise RuntimeError("disk on fire")
 
-    monkeypatch.setattr("vouch.graph.search_policies", broken_search)
+    monkeypatch.setattr("vouch.graph.search_folder", broken_search)
 
     response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 

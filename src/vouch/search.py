@@ -1,4 +1,5 @@
-"""search_policies: keyword search over the policy folder a compliance profile allows."""
+"""One keyword search over an evidence folder a compliance profile allows: the policies'
+(search_policies) or the records' (search_records)."""
 
 import re
 from pathlib import Path
@@ -28,12 +29,12 @@ class ErrorResult(TypedDict):
     detail: NotRequired[str]
 
 
-def search_policies(
+def search_folder(
     query: str, limit: int = DEFAULT_LIMIT, *, folder: Path
 ) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
-    `folder` is the policy folder the compliance profile allows, resolved as the profile
+    `folder` is the evidence folder the compliance profile allows, resolved as the profile
     resolved it on load. It is resolved again here, on the path actually read: one that now
     resolves elsewhere (swapped for a symlink) is refused with `folder_escaped`. Errors come
     back as a dict with an `error` key; nothing is raised.
@@ -44,7 +45,7 @@ def search_policies(
     if escaped(folder):
         return folder_escaped()
     try:
-        passages = [p for doc in _policy_files(folder) for p in _passages(doc)]
+        passages = [p for doc in _document_files(folder) for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}
@@ -66,6 +67,10 @@ def passages_of(doc_id: str, body: str) -> list[Passage]:
     return [Passage(doc_id=doc_id, heading=h, text=t) for h, t in paragraphs(body)]
 
 
+# The names the tools go by; an empty folder gives no passages, not an error.
+search_policies = search_records = search_folder
+
+
 def _check_input(query: Any, limit: Any) -> str | None:
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= MAX_QUERY_CHARS:
         return f"query must be 1 to {MAX_QUERY_CHARS} characters after trimming"
@@ -74,7 +79,7 @@ def _check_input(query: Any, limit: Any) -> str | None:
     return None
 
 
-def _policy_files(root: Path) -> list[Path]:
+def _document_files(root: Path) -> list[Path]:
     """The .md files directly in the resolved folder; a link pointing elsewhere is left out."""
     if not root.is_dir():
         raise FileNotFoundError(root)
