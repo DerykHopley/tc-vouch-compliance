@@ -54,11 +54,18 @@ def script_5_2_9(remediate: list[dict] | list[list[dict]] | None = None) -> dict
     return {
         "gather": [
             {"tool": "search_policies", "args": {"query": "backup recovery"}},
-            {"answer": "No backup or recovery concept was found.", "cited": []},
+            {"answer": "No backup or recovery concept was found."},
         ],
         "judge": {"requirements": judge},
         "remediate": plans,
     }
+
+
+# A quote that is in Nordlicht's authentication standard, so an evidenced verdict keeps it.
+TRUE_QUOTE = {
+    "doc_id": "authentication-standard",
+    "quote": "Passwords have at least 12 characters.",
+}
 
 
 def mixed_4_1_2() -> dict:
@@ -73,11 +80,16 @@ def mixed_4_1_2() -> dict:
     return {
         "gather": [
             {"tool": "search_policies", "args": {"query": "authentication"}},
-            {"answer": "Sign-in methods are set per system.", "cited": []},
+            {"answer": "Sign-in methods are set per system."},
         ],
         "judge": {
             "requirements": [
-                {"requirement_id": r, "verdict": v, "reason": "From the standard."}
+                {
+                    "requirement_id": r,
+                    "verdict": v,
+                    "reason": "From the standard.",
+                    "citations": [TRUE_QUOTE] if v == "evidenced" else [],
+                }
                 for r, v in verdicts.items()
             ]
         },
@@ -117,7 +129,7 @@ def test_a_skipped_draft_is_listed_not_drafted_and_drafts_for_other_requirements
 def test_nothing_not_evidenced_means_no_remediation_call():
     script = mixed_4_1_2()
     for item in script["judge"]["requirements"]:
-        item["verdict"] = "evidenced"
+        item.update(verdict="evidenced", citations=[TRUE_QUOTE])
 
     result, model, _ = proposed("4.1.2", script)
 
@@ -147,7 +159,7 @@ def test_the_run_stops_at_the_review_interrupt_and_returns_the_proposed_assessme
     assert result.review is None
     assert result.thread_id
     assert result.verdict == "partly-evidenced"
-    assert [s["node"] for s in result.steps][-3:] == ["judge", "remediate", "review"]
+    assert [s["node"] for s in result.steps][-3:] == ["check_quotes", "remediate", "review"]
     assert result.steps[-1]["text"] == "Waiting for the compliance lead's review."
     assert [d.requirement_id for d in result.remediation] == ["M2", "S2"]
 

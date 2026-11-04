@@ -79,8 +79,8 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
         "tools",
         "gather",
         "check_answer",
-        "cite",
         "judge",
+        "check_quotes",
         "remediate",
         "review",
     ]
@@ -97,7 +97,17 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
         ("S2", "evidenced"),
         ("S3", "evidenced"),
     ]
-    assert all(set(r) == {"id", "column", "text", "verdict", "reason"} for r in requirements)
+    assert all(
+        set(r) == {"id", "column", "text", "verdict", "reason", "citations"} for r in requirements
+    )
+    assert requirements[3]["citations"] == [
+        {
+            "doc_id": "authentication-standard",
+            "version": "3.1",
+            "section": "Passwords",
+            "quote": "Passwords have at least 12 characters.",
+        }
+    ]
     assessment = events[-1][1]["assessment"]
     assert assessment["control_id"] == DEMO_CONTROL
     assert assessment["profile_id"] == "nordlicht"
@@ -106,7 +116,7 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
     assert assessment["requirements"] == requirements
     assert assessment["steps"] == steps
     assert assessment["answer"]
-    assert "authentication-standard" in {s["doc_id"] for s in assessment["sources"]}
+    assert "sources" not in assessment  # citations sit on each requirement (#21)
     assert assessment["status"] == "waiting-for-review"
     assert assessment["thread_id"]
     assert assessment["remediation"] == []  # nothing in the demo is not evidenced
