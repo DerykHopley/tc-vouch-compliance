@@ -43,16 +43,23 @@ MALFORMED_URL = "postgresql://vouch:s3cr%zzet@/vouch?host=/nonexistent-33"
 class FakeConnection:
     """What the pool touches on a connection: enough to pool it without a server."""
 
-    def __init__(self) -> None:
+    def __init__(self, missing: int = 0) -> None:
         self.autocommit = True
         self.broken = False
         self.closed = False
+        self.missing = missing  # how many of vouch-db-setup's tables health's check finds missing
+        self.queries: list[str] = []
         self.pgconn = type("PGconn", (), {"transaction_status": TransactionStatus.IDLE})()
 
-    def execute(self, query: str, *args: Any) -> None:
+    def execute(self, query: str, *args: Any) -> "FakeConnection":
         if self.broken:  # as libpq does: the status turns unknown, so the pool discards it
             self.pgconn.transaction_status = TransactionStatus.UNKNOWN
             raise psycopg.OperationalError("server closed the connection unexpectedly")
+        self.queries.append(query)
+        return self
+
+    def fetchone(self) -> dict[str, int]:
+        return {"missing": self.missing}
 
     def rollback(self) -> None: ...
 
@@ -63,9 +70,12 @@ class FakeConnection:
 class FlakyConnect:
     """psycopg's connect, failing the first `failures` calls with `message`."""
 
-    def __init__(self, failures: int = 0, message: str = "server closed the connection") -> None:
+    def __init__(
+        self, failures: int = 0, message: str = "server closed the connection", missing: int = 0
+    ) -> None:
         self.failures = failures
         self.message = message
+        self.missing = missing
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.made: list[FakeConnection] = []
 
@@ -73,7 +83,7 @@ class FlakyConnect:
         self.calls.append((url, kwargs))
         if len(self.calls) <= self.failures:
             raise psycopg.OperationalError(self.message)
-        self.made.append(FakeConnection())
+        self.made.append(FakeConnection(self.missing))
         return self.made[-1]
 
 
@@ -220,7 +230,7 @@ def test_a_malformed_url_says_only_that_without_libpqs_text(make_db, caplog):
 
     assert str(refused.value) == f"{DATABASE_URL_ENV} is malformed"
     assert "s3cr" not in caplog.text
-    assert db.reachable() is False
+    assert db.health() == "unavailable"
 
 
 def test_the_password_never_reaches_an_error_or_the_log_in_any_form(make_db, caplog):
@@ -268,11 +278,41 @@ def test_health_checks_the_database_at_most_once_in_a_few_seconds(make_db):
 
     db.connection = counted.__get__(db)
 
-    assert db.reachable() and db.reachable()
+    assert db.health() == db.health() == "reachable"
     now[0] += database.HEALTH_CACHE_SECONDS
-    assert db.reachable()
+    assert db.health() == "reachable"
 
     assert checks == [database.HEALTH_TIMEOUT_SECONDS] * 2
+    # The setup check (#123) is part of the cached answer: one query per check, not per call.
+    [conn] = connect.made
+    assert [q for q in conn.queries if "to_regclass" in q] == [database.SETUP_CHECK] * 2
+
+
+def test_health_says_needs_setup_when_vouch_db_setup_s_tables_are_missing(make_db):
+    db = make_db(connect=FlakyConnect(missing=2))
+
+    assert db.health() == "needs-setup"
+
+
+def test_health_s_setup_check_waits_no_longer_than_health_s_bound(make_db):
+    """A server that freezes after the checkout check: the setup query still answers within
+    HEALTH_TIMEOUT_SECONDS, not a query's WAIT_TIMEOUT_SECONDS."""
+    seen: list[float] = []
+
+    class Timed(FakeConnection):
+        wait_timeout = database.WAIT_TIMEOUT_SECONDS
+
+        def execute(self, query: str, *args: Any) -> FakeConnection:
+            if "to_regclass" in query:
+                seen.append(self.wait_timeout)
+            return super().execute(query, *args)
+
+    db = make_db(connect=lambda url, **kwargs: Timed())
+
+    assert db.health() == "reachable"
+    assert seen == [database.HEALTH_TIMEOUT_SECONDS]
+    with db.connection() as conn:
+        assert conn.wait_timeout == database.WAIT_TIMEOUT_SECONDS  # set back after the check
 
 
 def test_settings_read_the_database_url_as_a_secret():
@@ -466,11 +506,33 @@ def test_a_checkpoint_is_written_and_read_back_through_the_module(empty_database
 
 
 @needs_postgres
-def test_health_says_reachable_with_the_database_up(empty_database):
-    client = client_with_a_database_route(Settings(database_url=empty_database.url), empty_database)
+def test_health_says_needs_setup_until_vouch_db_setup_has_run_then_reachable(empty_database):
+    """#123: a database with no tables isn't a working deploy, though it answers."""
+    now = [0.0]
+    db = Database(empty_database.url, clock=lambda: now[0])
+    client = client_with_a_database_route(Settings(database_url=db.url), db)
+    try:
+        before = client.get("/api/health").json()
+        assert before["status"] == "ok"  # liveness: the app itself is up
+        assert before["database"] == "needs-setup"
+        assert client.get("/needs-database").json() == {"connected": True}
+        with pytest.raises(DatabaseUnavailable, match="vouch-db-setup"):
+            db.set_setting("model", "fake")  # a route on a table answers 503
 
-    assert client.get("/api/health").json()["database"] == "reachable"
-    assert client.get("/needs-database").json() == {"connected": True}
+        empty_database.setup()
+        assert client.get("/api/health").json()["database"] == "needs-setup"  # still cached
+        now[0] += database.HEALTH_CACHE_SECONDS
+
+        assert client.get("/api/health").json()["database"] == "reachable"
+    finally:
+        db.close()
+
+
+@needs_postgres
+def test_health_s_setup_check_names_every_table_vouch_db_setup_creates(empty_database):
+    empty_database.setup()
+
+    assert set(database.SETUP_TABLES) == tables(empty_database)
 
 
 @needs_postgres
@@ -615,6 +677,7 @@ def freezable(empty_database) -> Iterator[tuple[Database, FreezableProxy]]:
         return now[0]
 
     url = conninfo.make_conninfo(target, host="127.0.0.1", port=proxy.port)
+    empty_database.setup()  # health's reachable needs vouch-db-setup's tables (#123)
     db = Database(SecretStr(url), clock=clock)
     try:
         yield db, proxy

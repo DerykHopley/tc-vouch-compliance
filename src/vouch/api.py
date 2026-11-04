@@ -238,12 +238,13 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user), Depends(r
 @public.get("/health")
 def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     """Also tells the front end how to sign in (Clerk's publishable key is public), and, with a
-    database URL set, whether the database is reachable."""
+    database URL set, whether the database is reachable, set up by vouch-db-setup (#123).
+    `status` is liveness: ok while the app answers, whatever the database says."""
     publishable_key = settings.clerk.publishable_key if settings.clerk else None
     auth = {"mode": settings.auth_mode, "publishable_key": publishable_key}
     answer: dict[str, Any] = {"status": "ok", "version": version("vouch"), "auth": auth}
     if db is not None:
-        answer["database"] = "reachable" if db.reachable() else "unavailable"
+        answer["database"] = db.health()
     return answer
 
 
