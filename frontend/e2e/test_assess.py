@@ -29,7 +29,7 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     expect(steps).to_have_count(5)
     expect(steps.first).to_contain_text("encrypt")
     expect(steps.last).to_contain_text("Judged 3 of 3 requirements evidenced.")
-    result = paper.get_by_role("region", name="Result")
+    result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Evidenced", exact=True)).to_be_visible()
     expect(result).to_contain_text("full-disk encryption")
     assert seen[0] == 1, f"the first render already held {seen[0]} steps"
@@ -46,8 +46,8 @@ def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, 
         "Vouch could not reach its service. Try again shortly."
     )
     page.unroute("**/api/assessments")
-    paper.get_by_role("button", name="Retry").click()
-    expect(paper.get_by_role("region", name="Result").get_by_text("Evidenced", exact=True)).to_be_visible()
+    paper.get_by_role("button", name=f"Retry {CONTROL}", exact=True).click()
+    expect(paper.get_by_role("region", name="Verdict and draft answer").get_by_text("Evidenced", exact=True)).to_be_visible()
     expect(paper.get_by_role("alert")).to_have_count(0)
 
 
@@ -65,7 +65,7 @@ def test_an_error_event_shows_its_message_in_place_of_the_result(
     expect(paper.get_by_role("alert")).to_have_text(
         "The assessment could not be completed. Please try again later."
     )
-    expect(paper.get_by_role("region", name="Result")).to_have_count(0)
+    expect(paper.get_by_role("region", name="Verdict and draft answer")).to_have_count(0)
 
 
 def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page: Page, ui_url):
@@ -78,7 +78,7 @@ def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page
 
     button.evaluate("b => { b.click(); b.click() }")  # two clicks before React re-renders
     paper = page.get_by_role("region", name="Working paper")
-    busy = paper.get_by_role("button", name="Assessing")
+    busy = paper.get_by_role("button", name=f"Assessing {CONTROL}", exact=True)
     expect(busy).to_be_disabled()
     expect(busy).to_have_attribute("aria-busy", "true")
     busy.click(force=True)  # a disabled button: the click must start nothing
@@ -86,7 +86,7 @@ def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page
 
     assert len(posts) == 1
     held[0].continue_()
-    expect(paper.get_by_role("region", name="Result")).to_be_visible()
+    expect(paper.get_by_role("region", name="Verdict and draft answer")).to_be_visible()
     assert len(posts) == 1
 
 

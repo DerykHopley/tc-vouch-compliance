@@ -5,7 +5,7 @@ import { assess, type Assessment, type Step, UNREACHABLE } from './assessment.ts
 export type Run =
   | { status: 'idle'; steps: Step[] }
   | { status: 'running'; steps: Step[] }
-  | { status: 'done'; steps: Step[]; result: Assessment }
+  | { status: 'done'; steps: Step[]; assessment: Assessment }
   | { status: 'failed'; steps: Step[]; message: string }
   | { status: 'unreachable'; steps: Step[]; message: string }
 
@@ -29,7 +29,7 @@ export function useAssessment(controlId: string) {
           flushSync(() => setRun({ status: 'running', steps: [...steps] }))
           await nextTask()
         } else if (item.event === 'result') {
-          setRun({ status: 'done', steps, result: item.data.assessment })
+          setRun({ status: 'done', steps, assessment: item.data.assessment })
         } else {
           setRun({ status: 'failed', steps, message: item.data.message })
         }

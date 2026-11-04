@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Control } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
 import { useAssessment } from './useAssessment.ts'
 import WorkingPaper, { AssessButton, RunChip } from './WorkingPaper.tsx'
@@ -10,8 +11,9 @@ function systemTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-// One control from the trial's fixtures until M1 brings the ISA catalogue.
-const CONTROL = { id: 'NK-ENC-01', title: 'Laptops are encrypted', owner: 'Information security officer' }
+// The trial's company and one of its controls, until M1 brings profiles and the ISA catalogue.
+const COMPANY = 'Nordlicht Komponenten GmbH'
+const CONTROL: Control = { id: 'NK-ENC-01', title: 'Laptops are encrypted', owner: 'Information security officer' }
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(systemTheme)
@@ -40,10 +42,10 @@ export default function App() {
           </button>
         </div>
       </header>
-      {view === 'paper' ? <main><WorkingPaper control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
+      {view === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
       <main className="dossier wrap">
         <section className="hero">
-          <span className="pill">Nordlicht Komponenten GmbH · Germany</span>
+          <span className="pill">{COMPANY} · Germany</span>
           <h1>Prepared for audit. One piece of evidence at a time.</h1>
           <p><b>0 of 1 controls accepted.</b> Start with {CONTROL.id}: assess it and review what Vouch finds.</p>
         </section>

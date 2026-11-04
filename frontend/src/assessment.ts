@@ -8,6 +8,8 @@ export const VERDICT_WORDS: Record<Verdict, string> = {
   'not-evidenced': 'Not evidenced',
 }
 
+export type Control = { id: string; title: string; owner: string }
+
 export type Step = { node: string; text: string }
 // The trial's assessment shape until M1 renames its fields (#20, #21, #26); the page reads only these.
 export type Assessment = { control_id: string; verdict: Verdict; answer: string }
@@ -67,5 +69,5 @@ export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent
     yield item as AssessmentEvent
     if (item.event === 'result' || item.event === 'error') return
   }
-  throw new Error('the stream ended before a result')
+  throw new Error('the stream ended before the assessment')
 }
