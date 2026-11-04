@@ -232,6 +232,34 @@ class Step:
     node: str
     update: dict[str, Any]
 
+    def describe(self) -> str:
+        """One plain sentence, in the glossary's words, saying what the step did."""
+        update = self.update
+        if self.node == "gather":
+            calls = update["messages"][-1].tool_calls if update.get("messages") else []
+            queries = [c["args"].get("query", "") for c in calls if c["name"] == SEARCH_POLICIES]
+            if queries:
+                return "Searching the policies for " + ", ".join(f"“{q}”" for q in queries) + "."
+            if any(c["name"] == SUBMIT_ANSWER for c in calls):
+                cited = _plural(len(update.get("cited", [])), "document")
+                return f"Drafted an answer citing {cited}."
+        if self.node == "tools":
+            if update.get("warnings"):
+                return "The policy folder could not be read."
+            return f"Found {_plural(len(update.get('evidence', [])), 'passage')}."
+        if self.node == "cite":
+            return f"Kept {_plural(len(update['sources']), 'cited passage')}."
+        if self.node == "judge":
+            covered, missing = len(update["covered_points"]), len(update["missing_points"])
+            return f"Judged {covered} of {covered + missing} requirements evidenced."
+        if self.node == "escalate":
+            return f"Drafted a remediation item for the {update['gap_note']['owner_role']}."
+        return f"Finished the {self.node} step."
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
 
 def assess_steps(control: Control, model: BaseChatModel) -> Iterator[Step | Assessment]:
     """Run the graph for one control: a Step per node as it finishes, then the Assessment."""
@@ -258,5 +286,6 @@ def assess_steps(control: Control, model: BaseChatModel) -> Iterator[Step | Asse
 def assess(control: Control, model: BaseChatModel) -> Assessment:
     """Run the graph for one control and return its Assessment."""
     *_, assessment = assess_steps(control, model)
-    assert isinstance(assessment, Assessment)
+    if not isinstance(assessment, Assessment):
+        raise TypeError(f"the graph ended without an Assessment for {control.id}")
     return assessment

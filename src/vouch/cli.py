@@ -7,8 +7,9 @@ import sys
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.controls import UnknownControlError, load_control
-from vouch.fake_model import ScriptedChatModel, ScriptError
+from vouch.fake_model import ScriptError
 from vouch.graph import assess
+from vouch.settings import fake_model_from_env
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 EXIT_BAD_INPUT = 2
@@ -20,9 +21,9 @@ class ConfigError(RuntimeError):
 
 def build_model() -> BaseChatModel:
     """The fake when ASSESS_FAKE_SCRIPT is set; otherwise the real model from the environment."""
-    script = os.environ.get("ASSESS_FAKE_SCRIPT")
-    if script:
-        return ScriptedChatModel.from_file(script)
+    fake = fake_model_from_env()
+    if fake is not None:
+        return fake
     api_key = os.environ.get("OPENROUTER_API_KEY")
     model = os.environ.get("ASSESS_MODEL")
     if not api_key or not model:

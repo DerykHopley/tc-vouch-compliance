@@ -5,13 +5,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from vouch.api import app
+from vouch.settings import FAKE_SCRIPT_ENV
 
 DEMO_CONTROL = "NK-ENC-01"
 
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.delenv("ASSESS_FAKE_SCRIPT", raising=False)
+    monkeypatch.delenv(FAKE_SCRIPT_ENV, raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     return TestClient(app, raise_server_exceptions=False)
 
@@ -47,6 +48,7 @@ def test_demo_control_streams_steps_then_one_result_with_a_decided_verdict(clien
     assert [s["node"] for s in steps] == ["gather", "tools", "gather", "cite", "judge"]
     assert all(set(s) == {"node", "text"} and s["text"] for s in steps)
     assert "encrypt" in steps[0]["text"]
+    assert steps[-1]["text"] == "Judged 3 of 3 requirements evidenced."
     assessment = events[-1][1]["assessment"]
     assert assessment["control_id"] == DEMO_CONTROL
     assert assessment["verdict"] == "evidenced"
@@ -55,7 +57,7 @@ def test_demo_control_streams_steps_then_one_result_with_a_decided_verdict(clien
 
 
 def test_a_gap_maps_to_not_evidenced(client, monkeypatch):
-    monkeypatch.setenv("ASSESS_FAKE_SCRIPT", "tests/scripts/vul_gap.json")
+    monkeypatch.setenv(FAKE_SCRIPT_ENV, "tests/scripts/vul_gap.json")
 
     response = client.post("/api/assessments", json={"control_id": "NK-VUL-01"})
 
@@ -64,7 +66,10 @@ def test_a_gap_maps_to_not_evidenced(client, monkeypatch):
     assert events[-1][1]["assessment"]["verdict"] == "not-evidenced"
     assert events[-2] == (
         "step",
-        {"node": "escalate", "text": "Noted the gap for the Head of IT infrastructure."},
+        {
+            "node": "escalate",
+            "text": "Drafted a remediation item for the Head of IT infrastructure.",
+        },
     )
 
 
@@ -86,7 +91,7 @@ def test_empty_or_missing_control_id_gets_422(client, body):
 def test_a_broken_fake_script_ends_the_stream_with_one_error_event(client, monkeypatch, tmp_path):
     script = tmp_path / "broken.json"
     script.write_text('{"gather": [')
-    monkeypatch.setenv("ASSESS_FAKE_SCRIPT", str(script))
+    monkeypatch.setenv(FAKE_SCRIPT_ENV, str(script))
 
     response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 

@@ -1,9 +1,8 @@
-"""Which model the API runs. Sign-in and the real model join here in M3."""
+"""Which model to run. Sign-in and the API's real model join here in M3."""
 
 import os
 from pathlib import Path
-
-from langchain_core.language_models.chat_models import BaseChatModel
+from typing import overload
 
 from vouch.fake_model import ScriptedChatModel
 
@@ -11,10 +10,14 @@ FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
 
 
-def build_api_model() -> BaseChatModel:
-    """The scripted fake model: ASSESS_FAKE_SCRIPT's script, or the bundled demo script.
+@overload
+def fake_model_from_env(default: Path) -> ScriptedChatModel: ...
+@overload
+def fake_model_from_env(default: None = None) -> ScriptedChatModel | None: ...
+def fake_model_from_env(default: Path | None = None) -> ScriptedChatModel | None:
+    """The scripted fake model playing ASSESS_FAKE_SCRIPT's script, else `default`'s.
 
-    Until sign-in exists (M3) the API never builds the real model, so an open URL costs
-    nothing. A bad script raises ScriptError.
+    None when neither names a script. A bad script raises ScriptError.
     """
-    return ScriptedChatModel.from_file(os.environ.get(FAKE_SCRIPT_ENV) or DEMO_SCRIPT)
+    script = os.environ.get(FAKE_SCRIPT_ENV) or default
+    return ScriptedChatModel.from_file(script) if script else None

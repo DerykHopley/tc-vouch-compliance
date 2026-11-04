@@ -13,8 +13,8 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, StringConstraints
 
 from vouch.controls import Control, UnknownControlError, load_control
-from vouch.graph import SEARCH_POLICIES, SUBMIT_ANSWER, Assessment, Step, assess_steps
-from vouch.settings import build_api_model
+from vouch.graph import Assessment, assess_steps
+from vouch.settings import DEMO_SCRIPT, fake_model_from_env
 
 log = logging.getLogger(__name__)
 
@@ -46,13 +46,18 @@ def health() -> dict[str, str]:
 def create_assessment(
     control: Annotated[Control, Depends(requested_control)],
 ) -> Iterable[ServerSentEvent]:
-    """A `step` event per agent step, one `result`, then close; or one `error`, then close."""
+    """A `step` event per agent step, one `result`, then close; or one `error`, then close.
+
+    Until sign-in exists (M3) this runs only the scripted fake model, so an open URL costs
+    nothing: ASSESS_FAKE_SCRIPT's script, else the bundled demo script.
+    """
     try:
-        for item in assess_steps(control, build_api_model()):
+        for item in assess_steps(control, fake_model_from_env(DEMO_SCRIPT)):
             if isinstance(item, Assessment):
                 yield ServerSentEvent(event="result", data={"assessment": _api_assessment(item)})
             else:
-                yield ServerSentEvent(event="step", data={"node": item.node, "text": _text(item)})
+                text = item.describe()
+                yield ServerSentEvent(event="step", data={"node": item.node, "text": text})
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
@@ -60,31 +65,3 @@ def create_assessment(
 
 def _api_assessment(assessment: Assessment) -> dict[str, Any]:
     return assessment.to_dict() | {"verdict": VERDICTS[assessment.verdict]}
-
-
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}" + ("" if count == 1 else "s")
-
-
-def _text(step: Step) -> str:
-    """One plain sentence saying what the step did."""
-    update = step.update
-    if step.node == "gather":
-        calls = update["messages"][-1].tool_calls if update.get("messages") else []
-        queries = [c["args"].get("query", "") for c in calls if c["name"] == SEARCH_POLICIES]
-        if queries:
-            return "Searching the policies for " + ", ".join(f"“{q}”" for q in queries) + "."
-        if any(c["name"] == SUBMIT_ANSWER for c in calls):
-            return f"Drafted an answer citing {_plural(len(update.get('cited', [])), 'document')}."
-    if step.node == "tools":
-        if update.get("warnings"):
-            return "The policy folder could not be read."
-        return f"Found {_plural(len(update.get('evidence', [])), 'passage')}."
-    if step.node == "cite":
-        return f"Kept {_plural(len(update['sources']), 'cited passage')}."
-    if step.node == "judge":
-        covered, missing = len(update["covered_points"]), len(update["missing_points"])
-        return f"Judged {covered} of {covered + missing} evidence points covered."
-    if step.node == "escalate":
-        return f"Noted the gap for the {update['gap_note']['owner_role']}."
-    return f"Finished the {step.node} step."
