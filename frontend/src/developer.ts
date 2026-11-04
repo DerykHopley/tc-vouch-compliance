@@ -20,19 +20,24 @@ export type ModelChange = { ok: true; settings: DeveloperSettings } | { ok: fals
 const BAD_FORM = 'A model id is written author/model, such as anthropic/claude-haiku-5.5.'
 const REFUSED = 'The model could not be changed. Please try again later.'
 
-/** The developer page while its settings can't be read (a 503: the database is down): it says so. */
+/** The developer page while its settings can't be read (the database's 503): it says so. */
 export const UNAVAILABLE = 'unavailable'
 
+/** Only the database's 503 says this (vouch.api's database_unavailable), and only after the role check passed. */
+const isDatabaseDown = (body: unknown) =>
+  typeof body === 'object' && body !== null && (body as { unavailable?: unknown }).unavailable === 'database'
+
 /**
- * The developer settings; UNAVAILABLE when the API answered but couldn't give them; or null when this user has no
- * developer page: a compliance lead (403), signed out (401), or the API unreachable. The answer itself is the only
- * sign of the role the browser gets.
+ * The developer settings; UNAVAILABLE on the database's 503 (a developer, whose settings can't be read just now); or
+ * null for anything else, where the role is unknown or not a developer's: a 403, a 401, the role lookup's 503, any
+ * other refusal, or the API unreachable. The answer itself is the only sign of the role the browser gets.
  */
 export async function developerSettings(): Promise<DeveloperSettings | typeof UNAVAILABLE | null> {
   try {
     const response = await fetch('/api/developer/settings', { headers: await authHeaders() })
-    if (response.status === 401 || response.status === 403) return null
-    return response.ok ? ((await response.json()) as DeveloperSettings) : UNAVAILABLE
+    if (response.ok) return (await response.json()) as DeveloperSettings
+    if (response.status !== 503) return null
+    return isDatabaseDown(await response.json().catch(() => null)) ? UNAVAILABLE : null
   } catch {
     return null
   }

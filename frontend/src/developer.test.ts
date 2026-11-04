@@ -33,9 +33,19 @@ describe('developerSettings', () => {
     expect(await developerSettings()).toBeNull()
   })
 
-  it.each([503, 500, 404])('is unavailable when the API answers %i: the page says so', async (status) => {
-    vi.stubGlobal('fetch', answer(status, { detail: 'The database is unavailable just now.' }))
+  it("is unavailable when the API's 503 says the database is: the page says so", async () => {
+    vi.stubGlobal('fetch', answer(503, { detail: 'The database is unavailable just now. Please try again shortly.', unavailable: 'database' }))
     expect(await developerSettings()).toBe('unavailable')
+  })
+
+  it.each([
+    ['a role lookup 503 (Clerk unreachable)', 503, { detail: 'Vouch cannot check your sign-in just now. Please try again shortly.' }],
+    ['a 500', 500, { detail: 'Internal Server Error' }],
+    ['a 404', 404, { detail: 'Not Found' }],
+    ['a 503 that is not JSON', 503, 'Service Unavailable'],
+  ])('is null on %s: the role is unknown, so no page', async (_, status, body) => {
+    vi.stubGlobal('fetch', answer(status, body))
+    expect(await developerSettings()).toBeNull()
   })
 
   it('is null when the API cannot be reached', async () => {

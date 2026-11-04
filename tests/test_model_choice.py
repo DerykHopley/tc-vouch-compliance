@@ -17,7 +17,7 @@ import openai._base_client
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from test_auth import FakeClerk, bearer, clerk_app, token
+from test_auth import FakeClerk, bearer, clerk_app, token, unreachable
 
 from vouch import model_choice
 from vouch.api import create_app
@@ -402,6 +402,10 @@ def test_with_the_database_down_an_assessment_is_a_503_before_any_paid_call(chat
     )
     assert chat.requests == []  # no other model runs in its place
     assert page.status_code == 503
+    assert page.json() == {
+        "detail": "The database is unavailable just now. Please try again shortly.",
+        "unavailable": "database",  # the front end shows the page saying so
+    }
     assert change.status_code == 503
 
 
@@ -579,3 +583,14 @@ def test_a_new_openrouter_opens_no_catalogue_client_until_asked():
 
     assert router._catalogue is None
     router.close()  # nothing to close
+
+
+def test_the_role_lookups_503_does_not_say_the_database_is_unavailable(clerk):
+    """#32's 503 when Clerk can't be asked: the role is unknown, so the front end hides the page."""
+    clerk.fail = unreachable
+    client = TestClient(clerk_app(clerk), raise_server_exceptions=False)
+
+    response = client.get("/api/developer/settings", headers=bearer(token("user_dev")))
+
+    assert response.status_code == 503
+    assert "unavailable" not in response.json()

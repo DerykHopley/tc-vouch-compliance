@@ -118,8 +118,13 @@ def database_connection(db: AppDatabase) -> Iterator[Connection]:
 
 
 def database_unavailable(request: Request, error: Exception) -> JSONResponse:
-    """Any route: the database can't be used just now is a 503, its reason only in the log."""
-    return JSONResponse(status_code=503, content={"detail": DATABASE_UNAVAILABLE})
+    """Any route: the database can't be used just now is a 503, its reason only in the log.
+
+    `unavailable: "database"` tells the front end which 503 this is: on the developer API it
+    comes only after require_developer passed, so the page shows saying so. Any other 503 (the
+    role lookup's, when Clerk can't be asked) leaves the role unknown, and the page hidden."""
+    content = {"detail": DATABASE_UNAVAILABLE, "unavailable": "database"}
+    return JSONResponse(status_code=503, content=content)
 
 
 def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:

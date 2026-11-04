@@ -15,8 +15,8 @@ const SETTINGS: DeveloperSettings = {
 }
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
-function api(settingsStatus = 200, put?: (body: { model: string }) => [number, unknown]) {
-  const body = settingsStatus === 200 ? SETTINGS : { detail: 'The database is unavailable just now.' }
+function api(settingsStatus = 200, put?: (body: { model: string }) => [number, unknown], refusal?: unknown) {
+  const body = settingsStatus === 200 ? SETTINGS : (refusal ?? { detail: 'This is available to developers only.' })
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === '/api/developer/settings')
       return Promise.resolve(new Response(JSON.stringify(body), { status: settingsStatus }))
@@ -125,13 +125,23 @@ describe('the Developer link', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/prepared for audit/i)
   })
 
-  it('stays, with the page saying the settings are unavailable, when the API answers 503', async () => {
+  it("stays, with the page saying the settings are unavailable, on the database's 503", async () => {
     window.history.replaceState(null, '', '/developer')
-    api(503)
+    api(503, undefined, { detail: 'The database is unavailable just now. Please try again shortly.', unavailable: 'database' })
     render(<App />)
     expect(await screen.findByRole('link', { name: 'Developer' })).toBeTruthy()
     const region = await screen.findByRole('region', { name: 'Developer settings' })
     expect(within(region).getByRole('alert').textContent).toMatch(/unavailable just now/)
+  })
+
+  it("is hidden on the role lookup's 503: a compliance lead never sees the page", async () => {
+    window.history.replaceState(null, '', '/developer')
+    const fetch = api(503, undefined, { detail: 'Vouch cannot check your sign-in just now. Please try again shortly.' })
+    render(<App />)
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/developer/settings', expect.anything()))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
   })
 
   it('opens straight at /developer for a developer, as after a refresh', async () => {
