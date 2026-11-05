@@ -45,11 +45,20 @@ const CONTROLS: ControlCard[] = IDS.map((id) => ({ id, question: `Question ${id}
 const OVERVIEW = { company: 'Nordlicht Komponenten GmbH', protection_level: 'high', answer_language: 'en',
   requirements: { '5.1.2': LISTED }, controls: CONTROLS } as const
 
-type Shown = { run?: Run; onAssess?: () => void; onOpen?: (id: string) => void; onOverview?: () => void }
+type Shown = {
+  run?: Run
+  running?: string | null
+  checking?: boolean
+  onAssess?: () => void
+  onOpen?: (id: string) => void
+  onOverview?: () => void
+}
 
-function show({ run = { status: 'idle', steps: [] }, onAssess = () => {}, onOpen = () => {}, onOverview = () => {} }: Shown = {}) {
-  render(<WorkingPaper overview={OVERVIEW} control={{ id: '5.1.2', title: QUESTION }}
-    running={null} run={run} onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} />)
+function show({ run = { status: 'idle', steps: [] }, running = null, checking = false, onAssess = () => {},
+  onOpen = () => {}, onOverview = () => {} }: Shown = {}) {
+  const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION }
+  render(<WorkingPaper overview={OVERVIEW} card={card} running={running} run={run} checking={checking}
+    onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} />)
 }
 
 /** The requirement's row, by the id in its header cell. */
@@ -60,11 +69,11 @@ afterEach(cleanup)
 describe('the working paper of an assessed control', () => {
   beforeEach(() => show({ run: { status: 'done', steps: [], assessment: ASSESSED } }))
 
-  it('shows the head: question, ISO reference, protection and answer language', () => {
+  it('shows the head: question, ISO reference, protection level and answer language', () => {
     const paper = screen.getByRole('region', { name: 'Working paper' })
     expect(within(paper).getByRole('heading', { name: /5\.1\.2 To what extent is information protected/ })).toBeTruthy()
-    expect(within(paper).getByText('ISO 27001:2022: A.5.14')).toBeTruthy()
-    expect(within(paper).getByText('Protection: high')).toBeTruthy()
+    expect(within(paper).getByText('ISO A.5.14')).toBeTruthy()
+    expect(within(paper).getByText('Protection level: high')).toBeTruthy()
     expect(within(paper).getByText('Answer language: English')).toBeTruthy()
   })
 
@@ -72,7 +81,7 @@ describe('the working paper of an assessed control', () => {
     const m1 = row('M1')
     expect(within(m1).getByText('Must')).toBeTruthy()
     expect(within(m1).getByText('Evidenced')).toBeTruthy()
-    expect(within(m1).getByText('implemented')).toBeTruthy()
+    expect(within(m1).getAllByText('implemented')).toHaveLength(2) // the row's evidence, and the quote's own
     expect(within(m1).getByText('Current')).toBeTruthy()
     expect(within(m1).getByText('TLS everywhere.')).toBeTruthy()
     expect(within(m1).getByText('All transfers use TLS 1.3.').closest('blockquote')).toBeTruthy()
@@ -81,13 +90,19 @@ describe('the working paper of an assessed control', () => {
     const s1 = row('S1')
     expect(within(s1).getByText('Should')).toBeTruthy()
     expect(within(s1).getByText('Partly evidenced')).toBeTruthy()
-    expect(within(s1).getByText('documented')).toBeTruthy()
+    expect(within(s1).getAllByText('documented')).toHaveLength(2)
     expect(within(s1).getByText('Stale')).toBeTruthy()
     expect(within(s1).getByText('Stale: approved 2022-03-14, yearly review')).toBeTruthy()
 
     expect(within(row('H1')).getByText('High protection')).toBeTruthy()
     expect(within(row('H1')).getByText('No evidence')).toBeTruthy()
     expect(within(row('O1')).getByText('Country overlay')).toBeTruthy()
+    expect(within(row('O1')).getByText('AT NIS2 (illustrative)')).toBeTruthy()
+  })
+
+  it('heads the text column "Requirement": an overlay requirement is not VDA ISA text', () => {
+    const table = screen.getByRole('table', { name: 'Requirements' })
+    expect(within(table).getByRole('columnheader', { name: 'Requirement' })).toBeTruthy()
   })
 
   it('shows a not-applicable requirement with its reason', () => {
@@ -108,6 +123,31 @@ describe('the working paper of a control not yet assessed', () => {
     expect(within(row('M1')).queryByText('Evidenced')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Assess 5.1.2' }))
     expect(onAssess).toHaveBeenCalledOnce()
+  })
+
+  it("offers no Assess while another control's run is in progress, and says which, with a link to it", async () => {
+    const onOpen = vi.fn()
+    show({ running: '4.1.2', onOpen })
+    const assess = screen.getByRole('button', { name: 'Assess 5.1.2' }) as HTMLButtonElement
+    expect(assess.disabled).toBe(true)
+    const why = screen.getByText(/^Vouch is assessing/)
+    expect(why.textContent).toBe('Vouch is assessing 4.1.2. One assessment runs at a time.')
+    const link = within(why).getByRole('link', { name: '4.1.2' })
+    expect(link.getAttribute('href')).toBe('/controls/4.1.2')
+    await userEvent.click(link)
+    expect(onOpen).toHaveBeenCalledWith('4.1.2')
+  })
+})
+
+describe('the working paper while its stored assessment is read', () => {
+  it('shows a neutral loading state: no verdict, no Assess, no requirement table', () => {
+    show({ checking: true })
+    const paper = screen.getByRole('region', { name: 'Working paper' })
+    expect(within(paper).getByRole('status').textContent).toBe('Reading the working paper…')
+    expect(within(paper).queryByText('Not assessed')).toBeNull()
+    expect(within(paper).queryByRole('button', { name: /Assess/ })).toBeNull()
+    expect(within(paper).queryByRole('table')).toBeNull()
+    expect(within(paper).getByText('Protection level: high')).toBeTruthy() // the head is known already
   })
 })
 

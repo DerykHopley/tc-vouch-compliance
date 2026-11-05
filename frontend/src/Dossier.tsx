@@ -1,6 +1,7 @@
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { type ControlCard, controlPath, type NextStep, type Overview, type OverviewState, type Readiness }
+import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness }
   from './overview.ts'
+import VerdictChip from './VerdictChip.tsx'
 
 /** The Dossier overview (`docs/design.md`, Decisions: Screens): the headline with the next step, the readiness band,
  * the control cards and the evidence quotes, all from `GET /api/overview`. */
@@ -127,10 +128,8 @@ function Card({ card, onOpen, assessing }: { card: ControlCard; onOpen: Props['o
       </a>
       <div className="control-title">{card.question}</div>
       <div className="card-meta">
-        <span className="mono">{card.iso_27001.replace(/^ISO 27001:2022:? /, 'ISO ')}</span>
-        {assessing ? <span className="chip v-assessing">Assessing</span>
-          : card.verdict ? <span className={`chip v-${card.verdict}`}>{VERDICT_WORDS[card.verdict]}</span>
-            : <span className="chip v-none">Not assessed</span>}
+        <span className="mono">{isoLabel(card.iso_27001)}</span>
+        <VerdictChip verdict={card.verdict} assessing={assessing} />
       </div>
     </article>
   )

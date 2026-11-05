@@ -22,10 +22,17 @@ def assessed(request: APIRequestContext, paper_url: str, control_id: str) -> Non
 
 def open_paper(page: Page, paper_url: str, control_id: str, *, assessed: bool) -> Locator:
     """The control's paper, once what it lists is read: the overview (the requirements before
-    an assessment) and the stored assessments, with the newest one when there is one."""
-    stored = r"/api/assessments/[^/]+$" if assessed else r"/api/assessments$"
-    with page.expect_response("**/api/overview"), page.expect_response(re.compile(stored)):
-        page.goto(f"{paper_url}/controls/{control_id}")
+    an assessment), and for an assessed control its newest stored assessment. A control the
+    overview says is not assessed reads none."""
+    if assessed:
+        with (
+            page.expect_response("**/api/overview"),
+            page.expect_response(re.compile(r"/api/assessments/[^/]+$")),
+        ):
+            page.goto(f"{paper_url}/controls/{control_id}")
+    else:
+        with page.expect_response("**/api/overview"):
+            page.goto(f"{paper_url}/controls/{control_id}")
     return page.get_by_role("region", name="Working paper")
 
 
@@ -40,7 +47,7 @@ def test_an_assessed_controls_rows_show_verdict_kind_stale_flag_and_quotes(page:
 
     paper = open_paper(page, paper_url, ASSESSED, assessed=True)
 
-    expect(paper.get_by_text("Protection: normal")).to_be_visible()
+    expect(paper.get_by_text("Protection level: normal")).to_be_visible()
     expect(paper.get_by_text("Answer language: English")).to_be_visible()
     rows = paper.get_by_role("table", name="Requirements").locator("tbody tr")
     expect(rows).to_have_count(5)

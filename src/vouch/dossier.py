@@ -70,12 +70,9 @@ class PaperRequirement(TypedDict):
 class Overview(TypedDict):
     company: str
     country: str
-    # The working paper's (#41): its head shows the profile's protection level and answer
-    # language, and before an assessment it lists the control's requirements. They come with the
-    # overview so opening a paper costs no request of its own (each counts to the rate limit).
+    # The working paper's head shows the profile's protection level and answer language (#41).
     protection_level: ProtectionLevel
     answer_language: str  # ISO 639-1
-    requirements: dict[str, list[PaperRequirement]]  # by control id
     readiness: Readiness
     by_status: dict[CardStatus, int]  # how many listed controls are in each status
     next_step: NextStep | None
@@ -102,13 +99,21 @@ def control_requirements(profile: ComplianceProfile, control: IsaControl) -> lis
     ]
 
 
+def requirements_by_control(
+    profile: ComplianceProfile, controls: Iterable[IsaControl]
+) -> dict[str, list[PaperRequirement]]:
+    """Each control's requirements under the profile, by control id: what its working paper
+    lists before an assessment (#41). They change only with the profile; the API sends them with
+    the overview, so opening a paper costs no request of its own (each counts to the rate limit)."""
+    return {c.id: control_requirements(profile, c) for c in controls}
+
+
 def overview(
     profile: ComplianceProfile,
     controls: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
 ) -> Overview:
-    """The overview: the company, the profile's protection level, answer language and each
-    control's requirements under it, readiness from accepted verdicts only, a card per control
+    """The overview: the company, the profile's protection level and answer language, readiness from accepted verdicts only, a card per control
     (in the base framework's order) with its review state and verdict, how many controls are in
     each state, the evidence quotes from assessed controls not rejected, and the next step (None
     once every control is accepted). Assessments of controls not in `controls` are left out."""
@@ -123,7 +128,6 @@ def overview(
         "country": profile.country,
         "protection_level": profile.protection_level,
         "answer_language": profile.answer_language,
-        "requirements": {c.id: control_requirements(profile, c) for c in controls},
         "readiness": {
             "controls": len(controls),
             "accepted": len(accepted),
