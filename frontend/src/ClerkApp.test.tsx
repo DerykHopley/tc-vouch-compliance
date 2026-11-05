@@ -175,6 +175,14 @@ describe('signed in, before the app: may this user use Vouch? (ticket 152)', () 
     expect(clerk.signOut).toHaveBeenCalledOnce()
   })
 
+  it("on an invitation-only Vouch, the page before the app keeps the invitation's pill", async () => {
+    access(503, {})
+    render(<ClerkApp publishableKey="pk_test_x" gate="clerk" />)
+    await screen.findByRole('alert')
+    expect(screen.getByText('By invitation')).toBeTruthy()
+    expect(screen.queryByText('Course members')).toBeNull()
+  })
+
   it('the check failing: says so, never the app, and can try again', async () => {
     access(503, { detail: 'Vouch cannot check your sign-in just now.' })
     render(<ClerkApp publishableKey="pk_test_x" />)

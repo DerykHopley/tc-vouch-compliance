@@ -379,6 +379,9 @@ ENV_VARS="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZE
 if [[ -n "$DISCORD_SERVER_ID" ]]; then
   ENV_VARS+=",DISCORD_SERVER_ID=$DISCORD_SERVER_ID"
   say "Sign-in lets in members of Discord server $DISCORD_SERVER_ID, invited users and developers."
+else
+  say "${Y}No DISCORD_SERVER_ID in $WIZARD_ENV: Clerk's own restrictions alone decide who signs in."
+  say "With Clerk's sign-up open (#153), that is anyone with a Discord account.${N}"
 fi
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on OpenRouter, signed in"
 say "through Clerk. Each secret's version is pinned; sign-in accepts $AUTHORIZED_PARTIES."

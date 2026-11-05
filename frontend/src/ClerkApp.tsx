@@ -5,7 +5,7 @@ import App from './App.tsx'
 import type { Gate } from './authConfig.ts'
 import Invitation, { Page, SignInFailed } from './Invitation.tsx'
 import { setOnSignedOut, setTokenSource } from './session.ts'
-import { COURSE_MEMBERS } from './words.ts'
+import { BY_INVITATION, COURSE_MEMBERS } from './words.ts'
 
 // Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
 // mode fetches nothing of Clerk's. Signed out: the invitation page with Clerk's sign-in (the instance is invitation
@@ -43,10 +43,10 @@ export default function ClerkApp({ publishableKey, gate = 'clerk' }: { publishab
 
 function SignedInOrOut({ gate }: { gate: Gate }) {
   const { isSignedIn } = useAuth()
-  return isSignedIn ? <SignedInApp /> : <SignedOut gate={gate} />
+  return isSignedIn ? <SignedInApp gate={gate} /> : <SignedOut gate={gate} />
 }
 
-function SignedInApp() {
+function SignedInApp({ gate }: { gate: Gate }) {
   const { getToken } = useAuth()
   const { signOut } = useClerk()
   // A layout effect runs before the app's own effects make their first API calls.
@@ -74,7 +74,7 @@ function SignedInApp() {
   if (access === 'allowed') return <App onSignOut={leave} />
   const [title, text] = BEFORE_THE_APP[access]
   return (
-    <Page pill={COURSE_MEMBERS.pill} title={title} text={text}>
+    <Page pill={(gate === 'discord-server' ? COURSE_MEMBERS : BY_INVITATION).pill} title={title} text={text}>
       <section className="signin">
         {access === 'checking' && <p className="signin-note">Opening Vouch…</p>}
         {access === 'not-a-member' && <p><button className="btn btn-primary" onClick={leave}>Sign out</button></p>}

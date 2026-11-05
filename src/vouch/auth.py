@@ -20,7 +20,8 @@ With DISCORD_SERVER_ID set (#152), every route but health also needs access (`ac
 with an accepted Clerk invitation, or one whose private metadata says `{"access": "invited"}`.
 Membership is read with the user's Discord token, which Clerk keeps from the sign-in (scope
 `guilds`), from Discord's GET /users/@me/guilds, 200 servers a page. The answer is cached per
-user for ACCESS_TTL seconds, so Discord is asked once a period, not once a request.
+user for ACCESS_TTL seconds, so Discord is asked once a period, not once a request; a refusal
+only for REFUSAL_TTL, so a user who joins the server, or signs in again, gets in soon after.
 
 Fails closed: a token that doesn't verify is SignedOut (401); a role or access Clerk or Discord
 can't answer for is ClerkUnavailable (503), never access. A Discord token Discord refuses, or one
@@ -113,6 +114,9 @@ class ClerkAuth:
     ROLE_TTL = 300.0
     """Seconds a user's role is kept before Clerk is asked again."""
     ACCESS_TTL = 300.0
+    REFUSAL_TTL = 30.0
+    """Seconds a refusal (not a member, sign in again) is kept: short, as the page asks the user
+    to put it right."""
     """Seconds a user's access is kept before Clerk and Discord are asked again."""
 
     def __init__(
@@ -208,9 +212,9 @@ class ClerkAuth:
         now = self._clock()
         cached = self._access.get(user.id)
         if cached is None or now >= cached.expires:
-            cached = _CachedAccess(
-                expires=now + self.ACCESS_TTL, access=self._fetch_access(user.id)
-            )
+            found = self._fetch_access(user.id)
+            ttl = self.ACCESS_TTL if found == "allowed" else self.REFUSAL_TTL
+            cached = _CachedAccess(expires=now + ttl, access=found)
             self._access[user.id] = cached
             log.info("access checked: %s", cached.access)
         if cached.access == "not-a-member":
@@ -262,7 +266,10 @@ class ClerkAuth:
 
     def _was_invited(self, address: str) -> bool:
         """Whether an invitation to exactly `address` was accepted (Clerk's query matches part)."""
-        response = self._clerk("/invitations", {"status": "accepted", "query": address})
+        # Clerk's `query` matches part of an address, so ask for its largest page (500) to find
+        # the whole one among the near matches.
+        params = {"status": "accepted", "query": address, "limit": "500"}
+        response = self._clerk("/invitations", params)
         invitations = _json(response, "Clerk's invitations") if response.status_code != 404 else []
         if not isinstance(invitations, list):
             log.error("Clerk's invitations failed: not a list")

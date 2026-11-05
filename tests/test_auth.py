@@ -686,6 +686,28 @@ def test_the_answer_is_cached_one_discord_call_per_user_per_period(access):
     assert len(access.discord_calls()) == 2
 
 
+def test_a_refusal_is_kept_only_briefly_so_doing_what_the_page_says_gets_in(access):
+    """Joining the server, or signing in again, is checked within REFUSAL_TTL, not ACCESS_TTL."""
+    now = [1000.0]
+    client = gated_app(access, clock=lambda: now[0])
+    access.servers["user_bob"] = []
+    assert ask(client, "user_bob").json()["reason"] == "not-a-member"
+    assert ask(client, "user_bob").json()["reason"] == "not-a-member"
+    assert len(access.discord_calls()) == 1  # still cached for a moment
+
+    access.servers["user_bob"] = [SERVER]  # they joined the course server
+    now[0] += ClerkAuth.REFUSAL_TTL + 1
+    assert ClerkAuth.REFUSAL_TTL < ClerkAuth.ACCESS_TTL
+    assert ask(client, "user_bob").status_code == 200
+
+
+def test_invitations_are_asked_for_in_one_large_page(access):
+    ask(gated_app(access), "user_invited")
+
+    [invitations] = [call for call in access.calls if call.url.path == "/v1/invitations"]
+    assert invitations.url.params["limit"] == "500"
+
+
 def test_a_failed_check_is_not_cached(access):
     client = gated_app(access)
     access.discord_fail = unreachable
