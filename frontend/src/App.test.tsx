@@ -4,11 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
+/** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
+let resizeTo: (width: number) => void = () => {}
+
 function systemPrefers(dark: boolean | null, width = 1400) {
+  let now = width
+  const listeners = new Set<() => void>()
+  resizeTo = (next) => act(() => {
+    now = next
+    for (const listener of listeners) listener()
+  })
   window.matchMedia = (query: string) => {
     const maxWidth = /^\(max-width: (\d+)px\)$/.exec(query)
-    const matches = maxWidth ? width <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
-    return { matches, media: query } as MediaQueryList
+    return {
+      get matches() {
+        return maxWidth ? now <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    } as unknown as MediaQueryList
   }
 }
 
@@ -17,6 +32,7 @@ beforeEach(() => systemPrefers(null))
 afterEach(() => {
   cleanup()
   delete document.documentElement.dataset.theme
+  delete document.documentElement.dataset.chat
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
 })
@@ -340,6 +356,175 @@ describe('Ask Vouch', () => {
     render(<App />)
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(bubble()).toBeTruthy()
+  })
+
+  it('opens with Cmd+K, ready to type', async () => {
+    render(<App />)
+    await userEvent.keyboard('{Meta>}k{/Meta}')
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message to Vouch' }))
+  })
+
+  const open = () => userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+  const press = (name: string | RegExp) => userEvent.click(screen.getByRole('button', { name }))
+
+  it('enlarges, pins, and goes back the same way', async () => {
+    render(<App />)
+    await open()
+    expect(bubble()!.className).toBe('bubble')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    const pin = screen.getByRole('button', { name: 'Pin beside the page' })
+    expect(pin.getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(pin)
+    expect(bubble()!.className).toBe('bubble pinned')
+    expect(document.documentElement.dataset.chat).toBe('pinned')
+    expect(screen.queryByRole('button', { name: 'Make smaller' })).toBeNull()
+    // One label, its state in aria-pressed: pressed again, it unpins.
+    expect(screen.getByRole('button', { name: 'Pin beside the page' }).getAttribute('aria-pressed')).toBe('true')
+    await press('Pin beside the page')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    await press('Make smaller')
+    expect(bubble()!.className).toBe('bubble')
+  })
+
+  it('offers no pin at 1000px or less: bubble and enlarged only', async () => {
+    systemPrefers(null, 900)
+    render(<App />)
+    await open()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+  })
+
+  it('falls back from pinned to enlarged at 1000px or less, and to the sheet at 700px', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(900)
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await userEvent.keyboard('{Escape}') // enlarged now: Esc closes it
+    expect(bubble()).toBeNull()
+  })
+
+  it('as a full-screen sheet, closes on Esc even when it was pinned', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(400)
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+  })
+
+  it('closes an enlarged chat on Esc, but never a pinned one', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeTruthy()
+    await press('Close the chat')
+    expect(bubble()).toBeNull()
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+  })
+
+  it('names the page it is on in its header', async () => {
+    serve()
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Dossier')).toBeTruthy()
+  })
+
+  it("names the control on its working paper", async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    await open()
+    expect(within(bubble()!).getByText('on 4.1.2 · Working paper')).toBeTruthy()
+  })
+
+  /** The API as `serve` has it, and `/api/chat` answering with `chat`. */
+  function serveChat(chat: (body: { message: string; page: string; control_id: string | null }) => Promise<Response>) {
+    serve()
+    const others = fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url === '/api/chat' ? chat(JSON.parse(init!.body as string)) : others(url, init))
+  }
+  const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+
+  it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
+    let write: (block: string) => void = () => {}
+    let end: () => void = () => {}
+    serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder()
+        write = (block) => controller.enqueue(encoder.encode(block))
+        end = () => controller.close()
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } })))
+    render(<App />)
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await act(async () => write('event: token\ndata: {"text":"Thank"}\n\n'))
+    await within(log).findByText('Thank')
+    expect(log.getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      write('event: token\ndata: {"text":" you."}\n\nevent: done\ndata: {}\n\n')
+      end()
+    })
+    await within(log).findByText('Thank you.')
+    await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'))
+  })
+
+  it('keeps Send disabled while the message is empty', async () => {
+    render(<App />)
+    await open()
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), '   ')
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello')
+    expect(send.disabled).toBe(false)
+  })
+
+  it("sends the message with the page, and shows Vouch's reply as it streams", async () => {
+    const asked: unknown[] = []
+    serveChat((body) => {
+      asked.push(body)
+      return Promise.resolve(sse(['event: token\ndata: {"text":"Thank"}\n\n', 'event: token\ndata: {"text":" you."}\n\n',
+        'event: done\ndata: {}\n\n']))
+    })
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' })
+    await userEvent.type(field, 'Where do I stand?{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await within(log).findByText('Thank you.')
+    expect(within(log).getByText('Where do I stand?')).toBeTruthy()
+    expect((field as HTMLInputElement).value).toBe('')
+    expect(asked).toEqual([{ message: 'Where do I stand?', page: 'dossier', control_id: null }])
+  })
+
+  it('with the chat endpoint down, says so and keeps the typed message', async () => {
+    serveChat(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' }) as HTMLInputElement
+    await userEvent.type(field, 'Where do I stand?')
+    await press('Send')
+    await within(bubble()!).findByText(/Vouch could not be reached/)
+    expect(field.value).toBe('Where do I stand?')
   })
 })
 

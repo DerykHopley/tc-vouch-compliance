@@ -8,6 +8,7 @@
 #     request-rate budget, as local mode's one user would otherwise spend the 60 a minute across the suite;
 #   - a third Vouch on a profiles folder of its own, for the profile switcher's checks (#47): Nordlicht,
 #     a second test profile and a broken one (tests/profiles_dir.py), and again its own request-rate budget;
+#   - a fourth, for the chat's checks (#44), for the same reason;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 #
@@ -29,7 +30,7 @@ PIDS=()
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
   if [ -n "${VOUCH_IMAGE:-}" ]; then
-    "$CONTAINER" rm -f "$NAME" "$NAME-dossier" "$NAME-profiles" >/dev/null 2>&1 || true
+    "$CONTAINER" rm -f "$NAME" "$NAME-dossier" "$NAME-profiles" "$NAME-chat" >/dev/null 2>&1 || true
   fi
   wait 2>/dev/null || true
   rm -rf "$PROFILES_DIR"
@@ -37,9 +38,9 @@ cleanup() {
 PROFILES_DIR="$(mktemp -d)"
 trap cleanup EXIT
 
-read -r VOUCH_PORT DOSSIER_PORT PROFILES_PORT FAILING_PORT < <(python3 -c '
+read -r VOUCH_PORT DOSSIER_PORT PROFILES_PORT CHAT_PORT FAILING_PORT < <(python3 -c '
 import socket
-socks = [socket.socket() for _ in range(4)]
+socks = [socket.socket() for _ in range(5)]
 for s in socks: s.bind(("127.0.0.1", 0))
 print(*(s.getsockname()[1] for s in socks))')
 
@@ -65,6 +66,7 @@ chmod -R a+rX "$PROFILES_DIR" # the container runs as nobody
 start_vouch "$VOUCH_PORT" vouch "$NAME"
 start_vouch "$DOSSIER_PORT" dossier "$NAME-dossier"
 start_vouch "$PROFILES_PORT" profiles "$NAME-profiles" "$PROFILES_DIR/profiles"
+start_vouch "$CHAT_PORT" chat "$NAME-chat"
 (cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
   uv run uvicorn vouch.api:app --port "$FAILING_PORT") >"$LOG_DIR/failing-api.log" 2>&1 &
 PIDS+=($!)
@@ -72,6 +74,7 @@ PIDS+=($!)
 export VOUCH_URL="http://localhost:$VOUCH_PORT"
 export DOSSIER_URL="http://localhost:$DOSSIER_PORT"
 export PROFILES_URL="http://localhost:$PROFILES_PORT"
+export CHAT_URL="http://localhost:$CHAT_PORT"
 export FAILING_API_URL="http://127.0.0.1:$FAILING_PORT"
 
 wait_for() {
@@ -87,6 +90,7 @@ wait_for "$VOUCH_URL/api/health"
 wait_for "$VOUCH_URL/"
 wait_for "$DOSSIER_URL/api/health"
 wait_for "$PROFILES_URL/api/health"
+wait_for "$CHAT_URL/api/health"
 wait_for "$FAILING_API_URL/api/health"
 
 echo "Browser check on $VOUCH_URL (${VOUCH_IMAGE:-built front end}; failing API $FAILING_API_URL): pytest $*"
