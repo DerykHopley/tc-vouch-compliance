@@ -106,6 +106,11 @@ Flow map (visual, private artifact): https://claude.ai/artifact/CXZ7LB2yySvQPsaR
     - gpt-oss 20B: **$0**
     - Judge: 96 cases × (10,000 × $1 + 1,600 × $5) / 1M = 96 × $0.018 = **$1.73** ($0.43 per model)
     - Total **$3.18**; asking the owner for a $5 ceiling covers retries and EU endpoints (everything on EU endpoints: about $3.67). Time (estimated, not measured; each model's dry run prints its own): Haiku about 20 s per case, Sonnet 40 s, Mistral 25 s, gpt-oss locally 90 s (with its reasoning tokens), plus about 20 s judging each; so about 16, 24, 18 and 44 minutes, 1 h 42 min in all, run one model after another.
+- 2026-11-05: **the owner's calls on M3's spec PR (#87)**, recorded in Fix #151:
+  - **Clerk keys set with a blank auth mode refuse to start**, naming `VOUCH_AUTH_MODE`; an explicit `local` with keys set still starts (a developer's choice), and `scripts/dev.sh` sets `local` when nothing is set. Why: keys without a mode is a deploy that lost its mode, and falling back to `local` would serve the paid model to anyone (the 2026-11-04 rule); failing loudly beats a silent default.
+  - **`CALL_BUDGET` is 12 model calls per assessment**, up from 8. Why: M1's graph already makes about 6 (gather, judge, remediation drafts, each output check's retry), so 8 left too little room; 12 still bounds the cost of one assessment.
+  - **Phone numbers stay out of redaction**; an international-only pattern (`+43 …`) is added only if phone numbers show up in evidence. Why: #36's pattern both missed joined numbers and removed ordinary text such as `01/2024-12/2024`, `doc 0815/2023` and `0800-1700`.
+  - **No dedicated `vouch` service account** while the Google Cloud project holds only Vouch; the service keeps the account the deploy wizard grants its two roles to. Why: a separate account matters when other workloads share the project, and none do.
 
 ## Ideas
 
