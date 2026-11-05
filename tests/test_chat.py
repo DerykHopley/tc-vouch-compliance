@@ -9,7 +9,7 @@ from pydantic import SecretStr
 from test_api import read_events
 
 from vouch.api import create_app
-from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext, RedactedText
+from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext
 from vouch.chat_agent import chat_prompt
 from vouch.chat_fake import CHAT_REPLY, CannedChatModel
 from vouch.isa import load_isa_control
@@ -31,15 +31,15 @@ def chat(client, **body):
     return client.post("/api/chat", json={"page": "dossier", **body})
 
 
-def test_the_chat_streams_the_reply_as_token_events_then_done(client):
+def test_the_chat_streams_the_reply_whole_as_one_token_event_then_done(client):
     response = chat(client, message="What does TISAX ask of us?")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = read_events(response)
     names = [name for name, _ in events]
-    assert names[0] == "thread" and names[-1] == "done" and names.count("done") == 1
-    assert set(names[1:-1]) == {"token"} and len(names) > 3  # streamed, not one block
+    # Whole, once its quotes are checked (#46), not piece by piece as the model writes it.
+    assert names == ["thread", "token", "done"]
     assert "".join(data["text"] for name, data in events if name == "token") == CHAT_REPLY
 
 
@@ -109,13 +109,6 @@ def test_a_secret_in_the_reply_is_removed_with_a_guard_step(client, monkeypatch)
 # The chat entry point
 
 
-def sent(chunks: list[str]) -> list[tuple[str, list[str]]]:
-    """What RedactedText sends of a reply written in `chunks`: piece by piece, then the rest."""
-    text = RedactedText()
-    pieces = [piece for chunk in chunks for piece in text.add(chunk)]
-    return pieces + list(text.flush())
-
-
 def nordlicht():
     return load_named_profile(DEFAULT_PROFILE)
 
@@ -132,12 +125,27 @@ def test_the_prompt_asks_for_the_formal_voice_in_the_profiles_language():
     assert "Dossier" in system.content
 
 
+def test_the_prompt_asks_for_every_quote_in_a_cite_naming_its_document():
+    system = chat_prompt(nordlicht(), PageContext("dossier"))
+
+    assert '<cite doc="DOC_ID">exact words</cite>' in system.content
+
+
 def test_the_prompt_names_the_control_on_its_working_paper():
     control = load_isa_control("5.1.1")
 
     system = chat_prompt(nordlicht(), PageContext("paper", control))
 
     assert f"{control.id}" in system.content and control.question in system.content
+
+
+def said_in_chunks(client, monkeypatch, chunks: list[str]) -> tuple[str, list[str]]:
+    """The reply the chat sends when the model writes it in `chunks`, and its guard steps."""
+    fake = CannedChatModel(chunks=chunks)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    events = read_events(chat(client, message="Hello"))
+    text = "".join(data["text"] for name, data in events if name == "token")
+    return text, [data["text"] for name, data in events if name == "step"]
 
 
 @pytest.mark.parametrize(
@@ -148,11 +156,11 @@ def test_the_prompt_names_the_control_on_its_working_paper():
         ["Bearer abc123def456 end"],
     ],
 )
-def test_a_secret_split_across_chunks_is_still_removed(chunks):
-    pieces = sent(chunks)
+def test_a_secret_split_across_chunks_is_still_removed(client, monkeypatch, chunks):
+    text, steps = said_in_chunks(client, monkeypatch, chunks)
 
-    assert "".join(text for text, _ in pieces) == "Bearer [removed] end"
-    assert any(removed for _, removed in pieces)
+    assert text == "Bearer [removed] end"
+    assert steps
 
 
 @pytest.mark.parametrize(
@@ -169,28 +177,19 @@ def test_a_secret_split_across_chunks_is_still_removed(chunks):
         ),
     ],
 )
-def test_a_secret_split_across_whitespace_or_lines_is_never_half_sent(chunks, expected):
-    pieces = sent(chunks)
+def test_a_secret_split_across_whitespace_or_lines_is_never_half_sent(
+    client, monkeypatch, chunks, expected
+):
+    assert said_in_chunks(client, monkeypatch, chunks)[0] == expected
 
-    assert "".join(text for text, _ in pieces) == expected
 
-
-def test_a_remembered_secret_with_spaces_is_removed_across_chunks():
+def test_a_remembered_secret_with_spaces_is_removed_across_chunks(client, monkeypatch):
     remember_secrets(Settings(openrouter_api_key=SecretStr("open sesame key 0047 plus")))
     chunks = ["The key is open ", "sesame", " key 0047", " plus and", " that is all."]
 
-    pieces = sent(chunks)
+    text, _ = said_in_chunks(client, monkeypatch, chunks)
 
-    assert "".join(text for text, _ in pieces) == "The key is [removed] and that is all."
-
-
-def test_a_long_reply_is_sent_as_it_is_written_not_held_to_the_end():
-    words = [f" word{i}" for i in range(200)]
-
-    seen = [text for text, _ in sent(words)]
-
-    assert len(seen) > 150  # sent along the way, a few words behind
-    assert "".join(seen) == "".join(words)
+    assert text == "The key is [removed] and that is all."
 
 
 # The spending guard (M3, docs/requirements.md 2026-11-03): chat is metered, and refused at the limit

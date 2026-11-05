@@ -4,6 +4,7 @@ import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWo
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
+import CitedQuote from './CitedQuote.tsx'
 import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
 import { type Override, rollUp, withOverrides } from './review.ts'
@@ -369,15 +370,12 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   <p className="why">{r.reason}</p>
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
-                    <figure className="cite" key={i}>
-                      <blockquote>{c.quote}</blockquote>
-                      <figcaption>
-                        <span className="mono">{c.doc_id} v{c.version} · {c.section}</span>
-                        <span className={`kind kind-${c.kind}`}>{c.kind}</span>
-                        {c.stale && <span className="flag">Stale: {c.stale_because}</span>}
-                        <span>Quote verified</span>
-                      </figcaption>
-                    </figure>
+                    <CitedQuote key={i} quote={c.quote}>
+                      <span className="mono">{c.doc_id} v{c.version} · {c.section}</span>
+                      <span className={`kind kind-${c.kind}`}>{c.kind}</span>
+                      {c.stale && <span className="flag">Stale: {c.stale_because}</span>}
+                      <span>Quote verified</span>
+                    </CitedQuote>
                   ))}
                   {item && items.threadId && (
                     // A new key when the item changes, so its fields start from the kept values.

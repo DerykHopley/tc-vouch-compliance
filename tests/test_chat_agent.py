@@ -341,7 +341,7 @@ def test_the_greetings_model_calls_are_metered_as_chat_not_as_assessments(client
 def test_an_assessment_from_the_chat_runs_apart_from_the_chats_own_step_limit(client, monkeypatch):
     """Started inside the chat's graph, the assessment graph would take the chat's run config,
     its recursion limit included, and stop part way."""
-    monkeypatch.setattr(chat_agent, "RECURSION_LIMIT", 4)  # the chat's turn needs 3 steps
+    monkeypatch.setattr(chat_agent, "RECURSION_LIMIT", 5)  # the chat's turn needs 4 steps
 
     events = say(client, "Assess 5.1.1")
 

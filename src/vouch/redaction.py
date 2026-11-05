@@ -122,20 +122,6 @@ def remember_secrets(settings: Settings) -> None:
             _known = Redaction(KEY, pattern)
 
 
-PATTERN_WORDS = 3
-"""The most whitespace-separated words one match of REDACTIONS spans: "Authorization: Bearer
-<token>"."""
-
-
-def match_words() -> int:
-    """The most whitespace-separated words one redaction can span, the app's own secret values
-    included (a key file's header has spaces): a stream redacted in pieces (vouch.chat) holds
-    back this many words, so a secret is never sent half."""
-    with _secrets_lock:
-        secret_words = max((len(value.split()) for value in _secrets), default=1)
-    return max(PATTERN_WORDS, secret_words)
-
-
 def redact(text: str) -> tuple[str, list[str]]:
     """The text with secrets and personal data replaced, and the labels of what was removed."""
     found: list[str] = []

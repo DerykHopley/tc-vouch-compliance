@@ -3,6 +3,7 @@ import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, VERDICT_WORDS
 import {
   CHAT_UNREACHABLE, GREETING_UNREACHABLE, type PageContext, pageLabel, sendChat, suggestionLabel, suggestionMessage,
 } from './chat.ts'
+import ChatReply from './ChatReply.tsx'
 import { controlPath, type NextStep } from './overview.ts'
 
 // Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
@@ -274,7 +275,8 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         {messages.map((m, i) => m.from === 'verdict'
           ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} onOpen={onOpen} />
           : m.from === 'step' ? <StepLine key={i} step={m.step} />
-            : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : m.failed ? 'msg notice' : 'msg'}>{m.text}</p>)}
+            : m.from === 'vouch' && !m.failed ? <ChatReply key={i} text={m.text} />
+              : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : 'msg notice'}>{m.text}</p>)}
         {suggestion && !busy && (suggestion.action === 'review'
           ? <PaperLink className="suggestion" controlId={suggestion.control_id} onOpen={onOpen}>
             {suggestionLabel(suggestion)}

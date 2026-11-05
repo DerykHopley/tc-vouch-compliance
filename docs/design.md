@@ -88,7 +88,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Verdict chip | evidenced, partly evidenced, not evidenced, not applicable, not assessed (hollow outline), assessing |
 | Review state tag | proposed, accepted, rejected |
 | Evidence kind tag | documented (dashed), implemented (solid navy); stale flag |
-| Citation | quote (serif italic, brass rule), document id and version, section, kind, stale flag, "quote verified" |
+| Citation | quote (serif italic, brass rule), document id and version, section, kind, stale flag, "quote verified". In the chat: the quote and its document id only |
 | Agent steps (trace) | streaming, done; a guard step and an overlay branch step marked apart |
 | Requirement row | must, should, high protection, country overlay; each verdict; override with reason; not applicable with reason |
 | Review bar | proposed (note and Accept / Reject), accepted, rejected (with "Assess again") |

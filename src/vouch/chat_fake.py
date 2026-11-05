@@ -5,7 +5,8 @@ chat agent's tools (#45, #46), it calls one as a model would: `start_assessment`
 <id>", `progress` for the greeting or "where do I stand", `explain_control` for "What's missing
 for <id>?" (the page's control when none is named) or with `sign_off` for "Accept <id>", and
 `search_evidence` for "Is there evidence of <words>?". Then it passes the tool's words on as its
-answer, each passage of evidence cited as the chat prompt asks: “its first line” [doc_id].
+answer, each passage of evidence cited as the chat prompt asks:
+<cite doc="doc_id">its first line</cite>.
 """
 
 import json
@@ -58,7 +59,7 @@ def _words(text: str) -> list[str]:
 
 def _cited(tool_words: str) -> str:
     """A tool's words with its evidence data given as citations: each passage's first line,
-    in curly quotes, then its document id in square brackets."""
+    in a cite naming its document id."""
 
     def cite(found: re.Match[str]) -> str:
         lines = []
@@ -67,7 +68,7 @@ def _cited(tool_words: str) -> str:
                 continue
             first = _LIST_MARK.sub("", passage["text"].splitlines()[0].strip())
             label = f"{passage['requirement']}: " if "requirement" in passage else ""
-            lines.append(f"- {label}“{first}” [{passage['doc_id']}]")
+            lines.append(f'- {label}<cite doc="{passage["doc_id"]}">{first}</cite>')
         return "\n".join(lines)
 
     def findings(found: re.Match[str]) -> str:
@@ -92,9 +93,9 @@ class CannedChatModel(BaseChatModel):
     given), with token counts estimated as the scripted fake's are, so the usage meter sees
     them. Each call's messages are kept in `prompts`; with `fail_with`, every call raises it,
     as a model that can't be reached would. With tools bound, it calls the one the lead's
-    message asks for (or `call`, whatever is asked), and answers a tool's result with the
-    result's words (or `after_tool`). With `blocks`, it writes its answer in content blocks, as
-    some providers do."""
+    message asks for (or `call`, whatever is asked), writing `before_tool` with the call, and
+    answers a tool's result with the result's words (or `after_tool`). With `blocks`, it writes
+    its answer in content blocks, as some providers do."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -104,6 +105,7 @@ class CannedChatModel(BaseChatModel):
     prompts: list[list[BaseMessage]] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)  # the names of the tools bound
     call: dict[str, Any] | None = None  # {"name", "args"}: the tool call it makes
+    before_tool: str = ""
     after_tool: str | None = None
     blocks: bool = False
 
@@ -129,7 +131,7 @@ class CannedChatModel(BaseChatModel):
             return _words(self.after_tool or _cited(str(last.content))), []
         call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
         if call is not None:
-            return [], [call]
+            return _words(self.before_tool), [call]
         return (self.chunks if self.chunks is not None else _words(self.reply)), []
 
     def _tool_call(self, message: HumanMessage, messages: list[BaseMessage]) -> ToolCall | None:
