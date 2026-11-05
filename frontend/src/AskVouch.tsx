@@ -1,11 +1,13 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { CHAT_UNREACHABLE, type PageContext, pageLabel, sendChat } from './chat.ts'
 
-// Must match the sheet breakpoint in app.css.
+// Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
 const SHEET_QUERY = '(max-width: 700px)'
+const NO_PIN_QUERY = '(max-width: 1000px)'
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
 
 const isSheet = () => window.matchMedia?.(SHEET_QUERY).matches ?? false
+const canPin = () => !(window.matchMedia?.(NO_PIN_QUERY).matches ?? false)
 
 /** While the bubble is a full-screen sheet, Tab and Shift+Tab cycle inside it, wherever focus starts:
  * the page behind can't be seen. Listens on the document, so a click that leaves focus on the body is covered. */
@@ -25,12 +27,22 @@ function keepFocusInSheet(e: KeyboardEvent, sheet: HTMLElement | null) {
 }
 
 /** Patch's chat pattern (design.md, Decisions: Chat): closed (the button), a bubble, enlarged, or pinned beside the
- * page. At 700px or less every open state is a full-screen sheet, and pin and enlarge are not offered. */
+ * page (only over 1000px). At 700px or less every open state is a full-screen sheet, and pin and enlarge are not
+ * offered. */
 export type ChatState = 'closed' | 'bubble' | 'enlarged' | 'pinned'
+
+/** Each state's look and the header's toggles: the size toggle's label and the state it leads to, and the state the
+ * pin toggle leads to (null: not offered). */
+const STATES: Record<ChatState, { className: string; size: { label: string; to: ChatState } | null; pin: ChatState | null }> = {
+  closed: { className: '', size: null, pin: null },
+  bubble: { className: 'bubble', size: { label: 'Make larger', to: 'enlarged' }, pin: null },
+  enlarged: { className: 'bubble enlarged', size: { label: 'Make smaller', to: 'bubble' }, pin: 'pinned' },
+  pinned: { className: 'bubble pinned', size: null, pin: 'enlarged' },
+}
 
 type Message = { from: 'lead' | 'vouch'; text: string; failed?: boolean }
 
-/** The "Ask Vouch" button, bottom right, and the chat it opens; `context` is the page the lead is on. */
+/** The "Ask Vouch" button, bottom right, and the chat it opens; `context` is the page the compliance lead is on. */
 export default function AskVouch({ context }: { context: PageContext }) {
   const [state, setState] = useState<ChatState>('closed')
   const open = state !== 'closed'
@@ -44,22 +56,32 @@ export default function AskVouch({ context }: { context: PageContext }) {
         e.preventDefault()
         setState((s) => (s === 'closed' ? 'bubble' : s))
         inputRef.current?.focus() // already open: straight to the field
-      } else if (e.key === 'Escape') setState((s) => (s === 'pinned' ? s : 'closed')) // never a pinned chat
-      else keepFocusInSheet(e, sheetRef.current)
+      } else if (e.key === 'Escape') {
+        // Never a pinned chat beside the page; a full-screen sheet always closes.
+        setState((s) => (s === 'pinned' && !isSheet() ? s : 'closed'))
+      } else keepFocusInSheet(e, sheetRef.current)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // While the sheet covers the page, the page behind it (the sheet's siblings) is inert:
-  // nothing there takes focus or clicks, and assistive tech skips it. Follows the width while open.
+  // The width, followed while open: at 700px or less the sheet; at 1000px or less no pin, and a pinned chat falls back
+  // to enlarged.
   const [sheet, setSheet] = useState(isSheet)
+  const [pinnable, setPinnable] = useState(canPin)
   useEffect(() => {
-    const query = window.matchMedia?.(SHEET_QUERY)
-    const onChange = () => setSheet(isSheet())
-    query?.addEventListener?.('change', onChange)
-    return () => query?.removeEventListener?.('change', onChange)
+    const queries = [SHEET_QUERY, NO_PIN_QUERY].map((q) => window.matchMedia?.(q))
+    const onChange = () => {
+      setSheet(isSheet())
+      setPinnable(canPin())
+      if (!canPin()) setState((s) => (s === 'pinned' ? 'enlarged' : s))
+    }
+    for (const query of queries) query?.addEventListener?.('change', onChange)
+    return () => { for (const query of queries) query?.removeEventListener?.('change', onChange) }
   }, [])
+
+  // While the sheet covers the page, the page behind it (the sheet's siblings) is inert:
+  // nothing there takes focus or clicks, and assistive tech skips it.
   useEffect(() => {
     const aside = sheetRef.current
     if (!open || !sheet || !aside?.parentElement) return
@@ -122,27 +144,26 @@ export default function AskVouch({ context }: { context: PageContext }) {
       </button>
     )
   }
-  const pinned = state === 'pinned'
+  const { className, size, pin } = STATES[state]
   return (
-    <aside ref={sheetRef} className={state === 'bubble' ? 'bubble' : `bubble ${state}`} aria-label="Chat with Vouch">
+    <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
       <div className="bubble-head">
         <b>Vouch</b>
         <span className="page-context">{pageLabel(context)}</span>
-        {!sheet && state !== 'bubble' && (
-          <button className="btn btn-ghost" aria-pressed={pinned} onClick={() => setState(pinned ? 'enlarged' : 'pinned')}>
-            {pinned ? 'Unpin' : 'Pin beside the page'}
+        {!sheet && pinnable && pin && (
+          <button className="btn btn-ghost" aria-pressed={state === 'pinned'} onClick={() => setState(pin)}>
+            Pin beside the page
           </button>
         )}
-        {!sheet && !pinned && (
-          <button className="btn btn-ghost" onClick={() => setState(state === 'enlarged' ? 'bubble' : 'enlarged')}>
-            {state === 'enlarged' ? 'Make smaller' : 'Make larger'}
-          </button>
+        {!sheet && size && (
+          <button className="btn btn-ghost" onClick={() => setState(size.to)}>{size.label}</button>
         )}
         <button className="btn btn-ghost" onClick={() => setState('closed')} aria-label="Close the chat">
           Close
         </button>
       </div>
-      <div className="bubble-log" role="log" aria-live="polite">
+      {/* Busy while a reply streams, so assistive tech announces the finished message, not each piece. */}
+      <div className="bubble-log" role="log" aria-live="polite" aria-busy={busy}>
         {messages.map((m, i) => (
           <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : m.failed ? 'msg notice' : 'msg'}>{m.text}</p>
         ))}

@@ -4,11 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
+/** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
+let resizeTo: (width: number) => void = () => {}
+
 function systemPrefers(dark: boolean | null, width = 1400) {
+  let now = width
+  const listeners = new Set<() => void>()
+  resizeTo = (next) => act(() => {
+    now = next
+    for (const listener of listeners) listener()
+  })
   window.matchMedia = (query: string) => {
     const maxWidth = /^\(max-width: (\d+)px\)$/.exec(query)
-    const matches = maxWidth ? width <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
-    return { matches, media: query } as MediaQueryList
+    return {
+      get matches() {
+        return maxWidth ? now <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    } as unknown as MediaQueryList
   }
 }
 
@@ -359,15 +374,51 @@ describe('Ask Vouch', () => {
     expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
     await press('Make larger')
     expect(bubble()!.className).toBe('bubble enlarged')
-    await press('Pin beside the page')
+    const pin = screen.getByRole('button', { name: 'Pin beside the page' })
+    expect(pin.getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(pin)
     expect(bubble()!.className).toBe('bubble pinned')
     expect(document.documentElement.dataset.chat).toBe('pinned')
     expect(screen.queryByRole('button', { name: 'Make smaller' })).toBeNull()
-    await press('Unpin')
+    // One label, its state in aria-pressed: pressed again, it unpins.
+    expect(screen.getByRole('button', { name: 'Pin beside the page' }).getAttribute('aria-pressed')).toBe('true')
+    await press('Pin beside the page')
     expect(bubble()!.className).toBe('bubble enlarged')
     expect(document.documentElement.dataset.chat).toBeUndefined()
     await press('Make smaller')
     expect(bubble()!.className).toBe('bubble')
+  })
+
+  it('offers no pin at 1000px or less: bubble and enlarged only', async () => {
+    systemPrefers(null, 900)
+    render(<App />)
+    await open()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+  })
+
+  it('falls back from pinned to enlarged at 1000px or less, and to the sheet at 700px', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(900)
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await userEvent.keyboard('{Escape}') // enlarged now: Esc closes it
+    expect(bubble()).toBeNull()
+  })
+
+  it('as a full-screen sheet, closes on Esc even when it was pinned', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(400)
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
   })
 
   it('closes an enlarged chat on Esc, but never a pinned one', async () => {
@@ -410,6 +461,31 @@ describe('Ask Vouch', () => {
       url === '/api/chat' ? chat(JSON.parse(init!.body as string)) : others(url, init))
   }
   const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+
+  it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
+    let write: (block: string) => void = () => {}
+    let end: () => void = () => {}
+    serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder()
+        write = (block) => controller.enqueue(encoder.encode(block))
+        end = () => controller.close()
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } })))
+    render(<App />)
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await act(async () => write('event: token\ndata: {"text":"Thank"}\n\n'))
+    await within(log).findByText('Thank')
+    expect(log.getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      write('event: token\ndata: {"text":" you."}\n\nevent: done\ndata: {}\n\n')
+      end()
+    })
+    await within(log).findByText('Thank you.')
+    await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'))
+  })
 
   it('keeps Send disabled while the message is empty', async () => {
     render(<App />)

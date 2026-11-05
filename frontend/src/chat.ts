@@ -1,9 +1,8 @@
-import { readEvents } from './assessment.ts'
-import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
+import { postEvents } from './assessment.ts'
 
 /** Vouch's chat (#44): one message to `POST /api/chat`, its reply read as server-sent events. */
 
-/** The page the lead is on, as the chat request and the chat's header name it. */
+/** The page the compliance lead is on, as the chat request and the chat's header name it. */
 export type PageContext = { page: 'dossier' | 'paper' | 'developer'; controlId: string | null }
 
 export type ChatEvent =
@@ -14,6 +13,7 @@ export type ChatEvent =
 
 /** Shown in the chat for any throw from `sendChat`; the typed message stays in the field. */
 export const CHAT_UNREACHABLE = 'Vouch could not be reached just now. Your message is kept: please try again shortly.'
+/** Must match CHAT_FAILED in src/vouch/chat.py: the one sentence for a chat that failed. */
 const NOT_ANSWERED = 'Vouch could not answer just now. Please try again shortly.'
 
 const PAGE_WORDS: Record<PageContext['page'], string> = {
@@ -28,31 +28,10 @@ export function pageLabel({ page, controlId }: PageContext): string {
 }
 
 /**
- * Sends the message and yields the reply's events until `done` or `error`.
+ * Sends the message and yields the reply's events until `done` or `error`; at the daily limit, its 429's message.
  * Throws when the service can't be reached, or the stream breaks off before either.
  */
-export async function* sendChat(message: string, context: PageContext): AsyncGenerator<ChatEvent> {
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(await authHeaders()) },
-    body: JSON.stringify({ message, page: context.page, control_id: context.controlId }),
-  })
-  if (response.status >= 500 || !response.body) throw new Error(`service answered ${response.status}`)
-  if (sessionEnded(response)) {
-    yield { event: 'error', data: { message: SESSION_ENDED } }
-    return
-  }
-  if (!response.ok) {
-    // The request rate's 429 says why; any other refusal doesn't.
-    const detail = response.status === 429
-      ? await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
-      : undefined
-    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : NOT_ANSWERED } }
-    return
-  }
-  for await (const item of readEvents(response.body)) {
-    yield item as ChatEvent
-    if (item.event === 'done' || item.event === 'error') return
-  }
-  throw new Error('the stream ended before the reply')
+export function sendChat(message: string, context: PageContext): AsyncGenerator<ChatEvent> {
+  const body = { message, page: context.page, control_id: context.controlId }
+  return postEvents<ChatEvent>('/api/chat', body, ['done'], NOT_ANSWERED)
 }

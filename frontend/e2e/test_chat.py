@@ -7,7 +7,9 @@ import pytest
 from playwright.sync_api import Page, expect
 
 CHAT = "aside[aria-label='Chat with Vouch']"
-SCROLLS_SIDEWAYS = "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
+SCROLLS_SIDEWAYS = (
+    "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
+)
 TOKEN = """(name) => {
   const probe = document.createElement('div')
   probe.style.background = `var(${name})`
@@ -53,7 +55,9 @@ def test_each_state_is_reachable_and_drawn_in_the_theme(page: Page, chat_url, sc
     expect(chat(page)).to_be_visible()
     bubble = box(page, CHAT)
     assert 1360 < bubble["x"] + bubble["width"] <= 1400 and bubble["width"] < 420
-    style = chat(page).evaluate("el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).boxShadow]")
+    style = chat(page).evaluate(
+        "el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).boxShadow]"
+    )
     assert style[0] == sheet and style[1] != "none"
 
     # Enlarged: wider and taller, still floating.
@@ -62,10 +66,14 @@ def test_each_state_is_reachable_and_drawn_in_the_theme(page: Page, chat_url, sc
     assert enlarged["width"] > bubble["width"] + 200 and enlarged["height"] > bubble["height"]
 
     # Pinned: a column of about 400px at the right edge, full height, flat.
-    page.get_by_role("button", name="Pin beside the page").click()
-    expect(page.get_by_role("button", name="Unpin")).to_have_attribute("aria-pressed", "true")
+    pin = page.get_by_role("button", name="Pin beside the page")
+    expect(pin).to_have_attribute("aria-pressed", "false")
+    pin.click()
+    expect(pin).to_have_attribute("aria-pressed", "true")
     pinned = box(page, CHAT)
-    assert pinned["x"] + pinned["width"] == 1400 and pinned["width"] == 400 and pinned["height"] == 800
+    assert (
+        pinned["x"] + pinned["width"] == 1400 and pinned["width"] == 400 and pinned["height"] == 800
+    )
     assert chat(page).evaluate("el => getComputedStyle(el).boxShadow") == "none"
     assert chat(page).evaluate("el => getComputedStyle(el).backgroundColor") == sheet
 
@@ -95,11 +103,10 @@ def test_ctrl_or_cmd_k_opens_and_esc_closes_a_bubble_but_not_a_pinned_chat(page:
     expect(chat(page)).to_be_visible()
 
 
-@pytest.mark.parametrize("width", [1400, 900])
-def test_pinned_the_page_and_chat_sit_side_by_side_with_no_sideways_scroll(
-    page: Page, chat_url, width
+def test_pinned_the_page_and_chat_sit_side_by_side_with_no_sideways_scroll_at_1400px(
+    page: Page, chat_url
 ):
-    open_page(page, chat_url, width)
+    open_page(page, chat_url, 1400)
     page.get_by_role("button", name="Ask Vouch").click()
     page.get_by_role("button", name="Make larger").click()
     page.get_by_role("button", name="Pin beside the page").click()
@@ -114,6 +121,47 @@ def test_pinned_the_page_and_chat_sit_side_by_side_with_no_sideways_scroll(
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
     expect(chat(page)).to_contain_text("on 4.1.2 · Working paper")
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
+
+
+def test_pin_isnt_offered_at_900px_only_bubble_and_enlarged(page: Page, chat_url):
+    open_page(page, chat_url, 900)
+    page.get_by_role("button", name="Ask Vouch").click()
+    expect(page.get_by_role("button", name="Pin beside the page")).to_have_count(0)
+
+    page.get_by_role("button", name="Make larger").click()
+
+    expect(chat(page)).to_have_class("bubble enlarged")
+    expect(page.get_by_role("button", name="Pin beside the page")).to_have_count(0)
+    assert page.evaluate(SCROLLS_SIDEWAYS) is False
+
+
+def test_a_chat_pinned_at_1400px_falls_back_to_enlarged_at_900px_and_the_page_takes_the_width(
+    page: Page, chat_url
+):
+    open_page(page, chat_url, 1400)
+    page.get_by_role("button", name="Ask Vouch").click()
+    page.get_by_role("button", name="Make larger").click()
+    page.get_by_role("button", name="Pin beside the page").click()
+
+    page.set_viewport_size({"width": 900, "height": 800})
+
+    expect(chat(page)).to_have_class("bubble enlarged")
+    assert box(page, "main")["width"] == 900  # no room kept for a column that is gone
+    page.keyboard.press("Escape")  # enlarged now: Esc closes it
+    expect(chat(page)).to_have_count(0)
+
+
+def test_a_chat_pinned_at_1400px_is_a_sheet_at_400px_and_esc_closes_it(page: Page, chat_url):
+    open_page(page, chat_url, 1400)
+    page.get_by_role("button", name="Ask Vouch").click()
+    page.get_by_role("button", name="Make larger").click()
+    page.get_by_role("button", name="Pin beside the page").click()
+
+    page.set_viewport_size({"width": 400, "height": 800})
+
+    assert box(page, CHAT) == {"x": 0, "y": 0, "width": 400, "height": 800}
+    page.keyboard.press("Escape")
+    expect(chat(page)).to_have_count(0)
 
 
 def test_at_400px_the_chat_is_a_full_screen_sheet_without_pin_or_enlarge(page: Page, chat_url):
@@ -156,9 +204,7 @@ def test_a_message_gets_vouchs_formal_reply(page: Page, chat_url):
     expect(field).to_have_value("")
 
 
-def test_with_the_chat_endpoint_down_a_message_shows_and_the_typed_text_stays(
-    page: Page, chat_url
-):
+def test_with_the_chat_endpoint_down_a_message_shows_and_the_typed_text_stays(page: Page, chat_url):
     page.route("**/api/chat", lambda route: route.abort())
     open_page(page, chat_url, 1400)
     page.get_by_role("button", name="Ask Vouch").click()

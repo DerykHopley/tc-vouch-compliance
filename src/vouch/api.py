@@ -27,7 +27,14 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch import audit
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
-from vouch.chat import CHAT_FAILED, Page, PageContext, chat_messages, streamed_reply
+from vouch.chat import (
+    CHAT_FAILED,
+    CHAT_PROMPT_VERSION,
+    Page,
+    PageContext,
+    chat_messages,
+    streamed_reply,
+)
 from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.dossier import overview
 from vouch.graph import (
@@ -71,6 +78,7 @@ from vouch.settings import (
     load_settings,
 )
 from vouch.spending import (
+    CHAT,
     MAX_DAILY_LIMIT,
     DailyLimitReached,
     NoSharedCounter,
@@ -549,7 +557,8 @@ class ChatRequest(BaseModel):
 
 
 def page_context(request: Annotated[ChatRequest, Body()]) -> PageContext:
-    """The page the lead is on; an unknown control is a plain 404, before the stream starts."""
+    """The page the compliance lead is on; an unknown control is a plain 404, before the stream
+    starts."""
     if request.control_id is None:
         return PageContext(request.page)
     try:
@@ -558,21 +567,44 @@ def page_context(request: Annotated[ChatRequest, Body()]) -> PageContext:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-@router.post("/chat", response_class=EventSourceResponse)
+def chat_within_spending(
+    context: Annotated[PageContext, Depends(page_context)],
+    user: CurrentUser,
+    spending: AppSpending,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+) -> None:
+    """The spending guard before a chat message, once the page and the model are known (M3,
+    docs/requirements.md 2026-11-03): at the day's limit, the daily limit's 429; a paid model
+    with only memory to count in, a 503. A chat message is not counted as an assessment."""
+    try:
+        spending.check(user.id, paid=chosen is not None)
+    except NoSharedCounter as error:
+        log.error("chat on OpenRouter needs %s for the daily limit", DATABASE_URL_ENV)
+        raise HTTPException(status_code=503, detail=str(error)) from None
+
+
+@router.post(
+    "/chat", response_class=EventSourceResponse, dependencies=[Depends(chat_within_spending)]
+)
 def chat(
     request: Annotated[ChatRequest, Body()],
     context: Annotated[PageContext, Depends(page_context)],
     profile: Profile,
     models: AppModels,
     chosen: Annotated[str | None, Depends(chosen_model)],
+    user: CurrentUser,
+    spending: AppSpending,
 ) -> Iterable[ServerSentEvent]:
-    """The chat agent's reply to the lead's message (vouch.chat), knowing the page and control
-    the lead is on: a `token` event per piece of the reply as it is written, then `done`; or
-    one `error`, then close. Secrets and personal data are removed from the reply, a guard
-    `step` saying what (security layer 4). The model is the assessments' (vouch.model_choice):
-    OpenRouter when a key is set, else the chat's canned fake."""
+    """The chat agent's reply to the compliance lead's message (vouch.chat), knowing the page
+    and control they are on: a `token` event per piece of the reply as it is written, then
+    `done`; or one `error`, then close. Secrets and personal data are removed from the reply,
+    a guard `step` saying what (security layer 4). The model is the assessments'
+    (vouch.model_choice): OpenRouter when a key is set, else the chat's canned fake. Its tokens
+    and cost are metered and kept with the assessments' (vouch.spending), whether the reply
+    ends in `done` or an `error`: the call was made."""
+    meter = UsageMeter(chosen)
     try:
-        model = models.for_chat(chosen)
+        model = models.for_chat(chosen, callbacks=[meter])
         messages = chat_messages(request.message, profile, context)
         for text, removed in streamed_reply(model, messages):
             if removed:
@@ -584,6 +616,16 @@ def chat(
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("the chat could not answer")
         yield ServerSentEvent(event="error", data={"message": CHAT_FAILED})
+    finally:
+        usage = meter.usage()
+        log.info(
+            "a chat message on %s (%s): %d tokens in, %d tokens out",
+            usage.model,
+            CHAT_PROMPT_VERSION,
+            usage.input_tokens,
+            usage.output_tokens,
+        )
+        record_off_the_event_loop(spending, user.id, CHAT, usage)
 
 
 DEVELOPERS = [Depends(require_developer)]

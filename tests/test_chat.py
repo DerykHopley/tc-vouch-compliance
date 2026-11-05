@@ -1,16 +1,20 @@
 """Vouch's chat (#44): the chat stream endpoint, and the chat agent's prompt and reply."""
 
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import SecretStr
 from test_api import read_events
 
 from vouch.api import create_app, load_default_profile
-from vouch.chat import CHAT_FAILED, PageContext, chat_messages, streamed_reply
-from vouch.fake_model import CHAT_REPLY, CannedChatModel
+from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext, chat_messages, streamed_reply
+from vouch.chat_fake import CHAT_REPLY, CannedChatModel
 from vouch.isa import load_isa_control
 from vouch.model_choice import ModelChoice
 from vouch.profile import DEFAULT_PROFILE, load_named_profile
+from vouch.redaction import remember_secrets
 from vouch.settings import Settings
 
 
@@ -58,9 +62,9 @@ def test_an_unknown_control_is_404_and_no_stream(client):
     assert not response.headers["content-type"].startswith("text/event-stream")
 
 
-def test_the_model_sees_the_page_and_control_the_lead_is_on(client, monkeypatch):
+def test_the_model_sees_the_page_and_control_the_compliance_lead_is_on(client, monkeypatch):
     fake = CannedChatModel()
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
 
     chat(client, message="What's missing here?", page="paper", control_id="4.1.2")
 
@@ -73,7 +77,7 @@ def test_the_model_sees_the_page_and_control_the_lead_is_on(client, monkeypatch)
 
 def test_a_model_failure_ends_the_stream_with_one_formal_error_event(client, monkeypatch):
     fake = CannedChatModel(fail_with=RuntimeError("socket on fire"))
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
 
     response = chat(client, message="Hello")
 
@@ -89,7 +93,7 @@ def test_a_secret_in_the_reply_is_removed_with_a_guard_step(client, monkeypatch)
         "Your token is Bearer abc123def456ghi and the address is anna.schmidt@example.com today."
     )
     fake = CannedChatModel(reply=leaked)
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
 
     response = chat(client, message="Hello")
 
@@ -143,3 +147,85 @@ def test_a_secret_split_across_chunks_is_still_removed(chunks):
 
     assert "".join(text for text, _ in pieces) == "Bearer [removed] end"
     assert any(removed for _, removed in pieces)
+
+
+@pytest.mark.parametrize(
+    ("chunks", "expected"),
+    [
+        (["Bearer\n", "abc12345 ok"], "Bearer [removed] ok"),
+        (
+            ["Authorization:", " Bearer", " tok", "en1234 done"],
+            "Authorization: Bearer [removed] done",
+        ),
+        (
+            ["Authorization:\n", "Bearer\n", "abcd", "efghijklmnopqrstuvwx\n", "then more words"],
+            "Authorization:\nBearer [removed]\nthen more words",  # the scheme kept as written
+        ),
+    ],
+)
+def test_a_secret_split_across_whitespace_or_lines_is_never_half_sent(chunks, expected):
+    pieces = list(streamed_reply(CannedChatModel(chunks=chunks), []))
+
+    assert "".join(text for text, _ in pieces) == expected
+
+
+def test_a_remembered_secret_with_spaces_is_removed_across_chunks():
+    remember_secrets(Settings(openrouter_api_key=SecretStr("open sesame key 0047 plus")))
+    chunks = ["The key is open ", "sesame", " key 0047", " plus and", " that is all."]
+
+    pieces = list(streamed_reply(CannedChatModel(chunks=chunks), []))
+
+    assert "".join(text for text, _ in pieces) == "The key is [removed] and that is all."
+
+
+def test_a_long_reply_is_sent_as_it_is_written_not_held_to_the_end():
+    words = [f" word{i}" for i in range(200)]
+
+    seen = [text for text, _ in streamed_reply(CannedChatModel(chunks=words), [])]
+
+    assert len(seen) > 150  # sent along the way, a few words behind
+    assert "".join(seen) == "".join(words)
+
+
+# The spending guard (M3, docs/requirements.md 2026-11-03): chat is metered, and refused at the limit
+
+
+def test_a_chat_messages_tokens_are_in_the_developer_pages_totals_but_not_its_assessments(client):
+    chat(client, message="Where do I stand?")
+
+    usage = client.get("/api/developer/settings").json()["usage"]["fake"]
+    assert usage["input_tokens"] > 0 and usage["output_tokens"] > 0
+    assert usage["assessments"] == 0
+
+
+def test_a_chat_message_takes_nothing_from_the_daily_assessment_count(client):
+    client.put("/api/developer/daily-limit", json={"daily_limit": 1})
+
+    for _ in range(3):
+        assert chat(client, message="Hello").status_code == 200
+    assessed = client.post("/api/assessments", json={"control_id": "4.1.2"})
+
+    assert assessed.status_code == 200
+
+
+def test_once_the_daily_limit_is_reached_a_chat_message_is_refused_with_its_429(client):
+    client.put("/api/developer/daily-limit", json={"daily_limit": 1})
+    client.post("/api/assessments", json={"control_id": "4.1.2"})
+
+    response = chat(client, message="Hello")
+
+    assert response.status_code == 429
+    body = response.json()
+    assert body["limit"] == "daily" and body["detail"].startswith("You have reached today's limit")
+    assert int(response.headers["Retry-After"]) > 0
+
+
+def test_the_chat_prompt_version_is_on_the_developer_page_and_in_the_usage_log(client, caplog):
+    settings = client.get("/api/developer/settings").json()
+    assert settings["chat_prompt_version"] == CHAT_PROMPT_VERSION
+
+    with caplog.at_level(logging.INFO, logger="vouch.api"):
+        chat(client, message="Hello")
+
+    logged = [r.getMessage() for r in caplog.records]
+    assert any(CHAT_PROMPT_VERSION in line and "tokens" in line for line in logged), logged
