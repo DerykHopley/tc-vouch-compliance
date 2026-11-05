@@ -260,20 +260,21 @@ def render(runs: Sequence[Run]) -> str:
 
 def keep_reading(page: str, existing: str | None) -> str:
     """The rendered page inside its tables block, with whatever an existing file has around
-    that block (the reading) kept as it is. A file without the block is replaced whole; one
-    whose block is broken (a marker missing, doubled or out of order) raises ReportError, so
-    a reading is never lost."""
+    that block (the reading) kept as it is. A new file, or one that is exactly this page with
+    no markers (the renderer's own output, no reading), is written whole. Any other file whose
+    block is missing or broken (both markers gone, one missing, doubled or out of order) raises
+    ReportError and is left alone, so a reading is never lost."""
     block = f"{TABLES_START}\n{page}{TABLES_END}\n"
-    if existing is None:
+    if existing is None or existing == page:
         return block
     starts, ends = existing.count(TABLES_START), existing.count(TABLES_END)
-    if starts == ends == 0:
-        return block
     before, _, rest = existing.partition(TABLES_START)
     if starts != 1 or ends != 1 or TABLES_END not in rest:
+        state = "has no tables markers" if starts == ends == 0 else "has a broken tables block"
         raise ReportError(
-            f"the page's tables block is broken: it needs one {TABLES_START} line, then one "
-            f"{TABLES_END} line; fix the page, or delete it to render it afresh"
+            f"the page {state}, so a re-render could overwrite its reading: restore one "
+            f"{TABLES_START} line before the rendered tables and one {TABLES_END} line after "
+            "them (git shows where they were), then render again"
         )
     after = rest.partition(TABLES_END)[2].removeprefix("\n")
     return before + block + after

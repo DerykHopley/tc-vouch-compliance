@@ -47,6 +47,9 @@ def price_of(name: str) -> Price | None:
     return PRICES.get(name)
 
 
+PriceKind = Literal["listed", "variable", "local"]
+
+
 @dataclass(frozen=True)
 class EvalModel:
     """A model the eval runs: its id (OpenRouter's, or `ollama/<name>`), why it's in the set,
@@ -55,9 +58,17 @@ class EvalModel:
     id: str
     why: str
     source: str
-    variable_price: bool = False
-    """A router: each request costs what the model it picks costs, so there is no price to
-    list; only OpenRouter's reported cost counts, and a call without one has an unknown cost."""
+    router: bool = False  # picks a model per request, so its price varies (price_kind)
+
+    @property
+    def price_kind(self) -> PriceKind:
+        """What kind of price the model has: `local` (Ollama, free), `variable` (a router:
+        each request costs what the model it picks costs, so there is no price to list and only
+        OpenRouter's reported cost counts; a call without one has an unknown cost), or `listed`
+        (its price in vouch.spending.PRICES)."""
+        if self.id.startswith(OLLAMA_PREFIX):
+            return "local"
+        return "variable" if self.router else "listed"
 
     @property
     def price(self) -> Price | None:
@@ -81,7 +92,7 @@ MODELS: tuple[EvalModel, ...] = (
         "Sonnet's quality nearer Haiku's cost?); results record only the router, and it may "
         "route to OpenAI, the judge's provider. Nordlicht only (#54)",
         f"{OPENROUTER_SOURCE} (its pricing -1 / -1: set per request)",
-        variable_price=True,
+        router=True,
     ),
     EvalModel(
         LOCAL_MODEL,

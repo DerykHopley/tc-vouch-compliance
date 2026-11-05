@@ -10,7 +10,6 @@ from vouch.eval_models import (
     JUDGE,
     LOCAL_PRICE,
     MODELS,
-    OLLAMA_PREFIX,
     ModelUnavailable,
     OllamaNotRunning,
     chat_models,
@@ -137,19 +136,30 @@ def test_the_list_is_what_ran_haiku_sonnet_the_jev_router_and_one_local_model():
 
 def test_each_model_and_the_judge_has_a_price_with_its_source_and_date_and_a_reason():
     for m in (*MODELS, JUDGE):
-        assert m.price is not None or m.variable_price, m.id
+        assert m.price is not None or m.price_kind == "variable", m.id
         assert DATED_SOURCE.search(m.source), m.id
         assert m.why, m.id
 
 
 def test_the_router_has_no_fixed_price_so_only_openrouters_reported_cost_counts():
-    [router] = [m for m in MODELS if m.variable_price]
+    [router] = [m for m in MODELS if m.price_kind == "variable"]
 
     assert router.id == "typesafe/jev-router"
     assert router.price is None  # an unreported cost stays unknown, never $0
     assert router.id not in PRICES
     assert "openai" in router.why.lower()  # it may route to the judge's provider
-    assert all(not m.variable_price for m in MODELS if m is not router)
+
+
+def test_each_model_has_one_kind_of_price():
+    kinds = {m.id: m.price_kind for m in (*MODELS, JUDGE)}
+
+    assert kinds == {
+        DEFAULT_MODEL: "listed",
+        "anthropic/claude-sonnet-5.5": "listed",
+        "typesafe/jev-router": "variable",
+        "ollama/gpt-oss:20b": "local",
+        JUDGE.id: "listed",
+    }
 
 
 def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
@@ -160,11 +170,11 @@ def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
 
 def test_the_app_knows_each_hosted_models_price_so_its_cost_is_never_unknown():
     for m in (*MODELS, JUDGE):
-        if not m.id.startswith(OLLAMA_PREFIX) and not m.variable_price:
+        if m.price_kind == "listed":
             assert PRICES[m.id] == m.price, m.id
 
 
 def test_the_local_model_is_free():
-    [local] = [m for m in MODELS if m.id.startswith(OLLAMA_PREFIX)]
+    [local] = [m for m in MODELS if m.price_kind == "local"]
 
     assert local.price == LOCAL_PRICE

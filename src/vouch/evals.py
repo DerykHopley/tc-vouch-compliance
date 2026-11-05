@@ -704,7 +704,7 @@ def real_models(
 
 def _listed(m: EvalModel) -> str:
     """One model's line, its price and why, then where that was read, and when."""
-    if m.variable_price:
+    if m.price_kind == "variable":
         price = "price varies per request (OpenRouter reports each call's cost)"
     elif m.price:
         price = f"${m.price.input_per_million} / ${m.price.output_per_million}"
