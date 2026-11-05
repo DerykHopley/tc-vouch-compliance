@@ -372,6 +372,35 @@ def test_a_real_model_with_no_key_is_refused_and_the_fake_still_runs(tmp_path, c
     assert main(["--model", "fake", "--results", str(tmp_path)]) == 0
 
 
+@pytest.mark.parametrize("auth_mode", [None, "bogus"])
+def test_the_eval_starts_whatever_the_apps_sign_in_settings_say(
+    auth_mode, tmp_path, monkeypatch
+):
+    """The eval signs nobody in, so Clerk keys with no (or a wrong) auth mode don't stop it;
+    it reads only the OpenRouter key (#173)."""
+    for name in ("CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "CLERK_JWT_KEY"):
+        monkeypatch.setenv(name, "clerk-test-value")
+    if auth_mode is None:
+        monkeypatch.delenv("VOUCH_AUTH_MODE", raising=False)
+    else:
+        monkeypatch.setenv("VOUCH_AUTH_MODE", auth_mode)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+    endpoint = FakeEndpoint()
+    seen = []
+
+    def real_models(name, settings, **ollama):
+        seen.append(settings.openrouter_api_key.get_secret_value())
+        return endpoint
+
+    monkeypatch.setattr(evals, "real_models", real_models)
+    monkeypatch.setattr(evals, "_judge_name", lambda args: None)
+    monkeypatch.setattr("builtins.input", answers("no"))
+
+    assert main(["--model", MODEL, "--results", str(tmp_path)]) == 0
+    assert seen == ["sk-test-not-real"]
+    assert saved(tmp_path)["status"] == "stopped at the estimate"
+
+
 @pytest.mark.parametrize(
     ("named", "judge"), [([], eval_models.JUDGE.id), (["--judge", "j/other"], "j/other")]
 )

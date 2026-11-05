@@ -70,7 +70,7 @@ from vouch.profile import (
     UnknownProfileError,
     load_named_profile,
 )
-from vouch.settings import Settings, SettingsError, load_settings
+from vouch.settings import Settings, load_model_settings
 from vouch.spending import FAKE, Price, Usage, UsageMeter
 
 EXPECTED_ANSWERS = "expected-answers.yaml"  # in the profile's fixtures folder
@@ -789,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         profile = load_named_profile(args.profile)
         cases = load_cases(FIXTURES_DIR / profile.id / EXPECTED_ANSWERS, profile.id)
-        settings = load_settings() if args.model != FAKE or judge_name else Settings()
+        settings = load_model_settings() if args.model != FAKE or judge_name else Settings()
         if args.model == FAKE:
             models = EvalModels(FAKE, fake_models(FAKE_SCRIPTS_DIR / profile.id))
         else:
@@ -807,7 +807,6 @@ def main(argv: list[str] | None = None) -> int:
         UnknownProfileError,
         ProfileError,
         CasesError,
-        SettingsError,
         ModelUnavailable,
         JudgeUnavailable,
     ) as error:
