@@ -12,14 +12,20 @@ export type Run =
 /** The next task: the browser paints, and observers see, each step before the next one lands. */
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-/** One control's assessment run: `start` is ignored while a run is in progress. */
-export function useAssessment(controlId: string) {
-  const [run, setRun] = useState<Run>({ status: 'idle', steps: [] })
+/**
+ * The page's assessment run, one at a time, of the control `start` names: held above the views, so it carries on
+ * while the lead leaves the working paper. `start` is ignored while a run is in progress; `onDone` is called once a
+ * run has its result.
+ */
+export function useAssessment(onDone?: () => void) {
+  const [current, setCurrent] = useState<{ controlId: string | null; run: Run }>(
+    { controlId: null, run: { status: 'idle', steps: [] } })
   const running = useRef(false) // a ref, so two clicks in one tick still start one run
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (controlId: string) => {
     if (running.current) return
     running.current = true
+    const setRun = (run: Run) => setCurrent({ controlId, run })
     const steps: Step[] = []
     setRun({ status: 'running', steps })
     try {
@@ -32,6 +38,7 @@ export function useAssessment(controlId: string) {
           continue // the result carries every requirement too; the page shows none yet
         } else if (item.event === 'result') {
           setRun({ status: 'done', steps, assessment: item.data.assessment, usage: item.data.usage })
+          onDone?.()
         } else {
           setRun({ status: 'failed', steps, message: item.data.message })
         }
@@ -41,7 +48,7 @@ export function useAssessment(controlId: string) {
     } finally {
       running.current = false
     }
-  }, [controlId])
+  }, [onDone])
 
-  return { run, start }
+  return { run: current.run, controlId: current.controlId, start }
 }

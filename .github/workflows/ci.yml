@@ -55,7 +55,7 @@ jobs:
 
   database:
     # The integration tests that need Postgres (#33's database module, #35's spending guard,
-    # #38's assessments and memory per user)
+    # #38's assessments and memory per user, #40's overview)
     # against a service container, on every PR and on main: it takes seconds. Cloud SQL runs
     # PostgreSQL 16. Every file that uses VOUCH_TEST_DATABASE_URL belongs in the command below.
     runs-on: ubuntu-latest
@@ -75,8 +75,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --locked
-      - name: the database module, spending guard and memory against Postgres, none skipped
-        run: set -o pipefail; uv run pytest tests/test_database.py tests/test_spending.py tests/test_memory.py -rs | tee "$RUNNER_TEMP/db.txt" && ! grep -q SKIPPED "$RUNNER_TEMP/db.txt"
+      - name: the database module, spending guard, memory and overview against Postgres, none skipped
+        run: set -o pipefail; uv run pytest tests/test_database.py tests/test_spending.py tests/test_memory.py tests/test_dossier.py -rs | tee "$RUNNER_TEMP/db.txt" && ! grep -q SKIPPED "$RUNNER_TEMP/db.txt"
         env:
           VOUCH_TEST_DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/postgres
 
