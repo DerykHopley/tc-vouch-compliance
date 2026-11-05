@@ -20,6 +20,7 @@ recorded" for a run saved before they were.
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from collections.abc import Callable, Iterable, Sequence
@@ -120,9 +121,32 @@ def served_models(cases: Sequence[dict[str, Any]]) -> dict[str, int] | None:
     return total
 
 
+OLLAMA = "ollama/"
+"""vouch.eval_models' OLLAMA_PREFIX, which Ollama's answers leave out; written again here so the
+report needn't import the model code."""
+DATED = re.compile(r"-\d{8}$")
+
+
+def _same_model(requested: str, served: str) -> bool:
+    """Whether `served` is the model asked for, under another of its names. A local model is
+    asked for as `ollama/<name>:<tag>` and answers as `<name>:<tag>` (the tag is the model, so
+    it's kept). OpenRouter may answer with a model's dated canonical slug
+    (`anthropic/claude-sonnet-5.5-20260928`) and without a `:variant` suffix (`:free`), so both
+    are left out of the match. That OpenRouter's answers carry the dated slug is unverified
+    without a paid call: the catalogue gives each model one, so the match allows for it."""
+    if requested.startswith(OLLAMA):
+        return requested.removeprefix(OLLAMA) == served
+
+    def plain(model: str) -> str:
+        return DATED.sub("", model.split(":", 1)[0])
+
+    return plain(requested) == plain(served)
+
+
 def routed(model: str, served: dict[str, int] | None) -> bool:
-    """Whether some call was served by a model other than the one asked for: a router's run."""
-    return bool(served) and set(served) != {model}
+    """Whether some call was served by a model other than the one asked for: a router's run.
+    The served ids stay as the answers gave them; only this decision matches names."""
+    return any(not _same_model(model, s) for s in served or {})
 
 
 def served_text(served: dict[str, int]) -> str:

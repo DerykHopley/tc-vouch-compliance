@@ -239,10 +239,11 @@ def _served_model(response: LLMResult) -> str | None:
     langchain-openai puts it in `llm_output["model_name"]`, or on a streamed call in the
     message's `response_metadata["model_name"]`."""
     served = (response.llm_output or {}).get("model_name")
-    for generations in [] if served else response.generations:
-        for generation in generations:
-            metadata = getattr(getattr(generation, "message", None), "response_metadata", {})
-            served = served or metadata.get("model_name")
+    if isinstance(served, str) and served:
+        return served
+    first = next((g for generations in response.generations for g in generations), None)
+    metadata = getattr(getattr(first, "message", None), "response_metadata", None) or {}
+    served = metadata.get("model_name")
     return served if isinstance(served, str) and served else None
 
 

@@ -688,6 +688,15 @@ def test_a_call_whose_answer_names_no_model_records_no_served_model():
     assert meter.usage().served_models == {}
 
 
+def test_a_streamed_call_names_its_served_model_in_the_messages_metadata():
+    message = AIMessage("", response_metadata={"model_name": LUNA})
+    meter = UsageMeter(ROUTER)
+
+    meter.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]))
+
+    assert meter.usage().served_models == {LUNA: 1}
+
+
 def test_the_apps_usage_answer_is_unchanged_by_the_served_model(chat, catalogue):
     usage = result_of(assess(TestClient(app_with_key(chat, catalogue))))["usage"]
 

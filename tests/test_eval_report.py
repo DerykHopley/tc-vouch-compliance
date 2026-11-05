@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 from test_eval_runner import FakeEndpoint, answers, models
 
-from vouch.eval_report import assessment_measures, load_runs, main, render, write_atomic
+from vouch.eval_report import (
+    assessment_measures,
+    load_runs,
+    main,
+    render,
+    routed,
+    write_atomic,
+)
 from vouch.evals import ResultsFile, RunInfo, load_cases, run_confirmed
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile
@@ -219,7 +226,10 @@ def test_the_served_models_show_the_routers_mix_and_not_recorded_for_an_older_re
         case("1.6.1", 3000, 0.004, 6.0, **served({luna: 3})),
     ]
     direct = raw("nordlicht", sonnet, "2026-11-05T11", 0.8)
-    direct["cases"] = [case("1.1.1", 1000, 0.002, 4.0, **served({sonnet: 5}))]
+    direct["cases"] = [
+        case("1.1.1", 1000, 0.002, 4.0, **served({sonnet: 5})),
+        case("1.6.1", 1000, 0.002, 4.0, **served({f"{sonnet}-20260928": 2})),  # its dated slug
+    ]
     write(tmp_path, "new.json", new)
     write(tmp_path, "direct.json", direct)
     write(tmp_path, "old.json", raw("alpenwerk", router, "2026-11-04T10", 0.6))  # before #185
@@ -229,3 +239,20 @@ def test_the_served_models_show_the_routers_mix_and_not_recorded_for_an_older_re
     table = page.split("## Served models", 1)[1].split("## Runs", 1)[0]
     assert f"| {router} | not recorded | {luna} 7 calls, {sonnet} 3 calls |" in table
     assert f"| {sonnet} | not run | as requested |" in table
+
+
+@pytest.mark.parametrize(
+    ("model", "served", "is_routed"),
+    [
+        ("anthropic/claude-sonnet-5.5", {"anthropic/claude-sonnet-5.5-20260928": 3}, False),
+        ("openai/gpt-6-luna:free", {"openai/gpt-6-luna": 2}, False),  # a :variant dropped
+        ("ollama/gpt-oss:20b", {"gpt-oss:20b": 4}, False),
+        ("ollama/gpt-oss:20b", {"gpt-oss:120b": 4}, True),  # Ollama's tag is the model
+        ("typesafe/jev-router", {"openai/gpt-6-luna-20260901": 1}, True),
+        ("typesafe/jev-router", {}, False),
+    ],
+)
+def test_routed_matches_the_same_model_under_its_dated_slug_variant_or_ollama_name(
+    model, served, is_routed
+):
+    assert routed(model, served) is is_routed

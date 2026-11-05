@@ -622,13 +622,14 @@ def summary(report: EvalReport, *, profile: str, model: str, today: date) -> str
         *_measure_lines(report),
     ]
     run_served = served_models([raw_case(s) for s in report.scores])
-    if routed(model, run_served):
+    is_routed = routed(model, run_served)
+    if is_routed:
         lines.append(f"Served models: {served_text(run_served or {})}")
     for s in report.scores:
         served = s.usage.served_models if s.usage is not None else None
-        on = f"; served {served_text(served)}" if served and routed(model, run_served) else ""
+        served_suffix = f"; served {served_text(served)}" if is_routed and served else ""
         if s.error is not None:
-            lines.append(f"  {s.control_id:<6} Failed: {s.error}{on}")
+            lines.append(f"  {s.control_id:<6} Failed: {s.error}{served_suffix}")
             continue
         wrong = ", ".join(r.requirement_id for r in s.requirements if not r.right)
         lines.append(
@@ -636,7 +637,7 @@ def summary(report: EvalReport, *, profile: str, model: str, today: date) -> str
             + (f" (wrong: {wrong})" if wrong else "")
             + f"; control {s.verdict}, expected {s.expected_verdict}"
             + f"; citations {s.cited_right}/{s.cited} expected"
-            + on
+            + served_suffix
         )
     lines.extend(f"  Bad case {b.control_id}: {b.problem}" for b in report.bad_cases)
     return "\n".join(lines) + "\n"

@@ -576,10 +576,20 @@ def test_a_router_runs_raw_results_and_summary_list_the_served_models_with_call_
     assert line.endswith(f"; served {LUNA} {calls[0]} calls")
 
 
-def test_a_model_asked_for_directly_shows_no_served_models_in_the_summary():
-    report = run_eval(CASES.cases[:1], NORDLICHT, models(RoutedEndpoint(MODEL)), today=CASES.today)
+@pytest.mark.parametrize(
+    ("requested", "served"),
+    [
+        (MODEL, MODEL),
+        ("anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5-20260928"),  # dated slug
+        ("ollama/gpt-oss:20b", "gpt-oss:20b"),  # Ollama answers without the prefix
+    ],
+    ids=["same-id", "dated-slug", "local"],
+)
+def test_a_model_asked_for_directly_shows_no_served_models_in_the_summary(requested, served):
+    endpoint = RoutedEndpoint(served)
+    report = run_eval(CASES.cases[:1], NORDLICHT, models(endpoint, name=requested), today=CASES.today)
 
     [score] = report.scores
-    assert score.usage is not None and set(score.usage.served_models) == {MODEL}
-    text = evals.summary(report, profile="nordlicht", model=MODEL, today=CASES.today)
+    assert score.usage is not None and set(score.usage.served_models) == {served}  # kept as given
+    text = evals.summary(report, profile="nordlicht", model=requested, today=CASES.today)
     assert "served" not in text.lower()
