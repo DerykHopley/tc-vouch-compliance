@@ -1,21 +1,32 @@
 import type { ReactNode } from 'react'
+import type { Gate } from './authConfig.ts'
 import TopBar from './TopBar.tsx'
+import { BY_INVITATION, COURSE_MEMBERS } from './words.ts'
 
-/** The page every visitor sees until signed in (clerk mode); `children` is the sign-in, or why it can't show. */
-export default function Invitation({ children }: { children: ReactNode }) {
+/**
+ * The page every visitor sees until signed in (clerk mode); `children` is the sign-in, or why it can't show. Its words
+ * follow who may sign in: the course's Discord server's members (#152), or invited users.
+ */
+export default function Invitation({ gate = 'clerk', children }: { gate?: Gate; children: ReactNode }) {
+  return (
+    <Page {...(gate === 'discord-server' ? COURSE_MEMBERS : BY_INVITATION)}>
+      <section className="signin" aria-label="Sign in">{children}</section>
+    </Page>
+  )
+}
+
+/** The top bar and a Dossier-style hero, then `children`: the shape of every page before the app. */
+export function Page({ pill, title, text, children }: { pill: string; title: string; text: string; children?: ReactNode }) {
   return (
     <>
       <TopBar />
       <main className="dossier wrap">
         <section className="hero">
-          <span className="pill">By invitation</span>
-          <h1>Access is by invitation</h1>
-          <p>
-            Vouch is available to invited users only. If you have received an invitation, sign in with the Discord
-            account that uses the e-mail address it was sent to.
-          </p>
+          <span className="pill">{pill}</span>
+          <h1>{title}</h1>
+          <p>{text}</p>
         </section>
-        <section className="signin" aria-label="Sign in">{children}</section>
+        {children}
       </main>
     </>
   )

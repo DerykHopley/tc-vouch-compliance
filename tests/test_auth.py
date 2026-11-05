@@ -412,7 +412,11 @@ def test_the_connection_to_clerk_is_closed_on_shutdown(clerk):
 def test_health_tells_the_front_end_how_to_sign_in(client):
     response = client.get("/api/health")
 
-    assert response.json()["auth"] == {"mode": "clerk", "publishable_key": "pk_test_ZmFrZSQ"}
+    assert response.json()["auth"] == {
+        "mode": "clerk",
+        "publishable_key": "pk_test_ZmFrZSQ",
+        "gate": "clerk",  # no Discord server set (#152)
+    }
 
 
 def test_local_mode_is_unchanged_one_default_user_and_no_sign_in():
@@ -428,5 +432,323 @@ def test_local_mode_is_unchanged_one_default_user_and_no_sign_in():
 
     # Local mode is for a developer's machine: its one user is a developer.
     assert client.get("/whoami").json() == {"id": "local-user", "role": "developer"}
-    assert client.get("/api/health").json()["auth"] == {"mode": "local", "publishable_key": None}
+    assert client.get("/api/health").json()["auth"] == {
+        "mode": "local",
+        "publishable_key": None,
+        "gate": "none",
+    }
     assert client.get("/openapi.json").status_code == 200  # the API map stays, locally
+
+
+# --- The course's Discord server gates access (#152) --------------------------------------------
+
+SERVER = "111111111111111111"  # the course's Discord server
+OTHER_SERVER = "222222222222222222"
+GATED = ClerkKeys(**(vars(KEYS) | {"discord_server_id": SERVER}))
+DISCORD_TOKEN = "discord-oauth-token-marker"
+
+
+class FakeAccess:
+    """Clerk's Backend API (users, their Discord token, invitations) and Discord's API, one fake.
+
+    `servers`: each user's Discord servers, in order. `scopes`: each user's token's scopes (none
+    listed is a token Clerk doesn't hold). `invited`: e-mail addresses with an accepted invitation.
+    """
+
+    def __init__(self) -> None:
+        self.metadata: dict[str, dict[str, Any]] = {
+            "user_alice": {},
+            "user_bob": {},
+            "user_dev": {"role": "developer"},
+            "user_flagged": {"access": "invited"},
+            "user_invited": {},
+        }
+        self.emails = {"user_invited": "reviewer@example.com", "user_bob": "bob@example.com"}
+        self.servers: dict[str, list[str]] = {"user_alice": [OTHER_SERVER, SERVER]}
+        self.scopes: dict[str, list[str]] = {
+            user: ["identify", "email", "guilds"] for user in self.metadata
+        }
+        self.invited = {"reviewer@example.com"}
+        self.calls: list[httpx.Request] = []
+        self.clerk_fail: Callable[[httpx.Request], httpx.Response] | None = None
+        self.discord_fail: Callable[[httpx.Request], httpx.Response] | None = None
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(request)
+        if request.url.host == "discord.com":
+            return (self.discord_fail or self.discord)(request)
+        return (self.clerk_fail or self.clerk)(request)
+
+    def clerk(self, request: httpx.Request) -> httpx.Response:
+        if request.headers.get("authorization") != f"Bearer {SECRET}":
+            return httpx.Response(401, json={"errors": []})
+        path = request.url.path
+        if path == "/v1/invitations":
+            query = request.url.params.get("query", "")
+            status = request.url.params.get("status")
+            # Clerk's query matches part of an address; the app must check the whole one.
+            found = [e for e in self.invited if query and query in e and status == "accepted"]
+            return httpx.Response(
+                200,
+                json=[
+                    {"object": "invitation", "email_address": e, "status": "accepted"}
+                    for e in found
+                ],
+            )
+        user_id, _, rest = path.removeprefix("/v1/users/").partition("/")
+        if user_id not in self.metadata:
+            return httpx.Response(404, json={"errors": []})
+        if rest == "oauth_access_tokens/oauth_discord":
+            scopes = self.scopes.get(user_id)
+            if scopes is None:
+                return httpx.Response(200, json=[])
+            tokens = [
+                {
+                    "object": "oauth_access_token",
+                    "provider": "oauth_discord",
+                    "token": f"{DISCORD_TOKEN}-{user_id}",
+                    "scopes": scopes,
+                }
+            ]
+            return httpx.Response(200, json=tokens)
+        email = self.emails.get(user_id)
+        addresses = (
+            [
+                {"email_address": email, "verification": {"status": "verified"}},
+                {
+                    "email_address": "unverified@example.com",
+                    "verification": {"status": "unverified"},
+                },
+            ]
+            if email
+            else []
+        )
+        return httpx.Response(
+            200,
+            json={
+                "id": user_id,
+                "private_metadata": self.metadata[user_id],
+                "public_metadata": {"access": "invited", "role": "developer"},  # never read
+                "email_addresses": addresses,
+            },
+        )
+
+    def discord(self, request: httpx.Request) -> httpx.Response:
+        auth = request.headers.get("authorization", "")
+        user_id = auth.removeprefix(f"Bearer {DISCORD_TOKEN}-")
+        if not auth.startswith(f"Bearer {DISCORD_TOKEN}-") or user_id not in self.metadata:
+            return httpx.Response(401, json={"message": "401: Unauthorized", "code": 0})
+        if "guilds" not in self.scopes.get(user_id, []):
+            return httpx.Response(403, json={"message": "Missing Access", "code": 50001})
+        assert request.url.path == "/api/v10/users/@me/guilds"
+        limit = int(request.url.params["limit"])
+        after = request.url.params.get("after")
+        servers = self.servers.get(user_id, [])
+        start = servers.index(after) + 1 if after else 0
+        page = servers[start : start + limit]
+        return httpx.Response(200, json=[{"id": s, "name": f"server {s}"} for s in page])
+
+    def discord_calls(self) -> list[httpx.Request]:
+        return [call for call in self.calls if call.url.host == "discord.com"]
+
+
+@pytest.fixture
+def access() -> FakeAccess:
+    return FakeAccess()
+
+
+def gated_app(
+    access: FakeAccess, keys: ClerkKeys = GATED, clock: Callable[[], float] = time.monotonic
+):
+    app = create_app(Settings(auth_mode="clerk", clerk=keys))
+    http = httpx.Client(transport=httpx.MockTransport(access))
+    app.state.auth = ClerkAuth(keys, client=http, clock=clock)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def ask(client: TestClient, user: str) -> httpx.Response:
+    return client.get("/api/access", headers=bearer(token(user)))
+
+
+def test_a_member_of_the_course_server_is_allowed(access):
+    response = ask(gated_app(access), "user_alice")
+
+    assert response.status_code == 200
+    assert response.json() == {"access": "allowed"}
+    [call] = access.discord_calls()
+    assert call.url.params["limit"] == "200"
+
+
+def test_someone_outside_the_course_server_gets_403_not_a_member_on_every_route(access):
+    access.servers["user_bob"] = [OTHER_SERVER]
+    client = gated_app(access)
+
+    for response in (
+        ask(client, "user_bob"),
+        client.post(
+            "/api/assessments", json={"control_id": "4.1.2"}, headers=bearer(token("user_bob"))
+        ),
+    ):
+        assert response.status_code == 403
+        assert response.json()["reason"] == "not-a-member"
+        assert "Discord server" in response.json()["detail"]
+
+
+def test_the_servers_are_read_page_by_page_past_200(access):
+    access.servers["user_bob"] = [f"9{n:017d}" for n in range(450)] + [SERVER]
+
+    assert ask(gated_app(access), "user_bob").status_code == 200
+    pages = access.discord_calls()
+    assert [call.url.params.get("after") for call in pages] == [
+        None,
+        access.servers["user_bob"][199],
+        access.servers["user_bob"][399],
+    ]
+
+
+@pytest.mark.parametrize("user", ["user_dev", "user_flagged", "user_invited"])
+def test_the_developer_and_invited_users_are_allowed_without_the_server(access, user):
+    access.servers[user] = []
+    access.scopes[user] = []  # not even a Discord token with the scope: never asked
+
+    assert ask(gated_app(access), user).status_code == 200
+    assert access.discord_calls() == []
+
+
+def test_an_invitation_counts_only_for_the_whole_verified_address(access):
+    access.invited = {"bob@example.com.evil", "unverified@example.com"}
+    access.servers["user_bob"] = []
+
+    assert ask(gated_app(access), "user_bob").json()["reason"] == "not-a-member"
+
+
+@pytest.mark.parametrize(
+    "token_case",
+    ["no-discord-token", "no-guilds-scope-listed", "discord-refuses-the-token", "discord-403"],
+)
+def test_a_token_discord_rejects_or_without_the_scope_says_sign_in_again(access, token_case):
+    if token_case == "no-discord-token":
+        del access.scopes["user_alice"]
+    elif token_case == "no-guilds-scope-listed":
+        access.scopes["user_alice"] = ["identify", "email"]
+    elif token_case == "discord-refuses-the-token":
+        access.discord_fail = lambda request: httpx.Response(401, json={"code": 0})
+    else:
+        access.discord_fail = lambda request: httpx.Response(403, json={"code": 50001})
+
+    response = ask(gated_app(access), "user_alice")
+
+    assert response.status_code == 403
+    assert response.json()["reason"] == "sign-in-again"
+
+
+DISCORD_FAILURES = {
+    "unreachable": unreachable,
+    "server-error": lambda request: httpx.Response(502, text="Bad gateway"),
+    "rate-limited": lambda request: httpx.Response(429, json={"retry_after": 1.5}),
+    "not-json": lambda request: httpx.Response(200, text="<html>"),
+    "not-a-list": lambda request: httpx.Response(200, json={"id": SERVER}),
+}
+
+
+@pytest.mark.parametrize("failure", DISCORD_FAILURES.values(), ids=DISCORD_FAILURES.keys())
+def test_discord_failing_gives_503_never_access(access, failure):
+    access.discord_fail = failure
+
+    response = ask(gated_app(access), "user_alice")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == api.CLERK_UNAVAILABLE
+
+
+@pytest.mark.parametrize("failure", CLERK_FAILURES.values(), ids=CLERK_FAILURES.keys())
+def test_clerk_failing_gives_503_never_access(access, failure):
+    access.clerk_fail = failure
+
+    assert ask(gated_app(access), "user_alice").status_code == 503
+
+
+def test_a_user_clerk_does_not_know_is_signed_out(access):
+    assert ask(gated_app(access), "user_deleted").status_code == 401
+
+
+def test_the_answer_is_cached_one_discord_call_per_user_per_period(access):
+    now = [1000.0]
+    client = gated_app(access, clock=lambda: now[0])
+
+    assert ask(client, "user_alice").status_code == 200
+    assert ask(client, "user_alice").status_code == 200
+    assert len(access.discord_calls()) == 1
+
+    access.servers["user_alice"] = [OTHER_SERVER]  # they left the server
+    now[0] += ClerkAuth.ACCESS_TTL + 1
+    assert ask(client, "user_alice").json()["reason"] == "not-a-member"
+    assert len(access.discord_calls()) == 2
+
+
+def test_a_refusal_is_kept_only_briefly_so_doing_what_the_page_says_gets_in(access):
+    """Joining the server, or signing in again, is checked within REFUSAL_TTL, not ACCESS_TTL."""
+    now = [1000.0]
+    client = gated_app(access, clock=lambda: now[0])
+    access.servers["user_bob"] = []
+    assert ask(client, "user_bob").json()["reason"] == "not-a-member"
+    assert ask(client, "user_bob").json()["reason"] == "not-a-member"
+    assert len(access.discord_calls()) == 1  # still cached for a moment
+
+    access.servers["user_bob"] = [SERVER]  # they joined the course server
+    now[0] += ClerkAuth.REFUSAL_TTL + 1
+    assert ClerkAuth.REFUSAL_TTL < ClerkAuth.ACCESS_TTL
+    assert ask(client, "user_bob").status_code == 200
+
+
+def test_invitations_are_asked_for_in_one_large_page(access):
+    ask(gated_app(access), "user_invited")
+
+    [invitations] = [call for call in access.calls if call.url.path == "/v1/invitations"]
+    assert invitations.url.params["limit"] == "500"
+
+
+def test_a_failed_check_is_not_cached(access):
+    client = gated_app(access)
+    access.discord_fail = unreachable
+    assert ask(client, "user_alice").status_code == 503
+
+    access.discord_fail = None
+    assert ask(client, "user_alice").status_code == 200
+
+
+def test_without_a_server_id_clerk_alone_decides_and_discord_is_never_asked(access):
+    access.servers["user_bob"] = []
+    client = gated_app(access, keys=KEYS)
+
+    assert ask(client, "user_bob").json() == {"access": "allowed"}
+    assert access.calls == []
+
+
+def test_no_discord_token_reaches_the_log_or_an_answer(access, caplog):
+    caplog.set_level("DEBUG")
+    client = gated_app(access)
+    access.discord_fail = lambda request: httpx.Response(500, text=request.headers["authorization"])
+    answers = [ask(client, "user_alice").text]
+    access.discord_fail = None
+    access.servers["user_bob"] = []
+    answers.append(ask(client, "user_bob").text)
+
+    seen = caplog.text + "".join(answers)
+    assert caplog.text
+    assert DISCORD_TOKEN not in seen and SECRET not in seen
+
+
+def test_health_says_whether_the_discord_server_gates_sign_in(access):
+    gated = gated_app(access).get("/api/health").json()["auth"]
+    open_ = gated_app(access, keys=KEYS).get("/api/health").json()["auth"]
+
+    assert gated["gate"] == "discord-server"
+    assert open_["gate"] == "clerk"
+
+
+def test_local_mode_has_no_gate():
+    client = TestClient(create_app(Settings()))
+
+    assert client.get("/api/access").json() == {"access": "allowed"}
+    assert client.get("/api/health").json()["auth"]["gate"] == "none"
