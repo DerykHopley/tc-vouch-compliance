@@ -320,3 +320,20 @@ def test_the_reviewed_assessment_is_redacted_as_the_stream_is(tmp_path):
     assert response.json()["assessment"]["answer"] == "Ask [removed] about the key [removed]."
     for planted in (PLANTED_KEY, PLANTED_EMAIL):
         assert planted not in response.text
+
+
+def test_with_no_rate_setting_the_61st_request_in_a_minute_gets_429():
+    """The default rate (#138): unset, the limit is still 60 a minute."""
+    client = client_for()
+    answers = [client.get("/api/no-such-route").status_code for _ in range(61)]
+
+    assert 429 not in answers[:60]
+    assert answers[60] == 429
+
+
+def test_the_rate_setting_sets_the_limit():
+    client = client_for(Settings(rate_requests=3))
+    answers = [client.get("/api/no-such-route").status_code for _ in range(4)]
+
+    assert 429 not in answers[:3]
+    assert answers[3] == 429

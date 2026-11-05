@@ -191,3 +191,34 @@ def test_a_blank_clerk_key_counts_as_missing():
 def test_the_tests_start_from_no_vouch_settings():
     """tests/conftest.py: a developer's exported settings can't change the tests' results."""
     assert not ENV_NAMES & set(os.environ)
+
+
+def test_with_no_rate_setting_the_rate_is_60_requests_a_minute():
+    assert load_settings({}).rate_requests == 60
+
+
+def test_the_rate_setting_is_read_as_requests_a_minute():
+    assert load_settings({"VOUCH_RATE_REQUESTS": " 5000 "}).rate_requests == 5000
+
+
+@pytest.mark.parametrize("value", ["lots", "0", "-3", "1.5", "60/min"])
+def test_a_rate_setting_that_isnt_a_whole_number_above_zero_refuses_naming_it(value):
+    with pytest.raises(SettingsError, match="VOUCH_RATE_REQUESTS"):
+        load_settings({"VOUCH_RATE_REQUESTS": value})
+
+
+def test_started_with_a_bad_rate_setting_the_app_exits_naming_it():
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES} | {"VOUCH_RATE_REQUESTS": "x"}
+
+    started = subprocess.run(
+        [sys.executable, "-c", "import vouch.api"],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert started.returncode != 0
+    assert "Vouch cannot start" in started.stderr
+    assert "VOUCH_RATE_REQUESTS" in started.stderr
+    assert "Traceback" not in started.stderr
