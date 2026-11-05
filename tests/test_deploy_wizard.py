@@ -597,7 +597,7 @@ def test_the_dry_run_names_the_tag_it_would_use_from_the_registry(tmp_path):
 
 
 def test_a_registry_that_can_t_be_read_stops_before_the_build(tmp_path):
-    result, calls = deployed(tmp_path, tags="v1", tags_error="(fake) PERMISSION_DENIED")
+    result, calls = deployed(tmp_path, tags_error="(fake) PERMISSION_DENIED")
     assert result.returncode != 0
     assert "registry's tags" in result.stderr
     assert not calls_to(calls, "docker ")

@@ -6,11 +6,11 @@ Cloud Run" and "the walking skeleton has no secrets").
 
 > **Easiest: run `scripts/deploy-wizard.sh`** from the repo root. It walks through the steps below
 > one at a time: it explains each, shows the command and asks before running it, and skips what
-> already exists, so you can stop and run it again. `--dry-run` prints every command and writes nothing;
-> it runs only the registry's tag list (to name the real next tag), and works with no `gcloud` or
-> `docker` installed; `--help` lists the steps. Its plain answers (project id, region) stay in
-> `deploy/cloudrun/wizard.env` (git-ignored); the image tag comes from the registry. Inside Claude Code, `! scripts/deploy-wizard.sh` puts
-> its output in the chat. The steps below are the same commands by hand. From #118 it also puts
+> already exists, so you can stop and run it again. `--dry-run` prints every command and writes
+> nothing; it runs only the registry's tag list (to name the real next tag), and works with no
+> `gcloud` or `docker` installed; `--help` lists the steps. Its plain answers (project id, region)
+> stay in `deploy/cloudrun/wizard.env` (git-ignored); the image tag comes from the registry.
+> Inside Claude Code, `! scripts/deploy-wizard.sh` puts its output in the chat. The steps below are the same commands by hand. From #118 it also puts
 > the secrets in Secret Manager from your keyring, grants the service's account its two roles and
 > deploys with the secrets and the Cloud SQL instance: see "Secrets and access" below.
 

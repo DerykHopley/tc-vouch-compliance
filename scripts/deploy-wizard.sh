@@ -105,9 +105,7 @@ forget() {
 }
 save() {
   mkdir -p "$(dirname "$WIZARD_ENV")"; touch "$WIZARD_ENV"
-  local tmp; tmp=$(mktemp)
-  grep -vE "^${1}=" "$WIZARD_ENV" > "$tmp" || true
-  printf '%s=%s\n' "$1" "$2" >> "$tmp"; mv "$tmp" "$WIZARD_ENV"
+  forget "$1"; printf '%s=%s\n' "$1" "$2" >> "$WIZARD_ENV"
 }
 
 # confirm "what it does" "the command as shown": prints both and asks. True to go ahead; otherwise
@@ -251,22 +249,24 @@ step  # Build and push
 # The tags come from the registry, never from a file in this checkout, so two checkouts can't hand
 # out the same tag (#135). The read runs in a dry run too, so it names the real tag; with no gcloud
 # there, the dry run says v1 and that the registry wasn't read.
-LAST=""; TAG=v1; READ=yes
+# Not `query`: it would hide the error that tells "not there yet" from "can't read".
+LAST=""; TAG=v1; REGISTRY_READ=yes
+LIST_TAGS=(gcloud artifacts docker tags list "$IMAGE" --format='value(tag)')
 if [[ $DRY == no ]] || command -v gcloud >/dev/null 2>&1; then
-  show gcloud artifacts docker tags list "$IMAGE" --format='value(tag)'
-  if LISTED=$(gcloud artifacts docker tags list "$IMAGE" --format='value(tag)' 2>&1); then :
+  show "${LIST_TAGS[@]}"
+  if LISTED=$("${LIST_TAGS[@]}" 2>&1); then :
   elif [[ "$LISTED" == *NOT_FOUND* ]]; then LISTED=""  # the image isn't in the registry yet
-  elif [[ $DRY == yes ]]; then LISTED=""; READ=no
+  elif [[ $DRY == yes ]]; then LISTED=""; REGISTRY_READ=no
   else stop "Couldn't read the registry's tags for $IMAGE (above: ${LISTED##*$'\n'}). Nothing was built: run this again."
   fi
-  while IFS= read -r line; do
-    [[ "${line##*/}" =~ ^v([0-9]+)$ ]] || continue
+  while IFS= read -r listed; do
+    [[ "${listed##*/}" =~ ^v([0-9]+)$ ]] || continue
     (( 10#${BASH_REMATCH[1]} > 10#${LAST:-0} )) && LAST=$((10#${BASH_REMATCH[1]}))
   done <<< "$LISTED"
-else READ=no
+else REGISTRY_READ=no
 fi
 [[ -n "$LAST" ]] && TAG="v$((LAST + 1))" && LAST="v$LAST"
-if [[ $READ == yes ]]; then say "The image from the Dockerfile, as $TAG (the registry's highest: ${LAST:-none})."
+if [[ $REGISTRY_READ == yes ]]; then say "The image from the Dockerfile, as $TAG (the registry's highest: ${LAST:-none})."
 else say "The image from the Dockerfile, as $TAG (the registry wasn't read: gcloud can't reach it here)."; fi
 [[ $DRY == no && -n "$(saved TAG)" ]] && forget TAG  # the tag lived in wizard.env before #135
 run "Build the image (a few minutes the first time)" docker build -t "$IMAGE:$TAG" .
