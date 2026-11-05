@@ -14,7 +14,6 @@ import logging
 import operator
 import re
 import textwrap
-import threading
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
@@ -365,19 +364,26 @@ class RemediationItem:
         return cls(requirement_id, NOT_DRAFTED, NO_OWNER, due)
 
 
+NO_NUL_PATTERN = r"^[^\x00]*$"
+"""Text the lead writes holds no NUL character: Postgres can't keep one (#39), so it's refused
+(a 422) whatever the backend."""
+
+
 class OverrideRequest(BaseModel):
     """The lead changes one requirement's verdict, with a reason."""
 
     requirement_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     verdict: JudgedVerdict
-    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, pattern=NO_NUL_PATTERN)
+    ]
 
 
 class ReviewDecision(BaseModel):
     """The compliance lead's review of one control: accept or reject, a note, any overrides."""
 
     decision: Decision
-    note: str = ""
+    note: Annotated[str, StringConstraints(pattern=NO_NUL_PATTERN)] = ""
     overrides: list[OverrideRequest] = Field(default_factory=list)
 
 
@@ -445,16 +451,18 @@ class Assessment:
         return asdict(self)
 
 
+def counts_towards_roll_up(requirement: RequirementVerdict) -> bool:
+    """Whether the requirement's verdict counts towards the control's (`roll_up`): a must,
+    high, very high or overlay requirement that applies."""
+    return requirement.column in ROLL_UP_COLUMNS and requirement.verdict != NOT_APPLICABLE
+
+
 def roll_up(requirements: Iterable[RequirementVerdict]) -> Verdict:
     """The control's verdict, over must, high, very high and overlay requirements, leaving out
     not applicable ones: all evidenced gives evidenced; none evidenced (only partly or not
     evidenced) gives not-evidenced; otherwise partly-evidenced. With none of those left, the
     control is not applicable."""
-    counted = [
-        r.verdict
-        for r in requirements
-        if r.column in ROLL_UP_COLUMNS and r.verdict != NOT_APPLICABLE
-    ]
+    counted = [r.verdict for r in requirements if counts_towards_roll_up(r)]
     if not counted:
         return NOT_APPLICABLE
     if all(v == "evidenced" for v in counted):
@@ -705,7 +713,7 @@ def _reviewed_remediation(
     ]
 
 
-def _apply_overrides(
+def apply_overrides(
     requirements: list[RequirementVerdict], overrides: list[OverrideRequest]
 ) -> tuple[list[RequirementVerdict], list[Override]]:
     """The requirements with the lead's verdicts and reasons in place, and the overrides kept
@@ -1118,7 +1126,7 @@ def build_graph(
         """Pause for the compliance lead. This node re-runs from its start on resume, so
         nothing before the interrupt writes; the decision comes back as its value."""
         decision = ReviewDecision.model_validate(interrupt({"control_id": state["control"].id}))
-        requirements, overrides = _apply_overrides(state["requirements"], decision.overrides)
+        requirements, overrides = apply_overrides(state["requirements"], decision.overrides)
         today = date.fromisoformat(state["today"])
         overridden = {o.requirement_id for o in overrides}
         still_pending = [i for i in state["pending_ids"] if i not in overridden]
@@ -1398,14 +1406,14 @@ def memory_checkpointer() -> InMemorySaver:
     return InMemorySaver(serde=state_serializer())
 
 
-def _thread_key(thread_id: str, scope: str = "") -> str:
+def thread_key(thread_id: str, scope: str = "") -> str:
     """The checkpointer's thread: `scope` (whose it is, vouch.memory) before the thread id, so
     one user's thread id names nothing for another."""
     return scope + thread_id
 
 
 def _config(thread_id: str, scope: str = "") -> dict[str, Any]:
-    return {"configurable": {"thread_id": _thread_key(thread_id, scope)}}
+    return {"configurable": {"thread_id": thread_key(thread_id, scope)}}
 
 
 def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
@@ -1522,18 +1530,6 @@ def assess(
     return assessment
 
 
-# One lock per thread, so two reviews of one assessment can't both find it waiting and resume
-# it: the second finds it reviewed. Locks are per process: two app instances on one database
-# could still both resume one thread (Cloud Run runs one instance for this app).
-_review_locks: dict[str, threading.Lock] = {}
-_review_locks_guard = threading.Lock()
-
-
-def _review_lock(thread_id: str) -> threading.Lock:
-    with _review_locks_guard:
-        return _review_locks.setdefault(thread_id, threading.Lock())
-
-
 def new_thread_id() -> str:
     """A new assessment's thread id: always a new thread, never piled onto an earlier run's."""
     return uuid.uuid4().hex
@@ -1580,18 +1576,20 @@ def resume(
     recorded. No model is called.
 
     Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
-    review), NotWaitingForReviewError for one not waiting (reviewed already, perhaps at the same
-    moment), and InvalidReviewError for an
-    override `_check_overrides` refuses. Nothing is resumed when any is raised. `scope` says
-    whose thread it is (see `_config`): another user's thread id is unknown."""
+    review), NotWaitingForReviewError for one not waiting (reviewed already), and
+    InvalidReviewError for an override `_check_overrides` refuses. Nothing is resumed when any
+    is raised. `scope` says whose thread it is (see `_config`): another user's thread id is
+    unknown.
+
+    It doesn't keep two reviews of one thread apart: the caller does (the API through
+    vouch.audit, whose trail holds a lock on the thread while it reviews and records)."""
     graph = build_graph(None, checkpointer=checkpointer)
     config = _config(thread_id, scope)
-    with _review_lock(_thread_key(thread_id, scope)):
-        snapshot = graph.get_state(config)
-        if not _reached_review(snapshot):
-            raise UnknownAssessmentError(f"no assessment {thread_id}")
-        if not snapshot.interrupts:
-            raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-        _check_overrides(snapshot.values["requirements"], decision.overrides)
-        values = graph.invoke(Command(resume=decision.model_dump()), config)
+    snapshot = graph.get_state(config)
+    if not _reached_review(snapshot):
+        raise UnknownAssessmentError(f"no assessment {thread_id}")
+    if not snapshot.interrupts:
+        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
+    _check_overrides(snapshot.values["requirements"], decision.overrides)
+    values = graph.invoke(Command(resume=decision.model_dump()), config)
     return _assessment(values, thread_id)

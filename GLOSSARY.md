@@ -105,7 +105,7 @@ A verdict the compliance lead has accepted or rejected, with an optional note; o
 _Avoid_: Approval, sign-off, final verdict
 
 **Audit trail**:
-The append-only record of every reviewed verdict and approved remediation item: who, when, the note, and the evidence versions behind it.
+The append-only record of every action of the compliance lead, one entry each: a control accepted or rejected, a requirement overridden, a remediation item approved or discarded. Each entry says who, when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
 _Avoid_: History, log, changelog
 
 **Override**:

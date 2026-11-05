@@ -20,10 +20,12 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
-limit, #35), the daily assessment counts and the usage (#35); nothing else does. Before it has
-run, a setting reads as unset, and a write, a count or the usage is DatabaseUnavailable (a 503).
+limit, #35), the daily assessment counts, the usage (#35) and the append-only audit trail (#39);
+nothing else does. Before it has run, a setting reads as unset, and a write, a count, the usage
+or a review is DatabaseUnavailable (a 503).
 """
 
+import hashlib
 import logging
 import sys
 import threading
@@ -32,7 +34,7 @@ import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date, datetime
-from typing import Any, Literal, Protocol, Self
+from typing import Any, Literal, Protocol, Self, get_args
 
 import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -40,6 +42,7 @@ from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.store.postgres import PostgresStore
 from psycopg import conninfo
 from psycopg.rows import DictRow, dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolClosed, PoolTimeout
 from pydantic import SecretStr
 
@@ -97,6 +100,57 @@ CREATE_USAGE = (
     "estimated boolean NOT NULL, cost_complete boolean NOT NULL, at timestamptz NOT NULL)"
 )
 
+AUDIT_TABLE = "vouch_audit_trail"
+"""Every reviewed verdict and override (vouch.audit), append-only, in its decision's transaction."""
+AuditAction = Literal["accept", "reject", "override", "approve", "discard"]
+"""What an audit entry records the compliance lead doing (vouch.audit's Action)."""
+AUDIT_COLUMNS = (
+    "user_id",
+    "at",
+    "profile_id",
+    "control_id",
+    "thread_id",
+    "action",
+    "requirement_id",
+    "note",
+    "verdict_before",
+    "verdict_after",
+    "evidence",
+    "model",
+    "prompt_version",
+)
+CREATE_AUDIT = (
+    f"CREATE TABLE IF NOT EXISTS {AUDIT_TABLE} (id bigserial PRIMARY KEY, "
+    "user_id text NOT NULL, at timestamptz NOT NULL, profile_id text NOT NULL, "
+    "control_id text NOT NULL, thread_id text NOT NULL, action text NOT NULL "
+    f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})), "
+    "requirement_id text, note text NOT NULL, verdict_before text, verdict_after text, "
+    "evidence jsonb NOT NULL, model text NOT NULL, prompt_version text NOT NULL)"
+)
+CREATE_AUDIT_INDEX = (
+    f"CREATE INDEX IF NOT EXISTS {AUDIT_TABLE}_by_owner ON {AUDIT_TABLE} "
+    "(user_id, profile_id, at DESC, id DESC)"
+)
+CREATE_AUDIT_GUARD = (
+    "CREATE OR REPLACE FUNCTION vouch_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS "
+    "$$ BEGIN RAISE EXCEPTION 'the audit trail is append-only'; END $$"
+)
+CREATE_AUDIT_TRIGGERS = (
+    (
+        f"CREATE OR REPLACE TRIGGER {AUDIT_TABLE}_append_only BEFORE UPDATE OR DELETE ON "
+        f"{AUDIT_TABLE} FOR EACH ROW EXECUTE FUNCTION vouch_audit_append_only()"
+    ),
+    (
+        f"CREATE OR REPLACE TRIGGER {AUDIT_TABLE}_no_truncate BEFORE TRUNCATE ON "
+        f"{AUDIT_TABLE} FOR EACH STATEMENT EXECUTE FUNCTION vouch_audit_append_only()"
+    ),
+)
+"""The table refuses an update, a delete or a truncate, whoever asks (dropping it still works:
+that's vouch-db-setup's owner's, not the app's)."""
+REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
+"""One review of a thread at a time, from any process: held until the transaction ends. Taken
+without waiting, so a second review is refused at once and holds no connection meanwhile."""
+
 SETUP_TABLES = (
     "checkpoints",
     "checkpoint_blobs",
@@ -107,6 +161,7 @@ SETUP_TABLES = (
     SETTINGS_TABLE,
     COUNTS_TABLE,
     USAGE_TABLE,
+    AUDIT_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -189,6 +244,10 @@ class Connect(Protocol):
 
 class DatabaseUnavailable(RuntimeError):
     """The database can't be used just now. The message never holds the URL or its password."""
+
+
+class ReviewInProgress(RuntimeError):
+    """Another review of the thread holds its lock (`Database.reviewing`)."""
 
 
 class DatabaseMisconfigured(DatabaseUnavailable):
@@ -375,6 +434,16 @@ class Database:
         return {row.pop("kind"): row for row in rows}
 
     @contextmanager
+    def _failed(self, table: str) -> Iterator[None]:
+        """Any other database error writing to `table` (a value it refuses, say):
+        DatabaseUnavailable, the reason in the log."""
+        try:
+            yield
+        except psycopg.Error as error:
+            log.error("a write to %s failed: %s", table, self._redacted(str(error)))
+            raise DatabaseUnavailable(f"a write to {table} failed") from None
+
+    @contextmanager
     def _needs_setup(self, table: str) -> Iterator[None]:
         """A table vouch-db-setup makes: missing, it's DatabaseUnavailable, and the log says so."""
         try:
@@ -400,6 +469,56 @@ class Database:
         with self._unavailable_on_drop(), self._needs_setup("store"):
             yield PostgresStore(pool)
 
+    @contextmanager
+    def reviewing(
+        self, lock_key: str, serde: SerializerProtocol | None = None
+    ) -> Iterator[tuple[PostgresSaver, Callable[[list[Mapping[str, Any]]], None]]]:
+        """One transaction for a review (vouch.audit): a checkpointer on its connection, and a
+        way to append audit entries (mappings of AUDIT_COLUMNS) on it. Both are committed when
+        the block ends, or both rolled back when it raises: no decision without its entries.
+
+        The pool's connections are in autocommit; the transaction is opened explicitly, and
+        LangGraph's own transactions inside it become savepoints. It first takes the review
+        lock on `lock_key` (vouch.graph's thread key): ReviewInProgress when another review
+        holds it. Raises DatabaseUnavailable for any database failure, also before
+        vouch-db-setup ran."""
+        with (
+            self.connection() as conn,
+            self._failed(AUDIT_TABLE),
+            self._needs_setup(f"checkpoints or {AUDIT_TABLE}"),
+            conn.transaction(),
+        ):
+            row = conn.execute(REVIEW_LOCK, (lock_id(lock_key),)).fetchone()
+            if not (row and row["taken"]):
+                raise ReviewInProgress(lock_key)
+
+            def append(entries: list[Mapping[str, Any]]) -> None:
+                columns = ", ".join(AUDIT_COLUMNS)
+                values = ", ".join(f"%({c})s" for c in AUDIT_COLUMNS)
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        f"INSERT INTO {AUDIT_TABLE} ({columns}) VALUES ({values})",
+                        [entry | {"evidence": Jsonb(entry["evidence"])} for entry in entries],
+                    )
+
+            yield PostgresSaver(conn, serde=serde), append
+
+    def audit_entries(
+        self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
+    ) -> list[dict[str, Any]]:
+        """At most `limit` of the user's audit entries under the profile, newest first (by time,
+        then id), after the entry `before` names when given: mappings of `id` and AUDIT_COLUMNS.
+        Raises DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(AUDIT_TABLE):
+            return conn.execute(
+                f"SELECT id, {', '.join(AUDIT_COLUMNS)} FROM {AUDIT_TABLE} "
+                "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
+                "AND (%(before)s::bigint IS NULL OR (at, id) < "
+                f"(SELECT at, id FROM {AUDIT_TABLE} WHERE id = %(before)s)) "
+                "ORDER BY at DESC, id DESC LIMIT %(limit)s",
+                {"user_id": user_id, "profile_id": profile_id, "before": before, "limit": limit},
+            ).fetchall()
+
     def setup(self) -> None:
         """Create or migrate LangGraph's tables; safe to run again.
 
@@ -420,6 +539,11 @@ class Database:
                 conn.execute(CREATE_SETTINGS)
                 conn.execute(CREATE_COUNTS)
                 conn.execute(CREATE_USAGE)
+                conn.execute(CREATE_AUDIT)
+                conn.execute(CREATE_AUDIT_INDEX)
+                conn.execute(CREATE_AUDIT_GUARD)
+                for trigger in CREATE_AUDIT_TRIGGERS:
+                    conn.execute(trigger)
         finally:
             conn.close()
 
@@ -480,6 +604,12 @@ class Database:
         for secret in self._secrets:
             message = message.replace(secret, "**********")
         return message.strip()
+
+
+def lock_id(key: str) -> int:
+    """`key` as an advisory lock's bigint: the first 8 bytes of its BLAKE2b hash, signed. Two
+    keys sharing one only take turns needlessly."""
+    return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), signed=True)
 
 
 def _parses(url: str) -> bool:
