@@ -164,9 +164,9 @@ def test_the_image_runs_in_clerk_mode():
     assert re.search(r"^ENV .*\bVOUCH_AUTH_MODE=clerk\b", DOCKERFILE.read_text(), re.MULTILINE)
 
 
-def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
-    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES} | {"VOUCH_AUTH_MODE": "clerk"}
-
+def refused_start(settings: dict[str, str]) -> str:
+    """The app started in a fresh process with only `settings` set: its stderr, once it refused."""
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES} | settings
     started = subprocess.run(
         [sys.executable, "-c", "import vouch.api"],
         check=False,
@@ -174,11 +174,16 @@ def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
         capture_output=True,
         text=True,
     )
-
     assert started.returncode != 0
     assert "Vouch cannot start" in started.stderr
-    assert all(name in started.stderr for name in CLERK_KEYS)
     assert "Traceback" not in started.stderr
+    return started.stderr
+
+
+def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
+    stderr = refused_start({"VOUCH_AUTH_MODE": "clerk"})
+
+    assert all(name in stderr for name in CLERK_KEYS)
 
 
 def test_a_blank_clerk_key_counts_as_missing():
@@ -208,17 +213,4 @@ def test_a_rate_setting_that_isnt_a_whole_number_above_zero_refuses_naming_it(va
 
 
 def test_started_with_a_bad_rate_setting_the_app_exits_naming_it():
-    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES} | {"VOUCH_RATE_REQUESTS": "x"}
-
-    started = subprocess.run(
-        [sys.executable, "-c", "import vouch.api"],
-        check=False,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    assert started.returncode != 0
-    assert "Vouch cannot start" in started.stderr
-    assert "VOUCH_RATE_REQUESTS" in started.stderr
-    assert "Traceback" not in started.stderr
+    assert "VOUCH_RATE_REQUESTS" in refused_start({"VOUCH_RATE_REQUESTS": "x"})

@@ -88,7 +88,7 @@ class Settings:
     database_url: SecretStr | None = None
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
     rate_requests: int = RATE_REQUESTS
-    """A user's requests a minute before 429 (vouch.limits). The browser suite raises it (#138)."""
+    """A user's requests a minute before 429: VOUCH_RATE_REQUESTS, else vouch.limits's 60."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
