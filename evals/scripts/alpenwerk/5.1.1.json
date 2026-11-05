@@ -1,0 +1,14 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "kryptografischer inwieweit verfahren verwaltet"}},
+    {"tool": "search_records", "args": {"query": "kryptografischer inwieweit verfahren verwaltet"}},
+    {"answer": "Antwortentwurf für 5.1.1: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Methods and key strengths follow BSI TR-02102 and are checked yearly.", "citations": [{"doc_id": "kryptografiekonzept", "quote": "Die Verfahren richten sich nach der aktuellen Technischen Richtlinie TR-02102 des BSI."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "The concept covers methods, key strengths and the key life cycle from creation to deletion.", "citations": [{"doc_id": "kryptografiekonzept", "quote": "Das Konzept regelt für jeden Schlüssel Archivierung, Abruf, Verteilung, Deaktivierung, Erneuerung spätestens nach drei Jahren und Löschung."}]},
+      {"requirement_id": "H1", "verdict": "partly-evidenced", "reason": "Confidential data at providers must use keys only Alpenwerk holds; payroll does, but the CAD exchange platform leaves its keys with the provider.", "citations": [{"doc_id": "cloud-dienste-register", "quote": "Diese Dienste betreiben Anbieter außerhalb von Alpenwerk für uns."}, {"doc_id": "kryptografiekonzept", "quote": "Vertrauliche Daten, die ein Anbieter außerhalb von Alpenwerk verarbeitet, werden mit Schlüsseln verschlüsselt, die nur Alpenwerk besitzt (kundenverwaltete Schlüssel aus unserem Hardware-Sicherheitsmodul)."}]}
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "wiederherstellung sichergestellt inwieweit sicherung"}},
+    {"tool": "search_records", "args": {"query": "wiederherstellung sichergestellt inwieweit sicherung"}},
+    {"answer": "Antwortentwurf für 5.2.9: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The concept covers the five key services, with encrypted, immutable, access-limited backups off site.", "citations": [{"doc_id": "datensicherungskonzept", "quote": "Die Sicherungen werden verschlüsselt (AES 256 Bit) auf ein Speichersystem in einem zweiten Brandabschnitt geschrieben und wöchentlich auf Bänder ausgelagert, die in einem Bankschließfach in Kufstein liegen."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Recovery times, order and resources are set for each key service.", "citations": [{"doc_id": "datensicherungskonzept", "quote": "Die Sicherungen werden verschlüsselt (AES 256 Bit) auf ein Speichersystem in einem zweiten Brandabschnitt geschrieben und wöchentlich auf Bänder ausgelagert, die in einem Bankschließfach in Kufstein liegen."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Each service has its backup and recovery, with dependencies and recovery order.", "citations": [{"doc_id": "datensicherungskonzept", "quote": "Die Tabelle steht in der Reihenfolge der Wiederherstellung: jeder Dienst kommt nach den Diensten in der letzten Spalte, von denen er abhängt, und nach der Wiederherstellungszeit (RTO)."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "The concept is reviewed methodically each year against the restore tests; the record shows the October 2026 review.", "citations": [{"doc_id": "datensicherungskonzept", "quote": "Die Sicherungen werden verschlüsselt (AES 256 Bit) auf ein Speichersystem in einem zweiten Brandabschnitt geschrieben und wöchentlich auf Bänder ausgelagert, die in einem Bankschließfach in Kufstein liegen."}, {"doc_id": "wiederherstellungstests", "quote": "Verzeichnisdienst | 2026-04-14 | Testsystem | 2 Stunden | ja | vollständig, Anmeldung geprüft"}]},
+      {"requirement_id": "H2", "verdict": "partly-evidenced", "reason": "Three services were restored in tests in 2026, but the CAD vault and file server weren't, the file server never.", "citations": [{"doc_id": "datensicherungskonzept", "quote": "Damit das Speichersystem bei einer vollständigen Wiederherstellung nicht überlastet wird, werden die Dienste nacheinander in der Reihenfolge der Tabelle wiederhergestellt."}, {"doc_id": "wiederherstellungstests", "quote": "Verzeichnisdienst | 2026-04-14 | Testsystem | 2 Stunden | ja | vollständig, Anmeldung geprüft"}]},
+      {"requirement_id": "H3", "verdict": "evidenced", "reason": "RPO, RTO, recovery resources and avoiding overload are set.", "citations": [{"doc_id": "datensicherungskonzept", "quote": "Die Sicherungen werden verschlüsselt (AES 256 Bit) auf ein Speichersystem in einem zweiten Brandabschnitt geschrieben und wöchentlich auf Bänder ausgelagert, die in einem Bankschließfach in Kufstein liegen."}]}
+    ]
+  }
+}

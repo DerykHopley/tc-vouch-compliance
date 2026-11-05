@@ -3,7 +3,8 @@
 `uv run python evals/scripts/generate.py [--profile nordlicht] [--out <folder>]` writes one script per control
 to `evals/scripts/<profile>/<control id>.json`, replacing what is there. Each script searches
 the policies and the records (and asks Patch when an expected answer cites its response), then
-judges every requirement as the expected answers do. Each citation quotes the sentence, list
+judges every requirement as the expected answers do; its draft answer is in the profile's
+answer language. Each citation quotes the sentence, list
 item or table row of the cited document sharing most words with the requirement and its `why`.
 
 The scripts are drafted from the expected answers, so on the fake model the eval checks the
@@ -23,17 +24,21 @@ from vouch.documents import document_path, sections
 from vouch.evals import EXPECTED_ANSWERS, FAKE_SCRIPTS_DIR, load_cases
 from vouch.front_matter import split_front_matter
 from vouch.graph import SEARCH_POLICIES, SEARCH_RECORDS, VULNERABILITY_STATUS
-from vouch.isa import load_isa_control
 from vouch.patch import RESPONSE_ID as PATCH_RESPONSE  # cited: the script asks Patch
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile
 
+DRAFT_ANSWERS = {  # in the profile's answer language, so the language check passes (#51)
+    "en": "Draft answer for {}, from the evidence found.",
+    "de": "Antwortentwurf für {}: Die Nachweise sind unten mit der Anforderung abgeglichen.",
+}
 LIST_ITEM = re.compile(r"^([-*+]|\d+[.)])\s+")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def _words(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]{4,}", text.lower()))
+    """Words of four letters or more; German ones keep their umlauts and ß."""
+    return set(re.findall(r"[a-z0-9äöüß]{4,}", text.lower()))
 
 
 def _is_separator(block: str) -> bool:
@@ -102,8 +107,9 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"{doc_id} is in none of {profile.id}'s evidence sources")
 
     for case in cases:
-        control = load_isa_control(case.control_id)
-        texts = {r.id: r.text for r in control.requirements}
+        # In the profile's ISA edition, its overlay's requirements (O1) included.
+        control = profile.isa_control(case.control_id)
+        texts = {r.id: r.text for r in profile.requirements_for(control).applicable}
         judged = []
         for req in case.requirements:
             wanted = _words(req.why) | _words(texts[req.id])
@@ -126,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
         ]
         if any(PATCH_RESPONSE in r.cites for r in case.requirements):
             gather.append({"tool": VULNERABILITY_STATUS, "args": {}})
-        gather.append({"answer": f"Draft answer for {case.control_id}, from the evidence found."})
+        gather.append({"answer": DRAFT_ANSWERS[profile.answer_language].format(case.control_id)})
         script = out / f"{case.control_id}.json"
         script.write_text(_script_text(gather, judged), encoding="utf-8")
     print(f"wrote {len(cases)} scripts to {out}")

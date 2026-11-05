@@ -45,7 +45,29 @@ This assesses each of Nordlicht's 12 controls on the scripted fake model (a scri
 and per control, and citation precision. It prints a summary and saves it, with the raw results,
 to `evals/results/` (git-ignored). On the fake model it checks the harness, not a model. The
 scripts are drafted from the expected answers: after those change, regenerate them with
-`uv run python evals/scripts/generate.py` and read the diff.
+`uv run python evals/scripts/generate.py [--profile alpenwerk]` and read the diff.
+`--profile alpenwerk` runs Alpenwerk's 12 controls the same way (`evals/scripts/alpenwerk/`,
+German draft answers).
+
+On a real model (`--model <OpenRouter id>`, or `--model ollama/<name>` for a local model through
+Ollama) each case also records its tokens, cost and seconds, and with `--judge <model>` the
+faithfulness of its answer to the passages it cites (DeepEval, judged by that model). A real run
+is paid, so it runs one case first (the dry run), prints a cost and time estimate, and runs the
+rest only when you type `yes`; anything else, or Ctrl-C, stops with nothing more sent. A judge
+is never added to a fake run unless you name it. OpenRouter needs `OPENROUTER_API_KEY` from the
+keyring (`.envrc`); without it a real model is refused and the fake still runs. Ollama must be
+running (`ollama serve`) with the model pulled (`ollama pull <name>`); `--ollama-timeout` sets a
+local model's per-request limit (600 s by default). `--models` lists the runner's models and
+prices; `--profile alpenwerk` runs the second profile.
+
+Raw results go to `evals/results/` (git-ignored), saved after every case, so Ctrl-C or a crash
+keeps the cases already run; `--keep` also copies them to `evals/kept/`, to commit. The report
+renders from saved results without calling a model (the newest complete run of each model on
+each profile; a partial run or a dry run only when there is nothing else, marked):
+
+```sh
+uv run python -m vouch.evals report evals/kept --out docs/eval-report.md
+```
 
 ### The API
 

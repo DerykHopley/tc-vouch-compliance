@@ -136,10 +136,11 @@ class UsageTotals:
 class UsageMeter(BaseCallbackHandler):
     """Adds up the tokens and cost of every model call of one assessment."""
 
-    def __init__(self, model: str | None) -> None:
-        """`model`: the OpenRouter id the assessment runs on; None for the fake."""
+    def __init__(self, model: str | None, price: Price | None = None) -> None:
+        """`model`: the OpenRouter id the assessment runs on; None for the fake. `price`: the
+        model's price when PRICES doesn't list it (the eval runner's model list)."""
         self.model = model or FAKE
-        self._price = PRICES.get(model or DEFAULT_MODEL)
+        self._price = PRICES.get(model or DEFAULT_MODEL) or price
         self._lock = threading.Lock()
         self._input = self._output = 0
         self._reported = self._computed = 0.0

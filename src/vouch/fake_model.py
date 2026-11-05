@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from typing import Annotated, Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.messages.ai import UsageMetadata
@@ -125,9 +126,12 @@ class ScriptedChatModel(BaseChatModel):
     prompts: list[list[BaseMessage]] = Field(default_factory=list)  # each call's messages, in order
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "ScriptedChatModel":
-        """Load and check a script file; a bad one raises ScriptError naming the path."""
-        return cls(script=_load_script(Path(path)))
+    def from_file(
+        cls, path: str | Path, callbacks: list[BaseCallbackHandler] | None = None
+    ) -> "ScriptedChatModel":
+        """Load and check a script file; a bad one raises ScriptError naming the path.
+        `callbacks` see every call (a usage meter)."""
+        return cls(script=_load_script(Path(path)), callbacks=callbacks)
 
     @property
     def _llm_type(self) -> str:

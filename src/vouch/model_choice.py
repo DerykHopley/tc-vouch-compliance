@@ -185,16 +185,20 @@ class OpenRouter:
             self._catalogue.close()
 
     def chat_model(
-        self, model: str, callbacks: list[BaseCallbackHandler] | None = None
+        self,
+        model: str,
+        callbacks: list[BaseCallbackHandler] | None = None,
+        timeout: float = TIMEOUT_SECONDS,
     ) -> BaseChatModel:
-        """A chat model for one assessment, within CALL_BUDGET calls."""
+        """A chat model for one assessment, within CALL_BUDGET calls. `timeout`: one request's
+        limit (a local model through the eval runner may need longer)."""
         return _budgeted_chat_openai()(
             callbacks=callbacks,
             model=model,
             api_key=self.api_key,
             base_url=str(self.base_url),
             max_retries=MAX_RETRIES,
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout,
             http_client=self._chat_client,
         )
 

@@ -23,6 +23,7 @@ vouch-db-setup = "vouch.database:main"
 
 [dependency-groups]
 dev = [
+    "deepeval==4.3.1",
     "openpyxl>=3.1.5",
     "pyjwt[crypto]>=2.9",
     "pytest",
@@ -39,7 +40,10 @@ packages = ["src/vouch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--disable-socket --allow-unix-socket"  # unix: the event loop's self-pipe (TestClient)
+addopts = "--disable-socket --allow-unix-socket -p no:deepeval -p no:asyncio"
+# unix: the event loop's self-pipe (TestClient). no:deepeval: its plugin, installed with it for
+# the eval runner, would report each pytest session to its telemetry; no:asyncio, installed
+# with it too, is a plugin this suite never used.
 
 [tool.ruff]
 line-length = 100
