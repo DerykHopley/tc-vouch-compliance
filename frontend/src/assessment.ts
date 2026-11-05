@@ -173,8 +173,9 @@ export async function* postEvents<E extends { event: string; data: unknown }>(
     return
   }
   if (!response.ok) {
-    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why; any other refusal doesn't.
-    const detail = response.status === 429
+    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why, as does a 409 (another of the
+    // lead's assessments is running); any other refusal doesn't.
+    const detail = response.status === 429 || response.status === 409
       ? await response.json().then((answer: { detail?: unknown }) => answer.detail, () => undefined)
       : undefined
     yield { event: 'error', data: { message: typeof detail === 'string' ? detail : refused } }

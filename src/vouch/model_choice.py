@@ -35,7 +35,6 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import PrivateAttr, SecretStr
 
 from vouch.chat import CHAT_PROMPT_VERSION
-from vouch.chat_fake import CannedChatModel
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
 from vouch.settings import DEMO_SCRIPT, Settings, fake_model
@@ -330,6 +329,10 @@ class ModelChoice:
         CALL_BUDGET calls; on the fake, the chat's canned answer. `callbacks` see every call
         (the usage meter), as for_assessment's do."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
+            # Imported here: the fake knows the chat agent's tools, and the chat agent's
+            # modules (vouch.spending among them) import this one.
+            from vouch.chat_fake import CannedChatModel
+
             return CannedChatModel(callbacks=callbacks)
         return self.openrouter.chat_model(chosen, callbacks)
 

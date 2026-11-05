@@ -132,6 +132,18 @@ describe('assess, when a limit refuses it (429)', () => {
   })
 })
 
+describe('assess, while another of the lead\'s assessments runs (409)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('says that one is running, as the chat would', async () => {
+    const detail = 'An assessment is already running for you. Please wait until it has finished before starting another.'
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ detail }, { status: 409 })))
+    const seen = []
+    for await (const item of assess('4.1.2')) seen.push(item)
+    expect(seen).toEqual([{ event: 'error', data: { message: detail } }])
+  })
+})
+
 describe('assess, when the API says signed out (401)', () => {
   const refuse = () =>
     vi.stubGlobal('fetch', () =>

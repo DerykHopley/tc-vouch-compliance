@@ -182,6 +182,11 @@ textarea.field { resize: vertical; font-family: inherit; }
 .msg { margin: 0; background: var(--paper); border-radius: 3px; padding: 8px 10px; max-width: 92%; overflow-wrap: anywhere; white-space: pre-wrap; }
 .msg:empty { display: none; }
 .msg-lead { background: var(--ink); color: var(--sheet); justify-self: end; }
+.msg-step { background: none; padding: 0 10px; font: 12px/1.5 var(--f-mono); color: var(--muted); }
+.msg-step b { font-weight: 500; color: var(--navy); margin-right: 6px; }
+.msg-step.guard { color: var(--ink); }
+.msg .chip { vertical-align: baseline; }
+.bubble-log .suggestion { justify-self: start; }
 .bubble-foot { display: flex; gap: 6px; border-top: 1px solid var(--rule); padding: 10px 12px; }
 .bubble-foot .field { flex: 1 1 auto; }
 /* Enlarged: wider and taller, still floating. Pinned: a column of 400px beside the page, which makes room for it

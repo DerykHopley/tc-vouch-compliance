@@ -1,9 +1,6 @@
-"""Vouch's chat (#44): the chat agent's prompt, and its reply streamed with secrets removed.
+"""Vouch's chat (#44): the page the lead is on, and the reply streamed with secrets removed.
 
-For now the agent has no tools (#45 and #46 add them): it answers the compliance lead's message
-in Vouch's formal voice, in the compliance profile's answer language, knowing which page and
-control the compliance lead is on. Each message is answered on its own; the chat keeps no
-history yet.
+The agent itself, its prompt and its tools are vouch.chat_agent (#45).
 
 The reply is streamed as it is written, a few words behind the model (security layer 4,
 vouch.redaction): a secret can span several words ("Authorization: Bearer <token>", or a key
@@ -12,18 +9,14 @@ to come, and it is never redacted again.
 """
 
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
 
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-
 from vouch.isa import IsaControl
-from vouch.profile import ComplianceProfile
 from vouch.redaction import match_words, redact
 
-CHAT_PROMPT_VERSION = "chat-1"
+CHAT_PROMPT_VERSION = "chat-2"
 """The chat agent's prompt version, beside the assessments' (vouch.graph.PROMPT_VERSION): on the
 developer page, and in the log line with each chat message's usage."""
 CHAT_FAILED = "Vouch could not answer just now. Please try again shortly."
@@ -54,51 +47,33 @@ class PageContext:
         return f"{where} of VDA ISA control {self.control.id}: “{self.control.question}”"
 
 
-def chat_messages(
-    message: str, profile: ComplianceProfile, context: PageContext
-) -> list[BaseMessage]:
-    """The chat agent's prompt and the compliance lead's message."""
-    system = (
-        f"You are Vouch, an assistant helping the compliance lead of {profile.company} prepare "
-        "for a TISAX assessment against VDA ISA. Write in a formal register, as an experienced "
-        "auditor would: complete sentences, no slang, no emoji, no exclamation marks. Answer in "
-        f"the language with ISO 639-1 code '{profile.answer_language}', whatever language the "
-        "compliance lead writes in. Never say that the company is compliant, certified, or has "
-        "passed an audit: you prepare for the audit, you do not decide it. You cannot yet read "
-        "the evidence or start an assessment from the chat; when asked to, say so plainly and "
-        "point the compliance lead to the control's working paper, where an assessment starts. "
-        f"The compliance lead is on {context.describe()}."
-    )
-    return [SystemMessage(system), HumanMessage(message)]
-
-
 _WORD = re.compile(r"\S+")
 
 
-def streamed_reply(
-    model: BaseChatModel, messages: list[BaseMessage]
-) -> Iterator[tuple[str, list[str]]]:
-    """The model's reply in pieces as it streams, each redacted, with the labels of what was
-    newly removed from it (vouch.redaction)."""
-    return _redacted_pieces(str(chunk.content) for chunk in model.stream(messages))
+class RedactedText:
+    """Sends a reply a few words behind the model: only text before a safe cut, redacted on its
+    own, and only the text not yet sent is ever redacted again (linear in the reply). `flush`
+    sends the rest, at the end of a reply or before something else is sent (a tool's step).
+    Each label removed is reported once, the first time."""
 
+    def __init__(self) -> None:
+        self._span = match_words()
+        self._pending = ""  # written, not yet sent
+        self._found: list[str] = []
 
-def _redacted_pieces(chunks: Iterable[str]) -> Iterator[tuple[str, list[str]]]:
-    """Sends the reply a few words behind the model: only text before a safe cut, redacted on
-    its own, and only the text not yet sent is ever redacted again (linear in the reply)."""
-    span = match_words()
-    pending = ""  # written, not yet sent
-    found: list[str] = []
-    for chunk in chunks:
-        pending += chunk
-        cut = _safe_cut(pending, span)
+    def add(self, chunk: str) -> Iterator[tuple[str, list[str]]]:
+        self._pending += chunk
+        cut = _safe_cut(self._pending, self._span)
         if cut:
-            clean, labels = redact(pending[:cut])
-            pending = pending[cut:]
-            yield clean, _new(labels, found)
-    if pending:
-        clean, labels = redact(pending)
-        yield clean, _new(labels, found)
+            clean, labels = redact(self._pending[:cut])
+            self._pending = self._pending[cut:]
+            yield clean, _new(labels, self._found)
+
+    def flush(self) -> Iterator[tuple[str, list[str]]]:
+        if self._pending:
+            clean, labels = redact(self._pending)
+            self._pending = ""
+            yield clean, _new(labels, self._found)
 
 
 def _safe_cut(pending: str, span: int) -> int:

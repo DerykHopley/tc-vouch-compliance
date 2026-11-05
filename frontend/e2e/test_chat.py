@@ -194,12 +194,12 @@ def test_a_message_gets_vouchs_formal_reply(page: Page, chat_url):
     expect(send).to_be_disabled()
 
     field = page.get_by_role("textbox", name="Message to Vouch")
-    field.fill("Where do I stand?")
+    field.fill("What does TISAX ask of us?")
     with page.expect_response("**/api/chat"):
         send.click()
 
     log = chat(page).get_by_role("log")
-    expect(log).to_contain_text("Where do I stand?")
+    expect(log).to_contain_text("What does TISAX ask of us?")
     expect(log).to_contain_text("Thank you for your question.")
     expect(field).to_have_value("")
 
