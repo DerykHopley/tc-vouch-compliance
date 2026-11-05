@@ -10,10 +10,18 @@ export function setTokenSource(next: TokenSource | null) {
   source = next
 }
 
-/** The Authorization header for an API call: empty in local mode or signed out. */
+let profile: string | null = null
+
+/** The compliance profile every API call is for (#47): set by the top bar's switcher; null, the API's default. */
+export function setProfile(next: string | null) {
+  profile = next
+}
+
+/** The headers every API call carries: Authorization (none in local mode or signed out), and the chosen profile. */
 export async function authHeaders(): Promise<Record<string, string>> {
+  const chosen = profile // read before the await: a switch meanwhile mustn't change where this call goes
   const token = source ? await source() : null
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(chosen ? { 'X-Vouch-Profile': chosen } : {}) }
 }
 
 /** What to do when the API answers 401 (no valid session): Clerk mode signs out, back to the sign-in. */

@@ -16,6 +16,7 @@ const SETTINGS: DeveloperSettings = {
   kept_in: 'database',
   daily_limit: 30,
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
+  broken_profiles: [],
 }
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
@@ -107,6 +108,17 @@ describe('the developer page', () => {
       onChange={() => {}} />)
     expect(screen.getByText('No OpenRouter key is set: assessments run on the fake model.')).toBeTruthy()
     expect(screen.getByText(/until the server restarts/i)).toBeTruthy()
+  })
+
+  it('names each compliance profile left out because it could not be loaded, with its problem (#47)', () => {
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    expect(screen.queryByRole('region', { name: 'Profiles left out' })).toBeNull()
+    cleanup()
+    const broken_profiles = [{ id: 'broken', problem: 'not valid YAML (ParserError)' }]
+    render(<DeveloperPage settings={{ ...SETTINGS, broken_profiles }} onChange={() => {}} />)
+    const note = screen.getByRole('region', { name: 'Profiles left out' })
+    expect(within(note).getByText('broken')).toBeTruthy()
+    expect(within(note).getByText('not valid YAML (ParserError)')).toBeTruthy()
   })
 
   it('says a fake script, not a missing key, makes assessments run on the fake model', () => {

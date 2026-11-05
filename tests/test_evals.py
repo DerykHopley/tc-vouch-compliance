@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import date
@@ -276,6 +277,17 @@ def test_the_runner_exits_1_when_a_case_failed_or_was_bad(tmp_path, monkeypatch,
 
     assert main(["--results", str(tmp_path)]) == 1
     assert "Failed: RuntimeError: no model" in capsys.readouterr().out
+
+
+def test_the_runner_reads_the_profile_from_the_profiles_folder_setting(
+    tmp_path, monkeypatch, capsys
+):
+    shutil.copytree(FIXTURES_DIR / "nordlicht", tmp_path / "profiles" / "nordlicht")
+    (tmp_path / "profiles" / "nordlicht" / EXPECTED_ANSWERS).unlink()
+    monkeypatch.setenv("VOUCH_PROFILES_DIR", str(tmp_path / "profiles"))  # the API's (#47)
+
+    assert main(["--results", str(tmp_path / "results")]) == 2
+    assert str(tmp_path / "profiles") in capsys.readouterr().err
 
 
 # The expected-answers file.

@@ -3,6 +3,9 @@
 Below 700px the bubble is a full-screen sheet: the page behind can't be seen, so Tab must never
 reach it, whatever had focus first. jsdom ignores `inert` and focus starting points, so these
 paths are checked in a real browser.
+
+They run on DOSSIER_URL: #47 moved them off the main server while the request rate was capped at
+60 a minute. Fix #138 lifted that cap for the suite, so they could move back.
 """
 
 import pytest
@@ -17,9 +20,9 @@ FOCUS_OUTSIDE_SHEET = f"""() => {{
 TABS = 6
 
 
-def open_sheet(page: Page, vouch_url: str, width: int, double: bool = False) -> None:
+def open_sheet(page: Page, dossier_url: str, width: int, double: bool = False) -> None:
     page.set_viewport_size({"width": width, "height": 800})
-    page.goto(vouch_url)
+    page.goto(dossier_url)
     ask = page.get_by_role("button", name="Ask Vouch")
     if double:
         ask.dblclick()
@@ -40,8 +43,8 @@ def tab_round(page: Page) -> list[str]:
 
 
 @pytest.mark.parametrize("where", ["blank area", "title"])
-def test_at_400px_tab_stays_in_the_sheet_after_a_click_inside_it(page: Page, vouch_url, where):
-    open_sheet(page, vouch_url, 400)
+def test_at_400px_tab_stays_in_the_sheet_after_a_click_inside_it(page: Page, dossier_url, where):
+    open_sheet(page, dossier_url, 400)
     sheet = page.locator(SHEET)
     if where == "title":
         sheet.get_by_text("Vouch", exact=True).click()
@@ -50,20 +53,20 @@ def test_at_400px_tab_stays_in_the_sheet_after_a_click_inside_it(page: Page, vou
     assert tab_round(page) == []
 
 
-def test_at_400px_tab_stays_in_the_sheet_after_a_double_click_on_ask_vouch(page: Page, vouch_url):
-    open_sheet(page, vouch_url, 400, double=True)
+def test_at_400px_tab_stays_in_the_sheet_after_a_double_click_on_ask_vouch(page: Page, dossier_url):
+    open_sheet(page, dossier_url, 400, double=True)
     assert tab_round(page) == []
 
 
-def test_at_400px_tab_reaches_close_inside_the_sheet(page: Page, vouch_url):
-    open_sheet(page, vouch_url, 400)
+def test_at_400px_tab_reaches_close_inside_the_sheet(page: Page, dossier_url):
+    open_sheet(page, dossier_url, 400)
     page.locator(SHEET).click(position={"x": 200, "y": 400})
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Close the chat")).to_be_focused()
 
 
-def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, vouch_url):
-    open_sheet(page, vouch_url, 1400)
+def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, dossier_url):
+    open_sheet(page, dossier_url, 1400)
     page.locator(SHEET).click(position={"x": 100, "y": 300})
     reached = set()
     for _ in range(TABS):
@@ -73,8 +76,8 @@ def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, vouch_
     assert any(name and name.endswith("theme") for name in reached), reached
 
 
-def test_closing_the_sheet_gives_the_page_back(page: Page, vouch_url):
-    open_sheet(page, vouch_url, 400)
+def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
+    open_sheet(page, dossier_url, 400)
     page.get_by_role("button", name="Close the chat").click()
     expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
     page.get_by_role("link", name="Dossier").focus()

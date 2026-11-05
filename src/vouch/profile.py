@@ -6,8 +6,10 @@ applicable, the evidence sources the agent may use, and (unused for now) an asse
 and risks.
 """
 
+import logging
 import re
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
@@ -35,8 +37,10 @@ from vouch.isa import (
 )
 from vouch.paths import FIXTURES_DIR
 
+log = logging.getLogger(__name__)
+
 PROFILE_FILE = "profile.yaml"
-DEFAULT_PROFILE = "nordlicht"  # the one profile until a user can choose theirs
+DEFAULT_PROFILE = "nordlicht"  # a request naming no profile is under this one (#47)
 NORDLICHT_PROFILE = FIXTURES_DIR / "nordlicht" / PROFILE_FILE
 
 ProtectionLevel = Literal["normal", "high", "very high"]
@@ -77,6 +81,7 @@ class ProfileError(ValueError):
     def __init__(self, path: Path, problem: str):
         super().__init__(f"invalid compliance profile {path}: {problem}")
         self.path = path
+        self.problem = problem  # without the path: what a developer page may show
 
 
 def _profile_dir(info: ValidationInfo) -> Path:
@@ -258,17 +263,96 @@ def load_profile(path: Path) -> ComplianceProfile:
         raise ProfileError(path, str(error)) from error
 
 
+PROFILE_LOAD_ERRORS: tuple[type[Exception], ...] = (ProfileError, BaseFrameworkError)
+"""What loading a profile that is there raises when it can't be used: the profile file invalid,
+or the base framework it needs unreadable. Add a new load error here, and every caller that
+leaves out or refuses a broken profile catches it (vouch.api)."""
+
+
+_PATH = re.compile(r"(?<![\w.])/(?:[^\s/:;,'\"]+/)*([^\s/:;,'\"]+)")
+"""An absolute path in a message; its last part is group 1."""
+
+
+def load_problem(error: Exception) -> str:
+    """A load error's problem in words, each path in it cut to its last part (a folder or a
+    file's name), so a developer page shows no server path."""
+    text = error.problem if isinstance(error, ProfileError) else str(error)
+    return _PATH.sub(r"\1", text)
+
+
 class UnknownProfileError(LookupError):
-    """No profile folder with this name under the fixtures."""
+    """No profile folder with this name in the profiles folder (Settings.profiles_dir)."""
 
     def __init__(self, name: str):
         super().__init__(f"unknown profile: {name}")
         self.name = name
 
 
-def load_named_profile(name: str) -> ComplianceProfile:
-    """The profile in `fixtures/<name>/profile.yaml`; a name is one lowercase word or slug."""
-    path = FIXTURES_DIR / name / PROFILE_FILE
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not path.is_file():
+PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+"""A profile's name, its folder's: one lowercase word or slug of at most 63 characters, so it
+never names a path, nor one too long for the file system."""
+
+
+def load_named_profile(name: str, folder: Path = FIXTURES_DIR) -> ComplianceProfile:
+    """The profile in `<folder>/<name>/profile.yaml`; the API and the CLI pass their
+    Settings.profiles_dir."""
+    if not PROFILE_NAME.fullmatch(name):
+        raise UnknownProfileError(name)
+    path = folder / name / PROFILE_FILE
+    try:
+        found = path.is_file()
+    except OSError:  # a name the file system refuses is no profile it holds
+        found = False
+    if not found:
         raise UnknownProfileError(name)
     return load_profile(path)
+
+
+@dataclass(frozen=True)
+class BrokenProfile:
+    """A profile left out because it can't be loaded: its name and the problem, path-free."""
+
+    id: str
+    problem: str
+
+
+@cache
+def read_profile_once(folder: Path, name: str) -> ComplianceProfile | BrokenProfile:
+    """The named profile in `folder`, read once, or why it can't be used (logged once). Raises
+    UnknownProfileError, which isn't kept: a profile folder added later is found."""
+    try:
+        return load_named_profile(name, folder)
+    except PROFILE_LOAD_ERRORS as error:
+        log.warning("compliance profile %s left out: %s", name, error)
+        return BrokenProfile(name, load_problem(error))
+
+
+@dataclass(frozen=True)
+class ProfileScan:
+    """The profiles in a profiles folder: those that load, and those left out."""
+
+    loaded: tuple[ComplianceProfile, ...]
+    broken: tuple[BrokenProfile, ...]
+
+    def find(self, name: str) -> ComplianceProfile | BrokenProfile | None:
+        """The profile in the folder `name`, loaded or broken; None when there's none."""
+        return next((p for p in (*self.loaded, *self.broken) if p.id == name), None)
+
+
+def scan_profiles(folder: Path) -> ProfileScan:
+    """Every profile in `folder`, each read once (read_profile_once)."""
+    read = [read_profile_once(folder, name) for name in profile_names(folder)]
+    loaded = tuple(p for p in read if isinstance(p, ComplianceProfile))
+    broken = tuple(p for p in read if isinstance(p, BrokenProfile))
+    return ProfileScan(loaded, broken)
+
+
+def profile_names(folder: Path) -> tuple[str, ...]:
+    """The names of the profiles in `folder`, sorted: each a folder with a profile file, valid
+    or not; none when the folder can't be read."""
+    try:
+        found = [path.parent.name for path in folder.glob(f"*/{PROFILE_FILE}") if path.is_file()]
+    except OSError:
+        log.exception("the compliance profiles in %s could not be listed", folder)
+        return ()
+    return tuple(sorted(name for name in found if PROFILE_NAME.fullmatch(name)))
