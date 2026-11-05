@@ -26,6 +26,10 @@ _Avoid_: Out of scope, skipped, N/A (in prose)
 The published catalogue of controls a profile starts from; for v1, VDA ISA.
 _Avoid_: Standard, catalogue (alone)
 
+**ISA edition**:
+One language's version of the VDA ISA catalogue (English or German), published by the ENX Association and quoted unchanged; never a translation by Vouch. A compliance profile reads the edition in its answer language, English when there is none.
+_Avoid_: Translation, localisation, language pack
+
 **Company overlay**:
 The company's own layer on top of the base framework: its scope, its policies and its evidence.
 _Avoid_: Company config, tenant

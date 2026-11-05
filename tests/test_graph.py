@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from assess_steps import in_order, step_texts
+from isa_editions import GERMAN_5_1_1
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
@@ -328,3 +329,34 @@ def test_a_judgement_reason_claiming_an_audit_result_twice_fails():
 
     with pytest.raises(OutputCheckError, match="audit result"):
         assess("4.1.2", NORDLICHT, model)
+
+
+GERMAN = NORDLICHT.model_copy(update={"answer_language": "de"})
+
+
+def answering_only() -> ScriptedChatModel:
+    return ScriptedChatModel(
+        script={"gather": [{"answer": "Antwort."}], "judge": {"requirements": []}}
+    )
+
+
+def test_a_german_profile_is_assessed_against_the_german_isa_text():
+    result = assess("5.1.1", GERMAN, answering_only())
+
+    assert result.steps[0]["text"].startswith(f"Loaded control 5.1.1: {GERMAN_5_1_1}")
+
+
+def test_assess_steps_assesses_the_control_it_is_given_never_a_fresh_lookup():
+    from dataclasses import replace
+
+    from vouch.graph import Assessment, assess_steps
+    from vouch.isa import load_isa_control
+
+    custom = replace(load_isa_control("5.1.1"), question="A question of the caller's own?")
+
+    *_, assessment = assess_steps(custom, GERMAN, answering_only())
+
+    assert isinstance(assessment, Assessment)
+    assert assessment.steps[0]["text"].startswith(
+        "Loaded control 5.1.1: A question of the caller's own?"
+    )

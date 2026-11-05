@@ -294,3 +294,23 @@ def test_a_bad_fake_script_exits_2_with_one_line_naming_it(case, tmp_path):
     assert "Traceback" not in result.stderr
     if case == "judgement-without-verdict":
         assert "verdict" in lines[0].split(str(script), 1)[1]  # the problem, not the file name
+
+
+def test_requirements_with_a_german_profile_list_the_german_isa_text(tmp_path, monkeypatch, capsys):
+    from vouch import cli, profile
+
+    folder = tmp_path / "alpen"
+    for name in ("policies", "records", "patch"):
+        (folder / name).mkdir(parents=True)
+    (folder / "profile.yaml").write_text(
+        profile.NORDLICHT_PROFILE.read_text(encoding="utf-8")
+        .replace("id: nordlicht", "id: alpen")
+        .replace("answer_language: en", "answer_language: de"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+
+    assert cli.main(["--requirements", "5.1.1", "--profile", "alpen"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("5.1.1 Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?\n")
+    assert "M1 (must): Alle angewendeten kryptografischen Verfahren" in out

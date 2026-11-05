@@ -4,8 +4,9 @@ from importlib.metadata import version
 import pytest
 from assess_steps import in_order
 from fastapi.testclient import TestClient
+from isa_editions import GERMAN_5_1_1
 
-from vouch import ScriptedChatModel, profile
+from vouch import ScriptedChatModel, isa, profile
 from vouch.api import app, load_default_profile
 from vouch.settings import FAKE_SCRIPT_ENV
 
@@ -293,3 +294,38 @@ def test_a_tool_failure_mid_run_ends_with_one_error_event(client, monkeypatch):
     assert "result" not in names
     assert "disk on fire" not in response.text
     assert "Traceback" not in response.text
+
+
+# ISA edition -----------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def german_default_profile(client):
+    from vouch.api import compliance_profile
+
+    german = load_default_profile().model_copy(update={"answer_language": "de"})
+    app.dependency_overrides[compliance_profile] = lambda: german
+    yield german
+    app.dependency_overrides.pop(compliance_profile)
+
+
+def test_a_german_profile_is_assessed_against_the_german_isa_text(client, german_default_profile):
+    response = client.post("/api/assessments", json={"control_id": "5.1.1"})
+
+    steps = [data for name, data in read_events(response) if name == "step"]
+    assert steps[0]["text"].startswith(f"Loaded control 5.1.1: {GERMAN_5_1_1}")
+
+
+def test_a_broken_german_edition_is_a_500_before_any_stream(
+    client, german_default_profile, monkeypatch, tmp_path
+):
+    broken = tmp_path / "controls-de.yaml"
+    broken.write_text("controls: [\n", encoding="utf-8")
+    monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+
+    response = client.post("/api/assessments", json={"control_id": "5.1.1"})
+
+    assert response.status_code == 500
+    assert not response.headers["content-type"].startswith("text/event-stream")
+    assert response.json()["detail"].startswith("The assessment could not be completed.")
+    assert str(tmp_path) not in response.text

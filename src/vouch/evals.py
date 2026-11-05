@@ -30,7 +30,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import JUDGED_VERDICTS, Assessment, Verdict, assess
-from vouch.isa import Column, UnknownControlError, load_isa_control
+from vouch.isa import Column, UnknownControlError
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.profile import (
     DEFAULT_PROFILE,
@@ -223,7 +223,7 @@ def _columns(case: EvalCase, profile: ComplianceProfile) -> dict[str, Column] | 
     """Each applicable requirement's column, or why the case doesn't fit the profile: an
     unknown control, a requirement that doesn't apply, one named twice or one left out."""
     try:
-        control = load_isa_control(case.control_id)
+        control = profile.isa_control(case.control_id)
     except UnknownControlError as error:
         return str(error)
     requirements = profile.requirements_for(control)

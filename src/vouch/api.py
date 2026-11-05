@@ -30,7 +30,7 @@ from vouch.graph import (
     memory_checkpointer,
     resume,
 )
-from vouch.isa import IsaControl, UnknownControlError, load_isa_control
+from vouch.isa import BaseFrameworkError, IsaControl, UnknownControlError
 from vouch.profile import (
     DEFAULT_PROFILE,
     ComplianceProfile,
@@ -59,14 +59,6 @@ class RequestedAssessment:
     note: str
 
 
-def requested_assessment(request: Annotated[AssessmentRequest, Body()]) -> RequestedAssessment:
-    """The control is looked up before the stream starts, so an unknown one is a plain 404."""
-    try:
-        return RequestedAssessment(load_isa_control(request.control_id), request.note)
-    except UnknownControlError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-
-
 @cache
 def load_default_profile() -> ComplianceProfile:
     """The default compliance profile, read once; a failed read isn't kept, so it's tried again."""
@@ -79,6 +71,21 @@ def compliance_profile() -> ComplianceProfile:
         return load_default_profile()
     except (ProfileError, UnknownProfileError):
         log.exception("the compliance profile %s could not be loaded", DEFAULT_PROFILE)
+        raise HTTPException(status_code=500, detail=FAILED) from None
+
+
+def requested_assessment(
+    request: Annotated[AssessmentRequest, Body()],
+    profile: Annotated[ComplianceProfile, Depends(compliance_profile)],
+) -> RequestedAssessment:
+    """The control is looked up, in the profile's ISA edition, before the stream starts, so
+    an unknown one is a plain 404 and an unreadable edition a plain 500, not an event."""
+    try:
+        return RequestedAssessment(profile.isa_control(request.control_id), request.note)
+    except UnknownControlError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except BaseFrameworkError:
+        log.exception("the ISA edition for %s could not be read", profile.answer_language)
         raise HTTPException(status_code=500, detail=FAILED) from None
 
 

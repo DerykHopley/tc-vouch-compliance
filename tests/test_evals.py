@@ -194,6 +194,25 @@ def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run()
     assert report.verdict_accuracy == 1
 
 
+def test_a_case_is_checked_against_the_profiles_isa_edition(tmp_path, monkeypatch):
+    from vouch import isa
+
+    german_edition = tmp_path / "controls-de.yaml"  # holds 5.2.9 only, so 5.1.2 is unknown
+    german_edition.write_text(
+        "source: VDA ISA 2027.1\ncontrols:\n"
+        "- {id: 5.2.9, question: Q, iso_27001: ISO 27001, requirements: []}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(isa, "CONTROLS_DE_FILE", german_edition)
+    german = NORDLICHT.model_copy(update={"answer_language": "de"})
+    case = EvalCase("5.1.2", (expected("M1", "evidenced"),))
+
+    report = run_eval([case], german, backup_models(), today=TODAY)
+
+    assert report.scores == []
+    assert report.bad_cases == [BadCase("5.1.2", "unknown control id: 5.1.2")]
+
+
 def test_a_case_missing_an_applicable_requirement_or_naming_one_twice_is_a_bad_case():
     missing = EvalCase("5.2.9", BACKUP.requirements[:2])  # no S1
     twice = EvalCase("5.2.9", (*BACKUP.requirements, expected("M1", "evidenced")))
