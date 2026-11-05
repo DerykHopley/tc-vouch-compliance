@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
@@ -581,6 +581,42 @@ describe('Ask Vouch', () => {
       return body.message === undefined ? greeting(body) : chat(body)
     })
   }
+
+  it('keeps the log on the newest message at its bottom, and leaves a lead who scrolled up to read where they are',
+    async () => {
+      let write: (block: string) => void = () => {}
+      serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder()
+          write = (block) => controller.enqueue(encoder.encode(block))
+        },
+      }), { headers: { 'Content-Type': 'text/event-stream' } })))
+      render(<App />)
+      await open()
+      await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+      const log = within(bubble()!).getByRole('log')
+      // jsdom lays nothing out: the log is 1000px of content in a 400px box.
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 })
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 400 })
+      const step = (n: number) => act(async () =>
+        write(`event: step\ndata: {"node":"gather","text":"Step ${n}."}\n\n`))
+
+      await step(1)
+      await within(log).findByText('Step 1.')
+      expect(log.scrollTop).toBe(1000) // followed to the newest
+
+      log.scrollTop = 100 // the lead scrolls up to read
+      fireEvent.scroll(log)
+      await step(2)
+      await within(log).findByText('Step 2.')
+      expect(log.scrollTop).toBe(100) // left where they are
+
+      log.scrollTop = 580 // back near the bottom
+      fireEvent.scroll(log)
+      await step(3)
+      await within(log).findByText('Step 3.')
+      expect(log.scrollTop).toBe(1000)
+    })
 
   it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
     let write: (block: string) => void = () => {}

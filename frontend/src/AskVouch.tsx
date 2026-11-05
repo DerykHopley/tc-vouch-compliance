@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import {
   CHAT_UNREACHABLE, GREETING_UNREACHABLE, type PageContext, pageLabel, sendChat, suggestionLabel, suggestionMessage,
@@ -10,6 +10,8 @@ const SHEET_QUERY = '(max-width: 700px)'
 const NO_PIN_QUERY = '(max-width: 1000px)'
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
 
+/** How close to the log's bottom (px) still counts as reading the newest message. */
+const NEAR_BOTTOM = 48
 const isSheet = () => window.matchMedia?.(SHEET_QUERY).matches ?? false
 const canPin = () => !(window.matchMedia?.(NO_PIN_QUERY).matches ?? false)
 
@@ -164,6 +166,18 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
   const greeted = useRef(false) // asked for the greeting
   const greetAgain = useRef(false) // it failed: asked for again on the next opening
 
+  // The log follows the newest message while the lead is at, or near, its bottom; scrolled up to read, it stays put.
+  const logRef = useRef<HTMLDivElement>(null)
+  const following = useRef(true)
+  const noteWhereRead = () => {
+    const log = logRef.current
+    if (log) following.current = log.scrollHeight - log.scrollTop - log.clientHeight <= NEAR_BOTTOM
+  }
+  useLayoutEffect(() => {
+    const log = logRef.current
+    if (log && following.current) log.scrollTop = log.scrollHeight
+  }, [messages, suggestion, busy, open])
+
   /** Sends `text` (null: asks for the greeting) and shows the reply as it streams: Vouch's words, an assessment's
    * steps and its verdict, the next step as a chip. A failure is a notice; a typed message is kept, to send again. */
   async function converse(text: string | null) {
@@ -183,6 +197,8 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
       if (text !== null) setDraft((now) => now || text)
       else greetAgain.current = true
     }
+    // A finished assessment's verdict line, with its link, is the last thing the turn adds: after Vouch's words on it.
+    const verdicts: Message[] = []
     try {
       for await (const item of sendChat(text, context, threadId.current)) {
         if (item.event === 'token') write(item.data.text)
@@ -190,13 +206,14 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         else if (item.event === 'step') add({ from: 'step', step: item.data })
         else if (item.event === 'suggestion') setSuggestion(item.data)
         else if (item.event === 'assessment') {
-          add({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status })
+          verdicts.push({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status })
           onAssessed?.(item.data.control_id)
         } else if (item.event === 'error') failed(item.data.message)
       }
     } catch {
       failed(text === null ? GREETING_UNREACHABLE : CHAT_UNREACHABLE)
     } finally {
+      for (const verdict of verdicts) add(verdict)
       sending.current = false
       setBusy(false)
     }
@@ -248,7 +265,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         </button>
       </div>
       {/* Busy while a reply streams, so assistive tech announces the finished message, not each piece. */}
-      <div className="bubble-log" role="log" aria-live="polite" aria-busy={busy}>
+      <div ref={logRef} onScroll={noteWhereRead} className="bubble-log" role="log" aria-live="polite" aria-busy={busy}>
         {messages.map((m, i) => m.from === 'verdict'
           ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} onOpen={onOpen} />
           : m.from === 'step' ? <StepLine key={i} step={m.step} />

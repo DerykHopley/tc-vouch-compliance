@@ -166,7 +166,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 .field[aria-invalid="true"] { border-color: var(--ink); border-width: 2px; }
 .field-note { margin: 0; color: var(--muted); max-width: 72ch; }
 .field-note.notice { color: var(--ink); padding-left: 10px; }
-.sheet a { color: var(--navy); }
+.sheet a, .msg a { color: var(--navy); }
 
 /* Ask Vouch: button and bubble */
 .fab, .bubble { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; }
