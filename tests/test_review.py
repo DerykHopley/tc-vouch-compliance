@@ -489,7 +489,11 @@ def test_two_reviews_at_once_resume_once_and_the_other_is_refused():
         saver.local.armed = True
         try:
             reviewed = audit.review(
-                trail, result.thread_id, ReviewDecision(decision=decision), user_id="lead"
+                trail,
+                result.thread_id,
+                ReviewDecision(decision=decision),
+                user_id="lead",
+                reviewer_name="Lead",
             )
             outcomes[decision] = reviewed.review.decision
         except NotWaitingForReviewError:

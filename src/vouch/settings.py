@@ -32,6 +32,7 @@ MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 FRONTEND_ENV = "VOUCH_FRONTEND"
 DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
+LOCAL_USER_NAME_ENV = "VOUCH_LOCAL_USER_NAME"
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
@@ -40,7 +41,7 @@ ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?")
 ENV_NAMES = frozenset(
     {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {FRONTEND_ENV}
-    | {DATABASE_URL_ENV}
+    | {DATABASE_URL_ENV, LOCAL_USER_NAME_ENV}
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
@@ -59,6 +60,8 @@ class User:
 
 DEFAULT_USER = User(id="local-user")
 """Local mode's one user: no sign-in on a developer's machine."""
+DEFAULT_USER_NAME = "Local user"
+"""Local mode's one user's display name, unless VOUCH_LOCAL_USER_NAME names another."""
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,8 @@ class Settings:
     frontend: Path | None = None
     database_url: SecretStr | None = None
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
+    local_user_name: str = DEFAULT_USER_NAME
+    """Local mode's one user's display name, kept on their audit entries (#154)."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -140,6 +145,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fake_script=read_path(FAKE_SCRIPT_ENV),
         frontend=read_path(FRONTEND_ENV),
         database_url=SecretStr(database_url) if database_url else None,
+        local_user_name=read(LOCAL_USER_NAME_ENV) or DEFAULT_USER_NAME,
     )
 
 

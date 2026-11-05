@@ -70,10 +70,12 @@ def bearer(value: str) -> dict[str, str]:
 
 
 class FakeClerk:
-    """Clerk's Backend API, GET /v1/users/{id} only: each user's private metadata."""
+    """Clerk's Backend API, GET /v1/users/{id} only: each user's private metadata, and their
+    name and e-mail addresses where `profiles` gives them (the User object's own fields)."""
 
     def __init__(self, metadata: dict[str, dict[str, Any]] | None = None):
         self.metadata = metadata if metadata is not None else {}
+        self.profiles: dict[str, dict[str, Any]] = {}
         self.calls: list[httpx.Request] = []
         self.fail: Callable[[httpx.Request], httpx.Response] | None = None
 
@@ -87,6 +89,12 @@ class FakeClerk:
         if request.method != "GET" or user_id not in self.metadata:
             return httpx.Response(404, json={"errors": [{"code": "resource_not_found"}]})
         # The fields the app reads, and one it must not: public metadata is the browser's.
+        no_name = {
+            "first_name": None,
+            "last_name": None,
+            "primary_email_address_id": None,
+            "email_addresses": [],
+        }
         return httpx.Response(
             200,
             json={
@@ -94,7 +102,9 @@ class FakeClerk:
                 "object": "user",
                 "public_metadata": {"role": "developer"},
                 "private_metadata": self.metadata[user_id],
-            },
+            }
+            | no_name
+            | self.profiles.get(user_id, {}),
         )
 
 

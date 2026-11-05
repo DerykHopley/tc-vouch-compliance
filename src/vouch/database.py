@@ -106,6 +106,7 @@ AuditAction = Literal["accept", "reject", "override", "approve", "discard"]
 """What an audit entry records the compliance lead doing (vouch.audit's Action)."""
 AUDIT_COLUMNS = (
     "user_id",
+    "reviewer_name",
     "at",
     "profile_id",
     "control_id",
@@ -121,7 +122,8 @@ AUDIT_COLUMNS = (
 )
 CREATE_AUDIT = (
     f"CREATE TABLE IF NOT EXISTS {AUDIT_TABLE} (id bigserial PRIMARY KEY, "
-    "user_id text NOT NULL, at timestamptz NOT NULL, profile_id text NOT NULL, "
+    "user_id text NOT NULL, reviewer_name text NOT NULL, at timestamptz NOT NULL, "
+    "profile_id text NOT NULL, "
     "control_id text NOT NULL, thread_id text NOT NULL, action text NOT NULL "
     f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})), "
     "requirement_id text, note text NOT NULL, verdict_before text, verdict_after text, "
@@ -147,6 +149,21 @@ CREATE_AUDIT_TRIGGERS = (
 )
 """The table refuses an update, a delete or a truncate, whoever asks (dropping it still works:
 that's vouch-db-setup's owner's, not the app's)."""
+ADD_AUDIT_REVIEWER_NAME = (
+    "DO $$ BEGIN "
+    "IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = "
+    f"current_schema() AND table_name = '{AUDIT_TABLE}' AND column_name = 'reviewer_name') THEN "
+    f"ALTER TABLE {AUDIT_TABLE} ADD COLUMN reviewer_name text; "
+    f"ALTER TABLE {AUDIT_TABLE} DISABLE TRIGGER {AUDIT_TABLE}_append_only; "
+    f"UPDATE {AUDIT_TABLE} SET reviewer_name = user_id; "
+    f"ALTER TABLE {AUDIT_TABLE} ENABLE TRIGGER {AUDIT_TABLE}_append_only; "
+    f"ALTER TABLE {AUDIT_TABLE} ALTER COLUMN reviewer_name SET NOT NULL; "
+    "END IF; END $$"
+)
+"""A trail made before #154 gains the reviewer's name, the user id on its rows (no way to know
+the name then). One statement, so one transaction: the guard is off only inside it, for this
+one fill, and no other session sees it off. Runs after CREATE_AUDIT_TRIGGERS, so the trigger
+it lifts is there."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -544,6 +561,7 @@ class Database:
                 conn.execute(CREATE_AUDIT_GUARD)
                 for trigger in CREATE_AUDIT_TRIGGERS:
                     conn.execute(trigger)
+                conn.execute(ADD_AUDIT_REVIEWER_NAME)
         finally:
             conn.close()
 

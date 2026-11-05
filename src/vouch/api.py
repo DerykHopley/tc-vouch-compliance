@@ -223,6 +223,26 @@ def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Rol
         raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
 
 
+def reviewer_name(request: Request, user: CurrentUser, settings: AppSettings) -> str:
+    """The user's display name as it is now, for their audit entries (#154): local mode's
+    setting; in clerk mode Clerk's, from the role's cached lookup (auth.py). When Clerk can't
+    be asked, the user id, so the review still goes on; a user Clerk doesn't know is a 401, as
+    where the role is needed."""
+    if settings.auth_mode == "local":
+        return settings.local_user_name
+    auth: ClerkAuth = request.app.state.auth
+    try:
+        return auth.display_name(user)
+    except SignedOut:
+        raise _signed_out() from None
+    except ClerkUnavailable:
+        log.warning("the reviewer's name lookup failed: the entry keeps the user id as the name")
+        return user.id
+
+
+ReviewerName = Annotated[str, Depends(reviewer_name)]
+
+
 def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
     """A route only a developer may use (the developer page, #34); anyone else gets a 403."""
     if role != "developer":
@@ -489,6 +509,7 @@ def review_assessment(
     trail: AuditTrail,
     memory: UserMemory,
     user: CurrentUser,
+    name: ReviewerName,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
@@ -499,7 +520,9 @@ def review_assessment(
     already); 422 for an override naming a requirement the assessment didn't judge, or naming
     one twice (the decision's shape is checked before, also 422)."""
     try:
-        reviewed = audit.review(trail, thread_id, decision, user_id=user.id, scope=memory.scope)
+        reviewed = audit.review(
+            trail, thread_id, decision, user_id=user.id, reviewer_name=name, scope=memory.scope
+        )
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:

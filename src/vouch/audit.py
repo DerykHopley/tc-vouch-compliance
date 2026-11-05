@@ -68,6 +68,8 @@ class AuditEntry:
 
     id: int | None
     user_id: str
+    reviewer_name: str
+    """The reviewer's display name as it was at review time (#154): history keeps it."""
     at: datetime
     profile_id: str
     control_id: str
@@ -106,7 +108,11 @@ def _versions(requirements: list[RequirementVerdict]) -> tuple[EvidenceVersion, 
 
 
 def review_entries(
-    waiting: Assessment, decision: ReviewDecision, user_id: str, at: datetime
+    waiting: Assessment,
+    decision: ReviewDecision,
+    user_id: str,
+    at: datetime,
+    reviewer_name: str,
 ) -> list[AuditEntry]:
     """The entries the lead's decision on a waiting assessment makes: one per override, then
     the decision itself (so read newest first, the decision comes before its overrides). The
@@ -118,6 +124,7 @@ def review_entries(
         return AuditEntry(
             id=None,
             user_id=user_id,
+            reviewer_name=reviewer_name,
             at=at,
             profile_id=waiting.profile_id,
             control_id=waiting.control_id,
@@ -274,6 +281,7 @@ def review(
     decision: ReviewDecision,
     *,
     user_id: str,
+    reviewer_name: str,
     scope: str = "",
     clock: Callable[[], datetime] = _now,
 ) -> Assessment:
@@ -285,5 +293,5 @@ def review(
         waiting = load_assessment(thread_id, saver, scope=scope)
         if waiting.status != WAITING:
             raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-        record(review_entries(waiting, decision, user_id, clock()))
+        record(review_entries(waiting, decision, user_id, clock(), reviewer_name))
         return resume(thread_id, decision, saver, scope=scope)

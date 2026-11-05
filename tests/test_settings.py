@@ -191,3 +191,10 @@ def test_a_blank_clerk_key_counts_as_missing():
 def test_the_tests_start_from_no_vouch_settings():
     """tests/conftest.py: a developer's exported settings can't change the tests' results."""
     assert not ENV_NAMES & set(os.environ)
+
+
+def test_local_mode_names_its_user_local_user_unless_a_setting_names_another():
+    assert load_settings({}).local_user_name == "Local user"
+    assert load_settings({"VOUCH_LOCAL_USER_NAME": "  "}).local_user_name == "Local user"
+    named = load_settings({"VOUCH_LOCAL_USER_NAME": " Dana Lead "})
+    assert named.local_user_name == "Dana Lead"

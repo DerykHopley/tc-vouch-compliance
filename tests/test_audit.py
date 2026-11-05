@@ -7,16 +7,17 @@ those cases are skipped). The user is set per request by a test header (test_mem
 
 import threading
 import time
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
 from langgraph.store.memory import InMemoryStore
-from test_auth import api_routes
+from test_auth import SECRET, FakeClerk, api_routes, bearer, clerk_app, token
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture)
 from test_memory import DEMO_CONTROL, app_on, assess
 
@@ -24,7 +25,13 @@ from vouch import audit, load_named_profile
 from vouch.api import compliance_profile
 from vouch.audit import MAX_PAGE, AuditEntry, EvidenceVersion, review_entries
 from vouch.citations import Citation
-from vouch.database import AUDIT_COLUMNS, AUDIT_TABLE, lock_id
+from vouch.database import (
+    AUDIT_COLUMNS,
+    AUDIT_TABLE,
+    CREATE_AUDIT_GUARD,
+    CREATE_AUDIT_TRIGGERS,
+    lock_id,
+)
 from vouch.graph import Assessment, RequirementVerdict, ReviewDecision, ShouldScore, thread_key
 from vouch.memory import Memory
 from vouch.profile import DEFAULT_PROFILE
@@ -64,6 +71,7 @@ def test_an_accept_with_one_override_writes_two_entries(database_url, users):
     accept, override = entries
     common = {
         "user_id": alice["X-Test-User"],
+        "reviewer_name": "Local user",  # local mode's default user's name
         "profile_id": reviewed["profile_id"],
         "control_id": DEMO_CONTROL,
         "thread_id": thread_id,
@@ -93,6 +101,118 @@ def test_an_accept_with_one_override_writes_two_entries(database_url, users):
     assert accept["id"] != override["id"]
     assert accept["at"] == override["at"]
     datetime.fromisoformat(accept["at"])
+
+
+def test_a_review_in_local_mode_keeps_the_local_users_name(database_url, users):
+    alice, _ = users
+    app = app_on(database_url)
+    app.state.settings = replace(app.state.settings, local_user_name="Dana Lead")
+    with TestClient(app) as client:
+        thread_id = assess(client, alice)
+        review(client, alice, thread_id, decision="accept", overrides=[OVERRIDE_M1])
+        entries = trail(client, alice)
+
+    assert [(e["action"], e["reviewer_name"]) for e in entries] == [
+        ("accept", "Dana Lead"),
+        ("override", "Dana Lead"),
+    ]
+
+
+# --- Clerk mode: the reviewer's name from Clerk's user lookup, Backend API faked over HTTP ------
+
+ALICE = "user_alice"
+
+
+def clerk_trail(clerk: FakeClerk, *decisions: str) -> tuple[list[int], list[dict[str, Any]]]:
+    """Alice assesses and reviews once per decision in clerk mode; each review's status, and
+    her trail. Her token is a real one, checked offline as #32 does."""
+    signed_in = bearer(token(ALICE))
+    with TestClient(clerk_app(clerk), raise_server_exceptions=False) as client:
+        codes = [
+            review(client, signed_in, assess(client, signed_in), decision=d).status_code
+            for d in decisions
+        ]
+        return codes, trail(client, signed_in)
+
+
+@pytest.fixture
+def clerk() -> FakeClerk:
+    audit.process_trail.cache_clear()  # Alice's trail is new to each test
+    return FakeClerk({ALICE: {}})
+
+
+def test_in_clerk_mode_the_name_comes_from_clerk_looked_up_once_per_cache_time(clerk):
+    clerk.profiles[ALICE] = {"first_name": "Alice", "last_name": "Lindqvist"}
+
+    codes, entries = clerk_trail(clerk, "reject", "accept")
+
+    assert codes == [200, 200]
+    assert [e["reviewer_name"] for e in entries] == ["Alice Lindqvist", "Alice Lindqvist"]
+    assert [e["user_id"] for e in entries] == [ALICE, ALICE]
+    assert [call.url.path for call in clerk.calls] == [f"/v1/users/{ALICE}"]
+
+
+EMAILS = {
+    "primary_email_address_id": "idn_2",
+    "email_addresses": [
+        {"id": "idn_1", "object": "email_address", "email_address": "old@nordlicht.example"},
+        {
+            "id": "idn_2",
+            "object": "email_address",
+            "email_address": "a.lindqvist@nordlicht.example",
+        },
+    ],
+}
+NAMES = {
+    "first and last": (
+        {"first_name": "Alice", "last_name": "Lindqvist"} | EMAILS,
+        "Alice Lindqvist",
+    ),
+    "first only": ({"first_name": "Alice", "last_name": ""} | EMAILS, "Alice"),
+    "last only": ({"first_name": None, "last_name": "Lindqvist"}, "Lindqvist"),
+    "blank names: the primary e-mail's local part": (
+        {"first_name": " ", "last_name": None} | EMAILS,
+        "a.lindqvist",
+    ),
+    "no name, primary e-mail gone: the user id": (
+        EMAILS | {"primary_email_address_id": "idn_gone"},
+        ALICE,
+    ),
+    "nothing at all: the user id": ({}, ALICE),
+}
+
+
+@pytest.mark.parametrize(("profile", "name"), NAMES.values(), ids=NAMES.keys())
+def test_the_name_falls_back_to_the_primary_emails_local_part_then_the_user_id(
+    clerk, profile, name
+):
+    clerk.profiles[ALICE] = profile
+
+    _, (entry,) = clerk_trail(clerk, "accept")
+
+    assert entry["reviewer_name"] == name
+
+
+def test_a_failing_name_lookup_still_records_the_review_under_the_user_id(clerk, caplog):
+    clerk.fail = lambda request: httpx.Response(500, json={"errors": []})
+
+    codes, entries = clerk_trail(clerk, "accept")
+
+    assert codes == [200]
+    assert [(e["action"], e["reviewer_name"]) for e in entries] == [("accept", ALICE)]
+    assert "name lookup failed" in caplog.text
+    assert SECRET not in caplog.text
+
+
+def test_a_user_clerk_no_longer_knows_cannot_review(clerk):
+    """A deleted user's token verifies until it expires: Clerk's 404 signs them out, as where
+    the role is needed (#32)."""
+    clerk.metadata.clear()
+
+    codes, entries = clerk_trail(clerk, "accept")
+
+    assert codes == [401]
+    assert entries == []
 
 
 def test_entries_are_read_per_profile_newest_first(database_url, users):
@@ -314,7 +434,7 @@ def test_the_decisions_evidence_is_what_the_control_verdict_rests_on():
     )
     decision = ReviewDecision(decision="accept")
 
-    (entry,) = review_entries(waiting, decision, "u", datetime(2026, 11, 5, tzinfo=UTC))
+    (entry,) = review_entries(waiting, decision, "u", datetime(2026, 11, 5, tzinfo=UTC), "U")
 
     assert entry.evidence == (EvidenceVersion("counted", "1"),)
 
@@ -338,3 +458,62 @@ def test_the_table_refuses_an_update_a_delete_and_a_truncate(postgres, users):
     assert refused == [True, True, True]
     with TestClient(app_on(postgres.url)) as client:
         assert [e["note"] for e in trail(client, alice)] == [""]
+
+
+# The table as #39's vouch-db-setup made it, before entries kept the reviewer's name.
+CREATE_AUDIT_BEFORE_154 = (
+    f"CREATE TABLE {AUDIT_TABLE} (id bigserial PRIMARY KEY, "
+    "user_id text NOT NULL, at timestamptz NOT NULL, profile_id text NOT NULL, "
+    "control_id text NOT NULL, thread_id text NOT NULL, action text NOT NULL "
+    "CHECK (action IN ('accept', 'reject', 'override', 'approve', 'discard')), "
+    "requirement_id text, note text NOT NULL, verdict_before text, verdict_after text, "
+    "evidence jsonb NOT NULL, model text NOT NULL, prompt_version text NOT NULL)"
+)
+
+
+@needs_postgres
+def test_setup_adds_the_name_to_an_existing_trail_keeping_its_rows_and_its_guard(request, users):
+    alice, _ = users
+    db = request.getfixturevalue("empty_database")  # not set up: made as #39's setup made it
+    with db.connection() as conn:
+        conn.execute(CREATE_AUDIT_BEFORE_154)
+        conn.execute(CREATE_AUDIT_GUARD)
+        for trigger in CREATE_AUDIT_TRIGGERS:
+            conn.execute(trigger)
+        conn.execute(
+            f"INSERT INTO {AUDIT_TABLE} (user_id, at, profile_id, control_id, thread_id, action, "
+            "note, evidence, model, prompt_version) VALUES (%s, now(), %s, '4.1.2', 't-old', "
+            "'accept', 'Before #154.', '[]', 'fake', 'v1')",
+            (alice["X-Test-User"], DEFAULT_PROFILE),
+        )
+
+    db.setup()
+    db.setup()  # safe to run again
+    with TestClient(app_on(db.url)) as client:
+        review(client, alice, assess(client, alice), decision="accept")
+        entries = trail(client, alice)
+
+    assert [(e["thread_id"], e["reviewer_name"]) for e in entries] == [
+        (entries[0]["thread_id"], "Local user"),
+        ("t-old", alice["X-Test-User"]),  # no way to know the name then: the user id
+    ]
+    refused = []
+    for statement in (
+        f"UPDATE {AUDIT_TABLE} SET reviewer_name = 'changed'",
+        f"DELETE FROM {AUDIT_TABLE}",
+        f"TRUNCATE {AUDIT_TABLE}",
+    ):
+        with (
+            db.connection() as conn,
+            pytest.raises(psycopg.errors.RaiseException) as error,
+        ):
+            conn.execute(statement)
+        refused.append("append-only" in str(error.value))
+    assert refused == [True, True, True]
+    with db.connection() as conn:
+        nullable = conn.execute(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_name = %s AND column_name = 'reviewer_name'",
+            (AUDIT_TABLE,),
+        ).fetchone()
+    assert nullable == {"is_nullable": "NO"}
