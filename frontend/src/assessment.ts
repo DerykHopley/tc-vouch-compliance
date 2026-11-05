@@ -5,12 +5,26 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** A requirement's or a control's verdict, as the API sends it (`vouch.graph.Verdict`). */
 export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced' | 'not-applicable'
 
-export const VERDICT_WORDS: Record<Verdict, string> = {
+const VERDICT_WORDS: Record<Verdict, string> = {
   evidenced: 'Evidenced',
   'partly-evidenced': 'Partly evidenced',
   'not-evidenced': 'Not evidenced',
   'not-applicable': 'Not applicable',
 }
+
+/** The verdict words in each answer language besides English (docs/design.md, Verdict wording). */
+const VERDICT_WORDS_IN: Record<string, Record<Verdict, string>> = {
+  de: {
+    evidenced: 'Nachgewiesen',
+    'partly-evidenced': 'Teilweise nachgewiesen',
+    'not-evidenced': 'Nicht nachgewiesen',
+    'not-applicable': 'Nicht anwendbar',
+  },
+}
+
+/** A verdict in words, in the profile's answer language (ISO 639-1); English when there are none in it. */
+export const verdictWord = (verdict: Verdict, language: string): string =>
+  (VERDICT_WORDS_IN[language] ?? VERDICT_WORDS)[verdict]
 
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
@@ -21,7 +35,8 @@ export type Step = { node: string; text: string }
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
 export type RequirementVerdict = { id: string; column: Column; text: string; verdict: Verdict; reason: string }
 // The page reads only these of the Assessment's fields so far.
-export type Assessment = { control_id: string; verdict: Verdict; answer: string }
+// `answer_language` is the profile's: the answer and the verdict words are in it, the interface stays English.
+export type Assessment = { control_id: string; verdict: Verdict; answer: string; answer_language: string }
 
 /**
  * One assessment's tokens and cost (#35): `cost_usd` is OpenRouter's reported part plus the part computed from a
