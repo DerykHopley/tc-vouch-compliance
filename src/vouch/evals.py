@@ -39,7 +39,6 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.eval_models import (
     JUDGE,
-    JUDGE_MODEL,
     MODELS,
     OLLAMA_TIMEOUT_SECONDS,
     OLLAMA_URL,
@@ -714,14 +713,8 @@ def model_list() -> str:
     lines = ["Models (US dollars per million tokens, input / output):"]
     for m in MODELS:
         lines.append(_listed(m))
-    judge = (
-        f"{JUDGE} (on real models; with {FAKE}, only when --judge names it)"
-        if JUDGE
-        else "none named; give one with --judge"
-    )
-    lines.append(f"Judge: {judge}")
-    if JUDGE == JUDGE_MODEL.id:
-        lines.append(_listed(JUDGE_MODEL))
+    lines.append(f"Judge: {JUDGE.id} (on real models; with {FAKE}, only when --judge names it)")
+    lines.append(_listed(JUDGE))
     lines.append(f"Also: {FAKE} (the scripted fake model, free), and any ollama/<name> (local).")
     return "\n".join(lines)
 
@@ -746,11 +739,7 @@ def _parser() -> argparse.ArgumentParser:
         "--judge",
         metavar="<name>",
         help="the faithfulness judge: an OpenRouter model id or ollama/<name>; "
-        + (
-            f"on a real model {JUDGE} unless named, on {FAKE} none unless named"
-            if JUDGE
-            else "without one, faithfulness isn't measured"
-        ),
+        f"on a real model {JUDGE.id} unless named, on {FAKE} none unless named",
     )
     parser.add_argument("--ollama-url", default=OLLAMA_URL, metavar="<url>")
     parser.add_argument(
@@ -778,7 +767,7 @@ def _judge_name(args: argparse.Namespace) -> str | None:
     a free run never brings in a paid judge."""
     if args.judge is not None:
         return args.judge
-    return JUDGE if args.model != FAKE else None
+    return JUDGE.id if args.model != FAKE else None
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -8,7 +8,6 @@ from pydantic import SecretStr
 
 from vouch.eval_models import (
     JUDGE,
-    JUDGE_MODEL,
     LOCAL_PRICE,
     MODELS,
     OLLAMA_PREFIX,
@@ -135,20 +134,20 @@ def test_the_list_compares_haiku_sonnet_one_other_provider_and_one_local_model()
 
 
 def test_each_model_and_the_judge_has_a_price_with_its_source_and_date_and_a_reason():
-    for m in (*MODELS, JUDGE_MODEL):
+    for m in (*MODELS, JUDGE):
         assert m.price is not None, m.id
         assert DATED_SOURCE.search(m.source), m.id
         assert m.why, m.id
 
 
 def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
-    assert JUDGE == JUDGE_MODEL.id
-    assert JUDGE not in {m.id for m in MODELS}
-    assert price_of(JUDGE) == JUDGE_MODEL.price
+    assert JUDGE.id not in {m.id for m in MODELS}
+    assert JUDGE.price is not None
+    assert price_of(JUDGE.id) == JUDGE.price
 
 
 def test_the_app_knows_each_hosted_models_price_so_its_cost_is_never_unknown():
-    for m in (*MODELS, JUDGE_MODEL):
+    for m in (*MODELS, JUDGE):
         if not m.id.startswith(OLLAMA_PREFIX):
             assert PRICES[m.id] == m.price, m.id
 

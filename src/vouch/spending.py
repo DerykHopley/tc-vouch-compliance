@@ -71,12 +71,13 @@ PRICES = {
     MISTRAL_SMALL: Price(0.15, 0.60),
     GPT_TERRA: Price(1.00, 5.00),
 }
-"""For a cost OpenRouter doesn't report: each model's list price, the cheapest standard
-endpoint, from OpenRouter's model list (openrouter.ai/api/v1/models and each model's
-`/endpoints`). Haiku 5.5 read 2026-11-04, the others 2026-11-05 (#53). EU in-region endpoints
-charge 10% more (Haiku $0.11/$0.55, Sonnet $2.20/$11, Mistral Small 4 $0.165/$0.66, GPT-6.1
-Terra $1.20/$6). These are the eval runner's hosted models and judge (vouch.eval_models), which
-the developer page can also pick. A model missing here has no computed cost."""
+"""For a cost OpenRouter doesn't report: each model's list price, its cheapest standard
+endpoint (not a discounted "flex" or "batch" one), from OpenRouter's model list
+(openrouter.ai/api/v1/models and each model's `/endpoints`). Haiku 5.5 read 2026-11-04, the
+others 2026-11-05 (#53). EU in-region endpoints charge more: 10% for Haiku ($0.11/$0.55),
+Sonnet ($2.20/$11) and Mistral Small 4 ($0.165/$0.66), 20% for GPT-6.1 Terra (Azure EU,
+$1.20/$6). These are the eval runner's hosted models and judge (vouch.eval_models), which the
+developer page can also pick. A model missing here has no computed cost."""
 
 
 @dataclass(frozen=True)
