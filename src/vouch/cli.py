@@ -92,8 +92,15 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
 def list_requirements(control_id: str, profile_name: str | None = None) -> int:
     try:
         control = load_isa_control(control_id)
-        profile = None if profile_name is None else load_named_profile(profile_name)
-    except (UnknownControlError, BaseFrameworkError, UnknownProfileError, ProfileError) as error:
+        folder = load_settings().profiles_dir
+        profile = None if profile_name is None else load_named_profile(profile_name, folder)
+    except (
+        UnknownControlError,
+        BaseFrameworkError,
+        UnknownProfileError,
+        ProfileError,
+        SettingsError,
+    ) as error:
         print(f"assess: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT
     print(format_requirements(control, profile))
@@ -132,8 +139,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.requirements is not None:
         return list_requirements(args.requirements, args.profile)
     try:
-        profile = load_named_profile(args.profile or DEFAULT_PROFILE)
-        model = build_model(load_settings())
+        settings = load_settings()
+        profile = load_named_profile(args.profile or DEFAULT_PROFILE, settings.profiles_dir)
+        model = build_model(settings)
         assessment = assess(args.control_id, profile, model)
     except (
         UnknownControlError,

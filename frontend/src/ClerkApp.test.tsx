@@ -88,14 +88,14 @@ describe('signed in', () => {
 
   it('shows the app, and every API call carries a fresh session token', async () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy() // once the profiles are read
     expect(screen.queryByText('Access is by invitation')).toBeNull()
     expect(await authHeaders()).toEqual({ Authorization: 'Bearer session-token' })
   })
 
   it('signs out from the top bar', async () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
     expect(clerk.signOut).toHaveBeenCalledOnce()
   })
 

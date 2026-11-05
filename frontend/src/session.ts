@@ -19,8 +19,9 @@ export function setProfile(next: string | null) {
 
 /** The headers every API call carries: Authorization (none in local mode or signed out), and the chosen profile. */
 export async function authHeaders(): Promise<Record<string, string>> {
+  const chosen = profile // read before the await: a switch meanwhile mustn't change where this call goes
   const token = source ? await source() : null
-  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(profile ? { 'X-Vouch-Profile': profile } : {}) }
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(chosen ? { 'X-Vouch-Profile': chosen } : {}) }
 }
 
 /** What to do when the API answers 401 (no valid session): Clerk mode signs out, back to the sign-in. */

@@ -8,12 +8,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import SecretStr
 from test_api import read_events
 
-from vouch.api import cached_profile, create_app
+from vouch.api import create_app
 from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext, chat_messages, streamed_reply
 from vouch.chat_fake import CHAT_REPLY, CannedChatModel
 from vouch.isa import load_isa_control
 from vouch.model_choice import ModelChoice
-from vouch.profile import DEFAULT_PROFILE, load_named_profile
+from vouch.profile import DEFAULT_PROFILE, load_named_profile, read_profile_once
 from vouch.redaction import remember_secrets
 from vouch.settings import Settings
 
@@ -21,9 +21,9 @@ from vouch.settings import Settings
 @pytest.fixture
 def client():
     """The app in local mode, its chat on the canned fake (no key, no paid call)."""
-    cached_profile.cache_clear()
+    read_profile_once.cache_clear()
     yield TestClient(create_app(Settings()), raise_server_exceptions=False)
-    cached_profile.cache_clear()
+    read_profile_once.cache_clear()
 
 
 def chat(client, **body):

@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Literal, cast, get_args, overload
 
 from pydantic import SecretStr
 
+from vouch.paths import FIXTURES_DIR
+
 if TYPE_CHECKING:  # imported when called: the model's modules read settings themselves
     from vouch.fake_model import ScriptedChatModel
 
@@ -84,8 +86,8 @@ class Settings:
     frontend: Path | None = None
     database_url: SecretStr | None = None
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
-    profiles_dir: Path | None = None
-    """The folder of compliance profiles, one folder each (#47). None: the repository's fixtures."""
+    profiles_dir: Path = FIXTURES_DIR
+    """The folder of compliance profiles, one folder each (#47); by default the repository's."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -143,7 +145,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fake_script=read_path(FAKE_SCRIPT_ENV),
         frontend=read_path(FRONTEND_ENV),
         database_url=SecretStr(database_url) if database_url else None,
-        profiles_dir=read_path(PROFILES_DIR_ENV),
+        profiles_dir=read_path(PROFILES_DIR_ENV) or FIXTURES_DIR,
     )
 
 

@@ -1,4 +1,4 @@
-import { authHeaders } from './session.ts'
+import { authHeaders, sessionEnded } from './session.ts'
 
 /** The compliance profiles from `GET /api/profiles` (#47): those the user may switch between. */
 
@@ -11,7 +11,9 @@ export type Profiles = { profiles: ProfileSummary[]; default: string | null }
 export async function fetchProfiles(): Promise<Profiles | null> {
   try {
     const response = await fetch('/api/profiles', { headers: await authHeaders() })
-    return response.ok ? ((await response.json()) as Profiles) : null
+    if (response.ok) return (await response.json()) as Profiles
+    sessionEnded(response) // a 401 signs out, as every API call's does
+    return null
   } catch {
     return null
   }

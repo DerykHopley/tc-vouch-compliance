@@ -1,7 +1,7 @@
 import { Component, lazy, type ReactNode, Suspense } from 'react'
 import type { AuthConfig } from './authConfig.ts'
 import Invitation, { LoadFailed } from './Invitation.tsx'
-import Profiled from './Profiled.tsx'
+import ProfiledApp from './ProfiledApp.tsx'
 import TopBar from './TopBar.tsx'
 
 // Clerk's package is its own chunk, fetched only in clerk mode (#32).
@@ -9,7 +9,7 @@ const ClerkApp = lazy(() => import('./ClerkApp.tsx'))
 
 /** The app as the API's auth mode needs it: behind Clerk's sign-in, as it is locally, or why it can't open. */
 export default function Root({ auth }: { auth: AuthConfig }) {
-  if (auth.mode === 'local') return <Profiled />
+  if (auth.mode === 'local') return <ProfiledApp />
   if (auth.mode === 'unreachable') return <Unreachable />
   return (
     <ChunkFailed fallback={<Invitation><LoadFailed /></Invitation>}>

@@ -1,7 +1,7 @@
 import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk } from '@clerk/react'
 import { useLayoutEffect } from 'react'
 import Invitation, { SignInFailed } from './Invitation.tsx'
-import Profiled from './Profiled.tsx'
+import ProfiledApp from './ProfiledApp.tsx'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
 // Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
@@ -54,7 +54,7 @@ function SignedInApp() {
       setOnSignedOut(null)
     }
   }, [getToken, signOut])
-  return <Profiled onSignOut={() => void signOut()} />
+  return <ProfiledApp onSignOut={() => void signOut()} />
 }
 
 function SignedOut() {

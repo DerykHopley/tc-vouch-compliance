@@ -19,8 +19,11 @@ export type DeveloperSettings = {
   /** Every assessment's usage added up: real spend on OpenRouter, and the fake model's estimates apart. */
   usage: { openrouter: RunTotals; fake: RunTotals }
   /** The compliance profiles left out of the profile switcher because they could not be loaded (#47). */
-  broken_profiles: { id: string; problem: string }[]
+  broken_profiles: BrokenProfile[]
 }
+
+/** A compliance profile left out because it can't be loaded: its name and the problem, with no server path. */
+export type BrokenProfile = { id: string; problem: string }
 
 /** Some assessments' usage added up; `incomplete` of them have a cost not wholly known. */
 export type RunTotals = Pick<Usage, 'input_tokens' | 'output_tokens' | 'reported_cost_usd' | 'estimated_cost_usd'> & {

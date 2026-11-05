@@ -31,7 +31,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import JUDGED_VERDICTS, Assessment, Verdict, assess
 from vouch.isa import Column, UnknownControlError, load_isa_control
-from vouch.paths import FIXTURES_DIR, REPO_DIR
+from vouch.paths import REPO_DIR
 from vouch.profile import (
     DEFAULT_PROFILE,
     ComplianceProfile,
@@ -39,6 +39,7 @@ from vouch.profile import (
     UnknownProfileError,
     load_named_profile,
 )
+from vouch.settings import SettingsError, load_settings
 
 EXPECTED_ANSWERS = "expected-answers.yaml"  # in the profile's fixtures folder
 FAKE_SCRIPTS_DIR = REPO_DIR / "evals" / "scripts"  # one folder per profile, a script per case
@@ -403,9 +404,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--results", type=Path, default=RESULTS_DIR, metavar="<folder>")
     args = parser.parse_args(argv)
     try:
-        profile = load_named_profile(args.profile)
-        cases = load_cases(FIXTURES_DIR / profile.id / EXPECTED_ANSWERS, profile.id)
-    except (UnknownProfileError, ProfileError, CasesError) as error:
+        folder = load_settings().profiles_dir  # the API's profiles folder (#47)
+        profile = load_named_profile(args.profile, folder)
+        cases = load_cases(folder / profile.id / EXPECTED_ANSWERS, profile.id)
+    except (UnknownProfileError, ProfileError, CasesError, SettingsError) as error:
         print(f"eval: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT
     models = fake_models(FAKE_SCRIPTS_DIR / profile.id)

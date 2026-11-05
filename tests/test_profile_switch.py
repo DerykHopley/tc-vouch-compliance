@@ -4,6 +4,7 @@ header names, so nothing is shared between profiles."""
 
 import logging
 import shutil
+from pathlib import Path
 
 import pytest
 import test_memory
@@ -11,8 +12,12 @@ from fastapi.testclient import TestClient
 from profiles_dir import BROKEN, SECOND, SECOND_COMPANY, make_profiles
 from test_memory import as_user, assess, restart
 
-from vouch.api import PROFILE_HEADER, cached_profile, create_app, current_user
-from vouch.settings import Settings
+from vouch.api import PROFILE_HEADER, create_app, current_user
+from vouch.chat_fake import CannedChatModel
+from vouch.isa import BaseFrameworkError
+from vouch.model_choice import ModelChoice
+from vouch.profile import ProfileError, load_problem, read_profile_once
+from vouch.settings import PROFILES_DIR_ENV, Settings
 
 users = test_memory.users
 
@@ -24,7 +29,7 @@ def profiles(tmp_path):
 
 
 def app_with(profiles_dir) -> TestClient:
-    cached_profile.cache_clear()
+    read_profile_once.cache_clear()
     restart()
     app = create_app(Settings(profiles_dir=profiles_dir))
     app.dependency_overrides[current_user] = as_user
@@ -64,13 +69,15 @@ def test_a_broken_profile_is_left_out_logged_and_noted_on_the_developer_page(
     profiles, users, caplog
 ):
     alice, _ = users
-    with app_with(profiles) as client, caplog.at_level(logging.WARNING, "vouch.api"):
+    with caplog.at_level(logging.WARNING, "vouch.profile"), app_with(profiles) as client:
         listed = client.get("/api/profiles", headers=alice)
+        client.get("/api/profiles", headers=alice)
         developer = client.get("/api/developer/settings", headers=alice)
 
     assert listed.status_code == 200
     assert BROKEN not in [p["id"] for p in listed.json()["profiles"]]
-    assert BROKEN in caplog.text
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and BROKEN in r.message]
+    assert len(warnings) == 1  # read once, warned once, whatever the requests
     assert developer.status_code == 200
     [note] = developer.json()["broken_profiles"]
     assert note["id"] == BROKEN
@@ -87,15 +94,64 @@ def test_with_one_profile_the_list_has_one(tmp_path, users):
     assert [p["id"] for p in listed["profiles"]] == ["nordlicht"]
 
 
-def test_with_the_default_profile_broken_there_is_no_default(tmp_path, users):
-    alice, _ = users
+def test_a_missing_profile_folder_stops_the_app_naming_the_setting(tmp_path):
+    read_profile_once.cache_clear()
+    with pytest.raises(SystemExit) as stop:
+        create_app(Settings(profiles_dir=tmp_path / "nowhere"))
+
+    assert PROFILES_DIR_ENV in str(stop.value.code)
+
+
+def test_a_broken_default_profile_stops_the_app_naming_the_setting(tmp_path):
     make_profiles(tmp_path, broken=False)
     (tmp_path / "nordlicht" / "profile.yaml").write_text("id: [unclosed\n", encoding="utf-8")
-    with app_with(tmp_path) as client:
+    read_profile_once.cache_clear()
+    with pytest.raises(SystemExit) as stop:
+        create_app(Settings(profiles_dir=tmp_path))
+
+    assert PROFILES_DIR_ENV in str(stop.value.code)
+    assert "nordlicht" in str(stop.value.code)
+
+
+def test_a_missing_evidence_folder_is_noted_without_the_servers_path(profiles, users):
+    alice, _ = users
+    shutil.rmtree(profiles / SECOND / "records")
+    with app_with(profiles) as client:
+        notes = client.get("/api/developer/settings", headers=alice).json()["broken_profiles"]
+
+    problems = {note["id"]: note["problem"] for note in notes}
+    assert set(problems) == {BROKEN, SECOND}
+    assert "records" in problems[SECOND] and "does not exist" in problems[SECOND]
+    assert str(profiles) not in problems[SECOND] and "/" not in problems[SECOND]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ProfileError(
+            Path("/srv/p/a/profile.yaml"),
+            "evidence_sources.policies.folder: folder /srv/p/a/policies does not exist",
+        ),
+        BaseFrameworkError(Path("/srv/app/src/vouch/data/controls.yaml"), "not valid YAML"),
+        ProfileError(
+            Path("/srv/p/a/profile.yaml"),
+            "cannot read base framework file /srv/app/src/vouch/data/controls.yaml: not valid YAML",
+        ),
+    ],
+)
+def test_every_load_problem_is_told_without_paths(error):
+    problem = load_problem(error)
+
+    assert "/srv" not in problem and "/" not in problem
+    assert "policies" in problem or "controls.yaml" in problem
+
+
+def test_the_default_comes_from_the_loaded_default_profile(profiles, users):
+    alice, _ = users
+    with app_with(profiles) as client:
         listed = client.get("/api/profiles", headers=alice).json()
 
-    assert [p["id"] for p in listed["profiles"]] == [SECOND]
-    assert listed["default"] is None
+    assert listed["default"] == "nordlicht"
 
 
 def test_each_profile_keeps_its_own_progress(profiles, users):
@@ -143,6 +199,39 @@ def test_an_unknown_profile_is_404_before_any_stream(profiles, users):
 
     assert response.status_code == 404
     assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_an_over_long_profile_name_is_404_not_500(profiles, users):
+    alice, _ = users
+    with app_with(profiles) as client:
+        response = client.get("/api/overview", headers=under(alice, "a" * 300))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("profile_id", "company", "language"),
+    [("nordlicht", "Nordlicht Komponenten GmbH", "'en'"), (SECOND, SECOND_COMPANY, "'de'")],
+)
+def test_a_chat_builds_its_prompt_for_the_chosen_profile(
+    profiles, users, monkeypatch, profile_id, company, language
+):
+    alice, _ = users
+    fake = CannedChatModel()
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    with app_with(profiles) as client:
+        response = client.post(
+            "/api/chat",
+            json={"message": "Where do I stand?", "page": "dossier"},
+            headers=under(alice, profile_id),
+        )
+
+    assert response.status_code == 200, response.text
+    system, _ = fake.prompts[0]
+    assert company in system.content
+    assert language in system.content
+    other = SECOND_COMPANY if profile_id == "nordlicht" else "Nordlicht Komponenten GmbH"
+    assert other not in system.content
 
 
 def test_choosing_the_broken_profile_is_a_500_before_any_stream(profiles, users):

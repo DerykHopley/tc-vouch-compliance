@@ -3,8 +3,8 @@ progress; with one, its name and no menu; a broken profile is left out.
 
 Request budget (local mode: one user, 60 requests a minute per server; health isn't counted). The
 two-profile checks run on PROFILES_URL: 3 seeding calls, 3 counted calls a page load (profiles,
-overview, developer settings) and 2 a switch (overview, developer settings), 14 in all; with the
-developer page's checks, which share that server, 26 (measured in the servers' logs). The
+overview, developer settings) and 2 a switch (overview, developer settings), plus 2 chat messages:
+21 in all; with the developer page's checks, which share that server, about 33. The
 one-profile check spends 3 on DOSSIER_URL (the fixtures' one profile). Each page load now reads
 the profiles, one more request, so the developer page's and Ask Vouch's checks moved off VOUCH_URL,
 which was near the limit (Fix #138 lifts it): VOUCH_URL 46, DOSSIER_URL 44."""
@@ -81,6 +81,34 @@ def test_switching_shows_each_profiles_own_progress(page: Page, profiles_url):
         menu.select_option(label=NORDLICHT)
     expect(accepted_tile(page).locator("b")).to_have_text("1")
     expect(card(page, "1.1.1")).to_contain_text("Not assessed")
+
+
+def sent(page: Page, message: str):
+    """Sends `message` in the open chat; the chat request it made."""
+    page.get_by_role("textbox", name="Message to Vouch").fill(message)
+    with page.expect_response("**/api/chat") as answer:
+        page.get_by_role("button", name="Send").click()
+    return answer.value.request
+
+
+def test_switching_clears_the_chat_and_the_next_message_is_under_the_new_profile(
+    page: Page, profiles_url
+):
+    opened(page, profiles_url)
+    page.get_by_role("button", name="Ask Vouch").click()
+    first = sent(page, "Where do I stand?")
+    log = page.locator("aside[aria-label='Chat with Vouch']").get_by_role("log")
+    expect(log).to_contain_text("Where do I stand?")
+    assert first.header_value("X-Vouch-Profile") == "nordlicht"
+
+    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
+        page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
+            label=TESTWERK
+        )
+    page.get_by_role("button", name="Ask Vouch").click()
+    expect(log).not_to_contain_text("Where do I stand?")
+    second = sent(page, "What is missing?")
+    assert second.header_value("X-Vouch-Profile") == "testwerk"
 
 
 def test_the_switcher_fits_a_phone_in_dark(page: Page, profiles_url):

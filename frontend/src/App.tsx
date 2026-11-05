@@ -12,7 +12,7 @@ import WorkingPaper from './WorkingPaper.tsx'
 type Theme = 'light' | 'dark'
 
 /** The theme the page already shows (the app opens afresh on a profile switch), else the system setting, else light. */
-function systemTheme(): Theme {
+function startingTheme(): Theme {
   const shown = document.documentElement.dataset.theme
   if (shown === 'light' || shown === 'dark') return shown
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -35,9 +35,9 @@ function viewAt(path: string): View {
 }
 
 /** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out.
- * `profileSwitcher`: the top bar's profile switcher (Profiled.tsx, #47). */
+ * `profileSwitcher`: the top bar's profile switcher (ProfiledApp.tsx, #47). */
 export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => void; profileSwitcher?: ReactNode } = {}) {
-  const [theme, setTheme] = useState<Theme>(systemTheme)
+  const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])

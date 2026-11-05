@@ -13,9 +13,7 @@ import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from functools import cache
 from importlib.metadata import version
-from pathlib import Path
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -63,18 +61,17 @@ from vouch.model_choice import (
 )
 from vouch.profile import (
     DEFAULT_PROFILE,
-    PROFILE_LOAD_ERRORS,
+    BrokenProfile,
     ComplianceProfile,
-    UnknownProfileError,
-    load_named_profile,
-    load_problem,
-    profile_names,
+    ProfileScan,
+    scan_profiles,
 )
 from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
     DATABASE_URL_ENV,
     DEFAULT_USER,
     FRONTEND_ENV,
+    PROFILES_DIR_ENV,
     Settings,
     SettingsError,
     User,
@@ -133,69 +130,12 @@ PROFILE_HEADER = "X-Vouch-Profile"
 every call. Without it, the default profile."""
 
 
-@cache
-def cached_profile(folder: Path | None, name: str) -> ComplianceProfile:
-    """A compliance profile in `folder` (None: the fixtures), read once; a failed read isn't
-    kept, so it's tried again."""
-    return load_named_profile(name, folder)
-
-
 def app_settings(request: Request) -> Settings:
     """The Settings the app was created with."""
     return request.app.state.settings
 
 
 AppSettings = Annotated[Settings, Depends(app_settings)]
-
-
-def compliance_profile(
-    settings: AppSettings,
-    chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
-) -> ComplianceProfile:
-    """The profile the request names, else the default. Loaded before the stream starts, so a
-    broken profile is a plain 500, not an event; one that isn't there, when named, a 404."""
-    name = chosen or DEFAULT_PROFILE
-    try:
-        return cached_profile(settings.profiles_dir, name)
-    except UnknownProfileError:
-        if chosen is None:  # the default missing is the server's fault
-            log.exception("the default compliance profile %s is missing", name)
-            raise HTTPException(status_code=500, detail=FAILED) from None
-        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE) from None
-    except PROFILE_LOAD_ERRORS:
-        log.exception("the compliance profile %s could not be loaded", name)
-        raise HTTPException(status_code=500, detail=FAILED) from None
-
-
-Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
-
-
-@dataclass(frozen=True)
-class Profiles:
-    """The profiles a user may switch between, and those left out because they can't be loaded
-    (each name with its problem, for the developer page)."""
-
-    loaded: tuple[ComplianceProfile, ...]
-    broken: tuple[tuple[str, str], ...]
-
-
-def available_profiles(settings: Settings) -> Profiles:
-    """Every profile in the profiles folder that loads; a broken one is left out and logged,
-    never a failure of the list."""
-    loaded, broken = [], []
-    for name in profile_names(settings.profiles_dir):
-        try:
-            loaded.append(cached_profile(settings.profiles_dir, name))
-        except PROFILE_LOAD_ERRORS as error:
-            log.warning("compliance profile %s left out: %s", name, error)
-            broken.append((name, load_problem(error)))
-    return Profiles(tuple(loaded), tuple(broken))
-
-
-def profile_tools(profile: Profile) -> frozenset[str]:
-    """The tools the API lets the model call: the compliance profile's allow-list (security
-    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
-    return allowed_tools(profile)
 
 
 def _signed_out() -> HTTPException:
@@ -286,6 +226,39 @@ def rate_limit(request: Request, user: CurrentUser) -> None:
     if wait is not None:
         headers = {"Retry-After": str(wait)}
         raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS, headers=headers)
+
+
+def user_profiles(settings: Settings, user: User) -> ProfileScan:
+    """The one place that decides which compliance profiles a user may see and use (#47): for
+    now every profile in the profiles folder, for every user, each read once. A broken one is
+    left out (and listed for the developer page), never a failure."""
+    return scan_profiles(settings.profiles_dir)
+
+
+def compliance_profile(
+    settings: AppSettings,
+    user: CurrentUser,
+    chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
+) -> ComplianceProfile:
+    """The profile the request names, else the default, from the user's profiles. Settled
+    before the stream starts: one the user doesn't have is a 404; a broken one a plain 500."""
+    name = chosen or DEFAULT_PROFILE
+    found = user_profiles(settings, user).find(name)
+    if found is None:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    if isinstance(found, BrokenProfile):
+        log.error("the compliance profile %s can't be used: %s", name, found.problem)
+        raise HTTPException(status_code=500, detail=FAILED)
+    return found
+
+
+Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
+
+
+def profile_tools(profile: Profile) -> frozenset[str]:
+    """The tools the API lets the model call: the compliance profile's allow-list (security
+    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
+    return allowed_tools(profile)
 
 
 def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterator[Memory]:
@@ -583,12 +556,12 @@ def read_audit_trail(
 
 
 @router.get("/profiles")
-def list_profiles(settings: AppSettings) -> dict[str, Any]:
+def list_profiles(settings: AppSettings, user: CurrentUser) -> dict[str, Any]:
     """The compliance profiles the user may switch between (#47): each one's id, company,
     country and answer language. A profile that can't be loaded is left out (the developer page
     names it). `default` is the profile a request without X-Vouch-Profile is under; null when
     that one is left out."""
-    loaded = available_profiles(settings).loaded
+    scan = user_profiles(settings, user)
     listed = [
         {
             "id": p.id,
@@ -596,10 +569,10 @@ def list_profiles(settings: AppSettings) -> dict[str, Any]:
             "country": p.country,
             "answer_language": p.answer_language,
         }
-        for p in loaded
+        for p in scan.loaded
     ]
-    default = DEFAULT_PROFILE if any(p.id == DEFAULT_PROFILE for p in loaded) else None
-    return {"profiles": listed, "default": default}
+    default = scan.find(DEFAULT_PROFILE)
+    return {"profiles": listed, "default": default.id if default in scan.loaded else None}
 
 
 @router.get("/overview")
@@ -710,13 +683,13 @@ def _developer_page(
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
 def developer_settings(
-    models: AppModels, spending: AppSpending, settings: AppSettings
+    models: AppModels, spending: AppSpending, settings: AppSettings, user: CurrentUser
 ) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
     limit, every assessment's usage totalled, and the compliance profiles left out of the
     profile switcher because they can't be loaded (#47), each with its problem."""
-    notes = [{"id": n, "problem": p} for n, p in available_profiles(settings).broken]
-    return _developer_page(models, spending) | {"broken_profiles": notes}
+    broken = user_profiles(settings, user).broken
+    return _developer_page(models, spending) | {"broken_profiles": [asdict(b) for b in broken]}
 
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)
@@ -749,6 +722,24 @@ def unknown_api_path(path: str) -> None:
     raise HTTPException(status_code=404)
 
 
+def _check_profiles(settings: Settings) -> None:
+    """Stops the app, naming the setting, when the profiles folder can't serve: it isn't a
+    folder, or the default profile in it doesn't load."""
+    folder = settings.profiles_dir
+    if not folder.is_dir():
+        raise SystemExit(
+            f"Vouch cannot start: {PROFILES_DIR_ENV} names no folder ({folder}). Point it at a "
+            "folder of compliance profiles, or unset it for the repository's fixtures/."
+        )
+    default = scan_profiles(folder).find(DEFAULT_PROFILE)
+    if not isinstance(default, ComplianceProfile):
+        problem = default.problem if default else "it isn't there"
+        raise SystemExit(
+            f"Vouch cannot start: the default compliance profile {DEFAULT_PROFILE} in "
+            f"{PROFILES_DIR_ENV} ({folder}) can't be loaded: {problem}."
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """The API under /api; given the built front end (`settings.frontend`), that on every other path.
 
@@ -763,6 +754,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings = load_settings()
         except SettingsError as error:
             raise SystemExit(f"Vouch cannot start: {error}.") from None
+    _check_profiles(settings)
     clerk_mode = settings.auth_mode == "clerk"
     auth = None
     if clerk_mode:

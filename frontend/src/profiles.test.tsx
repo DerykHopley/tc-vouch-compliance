@@ -2,10 +2,10 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
-import Profiled from './Profiled.tsx'
+import ProfiledApp from './ProfiledApp.tsx'
 import { fetchProfiles, type ProfileSummary, profileLabel } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
-import { authHeaders, setProfile } from './session.ts'
+import { authHeaders, setOnSignedOut, setProfile, setTokenSource } from './session.ts'
 
 const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany',
   answer_language: 'en' }
@@ -19,6 +19,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   setProfile(null)
+  setTokenSource(null)
+  setOnSignedOut(null)
   delete document.documentElement.dataset.theme
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
@@ -37,6 +39,16 @@ describe('authHeaders', () => {
     setProfile('testwerk')
     expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'testwerk' })
   })
+
+  it('names the profile chosen when the call started, even if a switch lands while the token is fetched', async () => {
+    let giveToken: (token: string) => void = () => {}
+    setTokenSource(() => new Promise((resolve) => { giveToken = resolve }))
+    setProfile('nordlicht')
+    const headers = authHeaders()
+    setProfile('testwerk')
+    giveToken('t0ken')
+    expect(await headers).toEqual({ Authorization: 'Bearer t0ken', 'X-Vouch-Profile': 'nordlicht' })
+  })
 })
 
 describe('fetchProfiles', () => {
@@ -48,9 +60,36 @@ describe('fetchProfiles', () => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
     expect(await fetchProfiles()).toBeNull()
   })
+
+  it('signs out on a 401, as the other API calls do', async () => {
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
+    expect(await fetchProfiles()).toBeNull()
+    expect(signOut).toHaveBeenCalledOnce()
+  })
 })
 
 describe('ProfileSwitcher', () => {
+  it('opens the app only once the list has answered, under the default profile', async () => {
+    let answer: (response: Response) => void = () => {}
+    const fetch = vi.fn((url: string, _init?: RequestInit) => {
+      if (url === '/api/profiles') return new Promise<Response>((resolve) => { answer = resolve })
+      if (url === '/api/overview') return Promise.resolve(Response.json(overviewOf(NORDLICHT.company)))
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    render(<ProfiledApp />)
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/profiles', expect.anything()))
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/profiles'])
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
+
+    answer(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
+
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['nordlicht'])
+  })
+
   it('with one profile, shows its name and no menu', () => {
     render(<ProfileSwitcher profiles={[NORDLICHT]} selected="nordlicht" onSwitch={() => {}} />)
     expect(screen.queryByRole('combobox')).toBeNull()
@@ -99,10 +138,10 @@ const overviewCalls = (fetch: ReturnType<typeof serve>) =>
   fetch.mock.calls.filter(([url]) => url === '/api/overview')
     .map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))
 
-describe('Profiled', () => {
+describe('ProfiledApp', () => {
   it('switching loads the chosen profile\'s overview, and keeps the theme', async () => {
     const fetch = serve([NORDLICHT, TESTWERK])
-    render(<Profiled />)
+    render(<ProfiledApp />)
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
     const menu = await screen.findByRole('combobox', { name: 'Profile' })
     await userEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
@@ -110,7 +149,7 @@ describe('Profiled', () => {
     await userEvent.selectOptions(menu, 'testwerk')
 
     await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
-    expect(overviewCalls(fetch)).toEqual([null, 'testwerk'])
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'testwerk'])
     expect((screen.getByRole('combobox', { name: 'Profile' }) as HTMLSelectElement).value).toBe('testwerk')
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(screen.getByRole('button', { name: 'Light theme' })).toBeTruthy()
@@ -118,23 +157,23 @@ describe('Profiled', () => {
 
   it('with one profile, shows its name in the top bar and no menu', async () => {
     serve([NORDLICHT])
-    render(<Profiled />)
-    const bar = screen.getByRole('banner')
-    await within(bar).findByText('Nordlicht Komponenten GmbH · Germany · English')
-    expect(within(bar).queryByRole('combobox')).toBeNull()
+    render(<ProfiledApp />)
+    await screen.findByText('Nordlicht Komponenten GmbH · Germany · English')
+    expect(within(screen.getByRole('banner')).queryByRole('combobox')).toBeNull()
   })
 
   it('with the default profile left out, chooses the first listed', async () => {
     const fetch = serve([TESTWERK], null)
-    render(<Profiled />)
-    await waitFor(() => expect(overviewCalls(fetch).at(-1)).toBe('testwerk'))
+    render(<ProfiledApp />)
+    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['testwerk'])
   })
 
   it('without the list, shows no switcher and the app as before', async () => {
     vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
       ? Promise.resolve(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
       : Promise.resolve(new Response(null, { status: 500 })))
-    render(<Profiled />)
+    render(<ProfiledApp />)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy()
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
     expect(screen.queryByRole('combobox', { name: 'Profile' })).toBeNull()
