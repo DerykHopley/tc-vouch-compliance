@@ -9,9 +9,11 @@ OpenRouter model id, through the app's own OpenRouter client (vouch.model_choice
 budget, retries and timeout), with OPENROUTER_API_KEY from the environment (the keyring, through
 `.envrc`). Without the key a real model is refused; the fake still runs.
 
-MODELS is the runner's model list (#53 names the set and the judge). A model's cost per call is
-OpenRouter's reported `usage.cost` when it gives one, else its price here (vouch.spending's
-UsageMeter does the sums); a real model with neither has an unknown cost, never $0.
+MODELS is the runner's model list and JUDGE_MODEL its faithfulness judge, chosen in #53
+(docs/requirements.md, Decisions, 2026-11-05: the reasons, prices and the full run's estimate).
+A model's cost per call is OpenRouter's reported `usage.cost` when it gives one, else its price
+here (vouch.spending's UsageMeter does the sums); a real model with neither has an unknown cost,
+never $0.
 """
 
 from collections.abc import Callable
@@ -25,7 +27,7 @@ from pydantic import SecretStr
 
 from vouch.model_choice import DEFAULT_MODEL, OpenRouter
 from vouch.settings import OPENROUTER_API_KEY_ENV, Settings
-from vouch.spending import FAKE, PRICES, Price, Usage
+from vouch.spending import FAKE, GPT_TERRA, MISTRAL_SMALL, PRICES, SONNET, Price, Usage
 
 OLLAMA_PREFIX = "ollama/"
 OLLAMA_URL = "http://localhost:11434"
@@ -38,22 +40,56 @@ LOCAL_PRICE = Price(0.0, 0.0)
 
 @dataclass(frozen=True)
 class EvalModel:
-    """A model the eval compares: its id (OpenRouter's, or `ollama/<name>`), its price in US
-    dollars per million tokens (None: not known), and why it's in the set."""
+    """A model the eval runs: its id (OpenRouter's, or `ollama/<name>`), its price in US
+    dollars per million tokens (None: not known), why it's in the set, and where its price (or
+    for a local model, its size) was read, with the date."""
 
     id: str
     price: Price | None
     why: str = ""
+    source: str = ""
 
+
+OPENROUTER_PRICES = "https://openrouter.ai/api/v1/models"
+LOCAL_MODEL = "ollama/gpt-oss:20b"
 
 MODELS: tuple[EvalModel, ...] = (
     EvalModel(
-        DEFAULT_MODEL, PRICES[DEFAULT_MODEL], "the app's default (docs/requirements.md, 2026-11-03)"
+        DEFAULT_MODEL,
+        PRICES[DEFAULT_MODEL],
+        "the app's default (docs/requirements.md, 2026-11-03)",
+        f"{OPENROUTER_PRICES}, 2026-11-05",
+    ),
+    EvalModel(
+        SONNET,
+        PRICES[SONNET],
+        "Anthropic's next size up: what more quality costs",
+        f"{OPENROUTER_PRICES}, 2026-11-05",
+    ),
+    EvalModel(
+        MISTRAL_SMALL,
+        PRICES[MISTRAL_SMALL],
+        "another provider at Haiku's price, EU-based (Mistral Small 4, tools and structured "
+        "outputs)",
+        f"{OPENROUTER_PRICES}, 2026-11-05",
+    ),
+    EvalModel(
+        LOCAL_MODEL,
+        LOCAL_PRICE,
+        "local through Ollama: 14 GB, fits a 20 GB RX 7900 on ROCm, with tool calling",
+        "https://ollama.com/library/gpt-oss, 2026-11-05",
     ),
 )
-"""The models compared; #53 adds the rest, with their prices, source and date."""
-JUDGE: str | None = None
-"""The faithfulness judge's model; #53 names it. None: faithfulness only with --judge."""
+"""The models compared: Haiku, Sonnet, one other provider, one local model (#53)."""
+JUDGE_MODEL = EvalModel(
+    GPT_TERRA,
+    PRICES[GPT_TERRA],
+    "a mid-tier judge from a provider none of the compared models share, so it never judges "
+    "its own answers",
+    f"{OPENROUTER_PRICES}, 2026-11-05",
+)
+JUDGE: str | None = JUDGE_MODEL.id
+"""The faithfulness judge's model, on real models; on the fake, only with --judge."""
 
 
 class ModelUnavailable(RuntimeError):
@@ -69,7 +105,7 @@ def price_of(name: str) -> Price | None:
     one, else the app's (vouch.spending.PRICES); None when none is known."""
     if name.startswith(OLLAMA_PREFIX):
         return LOCAL_PRICE
-    listed = {m.id: m.price for m in MODELS}
+    listed = {m.id: m.price for m in (*MODELS, JUDGE_MODEL)}
     return listed[name] if name in listed else PRICES.get(name)
 
 

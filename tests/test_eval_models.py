@@ -1,12 +1,17 @@
 """The eval's models by name: OpenRouter with a key, a local Ollama model, and their prices."""
 
+import re
+
 import httpx
 import pytest
 from pydantic import SecretStr
 
 from vouch.eval_models import (
+    JUDGE,
+    JUDGE_MODEL,
     LOCAL_PRICE,
     MODELS,
+    OLLAMA_PREFIX,
     ModelUnavailable,
     OllamaNotRunning,
     chat_models,
@@ -113,3 +118,42 @@ def test_the_apps_default_model_is_in_the_list_at_the_apps_price():
 
 def test_a_real_model_with_no_known_price_has_none_never_zero():
     assert price_of("someone/unlisted-model") is None
+
+
+DATED_SOURCE = re.compile(r"https://\S+, \d{4}-\d{2}-\d{2}")
+
+
+def test_the_list_compares_haiku_sonnet_one_other_provider_and_one_local_model():
+    ids = [m.id for m in MODELS]
+
+    assert ids[:2] == [DEFAULT_MODEL, "anthropic/claude-sonnet-5.5"]
+    assert len(ids) == 4
+    other = [i for i in ids if not i.startswith(("anthropic/", OLLAMA_PREFIX))]
+    local = [i for i in ids if i.startswith(OLLAMA_PREFIX)]
+    assert len(other) == 1
+    assert len(local) == 1
+
+
+def test_each_model_and_the_judge_has_a_price_with_its_source_and_date_and_a_reason():
+    for m in (*MODELS, JUDGE_MODEL):
+        assert m.price is not None, m.id
+        assert DATED_SOURCE.search(m.source), m.id
+        assert m.why, m.id
+
+
+def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
+    assert JUDGE == JUDGE_MODEL.id
+    assert JUDGE not in {m.id for m in MODELS}
+    assert price_of(JUDGE) == JUDGE_MODEL.price
+
+
+def test_the_app_knows_each_hosted_models_price_so_its_cost_is_never_unknown():
+    for m in (*MODELS, JUDGE_MODEL):
+        if not m.id.startswith(OLLAMA_PREFIX):
+            assert PRICES[m.id] == m.price, m.id
+
+
+def test_the_local_model_is_free():
+    [local] = [m for m in MODELS if m.id.startswith(OLLAMA_PREFIX)]
+
+    assert local.price == LOCAL_PRICE

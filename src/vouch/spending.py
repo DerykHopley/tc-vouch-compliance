@@ -62,10 +62,21 @@ class Price:
         return spent / 1_000_000
 
 
-PRICES = {DEFAULT_MODEL: Price(0.10, 0.50)}
-"""For a cost OpenRouter doesn't report. From openrouter.ai/anthropic/claude-haiku-5.5,
-2026-11-04: $0.10/M input, $0.50/M output (EU in-region providers charge $0.11/M and $0.55/M).
-A model missing here has no computed cost."""
+SONNET = "anthropic/claude-sonnet-5.5"
+MISTRAL_SMALL = "mistralai/mistral-small-2603"
+GPT_TERRA = "openai/gpt-6.1-terra"
+PRICES = {
+    DEFAULT_MODEL: Price(0.10, 0.50),
+    SONNET: Price(2.00, 10.00),
+    MISTRAL_SMALL: Price(0.15, 0.60),
+    GPT_TERRA: Price(1.00, 5.00),
+}
+"""For a cost OpenRouter doesn't report: each model's list price, the cheapest standard
+endpoint, from OpenRouter's model list (openrouter.ai/api/v1/models and each model's
+`/endpoints`). Haiku 5.5 read 2026-11-04, the others 2026-11-05 (#53). EU in-region endpoints
+charge 10% more (Haiku $0.11/$0.55, Sonnet $2.20/$11, Mistral Small 4 $0.165/$0.66, GPT-6.1
+Terra $1.20/$6). These are the eval runner's hosted models and judge (vouch.eval_models), which
+the developer page can also pick. A model missing here has no computed cost."""
 
 
 @dataclass(frozen=True)

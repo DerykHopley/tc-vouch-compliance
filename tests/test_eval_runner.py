@@ -309,6 +309,7 @@ def saved(folder) -> dict:
 
 def test_the_command_stops_at_the_estimate_and_saves_the_dry_run(tmp_path, monkeypatch, capsys):
     endpoint = FakeEndpoint()
+    monkeypatch.setattr(evals, "JUDGE", None)  # unjudged: the list's judge needs a key
     monkeypatch.setattr(evals, "real_models", fake_endpoint_for(endpoint))
     monkeypatch.setattr("builtins.input", answers("n"))
 
@@ -328,6 +329,7 @@ def test_the_command_stops_at_the_estimate_and_saves_the_dry_run(tmp_path, monke
 def test_each_case_is_saved_as_it_runs_so_ctrl_c_keeps_the_paid_ones(tmp_path, monkeypatch):
     stop_at = CASES.cases[4].control_id
     endpoint = FakeEndpoint(interrupt_at=stop_at)
+    monkeypatch.setattr(evals, "JUDGE", None)  # unjudged: the list's judge needs a key
     monkeypatch.setattr(evals, "real_models", fake_endpoint_for(endpoint))
     monkeypatch.setattr("builtins.input", answers("yes"))
 
@@ -368,6 +370,19 @@ def test_a_real_model_with_no_key_is_refused_and_the_fake_still_runs(tmp_path, c
     assert list(tmp_path.iterdir()) == []
 
     assert main(["--model", "fake", "--results", str(tmp_path)]) == 0
+
+
+def test_a_real_model_is_judged_by_the_lists_judge_unless_another_is_named(
+    tmp_path, monkeypatch, capsys
+):
+    endpoint = FakeEndpoint()
+    monkeypatch.setattr(evals, "real_models", fake_endpoint_for(endpoint))
+
+    code = main(["--model", MODEL, "--results", str(tmp_path)])
+
+    assert code == 2  # the list's judge runs on OpenRouter, and no key is set
+    assert f"The judge {eval_models.JUDGE}" in capsys.readouterr().err
+    assert endpoint.asked == []
 
 
 def test_a_fake_run_never_brings_in_the_lists_judge(tmp_path, monkeypatch):
@@ -448,8 +463,11 @@ def test_the_fake_model_runs_without_a_dry_run(tmp_path, monkeypatch):
 def test_the_model_list_is_printed(capsys):
     assert main(["--models"]) == 0
     out = capsys.readouterr().out
-    assert "anthropic/claude-haiku-5.5" in out
-    assert "judge" in out.lower()
+    for m in eval_models.MODELS:
+        assert m.id in out
+        assert m.source in out
+    assert f"Judge: {eval_models.JUDGE}" in out
+    assert eval_models.JUDGE_MODEL.source in out
 
 
 def test_both_profiles_have_twelve_cases_that_fit_them_about_24_in_all():

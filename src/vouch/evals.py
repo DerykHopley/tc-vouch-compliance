@@ -39,10 +39,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.eval_models import (
     JUDGE,
+    JUDGE_MODEL,
     MODELS,
     OLLAMA_TIMEOUT_SECONDS,
     OLLAMA_URL,
     ChatModels,
+    EvalModel,
     ModelUnavailable,
     OllamaNotRunning,
     chat_models,
@@ -701,18 +703,25 @@ def real_models(
     return lambda control_id, callbacks: make(callbacks)
 
 
+def _listed(m: EvalModel) -> str:
+    """One model's line, its price and why, then where that was read, and when."""
+    price = f"${m.price.input_per_million} / ${m.price.output_per_million}" if m.price else "?"
+    return f"  {m.id}  {price}  {m.why}\n      source: {m.source}"
+
+
 def model_list() -> str:
     """The runner's model list and judge, with prices."""
     lines = ["Models (US dollars per million tokens, input / output):"]
     for m in MODELS:
-        price = f"${m.price.input_per_million} / ${m.price.output_per_million}" if m.price else "?"
-        lines.append(f"  {m.id}  {price}  {m.why}")
+        lines.append(_listed(m))
     judge = (
         f"{JUDGE} (on real models; with {FAKE}, only when --judge names it)"
         if JUDGE
-        else ("none named yet (#53); give one with --judge")
+        else "none named; give one with --judge"
     )
     lines.append(f"Judge: {judge}")
+    if JUDGE == JUDGE_MODEL.id:
+        lines.append(_listed(JUDGE_MODEL))
     lines.append(f"Also: {FAKE} (the scripted fake model, free), and any ollama/<name> (local).")
     return "\n".join(lines)
 
