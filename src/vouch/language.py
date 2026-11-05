@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from vouch.citations import MIN_QUOTE_WORDS, normalise
+from vouch.citations import occurs
 
 
 @dataclass(frozen=True)
@@ -81,22 +81,14 @@ def without_quotes(text: str) -> str:
     return _QUOTED.sub(" ", text)
 
 
-def _quoted_inner(span: str) -> str:
-    """A quoted span's text, its quote marks left out, normalised."""
-    return normalise(span[1:-1])
-
-
 def without_evidence_quotes(text: str, passages: Iterable[str]) -> str:
-    """The text with each quoted span left out that a passage holds word for word (whitespace
-    normalised, whole words, at least MIN_QUOTE_WORDS words); every other span stays in."""
-    held = [normalise(p) for p in passages]
+    """The text with each quoted span left out that a passage holds as evidence, by the
+    citations' quote-match rule (vouch.citations.occurs); every other span stays in."""
+    held = list(passages)
 
     def from_evidence(span: re.Match[str]) -> str:
-        inner = _quoted_inner(span.group())
-        if len(inner.split()) < MIN_QUOTE_WORDS:
-            return span.group()
-        found = re.compile(rf"(?<!\w){re.escape(inner)}(?!\w)")
-        return " " if any(found.search(p) for p in held) else span.group()
+        inner = span.group()[1:-1]  # the quote marks left out
+        return " " if any(occurs(inner, p) for p in held) else span.group()
 
     return _QUOTED.sub(from_evidence, text)
 
