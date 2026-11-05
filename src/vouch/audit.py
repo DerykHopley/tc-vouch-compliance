@@ -68,6 +68,8 @@ class AuditEntry:
 
     id: int | None
     user_id: str
+    reviewer_name: str
+    """The reviewer's display name as it was at review time (#154): history keeps it."""
     at: datetime
     profile_id: str
     control_id: str
@@ -85,6 +87,14 @@ class AuditEntry:
         data = asdict(self)
         data["at"] = self.at.isoformat()
         return data
+
+
+@dataclass(frozen=True)
+class Reviewer:
+    """Who acts on the trail: their user id, and their display name as it is now (#154)."""
+
+    id: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -106,7 +116,7 @@ def _versions(requirements: list[RequirementVerdict]) -> tuple[EvidenceVersion, 
 
 
 def review_entries(
-    waiting: Assessment, decision: ReviewDecision, user_id: str, at: datetime
+    waiting: Assessment, decision: ReviewDecision, reviewer: Reviewer, at: datetime
 ) -> list[AuditEntry]:
     """The entries the lead's decision on a waiting assessment makes: one per override, then
     the decision itself (so read newest first, the decision comes before its overrides). The
@@ -117,7 +127,8 @@ def review_entries(
     def entry(**fields: Any) -> AuditEntry:
         return AuditEntry(
             id=None,
-            user_id=user_id,
+            user_id=reviewer.id,
+            reviewer_name=reviewer.name,
             at=at,
             profile_id=waiting.profile_id,
             control_id=waiting.control_id,
@@ -273,7 +284,7 @@ def review(
     thread_id: str,
     decision: ReviewDecision,
     *,
-    user_id: str,
+    reviewer: Reviewer,
     scope: str = "",
     clock: Callable[[], datetime] = _now,
 ) -> Assessment:
@@ -285,5 +296,5 @@ def review(
         waiting = load_assessment(thread_id, saver, scope=scope)
         if waiting.status != WAITING:
             raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-        record(review_entries(waiting, decision, user_id, clock()))
+        record(review_entries(waiting, decision, reviewer, clock()))
         return resume(thread_id, decision, saver, scope=scope)

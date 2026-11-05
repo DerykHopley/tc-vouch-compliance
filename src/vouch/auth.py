@@ -12,8 +12,12 @@ expires, is refused. Only `sub` is used.
 The role is asked for only where a route needs it (`user_role`, `require_developer` in
 vouch.api), so a Clerk outage never stops a request that doesn't. It lives in the user's private
 metadata (`{"role": "developer"}`, docs/requirements.md, 2026-11-04), which only the backend can
-read: from Clerk's Backend API with the secret key, cached per user for ROLE_TTL seconds (a
-development instance allows 100 requests per 10 s). Anyone else is a compliance lead.
+read: from Clerk's Backend API with the secret key. Anyone else is a compliance lead.
+
+The same lookup gives the user's display name, kept on their audit entries (#154): first and
+last name, else the primary e-mail's local part, else the user id. The role and the name are
+cached together per user for USER_TTL seconds (a development instance allows 100 requests per
+10 s), so a review right after a role check (or another review) asks Clerk nothing.
 
 Fails closed: a token that doesn't verify is SignedOut (401); a role Clerk can't be asked for is
 ClerkUnavailable (503), never access.
@@ -60,9 +64,31 @@ class _Headers:
     headers: dict[str, str]
 
 
-class _CachedRole(NamedTuple):
-    expires: float
+class ClerkUser(NamedTuple):
+    """What Vouch reads of Clerk's user: their role, and their display name."""
+
     role: Role
+    name: str
+
+
+class _Cached(NamedTuple):
+    expires: float
+    user: ClerkUser
+
+
+def _display_name(user_id: str, found: dict[str, Any]) -> str:
+    """First and last name; else the primary e-mail's local part; else the user id."""
+    parts = (found.get("first_name"), found.get("last_name"))
+    name = " ".join(p.strip() for p in parts if isinstance(p, str) and p.strip())
+    if name:
+        return name
+    primary = found.get("primary_email_address_id")
+    for email in found.get("email_addresses") or []:
+        if primary and isinstance(email, dict) and email.get("id") == primary:
+            local = str(email.get("email_address") or "").partition("@")[0].strip()
+            if local:
+                return local
+    return user_id
 
 
 def _checked_jwt_key(keys: ClerkKeys) -> str:
@@ -78,10 +104,11 @@ def _checked_jwt_key(keys: ClerkKeys) -> str:
 
 
 class ClerkAuth:
-    """Checks one request's session token, and finds a user's role. Built once per app."""
+    """Checks one request's session token, and looks up a user's role and display name. Built
+    once per app."""
 
-    ROLE_TTL = 300.0
-    """Seconds a user's role is kept before Clerk is asked again."""
+    USER_TTL = 300.0
+    """Seconds a user's role and display name are kept before Clerk is asked again."""
 
     def __init__(
         self,
@@ -98,7 +125,7 @@ class ClerkAuth:
         self._secret_key = keys.secret_key
         self._client = client or httpx.Client(timeout=5.0)
         self._clock = clock
-        self._roles: dict[str, _CachedRole] = {}
+        self._users: dict[str, _Cached] = {}
 
     def close(self) -> None:
         """Closes the connection to Clerk's Backend API (the app's shutdown)."""
@@ -133,18 +160,21 @@ class ClerkAuth:
             raise SignedOut()
         return User(id=user_id)
 
-    def role(self, user: User) -> Role:
-        """The user's role, cached. Raises ClerkUnavailable, or SignedOut for a deleted user."""
+    def lookup(self, user: User) -> ClerkUser:
+        """The user's role and display name, cached for USER_TTL. Raises ClerkUnavailable, or
+        SignedOut for a deleted user; neither is cached."""
         now = self._clock()
-        cached = self._roles.get(user.id)
+        cached = self._users.get(user.id)
         if cached is not None and now < cached.expires:
-            return cached.role
-        role = self._fetch_role(user.id)
-        self._roles[user.id] = _CachedRole(expires=now + self.ROLE_TTL, role=role)
-        return role
+            return cached.user
+        found = self._fetch_user(user.id)
+        self._users[user.id] = _Cached(expires=now + self.USER_TTL, user=found)
+        return found
 
-    def _fetch_role(self, user_id: str) -> Role:
-        """Developer when the user's private metadata says so exactly; else compliance lead."""
+    def _fetch_user(self, user_id: str) -> ClerkUser:
+        """The user's role and display name, from Clerk's Backend API. The role is developer
+        when the user's private metadata says so exactly, else compliance lead; the name is
+        _display_name's."""
         try:
             response = self._client.get(
                 f"{CLERK_API}/users/{user_id}",
@@ -154,7 +184,9 @@ class ClerkAuth:
                 log.info("signed out: Clerk does not know the token's user")
                 raise SignedOut()
             response.raise_for_status()
-            metadata = response.json()["private_metadata"]
+            found = response.json()
+            metadata = found["private_metadata"]
+            name = _display_name(user_id, found)
         except SignedOut:
             raise
         # Unreachable or refused (HTTPError), or not the answer expected (the rest).
@@ -163,4 +195,4 @@ class ClerkAuth:
             log.error("Clerk's user lookup failed: %s %s", type(error).__name__, status or "")
             raise ClerkUnavailable() from None
         developer = isinstance(metadata, dict) and metadata.get("role") == "developer"
-        return "developer" if developer else "compliance-lead"
+        return ClerkUser(role="developer" if developer else "compliance-lead", name=name)

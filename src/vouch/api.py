@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from vouch import audit
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
-from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
+from vouch.auth import ClerkAuth, ClerkUnavailable, ClerkUser, Role, SignedOut
 from vouch.chat import (
     CHAT_FAILED,
     CHAT_PROMPT_VERSION,
@@ -217,19 +217,43 @@ def database_unavailable(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content=content)
 
 
-def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
-    """The user's role, for a route that needs it. Local mode's one user is a developer: local
-    mode is for a developer's machine. In clerk mode Clerk's API is asked (cached, auth.py);
-    when it can't answer, a 503, never access."""
+def _clerk_user(request: Request, user: User, settings: Settings) -> ClerkUser | None:
+    """Clerk's lookup of the user (role and display name, cached, auth.py); None in local mode,
+    where Clerk isn't asked. A user Clerk doesn't know is a 401. ClerkUnavailable is raised for
+    the caller to answer."""
     if settings.auth_mode == "local":
-        return "developer"
+        return None
     auth: ClerkAuth = request.app.state.auth
     try:
-        return auth.role(user)
+        return auth.lookup(user)
     except SignedOut:
         raise _signed_out() from None
+
+
+def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
+    """The user's role, for a route that needs it. Local mode's one user is a developer: local
+    mode is for a developer's machine. In clerk mode Clerk's API is asked; when it can't
+    answer, a 503, never access."""
+    try:
+        found = _clerk_user(request, user, settings)
     except ClerkUnavailable:
         raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
+    return "developer" if found is None else found.role
+
+
+def reviewer_name(request: Request, user: CurrentUser, settings: AppSettings) -> str:
+    """The user's display name as it is now, for their audit entries (#154): local mode's
+    setting; in clerk mode Clerk's, from the role's lookup. When Clerk can't be asked, the user
+    id, so the review still goes on."""
+    try:
+        found = _clerk_user(request, user, settings)
+    except ClerkUnavailable:
+        log.warning("the reviewer's name lookup failed: the entry keeps the user id as the name")
+        return user.id
+    return settings.local_user_name if found is None else found.name
+
+
+ReviewerName = Annotated[str, Depends(reviewer_name)]
 
 
 def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
@@ -498,6 +522,7 @@ def review_assessment(
     trail: AuditTrail,
     memory: UserMemory,
     user: CurrentUser,
+    name: ReviewerName,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
@@ -508,7 +533,9 @@ def review_assessment(
     already); 422 for an override naming a requirement the assessment didn't judge, or naming
     one twice (the decision's shape is checked before, also 422)."""
     try:
-        reviewed = audit.review(trail, thread_id, decision, user_id=user.id, scope=memory.scope)
+        reviewed = audit.review(
+            trail, thread_id, decision, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
+        )
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:
