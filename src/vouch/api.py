@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
+from vouch.chat import CHAT_FAILED, Page, PageContext, chat_messages, streamed_reply
 from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.dossier import overview
 from vouch.graph import (
@@ -510,6 +511,50 @@ def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) 
     latest = newest_by_control(memory, saver)  # from each control's newest thread
     clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
     return clean
+
+
+class ChatRequest(BaseModel):
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    page: Page
+    control_id: str | None = None  # the control whose working paper is open
+
+
+def page_context(request: Annotated[ChatRequest, Body()]) -> PageContext:
+    """The page the lead is on; an unknown control is a plain 404, before the stream starts."""
+    if request.control_id is None:
+        return PageContext(request.page)
+    try:
+        return PageContext(request.page, load_isa_control(request.control_id))
+    except UnknownControlError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post("/chat", response_class=EventSourceResponse)
+def chat(
+    request: Annotated[ChatRequest, Body()],
+    context: Annotated[PageContext, Depends(page_context)],
+    profile: Profile,
+    models: AppModels,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+) -> Iterable[ServerSentEvent]:
+    """The chat agent's reply to the lead's message (vouch.chat), knowing the page and control
+    the lead is on: a `token` event per piece of the reply as it is written, then `done`; or
+    one `error`, then close. Secrets and personal data are removed from the reply, a guard
+    `step` saying what (security layer 4). The model is the assessments' (vouch.model_choice):
+    OpenRouter when a key is set, else the chat's canned fake."""
+    try:
+        model = models.for_chat(chosen)
+        messages = chat_messages(request.message, profile, context)
+        for text, removed in streamed_reply(model, messages):
+            if removed:
+                step = {"node": GUARD, "text": removal_step(removed, "reply")}
+                yield ServerSentEvent(event="step", data=step)
+            if text:
+                yield ServerSentEvent(event="token", data={"text": text})
+        yield ServerSentEvent(event="done", data={})
+    except Exception:  # any failure reaches the browser as one formal sentence
+        log.exception("the chat could not answer")
+        yield ServerSentEvent(event="error", data={"message": CHAT_FAILED})
 
 
 DEVELOPERS = [Depends(require_developer)]
