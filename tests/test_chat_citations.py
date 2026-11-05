@@ -6,6 +6,8 @@ import pytest
 from vouch.chat_citations import QUOTE_REMOVED, CheckedCitations, dropped_step
 
 NOT_FOUND = "the quote isn't in that document"
+DOCUMENTS = frozenset({"encryption-standard", "doc"})
+"""The documents the profile allows, by id."""
 
 
 class Checks:
@@ -23,7 +25,7 @@ def checked(chunks: list[str]) -> tuple[str, list[str], Checks]:
     """What CheckedCitations sends of a reply written in `chunks`, every quote failing: the
     text, the guard steps, and the check (what it was asked)."""
     check = Checks()
-    quotes = CheckedCitations(check)
+    quotes = CheckedCitations(check, DOCUMENTS)
     pieces = [piece for chunk in chunks for piece in quotes.add(chunk)] + list(quotes.flush())
     text = "".join(text for text, _ in pieces)
     return text, [step for _, steps in pieces for step in steps], check
@@ -33,13 +35,14 @@ QUOTE = "every laptop is encrypted daily"
 
 
 def test_text_before_a_quote_is_sent_at_once_and_the_quote_held_until_its_citation_ends():
-    quotes = CheckedCitations(Checks())
+    quotes = CheckedCitations(Checks(), DOCUMENTS)
 
     assert list(quotes.add("It says “every laptop")) == [("It says ", [])]
     assert list(quotes.add(" is encrypted daily” [encr")) == []
     assert list(quotes.add("yption-standard] today.")) == [
-        (f"{QUOTE_REMOVED} today.", [dropped_step("encryption-standard", NOT_FOUND)])
+        (QUOTE_REMOVED, [dropped_step("encryption-standard", NOT_FOUND)])
     ]
+    assert list(quotes.flush()) == [(" today.", [])]  # its own sentence, held until it ended
 
 
 @pytest.mark.parametrize(
@@ -84,14 +87,91 @@ def test_a_short_quoted_phrase_with_no_document_is_text_and_not_checked():
 
 
 def test_german_quotes_dont_hold_back_the_text_after_them():
-    quotes = CheckedCitations(Checks())
+    quotes = CheckedCitations(Checks(), DOCUMENTS)
 
     sent = list(quotes.add(f"Die Richtlinie sagt „{QUOTE}“ [encryption-standard]. Danach "))
-    sent += list(quotes.add("folgt mehr"))
+    sent += list(quotes.add("folgt mehr. Und so"))
 
     assert "".join(text for text, _ in sent).startswith(
-        f"Die Richtlinie sagt {QUOTE_REMOVED}. Danach folgt"
+        f"Die Richtlinie sagt {QUOTE_REMOVED}. Danach folgt mehr."
     )
+
+
+# Any text cited by a document id: the quotation, blockquote or sentence before it
+
+
+@pytest.mark.parametrize(
+    "cited",
+    [
+        f"‘{QUOTE}’ [doc]",
+        f"'{QUOTE}' [doc]",
+        f"”{QUOTE}” [doc]",
+        f"「{QUOTE}」 [doc]",
+        f"『{QUOTE}』 [doc]",
+        f"`{QUOTE}` [doc]",
+        f"‹{QUOTE}› [doc]",
+        f"〝{QUOTE}〞 [doc]",
+    ],
+)
+def test_text_in_any_pair_of_quotation_marks_before_a_document_id_is_checked(cited):
+    text, steps, check = checked([f"It says {cited[:10]}", f"{cited[10:]}, as noted."])
+
+    assert check.asked == [(QUOTE, "doc")]
+    assert text == f"It says {QUOTE_REMOVED}, as noted."
+    assert steps == [dropped_step("doc", NOT_FOUND)]
+
+
+def test_an_apostrophe_inside_a_quotation_doesnt_end_it():
+    _, _, check = checked([f"The company’s policy: ‘the staff’s {QUOTE}’ [doc]."])
+
+    assert check.asked == [(f"the staff’s {QUOTE}", "doc")]
+
+
+def test_the_blockquote_lines_before_a_document_id_are_checked_whole():
+    quotes = CheckedCitations(check := Checks(), DOCUMENTS)
+
+    assert list(quotes.add("It reads:\n> every laptop is\n> encrypted daily\n")) == [
+        ("It reads:\n", [])
+    ]
+    sent = list(quotes.add("[doc]\nThat is all.")) + list(quotes.flush())
+
+    assert check.asked == [("every laptop is encrypted daily", "doc")]
+    assert "".join(text for text, _ in sent) == f"{QUOTE_REMOVED}\nThat is all."
+
+
+def test_the_sentence_before_a_document_id_is_held_until_its_bracket_closes_then_checked():
+    quotes = CheckedCitations(check := Checks(), DOCUMENTS)
+
+    assert list(quotes.add(f"Noted. It says {QUOTE} [encryption-sta")) == [("Noted. ", [])]
+    sent = list(quotes.add("ndard] for each one."))
+
+    assert check.asked == [(f"It says {QUOTE}", "encryption-standard")]
+    assert "".join(text for text, _ in sent).startswith(QUOTE_REMOVED)
+
+
+def test_a_finished_sentence_is_sent_once_the_next_one_starts():
+    quotes = CheckedCitations(Checks(), DOCUMENTS)
+
+    sent = list(quotes.add("The first sentence is here. The second"))
+
+    assert "".join(text for text, _ in sent) == "The first sentence is here. "
+
+
+def test_a_bracket_naming_no_document_is_text():
+    text, steps, check = checked(["See the notes on this topic [appendix] and (below)."])
+
+    assert (text, steps, check.asked) == (
+        "See the notes on this topic [appendix] and (below).",
+        [],
+        [],
+    )
+
+
+def test_a_document_id_cut_off_at_the_end_of_the_reply_has_its_sentence_checked():
+    text, steps, check = checked([f"It says {QUOTE} [encryption-st"])
+
+    assert check.asked == [(f"It says {QUOTE}", None)]
+    assert QUOTE not in text and len(steps) == 1
 
 
 @pytest.mark.parametrize(
@@ -119,7 +199,7 @@ def test_a_nested_quote_is_checked_as_the_innermost_whole_citation():
 
 
 def test_a_quote_mark_never_closed_is_passed_on_once_it_is_too_long_to_be_a_quote():
-    quotes = CheckedCitations(Checks())
+    quotes = CheckedCitations(Checks(), DOCUMENTS)
 
     sent = list(quotes.add("A stray “ mark, then " + "words " * 400))
 

@@ -251,6 +251,44 @@ def test_a_short_quoted_phrase_that_cites_no_document_is_left_as_written(client,
     assert guard_steps(events) == []
 
 
+INVENTED_TEXT = "Every laptop is encrypted twice a day by the night shift."
+REAL_TEXT = "Every company laptop uses full-disk encryption with AES-256."
+CITED_FORMS = [
+    "‘{}’ [encryption-standard]",  # curly single quotes
+    "'{}' [encryption-standard]",  # ASCII single quotes
+    "”{}” [encryption-standard]",  # a closing mark used to open
+    "「{}」 [encryption-standard]",
+    "`{}` [encryption-standard]",
+    "> {}\n[encryption-standard]",  # a markdown blockquote
+    "{} [encryption-standard]",  # the sentence before the document id
+    "“{}” (encryption-standard)",
+]
+
+
+@pytest.mark.parametrize("form", CITED_FORMS)
+def test_an_invented_quote_in_any_form_citing_a_document_is_dropped(client, fake, form):
+    fake.reply = f"The standard says:\n\n{form.format(INVENTED_TEXT)}\n\nPlease check it."
+
+    events = say(client, "Tell me about laptops.")
+
+    text = reply(events)
+    assert "night shift" not in text
+    assert "[quote removed]" in text and text.endswith("Please check it.")
+    assert guard_steps(events) == [
+        "Dropped a quote from encryption-standard: the quote isn't in that document."
+    ]
+
+
+@pytest.mark.parametrize("form", CITED_FORMS)
+def test_a_real_quote_in_any_form_citing_its_document_is_kept(client, fake, form):
+    fake.reply = f"The standard says:\n\n{form.format(REAL_TEXT)}\n\nPlease check it."
+
+    events = say(client, "Tell me about laptops.")
+
+    assert reply(events) == fake.reply
+    assert guard_steps(events) == []
+
+
 def test_an_invented_german_quote_is_dropped_and_the_reply_after_it_still_sent(client, fake):
     fake.reply = (
         "Der Standard sagt „Jeder Laptop wird zweimal täglich verschlüsselt“ "

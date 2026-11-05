@@ -563,6 +563,13 @@ class ChatTools:
         return datetime.now(UTC).date()
 
     @cached_property
+    def documents(self) -> frozenset[str]:
+        """The ids of the documents in every source the profile allows: an id in brackets
+        after text in a chat answer marks that text as a quote to check."""
+        folders = [source.folder for source in self.profile.evidence_sources.values()]
+        return frozenset(path.stem for folder in folders for path in folder.glob("*.md"))
+
+    @cached_property
     def _quotes(self) -> QuoteChecker:
         """The documents of every source the profile allows, as the model saw them: redacted."""
         folders = {name: source.folder for name, source in self.profile.evidence_sources.items()}
@@ -704,7 +711,7 @@ def _agent(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     (vouch.chat_citations), then a guard step per quote dropped. The thread keeps the same
     checked text, redacted, so the next turn's model never reads a dropped quote."""
     chat = runtime.context
-    quotes = CheckedCitations(chat.tools.check_quote)
+    quotes = CheckedCitations(chat.tools.check_quote, chat.tools.documents)
     sent: list[str] = []
     dropped: list[str] = []
 
