@@ -4,11 +4,14 @@ DeepEval's FaithfulnessMetric (deepeval.com/docs/metrics-faithfulness) has the j
 truths in the passages and the claims in the answer, then decide for each claim whether the
 truths back it; the score is the share that do (an ambiguous claim counts as backed, the
 library's default). The judge is any chat model (ChatJudge), so an OpenRouter or local model
-judges, and a fixed one in tests. An answer citing nothing isn't judged: there's no passage to
-hold it to. A judge that fails leaves no score and says why; the assessment's scores stand.
+judges, and a fixed one in tests. An answer citing nothing, or making no claim, isn't scored:
+there is nothing to hold it to, and DeepEval would score it 1. A judge that fails leaves no
+score and says why; the assessment's scores stand.
 
-DeepEval is a dev dependency, imported only when a judgement runs. Its telemetry is turned off
-before the import: evidence passages never go anywhere but the judge.
+DeepEval is a dev dependency, imported only by prepare_deepeval, which the runner calls at
+start whenever a judge is named, so a missing install is refused before any paid call. Before
+the import it switches off DeepEval's telemetry (evidence passages go nowhere but the judge) and
+its loading of `.env` files (Vouch keeps secrets in the keyring, never a `.env`).
 """
 
 import functools
@@ -20,16 +23,36 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 
 TELEMETRY_OPT_OUT = "DEEPEVAL_TELEMETRY_OPT_OUT"
+DISABLE_DOTENV = "DEEPEVAL_DISABLE_DOTENV"
+DEEPEVAL_SWITCHES = (TELEMETRY_OPT_OUT, DISABLE_DOTENV)
 NOTHING_CITED = "The answer cites nothing, so nothing cited to check it against."
+NO_CLAIMS = "The answer makes no claim to check against its passages."
+
+
+class JudgeUnavailable(RuntimeError):
+    """DeepEval can't be imported, so faithfulness can't be judged."""
 
 
 @dataclass(frozen=True)
 class Faithfulness:
-    """The share of the answer's claims its passages back (None: not judged), and why."""
+    """The share of the answer's claims its passages back (None: not scored), and why."""
 
     score: float | None
     reason: str | None = None
     error: str | None = None  # why the judge gave no score
+
+
+def prepare_deepeval() -> None:
+    """Switch DeepEval's telemetry and `.env` loading off, whatever the environment said, and
+    import it. Raises JudgeUnavailable when it isn't installed."""
+    for switch in DEEPEVAL_SWITCHES:
+        os.environ[switch] = "1"
+    try:
+        import deepeval  # noqa: F401
+    except ImportError as error:
+        raise JudgeUnavailable(
+            f"DeepEval can't be imported ({error}); it is a dev dependency: run `uv sync`."
+        ) from None
 
 
 @functools.cache
@@ -65,7 +88,7 @@ def measure_faithfulness(
     """How faithful `answer` (to `question`) is to `passages`, judged by `judge`."""
     if not passages:
         return Faithfulness(None, NOTHING_CITED)
-    os.environ.setdefault(TELEMETRY_OPT_OUT, "1")
+    prepare_deepeval()
     from deepeval.metrics import FaithfulnessMetric
     from deepeval.test_case import LLMTestCase
 
@@ -81,4 +104,6 @@ def measure_faithfulness(
     # Any exception: a judge's bad JSON, a provider's error; the eval goes on without a score.
     except Exception as error:  # noqa: BLE001
         return Faithfulness(None, error=f"{type(error).__name__}: {error}")
+    if not metric.claims:
+        return Faithfulness(None, NO_CLAIMS)
     return Faithfulness(score, metric.reason)

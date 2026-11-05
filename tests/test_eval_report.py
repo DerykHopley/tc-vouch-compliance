@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from test_eval_runner import FakeEndpoint, answers, models
 
-from vouch.eval_report import load_runs, main, render
-from vouch.evals import RunInfo, load_cases, run_confirmed, write_results
+from vouch.eval_report import assessment_measures, load_runs, main, render, write_atomic
+from vouch.evals import ResultsFile, RunInfo, load_cases, run_confirmed
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile
 
@@ -18,14 +18,30 @@ CASES = load_cases(FIXTURES_DIR / "nordlicht" / "expected-answers.yaml", "nordli
 
 def saved_run(folder: Path, model: str = "someone/priced-model") -> Path:
     """A real run on the fake endpoint, saved as the runner saves it."""
-    report, confirmed = run_confirmed(
+    results = ResultsFile(folder, RunInfo("nordlicht", CASES.today, model))
+    report, _ = run_confirmed(
         CASES.cases[:3],
         NORDLICHT,
         models(FakeEndpoint(), name=model),
         today=CASES.today,
         confirm=answers("yes"),
+        on_case=results.add,
     )
-    return write_results(report, folder, RunInfo("nordlicht", CASES.today, model, None, confirmed))
+    results.finish(report, "complete")
+    return results.path
+
+
+def case(control_id: str, tokens: int, cost: float | None, seconds: float, **extra) -> dict:
+    return {
+        "control_id": control_id,
+        "error": None,
+        "metered": True,
+        "tokens": tokens,
+        "cost_usd": cost,
+        "seconds": seconds,
+        "faithfulness": {"score": 0.9, "reason": "r", "error": None},
+        **extra,
+    }
 
 
 def raw(profile: str, model: str, run_at: str, accuracy: float, **extra) -> dict:
@@ -35,19 +51,14 @@ def raw(profile: str, model: str, run_at: str, accuracy: float, **extra) -> dict
         "today": "2026-11-04",
         "model": model,
         "judge": "judge/model",
-        "confirmed": True,
+        "status": "complete",
         "verdict_accuracy": accuracy,
         "control_accuracy": 0.5,
         "citation_precision": 0.75,
         "requirements_right": [int(accuracy * 40), 40],
         "controls_right": [6, 12],
         "citations_right": [30, 40],
-        "faithfulness": 0.9,
-        "faithfulness_judged": 12,
-        "cases": [
-            {"control_id": "1.1.1", "tokens": 1000, "cost_usd": 0.002, "seconds": 4.0},
-            {"control_id": "1.6.1", "tokens": 3000, "cost_usd": 0.004, "seconds": 6.0},
-        ],
+        "cases": [case("1.1.1", 1000, 0.002, 4.0), case("1.6.1", 3000, 0.004, 6.0)],
         "bad_cases": [],
         **extra,
     }
@@ -82,17 +93,62 @@ def test_one_table_per_measure_by_model_and_profile(tmp_path):
     assert "| anthropic/claude-haiku-5.5 | 2000 | 2000 |" in page  # tokens, the mean
     assert "| anthropic/claude-haiku-5.5 | $0.0030 | $0.0030 |" in page
     assert "| anthropic/claude-haiku-5.5 | 5.0 s | 5.0 s |" in page
-    assert "| anthropic/claude-haiku-5.5 | 0.90 (12 judged) | 0.90 (12 judged) |" in page
+    assert "| anthropic/claude-haiku-5.5 | 0.90 (2 judged) | 0.90 (2 judged) |" in page
 
 
-def test_the_latest_run_of_a_model_on_a_profile_counts(tmp_path):
+def test_failed_cases_are_left_out_of_the_means_and_counted():
+    failed = case("5.2.9", 99999, 9.99, 999.0, error="ConnectionError: 502", faithfulness=None)
+    cases = [case("1.1.1", 1000, 0.002, 4.0), case("1.6.1", 3000, 0.004, 6.0), failed]
+
+    measures = assessment_measures(cases)
+
+    assert (measures.ran, measures.failed) == (2, 1)
+    assert measures.tokens == 2000
+    assert measures.cost_usd == pytest.approx(0.003)
+    assert measures.seconds == 5.0
+
+
+def test_a_failed_case_shows_as_a_count_in_the_cells(tmp_path):
+    data = raw("nordlicht", "m/x", "2026-11-05T10", 0.5)
+    data["cases"].append(case("5.2.9", 99999, 9.99, 999.0, error="ConnectionError: 502"))
+    write(tmp_path, "a.json", data)
+
+    page = render(load_runs([tmp_path]))
+
+    assert "| m/x | 5.0 s (1 failed, left out) |" in page
+
+
+def test_the_newest_complete_run_counts_over_newer_dry_runs_and_partial_runs(tmp_path):
     write(tmp_path, "old.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.25))
-    write(tmp_path, "new.json", raw("nordlicht", "m/x", "2026-11-06T10", 0.75))
+    write(tmp_path, "full.json", raw("nordlicht", "m/x", "2026-11-06T10", 0.75))
+    stopped = raw("nordlicht", "m/x", "2026-11-07T10", 0.1, status="stopped at the estimate")
+    write(tmp_path, "dry.json", stopped)
+    write(tmp_path, "cut.json", raw("nordlicht", "m/x", "2026-11-08T10", 0.2, status="running"))
 
     page = render(load_runs([tmp_path]))
 
     assert "| m/x | 75% (30/40) |" in page
-    assert "new.json" in page and "old.json" not in page.split("## Runs")[1]
+    runs = page.split("## Runs")[1]
+    assert "full.json" in runs and not {"old.json", "dry.json", "cut.json"} & set(runs.split("`"))
+
+
+def test_a_partial_run_stands_in_over_a_dry_run_and_is_marked(tmp_path):
+    stopped = raw("nordlicht", "m/x", "2026-11-07T10", 0.1, status="stopped at the estimate")
+    write(tmp_path, "dry.json", stopped)
+    write(tmp_path, "cut.json", raw("nordlicht", "m/x", "2026-11-06T10", 0.5, status="running"))
+
+    page = render(load_runs([tmp_path]))
+
+    assert "| m/x | 50% (20/40) (partial: 2 cases) |" in page
+
+
+def test_a_dry_run_is_used_only_when_nothing_else_exists_and_is_marked(tmp_path):
+    stopped = raw("nordlicht", "m/x", "2026-11-05T10", 0.5, status="stopped at the estimate")
+    write(tmp_path, "a.json", stopped)
+
+    page = render(load_runs([tmp_path]))
+
+    assert "| m/x | 50% (20/40) (dry run only) |" in page
 
 
 def test_a_cost_unknown_in_any_case_shows_as_unknown_never_zero(tmp_path):
@@ -105,12 +161,15 @@ def test_a_cost_unknown_in_any_case_shows_as_unknown_never_zero(tmp_path):
     assert "| someone/unpriced | cost unknown |" in page
 
 
-def test_a_run_stopped_at_the_estimate_is_marked(tmp_path):
-    write(tmp_path, "a.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.5, confirmed=False))
+def test_a_cut_off_file_is_skipped_with_a_warning(tmp_path, capsys):
+    write(tmp_path, "a.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.5))
+    (tmp_path / "b.json").write_text('{"profile": "nordlicht", "mod', encoding="utf-8")
 
     page = render(load_runs([tmp_path]))
 
-    assert "dry run only" in page
+    assert "| m/x | 50% (20/40) |" in page
+    err = capsys.readouterr().err
+    assert "skipped" in err and "b.json" in err
 
 
 @pytest.mark.disable_socket  # explicit: rendering must never reach the network
@@ -124,6 +183,22 @@ def test_it_renders_from_the_runners_own_saved_results_and_re_renders_the_same(t
 
     assert out.read_text(encoding="utf-8") == first
     assert "| someone/priced-model |" in first
+    assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_an_atomic_write_interrupted_leaves_the_old_file_whole(tmp_path, monkeypatch):
+    target = tmp_path / "page.md"
+    target.write_text("the old page\n", encoding="utf-8")
+
+    def interrupted(source, destination):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("vouch.eval_report.os.replace", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        write_atomic(target, "a new page, half writ")
+
+    assert target.read_text(encoding="utf-8") == "the old page\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["page.md"]
 
 
 def test_no_saved_results_is_a_clear_error(tmp_path, capsys):

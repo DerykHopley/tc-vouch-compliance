@@ -18,6 +18,7 @@ from vouch.evals import (
     BadCase,
     CasesError,
     EvalCase,
+    EvalModels,
     EvalReport,
     ExpectedRequirement,
     failed_case,
@@ -29,6 +30,7 @@ from vouch.evals import (
 )
 from vouch.graph import Assessment, RequirementVerdict, ShouldScore
 from vouch.paths import FIXTURES_DIR, REPO_DIR
+from vouch.spending import FAKE
 
 NORDLICHT_ANSWERS = FIXTURES_DIR / "nordlicht" / EXPECTED_ANSWERS
 
@@ -167,13 +169,18 @@ def scripted(script: dict) -> ScriptedChatModel:
     return ScriptedChatModel(script=script)
 
 
-def backup_models(asked: list[str] | None = None):
-    def model_for(control_id: str) -> ScriptedChatModel:
+def on_fake(model_for) -> EvalModels:
+    """The scripted fake, made per case by `model_for(control_id, callbacks)`."""
+    return EvalModels(FAKE, model_for)
+
+
+def backup_models(asked: list[str] | None = None) -> EvalModels:
+    def model_for(control_id: str, callbacks: list) -> ScriptedChatModel:
         if asked is not None:
             asked.append(control_id)
         return scripted(BACKUP_SCRIPT)
 
-    return model_for
+    return on_fake(model_for)
 
 
 def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run():
@@ -231,10 +238,10 @@ def test_a_run_that_errors_is_a_failed_case_with_its_message_and_the_rest_still_
     claims_a_result = {**BACKUP_SCRIPT, "gather": twice}  # the output check refuses it twice
     models = {"5.2.9": [scripted(claims_a_result), scripted(BACKUP_SCRIPT)]}
 
-    def model_for(control_id: str) -> ScriptedChatModel:
+    def model_for(control_id: str, callbacks: list) -> ScriptedChatModel:
         return models[control_id].pop(0)
 
-    report = run_eval([BACKUP, BACKUP], NORDLICHT, model_for, today=TODAY)
+    report = run_eval([BACKUP, BACKUP], NORDLICHT, on_fake(model_for), today=TODAY)
 
     failed, passed = report.scores
     assert failed.error is not None and "certified" in failed.error
@@ -244,10 +251,10 @@ def test_a_run_that_errors_is_a_failed_case_with_its_message_and_the_rest_still_
 
 
 def test_a_model_that_cannot_be_made_is_a_failed_case_too():
-    def model_for(control_id: str) -> ScriptedChatModel:
+    def model_for(control_id: str, callbacks: list) -> ScriptedChatModel:
         return ScriptedChatModel.from_file(Path("/nonexistent") / f"{control_id}.json")
 
-    report = run_eval([BACKUP], NORDLICHT, model_for, today=TODAY)
+    report = run_eval([BACKUP], NORDLICHT, on_fake(model_for), today=TODAY)
 
     assert "bad fake script" in report.scores[0].error
 
@@ -288,7 +295,7 @@ def test_the_fake_model_scores_every_nordlicht_case_right_and_prints_it(tmp_path
 
 
 def test_the_runner_exits_1_when_a_case_failed_or_was_bad(tmp_path, monkeypatch, capsys):
-    def no_model(control_id: str):
+    def no_model(control_id: str, callbacks: list):
         raise RuntimeError("no model")
 
     monkeypatch.setattr("vouch.evals.fake_models", lambda folder: no_model)

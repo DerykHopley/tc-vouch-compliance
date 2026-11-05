@@ -2,12 +2,22 @@
 passages it cites. The judge here gives fixed outputs, so nothing leaves the machine."""
 
 import json
+import os
+import sys
 
+import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import BaseMessage
 from pydantic import Field
 
-from vouch.faithfulness import Faithfulness, measure_faithfulness
+from vouch.faithfulness import (
+    DISABLE_DOTENV,
+    TELEMETRY_OPT_OUT,
+    Faithfulness,
+    JudgeUnavailable,
+    measure_faithfulness,
+    prepare_deepeval,
+)
 
 QUESTION = "To what extent are information security policies available?"
 ANSWER = "The policy was approved in July 2026 and is published on the intranet."
@@ -69,6 +79,17 @@ def test_an_answer_citing_nothing_is_not_judged():
     assert fixed.prompts == []
 
 
+def test_an_answer_with_passages_but_no_claims_is_left_unscored_not_scored_one():
+    fixed = judge(
+        {"truths": ["Published on the intranet."]}, {"claims": []}, {"reason": "Nothing to check."}
+    )
+
+    result = measure_faithfulness(QUESTION, "See the cited passages.", PASSAGES, fixed, "j/f")
+
+    assert result.score is None
+    assert result.reason is not None and "no claim" in result.reason
+
+
 def test_a_judge_that_errors_leaves_no_score_and_says_why():
     fixed = judge({"truths": []}, {"not claims": True})  # the claims reply doesn't fit
 
@@ -76,3 +97,21 @@ def test_a_judge_that_errors_leaves_no_score_and_says_why():
 
     assert result.score is None
     assert result.error
+
+
+def test_deepevals_telemetry_and_dotenv_are_switched_off_whatever_was_set(monkeypatch):
+    monkeypatch.setenv(TELEMETRY_OPT_OUT, "0")  # the developer's shell said otherwise
+
+    prepare_deepeval()
+
+    assert os.environ[TELEMETRY_OPT_OUT] == "1"
+    assert os.environ[DISABLE_DOTENV] == "1"
+
+
+def test_without_deepeval_installed_the_judge_is_refused(monkeypatch):
+    for name in [m for m in sys.modules if m == "deepeval" or m.startswith("deepeval.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "deepeval", None)  # `import deepeval` now fails
+
+    with pytest.raises(JudgeUnavailable, match="uv sync"):
+        prepare_deepeval()

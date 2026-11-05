@@ -9,11 +9,16 @@ import json
 
 import pytest
 
-from vouch import evals
+from vouch import eval_models, evals
 from vouch.eval_models import LOCAL_PRICE, cost_of
 from vouch.evals import (
+    EvalCase,
     EvalModels,
+    ExpectedRequirement,
     FaithfulnessJudge,
+    ResultsFile,
+    RunInfo,
+    estimate,
     load_cases,
     main,
     run_confirmed,
@@ -31,21 +36,28 @@ ANSWERS = FIXTURES_DIR / "nordlicht" / "expected-answers.yaml"
 CASES = load_cases(ANSWERS, "nordlicht")
 PRICED = Price(1.0, 2.0)
 MODEL = "someone/priced-model"
+NOT_APPLICABLE = EvalCase("5.1.2", (ExpectedRequirement("S3", "evidenced", frozenset()),))
 
 
 class FakeEndpoint:
-    """Makes the scripted fake model per case, counting each one made; `failing` controls
-    raise as a provider's error would."""
+    """Makes the scripted fake model per case, counting each one made and keeping the callbacks
+    it was given; `failing` controls raise as a provider's error would, and `interrupt_at`
+    stands for Ctrl-C at that control."""
 
-    def __init__(self, failing: frozenset[str] = frozenset()) -> None:
+    def __init__(self, failing: frozenset[str] = frozenset(), interrupt_at: str = "") -> None:
         self.asked: list[str] = []
+        self.callbacks: list[list] = []
         self.failing = failing
+        self.interrupt_at = interrupt_at
 
-    def __call__(self, control_id: str) -> ScriptedChatModel:
+    def __call__(self, control_id: str, callbacks: list) -> ScriptedChatModel:
         self.asked.append(control_id)
+        self.callbacks.append(callbacks)
+        if control_id == self.interrupt_at:
+            raise KeyboardInterrupt
         if control_id in self.failing:
             raise ConnectionError("the provider answered 502")
-        return ScriptedChatModel.from_file(SCRIPTS / f"{control_id}.json")
+        return ScriptedChatModel.from_file(SCRIPTS / f"{control_id}.json", callbacks=callbacks)
 
 
 def models(endpoint: FakeEndpoint, price: Price | None = PRICED, name: str = MODEL) -> EvalModels:
@@ -63,6 +75,15 @@ def answers(*replies: str):
 
     confirm.asked = asked  # type: ignore[attr-defined]
     return confirm
+
+
+def fixed_judge(faithfulness: Faithfulness, cost_known: bool = True) -> FaithfulnessJudge:
+    return FaithfulnessJudge(
+        "judge/fixed",
+        lambda callbacks: None,
+        PRICED if cost_known else None,
+        measure=lambda *args: faithfulness,
+    )
 
 
 def test_the_dry_run_prints_an_estimate_and_stops_without_a_typed_yes(capsys):
@@ -83,18 +104,20 @@ def test_the_dry_run_prints_an_estimate_and_stops_without_a_typed_yes(capsys):
     assert confirm.asked == ["Type yes to run the other 11 cases: "]
 
 
-def test_no_answer_at_all_stops_too(capsys):
+@pytest.mark.parametrize("stop", [EOFError, KeyboardInterrupt])
+def test_no_answer_or_ctrl_c_at_the_prompt_stops_too(stop, capsys):
     endpoint = FakeEndpoint()
 
-    def closed_stdin(prompt: str) -> str:
-        raise EOFError
+    def no_answer(prompt: str) -> str:
+        raise stop
 
     _, confirmed = run_confirmed(
-        CASES.cases, NORDLICHT, models(endpoint), today=CASES.today, confirm=closed_stdin
+        CASES.cases, NORDLICHT, models(endpoint), today=CASES.today, confirm=no_answer
     )
 
     assert confirmed is False
     assert len(endpoint.asked) == 1
+    assert "Stopped" in capsys.readouterr().out
 
 
 def test_a_typed_yes_runs_the_rest():
@@ -107,6 +130,17 @@ def test_a_typed_yes_runs_the_rest():
     assert confirmed is True
     assert endpoint.asked == [c.control_id for c in CASES.cases]
     assert report.verdict_accuracy == 1
+
+
+def test_the_estimate_counts_only_the_cases_that_will_run(capsys):
+    cases = [NOT_APPLICABLE, *CASES.cases[:3], NOT_APPLICABLE]
+
+    report, _ = run_confirmed(
+        cases, NORDLICHT, models(FakeEndpoint()), today=CASES.today, confirm=answers("no")
+    )
+
+    assert "Estimate for the other 2 cases" in capsys.readouterr().out
+    assert [b.control_id for b in report.bad_cases] == ["5.1.2", "5.1.2"]
 
 
 def test_a_model_failing_one_case_records_it_and_the_run_goes_on():
@@ -124,12 +158,15 @@ def test_a_model_failing_one_case_records_it_and_the_run_goes_on():
     assert sum(s.error is None for s in report.scores) == 11
 
 
-def test_each_case_has_its_tokens_seconds_and_cost_from_the_price(monkeypatch):
+def test_each_case_has_its_tokens_seconds_and_cost_from_the_price():
     ticks = iter(range(100))
-    case = CASES.cases[0]
 
     report = run_eval(
-        [case], NORDLICHT, models(FakeEndpoint()), today=CASES.today, clock=lambda: next(ticks)
+        CASES.cases[:1],
+        NORDLICHT,
+        models(FakeEndpoint()),
+        today=CASES.today,
+        clock=lambda: next(ticks),
     )
 
     [score] = report.scores
@@ -137,6 +174,17 @@ def test_each_case_has_its_tokens_seconds_and_cost_from_the_price(monkeypatch):
     assert score.usage is not None and score.usage.input_tokens > 0
     expected = PRICED.cost(score.usage.input_tokens, score.usage.output_tokens)
     assert score.cost_usd == pytest.approx(expected)
+
+
+def test_the_meter_goes_into_the_model_factory_on_a_real_model_and_none_on_the_fake():
+    real, fake = FakeEndpoint(), FakeEndpoint()
+
+    run_eval(CASES.cases[:1], NORDLICHT, models(real), today=CASES.today)
+    run_eval(CASES.cases[:1], NORDLICHT, models(fake, name="fake"), today=CASES.today)
+
+    [[meter]] = real.callbacks
+    assert isinstance(meter, UsageMeter)
+    assert fake.callbacks == [[]]
 
 
 def test_a_real_model_with_no_known_price_has_an_unknown_cost_never_zero(capsys):
@@ -201,14 +249,62 @@ def test_a_case_whose_run_failed_is_not_judged():
     assert report.scores[0].faithfulness is None
 
 
+@pytest.mark.parametrize(
+    ("faithfulness", "why"),
+    [
+        (
+            Faithfulness(None, "The answer cites nothing, so nothing cited to check it against."),
+            "cites nothing",
+        ),
+        (Faithfulness(None, error="ValueError: bad JSON"), "bad JSON"),
+    ],
+)
+def test_a_judge_cost_the_dry_run_cannot_show_is_warned_about_never_priced_at_zero(
+    faithfulness, why
+):
+    [dry] = run_eval(
+        CASES.cases[:1],
+        NORDLICHT,
+        models(FakeEndpoint()),
+        today=CASES.today,
+        judge=fixed_judge(faithfulness),
+    ).scores
+
+    text = estimate(dry, 11, models(FakeEndpoint()), "judge/fixed")
+
+    assert "Warning: the judge's cost can't be estimated" in text
+    assert why in text
+    assert "judge/fixed (its cost not estimated)" in text.splitlines()[-1]
+
+
+def test_a_judged_dry_run_includes_the_judges_cost_in_the_estimate():
+    [dry] = run_eval(
+        CASES.cases[:1],
+        NORDLICHT,
+        models(FakeEndpoint()),
+        today=CASES.today,
+        judge=fixed_judge(Faithfulness(0.8, "r")),
+    ).scores
+
+    text = estimate(dry, 11, models(FakeEndpoint()), "judge/fixed")
+
+    assert "Warning" not in text
+    assert "the judge judge/fixed included" in text
+
+
 # Through the command: the model by name, the confirmation on stdin, the raw results kept.
 
 
 def fake_endpoint_for(endpoint: FakeEndpoint):
-    def real_models(name, settings, ollama_url):
+    def real_models(name, settings, **ollama):
         return endpoint
 
     return real_models
+
+
+def saved(folder) -> dict:
+    [raw] = folder.glob("*.json")
+    return json.loads(raw.read_text(encoding="utf-8"))
 
 
 def test_the_command_stops_at_the_estimate_and_saves_the_dry_run(tmp_path, monkeypatch, capsys):
@@ -221,16 +317,52 @@ def test_the_command_stops_at_the_estimate_and_saves_the_dry_run(tmp_path, monke
     assert code == 0
     assert len(endpoint.asked) == 1
     [raw] = tmp_path.glob("*.json")
-    saved = json.loads(raw.read_text(encoding="utf-8"))
-    assert saved["model"] == MODEL
-    assert saved["confirmed"] is False
-    assert len(saved["cases"]) == 1
-    assert saved["cases"][0]["seconds"] is not None
+    data = saved(tmp_path)
+    assert data["model"] == MODEL
+    assert data["status"] == "stopped at the estimate"
+    assert len(data["cases"]) == 1
+    assert data["cases"][0]["seconds"] is not None
     assert "someone_priced-model" in raw.name
 
 
-def test_a_real_model_with_no_key_is_refused_and_the_fake_still_runs(tmp_path, monkeypatch, capsys):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)  # a key loaded by .envrc stays unused
+def test_each_case_is_saved_as_it_runs_so_ctrl_c_keeps_the_paid_ones(tmp_path, monkeypatch):
+    stop_at = CASES.cases[4].control_id
+    endpoint = FakeEndpoint(interrupt_at=stop_at)
+    monkeypatch.setattr(evals, "real_models", fake_endpoint_for(endpoint))
+    monkeypatch.setattr("builtins.input", answers("yes"))
+
+    code = main(["--model", MODEL, "--results", str(tmp_path)])
+
+    assert code == 130
+    data = saved(tmp_path)
+    assert data["status"] == "interrupted"
+    assert [c["control_id"] for c in data["cases"]] == [c.control_id for c in CASES.cases[:4]]
+    assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_a_crash_mid_run_leaves_the_cases_before_it_saved_whole(tmp_path):
+    results = ResultsFile(tmp_path, RunInfo("nordlicht", CASES.today, MODEL))
+
+    def crash_at_third(control_id, callbacks):
+        if control_id == CASES.cases[2].control_id:
+            raise SystemExit("the machine went away")  # not caught as a failed case
+        return FakeEndpoint()(control_id, callbacks)
+
+    with pytest.raises(SystemExit):
+        run_eval(
+            CASES.cases,
+            NORDLICHT,
+            EvalModels(MODEL, crash_at_third, PRICED),
+            today=CASES.today,
+            on_case=results.add,
+        )
+
+    data = saved(tmp_path)
+    assert data["status"] == "running"
+    assert len(data["cases"]) == 2
+
+
+def test_a_real_model_with_no_key_is_refused_and_the_fake_still_runs(tmp_path, capsys):
     assert main(["--model", "anthropic/claude-sonnet-5.5", "--results", str(tmp_path)]) == 2
     assert "OPENROUTER_API_KEY" in capsys.readouterr().err
     assert list(tmp_path.iterdir()) == []
@@ -238,16 +370,59 @@ def test_a_real_model_with_no_key_is_refused_and_the_fake_still_runs(tmp_path, m
     assert main(["--model", "fake", "--results", str(tmp_path)]) == 0
 
 
-@pytest.mark.allow_hosts(["127.0.0.1"])
-def test_the_command_with_ollama_not_running_gives_the_start_command(tmp_path, capsys):
-    from test_eval_models import closed_port
+def test_a_fake_run_never_brings_in_the_lists_judge(tmp_path, monkeypatch):
+    """After #53 names JUDGE, a plain fake run without a key still runs, free and unjudged."""
+    monkeypatch.setattr(evals, "JUDGE", "anthropic/claude-sonnet-5.5")
 
-    url = f"http://127.0.0.1:{closed_port()}"
+    def no_input(prompt):
+        raise AssertionError("asked to confirm a free run")
+
+    monkeypatch.setattr("builtins.input", no_input)
+
+    assert main(["--results", str(tmp_path)]) == 0
+    assert saved(tmp_path)["judge"] is None
+
+
+def test_the_fake_judge_is_refused_before_anything_runs(tmp_path, capsys):
+    assert main(["--judge", "fake", "--results", str(tmp_path)]) == 2
+    assert "leave out --judge" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_real_judge_without_deepeval_is_refused_before_any_paid_call(
+    tmp_path, monkeypatch, capsys
+):
+    endpoint = FakeEndpoint()
+    monkeypatch.setattr(evals, "real_models", fake_endpoint_for(endpoint))
+    monkeypatch.setattr(evals, "chat_models", lambda name, settings, **kwargs: None)
+
+    def missing():
+        raise evals.JudgeUnavailable("DeepEval can't be imported; run `uv sync`.")
+
+    monkeypatch.setattr(evals, "prepare_deepeval", missing)
+
+    code = main(["--model", MODEL, "--judge", "j/x", "--results", str(tmp_path)])
+
+    assert code == 2
+    assert "uv sync" in capsys.readouterr().err
+    assert endpoint.asked == []
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_the_command_with_ollama_not_running_gives_the_start_command(tmp_path, capsys, closed_port):
+    url = f"http://127.0.0.1:{closed_port}"
 
     code = main(["--model", "ollama/qwen3:14b", "--ollama-url", url, "--results", str(tmp_path)])
 
     assert code == 3
     assert "ollama serve" in capsys.readouterr().err
+
+
+def test_a_malformed_ollama_url_is_a_clear_error(tmp_path, capsys):
+    code = main(["--model", "ollama/qwen3:14b", "--ollama-url", "localhost", "--results", "x"])
+
+    assert code == 2
+    assert "--ollama-url" in capsys.readouterr().err
 
 
 def test_keep_copies_the_raw_results_where_the_owner_says(tmp_path):
@@ -257,6 +432,7 @@ def test_keep_copies_the_raw_results_where_the_owner_says(tmp_path):
 
     [raw] = (tmp_path / "results").glob("*.json")
     assert (kept / raw.name).read_text(encoding="utf-8") == raw.read_text(encoding="utf-8")
+    assert [p for p in kept.iterdir() if p.name.endswith(".tmp")] == []
 
 
 def test_the_fake_model_runs_without_a_dry_run(tmp_path, monkeypatch):
@@ -266,6 +442,7 @@ def test_the_fake_model_runs_without_a_dry_run(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", no_input)
 
     assert main(["--results", str(tmp_path)]) == 0
+    assert saved(tmp_path)["status"] == "complete"
 
 
 def test_the_model_list_is_printed(capsys):
@@ -292,3 +469,17 @@ def test_both_profiles_have_twelve_cases_that_fit_them_about_24_in_all():
         assert len(report.scores) == 12
         total += len(report.scores)
     assert total == 24
+
+
+def test_the_ollama_timeout_flag_reaches_the_local_model(tmp_path, monkeypatch):
+    asked = {}
+
+    def chat_models(name, settings, **kwargs):
+        asked.update(kwargs)
+        raise eval_models.ModelUnavailable("stop here")
+
+    monkeypatch.setattr(evals, "chat_models", chat_models)
+
+    main(["--model", "ollama/q", "--ollama-timeout", "900", "--results", str(tmp_path)])
+
+    assert asked["ollama_timeout"] == 900
