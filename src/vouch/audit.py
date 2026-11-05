@@ -296,5 +296,14 @@ def review(
         waiting = load_assessment(thread_id, saver, scope=scope)
         if waiting.status != WAITING:
             raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-        record(review_entries(waiting, decision, reviewer, clock()))
-        return resume(thread_id, decision, saver, scope=scope)
+        at = clock()
+        record(review_entries(waiting, decision, reviewer, at))
+        return resume(
+            thread_id,
+            decision,
+            saver,
+            scope=scope,
+            reviewer_id=reviewer.id,
+            reviewer_name=reviewer.name,
+            reviewed_at=at,
+        )

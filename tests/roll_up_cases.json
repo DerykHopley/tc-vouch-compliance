@@ -1,0 +1,13 @@
+{
+  "about": "A control's verdict from its requirements' columns and verdicts: checked against graph.roll_up (tests/test_roll_up_parity.py) and the working paper's copy, review.ts rollUp (frontend/src/review.test.ts), so the two can't drift apart (#42).",
+  "cases": [
+    {"requirements": [["must", "partly-evidenced"], ["must", "evidenced"], ["should", "not-evidenced"]], "verdict": "partly-evidenced"},
+    {"requirements": [["must", "evidenced"], ["must", "evidenced"], ["should", "not-evidenced"]], "verdict": "evidenced"},
+    {"requirements": [["must", "not-evidenced"], ["high", "partly-evidenced"]], "verdict": "not-evidenced"},
+    {"requirements": [["very high", "evidenced"], ["overlay", "not-evidenced"]], "verdict": "partly-evidenced"},
+    {"requirements": [["must", "not-applicable"], ["should", "evidenced"]], "verdict": "not-applicable"},
+    {"requirements": [["should", "evidenced"], ["should", "not-evidenced"]], "verdict": "not-applicable"},
+    {"requirements": [["must", "evidenced"], ["overlay", "not-applicable"], ["high", "evidenced"]], "verdict": "evidenced"},
+    {"requirements": [], "verdict": "not-applicable"}
+  ]
+}
