@@ -56,11 +56,16 @@ type Message =
 
 type OnOpen = ((controlId: string) => void) | undefined
 
-/** A link to a control's working paper: shown in the app (`onOpen`), or followed as a link without it. */
+/** The chat's action style (#176, design.md, Components: Chat): a ghost pill at least 44px tall, on one line, for
+ * "Open the working paper" and both suggestions, link or button alike. */
+const ACTION = 'btn btn-ghost chat-action'
+
+/** A link to a control's working paper, as a chat action: shown in the app (`onOpen`), or followed as a link without
+ * it. */
 function PaperLink({ controlId, onOpen, className, children }:
   { controlId: string; onOpen: OnOpen; className?: string; children: ReactNode }) {
   return (
-    <a className={className} href={controlPath(controlId)}
+    <a className={className ? `${ACTION} ${className}` : ACTION} href={controlPath(controlId)}
       onClick={(e) => { if (onOpen) { e.preventDefault(); onOpen(controlId) } }}>
       {children}
     </a>
@@ -273,10 +278,10 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
             : m.from === 'vouch' && !m.failed ? <ChatReply key={i} text={m.text} />
               : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : 'msg notice'}>{m.text}</p>)}
         {suggestion && !busy && (suggestion.action === 'review'
-          ? <PaperLink className="btn btn-ghost suggestion" controlId={suggestion.control_id} onOpen={onOpen}>
+          ? <PaperLink className="suggestion" controlId={suggestion.control_id} onOpen={onOpen}>
             {suggestionLabel(suggestion)}
           </PaperLink>
-          : <button className="btn btn-ghost suggestion" onClick={() => void converse(suggestionMessage(suggestion))}>
+          : <button className={`${ACTION} suggestion`} onClick={() => void converse(suggestionMessage(suggestion))}>
             {suggestionLabel(suggestion)}
           </button>)}
       </div>
