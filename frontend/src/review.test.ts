@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Column, RequirementVerdict, Verdict } from './assessment.ts'
 import { ALREADY_REVIEWED, REVIEW_FAILED, REVIEW_REFUSED, rollUp, submitReview, withOverrides } from './review.ts'
@@ -8,8 +9,9 @@ const req = (id: string, column: Column, verdict: Verdict): RequirementVerdict =
 
 afterEach(() => vi.unstubAllGlobals())
 
-/** The cases graph.roll_up is checked against too (tests/test_roll_up_parity.py): the copy can't drift. */
-const { cases } = JSON.parse(readFileSync(new URL('../../tests/roll_up_cases.json', import.meta.url), 'utf8')) as
+/** The cases graph.roll_up is checked against too (tests/test_roll_up_parity.py): the copy can't drift.
+ *  Read from the working directory (npm test runs in frontend/): under jsdom import.meta.url isn't a file URL. */
+const { cases } = JSON.parse(readFileSync(resolve(process.cwd(), '../tests/roll_up_cases.json'), 'utf8')) as
   { cases: { requirements: [Column, Verdict][]; verdict: Verdict }[] }
 
 describe('rollUp', () => {
