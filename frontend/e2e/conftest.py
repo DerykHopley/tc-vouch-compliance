@@ -25,6 +25,12 @@ def paper_url() -> str:
 
 
 @pytest.fixture
+def chat_url() -> str:
+    """A fourth Vouch like vouch_url, for the chat's checks (#44): its own request-rate budget."""
+    return os.environ["CHAT_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]
