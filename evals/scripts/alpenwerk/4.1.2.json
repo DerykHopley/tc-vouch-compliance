@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "benutzern gesichert inwieweit diensten"}},
+    {"tool": "search_records", "args": {"query": "benutzern gesichert inwieweit diensten"}},
+    {"answer": "Antwortentwurf für 4.1.2: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The 2026 risk assessment rates each system, including internet exposure, and picks its sign-in method.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Sie berücksichtigt, ob ein System direkt aus dem Internet erreichbar ist, welche Daten es enthält und welche Angriffe zu erwarten sind, zum Beispiel Phishing und das Durchprobieren von Passwörtern."}, {"doc_id": "risikobewertung-anmeldeverfahren", "quote": "Cloud-Dienste | ja | vertraulich bis intern | hoch | Anmeldung über den Verzeichnisdienst mit Hardware-Token | seit 2026-02"}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "The methods follow BSI baseline protection and NIST password guidance.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Die Verfahren richten sich nach den Empfehlungen des BSI-Grundschutzes und des NIST zu Passwörtern."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Methods are chosen per system from its data and exposure, and all are recorded as in place.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Sie berücksichtigt, ob ein System direkt aus dem Internet erreichbar ist, welche Daten es enthält und welche Angriffe zu erwarten sind, zum Beispiel Phishing und das Durchprobieren von Passwörtern."}, {"doc_id": "risikobewertung-anmeldeverfahren", "quote": "Alle Maßnahmen der Tabelle sind umgesetzt."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Passwords have at least 14 characters and are checked against leaked-password lists.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Passwörter haben mindestens 14 Zeichen."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Administrators use a separate account with a hardware token, in place for all 9 since March 2026.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Eine zweite Anmeldung mit einem Hardware-Token ist Pflicht für alle Administratorkonten, für den Fernzugriff über VPN und für alle Cloud-Dienste."}, {"doc_id": "risikobewertung-anmeldeverfahren", "quote": "Cloud-Dienste | ja | vertraulich bis intern | hoch | Anmeldung über den Verzeichnisdienst mit Hardware-Token | seit 2026-02"}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Lockout after five failures, screen locks, session limits and alerts on unusual countries, all recorded as in place.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Die Anmeldeverfahren dieser Richtlinie folgen aus der Risikobewertung der Anmeldeverfahren, die der IT-Leiter jedes Jahr erstellt."}, {"doc_id": "risikobewertung-anmeldeverfahren", "quote": "Die Risiken der direkt aus dem Internet erreichbaren Systeme sind durch die Mehrfaktor-Authentifizierung und die ergänzenden Maßnahmen ausreichend behandelt."}]}
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "ereignisprotokolle aufgezeichnet analysiert inwieweit"}},
+    {"tool": "search_records", "args": {"query": "ereignisprotokolle aufgezeichnet analysiert inwieweit"}},
+    {"answer": "Antwortentwurf für 5.2.4: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The logging policy sets requirements for handling logs, but it is stale (approved May 2023, yearly review).", "citations": [{"doc_id": "protokollierungsrichtlinie", "quote": "Ereignisprotokolle werden so geführt, dass Sicherheitsvorfälle erkannt und nachvollzogen werden können."}]},
+      {"requirement_id": "M2", "verdict": "partly-evidenced", "reason": "User and administrator activity logging is set and its logs are reviewed monthly, but the policy that sets it is stale.", "citations": [{"doc_id": "protokollauswertung", "quote": "Die IT hat die Ereignisprotokolle jeden Monat auf Regelverstöße und Auffälligkeiten ausgewertet, zuletzt am 6."}, {"doc_id": "protokollierungsrichtlinie", "quote": "Der Betriebsrat hat der Protokollierung zugestimmt."}]},
+      {"requirement_id": "M3", "verdict": "partly-evidenced", "reason": "Each new system is assessed for logging, but only the stale logging policy says so.", "citations": [{"doc_id": "protokollierungsrichtlinie", "quote": "Die IT bewertet für jedes neue System, ob und was protokolliert werden muss, und trägt das Ergebnis in die Systemliste ein."}]},
+      {"requirement_id": "M4", "verdict": "evidenced", "reason": "Each cloud service's monitoring options were recorded at approval and feed the monthly log review.", "citations": [{"doc_id": "cloud-dienste-register", "quote": "Die IT und die Informationssicherheitsbeauftragte geben jeden Dienst vor der Nutzung frei, nachdem sie den Vertrag, den Datenstandort, die Schlüsselverwaltung und die Überwachungsmöglichkeiten geprüft haben."}]},
+      {"requirement_id": "M5", "verdict": "evidenced", "reason": "Logs were reviewed every month from January to September 2026, with findings counted.", "citations": [{"doc_id": "protokollauswertung", "quote": "Die IT hat die Ereignisprotokolle jeden Monat auf Regelverstöße und Auffälligkeiten ausgewertet, zuletzt am 6."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Findings that suggest a security event go to the security desk, as five did.", "citations": [{"doc_id": "protokollauswertung", "quote": "Auffälligkeiten, die auf ein Sicherheitsereignis hindeuten, wurden nach dem Meldeverfahren an den Security-Desk eskaliert und dort im Sicherheitsereignis-Register erfasst."}]},
+      {"requirement_id": "S2", "verdict": "partly-evidenced", "reason": "Logs sit on a dedicated server where entries can't be changed, but only the stale policy says so.", "citations": [{"doc_id": "protokollierungsrichtlinie", "quote": "Ereignisprotokolle werden so geführt, dass Sicherheitsvorfälle erkannt und nachvollzogen werden können."}]},
+      {"requirement_id": "S3", "verdict": "partly-evidenced", "reason": "Firewall and VPN logs are reviewed monthly, but the policy setting network monitoring is stale.", "citations": [{"doc_id": "protokollauswertung", "quote": "Ausgewertet wurden die Protokolle des Verzeichnisdienstes, der Firewall, des VPN und der Cloud-Dienste."}, {"doc_id": "protokollierungsrichtlinie", "quote": "Das Netzwerk wird durch die Firewall und ein System zur Angriffserkennung überwacht; Warnungen gehen an den Security-Desk."}]},
+      {"requirement_id": "H1", "verdict": "partly-evidenced", "reason": "The stale logging policy names the works council's approval and the 12-month retention, but no contractual requirements for logs are identified.", "citations": [{"doc_id": "protokollierungsrichtlinie", "quote": "Ereignisprotokolle werden so geführt, dass Sicherheitsvorfälle erkannt und nachvollzogen werden können."}]},
+      {"requirement_id": "H2", "verdict": "evidenced", "reason": "Setting up and ending each remote maintenance session is logged; 23 sessions were.", "citations": [{"doc_id": "protokollauswertung", "quote": "Der Auf- und Abbau jeder Fernwartungssitzung wird mit Benutzer, Zeit und Zielmaschine protokolliert."}]}
+    ]
+  }
+}

@@ -45,7 +45,9 @@ This assesses each of Nordlicht's 12 controls on the scripted fake model (a scri
 and per control, and citation precision. It prints a summary and saves it, with the raw results,
 to `evals/results/` (git-ignored). On the fake model it checks the harness, not a model. The
 scripts are drafted from the expected answers: after those change, regenerate them with
-`uv run python evals/scripts/generate.py` and read the diff.
+`uv run python evals/scripts/generate.py [--profile alpenwerk]` and read the diff.
+`--profile alpenwerk` runs Alpenwerk's 12 controls the same way (`evals/scripts/alpenwerk/`,
+German draft answers).
 
 On a real model (`--model <OpenRouter id>`, or `--model ollama/<name>` for a local model through
 Ollama) each case also records its tokens, cost and seconds, and with `--judge <model>` the

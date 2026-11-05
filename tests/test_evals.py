@@ -29,6 +29,7 @@ from vouch.evals import (
     spec_roll_up,
 )
 from vouch.graph import Assessment, RequirementVerdict, ShouldScore
+from vouch.language import mismatch
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.spending import FAKE
 
@@ -269,14 +270,15 @@ def test_a_broken_roll_up_in_the_graph_lowers_control_accuracy(monkeypatch):
     assert report.verdict_accuracy == 1  # the requirements were still judged right
 
 
-def test_the_fake_model_scores_every_nordlicht_case_right_and_prints_it(tmp_path, capsys):
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_the_fake_model_scores_every_case_right_and_prints_it(profile, tmp_path, capsys):
     """The fake scripts are drafted from the expected answers, so anything short of all right
     is a harness regression (or expected answers changed without regenerating the scripts)."""
-    cases = load_cases(NORDLICHT_ANSWERS, "nordlicht").cases
+    cases = load_cases(FIXTURES_DIR / profile / EXPECTED_ANSWERS, profile).cases
     requirements = sum(len(c.requirements) for c in cases)
     cites = sum(len(r.cites) for c in cases for r in c.requirements)
 
-    code = main(["--results", str(tmp_path)])
+    code = main(["--profile", profile, "--results", str(tmp_path)])
 
     out = capsys.readouterr().out
     assert code == 0
@@ -290,6 +292,9 @@ def test_the_fake_model_scores_every_nordlicht_case_right_and_prints_it(tmp_path
     assert [c["control_id"] for c in saved["cases"]] == [c.control_id for c in cases]
     assert saved["today"] == "2026-11-04"
     assert all(c["assessment"]["requirements"] for c in saved["cases"])
+    # Each draft answer is in the profile's language, so none was asked for again (#51).
+    language = load_named_profile(profile).answer_language
+    assert {mismatch(c["assessment"]["answer"], language) for c in saved["cases"]} == {None}
     summary = tmp_path / raw.name.replace(".json", "-summary.txt")
     assert summary.read_text(encoding="utf-8") in out
 
@@ -385,3 +390,27 @@ def test_the_script_generator_gives_the_same_scripts_whatever_the_hash_seed(tmp_
 
     assert len(first) == 12
     assert generate("2") == first
+
+
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_the_committed_scripts_are_what_the_generator_writes(profile, tmp_path):
+    """Scripts edited by hand, or left behind after the expected answers changed, show here."""
+    subprocess.run(
+        [
+            sys.executable,
+            str(REPO_DIR / "evals" / "scripts" / "generate.py"),
+            "--profile",
+            profile,
+            "--out",
+            tmp_path,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    committed = REPO_DIR / "evals" / "scripts" / profile
+
+    for script in sorted(tmp_path.glob("*.json")):
+        assert script.read_text(encoding="utf-8") == (committed / script.name).read_text(
+            encoding="utf-8"
+        ), script.name
+    assert len(list(committed.glob("*.json"))) == 12
