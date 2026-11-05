@@ -122,7 +122,7 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
           </main>
         )
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
-      <AskVouch />
+      <AskVouch context={{ page: shown, controlId: shown === 'paper' && control ? control.id : null }} />
     </>
   )
 }

@@ -17,6 +17,7 @@ beforeEach(() => systemPrefers(null))
 afterEach(() => {
   cleanup()
   delete document.documentElement.dataset.theme
+  delete document.documentElement.dataset.chat
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
 })
@@ -340,6 +341,114 @@ describe('Ask Vouch', () => {
     render(<App />)
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(bubble()).toBeTruthy()
+  })
+
+  it('opens with Cmd+K, ready to type', async () => {
+    render(<App />)
+    await userEvent.keyboard('{Meta>}k{/Meta}')
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message to Vouch' }))
+  })
+
+  const open = () => userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+  const press = (name: string | RegExp) => userEvent.click(screen.getByRole('button', { name }))
+
+  it('enlarges, pins, and goes back the same way', async () => {
+    render(<App />)
+    await open()
+    expect(bubble()!.className).toBe('bubble')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    await press('Pin beside the page')
+    expect(bubble()!.className).toBe('bubble pinned')
+    expect(document.documentElement.dataset.chat).toBe('pinned')
+    expect(screen.queryByRole('button', { name: 'Make smaller' })).toBeNull()
+    await press('Unpin')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    await press('Make smaller')
+    expect(bubble()!.className).toBe('bubble')
+  })
+
+  it('closes an enlarged chat on Esc, but never a pinned one', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeTruthy()
+    await press('Close the chat')
+    expect(bubble()).toBeNull()
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+  })
+
+  it('names the page it is on in its header', async () => {
+    serve()
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Dossier')).toBeTruthy()
+  })
+
+  it("names the control on its working paper", async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    await open()
+    expect(within(bubble()!).getByText('on 4.1.2 · Working paper')).toBeTruthy()
+  })
+
+  /** The API as `serve` has it, and `/api/chat` answering with `chat`. */
+  function serveChat(chat: (body: { message: string; page: string; control_id: string | null }) => Promise<Response>) {
+    serve()
+    const others = fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url === '/api/chat' ? chat(JSON.parse(init!.body as string)) : others(url, init))
+  }
+  const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+
+  it('keeps Send disabled while the message is empty', async () => {
+    render(<App />)
+    await open()
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), '   ')
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello')
+    expect(send.disabled).toBe(false)
+  })
+
+  it("sends the message with the page, and shows Vouch's reply as it streams", async () => {
+    const asked: unknown[] = []
+    serveChat((body) => {
+      asked.push(body)
+      return Promise.resolve(sse(['event: token\ndata: {"text":"Thank"}\n\n', 'event: token\ndata: {"text":" you."}\n\n',
+        'event: done\ndata: {}\n\n']))
+    })
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' })
+    await userEvent.type(field, 'Where do I stand?{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await within(log).findByText('Thank you.')
+    expect(within(log).getByText('Where do I stand?')).toBeTruthy()
+    expect((field as HTMLInputElement).value).toBe('')
+    expect(asked).toEqual([{ message: 'Where do I stand?', page: 'dossier', control_id: null }])
+  })
+
+  it('with the chat endpoint down, says so and keeps the typed message', async () => {
+    serveChat(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' }) as HTMLInputElement
+    await userEvent.type(field, 'Where do I stand?')
+    await press('Send')
+    await within(bubble()!).findByText(/Vouch could not be reached/)
+    expect(field.value).toBe('Where do I stand?')
   })
 })
 
