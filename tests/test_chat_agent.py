@@ -15,11 +15,13 @@ import test_memory
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
+from profiles_dir import SECOND, make_profiles
 from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
-from test_memory import app_on, restart
+from test_memory import app_on, as_user, restart
 
 from vouch import api, chat_agent
+from vouch.api import PROFILE_HEADER, create_app, current_user
 from vouch.chat_agent import (
     GREETING_REQUEST,
     HISTORY_WINDOW,
@@ -36,7 +38,7 @@ from vouch.graph import memory_checkpointer, new_thread_id, state_serializer
 from vouch.isa import load_base_framework
 from vouch.memory import Memory, process_checkpointer
 from vouch.model_choice import MemoryModelStore, ModelChoice
-from vouch.profile import DEFAULT_PROFILE, load_named_profile
+from vouch.profile import DEFAULT_PROFILE, load_named_profile, read_profile_once
 from vouch.runs import RUNNING_ALREADY, AssessmentRun, RunningAssessments
 from vouch.settings import Settings
 from vouch.spending import DailyLimitReached, MemorySpendingStore, SpendingGuard, UsageMeter
@@ -461,6 +463,29 @@ def test_a_start_assessment_call_without_a_control_id_says_its_arguments_are_inv
 
     assert "its arguments are invalid" in said and "isn't one of the chat's tools" not in said
     assert written == [("step", {"node": "guard", "text": said})]
+
+
+def test_a_chat_thread_under_one_profile_names_nothing_under_another(tmp_path, lead, fake):
+    read_profile_once.cache_clear()
+    restart()
+    app = create_app(Settings(profiles_dir=make_profiles(tmp_path / "profiles")))
+    app.dependency_overrides[current_user] = as_user
+
+    def ask(client, message, profile_id, thread_id=None):
+        body = {"page": "dossier", "message": message, "thread_id": thread_id}
+        headers = {PROFILE_HEADER: profile_id}
+        return read_events(client.post("/api/chat", json=body, headers=headers))
+
+    with TestClient(app, headers=lead) as client:
+        thread_id = thread_of(ask(client, "About Nordlicht", DEFAULT_PROFILE))
+        ask(client, "Hello", SECOND, thread_id)
+        under_second = [message.content for message in fake.prompts[-1][1:]]
+        ask(client, "Back again", DEFAULT_PROFILE, thread_id)
+        under_first = [message.content for message in fake.prompts[-1][1:]]
+
+    assert under_second == ["Hello"]  # nothing of Nordlicht's thread
+    assert under_first == ["About Nordlicht", fake.reply, "Back again"]
+    read_profile_once.cache_clear()
 
 
 def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypatch):

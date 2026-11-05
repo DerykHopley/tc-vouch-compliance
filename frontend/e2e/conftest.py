@@ -19,14 +19,21 @@ def dossier_url() -> str:
 
 
 @pytest.fixture
+def profiles_url() -> str:
+    """A third Vouch like vouch_url on a profiles folder of its own (#47): nordlicht, testwerk
+    and a broken profile; its own request-rate budget too."""
+    return os.environ["PROFILES_URL"]
+
+
+@pytest.fixture
 def paper_url() -> str:
-    """A third Vouch like vouch_url, for the working paper's checks (#41), for the same reason."""
+    """A fourth Vouch like vouch_url, for the working paper's checks (#41), for the same reason."""
     return os.environ["PAPER_URL"]
 
 
 @pytest.fixture
 def chat_url() -> str:
-    """A fourth Vouch like vouch_url, for the chat's checks (#44): its own request-rate budget."""
+    """A fifth Vouch like vouch_url, for the chat's checks (#44): its own request-rate budget."""
     return os.environ["CHAT_URL"]
 
 
