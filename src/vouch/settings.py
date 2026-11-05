@@ -3,7 +3,8 @@
 Locally the committed `.envrc` fills the secrets from the keyring; on Cloud Run, Secret Manager
 does. `.env.example` lists every name in ENV_NAMES (checked by tests/test_settings.py).
 
-Auth mode `local`, the default, is for a developer's machine: no sign-in, one default user. The
+Auth mode `local`, the default, is for a developer's machine: no sign-in, one default user. With
+any Clerk key set, the mode must be set too: keys and a blank mode refuse to start (#151). The
 container sets `clerk` (Dockerfile), and then the Clerk keys and CLERK_AUTHORIZED_PARTIES (the
 origins Vouch's pages are served from; not secret, so not in `.envrc`) are required.
 """
@@ -136,7 +137,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     def read_path(name: str) -> Path | None:
         return _read_path(env, name)
 
-    auth_mode = read(AUTH_MODE_ENV) or "local"
+    mode = read(AUTH_MODE_ENV)
+    keys_set = [name for name in CLERK_KEY_ENVS if read(name)]
+    if keys_set and not mode:
+        # Keys without a mode is a deploy that lost its mode, not a developer's machine (#151).
+        raise SettingsError(
+            f"{AUTH_MODE_ENV} is not set, but Clerk keys are ({', '.join(keys_set)}): "
+            f"set {AUTH_MODE_ENV}=clerk, or {AUTH_MODE_ENV}=local to run without sign-in"
+        )
+    auth_mode = mode or "local"
     if auth_mode not in get_args(AuthMode):
         raise SettingsError(f"{AUTH_MODE_ENV} must be one of: {', '.join(get_args(AuthMode))}")
     clerk = None
