@@ -121,15 +121,19 @@ def test_a_real_model_with_no_known_price_has_none_never_zero():
 DATED_SOURCE = re.compile(r"https://\S+, \d{4}-\d{2}-\d{2}")
 
 
-def test_the_list_is_what_ran_haiku_sonnet_the_jev_router_and_one_local_model():
+def test_the_list_is_what_ran():
     """#54's runs (#53's comment, 2026-11-05): Mistral Small 4 was blocked by the owner's
-    OpenRouter guardrail and dropped; TypeSafe's Jev Router ran instead."""
+    OpenRouter guardrail and dropped; TypeSafe's Jev Router ran instead; then OpenAI's GPT-6
+    Luna and GPT-6.1 Sol (#55's comment). GPT-6.1 Terra also ran, and is listed once, as the
+    judge."""
     ids = [m.id for m in MODELS]
 
     assert ids == [
         DEFAULT_MODEL,
         "anthropic/claude-sonnet-5.5",
         "typesafe/jev-router",
+        "openai/gpt-6-luna",
+        "openai/gpt-6.1-sol",
         "ollama/gpt-oss:20b",
     ]
 
@@ -157,6 +161,8 @@ def test_each_model_has_one_kind_of_price():
         DEFAULT_MODEL: "listed",
         "anthropic/claude-sonnet-5.5": "listed",
         "typesafe/jev-router": "variable",
+        "openai/gpt-6-luna": "listed",
+        "openai/gpt-6.1-sol": "listed",
         "ollama/gpt-oss:20b": "local",
         JUDGE.id: "listed",
     }

@@ -27,7 +27,7 @@ from pydantic import SecretStr
 
 from vouch.model_choice import DEFAULT_MODEL, OpenRouter
 from vouch.settings import OPENROUTER_API_KEY_ENV, Settings
-from vouch.spending import FAKE, GPT_TERRA, PRICES, SONNET, Price, Usage
+from vouch.spending import FAKE, GPT_LUNA, GPT_SOL, GPT_TERRA, PRICES, SONNET, Price, Usage
 
 OLLAMA_PREFIX = "ollama/"
 OLLAMA_URL = "http://localhost:11434"
@@ -95,17 +95,32 @@ MODELS: tuple[EvalModel, ...] = (
         router=True,
     ),
     EvalModel(
+        GPT_LUNA,
+        "OpenAI's small model, at Haiku's price (#55); judge it with --judge "
+        "anthropic/claude-sonnet-5.5, so OpenAI never judges its own answers",
+        OPENROUTER_SOURCE,
+    ),
+    EvalModel(
+        GPT_SOL,
+        "OpenAI's large model, at Sonnet's price (#55); judge it with --judge "
+        "anthropic/claude-sonnet-5.5, so OpenAI never judges its own answers",
+        OPENROUTER_SOURCE,
+    ),
+    EvalModel(
         LOCAL_MODEL,
         "local through Ollama: 14 GB, fits a 20 GB RX 7900 on ROCm, with tool calling",
         "https://ollama.com/library/gpt-oss, 2026-11-05",
     ),
 )
-"""The models compared: Haiku, Sonnet, one other provider (the Jev Router, after Mistral Small 4
-was blocked by the owner's OpenRouter guardrail), one local model (#53, #54)."""
+"""The models compared: Haiku, Sonnet, the Jev Router (after Mistral Small 4 was blocked by the
+owner's OpenRouter guardrail), OpenAI's GPT-6 Luna and GPT-6.1 Sol, and one local model (#53,
+#54, #55). GPT-6.1 Terra, the judge, also ran as a model, judged by Sonnet."""
 JUDGE = EvalModel(
     GPT_TERRA,
-    "a mid-tier judge from a provider none of the compared models is, so it never judges its "
-    "own answers (the Jev Router may route to OpenAI, so it may judge the router's)",
+    "a mid-tier judge from another provider than Anthropic's models, so it never judges their "
+    "answers (the Jev Router may route to OpenAI, so it may judge the router's). OpenAI's own "
+    "models (Luna, Sol, and Terra itself, which also ran in #55) are judged with --judge "
+    "anthropic/claude-sonnet-5.5",
     OPENROUTER_SOURCE,
 )
 """The faithfulness judge, on real models unless --judge names another; on the fake, only
