@@ -185,17 +185,23 @@ def progress(memory: Memory, saver: BaseCheckpointSaver) -> Progress:
     return Progress(controls=newest_by_control(memory, saver), last_worked=memory.last_worked())
 
 
-def rejection_note(memory: Memory, saver: BaseCheckpointSaver, control_id: str) -> str:
-    """The lead's note on the control's newest assessment when it was rejected, else nothing:
-    what a new run of a rejected control carries to the model however it was started (#42).
-    A run that never reached the review (the new one itself, say) is passed over."""
+def newest_assessment(
+    memory: Memory, saver: BaseCheckpointSaver, control_id: str
+) -> Assessment | None:
+    """The control's newest assessment under the memory's profile, from the index: only that
+    control's runs are loaded, newest first, and one that never reached the review (a new run,
+    say) is passed over. None when it has none."""
     load = assessment_loader(saver, scope=memory.scope)
     for entry in memory.entries():
-        if entry.control_id != control_id:
-            continue
-        assessment = load(entry.thread_id)
-        if assessment is None:
-            continue
-        rejected = assessment.status == "rejected" and assessment.review is not None
-        return assessment.review.note if rejected and assessment.review else ""
-    return ""
+        if entry.control_id == control_id and (assessment := load(entry.thread_id)) is not None:
+            return assessment
+    return None
+
+
+def rejection_note(memory: Memory, saver: BaseCheckpointSaver, control_id: str) -> str:
+    """The lead's note on the control's newest assessment when it was rejected, else nothing:
+    what a new run of a rejected control carries to the model however it was started (#42)."""
+    assessment = newest_assessment(memory, saver, control_id)
+    if assessment is None or assessment.status != "rejected" or assessment.review is None:
+        return ""
+    return assessment.review.note

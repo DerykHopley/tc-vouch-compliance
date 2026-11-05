@@ -48,6 +48,7 @@ MISSING = re.compile(rf"\b(?:missing|explain)\b(?:\D*{_ID})?", re.IGNORECASE)
 EVIDENCE = re.compile(r"\bevidence (?:of|for|about|on) (.+?)[?.!]*$", re.IGNORECASE)
 PAGE_CONTROL = re.compile(rf"VDA ISA control {_ID}:")
 _EVIDENCE_DATA = re.compile(r"<evidence>\n(.*?)\n</evidence>", re.DOTALL)
+_FINDINGS_DATA = re.compile(r"<findings>\n(.*?)\n</findings>", re.DOTALL)
 _LIST_MARK = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
 
@@ -69,7 +70,14 @@ def _cited(tool_words: str) -> str:
             lines.append(f"- {label}“{first}” [{passage['doc_id']}]")
         return "\n".join(lines)
 
-    return _EVIDENCE_DATA.sub(cite, tool_words)
+    def findings(found: re.Match[str]) -> str:
+        return "\n".join(
+            f"- {f['requirement']} ({f['column']}): {f['text']} "
+            f"{f['verdict'].capitalize()}: {f['reason']}"
+            for f in json.loads(found.group(1))
+        )
+
+    return _FINDINGS_DATA.sub(findings, _EVIDENCE_DATA.sub(cite, tool_words))
 
 
 def _page(messages: list[BaseMessage]) -> str | None:
@@ -84,7 +92,9 @@ class CannedChatModel(BaseChatModel):
     given), with token counts estimated as the scripted fake's are, so the usage meter sees
     them. Each call's messages are kept in `prompts`; with `fail_with`, every call raises it,
     as a model that can't be reached would. With tools bound, it calls the one the lead's
-    message asks for, and answers a tool's result with the result's words."""
+    message asks for (or `call`, whatever is asked), and answers a tool's result with the
+    result's words (or `after_tool`). With `blocks`, it writes its answer in content blocks, as
+    some providers do."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -93,6 +103,9 @@ class CannedChatModel(BaseChatModel):
     fail_with: Exception | None = None
     prompts: list[list[BaseMessage]] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)  # the names of the tools bound
+    call: dict[str, Any] | None = None  # {"name", "args"}: the tool call it makes
+    after_tool: str | None = None
+    blocks: bool = False
 
     @property
     def _llm_type(self) -> str:
@@ -113,7 +126,7 @@ class CannedChatModel(BaseChatModel):
             raise self.fail_with
         last = messages[-1] if messages else None
         if isinstance(last, ToolMessage):
-            return _words(_cited(str(last.content))), []
+            return _words(self.after_tool or _cited(str(last.content))), []
         call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
         if call is not None:
             return [], [call]
@@ -126,6 +139,8 @@ class CannedChatModel(BaseChatModel):
         def call(name: str, **args: str) -> ToolCall | None:
             return ToolCall(name=name, args=args, id=call_id) if name in self.tools else None
 
+        if self.call is not None:
+            return ToolCall(name=self.call["name"], args=self.call["args"], id=call_id)
         if asked := SIGN_OFF.search(text):
             verb = asked.group(1).lower()
             sign_off = verb if verb in ("reject", "override") else "accept"
@@ -152,12 +167,14 @@ class CannedChatModel(BaseChatModel):
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> Iterator[ChatGenerationChunk]:
         pieces, calls = self._record_prompt_then_answer(messages)
+        empty: str | list[Any] = [] if self.blocks else ""
         for piece in pieces:
-            yield ChatGenerationChunk(message=AIMessageChunk(content=piece))
+            content = [{"type": "text", "text": piece, "index": 0}] if self.blocks else piece
+            yield ChatGenerationChunk(message=AIMessageChunk(content=content))
         for index, call in enumerate(calls):
             chunk = {"name": call["name"], "args": json.dumps(call["args"]), "id": call["id"]}
-            message = AIMessageChunk(content="", tool_call_chunks=[chunk | {"index": index}])
+            message = AIMessageChunk(content=empty, tool_call_chunks=[chunk | {"index": index}])
             yield ChatGenerationChunk(message=message)
         # The whole call's token counts, on a last empty chunk, as OpenAI-style streams give them.
         usage = _usage(messages, "".join(pieces))
-        yield ChatGenerationChunk(message=AIMessageChunk(content="", usage_metadata=usage))
+        yield ChatGenerationChunk(message=AIMessageChunk(content=empty, usage_metadata=usage))
