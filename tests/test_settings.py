@@ -236,3 +236,21 @@ def test_a_rate_setting_that_isnt_a_whole_number_above_zero_refuses_naming_it(va
 
 def test_started_with_a_bad_rate_setting_the_app_exits_naming_it():
     assert "VOUCH_RATE_REQUESTS" in refused_start({"VOUCH_RATE_REQUESTS": "x"})
+
+
+def test_in_clerk_mode_the_discord_server_id_is_read_as_a_plain_setting():
+    env = {"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS
+    gated = load_settings(env | {"DISCORD_SERVER_ID": " 111111111111111111 "})
+
+    assert gated.clerk is not None and gated.clerk.discord_server_id == "111111111111111111"
+    assert load_settings(env).clerk.discord_server_id is None  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    "server", ["course", "12", "1" * 21, "11111111111111111a", "-1111111111111111"]
+)
+def test_a_discord_server_id_that_isnt_one_refuses_naming_it(server):
+    env = {"VOUCH_AUTH_MODE": "clerk", "DISCORD_SERVER_ID": server} | CLERK_KEYS
+
+    with pytest.raises(SettingsError, match="DISCORD_SERVER_ID"):
+        load_settings(env)

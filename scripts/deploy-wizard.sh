@@ -223,6 +223,10 @@ fi
 [[ "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] \
   || stop "\"$PROJECT_ID\" isn't a project id (6 to 30 lower-case letters, digits and hyphens)."
 REGION=$(saved REGION); REGION="${REGION:-europe-west1}"
+# The course's Discord server (#152), set by hand in $WIZARD_ENV (#153): its members may sign in.
+DISCORD_SERVER_ID=$(saved DISCORD_SERVER_ID)
+[[ -z "$DISCORD_SERVER_ID" || "$DISCORD_SERVER_ID" =~ ^[0-9]{17,20}$ ]] \
+  || stop "DISCORD_SERVER_ID in $WIZARD_ENV isn't a Discord server id (17 to 20 digits: Discord's Developer Mode, Copy Server ID)."
 if [[ $DRY == no ]]; then save PROJECT_ID "$PROJECT_ID"; save REGION "$REGION"; fi
 ok "project $PROJECT_ID, region $REGION$([[ $DRY == no ]] && echo " (in $WIZARD_ENV)")"
 has gcloud projects describe "$PROJECT_ID" || [[ $DRY == yes ]] \
@@ -371,12 +375,17 @@ step  # Deploy
 URL_NOW=$(service_field status.url)
 AUTHORIZED_PARTIES="${URL_NOW:-https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app}"
 SECRETS_ARG=$(IFS=,; printf '%s' "${PINNED[*]}")
+ENV_VARS="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZED_PARTIES"
+if [[ -n "$DISCORD_SERVER_ID" ]]; then
+  ENV_VARS+=",DISCORD_SERVER_ID=$DISCORD_SERVER_ID"
+  say "Sign-in lets in members of Discord server $DISCORD_SERVER_ID, invited users and developers."
+fi
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on OpenRouter, signed in"
 say "through Clerk. Each secret's version is pinned; sign-in accepts $AUTHORIZED_PARTIES."
 run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --region="$REGION" \
   --project="$PROJECT_ID" --allow-unauthenticated --min-instances=0 --max-instances=1 --max=1 \
   --set-secrets="$SECRETS_ARG" \
-  --set-env-vars="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZED_PARTIES" \
+  --set-env-vars="$ENV_VARS" \
   --add-cloudsql-instances="$SQL_INSTANCE" --quiet
 # Health on the old revision would pass, so a skipped deploy is never Done (#123).
 [[ $RAN == no ]] && stop "Nothing was deployed: the service still runs its last revision, without this run's image or secret versions. Run scripts/deploy-wizard.sh --db-ready again and answer y to the deploy."

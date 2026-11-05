@@ -664,3 +664,21 @@ def test_answering_n_to_the_deploy_says_nothing_was_deployed_and_fails(tmp_path)
     assert "Nothing was deployed" in result.stderr
     assert "gcloud run deploy" not in calls
     assert "curl" not in calls
+
+
+def test_a_discord_server_id_in_wizard_env_reaches_the_service(tmp_path):
+    """#152: the course's Discord server gates sign-in; #153 puts its id in wizard.env."""
+    server = "111111111111111111"
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1", DISCORD_SERVER_ID=server)
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"DISCORD_SERVER_ID={server}" in deploy_args(calls)["--set-env-vars"].split(",")
+    assert "members of Discord server 111111111111111111" in result.stdout
+
+
+def test_a_discord_server_id_that_isnt_one_stops_before_anything_changes(tmp_path):
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1", DISCORD_SERVER_ID="course")
+    result, calls = deployed(tmp_path)
+    assert result.returncode != 0
+    assert "DISCORD_SERVER_ID" in result.stderr
+    assert "gcloud run deploy" not in calls and "docker " not in calls
