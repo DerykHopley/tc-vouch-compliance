@@ -125,7 +125,7 @@ How much of a compliance profile's controls are backed by accepted verdicts, sho
 _Avoid_: Compliance score, maturity
 
 **Progress**:
-Where a user stands under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with.
+Where a user stands under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with. On screen, an assessment waiting for review is **Proposed** (its review state tag, `docs/design.md`); `waiting-for-review` is the same state in code and the API.
 _Avoid_: Status, history
 
 **Long-term memory**:

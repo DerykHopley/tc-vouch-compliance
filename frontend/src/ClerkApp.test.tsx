@@ -51,7 +51,7 @@ describe('signed out', () => {
     expect(screen.getByText(/available to invited users only/i)).toBeTruthy()
     expect(screen.getByText(/sign in with the Discord account that uses the e-mail address it was sent to/i)).toBeTruthy()
     expect(screen.getByRole('form', { name: 'Clerk sign-in' })).toBeTruthy()
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
   })
 
   it("draws Clerk's form in Vouch's colour tokens, so it follows light and dark", () => {
@@ -77,7 +77,7 @@ describe('signed out', () => {
     clerk.failed = true
     rerender(<ClerkApp publishableKey="pk_test_x" />)
     expect(screen.getByRole('alert').textContent).toMatch(/sign-in could not be loaded/i)
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
   })
 })
 
@@ -88,7 +88,7 @@ describe('signed in', () => {
 
   it('shows the app, and every API call carries a fresh session token', async () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
-    expect(screen.getByRole('region', { name: 'Readiness' })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
     expect(screen.queryByText('Access is by invitation')).toBeNull()
     expect(await authHeaders()).toEqual({ Authorization: 'Bearer session-token' })
   })

@@ -4,7 +4,9 @@
 #   - Vouch: the API on the bundled demo script (the scripted fake model: no key, no paid call)
 #     serving frontend/dist. With VOUCH_IMAGE set, that image's container instead of uvicorn,
 #     in local auth mode (the image's own default is clerk);
-#   - a second API on a broken fake script, for the error event (tests route the assessment call to it).
+#   - a second Vouch the same way, for the Dossier's checks (#40): its own assessments and its own
+#     request-rate budget, as local mode's one user would otherwise spend the 60 a minute across the suite;
+#   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 #
 #   frontend/e2e/run.sh                                  # build the front end, Chromium
@@ -24,32 +26,39 @@ NAME="vouch-e2e-$$"
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
-  if [ -n "${VOUCH_IMAGE:-}" ]; then "$CONTAINER" rm -f "$NAME" >/dev/null 2>&1 || true; fi
+  if [ -n "${VOUCH_IMAGE:-}" ]; then "$CONTAINER" rm -f "$NAME" "$NAME-dossier" >/dev/null 2>&1 || true; fi
   wait 2>/dev/null || true
 }
 trap cleanup EXIT
 
-read -r VOUCH_PORT FAILING_PORT < <(python3 -c '
+read -r VOUCH_PORT DOSSIER_PORT FAILING_PORT < <(python3 -c '
 import socket
-socks = [socket.socket() for _ in range(2)]
+socks = [socket.socket() for _ in range(3)]
 for s in socks: s.bind(("127.0.0.1", 0))
 print(*(s.getsockname()[1] for s in socks))')
 
-if [ -n "${VOUCH_IMAGE:-}" ]; then
-  "$CONTAINER" run --rm --name "$NAME" -p "127.0.0.1:$VOUCH_PORT:8080" -e VOUCH_AUTH_MODE=local "$VOUCH_IMAGE" \
-    >"$LOG_DIR/vouch.log" 2>&1 &
-else
+if [ -z "${VOUCH_IMAGE:-}" ]; then
   (cd "$ROOT/frontend" && npm run build) >"$LOG_DIR/build.log" 2>&1 \
     || { echo "The front-end build failed:" >&2; tail -n 30 "$LOG_DIR/build.log" >&2; exit 1; }
-  (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_AUTH_MODE=local VOUCH_FRONTEND="$ROOT/frontend/dist" \
-    uv run uvicorn vouch.api:app --port "$VOUCH_PORT") >"$LOG_DIR/vouch.log" 2>&1 &
 fi
-PIDS+=($!)
+start_vouch() { # port, log name, container name
+  if [ -n "${VOUCH_IMAGE:-}" ]; then
+    "$CONTAINER" run --rm --name "$3" -p "127.0.0.1:$1:8080" -e VOUCH_AUTH_MODE=local "$VOUCH_IMAGE" \
+      >"$LOG_DIR/$2.log" 2>&1 &
+  else
+    (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_AUTH_MODE=local VOUCH_FRONTEND="$ROOT/frontend/dist" \
+      uv run uvicorn vouch.api:app --port "$1") >"$LOG_DIR/$2.log" 2>&1 &
+  fi
+  PIDS+=($!)
+}
+start_vouch "$VOUCH_PORT" vouch "$NAME"
+start_vouch "$DOSSIER_PORT" dossier "$NAME-dossier"
 (cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
   uv run uvicorn vouch.api:app --port "$FAILING_PORT") >"$LOG_DIR/failing-api.log" 2>&1 &
 PIDS+=($!)
 
 export VOUCH_URL="http://localhost:$VOUCH_PORT"
+export DOSSIER_URL="http://localhost:$DOSSIER_PORT"
 export FAILING_API_URL="http://127.0.0.1:$FAILING_PORT"
 
 wait_for() {
@@ -63,6 +72,7 @@ wait_for() {
 }
 wait_for "$VOUCH_URL/api/health"
 wait_for "$VOUCH_URL/"
+wait_for "$DOSSIER_URL/api/health"
 wait_for "$FAILING_API_URL/api/health"
 
 echo "Browser check on $VOUCH_URL (${VOUCH_IMAGE:-built front end}; failing API $FAILING_API_URL): pytest $*"

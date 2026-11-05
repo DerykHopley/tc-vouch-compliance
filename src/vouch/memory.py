@@ -164,10 +164,10 @@ class Progress:
         return {status: counted[status] for status in STATUSES}
 
 
-def progress(memory: Memory, saver: BaseCheckpointSaver) -> Progress:
-    """The user's progress under the memory's profile. From the index, newest first, only each
-    control's newest assessment is loaded (an older one only when the newest never reached the
-    review)."""
+def newest_by_control(memory: Memory, saver: BaseCheckpointSaver) -> dict[str, Assessment]:
+    """Each assessed control's newest assessment under the memory's profile, by control id. From
+    the index, newest first, only each control's newest is loaded (an older one only when the
+    newest never reached the review)."""
     load = assessment_loader(saver, scope=memory.scope)
     latest: dict[str, Assessment] = {}
     for entry in memory.entries():
@@ -176,4 +176,10 @@ def progress(memory: Memory, saver: BaseCheckpointSaver) -> Progress:
         assessment = load(entry.thread_id)
         if assessment is not None:
             latest[entry.control_id] = assessment
-    return Progress(controls=latest, last_worked=memory.last_worked())
+    return latest
+
+
+def progress(memory: Memory, saver: BaseCheckpointSaver) -> Progress:
+    """The user's progress under the memory's profile: `newest_by_control`, and when they last
+    worked."""
+    return Progress(controls=newest_by_control(memory, saver), last_worked=memory.last_worked())

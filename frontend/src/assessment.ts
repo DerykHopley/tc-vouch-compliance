@@ -15,13 +15,22 @@ export const VERDICT_WORDS: Record<Verdict, string> = {
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 
-export type Control = { id: string; title: string; owner: string }
+export type Control = { id: string; title: string }
 
 export type Step = { node: string; text: string }
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
 export type RequirementVerdict = { id: string; column: Column; text: string; verdict: Verdict; reason: string }
+/** An assessment's review state (`vouch.graph.Status`); the screen says Proposed for waiting-for-review. */
+export type ReviewStatus = 'waiting-for-review' | 'accepted' | 'rejected'
+
+export const REVIEW_WORDS: Record<ReviewStatus, string> = {
+  'waiting-for-review': 'Proposed',
+  accepted: 'Accepted',
+  rejected: 'Rejected',
+}
+
 // The page reads only these of the Assessment's fields so far.
-export type Assessment = { control_id: string; verdict: Verdict; answer: string }
+export type Assessment = { control_id: string; verdict: Verdict; answer: string; status?: ReviewStatus }
 
 /**
  * One assessment's tokens and cost (#35): `cost_usd` is OpenRouter's reported part plus the part computed from a
@@ -57,6 +66,24 @@ export type AssessmentEvent =
   | { event: 'requirement'; data: { requirement: RequirementVerdict } }
   | { event: 'result'; data: { assessment: Assessment; usage?: Usage } }
   | { event: 'error'; data: { message: string } }
+
+/**
+ * The control's newest stored assessment, from #38's `GET /api/assessments` (newest first) and
+ * `GET /api/assessments/{thread_id}`; null when it has none, or it can't be read just now.
+ */
+export async function newestAssessment(controlId: string): Promise<Assessment | null> {
+  try {
+    const list = await fetch('/api/assessments', { headers: await authHeaders() })
+    if (sessionEnded(list) || !list.ok) return null
+    const { assessments } = (await list.json()) as { assessments: { thread_id: string; control_id: string }[] }
+    const newest = assessments.find((a) => a.control_id === controlId)
+    if (!newest) return null
+    const one = await fetch(`/api/assessments/${encodeURIComponent(newest.thread_id)}`, { headers: await authHeaders() })
+    return one.ok ? ((await one.json()) as { assessment: Assessment }).assessment : null
+  } catch {
+    return null
+  }
+}
 
 /** Shown, with Retry, for any throw from `assess`. */
 export const UNREACHABLE = 'Vouch could not reach its service. Try again shortly.'

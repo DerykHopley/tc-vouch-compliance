@@ -20,14 +20,14 @@ afterEach(() => {
 describe('Root', () => {
   it('shows the app in local mode', () => {
     render(<Root auth={{ mode: 'local' }} />)
-    expect(screen.getByRole('region', { name: 'Readiness' })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
   })
 
   it('says Vouch could not be reached, and never shows the app, when health could not be read', () => {
     render(<Root auth={{ mode: 'unreachable' }} />)
     expect(screen.getByRole('alert').textContent).toBe('Vouch could not be reached. Please try again shortly.')
     expect(screen.getByRole('banner').textContent).toMatch(/Vouch/)
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
   })
 
   it('shows the invitation page with "Vouch could not be loaded" when Clerk\'s chunk fails', async () => {
@@ -35,6 +35,6 @@ describe('Root', () => {
     // Not "sign-in could not be loaded": the boundary also catches the signed-in app's errors
     expect((await screen.findByRole('alert')).textContent).toBe('Vouch could not be loaded. Please reload the page.')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Access is by invitation')
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
   })
 })

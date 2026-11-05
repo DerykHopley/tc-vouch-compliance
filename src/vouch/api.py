@@ -1,5 +1,6 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, the user's assessments, and the developer
+compliance lead's review, the review that resumes it, the user's assessments, the Dossier
+overview, and the developer
 page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
@@ -27,6 +28,7 @@ from vouch import audit
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.database import Connection, Database, DatabaseUnavailable
+from vouch.dossier import overview
 from vouch.graph import (
     Assessment,
     InvalidReviewError,
@@ -39,9 +41,9 @@ from vouch.graph import (
     new_thread_id,
     state_serializer,
 )
-from vouch.isa import IsaControl, UnknownControlError, load_isa_control
+from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
-from vouch.memory import Memory, process_checkpointer, process_store
+from vouch.memory import Memory, newest_by_control, process_checkpointer, process_store
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -527,6 +529,16 @@ def read_audit_trail(
     page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
     clean, _ = redact_data({"entries": [entry.to_dict() for entry in page.entries]})
     return clean | {"next": page.next}
+
+
+@router.get("/overview")
+def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
+    """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
+    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step. Its
+    quotes are redacted as the stream's events are."""
+    latest = newest_by_control(memory, saver)  # from each control's newest thread
+    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
+    return clean
 
 
 DEVELOPERS = [Depends(require_developer)]
