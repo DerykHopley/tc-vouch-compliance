@@ -4,23 +4,42 @@ bundled assessment script: no key, no paid call. Each case runs in memory and on
 fixtures), for a lead new to the test."""
 
 import json
+import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.store.memory import InMemoryStore
 from test_api import read_events
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
-from test_memory import app_on
+from test_memory import app_on, restart
 
 from vouch import api, chat_agent
-from vouch.chat import GREETING_REQUEST
+from vouch.chat_agent import (
+    GREETING_REQUEST,
+    HISTORY_WINDOW,
+    START_ASSESSMENT,
+    ChatTools,
+    chat_config,
+    chat_context,
+    chat_graph,
+    chat_turn,
+)
 from vouch.chat_fake import CannedChatModel
+from vouch.database import Database
+from vouch.graph import memory_checkpointer, new_thread_id, state_serializer
 from vouch.isa import load_base_framework
-from vouch.model_choice import ModelChoice
-from vouch.profile import DEFAULT_PROFILE
-from vouch.runs import RUNNING_ALREADY
-from vouch.spending import DailyLimitReached, SpendingGuard
+from vouch.memory import Memory, process_checkpointer
+from vouch.model_choice import MemoryModelStore, ModelChoice
+from vouch.profile import DEFAULT_PROFILE, load_named_profile
+from vouch.runs import RUNNING_ALREADY, AssessmentRun, RunningAssessments
+from vouch.settings import Settings
+from vouch.spending import DailyLimitReached, MemorySpendingStore, SpendingGuard, UsageMeter
 
 CONTROL_IDS = [control.id for control in load_base_framework().controls]
 
@@ -48,6 +67,30 @@ def client(app, lead):
 def scope_of(headers: dict[str, str]) -> str:
     """The lead's memory scope (vouch.memory.Memory.scope)."""
     return json.dumps([headers["X-Test-User"], DEFAULT_PROFILE])
+
+
+@contextmanager
+def holding(running: RunningAssessments, scope: str) -> Iterator[None]:
+    """A run of the lead's going, as far as `running` knows."""
+    assert running.try_hold(scope)
+    try:
+        yield
+    finally:
+        running.release(scope)
+
+
+def is_held(running: RunningAssessments, scope: str) -> bool:
+    if running.try_hold(scope):
+        running.release(scope)
+        return False
+    return True
+
+
+def thread_of(events) -> str:
+    """The chat thread a reply names, in its first event."""
+    name, data = events[0]
+    assert name == "thread", events[0]
+    return data["thread_id"]
 
 
 def greet(client, **body):
@@ -157,7 +200,7 @@ def test_an_unknown_control_gets_a_formal_reply_listing_the_valid_ones(client):
 
 
 def test_a_second_assessment_while_one_runs_is_declined(app, client, lead):
-    with app.state.running.running(scope_of(lead)):
+    with holding(app.state.running, scope_of(lead)):
         events = say(client, "Assess 5.1.1")
 
     assert reply(events) == RUNNING_ALREADY
@@ -166,7 +209,7 @@ def test_a_second_assessment_while_one_runs_is_declined(app, client, lead):
 
 
 def test_another_users_running_assessment_doesnt_stop_this_one(app, client, users):
-    with app.state.running.running(scope_of(users[1])):
+    with holding(app.state.running, scope_of(users[1])):
         events = say(client, "Assess 5.1.1")
 
     assert "assessment" in names(events)
@@ -180,7 +223,7 @@ def test_an_assessment_from_the_working_paper_is_noted_as_running_while_it_runs(
 
     def watched(*args, **kwargs):
         for item in events_of(*args, **kwargs):
-            seen.append(app.state.running.busy(scope_of(lead)))
+            seen.append(is_held(app.state.running, scope_of(lead)))
             yield item
 
     monkeypatch.setattr(api, "assessment_events", watched)
@@ -188,7 +231,7 @@ def test_an_assessment_from_the_working_paper_is_noted_as_running_while_it_runs(
     assess_and_review(client, "4.1.2")
 
     assert seen and all(seen)
-    assert not app.state.running.busy(scope_of(lead))
+    assert not is_held(app.state.running, scope_of(lead))
 
 
 def test_the_chat_releases_its_run_so_the_next_one_starts(app, client, lead):
@@ -197,7 +240,7 @@ def test_the_chat_releases_its_run_so_the_next_one_starts(app, client, lead):
     events = say(client, "Assess 4.1.2")
 
     assert "assessment" in names(events)
-    assert not app.state.running.busy(scope_of(lead))
+    assert not is_held(app.state.running, scope_of(lead))
 
 
 # The daily limit
@@ -237,7 +280,7 @@ def test_the_limit_reached_as_the_chat_starts_an_assessment_is_said_in_the_chat(
 
 def test_a_chat_thread_keeps_its_history_for_the_next_message(client, fake):
     first = say(client, "Hello")
-    thread_id = first[-1][1]["thread_id"]
+    thread_id = thread_of(first)
     say(client, "And again", thread_id=thread_id)
 
     contents = [message.content for message in fake.prompts[-1][1:]]
@@ -246,8 +289,8 @@ def test_a_chat_thread_keeps_its_history_for_the_next_message(client, fake):
 
 def test_a_chat_thread_outlasts_a_restart(database_url, lead, fake):
     with TestClient(app_on(database_url), headers=lead) as client:
-        thread_id = say(client, "Hello")[-1][1]["thread_id"]
-    test_memory.restart()
+        thread_id = thread_of(say(client, "Hello"))
+    restart()
 
     with TestClient(app_on(database_url), headers=lead) as client:
         say(client, "And again", thread_id=thread_id)
@@ -258,7 +301,7 @@ def test_a_chat_thread_outlasts_a_restart(database_url, lead, fake):
 
 
 def test_another_users_thread_id_names_nothing_for_this_one(client, users, fake):
-    thread_id = say(client, "My secret question")[-1][1]["thread_id"]
+    thread_id = thread_of(say(client, "My secret question"))
 
     other = client.post(
         "/api/chat",
@@ -274,7 +317,7 @@ def test_without_a_thread_each_message_starts_a_new_one(client, fake):
     first = say(client, "Hello")
     second = say(client, "And again")
 
-    assert first[-1][1]["thread_id"] != second[-1][1]["thread_id"]
+    assert thread_of(first) != thread_of(second)
     assert [message.content for message in fake.prompts[-1][1:]] == ["And again"]
 
 
@@ -301,3 +344,120 @@ def test_an_assessment_from_the_chat_runs_apart_from_the_chats_own_step_limit(cl
     events = say(client, "Assess 5.1.1")
 
     assert "assessment" in names(events)
+
+
+# Review fixes (#45): one run per lead on both paths, a bounded and redacted thread, the thread
+# named first, a left stream that neither waits nor ends the run early, invalid arguments
+
+
+def test_the_working_paper_refuses_a_run_while_the_chats_is_going(app, client, lead):
+    with holding(app.state.running, scope_of(lead)):
+        response = client.post("/api/assessments", json={"control_id": "4.1.2"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == RUNNING_ALREADY
+    assert client.get("/api/assessments").json()["assessments"] == []
+    assert client.get("/api/developer/settings").json()["usage"]["fake"]["assessments"] == 0
+
+
+def test_a_long_thread_sends_the_model_only_its_latest_window(client, fake):
+    thread_id = thread_of(say(client, "Hello 0"))
+    for n in range(1, 15):
+        say(client, f"Hello {n}", thread_id=thread_id)
+
+    prompt = fake.prompts[-1]
+    assert len(prompt) <= 1 + HISTORY_WINDOW
+    assert isinstance(prompt[0], SystemMessage) and isinstance(prompt[1], HumanMessage)
+    assert prompt[-1].content == "Hello 14"
+    assert "Hello 0" not in [message.content for message in prompt]
+
+
+def test_a_secret_never_reaches_the_chat_thread_or_the_model_again(
+    database_url, client, lead, fake
+):
+    fake.reply = "Please write to anna.schmidt@example.com about it."
+    thread_id = thread_of(say(client, "My token is Bearer abc123def456ghi, is that fine?"))
+
+    say(client, "And now?", thread_id=thread_id)
+
+    config = chat_config(thread_id, scope_of(lead))
+    if database_url is None:
+        kept = chat_graph(process_checkpointer()).get_state(config).values
+    else:
+        with Database(database_url) as db, db.checkpointer(state_serializer()) as saver:
+            kept = chat_graph(saver).get_state(config).values
+    assert len(kept["messages"]) == 4
+    for seen in [str(kept), str(fake.prompts[-1])]:
+        assert "abc123def456ghi" not in seen
+        assert "anna.schmidt" not in seen
+
+
+def test_the_thread_is_named_first_so_a_failed_first_turn_keeps_it(client, fake):
+    fake.fail_with = RuntimeError("model down")
+
+    events = say(client, "Hello")
+
+    assert names(events) == ["thread", "error"]
+    thread_of(events)
+
+
+def chat_tools() -> tuple[ChatTools, list[str]]:
+    """The chat's tools for a lead in memory, on the fakes; and the controls whose usage they
+    recorded."""
+    memory = Memory(InMemoryStore(), "lead-left", DEFAULT_PROFILE)
+    models = ModelChoice(Settings(), MemoryModelStore())
+    saver = memory_checkpointer()
+    run = AssessmentRun(models, None, frozenset(), saver, UsageMeter(None), memory.scope)
+    recorded: list[str] = []
+    spending = SpendingGuard(MemorySpendingStore())
+    tools = ChatTools(
+        load_named_profile(DEFAULT_PROFILE),
+        memory,
+        run,
+        spending,
+        RunningAssessments(),
+        lambda control_id, usage: recorded.append(control_id),
+    )
+    return tools, recorded
+
+
+def test_a_chat_left_mid_assessment_neither_waits_for_it_nor_ends_its_run_early(monkeypatch):
+    gate = threading.Event()
+    made: list[int] = []
+
+    def slow_run(control, profile, run, *, thread_id, note=""):
+        for n in range(50):
+            made.append(n)
+            yield "step", {"node": "gather", "text": f"Step {n}."}
+            if n == 0:
+                assert gate.wait(5)  # the run is busy until the test lets it go on
+
+    monkeypatch.setattr(chat_agent, "assessment_events", slow_run)
+    tools, recorded = chat_tools()
+    scope = tools.memory.scope
+    chat = chat_context(CannedChatModel(), tools, SystemMessage("Test."))
+    turn = chat_turn(chat_graph(tools.run.saver), chat, "Assess 5.1.1", new_thread_id(), scope)
+    assert ("step", {"node": "gather", "text": "Step 0."}) in iter(turn)  # read up to it
+
+    started = time.monotonic()
+    turn.close()  # the lead closed the tab
+
+    assert time.monotonic() - started < 1  # never waits for the assessment
+    assert is_held(tools.running, scope) and recorded == []  # its worker is still going
+    gate.set()
+    deadline = time.monotonic() + 5
+    while is_held(tools.running, scope) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not is_held(tools.running, scope)
+    assert made == [0, 1]  # it stopped at its next step
+    assert recorded == ["5.1.1"]  # kept once, as it ended
+
+
+def test_a_start_assessment_call_without_a_control_id_says_its_arguments_are_invalid():
+    tools, _ = chat_tools()
+    written = []
+
+    said = tools.call(START_ASSESSMENT, {"control": 511}, written.append, threading.Event())
+
+    assert "its arguments are invalid" in said and "isn't one of the chat's tools" not in said
+    assert written == [("step", {"node": "guard", "text": said})]

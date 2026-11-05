@@ -38,7 +38,7 @@ describe('sendChat', () => {
   })
 
   it('asks for the greeting with no message, and goes on with a chat thread when given one', async () => {
-    const fetch = vi.fn(() => Promise.resolve(sse(['event: done\ndata: {"thread_id":"t1"}\n\n'])))
+    const fetch = vi.fn(() => Promise.resolve(sse(['event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n'])))
     vi.stubGlobal('fetch', fetch)
 
     await all(sendChat(null, { page: 'dossier', controlId: null }))

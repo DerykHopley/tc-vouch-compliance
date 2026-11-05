@@ -527,7 +527,7 @@ describe('Ask Vouch', () => {
   type ChatBody = { message?: string; page: string; control_id: string | null; thread_id: string | null }
   const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
   /** A greeting with nothing to say, on chat thread t0. */
-  const QUIET = () => Promise.resolve(sse(['event: done\ndata: {"thread_id":"t0"}\n\n']))
+  const QUIET = () => Promise.resolve(sse(['event: thread\ndata: {"thread_id":"t0"}\n\nevent: done\ndata: {}\n\n']))
 
   /** The API as `serve` has it, and `/api/chat` answering a message with `chat`, the greeting with `greeting`. */
   function serveChat(chat: (body: ChatBody) => Promise<Response>, greeting: (body: ChatBody) => Promise<Response> = QUIET) {
@@ -599,12 +599,12 @@ describe('Ask Vouch', () => {
     const asked: ChatBody[] = []
     serveChat((body) => {
       asked.push(body)
-      return Promise.resolve(sse(['event: done\ndata: {"thread_id":"t1"}\n\n']))
+      return Promise.resolve(sse(['event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n']))
     }, (body) => {
       greetings.push(body)
       return Promise.resolve(sse(['event: suggestion\ndata: {"control_id":"1.1.1","action":"assess"}\n\n',
         'event: token\ndata: {"text":"You have not assessed any of the 12 controls yet."}\n\n',
-        'event: done\ndata: {"thread_id":"t1"}\n\n']))
+        'event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n']))
     })
     render(<App />)
     await open()
@@ -624,7 +624,7 @@ describe('Ask Vouch', () => {
 
   it('offers a waiting review as a link to its working paper', async () => {
     serveChat(QUIET, () => Promise.resolve(sse(['event: suggestion\ndata: {"control_id":"4.1.2","action":"review"}\n\n',
-      'event: done\ndata: {"thread_id":"t1"}\n\n'])))
+      'event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n'])))
     render(<App />)
     await screen.findByRole('heading', { level: 1 })
     await open()
@@ -638,10 +638,11 @@ describe('Ask Vouch', () => {
   it("shows an assessment's steps, then its verdict with a link that opens its working paper", async () => {
     serveChat(() => Promise.resolve(sse([
       'event: step\ndata: {"node":"load_control","text":"Loaded control 4.1.2."}\n\n',
+      'event: step\ndata: {"node":"guard","text":"Removed an email address from the step."}\n\n',
       'event: step\ndata: {"node":"judge","text":"Judged 1 of 2 requirements evidenced."}\n\n',
       'event: assessment\ndata: {"control_id":"4.1.2","verdict":"partly-evidenced","status":"waiting-for-review","thread_id":"a1"}\n\n',
       'event: token\ndata: {"text":"The assessment of control 4.1.2 has finished."}\n\n',
-      'event: done\ndata: {"thread_id":"t0"}\n\n'])))
+      'event: done\ndata: {}\n\n'])))
     render(<App />)
     await screen.findByRole('heading', { level: 1 })
     await open()
@@ -649,15 +650,49 @@ describe('Ask Vouch', () => {
     const log = within(bubble()!).getByRole('log')
 
     await within(log).findByText('The assessment of control 4.1.2 has finished.')
-    expect(within(log).getByText('Loaded control 4.1.2.')).toBeTruthy()
-    expect(within(log).getByText('Judged 1 of 2 requirements evidenced.')).toBeTruthy()
+    // Each step as the trace shows it: its node, then what it did; a guard step marked apart.
+    const steps = [...log.querySelectorAll('.msg-step')]
+    expect(steps.map((step) => step.textContent)).toEqual(['load_control Loaded control 4.1.2.',
+      'guard Removed an email address from the step.', 'judge Judged 1 of 2 requirements evidenced.'])
+    expect(steps.map((step) => step.classList.contains('guard'))).toEqual([false, true, false])
     expect(within(log).getByText('Partly evidenced').className).toBe('chip v-partly-evidenced')
+    expect(within(log).getByText('Proposed').className).toBe('tag tag-waiting-for-review') // its review state tag
     await userEvent.click(within(log).getByRole('link', { name: 'Open the working paper' }))
 
     expect(window.location.pathname).toBe('/controls/4.1.2')
     await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
     expect(bubble()).toBeTruthy() // the chat stays open beside the paper
   })
+
+  it('goes on with the thread a failed first turn named, and asks for a failed greeting again on the next opening',
+    async () => {
+      const greetings: ChatBody[] = []
+      const asked: ChatBody[] = []
+      serveChat((body) => {
+        asked.push(body)
+        return Promise.resolve(sse(asked.length === 1
+          ? ['event: thread\ndata: {"thread_id":"t9"}\n\n', 'event: error\ndata: {"message":"Vouch could not answer."}\n\n']
+          : ['event: done\ndata: {}\n\n']))
+      }, (body) => {
+        greetings.push(body)
+        return Promise.reject(new TypeError('Failed to fetch'))
+      })
+      render(<App />)
+      await open()
+      await within(bubble()!).findByText('Vouch could not be reached just now. Please try again shortly.')
+      expect(greetings).toHaveLength(1) // not asked for over and over while open
+      const field = screen.getByRole('textbox', { name: 'Message to Vouch' })
+      await userEvent.type(field, 'Hello{Enter}')
+      await within(bubble()!).findByText('Vouch could not answer.')
+      await userEvent.clear(field)
+      await userEvent.type(field, 'Again{Enter}')
+      await waitFor(() => expect(asked).toHaveLength(2))
+      expect(asked[1].thread_id).toBe('t9')
+
+      await press('Close the chat')
+      await open()
+      await waitFor(() => expect(greetings).toHaveLength(2))
+    })
 
   it("at the daily limit, the greeting shows the limit's message", async () => {
     const limit = "You have reached today's limit of 0 assessments. It resets at 00:00 UTC on 6 November 2026."

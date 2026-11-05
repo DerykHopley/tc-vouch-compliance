@@ -3,7 +3,7 @@ import type { NextStep } from './overview.ts'
 
 /**
  * Vouch's chat (#44, #45): one message to `POST /api/chat`, its reply read as server-sent events. A chat opens with
- * Vouch's greeting (no message: where the lead stands, and the next step); each reply's `done` names the chat thread,
+ * Vouch's greeting (no message: where the lead stands, and the next step); each reply names its chat thread first (`thread`),
  * which the next message goes on with.
  */
 
@@ -18,7 +18,8 @@ export type ChatEvent =
   | { event: 'step'; data: Step }
   | { event: 'suggestion'; data: NonNullable<NextStep> }
   | { event: 'assessment'; data: ChatAssessment }
-  | { event: 'done'; data: { thread_id: string } }
+  | { event: 'thread'; data: { thread_id: string } }
+  | { event: 'done'; data: Record<string, never> }
   | { event: 'error'; data: { message: string } }
 
 /** Shown in the chat for any throw from `sendChat`; the typed message stays in the field. */

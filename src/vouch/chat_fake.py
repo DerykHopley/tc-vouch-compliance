@@ -23,7 +23,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import ConfigDict, Field
 
-from vouch.chat import GREETING_REQUEST, PROGRESS, START_ASSESSMENT
+from vouch.chat_agent import GREETING_REQUEST, PROGRESS, START_ASSESSMENT
 from vouch.fake_model import _usage
 
 CHAT_REPLY = (

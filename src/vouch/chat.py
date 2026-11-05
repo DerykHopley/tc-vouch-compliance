@@ -1,8 +1,6 @@
-"""Vouch's chat (#44): the chat agent's prompt, and its reply streamed with secrets removed.
+"""Vouch's chat (#44): the page the lead is on, and the reply streamed with secrets removed.
 
-The agent (vouch.chat_agent, #45) answers the compliance lead in Vouch's formal voice, in the
-compliance profile's answer language, knowing which page and control the compliance lead is on.
-Its tools read the lead's progress and start assessments; it never signs off a verdict.
+The agent itself, its prompt and its tools are vouch.chat_agent (#45).
 
 The reply is streamed as it is written, a few words behind the model (security layer 4,
 vouch.redaction): a secret can span several words ("Authorization: Bearer <token>", or a key
@@ -11,15 +9,11 @@ to come, and it is never redacted again.
 """
 
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
 
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-
 from vouch.isa import IsaControl
-from vouch.profile import ComplianceProfile
 from vouch.redaction import match_words, redact
 
 CHAT_PROMPT_VERSION = "chat-2"
@@ -27,12 +21,6 @@ CHAT_PROMPT_VERSION = "chat-2"
 developer page, and in the log line with each chat message's usage."""
 CHAT_FAILED = "Vouch could not answer just now. Please try again shortly."
 """Must match NOT_ANSWERED in frontend/src/chat.ts: the one sentence for a chat that failed."""
-
-PROGRESS = "progress"
-START_ASSESSMENT = "start_assessment"
-GREETING_REQUEST = "I have just opened the chat. Please tell me where I stand and what to do next."
-"""The message a new chat starts with (#45): the lead asks where they stand, and the agent
-answers from its `progress` tool. It is kept in the chat thread; the chat doesn't show it."""
 
 Page = Literal["dossier", "paper", "developer"]
 """The page the compliance lead is on: the Dossier overview, a control's working paper, the
@@ -59,50 +47,7 @@ class PageContext:
         return f"{where} of VDA ISA control {self.control.id}: “{self.control.question}”"
 
 
-def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessage:
-    """The chat agent's system prompt: its voice, its tools, and where the lead is."""
-    system = (
-        f"You are Vouch, an assistant helping the compliance lead of {profile.company} prepare "
-        "for a TISAX assessment against VDA ISA. Write in a formal register, as an experienced "
-        "auditor would: complete sentences, no slang, no emoji, no exclamation marks. Answer in "
-        f"the language with ISO 639-1 code '{profile.answer_language}', whatever language the "
-        "compliance lead writes in. Never say that the company is compliant, certified, or has "
-        "passed an audit: you prepare for the audit, you do not decide it. Use the "
-        f"`{PROGRESS}` tool when asked where the compliance lead stands, and the "
-        f"`{START_ASSESSMENT}` tool when asked to assess a control; pass on what a tool says in "
-        "full, every control id it lists included, and give its message as it is when it "
-        "declines. You never accept, reject or change a verdict: the compliance lead signs off "
-        "on the control's working paper. You cannot yet read the evidence from the chat; when "
-        "asked to, say so plainly. "
-        f"The compliance lead is on {context.describe()}."
-    )
-    return SystemMessage(system)
-
-
-def chat_messages(
-    message: str, profile: ComplianceProfile, context: PageContext
-) -> list[BaseMessage]:
-    """The chat agent's prompt and the compliance lead's message."""
-    return [chat_prompt(profile, context), HumanMessage(message)]
-
-
 _WORD = re.compile(r"\S+")
-
-
-def streamed_reply(
-    model: BaseChatModel, messages: list[BaseMessage]
-) -> Iterator[tuple[str, list[str]]]:
-    """The model's reply in pieces as it streams, each redacted, with the labels of what was
-    newly removed from it (vouch.redaction)."""
-    return _redacted_pieces(str(chunk.content) for chunk in model.stream(messages))
-
-
-def _redacted_pieces(chunks: Iterable[str]) -> Iterator[tuple[str, list[str]]]:
-    """The chunks as RedactedText sends them, then what it holds at the end."""
-    text = RedactedText()
-    for chunk in chunks:
-        yield from text.add(chunk)
-    yield from text.flush()
 
 
 class RedactedText:

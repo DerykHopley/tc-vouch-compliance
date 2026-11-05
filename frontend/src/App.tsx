@@ -95,13 +95,13 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   const paperId = control ? control.id : null
   const readStored = control !== undefined && control.status !== 'not-assessed' && runFor !== control.id
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
-  const [paperRead, setPaperRead] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
+  const [paperReloads, setPaperReloads] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
   useEffect(() => {
     if (paperId === null || !readStored) return
     const answer = { wanted: true } // until the paper changes
     void newestAssessment(paperId).then((assessment) => answer.wanted && setStored({ controlId: paperId, assessment }))
     return () => { answer.wanted = false }
-  }, [paperId, readStored, paperRead])
+  }, [paperId, readStored, paperReloads])
   const idle: Run = { status: 'idle', steps: [] }
   const paperRun: Run | null = runFor === paperId && run.status !== 'idle' ? run
     : !readStored ? idle
@@ -145,7 +145,7 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
         onOpen={(controlId) => open(controlId, false)}
         onAssessed={(controlId) => {
           void load()
-          if (controlId === paperId) setPaperRead((n) => n + 1)
+          if (controlId === paperId) setPaperReloads((n) => n + 1)
         }} />
     </>
   )

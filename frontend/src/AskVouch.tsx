@@ -1,5 +1,5 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
-import { type Verdict, VERDICT_WORDS } from './assessment.ts'
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import {
   CHAT_UNREACHABLE, GREETING_UNREACHABLE, type PageContext, pageLabel, sendChat, suggestionLabel, suggestionMessage,
 } from './chat.ts'
@@ -48,17 +48,36 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
  * assessment's verdict with the way to its working paper. */
 type Message =
   | { from: 'lead' | 'vouch'; text: string; failed?: boolean }
-  | { from: 'step'; text: string }
-  | { from: 'verdict'; controlId: string; verdict: Verdict }
+  | { from: 'step'; step: Step }
+  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus }
 
-/** The verdict an assessment from the chat ended with, and "Open the working paper". */
-function VerdictLine({ controlId, verdict, onOpen }: { controlId: string; verdict: Verdict; onOpen?: (id: string) => void }) {
+type OnOpen = ((controlId: string) => void) | undefined
+
+/** A link to a control's working paper: shown in the app (`onOpen`), or followed as a link without it. */
+function PaperLink({ controlId, onOpen, className, children }:
+  { controlId: string; onOpen: OnOpen; className?: string; children: ReactNode }) {
+  return (
+    <a className={className} href={controlPath(controlId)}
+      onClick={(e) => { if (onOpen) { e.preventDefault(); onOpen(controlId) } }}>
+      {children}
+    </a>
+  )
+}
+
+/** An assessment's step, as the working paper's trace shows it: its node, then what it did; a guard step marked
+ * apart (design.md, Agent steps). */
+function StepLine({ step }: { step: Step }) {
+  return <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}><b>{step.node}</b> {step.text}</p>
+}
+
+/** The verdict an assessment from the chat ended with, its review state tag, and "Open the working paper". */
+function VerdictLine({ controlId, verdict, status, onOpen }:
+  { controlId: string; verdict: Verdict; status: ReviewStatus; onOpen: OnOpen }) {
   return (
     <p className="msg">
-      {controlId}: <span className={`chip v-${verdict}`}>{VERDICT_WORDS[verdict]}</span>, proposed.{' '}
-      <a href={controlPath(controlId)} onClick={(e) => { if (onOpen) { e.preventDefault(); onOpen(controlId) } }}>
-        Open the working paper
-      </a>
+      {controlId}: <span className={`chip v-${verdict}`}>{VERDICT_WORDS[verdict]}</span>{' '}
+      <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>{' '}
+      <PaperLink controlId={controlId} onOpen={onOpen}>Open the working paper</PaperLink>
     </p>
   )
 }
@@ -141,8 +160,9 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
   const [suggestion, setSuggestion] = useState<NonNullable<NextStep> | null>(null)
   const [busy, setBusy] = useState(false)
   const sending = useRef(false) // a ref, so Enter twice in one tick still sends once
-  const threadId = useRef<string | null>(null) // the chat thread, from the first reply's `done`
-  const greeted = useRef(false)
+  const threadId = useRef<string | null>(null) // the chat thread, named first in the first reply
+  const greeted = useRef(false) // asked for the greeting
+  const greetAgain = useRef(false) // it failed: asked for again on the next opening
 
   /** Sends `text` (null: asks for the greeting) and shows the reply as it streams: Vouch's words, an assessment's
    * steps and its verdict, the next step as a chip. A failure is a notice; a typed message is kept, to send again. */
@@ -161,17 +181,18 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     const failed = (message: string) => {
       add({ from: 'vouch', text: message, failed: true })
       if (text !== null) setDraft((now) => now || text)
+      else greetAgain.current = true
     }
     try {
       for await (const item of sendChat(text, context, threadId.current)) {
         if (item.event === 'token') write(item.data.text)
-        else if (item.event === 'step') add({ from: 'step', text: item.data.text })
+        else if (item.event === 'thread') threadId.current = item.data.thread_id
+        else if (item.event === 'step') add({ from: 'step', step: item.data })
         else if (item.event === 'suggestion') setSuggestion(item.data)
         else if (item.event === 'assessment') {
-          add({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict })
+          add({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status })
           onAssessed?.(item.data.control_id)
-        } else if (item.event === 'done') threadId.current = item.data.thread_id
-        else failed(item.data.message)
+        } else if (item.event === 'error') failed(item.data.message)
       }
     } catch {
       failed(text === null ? GREETING_UNREACHABLE : CHAT_UNREACHABLE)
@@ -181,8 +202,13 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     }
   }
 
-  // Vouch greets the lead the first time the chat opens: where they stand, and the next step.
+  // Vouch greets the lead the first time the chat opens: where they stand, and the next step. A greeting that failed
+  // is asked for again the next time the chat opens (never over and over while it stays open).
   useEffect(() => {
+    if (!open && greetAgain.current) {
+      greetAgain.current = false
+      greeted.current = false
+    }
     if (!open || greeted.current) return
     greeted.current = true
     void converse(null)
@@ -224,14 +250,13 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
       {/* Busy while a reply streams, so assistive tech announces the finished message, not each piece. */}
       <div className="bubble-log" role="log" aria-live="polite" aria-busy={busy}>
         {messages.map((m, i) => m.from === 'verdict'
-          ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} onOpen={onOpen} />
-          : m.from === 'step' ? <p key={i} className="msg msg-step">{m.text}</p>
+          ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} onOpen={onOpen} />
+          : m.from === 'step' ? <StepLine key={i} step={m.step} />
             : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : m.failed ? 'msg notice' : 'msg'}>{m.text}</p>)}
         {suggestion && !busy && (suggestion.action === 'review'
-          ? <a className="btn btn-ghost suggestion" href={controlPath(suggestion.control_id)}
-            onClick={(e) => { if (onOpen) { e.preventDefault(); onOpen(suggestion.control_id) } }}>
+          ? <PaperLink className="btn btn-ghost suggestion" controlId={suggestion.control_id} onOpen={onOpen}>
             {suggestionLabel(suggestion)}
-          </a>
+          </PaperLink>
           : <button className="btn btn-ghost suggestion" onClick={() => void converse(suggestionMessage(suggestion))}>
             {suggestionLabel(suggestion)}
           </button>)}
