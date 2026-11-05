@@ -1,5 +1,6 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, and the developer page's settings.
+compliance lead's review, the review that resumes it, the user's assessments, and the developer
+page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -33,11 +34,14 @@ from vouch.graph import (
     ReviewDecision,
     UnknownAssessmentError,
     assess_steps,
-    memory_checkpointer,
+    load_assessment,
+    new_thread_id,
     resume,
+    state_serializer,
 )
 from vouch.isa import IsaControl, UnknownControlError, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
+from vouch.memory import Memory, memory_saver, memory_store
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -133,16 +137,6 @@ def profile_tools(profile: Profile) -> frozenset[str]:
     return allowed_tools(profile)
 
 
-@cache
-def checkpointer() -> BaseCheckpointSaver:
-    """Where paused assessments wait for review: in memory, one per process, until M2 brings
-    Postgres. A restart forgets them."""
-    return memory_checkpointer()
-
-
-Checkpointer = Annotated[BaseCheckpointSaver, Depends(checkpointer)]
-
-
 def app_settings(request: Request) -> Settings:
     """The Settings the app was created with."""
     return request.app.state.settings
@@ -178,6 +172,19 @@ def app_database(request: Request) -> Database | None:
 
 
 AppDatabase = Annotated[Database | None, Depends(app_database)]
+
+
+def checkpointer(db: AppDatabase) -> Iterator[BaseCheckpointSaver]:
+    """Where assessments wait for review (#38): Postgres with a database URL, so they outlast a
+    restart; else this process's memory. A failure of the database is a 503."""
+    if db is None:
+        yield memory_saver()
+        return
+    with db.checkpointer(state_serializer()) as saver:
+        yield saver
+
+
+Checkpointer = Annotated[BaseCheckpointSaver, Depends(checkpointer)]
 
 
 def database_connection(db: AppDatabase) -> Iterator[Connection]:
@@ -226,6 +233,19 @@ def rate_limit(request: Request, user: CurrentUser) -> None:
     if wait is not None:
         headers = {"Retry-After": str(wait)}
         raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS, headers=headers)
+
+
+def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterator[Memory]:
+    """The user's long-term memory under the compliance profile (#38): Postgres's store with a
+    database URL, else this process's. A failure of the database is a 503."""
+    if db is None:
+        yield Memory(memory_store(), user.id, profile.id)
+        return
+    with db.store() as store:
+        yield Memory(store, user.id, profile.id)
+
+
+UserMemory = Annotated[Memory, Depends(user_memory)]
 
 
 public = APIRouter(prefix="/api")
@@ -290,6 +310,18 @@ def within_daily_limit(
         raise HTTPException(status_code=503, detail=str(error)) from None
 
 
+def new_assessment(
+    memory: UserMemory,
+    requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
+    _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
+) -> str:
+    """A new thread for the assessment, remembered for the user before the stream starts (#38),
+    once it's counted: a write that fails is a 503, and no model runs."""
+    thread_id = new_thread_id()
+    memory.remember_assessment(thread_id, requested.control.id)
+    return thread_id
+
+
 def record_off_the_event_loop(
     spending: SpendingGuard, user_id: str, control_id: str, usage: Usage
 ) -> None:
@@ -329,8 +361,9 @@ def create_assessment(
     models: AppModels,
     chosen: Annotated[str | None, Depends(chosen_model)],
     # Counted only once the control, the profile and the model passed (within_daily_limit
-    # depends on each).
-    _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
+    # depends on each), then remembered for the user.
+    thread_id: Annotated[str, Depends(new_assessment)],
+    memory: UserMemory,
     user: CurrentUser,
     spending: AppSpending,
 ) -> Iterable[ServerSentEvent]:
@@ -359,7 +392,13 @@ def create_assessment(
         model = ToolAllowList(assessed, tools)
         # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
         steps = assess_steps(
-            control, profile, cast(BaseChatModel, model), saver, note=requested.note
+            control,
+            profile,
+            cast(BaseChatModel, model),
+            saver,
+            note=requested.note,
+            thread_id=thread_id,
+            scope=memory.scope,
         )
         for item in steps:
             if isinstance(item, Assessment):
@@ -392,18 +431,50 @@ def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
     yield ServerSentEvent(event=event, data=clean)
 
 
+@router.get("/assessments")
+def list_assessments(memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
+    """The user's assessments under the compliance profile, newest first: each one's thread id,
+    control, status and verdict. Another user's are never listed."""
+    summaries = [
+        {
+            "thread_id": a.thread_id,
+            "control_id": a.control_id,
+            "status": a.status,
+            "verdict": a.verdict,
+        }
+        for a in memory.assessments(saver)
+    ]
+    return {"assessments": summaries}
+
+
+@router.get("/assessments/{thread_id}")
+def open_assessment(thread_id: str, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
+    """One of the user's assessments, proposed or reviewed, redacted as the stream's events are.
+    404 for an unknown thread, another user's included."""
+    try:
+        assessment = load_assessment(thread_id, saver, scope=memory.scope)
+    except UnknownAssessmentError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    clean, _ = redact_data({"assessment": assessment.to_dict()})
+    return clean
+
+
 @router.post("/assessments/{thread_id}/review")
 def review_assessment(
-    thread_id: str, decision: Annotated[ReviewDecision, Body()], saver: Checkpointer
+    thread_id: str,
+    decision: Annotated[ReviewDecision, Body()],
+    saver: Checkpointer,
+    memory: UserMemory,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
 
-    404 for an unknown thread; 409 for one not waiting (reviewed already); 422 for an override
-    naming a requirement the assessment didn't judge, or naming one twice (the decision's shape
-    is checked before, also 422)."""
+    404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
+    already); 422 for an override naming a requirement the assessment didn't judge, or naming
+    one twice (the decision's shape is checked before, also 422)."""
+    memory.note_session()  # before the review, so a failure here leaves the thread waiting
     try:
-        reviewed = resume(thread_id, decision, saver)
+        reviewed = resume(thread_id, decision, saver, scope=memory.scope)
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:

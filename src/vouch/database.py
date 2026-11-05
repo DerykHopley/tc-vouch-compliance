@@ -36,6 +36,7 @@ from typing import Any, Literal, Protocol, Self
 
 import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.store.postgres import PostgresStore
 from psycopg import conninfo
 from psycopg.rows import DictRow, dict_row
@@ -383,11 +384,21 @@ class Database:
             raise DatabaseUnavailable(f"no {table} table: run vouch-db-setup") from None
 
     @contextmanager
-    def checkpointer(self) -> Iterator[PostgresSaver]:
-        """LangGraph's Postgres checkpointer on the pool. Raises DatabaseUnavailable."""
+    def checkpointer(self, serde: SerializerProtocol | None = None) -> Iterator[PostgresSaver]:
+        """LangGraph's Postgres checkpointer on the pool, writing and reading with `serde`
+        (LangGraph's default when None; the API passes vouch.graph.state_serializer). Raises
+        DatabaseUnavailable, also for a failure while it's in use."""
         pool = self._open_pool()
         with self._unavailable_on_drop():
-            yield PostgresSaver(pool)
+            yield PostgresSaver(pool, serde=serde)
+
+    @contextmanager
+    def store(self) -> Iterator[PostgresStore]:
+        """LangGraph's Postgres store on the pool: long-term memory (vouch.memory). Raises
+        DatabaseUnavailable, also for a failure while it's in use."""
+        pool = self._open_pool()
+        with self._unavailable_on_drop():
+            yield PostgresStore(pool)
 
     def setup(self) -> None:
         """Create or migrate LangGraph's tables; safe to run again.

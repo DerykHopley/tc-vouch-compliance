@@ -1386,16 +1386,22 @@ STATE_TYPES: tuple[type, ...] = (
 )
 
 
+def state_serializer() -> JsonPlusSerializer:
+    """How a checkpointer writes the graph's state and reads it back: LangGraph's safe types and
+    STATE_TYPES only, not any type with a warning. Every saver (in memory, Postgres) uses it."""
+    return JsonPlusSerializer(allowed_msgpack_modules=None).with_msgpack_allowlist(STATE_TYPES)
+
+
 def memory_checkpointer() -> InMemorySaver:
-    """LangGraph's in-memory saver, where a paused assessment waits for review (M2: Postgres).
-
-    It reads back LangGraph's safe types and STATE_TYPES only, not any type with a warning."""
-    serde = JsonPlusSerializer(allowed_msgpack_modules=None).with_msgpack_allowlist(STATE_TYPES)
-    return InMemorySaver(serde=serde)
+    """LangGraph's in-memory saver, where a paused assessment waits for review when there's no
+    database (the API's Postgres saver otherwise, vouch.database)."""
+    return InMemorySaver(serde=state_serializer())
 
 
-def _config(thread_id: str) -> dict[str, Any]:
-    return {"configurable": {"thread_id": thread_id}}
+def _config(thread_id: str, scope: str = "") -> dict[str, Any]:
+    """The checkpointer's thread: `scope` (whose it is, vouch.memory) before the thread id, so
+    one user's thread id names nothing for another."""
+    return {"configurable": {"thread_id": scope + thread_id}}
 
 
 def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
@@ -1437,6 +1443,8 @@ def assess_steps(
     *,
     note: str = "",
     today: date | None = None,
+    thread_id: str | None = None,
+    scope: str = "",
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
     Step saying the control was loaded, a Step per node as it finishes (and a guard Step per
@@ -1446,8 +1454,10 @@ def assess_steps(
     Without a checkpointer the thread is kept in a fresh in-memory saver, so it can't be
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
     again; `today` (default: the date now) is what due dates count from and what staleness is
-    judged on."""
-    thread_id = uuid.uuid4().hex  # always a new thread: never piled onto an earlier run's state
+    judged on. `thread_id` (default: a new one) must name a new thread; `scope` says whose
+    thread it is (see `_config`)."""
+    if thread_id is None:
+        thread_id = new_thread_id()
     graph = build_graph(model, profile, checkpointer or memory_checkpointer())
     loaded = _loaded_step(control, profile)
     initial = {
@@ -1468,7 +1478,7 @@ def assess_steps(
         "note": note,
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
     }
-    config = _config(thread_id)
+    config = _config(thread_id, scope)
     yield loaded
     for node, update in (
         (node, update)
@@ -1509,7 +1519,8 @@ def assess(
 
 
 # One lock per thread, so two reviews of one assessment can't both find it waiting and resume
-# it: the second finds it reviewed. Locks are per process, as the in-memory saver is (M2).
+# it: the second finds it reviewed. Locks are per process: two app instances on one database
+# could still both resume one thread (Cloud Run runs one instance for this app).
 _review_locks: dict[str, threading.Lock] = {}
 _review_locks_guard = threading.Lock()
 
@@ -1519,8 +1530,26 @@ def _review_lock(thread_id: str) -> threading.Lock:
         return _review_locks.setdefault(thread_id, threading.Lock())
 
 
+def new_thread_id() -> str:
+    """A new assessment's thread id: always a new thread, never piled onto an earlier run's."""
+    return uuid.uuid4().hex
+
+
+def load_assessment(
+    thread_id: str, checkpointer: BaseCheckpointSaver, *, scope: str = ""
+) -> Assessment:
+    """The Assessment on a thread: proposed while it waits for review, reviewed after.
+
+    Raises UnknownAssessmentError for a thread with no state, or one whose run never reached the
+    review (it failed on the way): there's no assessment to show."""
+    snapshot = build_graph(None, checkpointer=checkpointer).get_state(_config(thread_id, scope))
+    if not snapshot.values or not (snapshot.interrupts or snapshot.values.get("review")):
+        raise UnknownAssessmentError(f"no assessment {thread_id}")
+    return _assessment(snapshot.values, thread_id)
+
+
 def resume(
-    thread_id: str, decision: ReviewDecision, checkpointer: BaseCheckpointSaver
+    thread_id: str, decision: ReviewDecision, checkpointer: BaseCheckpointSaver, *, scope: str = ""
 ) -> Assessment:
     """Resume a thread waiting for review with the lead's decision and return the reviewed
     Assessment: overrides applied, the roll-up and remediation items recalculated, the decision
@@ -1528,10 +1557,11 @@ def resume(
 
     Raises UnknownAssessmentError for an unknown thread, NotWaitingForReviewError for one not
     waiting (reviewed already, perhaps at the same moment), and InvalidReviewError for an
-    override `_check_overrides` refuses. Nothing is resumed when any is raised."""
+    override `_check_overrides` refuses. Nothing is resumed when any is raised. `scope` says
+    whose thread it is (see `_config`): another user's thread id is unknown."""
     graph = build_graph(None, checkpointer=checkpointer)
-    config = _config(thread_id)
-    with _review_lock(thread_id):
+    config = _config(thread_id, scope)
+    with _review_lock(scope + thread_id):
         snapshot = graph.get_state(config)
         if not snapshot.values:
             raise UnknownAssessmentError(f"no assessment {thread_id}")
