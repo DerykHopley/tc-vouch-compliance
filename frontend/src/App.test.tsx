@@ -41,7 +41,8 @@ const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1
 
 /** The overview with nothing assessed, as `GET /api/overview` sends it. */
 const OVERVIEW: Overview = {
-  company: 'Nordlicht Komponenten GmbH', country: 'Germany',
+  company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
+  requirements: {},
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0 },
@@ -56,19 +57,34 @@ const OVERVIEW: Overview = {
 const STORED = { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys for administrators.',
   status: 'waiting-for-review', thread_id: 't1' }
 
+/** The overview with each stored assessment's control on its card, as the API would send it. */
+const overviewWith = (stored: (typeof STORED)[]): Overview => ({
+  ...OVERVIEW,
+  controls: OVERVIEW.controls.map((c) => {
+    const a = stored.find((s) => s.control_id === c.id)
+    return a ? { ...c, status: 'waiting-for-review', verdict: 'partly-evidenced' } : c
+  }),
+})
+
 /**
- * The API: the overview, the assessment's stream when given (POST), the stored assessments (GET: none unless given),
- * and nothing else ever answers.
+ * The API: the overview (each stored assessment on its card), the assessment's stream when given (POST), the stored
+ * assessments (GET: none unless given), and nothing else ever answers. Returns the fetch, to count its calls.
  */
 function serve(assessment?: () => Promise<Response>, stored: (typeof STORED)[] = []) {
-  vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
-    url === '/api/overview' ? Promise.resolve(Response.json(OVERVIEW))
-      : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise(() => {}))
+  const fetch = vi.fn((url: string, init?: RequestInit) =>
+    url === '/api/overview' ? Promise.resolve(Response.json(overviewWith(stored)))
+      : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise<Response>(() => {}))
         : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: stored }))
           : url.startsWith('/api/assessments/') && stored.length
             ? Promise.resolve(Response.json({ assessment: stored.find((a) => url.endsWith(a.thread_id)) }))
-            : new Promise(() => {}))
+            : new Promise<Response>(() => {}))
+  vi.stubGlobal('fetch', fetch)
+  return fetch
 }
+
+/** How many times the page asked for the stored assessments. */
+const storedReads = (fetch: ReturnType<typeof serve>) =>
+  fetch.mock.calls.filter(([url, init]) => url === '/api/assessments' && init?.method !== 'POST').length
 
 describe('Dossier landing', () => {
   it('shows the top bar, headline, readiness band and the 12 controls from the API', async () => {
@@ -256,11 +272,66 @@ describe('the working paper', () => {
     )
   })
 
-  it('shows the Dossier for a control the overview does not list', async () => {
+  it('says a control the overview does not list is not found, and "Overview" returns to the Dossier', async () => {
     serve()
     window.history.replaceState(null, '', '/controls/9.9.9')
     render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control 9.9.9')
+    expect(paper()).toBeNull()
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+    await userEvent.click(within(notFound).getByRole('link', { name: '← Overview' }))
     expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('says an address with a broken escape is not found, rather than failing blank', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/%E0')
+    render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control %E0')
+  })
+
+  it('reads no stored assessment for a control its card says is not assessed, and one for a control it says is', async () => {
+    const fetch = serve(undefined, [STORED])
+    window.history.replaceState(null, '', '/controls/5.2.4')
+    render(<App />)
+    expect(await within(await screen.findByRole('region', { name: 'Working paper' })).findByRole('button',
+      { name: 'Assess 5.2.4' })).toBeTruthy()
+    expect(storedReads(fetch)).toBe(0)
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^4\.1\.2/ }))
+    expect(await screen.findByRole('region', { name: 'Verdict and draft answer' })).toBeTruthy()
+    expect(storedReads(fetch)).toBe(1)
+  })
+
+  it("keeps a finished run's control current in the index after the lead opens another paper", async () => {
+    const result = { assessment: { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys.',
+      status: 'waiting-for-review' } }
+    const fetch = serve(() => Promise.resolve(new Response(`event: result\ndata: ${JSON.stringify(result)}\n\n`)))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
+    await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    const overviewReads = fetch.mock.calls.filter(([url]) => url === '/api/overview').length
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^5\.2\.4/ }))
+    await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })
+    const entry = within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^4\.1\.2/ })
+    expect(within(entry).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(entry).getByText('Proposed')).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/overview').length).toBe(overviewReads) // no read for it
+  })
+
+  it('opens another control from the index, and "Overview" returns to the Dossier', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const index = await screen.findByRole('navigation', { name: 'Controls' })
+    await userEvent.click(within(index).getByRole('link', { name: /^5\.2\.4/ }))
+    expect(window.location.pathname).toBe('/controls/5.2.4')
+    expect(await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
   })
 })
