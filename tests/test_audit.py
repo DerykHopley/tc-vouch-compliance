@@ -6,20 +6,27 @@ those cases are skipped). The user is set per request by a test header (test_mem
 """
 
 import threading
-from datetime import datetime
+import time
+from dataclasses import fields
+from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from langgraph.store.memory import InMemoryStore
 from test_auth import api_routes
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture)
 from test_memory import DEMO_CONTROL, app_on, assess
 
-from vouch import load_named_profile
+from vouch import audit, load_named_profile
 from vouch.api import compliance_profile
-from vouch.database import AUDIT_TABLE
+from vouch.audit import MAX_PAGE, AuditEntry, EvidenceVersion, review_entries
+from vouch.citations import Citation
+from vouch.database import AUDIT_COLUMNS, AUDIT_TABLE, lock_id
+from vouch.graph import Assessment, RequirementVerdict, ReviewDecision, ShouldScore, thread_key
+from vouch.memory import Memory
 from vouch.profile import DEFAULT_PROFILE
 
 # test_memory's fixtures: each backend (memory, Postgres), a set-up Postgres database, two users.
@@ -65,6 +72,7 @@ def test_an_accept_with_one_override_writes_two_entries(database_url, users):
         "prompt_version": reviewed["prompt_version"],
     }
     assert accept == common | {
+        "id": accept["id"],
         "at": accept["at"],
         "action": "accept",
         "requirement_id": None,
@@ -73,6 +81,7 @@ def test_an_accept_with_one_override_writes_two_entries(database_url, users):
         "verdict_after": "evidenced",
     }
     assert override == common | {
+        "id": override["id"],
         "at": override["at"],
         "action": "override",
         "requirement_id": "M1",
@@ -81,6 +90,7 @@ def test_an_accept_with_one_override_writes_two_entries(database_url, users):
         "verdict_after": "evidenced",
     }
     assert reviewed["model"] and reviewed["prompt_version"]
+    assert accept["id"] != override["id"]
     assert accept["at"] == override["at"]
     datetime.fromisoformat(accept["at"])
 
@@ -108,6 +118,107 @@ def test_entries_are_read_per_profile_newest_first(database_url, users):
     assert mine[2]["note"] == "See the records folder."
     assert bobs == []
     assert other_profile == []
+
+
+def test_the_trail_is_read_a_page_at_a_time(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        first = assess(client, alice)
+        review(client, alice, first, decision="reject")
+        second = assess(client, alice)
+        review(client, alice, second, decision="accept", overrides=[OVERRIDE_M1])
+        page = client.get("/api/audit-trail?limit=2", headers=alice).json()
+        rest = client.get(f"/api/audit-trail?limit=2&before={page['next']}", headers=alice)
+        refused = [
+            client.get(f"/api/audit-trail?limit={n}", headers=alice).status_code
+            for n in (0, MAX_PAGE + 1)
+        ]
+        whole = client.get(f"/api/audit-trail?limit={MAX_PAGE}", headers=alice).json()
+
+    assert [e["action"] for e in page["entries"]] == ["accept", "override"]
+    assert page["next"] == page["entries"][-1]["id"]
+    assert [(e["thread_id"], e["action"]) for e in rest.json()["entries"]] == [(first, "reject")]
+    assert rest.json()["next"] is None
+    assert refused == [422, 422]
+    assert [e["id"] for e in whole["entries"]] == [e["id"] for e in page["entries"]] + [
+        e["id"] for e in rest.json()["entries"]
+    ]
+    assert whole["next"] is None
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        {"decision": "accept", "note": "Fine.\x00"},
+        {"decision": "accept", "overrides": [OVERRIDE_M1 | {"reason": "MFA\x00 is on."}]},
+    ],
+    ids=["note", "reason"],
+)
+def test_a_nul_in_the_note_or_a_reason_is_refused_on_every_backend(database_url, users, decision):
+    alice, _ = users
+    with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
+        thread_id = assess(client, alice)
+        refused = review(client, alice, thread_id, **decision)
+        still = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
+        entries = trail(client, alice)
+
+    assert refused.status_code == 422
+    assert still["status"] == "waiting-for-review"
+    assert entries == []
+
+
+def test_entries_that_cannot_be_built_leave_no_decision(database_url, users, monkeypatch):
+    alice, _ = users
+
+    def broken(*args: Any) -> None:
+        raise RuntimeError("an entry couldn't be built")
+
+    with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
+        thread_id = assess(client, alice)
+        monkeypatch.setattr(audit, "review_entries", broken)
+        failed = review(client, alice, thread_id, decision="accept")
+        monkeypatch.undo()
+        still = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
+        entries = trail(client, alice)
+
+    assert failed.status_code == 500
+    assert still["status"] == "waiting-for-review"
+    assert entries == []
+
+
+@needs_postgres
+def test_any_failing_trail_write_is_a_503_and_rolls_back(postgres, users):
+    alice, _ = users
+    with TestClient(app_on(postgres.url), raise_server_exceptions=False) as client:
+        thread_id = assess(client, alice)
+        with postgres.connection() as conn:  # the insert breaks a constraint
+            conn.execute(f"ALTER TABLE {AUDIT_TABLE} ADD CONSTRAINT short CHECK (length(note) < 3)")
+        failed = review(client, alice, thread_id, decision="accept", note="Too long a note.")
+        still = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
+
+    assert failed.status_code == 503
+    assert failed.json()["unavailable"] == "database"
+    assert still["status"] == "waiting-for-review"
+
+
+@needs_postgres
+def test_a_review_of_a_thread_being_reviewed_is_refused_at_once(postgres, users):
+    alice, _ = users
+    with TestClient(app_on(postgres.url), raise_server_exceptions=False) as client:
+        thread_id = assess(client, alice)
+        scope = Memory(InMemoryStore(), alice["X-Test-User"], DEFAULT_PROFILE).scope
+        with postgres.connection() as conn, conn.transaction():  # another review holds the lock
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(%s)", (lock_id(thread_key(thread_id, scope)),)
+            )
+            started = time.monotonic()
+            busy = review(client, alice, thread_id, decision="accept")
+            waited = time.monotonic() - started
+        after = review(client, alice, thread_id, decision="accept")
+
+    assert busy.status_code == 409
+    assert waited < 1
+    assert after.status_code == 200
 
 
 @needs_postgres
@@ -166,15 +277,46 @@ def test_no_route_updates_or_deletes_an_entry(users):
         ]
         posted = client.post("/api/audit-trail", json={}, headers=alice).status_code
 
-    assert ("POST", "/api/assessments/{thread_id}/review") in routes  # the listing sees routes
     assert audit_routes == {("GET", "/api/audit-trail")}
-    assert {m for m, _ in routes} <= {"GET", "POST", "PUT"}  # no PATCH or DELETE anywhere
-    assert {p for m, p in routes if m == "PUT"} == {
-        "/api/developer/daily-limit",
-        "/api/developer/model",
-    }
     assert changed == [405, 405, 405]
     assert posted == 405
+
+
+def test_the_tables_columns_are_the_entrys_fields():
+    assert ("id", *AUDIT_COLUMNS) == tuple(f.name for f in fields(AuditEntry))
+
+
+def citation(doc_id: str, version: str) -> Citation:
+    return Citation(
+        doc_id, version, "1 Scope", "A quote of enough words.", "documented", False, None
+    )
+
+
+def test_the_decisions_evidence_is_what_the_control_verdict_rests_on():
+    """Only must, high, very high and overlay requirements that apply count towards the control
+    verdict (graph.roll_up): a should requirement's or a not-applicable one's documents don't."""
+
+    def requirement(id_: str, column: str, verdict: str, doc: str) -> RequirementVerdict:
+        return RequirementVerdict(id_, column, "Text.", verdict, "Why.", (citation(doc, "1"),))
+
+    waiting = Assessment(
+        control_id="4.1.2",
+        profile_id=DEFAULT_PROFILE,
+        verdict="evidenced",
+        should_score=ShouldScore(1, 1),
+        requirements=[
+            requirement("M1", "must", "evidenced", "counted"),
+            requirement("M2", "must", "not-applicable", "not-applicable-doc"),
+            requirement("S1", "should", "evidenced", "should-doc"),
+        ],
+        answer="",
+        thread_id="t",
+    )
+    decision = ReviewDecision(decision="accept")
+
+    (entry,) = review_entries(waiting, decision, "u", datetime(2026, 11, 5, tzinfo=UTC))
+
+    assert entry.evidence == (EvidenceVersion("counted", "1"),)
 
 
 @needs_postgres

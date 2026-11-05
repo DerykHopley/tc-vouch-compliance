@@ -16,7 +16,7 @@ from functools import cache
 from importlib.metadata import version
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -513,12 +513,20 @@ def review_assessment(
 
 
 @router.get("/audit-trail")
-def read_audit_trail(trail: AuditTrail, user: CurrentUser, profile: Profile) -> dict[str, Any]:
-    """The user's audit entries under the compliance profile, newest first, redacted as every
-    answer is. The trail is append-only: no route changes or removes an entry."""
-    entries = [entry.to_dict() for entry in trail.entries(user.id, profile.id)]
-    clean, _ = redact_data({"entries": entries})
-    return clean
+def read_audit_trail(
+    trail: AuditTrail,
+    user: CurrentUser,
+    profile: Profile,
+    limit: Annotated[int, Query(ge=1, le=audit.MAX_PAGE)] = audit.DEFAULT_PAGE,
+    before: Annotated[int | None, Query(ge=1)] = None,
+) -> dict[str, Any]:
+    """A page of the user's audit entries under the compliance profile, newest first, redacted
+    as every answer is: at most `limit`, after the entry with id `before`; `next` is the
+    `before` for the page after (null: no more). The trail is append-only: no route changes or
+    removes an entry."""
+    page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
+    clean, _ = redact_data({"entries": [entry.to_dict() for entry in page.entries]})
+    return clean | {"next": page.next}
 
 
 DEVELOPERS = [Depends(require_developer)]
