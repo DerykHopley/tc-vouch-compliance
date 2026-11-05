@@ -5,6 +5,7 @@ import App from './App.tsx'
 import type { Gate } from './authConfig.ts'
 import Invitation, { Page, SignInFailed } from './Invitation.tsx'
 import { setOnSignedOut, setTokenSource } from './session.ts'
+import { COURSE_MEMBERS } from './words.ts'
 
 // Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
 // mode fetches nothing of Clerk's. Signed out: the invitation page with Clerk's sign-in (the instance is invitation
@@ -71,36 +72,44 @@ function SignedInApp() {
   }
   const leave = () => void signOut()
   if (access === 'allowed') return <App onSignOut={leave} />
-  if (access === 'not-a-member') {
-    return (
-      <Page pill="Course members" title="Open to course members"
-        text="Vouch is open to members of the course's Discord server, and the Discord account you signed in with is not in it. Sign out, then sign in with the Discord account you use there.">
-        <p><button className="btn btn-primary" onClick={leave}>Sign out</button></p>
-      </Page>
-    )
-  }
-  if (access === 'sign-in-again') {
-    return (
-      <Page pill="Course members" title="Please sign in again"
-        text="Vouch needs to see which Discord servers you are in, and your sign-in does not allow it yet. Sign out, then sign in with Discord again.">
-        <p><button className="btn btn-primary" onClick={leave}>Sign out and sign in again</button></p>
-      </Page>
-    )
-  }
-  if (access === 'unavailable') {
-    return (
-      <Page pill="Course members" title="Opening Vouch" text="Vouch checks that your account may use it before it opens.">
-        <section className="signin" aria-label="Sign in">
-          <p className="signin-note" role="alert">Vouch cannot check your sign-in just now. Please try again shortly.</p>
-          <p>
-            <button className="btn btn-primary" onClick={check}>Try again</button>{' '}
-            <button className="btn" onClick={leave}>Sign out</button>
-          </p>
-        </section>
-      </Page>
-    )
-  }
-  return <Page pill="Course members" title="Opening Vouch" text="Vouch checks that your account may use it before it opens."><p className="signin-note">Opening Vouch…</p></Page>
+  const [title, text] = BEFORE_THE_APP[access]
+  return (
+    <Page pill={COURSE_MEMBERS.pill} title={title} text={text}>
+      <section className="signin">
+        {access === 'checking' && <p className="signin-note">Opening Vouch…</p>}
+        {access === 'not-a-member' && <p><button className="btn btn-primary" onClick={leave}>Sign out</button></p>}
+        {access === 'sign-in-again' && (
+          <p><button className="btn btn-primary" onClick={leave}>Sign out and sign in again</button></p>
+        )}
+        {access === 'unavailable' && (
+          <>
+            <p className="signin-note" role="alert">Vouch cannot check your sign-in just now. Please try again shortly.</p>
+            <p>
+              <button className="btn btn-primary" onClick={check}>Try again</button>{' '}
+              <button className="btn" onClick={leave}>Sign out</button>
+            </p>
+          </>
+        )}
+      </section>
+    </Page>
+  )
+}
+
+const OPENING = 'Vouch checks that your account may use it before it opens.'
+
+/** Each answer's heading and sentence, on the page shown before the app (docs/design.md, Invitation page states). */
+const BEFORE_THE_APP: Record<Exclude<Access, 'allowed'> | 'checking', [string, string]> = {
+  checking: ['Opening Vouch', OPENING],
+  'signed-out': ['Opening Vouch', OPENING], // a moment, while Clerk signs out
+  unavailable: ['Opening Vouch', OPENING],
+  'not-a-member': [
+    'Open to course members',
+    "Vouch is open to members of the course's Discord server, and the Discord account you signed in with is not in it. Sign out, then sign in with the Discord account you use there.",
+  ],
+  'sign-in-again': [
+    'Please sign in again',
+    'Vouch needs to see which Discord servers you are in, and your sign-in does not allow it yet. Sign out, then sign in with Discord again.',
+  ],
 }
 
 function SignedOut({ gate }: { gate: Gate }) {

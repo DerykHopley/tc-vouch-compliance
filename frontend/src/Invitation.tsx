@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Gate } from './authConfig.ts'
 import TopBar from './TopBar.tsx'
+import { BY_INVITATION, COURSE_MEMBERS } from './words.ts'
 
 /**
  * The page every visitor sees until signed in (clerk mode); `children` is the sign-in, or why it can't show. Its words
@@ -12,19 +13,6 @@ export default function Invitation({ gate = 'clerk', children }: { gate?: Gate; 
       <section className="signin" aria-label="Sign in">{children}</section>
     </Page>
   )
-}
-
-const BY_INVITATION = {
-  pill: 'By invitation',
-  title: 'Access is by invitation',
-  text: `Vouch is available to invited users only. If you have received an invitation, sign in with the Discord
-    account that uses the e-mail address it was sent to.`,
-}
-
-const COURSE_MEMBERS = {
-  pill: 'Course members',
-  title: "Open to the course's Discord server",
-  text: "Vouch is open to members of the course's Discord server. Sign in with the Discord account you use there.",
 }
 
 /** The top bar and a Dossier-style hero, then `children`: the shape of every page before the app. */
