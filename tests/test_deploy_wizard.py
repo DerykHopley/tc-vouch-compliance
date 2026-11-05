@@ -359,6 +359,16 @@ def test_a_missing_keyring_entry_stops_before_anything_changes(tmp_path):
     assert not (tmp_path / "wizard.env").exists()
 
 
+def test_a_jwt_key_stored_on_one_line_passes_and_reaches_secret_manager_unchanged(tmp_path):
+    # The app drops a PEM's line breaks before parsing it (vouch.auth), so one line is fine (#125).
+    one_line = "".join(PEM.splitlines())
+    plant(tmp_path, clerk_vouch_jwt_key=one_line)
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "state" / "CLERK_JWT_KEY.v1").read_text() == one_line
+    assert "planted" not in calls + result.stdout + result.stderr
+
+
 def test_an_entry_of_only_whitespace_or_a_jwt_key_with_no_pem_counts_as_missing(tmp_path):
     plant(tmp_path, openrouter=" \n\t \n", clerk_vouch_jwt_key="sk_test_plantedNotAPem")
     result, calls = deployed(tmp_path)

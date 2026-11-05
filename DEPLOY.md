@@ -135,10 +135,12 @@ keyring's `clerk-vouch-publishable`; the browser gets it anyway) and `CLERK_AUTH
 **What the wizard does** (its steps 2 and 6 to 9 of 11; *checked* with fakes, `tests/test_deploy_wizard.py`):
 
 1. **Keyring** (before anything changes): each of the five entries must hold something besides
-   whitespace; `clerk-vouch-jwt-key` a `-----BEGIN PUBLIC KEY-----` line; `clerk-vouch-publishable`
-   one `pk_test_` or `pk_live_` key, so a secret stored under the wrong entry is never shown or
-   deployed as a plain env var. The check runs inside the pipe: only a yes or no leaves it. One
-   wrong: it stops, naming each, with nothing changed.
+   whitespace; `clerk-vouch-jwt-key` a PEM public key, on several lines or on one (a line starting
+   `-----BEGIN PUBLIC KEY-----`: the app drops line breaks before reading it, *checked* in
+   `vouch.auth`, and the wizard passes the value on unchanged, #125); `clerk-vouch-publishable` one
+   `pk_test_` or `pk_live_` key, so a secret stored under the wrong entry is never shown or deployed
+   as a plain env var. The check runs inside the pipe: only a yes or no leaves it. One wrong: it
+   stops, naming each, with nothing changed.
 2. **Secret Manager:** it creates each secret that isn't there, then adds a version with the
    keyring's value, through a pipe only:
    `secret-tool lookup service clerk-vouch-secret | gcloud secrets versions add CLERK_SECRET_KEY --data-file=-`
