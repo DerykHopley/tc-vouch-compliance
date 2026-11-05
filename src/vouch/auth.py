@@ -114,10 +114,10 @@ class ClerkAuth:
     ROLE_TTL = 300.0
     """Seconds a user's role is kept before Clerk is asked again."""
     ACCESS_TTL = 300.0
+    """Seconds a user's access is kept before Clerk and Discord are asked again."""
     REFUSAL_TTL = 30.0
     """Seconds a refusal (not a member, sign in again) is kept: short, as the page asks the user
     to put it right."""
-    """Seconds a user's access is kept before Clerk and Discord are asked again."""
 
     def __init__(
         self,
