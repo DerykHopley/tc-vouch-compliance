@@ -7,11 +7,23 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 export type JudgedVerdict = Exclude<Verdict, 'not-applicable'>
 export const JUDGED_VERDICTS: JudgedVerdict[] = ['evidenced', 'partly-evidenced', 'not-evidenced']
 
-/** One requirement's verdict changed by the lead, with the reason (`vouch.graph.OverrideRequest`). */
+/** An override: one requirement's verdict changed by the lead, with the reason (`vouch.graph.OverrideRequest`). */
 export type Override = { requirement_id: string; verdict: JudgedVerdict; reason: string }
 
 /** The lead's decision on a control (`vouch.graph.ReviewDecision`). */
 export type ReviewDecision = { decision: 'accept' | 'reject'; note: string; overrides: Override[] }
+
+/**
+ * The decision as the assessment keeps it (`vouch.graph.Review`): each override with the agent's verdict and reason,
+ * and who decided and when (empty on a review kept before #42).
+ */
+export type Review = Omit<ReviewDecision, 'overrides'> & {
+  overrides: (Override & { agent_verdict: Verdict; agent_reason: string })[]
+  reviewer_id: string
+  reviewer_name: string
+  /** ISO 8601. */
+  reviewed_at: string
+}
 
 /** The columns whose verdicts make the control's (`vouch.graph.ROLL_UP_COLUMNS`). */
 const ROLL_UP_COLUMNS: Column[] = ['must', 'high', 'very high', 'overlay']
@@ -22,7 +34,8 @@ const countsTowardsRollUp = (r: Pick<RequirementVerdict, 'column' | 'verdict'>) 
 
 /**
  * The control's verdict from its requirements, as `vouch.graph.roll_up` makes it: all counted evidenced gives
- * evidenced, none evidenced gives not evidenced, otherwise partly; with none counted, not applicable.
+ * evidenced, none evidenced gives not evidenced, otherwise partly; with none counted, not applicable. Both are
+ * checked against the same cases (`tests/roll_up_cases.json`).
  */
 export function rollUp(requirements: Pick<RequirementVerdict, 'column' | 'verdict'>[]): Verdict {
   const counted = requirements.filter(countsTowardsRollUp).map((r) => r.verdict)
@@ -32,22 +45,35 @@ export function rollUp(requirements: Pick<RequirementVerdict, 'column' | 'verdic
   return 'partly-evidenced'
 }
 
-/** The requirements with the lead's verdicts and reasons in place (`vouch.graph.apply_overrides`). */
+/** The requirements with the lead's overrides in place (`vouch.graph.apply_overrides`). */
 export function withOverrides(requirements: RequirementVerdict[], overrides: Override[]): RequirementVerdict[] {
   return requirements.map((r) => {
-    const change = overrides.find((o) => o.requirement_id === r.id)
-    return change ? { ...r, verdict: change.verdict, reason: change.reason } : r
+    const override = overrides.find((o) => o.requirement_id === r.id)
+    return override ? { ...r, verdict: override.verdict, reason: override.reason } : r
   })
 }
 
 export const ALREADY_REVIEWED = 'This control has already been reviewed, perhaps in another tab. Refresh to see the decision.'
 export const REVIEW_FAILED = 'Your decision could not be recorded just now. Nothing was changed; please try again.'
+export const REVIEW_REFUSED = 'Vouch refused this decision, and nothing was changed:'
 
-export type ReviewAnswer =
-  | { ok: true; assessment: Assessment }
-  | { ok: false; conflict: boolean; message: string }
+/**
+ * Why a decision wasn't recorded: `conflict`, reviewed already (409); `refused`, the decision itself was refused (422),
+ * so sending it again can't help; `failed`, anything else, worth trying again.
+ */
+export type Refusal = 'conflict' | 'refused' | 'failed'
 
-/** Records the decision: the reviewed assessment, or why not. A 409 is `conflict`: it was reviewed already. */
+export type ReviewAnswer = { ok: true; assessment: Assessment } | { ok: false; refusal: Refusal; message: string }
+
+/** A 422's detail in words: FastAPI's own string, or each validation error's message. */
+async function refusedBecause(response: Response): Promise<string> {
+  const { detail } = (await response.json().catch(() => ({}))) as { detail?: unknown }
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((d: { msg?: unknown }) => String(d.msg ?? '')).join('; ')
+  return ''
+}
+
+/** Records the decision: the reviewed assessment, or why not. */
 export async function submitReview(threadId: string, decision: ReviewDecision): Promise<ReviewAnswer> {
   try {
     const response = await fetch(`/api/assessments/${encodeURIComponent(threadId)}/review`, {
@@ -56,33 +82,12 @@ export async function submitReview(threadId: string, decision: ReviewDecision): 
       body: JSON.stringify(decision),
     })
     if (response.ok) return { ok: true, assessment: ((await response.json()) as { assessment: Assessment }).assessment }
-    if (response.status === 409) return { ok: false, conflict: true, message: ALREADY_REVIEWED }
-    return { ok: false, conflict: false, message: sessionEnded(response) ? SESSION_ENDED : REVIEW_FAILED }
+    if (response.status === 409) return { ok: false, refusal: 'conflict', message: ALREADY_REVIEWED }
+    if (response.status === 422) {
+      return { ok: false, refusal: 'refused', message: `${REVIEW_REFUSED} ${await refusedBecause(response)}`.trim() }
+    }
+    return { ok: false, refusal: 'failed', message: sessionEnded(response) ? SESSION_ENDED : REVIEW_FAILED }
   } catch {
-    return { ok: false, conflict: false, message: REVIEW_FAILED }
-  }
-}
-
-/** Who decided on an assessment, and when (ISO 8601). */
-export type Reviewer = { who: string; at: string }
-
-type TrailEntry = { thread_id: string; action: string; user_id: string; reviewer_name?: string; at: string }
-
-/** How many of the newest audit entries are searched for a decision: the trail's largest page. */
-const TRAIL_PAGE = 500
-
-/**
- * Who accepted or rejected the assessment, and when, from the audit trail (#39): the reviewer's name when the entry
- * keeps one (#154), else their user id. Null when the trail can't be read, or its newest page has no decision on it.
- */
-export async function reviewedBy(threadId: string): Promise<Reviewer | null> {
-  try {
-    const response = await fetch(`/api/audit-trail?limit=${TRAIL_PAGE}`, { headers: await authHeaders() })
-    if (!response.ok) return null
-    const { entries } = (await response.json()) as { entries: TrailEntry[] }
-    const decided = entries.find((e) => e.thread_id === threadId && (e.action === 'accept' || e.action === 'reject'))
-    return decided ? { who: decided.reviewer_name || decided.user_id, at: decided.at } : null
-  } catch {
-    return null
+    return { ok: false, refusal: 'failed', message: REVIEW_FAILED }
   }
 }

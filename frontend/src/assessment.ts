@@ -1,3 +1,4 @@
+import type { Review } from './review.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
@@ -46,13 +47,6 @@ export const REVIEW_WORDS: Record<ReviewStatus, string> = {
   'waiting-for-review': 'Proposed',
   accepted: 'Accepted',
   rejected: 'Rejected',
-}
-
-/** The lead's recorded decision on the control (`vouch.graph.Review`); its overrides keep the agent's verdicts. */
-export type Review = {
-  decision: 'accept' | 'reject'
-  note: string
-  overrides: { requirement_id: string; verdict: Verdict; reason: string; agent_verdict: Verdict; agent_reason: string }[]
 }
 
 // The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
@@ -194,11 +188,10 @@ export async function* postEvents<E extends { event: string; data: unknown }>(
 }
 
 /**
- * Starts the assessment and yields its events until the `result` or `error`; `note` is the lead's note from a
- * rejected review, for the control assessed again (#42).
+ * Starts the assessment and yields its events until the `result` or `error`. A rejected control's new run carries
+ * the rejection note on the server's side (#42), however it was started.
  * Throws when the service can't be reached, or the stream breaks off before either.
  */
-export function assess(controlId: string, note?: string): AsyncGenerator<AssessmentEvent> {
-  const body = note ? { control_id: controlId, note } : { control_id: controlId }
-  return postEvents<AssessmentEvent>('/api/assessments', body, ['result'], NOT_STARTED)
+export function assess(controlId: string): AsyncGenerator<AssessmentEvent> {
+  return postEvents<AssessmentEvent>('/api/assessments', { control_id: controlId }, ['result'], NOT_STARTED)
 }

@@ -115,10 +115,13 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   const decided = shownRun?.status === 'done' && shownRun.assessment.thread_id
     ? reviewed[shownRun.assessment.thread_id] : undefined
   const paperRun: Run | null = shownRun?.status === 'done' && decided ? { ...shownRun, assessment: decided } : shownRun
-  /** Reads the paper's assessment again (another tab reviewed it first), and shows it as it now stands. */
-  const refresh = () => {
+  /** Reads the paper's assessment again (another tab reviewed it first) and shows it as it now stands; false when it
+   * couldn't be read. */
+  const refresh = async () => {
     const threadId = paperRun?.status === 'done' ? paperRun.assessment.thread_id : undefined
-    if (threadId) void storedAssessment(threadId).then((again) => again && noteReviewed(again))
+    const again = threadId ? await storedAssessment(threadId) : null
+    if (again) noteReviewed(again)
+    return again !== null
   }
   const open = (controlId: string, assess: boolean) => {
     showView({ name: 'paper', controlId })
@@ -146,7 +149,7 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
               run={paperRun ?? idle} checking={paperRun === null}
-              onAssess={(note) => void start(control.id, note)} onOpen={(id) => open(id, false)}
+              onAssess={() => void start(control.id)} onOpen={(id) => open(id, false)}
               onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh} />
           </main>
         )

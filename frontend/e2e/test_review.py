@@ -41,10 +41,10 @@ def head_verdict(paper: Locator) -> Locator:
     return paper.locator(".paper-head .paper-meta").filter(has_text="Verdict").locator(".chip")
 
 
-def change(paper: Locator, requirement_id: str, verdict: str, reason: str) -> Locator:
+def override(paper: Locator, requirement_id: str, verdict: str, reason: str) -> Locator:
     """Opens the requirement's override and fills it in; the editor, not yet saved."""
     paper.get_by_role("button", name=f"Change {requirement_id}", exact=True).click()
-    editor = paper.get_by_role("form", name=f"Change {requirement_id}")
+    editor = paper.get_by_role("form", name=f"Override {requirement_id}")
     editor.get_by_label("Verdict").select_option(label=verdict)
     editor.get_by_label("Reason (required)").fill(reason)
     return editor
@@ -57,10 +57,10 @@ def test_overriding_m1_to_evidenced_with_a_reason_changes_the_roll_up_on_screen(
     paper = open_paper(page, paper_url)
     expect(head_verdict(paper)).to_have_text("Partly evidenced")
 
-    change(paper, "M1", "Evidenced", REASON).get_by_role("button", name="Save").click()
+    override(paper, "M1", "Evidenced", REASON).get_by_role("button", name="Save").click()
 
     expect(row(paper, "M1").locator(".chip")).to_have_text("Evidenced")
-    expect(row(paper, "M1")).to_contain_text("Changed from Partly evidenced")
+    expect(row(paper, "M1")).to_contain_text("Overridden from Partly evidenced")
     expect(row(paper, "M1")).to_contain_text(REASON)
     expect(head_verdict(paper)).to_have_text("Evidenced")
 
@@ -69,10 +69,10 @@ def test_an_override_without_a_reason_cannot_be_saved(page: Page, paper_url):
     assessed(page.request, paper_url)
     paper = open_paper(page, paper_url)
 
-    editor = change(paper, "M1", "Evidenced", "")
+    editor = override(paper, "M1", "Evidenced", "")
     save = editor.get_by_role("button", name="Save")
     expect(save).to_be_disabled()
-    expect(editor.get_by_text("Give a reason to save the change.")).to_be_visible()
+    expect(editor.get_by_text("Give a reason to save the override.")).to_be_visible()
     editor.get_by_label("Reason (required)").fill("   ")
     expect(save).to_be_disabled()
     expect(head_verdict(paper)).to_have_text("Partly evidenced")
@@ -95,7 +95,7 @@ def test_accept_records_the_decision_and_the_overviews_counts_change(page: Page,
         bar.get_by_role("button", name="Accept verdict").click()
     assert answer.value.ok, answer.value.status
     expect(bar.get_by_text("Accepted", exact=True)).to_be_visible()
-    # Who and when, from the audit trail: local mode's reviewer name (#154).
+    # Who and when, kept with the review: local mode's reviewer name (#154).
     expect(bar).to_contain_text(re.compile(r"by Local user on \d+ \w+ \d{4}, \d\d:\d\d"))
     expect(bar.get_by_role("button", name="Accept verdict")).to_have_count(0)
 
@@ -107,7 +107,7 @@ def test_accept_records_the_decision_and_the_overviews_counts_change(page: Page,
     expect(accepted_tile(page)).to_have_text(str(before + 1))
 
 
-def test_reject_then_assess_again_sends_the_note_into_the_new_run(page: Page, paper_url):
+def test_reject_then_assess_again_carries_the_note_into_the_new_run(page: Page, paper_url):
     first = assessed(page.request, paper_url)
     paper = open_paper(page, paper_url)
     note = "The exposure assessment is in the records folder: " + "look at it closely. " * 20
@@ -123,7 +123,8 @@ def test_reject_then_assess_again_sends_the_note_into_the_new_run(page: Page, pa
         lambda r: r.method == "POST" and r.url.endswith("/api/assessments")
     ) as sent:
         bar.get_by_role("button", name=f"Assess again {CONTROL}", exact=True).click()
-    assert sent.value.post_data_json == {"control_id": CONTROL, "note": note}
+    # The server carries the rejection note itself, however the run was started.
+    assert sent.value.post_data_json == {"control_id": CONTROL}
 
     # The fake model counts the tokens it is sent: the note in its prompts makes the new run's more.
     usage = paper.get_by_role("region", name="Usage")
@@ -170,7 +171,7 @@ def test_the_review_bar_and_override_fit_at_400px_in_light_and_dark(page: Page, 
     for scheme in ("light", "dark"):
         page.emulate_media(color_scheme=scheme)
         paper = open_paper(page, paper_url)
-        change(paper, "M1", "Evidenced", REASON)
+        override(paper, "M1", "Evidenced", REASON)
         bar = paper.get_by_role("region", name="Review")
         expect(bar.get_by_role("button", name="Accept verdict")).to_be_visible()
         assert not scrolls_sideways(page), f"the review scrolls sideways at 400px in {scheme}"

@@ -1,11 +1,11 @@
-import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useState } from 'react'
+import { type AnchorHTMLAttributes, type ReactNode, useState } from 'react'
 import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS }
   from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
-import { JUDGED_VERDICTS, type JudgedVerdict, type Override, type ReviewDecision, type Reviewer, reviewedBy, rollUp,
-  submitReview, withOverrides } from './review.ts'
+import { type Override, rollUp, withOverrides } from './review.ts'
+import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import VerdictChip from './VerdictChip.tsx'
 
 /** The assess button's words for each state of the run; `running` is also the steps' label. */
@@ -56,14 +56,14 @@ type PaperProps = {
   run: Run
   /** The control's stored assessment is still being read: the paper shows neither verdict nor Assess yet. */
   checking?: boolean
-  /** Starts a run of the control; `note`, the lead's note from a rejected review, goes with it. */
-  onAssess: (note?: string) => void
+  /** Starts a run of the control (a rejected one's carries the rejection note, on the server's side). */
+  onAssess: () => void
   onOpen: (controlId: string) => void
   onOverview: () => void
   /** The lead's decision is recorded: the reviewed assessment. */
   onReviewed: (assessment: Assessment) => void
-  /** Reads the assessment again: another tab reviewed it first. */
-  onRefresh: () => void
+  /** Reads the assessment again (another tab reviewed it first); false when it couldn't be. */
+  onRefresh: () => Promise<boolean>
 }
 
 /**
@@ -73,8 +73,21 @@ type PaperProps = {
  */
 export default function WorkingPaper(props: PaperProps) {
   const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh } = props
-  // The lead's overrides, not yet recorded: they recalculate the control's verdict on screen until the decision.
+  // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until the decision; the
+  // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
+  // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
+  // afresh. A decision on an earlier one landing late can't touch them, as nothing but this resets them.
+  const assessed = props.run.status === 'done' ? props.run.assessment : null
+  const [shownFor, setShownFor] = useState<Assessment | null>(assessed)
   const [overrides, setOverrides] = useState<Override[]>([])
+  const [editing, setEditing] = useState<string | null>(null)
+  const [reads, setReads] = useState(0)
+  if (assessed !== shownFor) {
+    setShownFor(assessed)
+    setOverrides([])
+    setEditing(null)
+    setReads((n) => n + 1)
+  }
   const run = overridden(props.run, overrides)
   // Before an assessment the paper lists the profile's requirements; after one, the assessment's own.
   const judged = run.status === 'done' ? run.assessment.requirements : undefined
@@ -82,15 +95,20 @@ export default function WorkingPaper(props: PaperProps) {
   const applying = requirements.filter((r) => r.not_applicable === null).length
   const review = run.status === 'done' ? run.assessment.status : undefined
   const elsewhere = running !== null && running !== card.id ? running : null
-  const assessed = props.run.status === 'done' ? props.run.assessment : null
-  // A proposed control's requirements can be changed; a reviewed one's show what the lead changed.
-  const changes: Changes = review === 'waiting-for-review'
-    ? { editable: true, from: Object.fromEntries(overrides.map((o) => [o.requirement_id, agentVerdict(assessed, o)])) }
-    : { editable: false, from: Object.fromEntries((assessed?.review?.overrides ?? []).map((o) => [o.requirement_id,
-      o.agent_verdict])) }
-  const change = (next: Override) =>
+  const agentVerdicts: Record<string, Verdict> = Object.fromEntries(
+    (assessed?.requirements ?? []).map((r) => [r.id, r.verdict]))
+  // A proposed control's requirements can be overridden; a reviewed one's show the overrides the lead made.
+  const marks: Overrides = review === 'waiting-for-review'
+    ? { editable: true, saved: overrides, agentVerdicts,
+      replaced: Object.fromEntries(overrides.map((o) => [o.requirement_id, agentVerdicts[o.requirement_id]])) }
+    : { editable: false, saved: [], agentVerdicts,
+      replaced: Object.fromEntries((assessed?.review?.overrides ?? []).map((o) => [o.requirement_id, o.agent_verdict])) }
+  const save = (next: Override) => {
     setOverrides((now) => [...now.filter((o) => o.requirement_id !== next.requirement_id), next])
+    setEditing(null)
+  }
   const undo = (id: string) => setOverrides((now) => now.filter((o) => o.requirement_id !== id))
+  const assessingElsewhere = elsewhere !== null && <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
   return (
     <div className="wp">
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen} />
@@ -142,22 +160,19 @@ export default function WorkingPaper(props: PaperProps) {
                 </p>
               )}
               <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
-              {elsewhere !== null && (
-                <p className="field-note">
-                  Vouch is assessing <PaperLink id={elsewhere} onOpen={onOpen} className="mono">{elsewhere}</PaperLink>.
-                  One assessment runs at a time.
-                </p>
-              )}
+              {assessingElsewhere}
             </div>}
             {judged ? (
-              <JudgedRequirements judged={judged} listed={requirements} changes={changes} onChange={change}
-                onUndo={undo} />
+              <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
+                onEdit={setEditing} onSave={save} onUndo={undo} />
             ) : <Requirements requirements={requirements} />}
-            {assessed && assessed.status && assessed.thread_id && (
-              <ReviewBar key={assessed.thread_id} assessment={assessed} overrides={overrides}
-                onReviewed={(reviewed) => { setOverrides([]); onReviewed(reviewed) }} onRefresh={onRefresh}
-                assessAgain={<AssessButton id={card.id} run={run} held={elsewhere !== null}
-                  onAssess={() => onAssess(assessed.review?.note || undefined)} />} />
+            {assessed?.status && assessed.thread_id && (
+              <ReviewBar key={`${assessed.thread_id}:${reads}`} status={assessed.status} threadId={assessed.thread_id}
+                review={assessed.review} overrides={overrides} editing={editing} onReviewed={onReviewed}
+                onRefresh={onRefresh} assessAgain={<>
+                  <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
+                  {assessingElsewhere}
+                </>} />
             )}
           </>
         )}
@@ -182,9 +197,15 @@ function overridden(run: Run, overrides: Override[]): Run {
   return { ...run, assessment: { ...run.assessment, requirements, verdict: rollUp(requirements) } }
 }
 
-/** The agent's verdict on the requirement an override changes. */
-const agentVerdict = (assessment: Assessment | null, o: Override): Verdict =>
-  assessment?.requirements?.find((r) => r.id === o.requirement_id)?.verdict ?? o.verdict
+/** "Vouch is assessing X. One assessment runs at a time.": why Assess is held, with a link to the run's paper. */
+function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: (id: string) => void }) {
+  return (
+    <p className="field-note">
+      Vouch is assessing <PaperLink id={controlId} onOpen={onOpen} className="mono">{controlId}</PaperLink>.
+      One assessment runs at a time.
+    </p>
+  )
+}
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. */
 function ControlIndex({ controls, openId, running, run, onOpen }: IndexProps) {
@@ -251,26 +272,35 @@ function Requirements({ requirements }: { requirements: PaperRequirement[] }) {
 }
 
 /**
- * The lead's changes to the requirements: `from` holds the agent's verdict of each changed one; `editable` while the
- * control is proposed, when each requirement that applies has "Change".
+ * The lead's overrides on the requirements: `replaced` holds the agent's verdict of each overridden one, `saved` the
+ * overrides not yet recorded, `agentVerdicts` every requirement's own. `editable` while the control is proposed,
+ * when each requirement that applies has "Change".
  */
-type Changes = { editable: boolean; from: Record<string, Verdict> }
+type Overrides = {
+  editable: boolean
+  replaced: Record<string, Verdict>
+  saved: Override[]
+  agentVerdicts: Record<string, Verdict>
+}
 
 type JudgedProps = {
   judged: RequirementVerdict[]
   listed: PaperRequirement[]
-  changes: Changes
-  onChange: (override: Override) => void
+  overrides: Overrides
+  /** The requirement whose override is open. */
+  editing: string | null
+  onEdit: (requirementId: string | null) => void
+  onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
 }
 
 /**
  * The assessment's requirements: verdict, evidence kind and stale flag, then the reason and the exact quotes. An
- * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. A
- * changed requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override it.
+ * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
+ * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
+ * it.
  */
-function JudgedRequirements({ judged, listed, changes, onChange, onUndo }: JudgedProps) {
-  const [editing, setEditing] = useState<string | null>(null)
+function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   return (
     <div className="table-wrap">
@@ -285,7 +315,7 @@ function JudgedRequirements({ judged, listed, changes, onChange, onUndo }: Judge
           {judged.map((r) => {
             const { kinds, stale } = evidenceOf(r)
             const applies = r.verdict !== 'not-applicable'
-            const from = changes.from[r.id]
+            const replaced = overrides.replaced[r.id]
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
@@ -293,14 +323,14 @@ function JudgedRequirements({ judged, listed, changes, onChange, onUndo }: Judge
                 <td>
                   <div className="verdict-cell">
                     <VerdictChip verdict={r.verdict} />
-                    {from && <span className="why">Changed from {VERDICT_WORDS[from]}</span>}
-                    {changes.editable && applies && editing !== r.id && (
+                    {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
+                    {overrides.editable && applies && editing !== r.id && (
                       <span>
-                        <button className="btn btn-ghost" aria-label={`Change ${r.id}`} onClick={() => setEditing(r.id)}>
+                        <button className="btn btn-ghost" aria-label={`Change ${r.id}`} onClick={() => onEdit(r.id)}>
                           Change
                         </button>
-                        {from && (
-                          <button className="btn btn-ghost" aria-label={`Undo the change to ${r.id}`}
+                        {replaced && (
+                          <button className="btn btn-ghost" aria-label={`Undo the override of ${r.id}`}
                             onClick={() => onUndo(r.id)}>Undo</button>
                         )}
                       </span>
@@ -331,11 +361,12 @@ function JudgedRequirements({ judged, listed, changes, onChange, onUndo }: Judge
                   ))}
                 </div></td>
               </tr>,
-              editing === r.id && (
-                <tr key={`${r.id}-change`} className="change-row">
+              overrides.editable && editing === r.id && (
+                <tr key={`${r.id}-override`} className="override-row">
                   <td colSpan={5}>
-                    <ChangeEditor requirement={r} onCancel={() => setEditing(null)}
-                      onSave={(override) => { onChange(override); setEditing(null) }} />
+                    <OverrideEditor requirementId={r.id} agentVerdict={overrides.agentVerdicts[r.id] ?? r.verdict}
+                      saved={overrides.saved.find((o) => o.requirement_id === r.id)} onCancel={() => onEdit(null)}
+                      onSave={onSave} />
                   </td>
                 </tr>
               ),
@@ -344,123 +375,6 @@ function JudgedRequirements({ judged, listed, changes, onChange, onUndo }: Judge
         </tbody>
       </table>
     </div>
-  )
-}
-
-type EditorProps = { requirement: RequirementVerdict; onSave: (override: Override) => void; onCancel: () => void }
-
-/** Overrides one requirement's verdict: a verdict and a reason; Save stays disabled, saying why, until a reason. */
-function ChangeEditor({ requirement, onSave, onCancel }: EditorProps) {
-  const [verdict, setVerdict] = useState<JudgedVerdict>(
-    requirement.verdict === 'not-applicable' ? 'evidenced' : requirement.verdict)
-  const [reason, setReason] = useState('')
-  const id = useId()
-  const missing = reason.trim() === ''
-  return (
-    <form className="change" aria-label={`Change ${requirement.id}`} onSubmit={(e) => {
-      e.preventDefault()
-      if (!missing) onSave({ requirement_id: requirement.id, verdict, reason: reason.trim() })
-    }}>
-      <label htmlFor={`${id}-verdict`}>Verdict</label>
-      <select id={`${id}-verdict`} className="field" value={verdict}
-        onChange={(e) => setVerdict(e.target.value as JudgedVerdict)}>
-        {JUDGED_VERDICTS.map((v) => <option key={v} value={v}>{VERDICT_WORDS[v]}</option>)}
-      </select>
-      <label htmlFor={`${id}-reason`}>Reason (required)</label>
-      <textarea id={`${id}-reason`} className="field" rows={2} value={reason} required
-        onChange={(e) => setReason(e.target.value)} />
-      <div className="review-actions">
-        <button className="btn btn-primary" type="submit" disabled={missing}
-          aria-describedby={missing ? `${id}-hint` : undefined}>Save</button>
-        <button className="btn" type="button" onClick={onCancel}>Cancel</button>
-        {missing && <p id={`${id}-hint`} className="field-note">Give a reason to save the change.</p>}
-      </div>
-    </form>
-  )
-}
-
-/** "4 Nov 2026, 08:30": when a decision was made, in the reader's time zone. */
-const when = (at: string) =>
-  new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit',
-    minute: '2-digit' })
-
-type ReviewBarProps = {
-  assessment: Assessment
-  overrides: Override[]
-  onReviewed: (assessment: Assessment) => void
-  onRefresh: () => void
-  /** The Assess again button, for a rejected control. */
-  assessAgain: ReactNode
-}
-
-type Decision = ReviewDecision['decision']
-
-/**
- * The review bar at the paper's foot (`docs/design.md`, Components: Review bar): on a proposed control, the lead's
- * note and Accept verdict / Reject verdict, recorded with the overrides through the review route; a failure shows the
- * decision as not made, with Retry, and a 409 as already reviewed, with Refresh. On a reviewed control, who decided
- * and when (from the audit trail) and the note; a rejected one offers Assess again, carrying the note.
- */
-function ReviewBar({ assessment, overrides, onReviewed, onRefresh, assessAgain }: ReviewBarProps) {
-  const status = assessment.status ?? 'waiting-for-review'
-  const threadId = assessment.thread_id ?? ''
-  const [note, setNote] = useState('')
-  const [sending, setSending] = useState<Decision | null>(null)
-  const [refused, setRefused] = useState<{ decision: Decision; conflict: boolean; message: string } | null>(null)
-  const [reviewer, setReviewer] = useState<Reviewer | null>(null)
-  const noteId = useId()
-  useEffect(() => {
-    if (status === 'waiting-for-review') return
-    let wanted = true
-    void reviewedBy(threadId).then((found) => wanted && setReviewer(found))
-    return () => { wanted = false }
-  }, [status, threadId])
-
-  const decide = async (decision: Decision) => {
-    setSending(decision)
-    setRefused(null)
-    const answer = await submitReview(threadId, { decision, note, overrides })
-    setSending(null)
-    if (answer.ok) onReviewed(answer.assessment)
-    else setRefused({ decision, conflict: answer.conflict, message: answer.message })
-  }
-
-  if (status !== 'waiting-for-review') {
-    const decided = assessment.review?.note
-    return (
-      <section className="review-bar" aria-label="Review">
-        <p className="decided">
-          <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>
-          {reviewer && <span>by {reviewer.who} on {when(reviewer.at)}</span>}
-        </p>
-        {decided && <blockquote className="note">{decided}</blockquote>}
-        {status === 'rejected' && <div className="review-actions">{assessAgain}</div>}
-      </section>
-    )
-  }
-  return (
-    <section className="review-bar" aria-label="Review">
-      <label className="lbl" htmlFor={noteId}>Your note (kept in the audit trail)</label>
-      <textarea id={noteId} className="field" rows={2} value={note} placeholder="Optional: why you accept or reject"
-        onChange={(e) => setNote(e.target.value)} />
-      {overrides.length > 0 && (
-        <p className="field-note">{plural(overrides.length, 'requirement')} changed, recorded with your decision.</p>
-      )}
-      <div className="review-actions">
-        <button className="btn btn-sign" disabled={sending !== null} aria-busy={sending === 'accept'}
-          onClick={() => void decide('accept')}>Accept verdict</button>
-        <button className="btn" disabled={sending !== null} aria-busy={sending === 'reject'}
-          onClick={() => void decide('reject')}>Reject verdict</button>
-      </div>
-      {refused && (
-        <div className="review-actions">
-          <p className="field-note notice" role="alert">{refused.message}</p>
-          {refused.conflict
-            ? <button className="btn" onClick={onRefresh}>Refresh</button>
-            : <button className="btn" onClick={() => void decide(refused.decision)}>Retry</button>}
-        </div>
-      )}
-    </section>
   )
 }
 

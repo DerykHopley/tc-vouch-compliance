@@ -137,14 +137,14 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .cite { margin: 0; display: grid; gap: 2px; }
 .cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); overflow-wrap: anywhere; }
 .cite figcaption { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 12px; }
-/* The review (#42): "Change" under a requirement's verdict opens a row to override it, with a required reason; the
-   review bar at the paper's foot is square, ruled in the sign-off colour (design.md, Shape). Unlike the prototype it
-   doesn't stick to the window's foot, where the Ask Vouch button floats over it. */
+/* The review (#42): "Change" under a requirement's verdict opens the override row (a verdict and a required reason).
+   The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). Unlike the prototype
+   it doesn't stick to the window's foot, where the Ask Vouch button floats over it. */
 .verdict-cell { display: grid; gap: 4px; justify-items: start; }
 .verdict-cell .btn-ghost { margin-left: -10px; }
-.change-row td { background: var(--paper); }
-.change { display: grid; gap: 6px; max-width: 60ch; }
-.change label { font-weight: 500; }
+.override-row td { background: var(--paper); }
+.override { display: grid; gap: 6px; max-width: 60ch; }
+.override label { font-weight: 500; }
 textarea.field { resize: vertical; font-family: inherit; }
 .review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .btn-sign { background: var(--sign); color: var(--sheet); border-color: var(--sign); }
