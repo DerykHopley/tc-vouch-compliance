@@ -43,6 +43,7 @@ from vouch.eval_models import (
     OLLAMA_TIMEOUT_SECONDS,
     OLLAMA_URL,
     ChatModels,
+    EvalModel,
     ModelUnavailable,
     OllamaNotRunning,
     chat_models,
@@ -701,18 +702,19 @@ def real_models(
     return lambda control_id, callbacks: make(callbacks)
 
 
+def _listed(m: EvalModel) -> str:
+    """One model's line, its price and why, then where that was read, and when."""
+    price = f"${m.price.input_per_million} / ${m.price.output_per_million}" if m.price else "?"
+    return f"  {m.id}  {price}  {m.why}\n      source: {m.source}"
+
+
 def model_list() -> str:
     """The runner's model list and judge, with prices."""
     lines = ["Models (US dollars per million tokens, input / output):"]
     for m in MODELS:
-        price = f"${m.price.input_per_million} / ${m.price.output_per_million}" if m.price else "?"
-        lines.append(f"  {m.id}  {price}  {m.why}")
-    judge = (
-        f"{JUDGE} (on real models; with {FAKE}, only when --judge names it)"
-        if JUDGE
-        else ("none named yet (#53); give one with --judge")
-    )
-    lines.append(f"Judge: {judge}")
+        lines.append(_listed(m))
+    lines.append(f"Judge: {JUDGE.id} (on real models; with {FAKE}, only when --judge names it)")
+    lines.append(_listed(JUDGE))
     lines.append(f"Also: {FAKE} (the scripted fake model, free), and any ollama/<name> (local).")
     return "\n".join(lines)
 
@@ -737,11 +739,7 @@ def _parser() -> argparse.ArgumentParser:
         "--judge",
         metavar="<name>",
         help="the faithfulness judge: an OpenRouter model id or ollama/<name>; "
-        + (
-            f"on a real model {JUDGE} unless named, on {FAKE} none unless named"
-            if JUDGE
-            else "without one, faithfulness isn't measured"
-        ),
+        f"on a real model {JUDGE.id} unless named, on {FAKE} none unless named",
     )
     parser.add_argument("--ollama-url", default=OLLAMA_URL, metavar="<url>")
     parser.add_argument(
@@ -769,7 +767,7 @@ def _judge_name(args: argparse.Namespace) -> str | None:
     a free run never brings in a paid judge."""
     if args.judge is not None:
         return args.judge
-    return JUDGE if args.model != FAKE else None
+    return JUDGE.id if args.model != FAKE else None
 
 
 def main(argv: list[str] | None = None) -> int:
