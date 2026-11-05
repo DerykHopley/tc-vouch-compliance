@@ -15,6 +15,10 @@ when it gives one, else computed from PRICES and marked estimated. A call whose 
 known (no usage, no price, or a failure carrying none) leaves the assessment's cost incomplete:
 the known part stays, and nothing counts as $0. The fake model's tokens are priced as
 DEFAULT_MODEL, what the run would have cost there, and totalled apart from real spend.
+
+Each call's served model is counted too (#185): the model OpenRouter's answer names, which
+differs from the requested one only behind a router. The eval runner saves it; the app's usage
+answer leaves it out (Usage.to_dict), so the app shows what it showed before.
 """
 
 import logging
@@ -92,13 +96,19 @@ class Usage:
     estimated_cost_usd: float
     estimated: bool
     cost_complete: bool
+    served_models: dict[str, int] = field(default_factory=dict, hash=False)
+    """Calls per model, by the model OpenRouter's answer named as serving each; a call naming
+    none isn't counted."""
 
     @property
     def cost_usd(self) -> float:
         return self.reported_cost_usd + self.estimated_cost_usd
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self) | {"cost_usd": self.cost_usd}
+        """The app's usage answer, as it was before the served models were counted."""
+        kept = asdict(self)
+        del kept["served_models"]
+        return kept | {"cost_usd": self.cost_usd}
 
 
 @dataclass(frozen=True)
@@ -158,11 +168,16 @@ class UsageMeter(BaseCallbackHandler):
         self._reported = self._computed = 0.0
         self._estimated = False
         self._complete = True
+        self._served: dict[str, int] = {}
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         tokens = _tokens(response)
         reported = ((response.llm_output or {}).get("token_usage") or {}).get("cost")
         self._add(tokens, reported)
+        served = _served_model(response)
+        if served is not None:
+            with self._lock:
+                self._served[served] = self._served.get(served, 0) + 1
 
     def on_llm_error(
         self, error: BaseException, *, response: LLMResult | None = None, **kwargs: Any
@@ -203,6 +218,7 @@ class UsageMeter(BaseCallbackHandler):
                 self._computed,
                 self._estimated,
                 self._complete,
+                dict(self._served),
             )
 
 
@@ -216,6 +232,19 @@ def _tokens(response: LLMResult) -> tuple[int, int] | None:
                 found = found or (0, 0)
                 found = (found[0] + meta["input_tokens"], found[1] + meta["output_tokens"])
     return found
+
+
+def _served_model(response: LLMResult) -> str | None:
+    """The model the call's answer names as serving it (OpenRouter's `model` field), if any.
+    langchain-openai puts it in `llm_output["model_name"]`, or on a streamed call in the
+    message's `response_metadata["model_name"]`."""
+    served = (response.llm_output or {}).get("model_name")
+    if isinstance(served, str) and served:
+        return served
+    first = next((g for generations in response.generations for g in generations), None)
+    metadata = getattr(getattr(first, "message", None), "response_metadata", None) or {}
+    served = metadata.get("model_name")
+    return served if isinstance(served, str) and served else None
 
 
 def _error_usage(response: LLMResult | None) -> dict[str, Any] | None:
