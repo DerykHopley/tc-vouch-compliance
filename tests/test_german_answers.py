@@ -2,12 +2,14 @@
 output check knows German audit-result words (#51)."""
 
 import datetime
+import shutil
+from pathlib import Path
 
 import pytest
 from assess_steps import step_texts
 from langchain_core.messages import ToolMessage
 
-from vouch import ScriptedChatModel, assess, language, load_named_profile
+from vouch import ScriptedChatModel, assess, language, load_named_profile, load_profile
 from vouch.graph import ReviewDecision, Step, claims_audit_result, memory_checkpointer, resume
 from vouch.language import written_in
 
@@ -78,14 +80,52 @@ def test_english_negations_with_a_word_between_or_more_spaces_are_not_audit_clai
     "text",
     [
         "Der Vertrag sagt: „Das Rechenzentrum ist nach ISO 27001 zertifiziert.“",
-        "Laut Lieferant ist der Dienst «DSGVO-konform».",
+        "Laut Lieferant gilt: «der Dienst ist DSGVO-konform».",
         'The contract says "the data centre is certified to ISO 27001".',
         "The register reads “the supplier passed its audit”.",
     ],
 )
-def test_an_audit_word_inside_a_quote_is_not_a_claim(text):
+def test_an_audit_word_inside_a_quote_from_a_gathered_passage_is_not_a_claim(text):
     """Quotes are copied unchanged from the documents, as the prompts ask (#51 review)."""
-    assert claims_audit_result(text) is None
+    assert claims_audit_result(text, GATHERED) is None
+
+
+# Passages the assessment gathered, as search results, records and Patch's response give them.
+GATHERED = (
+    "Laut Vertrag:  Das Rechenzentrum ist nach\nISO 27001 zertifiziert. Es liegt in Wien.",
+    "Der Lieferant bestätigt, der Dienst ist DSGVO-konform.",
+    "Clause 4: the data centre is certified to ISO 27001.",
+    "Finding 3: the supplier passed its audit in May.",
+)
+
+
+@pytest.mark.parametrize(
+    "text, word",
+    [
+        ('Nordlicht is "certified".', "certified"),
+        ("Nordlicht is not only compliant but exemplary.", "compliant"),
+        ("Nordlicht is not just certified but audited yearly.", "certified"),
+        ('Alpenwerk ist "konform".', "konform"),
+        ("Alpenwerk ist nicht nur konform, sondern vorbildlich.", "konform"),
+        ("Alpenwerk ist nicht bloß zertifiziert.", "zertifiziert"),
+        ("Alpenwerk ist „nach TISAX zertifiziert“.", "zertifiziert"),
+    ],
+)
+def test_a_claim_in_quote_marks_or_after_not_only_is_caught(text, word):
+    """#140: neither a quote mark nor "not only" hides a claim."""
+    assert claims_audit_result(text, GATHERED) == word
+
+
+def test_a_quoted_claim_is_caught_when_no_passages_were_gathered():
+    text = "Der Vertrag sagt: „Das Rechenzentrum ist nach ISO 27001 zertifiziert.“"
+
+    assert claims_audit_result(text) == "zertifiziert"
+
+
+def test_a_short_quote_is_caught_even_when_a_gathered_passage_has_its_word():
+    """A quote is evidence only with at least four words, as the quote check asks: one
+    word ("konform") would otherwise pass wherever any passage uses it."""
+    assert claims_audit_result('Alpenwerk ist "DSGVO-konform".', GATHERED) == "dsgvo-konform"
 
 
 def test_an_audit_word_outside_a_quote_is_still_caught():
@@ -95,6 +135,7 @@ def test_an_audit_word_outside_a_quote_is_still_caught():
 # 1.6.2 for Alpenwerk, at the assess seam.
 
 ALPENWERK = load_named_profile("alpenwerk")
+ALPENWERK_DIR = Path(__file__).parent.parent / "fixtures" / "alpenwerk"
 TODAY = datetime.date(2026, 11, 4)  # the expected answers' as_of
 OVERLAY = "AT NIS2 (illustrative)"
 GERMAN_ANSWER = (
@@ -177,6 +218,49 @@ def test_1_6_2_for_alpenwerk_answers_in_german_judges_o1_and_quotes_german_passa
     assert quotes == {RECORDED, DUTIES}
     assert step_texts(result, "check_answer") == ["Checked the answer: it claims no audit result."]
     assert [i.requirement_id for i in result.remediation] == ["O1"]
+
+
+# A quote from a gathered passage may hold an audit word (#140).
+
+PROVIDER = "Das Rechenzentrum des Dienstleisters ist nach ISO 27001 zertifiziert."
+
+
+def alpenwerk_with_a_certified_provider(tmp_path: Path):
+    """Alpenwerk's profile and evidence copied to tmp_path, its incident register naming a
+    provider certified to ISO 27001."""
+    folder = tmp_path / "alpenwerk"
+    shutil.copytree(ALPENWERK_DIR, folder)
+    register = folder / "records" / f"{REGISTER}.md"
+    with register.open("a", encoding="utf-8") as text:
+        text.write(f"\n## Dienstleister\n\nLaut Vertrag: {PROVIDER} Es liegt in Wien.\n")
+    return load_profile(folder / "profile.yaml")
+
+
+def test_an_answer_quoting_a_gathered_alpenwerk_passage_with_zertifiziert_is_not_refused(
+    tmp_path,
+):
+    answer = f"{GERMAN_ANSWER} Der Vertrag hält fest: „{PROVIDER}“"
+    script = german_1_6_2_script((answer,))
+    search = {"tool": "search_records", "args": {"query": "Dienstleister Rechenzentrum"}}
+    script["gather"].insert(0, search)
+    model = ScriptedChatModel(script=script)
+
+    result = assess("1.6.2", alpenwerk_with_a_certified_provider(tmp_path), model, today=TODAY)
+
+    assert result.answer == answer
+    assert step_texts(result, "check_answer") == ["Checked the answer: it claims no audit result."]
+
+
+def test_an_answer_quoting_zertifiziert_from_no_gathered_passage_is_refused(tmp_path):
+    invented = "Alpenwerk ist nach ISO 27001 und TISAX zertifiziert."
+    answer = f"{GERMAN_ANSWER} Der Vertrag hält fest: „{invented}“"
+    model = ScriptedChatModel(script=german_1_6_2_script((answer, GERMAN_ANSWER)))
+
+    result = assess("1.6.2", alpenwerk_with_a_certified_provider(tmp_path), model, today=TODAY)
+
+    assert result.answer == GERMAN_ANSWER
+    refusal = next(r for r in tool_replies(model) if r.startswith("Answer refused"))
+    assert "zertifiziert" in refusal
 
 
 # An answer in the wrong language: asked for again once, then kept and noted.

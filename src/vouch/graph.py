@@ -123,10 +123,10 @@ class OutputCheckError(RuntimeError):
     """The answer or a judgement's reason still claimed an audit result after one retry."""
 
 
-def claims_audit_result(text: str) -> str | None:
+def claims_audit_result(text: str, passages: Iterable[str] = ()) -> str | None:
     """The word with which the text claims an audit result (lower case), or None: in any
-    answer language, outside quotes, not negated (vouch.language)."""
-    return audit_claim(text)
+    answer language, not negated, outside quotes from the gathered `passages` (vouch.language)."""
+    return audit_claim(text, passages)
 
 
 class SubmitAnswer(BaseModel):
@@ -802,6 +802,11 @@ def _usage_of(message: Any) -> list[dict[str, int]]:
     return [{k: usage[k] for k in USAGE_KEYS}]
 
 
+def _gathered(state: AssessState) -> list[str]:
+    """The texts of the passages this assessment gathered: search results, records, Patch."""
+    return [p["text"] for p in state.get("evidence", [])]
+
+
 def _ask_until_clean[T](
     model: Runnable,
     prompt: list[AnyMessage],
@@ -809,10 +814,12 @@ def _ask_until_clean[T](
     *,
     what: str,
     refusal: Callable[[str], str],
+    passages: list[str],
 ) -> tuple[T, list[dict[str, int]], str | None]:
     """Ask a structured-output model; `read` turns its parsed reply into a result and the
-    texts to check. A text claiming an audit result gets the reply asked for again once, with
-    `refusal(word)` added to the prompt, then OutputCheckError naming `what`.
+    texts to check. A text claiming an audit result (quotes from `passages` aside) gets the
+    reply asked for again once, with `refusal(word)` added to the prompt, then
+    OutputCheckError naming `what`.
 
     Returns the result, the token usage, and the word that was refused (or None)."""
     usage: list[dict[str, int]] = []
@@ -821,7 +828,7 @@ def _ask_until_clean[T](
         reply = model.invoke(prompt)
         usage += _usage_of(reply["raw"])
         result, texts = read(reply["parsed"])
-        word = next((w for text in texts if (w := claims_audit_result(text))), None)
+        word = next((w for text in texts if (w := claims_audit_result(text, passages))), None)
         if word is None:
             break
         if attempt == OUTPUT_RETRIES:
@@ -984,7 +991,7 @@ def build_graph(
         before the next call; a search asked for alongside the answer is not run.
         """
         answer = state["answer"] or ""
-        word = claims_audit_result(answer)
+        word = claims_audit_result(answer, _gathered(state))
         if word is not None:
             retries = state.get("answer_retries", 0)
             if retries >= OUTPUT_RETRIES:
@@ -1046,6 +1053,7 @@ def build_graph(
                 f"Judgement refused: a reason says “{word}”, an audit result Vouch never "
                 "claims. Judge again, saying only what the evidence shows."
             ),
+            passages=_gathered(state),
         )
         return {
             "requirements": judged.results,
@@ -1130,6 +1138,7 @@ def build_graph(
                 f"Remediation refused: a draft says “{word}”, an audit result Vouch never "
                 "claims. Draft again, saying only what is missing."
             ),
+            passages=_gathered(state),
         )
         return {
             "remediation": drafts,
