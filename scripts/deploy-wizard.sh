@@ -142,8 +142,9 @@ service_field() {
 }
 
 # keyring_holds ENTRY: true when the keyring's value for ENTRY looks usable: something besides
-# whitespace; for the JWT key, a "-----BEGIN PUBLIC KEY-----" line; for the publishable key, one
-# line of pk_test_ or pk_live_. The value stays in the pipe: awk prints only yes or no.
+# whitespace; for the JWT key, a line starting "-----BEGIN PUBLIC KEY-----" (a PEM on several lines
+# or on one, as the app reads either); for the publishable key, one line of pk_test_ or pk_live_.
+# The value stays in the pipe: awk prints only yes or no.
 keyring_holds() {
   local kind=secret verdict
   [[ $1 == clerk-vouch-jwt-key ]] && kind=pem
@@ -151,7 +152,7 @@ keyring_holds() {
   verdict=$(secret-tool lookup service "$1" 2>/dev/null | awk -v kind="$kind" -v form="$PUBLISHABLE_FORM" '
     { sub(/\r$/, "") }
     /[^[:space:]]/ { any = 1 }
-    $0 == "-----BEGIN PUBLIC KEY-----" { pem = 1 }
+    index($0, "-----BEGIN PUBLIC KEY-----") == 1 { pem = 1 }  # one line or several (#125)
     NR == 1 && $0 ~ form { pk = 1 }
     END {
       ok = any
@@ -200,9 +201,10 @@ else
   BAD=()
   for entry in "${ENTRIES[@]}"; do keyring_holds "$entry" || BAD+=("$entry"); done
   (( ${#BAD[@]} == 0 )) || stop "The keyring has nothing usable under ${BAD[*]}. Nothing has changed.
-    Each needs a value; clerk-vouch-jwt-key a -----BEGIN PUBLIC KEY----- line; clerk-vouch-publishable
-    one pk_test_ or pk_live_ key. Store each with secret-tool store --label=<entry> service <entry>
-    (it reads the value; #28, #30), then run this again."
+    Each needs a value; clerk-vouch-jwt-key a PEM starting -----BEGIN PUBLIC KEY----- (on one line
+    or several); clerk-vouch-publishable one pk_test_ or pk_live_ key. Store each with
+    secret-tool store --label=<entry> service <entry> (it reads the value; #28, #30), then run this
+    again."
   PUBLISHABLE=$(secret-tool lookup service "$PUBLISHABLE_ENTRY")
   [[ $PUBLISHABLE =~ $PUBLISHABLE_FORM ]] \
     || stop "$PUBLISHABLE_ENTRY changed since the check and isn't a pk_test_ or pk_live_ key now (not shown). Run this again."
