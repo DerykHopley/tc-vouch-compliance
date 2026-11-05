@@ -287,6 +287,25 @@ def test_an_uncited_quote_the_tools_returned_this_turn_is_kept(client, fake, mar
     assert guard_steps(events) == []
 
 
+@pytest.mark.parametrize(
+    ("quoted", "after"),
+    [
+        (f'“{INVENTED_TEXT}"', " Check it."),  # curly open, straight close
+        (f'"{INVENTED_TEXT}”', " Check it."),  # straight open, curly close
+        (f"“{INVENTED_TEXT}", ""),  # never closed, at the end
+    ],
+)
+def test_an_uncited_invented_quote_in_mixed_or_unclosed_marks_is_dropped(
+    client, fake, quoted, after
+):
+    fake.reply = f"The standard says {quoted}{after}"
+
+    events = say(client, "Tell me about laptops.")
+
+    assert reply(events) == f"The standard says [quote removed]{after}"
+    assert guard_steps(events) == [UNCITED]
+
+
 def test_an_uncited_real_quote_with_no_search_this_turn_is_dropped(client, fake):
     fake.reply = f"The standard says “{REAL_TEXT}”"
 
