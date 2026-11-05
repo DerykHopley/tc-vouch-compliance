@@ -204,3 +204,28 @@ def test_an_atomic_write_interrupted_leaves_the_old_file_whole(tmp_path, monkeyp
 def test_no_saved_results_is_a_clear_error(tmp_path, capsys):
     assert main([str(tmp_path)]) == 2
     assert "no saved results" in capsys.readouterr().err
+
+
+def served(models: dict[str, int]) -> dict:
+    return {"usage": {"served_models": models}}
+
+
+def test_the_served_models_show_the_routers_mix_and_not_recorded_for_an_older_result(tmp_path):
+    router = "typesafe/jev-router"
+    luna, sonnet = "openai/gpt-6-luna", "anthropic/claude-sonnet-5.5"
+    new = raw("nordlicht", router, "2026-11-05T10", 0.8)
+    new["cases"] = [
+        case("1.1.1", 1000, 0.002, 4.0, **served({luna: 4, sonnet: 3})),
+        case("1.6.1", 3000, 0.004, 6.0, **served({luna: 3})),
+    ]
+    direct = raw("nordlicht", sonnet, "2026-11-05T11", 0.8)
+    direct["cases"] = [case("1.1.1", 1000, 0.002, 4.0, **served({sonnet: 5}))]
+    write(tmp_path, "new.json", new)
+    write(tmp_path, "direct.json", direct)
+    write(tmp_path, "old.json", raw("alpenwerk", router, "2026-11-04T10", 0.6))  # before #185
+
+    page = render(load_runs([tmp_path]))
+
+    table = page.split("## Served models", 1)[1].split("## Runs", 1)[0]
+    assert f"| {router} | not recorded | {luna} 7 calls, {sonnet} 3 calls |" in table
+    assert f"| {sonnet} | not run | as requested |" in table

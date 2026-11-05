@@ -532,3 +532,54 @@ def test_the_ollama_timeout_flag_reaches_the_local_model(tmp_path, monkeypatch):
     main(["--model", "ollama/q", "--ollama-timeout", "900", "--results", str(tmp_path)])
 
     assert asked["ollama_timeout"] == 900
+
+
+# --- The served models (#185) ------------------------------------------------------------------
+
+ROUTER = "typesafe/jev-router"
+LUNA = "openai/gpt-6-luna"
+
+
+class RoutedEndpoint(FakeEndpoint):
+    """The scripted fake model behind a router: every answer names `served` as its model."""
+
+    def __init__(self, served: str) -> None:
+        super().__init__()
+        self.served = served
+
+    def __call__(self, control_id: str, callbacks: list) -> ScriptedChatModel:
+        model = super().__call__(control_id, callbacks)
+        model.served_model = self.served
+        return model
+
+
+def test_a_router_runs_raw_results_and_summary_list_the_served_models_with_call_counts(tmp_path):
+    results = ResultsFile(tmp_path, RunInfo("nordlicht", CASES.today, ROUTER))
+    report, _ = run_confirmed(
+        CASES.cases[:2],
+        NORDLICHT,
+        models(RoutedEndpoint(LUNA), name=ROUTER),
+        today=CASES.today,
+        confirm=answers("yes"),
+        on_case=results.add,
+    )
+    results.finish(report, "complete")
+
+    saved = json.loads(results.path.read_text(encoding="utf-8"))["cases"]
+    calls = [case["usage"]["served_models"][LUNA] for case in saved]
+    assert all(n > 0 for n in calls)
+    assert all(case["usage"]["served_models"] == {LUNA: n} for case, n in zip(saved, calls))
+    text = evals.summary(report, profile="nordlicht", model=ROUTER, today=CASES.today)
+    assert f"Served models: {LUNA} {sum(calls)} calls" in text
+    first = CASES.cases[0].control_id
+    [line] = [line for line in text.splitlines() if line.strip().startswith(first)]
+    assert line.endswith(f"; served {LUNA} {calls[0]} calls")
+
+
+def test_a_model_asked_for_directly_shows_no_served_models_in_the_summary():
+    report = run_eval(CASES.cases[:1], NORDLICHT, models(RoutedEndpoint(MODEL)), today=CASES.today)
+
+    [score] = report.scores
+    assert score.usage is not None and set(score.usage.served_models) == {MODEL}
+    text = evals.summary(report, profile="nordlicht", model=MODEL, today=CASES.today)
+    assert "served" not in text.lower()

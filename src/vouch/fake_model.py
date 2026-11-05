@@ -112,6 +112,13 @@ def _usage(messages: list[BaseMessage], written: str) -> UsageMetadata:
     return UsageMetadata(input_tokens=sent, output_tokens=out, total_tokens=sent + out)
 
 
+def _result(reply: AIMessage, served_model: str | None) -> ChatResult:
+    """One call's result; with a served model, named where langchain-openai puts OpenRouter's
+    `model` field (`llm_output["model_name"]`), so the usage meter reads it the same way."""
+    llm_output = {"model_name": served_model} if served_model else None
+    return ChatResult(generations=[ChatGeneration(message=reply)], llm_output=llm_output)
+
+
 class ScriptedChatModel(BaseChatModel):
     """Plays the script's `gather` turns in order, one per model call.
 
@@ -124,6 +131,7 @@ class ScriptedChatModel(BaseChatModel):
     turn: int = 0
     turns: dict[Any, int] = Field(default_factory=dict)  # structured replies given, per schema
     prompts: list[list[BaseMessage]] = Field(default_factory=list)  # each call's messages, in order
+    served_model: str | None = None  # the model each answer names as serving it (a router's pick)
 
     @classmethod
     def from_file(
@@ -180,7 +188,7 @@ class ScriptedChatModel(BaseChatModel):
             name, args = SUBMIT_ANSWER, step.model_dump(include=set(SubmitAnswer.model_fields))
         call = {"name": name, "args": args, "id": f"call_{self.turn}", "type": "tool_call"}
         reply = AIMessage("", tool_calls=[call], usage_metadata=_usage(messages, json.dumps(args)))
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+        return _result(reply, self.served_model)
 
 
 class ScriptedReply(BaseChatModel):
@@ -200,4 +208,4 @@ class ScriptedReply(BaseChatModel):
     ) -> ChatResult:
         content = self.source.next_reply(self.reply_schema, messages).model_dump_json()
         reply = AIMessage(content, usage_metadata=_usage(messages, content))
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+        return _result(reply, self.source.served_model)

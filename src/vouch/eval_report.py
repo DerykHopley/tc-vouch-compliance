@@ -11,6 +11,10 @@ page. The reading of the numbers and the recommendation are the owner's, around 
 The per-assessment measures (assessment_measures) are computed here once, from the raw cases,
 for this page and the runner's summary alike: failed cases are left out of the tokens, cost and
 seconds means and counted instead.
+
+The served models (served_models, #185) are the models OpenRouter named as serving a run's
+calls: a router's picks, shown for a router run by this page and the summary alike, and "not
+recorded" for a run saved before they were.
 """
 
 import argparse
@@ -99,6 +103,41 @@ def assessment_measures(cases: Sequence[dict[str, Any]]) -> Measures:
         faithfulness=_mean(scores),
         judged=len(scores),
     )
+
+
+def served_models(cases: Sequence[dict[str, Any]]) -> dict[str, int] | None:
+    """The calls each model served over a run's metered raw cases, failed ones included (their
+    calls were served); None when some case was saved before served models were (#185)."""
+    total: dict[str, int] = {}
+    for c in cases:
+        if not c.get("metered"):
+            continue
+        served = (c.get("usage") or {}).get("served_models")
+        if served is None:
+            return None
+        for model, calls in served.items():
+            total[model] = total.get(model, 0) + calls
+    return total
+
+
+def routed(model: str, served: dict[str, int] | None) -> bool:
+    """Whether some call was served by a model other than the one asked for: a router's run."""
+    return bool(served) and set(served) != {model}
+
+
+def served_text(served: dict[str, int]) -> str:
+    """The mix, most calls first: "openai/gpt-6-luna 7 calls, anthropic/claude-sonnet-5.5 3 calls"."""
+    ordered = sorted(served.items(), key=lambda item: (-item[1], item[0]))
+    return ", ".join(f"{model} {n} call{'' if n == 1 else 's'}" for model, n in ordered)
+
+
+def _served_cell(data: dict[str, Any]) -> str:
+    served = served_models(data["cases"])
+    if served is None:
+        return "not recorded"
+    if not any(c.get("metered") for c in data["cases"]):
+        return "n/a (fake)"
+    return served_text(served) if routed(data["model"], served) else "as requested"
 
 
 def load_runs(paths: Iterable[Path]) -> list[Run]:
@@ -201,6 +240,15 @@ MEASURES: tuple[tuple[str, str, Cell], ...] = (
         "Seconds per assessment",
         "Wall-clock seconds, the mean over the cases that ran.",
         lambda d, m: ("n/a" if m.seconds is None else f"{m.seconds:.1f} s") + _failed(m),
+    ),
+    (
+        "Served models",
+        (
+            "The models OpenRouter named as serving the assessments' calls, with how many each "
+            'served: a router\'s picks. "As requested" when the model asked for served them all; '
+            '"not recorded" for a run saved before served models were (#185).'
+        ),
+        lambda d, m: _served_cell(d),
     ),
 )
 

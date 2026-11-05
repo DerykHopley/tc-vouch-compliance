@@ -50,7 +50,15 @@ from vouch.eval_models import (
     cost_of,
     price_of,
 )
-from vouch.eval_report import KEPT_DIR, Status, assessment_measures, write_atomic
+from vouch.eval_report import (
+    KEPT_DIR,
+    Status,
+    assessment_measures,
+    routed,
+    served_models,
+    served_text,
+    write_atomic,
+)
 from vouch.eval_report import main as report_main
 from vouch.exit_codes import EXIT_BAD_INPUT, EXIT_UNAVAILABLE
 from vouch.faithfulness import (
@@ -613,9 +621,14 @@ def summary(report: EvalReport, *, profile: str, model: str, today: date) -> str
         f"Citation precision: {_count(report.citations_right, 'cited documents')}",
         *_measure_lines(report),
     ]
+    run_served = served_models([raw_case(s) for s in report.scores])
+    if routed(model, run_served):
+        lines.append(f"Served models: {served_text(run_served or {})}")
     for s in report.scores:
+        served = s.usage.served_models if s.usage is not None else None
+        on = f"; served {served_text(served)}" if served and routed(model, run_served) else ""
         if s.error is not None:
-            lines.append(f"  {s.control_id:<6} Failed: {s.error}")
+            lines.append(f"  {s.control_id:<6} Failed: {s.error}{on}")
             continue
         wrong = ", ".join(r.requirement_id for r in s.requirements if not r.right)
         lines.append(
@@ -623,6 +636,7 @@ def summary(report: EvalReport, *, profile: str, model: str, today: date) -> str
             + (f" (wrong: {wrong})" if wrong else "")
             + f"; control {s.verdict}, expected {s.expected_verdict}"
             + f"; citations {s.cited_right}/{s.cited} expected"
+            + on
         )
     lines.extend(f"  Bad case {b.control_id}: {b.problem}" for b in report.bad_cases)
     return "\n".join(lines) + "\n"
