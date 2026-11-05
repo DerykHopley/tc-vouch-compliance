@@ -342,6 +342,55 @@ def test_a_dropped_quotes_guard_step_comes_before_the_answer(client, fake):
     assert kinds.index("step") < kinds.index("token")
 
 
+SPLIT_ACROSS_A_TOOL_CALL = [
+    ("It says “Every laptop is encrypted", " twice a day by the night shift.” Done.", UNCITED),
+    (
+        'It says <cite doc="encryption-standard">Every laptop is encrypted',
+        " twice a day by the night shift.</cite> Done.",
+        NOT_IN_DOCUMENT,
+    ),
+]
+
+
+@pytest.mark.parametrize(("before", "after", "step"), SPLIT_ACROSS_A_TOOL_CALL)
+def test_a_quote_split_across_a_tool_call_is_checked_whole_and_sent_after_every_step(
+    client, fake, before, after, step
+):
+    fake.call = {"name": "progress", "args": {}}
+    fake.before_tool, fake.after_tool = before, after
+
+    events = say(client, "Tell me about laptops.")
+
+    kinds = names(events)
+    assert kinds.count("token") == 1 and "step" not in kinds[kinds.index("token") :]
+    assert reply(events) == "It says [quote removed] Done."
+    assert guard_steps(events) == [step]
+
+
+def test_the_thread_keeps_the_answer_split_across_a_tool_call_checked(client, fake):
+    fake.call = {"name": "progress", "args": {}}
+    fake.before_tool, fake.after_tool, _ = SPLIT_ACROSS_A_TOOL_CALL[0]
+    first = say(client, "Tell me about laptops.")
+    fake.call, fake.reply = None, "Noted."
+
+    say(client, "Thank you.", thread_id=first[0][1]["thread_id"])
+
+    kept = "".join(str(m.content) for m in fake.prompts[-1] if m.type == "ai")
+    assert kept == "It says [quote removed] Done."
+
+
+def test_a_findings_reason_the_tool_returned_may_be_quoted(client, fake):
+    assess_and_review(client, "5.1.1")
+    reasons = [r["reason"] for r in assessed(client, "5.1.1")["requirements"]]
+    reason = next(r for r in reasons if len(r.split()) >= 4)
+    fake.after_tool = f"The finding reads “{reason}”"
+
+    events = say(client, "What's missing for 5.1.1?")
+
+    assert reply(events) == fake.after_tool
+    assert guard_steps(events) == []
+
+
 def test_a_quote_spanning_a_removed_email_address_still_matches_its_record(tmp_path, lead):
     path = copy_profile(tmp_path, records="records")
     (path.parent / "records" / "review-mailbox-record.md").write_text(

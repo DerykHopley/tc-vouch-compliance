@@ -93,9 +93,9 @@ class CannedChatModel(BaseChatModel):
     given), with token counts estimated as the scripted fake's are, so the usage meter sees
     them. Each call's messages are kept in `prompts`; with `fail_with`, every call raises it,
     as a model that can't be reached would. With tools bound, it calls the one the lead's
-    message asks for (or `call`, whatever is asked), and answers a tool's result with the
-    result's words (or `after_tool`). With `blocks`, it writes its answer in content blocks, as
-    some providers do."""
+    message asks for (or `call`, whatever is asked), writing `before_tool` with the call, and
+    answers a tool's result with the result's words (or `after_tool`). With `blocks`, it writes
+    its answer in content blocks, as some providers do."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -105,6 +105,7 @@ class CannedChatModel(BaseChatModel):
     prompts: list[list[BaseMessage]] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)  # the names of the tools bound
     call: dict[str, Any] | None = None  # {"name", "args"}: the tool call it makes
+    before_tool: str = ""
     after_tool: str | None = None
     blocks: bool = False
 
@@ -130,7 +131,7 @@ class CannedChatModel(BaseChatModel):
             return _words(self.after_tool or _cited(str(last.content))), []
         call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
         if call is not None:
-            return [], [call]
+            return _words(self.before_tool), [call]
         return (self.chunks if self.chunks is not None else _words(self.reply)), []
 
     def _tool_call(self, message: HumanMessage, messages: list[BaseMessage]) -> ToolCall | None:

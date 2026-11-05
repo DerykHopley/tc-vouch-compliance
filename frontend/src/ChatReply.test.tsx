@@ -10,7 +10,7 @@ const QUOTE = 'Every company laptop uses full-disk encryption with AES-256.'
 describe('replyParts', () => {
   it('splits a reply into its text and its cites', () => {
     expect(replyParts(`It says <cite doc="encryption-standard">${QUOTE}</cite>, as noted.`)).toEqual([
-      { text: 'It says ' }, { quote: QUOTE, doc: 'encryption-standard' }, { text: ', as noted.' },
+      { text: 'It says ' }, { quote: QUOTE, doc_id: 'encryption-standard' }, { text: ', as noted.' },
     ])
   })
 
@@ -22,7 +22,7 @@ describe('replyParts', () => {
 
   it('drops the line break straight after a cite, as the quote is a block of its own', () => {
     expect(replyParts(`- <cite doc="a">${QUOTE}</cite>\n- next`)).toEqual([
-      { text: '- ' }, { quote: QUOTE, doc: 'a' }, { text: '- next' },
+      { text: '- ' }, { quote: QUOTE, doc_id: 'a' }, { text: '- next' },
     ])
   })
 })

@@ -48,7 +48,7 @@ export function suggestionLabel({ control_id, action }: NonNullable<NextStep>): 
 export const suggestionMessage = ({ control_id }: NonNullable<NextStep>) => `Assess ${control_id}`
 
 /** A piece of Vouch's reply: its own words, or a quote it cites from a document (#46). */
-export type ReplyPart = { text: string } | { quote: string; doc: string }
+export type ReplyPart = { text: string } | { quote: string; doc_id: string }
 
 /** Must match CITE in vouch/chat_citations.py: the one form of cite the backend checks and keeps. */
 const CITE = /<cite doc="([^"<>]+)">([\s\S]*?)<\/cite>/g
@@ -59,7 +59,7 @@ export function replyParts(reply: string): ReplyPart[] {
   const parts: ReplyPart[] = []
   let at = 0
   for (const cite of reply.matchAll(CITE)) {
-    parts.push({ text: reply.slice(at, cite.index) }, { quote: cite[2], doc: cite[1] })
+    parts.push({ text: reply.slice(at, cite.index) }, { quote: cite[2], doc_id: cite[1] })
     at = cite.index + cite[0].length
     if (reply[at] === '\n') at += 1
   }
