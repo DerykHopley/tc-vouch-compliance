@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Literal, cast, get_args, overload
 
 from pydantic import SecretStr
 
+from vouch.limits import RATE_REQUESTS
+
 if TYPE_CHECKING:  # imported when called: the model's modules read settings themselves
     from vouch.fake_model import ScriptedChatModel
 
@@ -32,6 +34,7 @@ MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 FRONTEND_ENV = "VOUCH_FRONTEND"
 DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
+RATE_REQUESTS_ENV = "VOUCH_RATE_REQUESTS"
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
@@ -41,6 +44,7 @@ ENV_NAMES = frozenset(
     {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {FRONTEND_ENV}
     | {DATABASE_URL_ENV}
+    | {RATE_REQUESTS_ENV}
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
@@ -83,6 +87,8 @@ class Settings:
     frontend: Path | None = None
     database_url: SecretStr | None = None
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
+    rate_requests: int = RATE_REQUESTS
+    """A user's requests a minute before 429: VOUCH_RATE_REQUESTS, else vouch.limits's 60."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -104,6 +110,15 @@ def _origins(value: str) -> tuple[str, ...]:
             "https://vouch.example.com,http://localhost:5173 (no path, no trailing /)"
         )
     return origins
+
+
+def _rate_requests(value: str | None) -> int:
+    """Requests a minute: a whole number above 0, else RATE_REQUESTS. Raises SettingsError."""
+    if value is None:
+        return RATE_REQUESTS
+    if not (value.isascii() and value.isdigit()) or int(value) < 1:
+        raise SettingsError(f"{RATE_REQUESTS_ENV} must be a whole number of requests above 0")
+    return int(value)
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -140,6 +155,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fake_script=read_path(FAKE_SCRIPT_ENV),
         frontend=read_path(FRONTEND_ENV),
         database_url=SecretStr(database_url) if database_url else None,
+        rate_requests=_rate_requests(read(RATE_REQUESTS_ENV)),
     )
 
 
