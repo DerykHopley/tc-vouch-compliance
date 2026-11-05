@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from vouch import ScriptedChatModel, assess, load_named_profile
+from vouch import ScriptedChatModel, assess, audit, load_named_profile
 from vouch.graph import (
     NO_OWNER,
     NOT_DRAFTED,
@@ -479,14 +479,18 @@ class BarrierSaver(InMemorySaver):
 
 
 def test_two_reviews_at_once_resume_once_and_the_other_is_refused():
+    """Through the audit trail, which keeps two reviews of one thread apart (resume doesn't)."""
     saver = BarrierSaver(memory_checkpointer())
     result, _, _ = proposed("4.1.2", mixed_4_1_2(), saver)
+    trail = audit.ProcessTrail(lambda: saver)
     outcomes: dict[str, str] = {}
 
     def review(decision: str) -> None:
         saver.local.armed = True
         try:
-            reviewed = resume(result.thread_id, ReviewDecision(decision=decision), saver)
+            reviewed = audit.review(
+                trail, result.thread_id, ReviewDecision(decision=decision), user_id="lead"
+            )
             outcomes[decision] = reviewed.review.decision
         except NotWaitingForReviewError:
             outcomes[decision] = "refused"

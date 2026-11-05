@@ -21,7 +21,7 @@ from pydantic import SecretStr
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
 
-from vouch import graph, memory
+from vouch import audit, graph, memory
 from vouch.api import create_app, current_user, load_default_profile
 from vouch.database import Database, DatabaseUnavailable
 from vouch.graph import state_serializer
@@ -36,9 +36,10 @@ def as_user(request: Request) -> User:
 
 
 def restart() -> None:
-    """What a restart of the process forgets: its in-memory saver and store."""
+    """What a restart of the process forgets: its in-memory saver, store and audit trail."""
     memory.process_checkpointer.cache_clear()
     memory.process_store.cache_clear()
+    audit.process_trail.cache_clear()
 
 
 def app_on(url: SecretStr | None) -> Any:
