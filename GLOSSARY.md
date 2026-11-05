@@ -48,6 +48,26 @@ _Avoid_: Config, settings, project
 One run of the agent over one control in one compliance profile, ending in a verdict with its cited evidence.
 _Avoid_: Check, evaluation, audit
 
+**User**:
+One person using Vouch: signed in with Clerk on the live app, or the one default user on a developer's machine. Their id scopes everything they store. A user's role is compliance lead (the default) or developer.
+_Avoid_: Account, tenant
+
+**Developer page**:
+The page, and its API, where a developer sees and changes the model assessments run on and the daily limit, and sees the prompt version and every assessment's usage totalled. Only a user with the developer role reaches it; a compliance lead never sees it.
+_Avoid_: Admin page, settings page
+
+**Prompt version**:
+The version of the assessment's prompts (`PROMPT_VERSION`), raised with any change to their words, so a run can say which prompts drafted it.
+_Avoid_: Prompt id, template version
+
+**Daily limit**:
+How many assessments one user may start in a UTC day (30 unless a developer changes it); past it, an assessment is refused with the time the count resets.
+_Avoid_: Quota, rate limit (that is the per-minute request limit)
+
+**Usage**:
+One assessment's input and output tokens and its cost: OpenRouter's reported cost, or one computed from a price table and marked estimated.
+_Avoid_: Spend, billing
+
 **Audit prep**:
 The weeks-long work of a compliance lead getting a compliance profile's controls evidenced before an audit; Vouch's guided chat walks them through it.
 _Avoid_: Onboarding, project, campaign
@@ -79,6 +99,10 @@ _Avoid_: Source, reference, link
 **Verdict**:
 The agent's proposed judgement of a requirement's or control's evidence: evidenced, partly evidenced or not evidenced.
 _Avoid_: Status, result, score, found / partial / gap
+
+**Guard step**:
+A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, or a secret or personal data removed from what is shown.
+_Avoid_: Alert, block, filter step (a warning is something else: a source that could not be read)
 
 **Reviewed verdict**:
 A verdict the compliance lead has accepted or rejected, with an optional note; only accepted ones count towards readiness.

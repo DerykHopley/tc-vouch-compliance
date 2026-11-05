@@ -53,6 +53,32 @@ jobs:
           -k test_starts_both_servers_and_ctrl_c_stops_both
         working-directory: .
 
+  database:
+    # The integration tests that need Postgres (#33's database module, #35's spending guard)
+    # against a service container, on every PR and on main: it takes seconds. Cloud SQL runs
+    # PostgreSQL 16. Every file that uses VOUCH_TEST_DATABASE_URL belongs in the command below.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: the database module and spending guard against Postgres, none skipped
+        run: set -o pipefail; uv run pytest tests/test_database.py tests/test_spending.py -rs | tee "$RUNNER_TEMP/db.txt" && ! grep -q SKIPPED "$RUNNER_TEMP/db.txt"
+        env:
+          VOUCH_TEST_DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/postgres
+
   browser:
     # The browser check (frontend/e2e) against the container, as on Cloud Run, on the fake model.
     # Fast lane (a PR): Chromium. Full lane (main, nightly, by hand): Chromium and Firefox.
@@ -71,10 +97,19 @@ jobs:
       - run: docker build -t vouch:ci .
       - name: without a front-end build the container refuses to start
         run: |
-          if out=$(docker run --rm --tmpfs /app/frontend/dist vouch:ci 2>&1); then
+          if out=$(docker run --rm -e VOUCH_AUTH_MODE=local --tmpfs /app/frontend/dist vouch:ci 2>&1); then
             echo "The container started without a front-end build."; exit 1
           fi
           echo "$out" | grep -F "no front-end build"
+      - name: without the Clerk keys the container refuses to start, naming them
+        run: |
+          # timeout: a regression that starts the server must fail here, not hang the job
+          if out=$(timeout 60 docker run --rm vouch:ci 2>&1); then
+            echo "The container started in clerk mode without the Clerk keys."; exit 1
+          fi
+          for key in CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY CLERK_JWT_KEY; do
+            echo "$out" | grep -F "$key"
+          done
       - run: uv sync --locked
       - run: uv run --locked --project frontend/e2e playwright install --with-deps ${{ matrix.browser }}
       - run: frontend/e2e/run.sh --browser ${{ matrix.browser }}

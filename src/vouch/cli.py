@@ -8,11 +8,11 @@ applies, then those it marks not applicable, with the reason. Flags go in any or
 
 import argparse
 import json
-import os
 import sys
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from vouch.exit_codes import EXIT_BAD_INPUT
 from vouch.fake_model import ScriptError
 from vouch.graph import OutputCheckError, assess
 from vouch.isa import (
@@ -23,6 +23,7 @@ from vouch.isa import (
     UnknownControlError,
     load_isa_control,
 )
+from vouch.model_choice import MemoryModelStore, ModelChoice
 from vouch.profile import (
     DEFAULT_PROFILE,
     ComplianceProfile,
@@ -30,33 +31,23 @@ from vouch.profile import (
     UnknownProfileError,
     load_named_profile,
 )
-from vouch.settings import fake_model_from_env
+from vouch.settings import Settings, SettingsError, load_settings
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 EXIT_FAILED = 1
-EXIT_BAD_INPUT = 2
 USAGE = (
     "assess <control-id> [--profile <name>] | "
     "assess --requirements <isa-control> [--profile <name>]"
 )
 
 
-class ConfigError(RuntimeError):
-    """The environment doesn't say which model to use."""
-
-
-def build_model() -> BaseChatModel:
-    """The fake when ASSESS_FAKE_SCRIPT is set; otherwise the real model from the environment."""
-    fake = fake_model_from_env()
-    if fake is not None:
-        return fake
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    model = os.environ.get("ASSESS_MODEL")
-    if not api_key or not model:
-        raise ConfigError("set OPENROUTER_API_KEY and ASSESS_MODEL, or ASSESS_FAKE_SCRIPT")
-    from langchain_openai import ChatOpenAI  # only the real path needs the provider
-
-    return ChatOpenAI(model=model, api_key=api_key, base_url=OPENROUTER_BASE_URL)
+def build_model(settings: Settings) -> BaseChatModel:
+    """The API's model rule (vouch.model_choice), on ASSESS_MODEL or the default model: the fake
+    when ASSESS_FAKE_SCRIPT is set, else OpenRouter. With neither set the CLI stops, rather
+    than run the API's demo script. Raises SettingsError."""
+    choice = ModelChoice(settings, MemoryModelStore())
+    if choice.fake_reason == "no_key":
+        raise SettingsError("set OPENROUTER_API_KEY, or ASSESS_FAKE_SCRIPT")
+    return choice.for_assessment(choice.chosen())
 
 
 def _requirement_lines(req: Requirement) -> list[str]:
@@ -145,14 +136,14 @@ def main(argv: list[str] | None = None) -> int:
         return list_requirements(args.requirements, args.profile)
     try:
         profile = load_named_profile(args.profile or DEFAULT_PROFILE)
-        model = build_model()
+        model = build_model(load_settings())
         assessment = assess(args.control_id, profile, model)
     except (
         UnknownControlError,
         BaseFrameworkError,
         UnknownProfileError,
         ProfileError,
-        ConfigError,
+        SettingsError,
         ScriptError,
     ) as error:
         print(f"assess: {error}", file=sys.stderr)

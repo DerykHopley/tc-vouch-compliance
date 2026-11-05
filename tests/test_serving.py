@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from vouch.api import create_app
+from vouch.settings import Settings
 
 PAGE = "<!doctype html><title>Vouch</title>"
 SCRIPT = "console.log('vouch')"
@@ -16,7 +17,7 @@ def client(tmp_path):
     (tmp_path / "index.html").write_text(PAGE)
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "app.js").write_text(SCRIPT)
-    return TestClient(create_app(frontend=tmp_path))
+    return TestClient(create_app(Settings(frontend=tmp_path)))
 
 
 def test_the_root_serves_the_landing_page(client):
@@ -64,7 +65,7 @@ def test_without_a_build_the_app_refuses_to_start_and_says_why(tmp_path):
     missing = tmp_path / "dist"
 
     with pytest.raises(SystemExit) as stopped:
-        create_app(frontend=missing)
+        create_app(Settings(frontend=missing))
 
     message = str(stopped.value.code)
     assert str(missing) in message

@@ -74,7 +74,9 @@ SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-kind-stale-patch-5"  # change it whenever a prompt below changes
+PROMPT_VERSION = "m1-kind-stale-patch-5"
+"""The version of the prompts below: change it whenever a prompt changes, so a run can say
+which prompts drafted it (the developer page, #34; the audit trail, M2)."""
 
 JudgedVerdict = Literal["evidenced", "partly-evidenced", "not-evidenced"]
 Verdict = JudgedVerdict | Literal["not-applicable"]

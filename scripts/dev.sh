@@ -6,8 +6,8 @@
 #   scripts/dev.sh --api-port 8010 --web-port 5180  # when those are taken
 #
 # A port already in use stops the run before anything starts. The API runs only the scripted fake
-# model: the bundled demo script, or the one ASSESS_FAKE_SCRIPT names. It doesn't read
-# OPENROUTER_API_KEY today; dropping the key here is a guard for M3, when the real model arrives.
+# model: the bundled demo script, or the one ASSESS_FAKE_SCRIPT names. It drops
+# OPENROUTER_API_KEY, with which the API would run the paid model (vouch.model_choice).
 # Needs: bash 4.4 or newer, python3, curl, uv and npm; backend deps (uv sync) and front-end deps
 # (npm ci in frontend/). `wait -n` and an empty array under `set -u` need bash 4.4; macOS has 3.2.
 if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
