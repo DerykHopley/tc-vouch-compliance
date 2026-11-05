@@ -210,8 +210,8 @@ controls:
         why: Accounts are created, changed and blocked through the service portal, as the record of joiners and leavers shows.
       - id: M2
         verdict: evidenced
-        cites: [benutzerkonten-verfahren]
-        why: Everyone gets their own personal account.
+        cites: [benutzerkonten-verfahren, zugriffsrechte-ueberpruefung]
+        why: Everyone gets their own personal account, and the review found each account tied to one person.
       - id: M3
         verdict: evidenced
         cites: [benutzerkonten-verfahren]
@@ -237,9 +237,9 @@ controls:
         cites: [benutzerkonten-verfahren]
         why: New accounts start with a basic profile of email, intranet and the service portal.
       - id: S2
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [benutzerkonten-verfahren]
-        why: Vendor default accounts are disabled or get a new password before a system goes live.
+        why: The procedure says vendor default accounts are disabled or get a new password before go-live, but no record shows it done.
       - id: S3
         verdict: evidenced
         cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
@@ -257,17 +257,17 @@ controls:
         cites: [benutzerkonten-verfahren]
         why: Blocked accounts are deleted after 6 months, mailboxes after 12.
       - id: S7
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [authentifizierungsrichtlinie]
-        why: The directory rejects default and leaked passwords.
+        why: The policy says the directory rejects default and leaked passwords, but no record shows the filter in place.
       - id: S8
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [authentifizierungsrichtlinie]
-        why: Hardware tokens are personal, never passed on and blocked at once when lost.
+        why: The policy says hardware tokens are personal and blocked at once when lost, but no record shows how they are handed out or blocked.
       - id: S9
         verdict: partly-evidenced
         cites: [benutzerkonten-verfahren, zugriffsrechte-ueberpruefung]
-        why: Accounts in our own systems are reviewed, but Alpenwerk's accounts in three customers' portals are not.
+        why: Accounts in our own systems and suppliers' portals are reviewed, but Alpenwerk's accounts in three customers' portals are not.
       - id: S10
         verdict: not-evidenced
         cites: []
@@ -362,8 +362,8 @@ controls:
         why: The logging policy sets requirements for handling logs, but it is stale (approved May 2023, yearly review).
       - id: M2
         verdict: partly-evidenced
-        cites: [protokollierungsrichtlinie]
-        why: User and administrator activity logging is set, but only in the stale logging policy.
+        cites: [protokollierungsrichtlinie, protokollauswertung]
+        why: User and administrator activity logging is set and its logs are reviewed monthly, but the policy that sets it is stale.
       - id: M3
         verdict: partly-evidenced
         cites: [protokollierungsrichtlinie]
@@ -386,12 +386,12 @@ controls:
         why: Logs sit on a dedicated server where entries can't be changed, but only the stale policy says so.
       - id: S3
         verdict: partly-evidenced
-        cites: [protokollierungsrichtlinie]
-        why: Firewall and intrusion detection watch the network, but only the stale policy says so.
+        cites: [protokollierungsrichtlinie, protokollauswertung]
+        why: Firewall and VPN logs are reviewed monthly, but the policy setting network monitoring is stale.
       - id: H1
-        verdict: not-evidenced
-        cites: []
-        why: No document identifies contractual or other requirements for handling logs.
+        verdict: partly-evidenced
+        cites: [protokollierungsrichtlinie]
+        why: The stale logging policy names the works council's approval and the 12-month retention, but no contractual requirements for logs are identified.
       - id: H2
         verdict: evidenced
         cites: [protokollauswertung]
@@ -412,9 +412,9 @@ controls:
         cites: [patch-vulnerability-status]
         why: Most are treated, but a high one on the production PCs is 12 days overdue with no stopgap.
       - id: S1
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [patch-vulnerability-status]
-        why: Patches are tracked as tickets with priorities and due dates.
+        why: Patching happens, as Patch's tickets and due dates show, but no document defines patch management.
       - id: S2
         verdict: partly-evidenced
         cites: [patch-vulnerability-status]
@@ -440,8 +440,8 @@ controls:
         why: Each service has its backup and recovery, with dependencies and recovery order.
       - id: H1
         verdict: evidenced
-        cites: [datensicherungskonzept]
-        why: The concept is reviewed methodically each year against the restore tests, last in October 2026.
+        cites: [datensicherungskonzept, wiederherstellungstests]
+        why: The concept is reviewed methodically each year against the restore tests; the record shows the October 2026 review.
       - id: H2
         verdict: partly-evidenced
         cites: [datensicherungskonzept, wiederherstellungstests]

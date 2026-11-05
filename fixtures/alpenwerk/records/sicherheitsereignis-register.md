@@ -30,8 +30,8 @@ Am 11. Februar 2026 legte Schadsoftware über einen USB-Stick zwei Fertigungs-PC
 
 ## Nachbesprechungen
 
-- 2026-009, am 20. Februar 2026: USB-Anschlüsse an allen Fertigungs-PCs gesperrt (erledigt 2026-03-06); Phishing- und USB-Übung für alle Mitarbeiter (erledigt im März 2026).
-- 2026-015, am 8. April 2026: Lieferantenportale in die Liste der zu prüfenden Zugänge aufgenommen (erledigt 2026-04-30).
+- 2026-009, am 20. Februar 2026: USB-Anschlüsse an allen Fertigungs-PCs gesperrt (erledigt 2026-03-06); Phishing- und USB-Übung für Fertigung und Verwaltung (erledigt im März 2026).
+- 2026-015, am 8. April 2026: die Konten von Alpenwerk in den Lieferantenportalen in die halbjährliche Zugriffsrechte-Überprüfung aufgenommen (erstmals im ersten Halbjahr 2026 geprüft).
 
 ## Eskalation
 

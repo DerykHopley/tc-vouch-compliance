@@ -21,3 +21,7 @@ language: de
 ## Nicht getestet
 
 Der CAD-Tresor und der Dateiserver wurden 2026 nicht testweise wiederhergestellt, weil das Testsystem zu wenig Speicher hat. Der letzte Test des CAD-Tresors war im Mai 2024; für den Dateiserver gab es noch keinen Test.
+
+## Prüfung des Konzepts
+
+Am 5. Oktober 2026 hat der IT-Leiter das Datensicherungs- und Wiederherstellungskonzept anhand dieser Testergebnisse und der Änderungen in der IT geprüft. Er hat die Reihenfolge der Wiederherstellung nach den Wiederherstellungszeiten neu geordnet und die Version 3.0 freigegeben. Die fehlenden Tests sind für das erste Quartal 2027 geplant, sobald das Testsystem erweitert ist.

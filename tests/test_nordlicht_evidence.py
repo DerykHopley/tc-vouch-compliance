@@ -3,80 +3,26 @@ expected-answers draft (#18)."""
 
 import datetime
 import re
-from functools import cache
-from pathlib import Path
-from typing import Literal
 
 import pytest
-import yaml
-from pydantic import BaseModel, ConfigDict
+from evidence_folder import EvidenceFolder, table_rows
 
-from vouch.documents import stale_because
-from vouch.front_matter import split_front_matter
 from vouch.graph import JUDGED_VERDICTS
 from vouch.isa import load_isa_control
+from vouch.patch import RESPONSE_ID as PATCH  # the recorded Patch response's id (#24)
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import NORDLICHT_PROFILE, load_profile
 
-NORDLICHT = FIXTURES_DIR / "nordlicht"
 FOLDERS = {"policies": "documented", "records": "implemented"}
-DOCUMENTS = sorted(p for folder in FOLDERS for p in (NORDLICHT / folder).glob("*.md"))
-EXPECTED_ANSWERS = NORDLICHT / "expected-answers.yaml"
+NORDLICHT = EvidenceFolder(FIXTURES_DIR / "nordlicht", FOLDERS, "en")
+DOCUMENTS = NORDLICHT.documents
 TWELVE = ["1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
           "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9"]  # fmt: skip
-PATCH = "patch-vulnerability-status"  # the recorded Patch response's id (#24)
 VERDICTS = set(JUDGED_VERDICTS)  # the draft speaks the graph's verdict words
 DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date (#22)
 
-
-class FrontMatter(BaseModel):
-    """The fields every evidence document carries (spec #2, Evidence documents)."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: str
-    title: str
-    kind: Literal["documented", "implemented"]
-    version: str
-    owner: str
-    approval_date: datetime.date
-    review_cycle: Literal["quarterly", "half-yearly", "yearly", "two-yearly"]
-    language: Literal["en"]
-
-
-def read(path: Path) -> tuple[FrontMatter, str]:
-    data, body = split_front_matter(path.read_text(encoding="utf-8"))
-    assert data is not None, f"{path.name} has no front matter"
-    return FrontMatter.model_validate(data), body
-
-
-def document(doc_id: str) -> tuple[FrontMatter, str]:
-    [path] = [p for p in DOCUMENTS if p.stem == doc_id]
-    return read(path)
-
-
-def mentioning(pattern: str) -> list[str]:
-    """The documents whose text matches this regular expression, ignoring case."""
-    return [
-        p.stem
-        for p in DOCUMENTS
-        if re.search(pattern, p.read_text(encoding="utf-8"), re.IGNORECASE)
-    ]
-
-
-@cache
-def draft() -> dict:
-    return yaml.safe_load(EXPECTED_ANSWERS.read_text(encoding="utf-8"))
-
-
-def expected_answers() -> dict[str, dict[str, dict]]:
-    """The draft as {control id: {requirement id: entry}}."""
-    return {c["id"]: {r["id"]: r for r in c["requirements"]} for c in draft()["controls"]}
-
-
-def stale_on(day: datetime.date) -> list[str]:
-    """The documents stale on this day, by vouch's rule (vouch.documents)."""
-    return [p.stem for p in DOCUMENTS if stale_because(read(p)[0].model_dump(), day)]
+read, document, mentioning = NORDLICHT.read, NORDLICHT.document, NORDLICHT.mentioning
+draft, expected_answers, stale_on = NORDLICHT.draft, NORDLICHT.expected_answers, NORDLICHT.stale_on
 
 
 # Front matter.
@@ -181,18 +127,6 @@ CLOUD_FIELDS = [
     "Contract",
     "Provider report or certificate",
 ]
-
-
-def table_rows(body: str) -> list[dict[str, str]]:
-    """The first Markdown table in the body, one {header: cell} per data row."""
-    lines: list[str] = []
-    for line in map(str.strip, body.splitlines()):
-        if line.startswith("|"):
-            lines.append(line)
-        elif lines:  # the first table has ended
-            break
-    header, _, *rows = ([cell.strip() for cell in line.strip("|").split("|")] for line in lines)
-    return [dict(zip(header, row, strict=True)) for row in rows]
 
 
 def sentences(doc_id: str) -> list[str]:

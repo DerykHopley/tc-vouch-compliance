@@ -16,11 +16,11 @@ language: de
 |---|---|---|---|---|
 | Verzeichnisdienst | stündlich, Snapshot | 1 Stunde | 4 Stunden | – (zuerst) |
 | ERP | stündlich, Datenbank und Dateien | 1 Stunde | 8 Stunden | Verzeichnisdienst |
+| Maschinenprogramme (DNC) | täglich | 24 Stunden | 12 Stunden | Verzeichnisdienst, ERP |
 | CAD-Tresor | täglich, vollständig | 24 Stunden | 24 Stunden | Verzeichnisdienst |
 | Dateiserver | täglich, inkrementell | 24 Stunden | 48 Stunden | Verzeichnisdienst |
-| Maschinenprogramme (DNC) | täglich | 24 Stunden | 12 Stunden | Verzeichnisdienst, ERP |
 
-Die Reihenfolge der Wiederherstellung folgt den Abhängigkeiten in der letzten Spalte.
+Die Tabelle steht in der Reihenfolge der Wiederherstellung: jeder Dienst kommt nach den Diensten in der letzten Spalte, von denen er abhängt, und nach der Wiederherstellungszeit (RTO).
 
 ## Schutz der Sicherungen
 

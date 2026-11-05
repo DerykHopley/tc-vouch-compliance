@@ -22,8 +22,11 @@ Zwischen 15. Juni und 3. Juli 2026 haben die Informationseigentümer mit den Fü
 | ERP | Leiter Finanzen | 88 | 2 | 5 | 0 |
 | CAD-Tresor | Leiter Konstruktion | 31 | 1 | 2 | 0 |
 | Dateiserver | IT-Leiter | 180 | 2 | 6 | 1 |
+| Lieferantenportale | Leiter Einkauf | 11 | 0 | 0 | 2 |
 
-Keines der normalen Benutzerkonten hatte privilegierte Rechte.
+Keines der normalen Benutzerkonten hatte privilegierte Rechte. Jedes geprüfte Konto war genau einer Person zugeordnet; Sammelkonten gab es nur auf den Anzeigeterminals der Fertigung, wie in der Liste des IT-Leiters geführt.
+
+Die Lieferantenportale sind seit dem Vorfall 2026-015 Teil der Überprüfung: Geprüft wurden die Konten von Alpenwerk in den Portalen von vier Lieferanten.
 
 ## Nicht geprüft
 

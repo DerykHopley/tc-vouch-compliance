@@ -53,4 +53,4 @@ Die Geschäftsführung hat diese Leitlinie am 20. Juli 2026 freigegeben.
 
 ## Überprüfung
 
-Diese Leitlinie und alle mitgeltenden Richtlinien werden mindestens einmal jährlich von ihrem Eigentümer geprüft und, falls notwendig, überarbeitet. Die Informationssicherheitsbeauftragte überwacht die Termine.
+Diese Leitlinie wird mindestens einmal jährlich geprüft und, falls notwendig, überarbeitet. Die mitgeltenden Richtlinien und Verfahren prüft ihr Eigentümer nach dem Prüfzyklus, der in jedem Dokument steht, mindestens alle zwei Jahre. Die Informationssicherheitsbeauftragte überwacht die Termine.

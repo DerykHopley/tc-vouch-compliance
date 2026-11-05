@@ -4,57 +4,36 @@ overlay, every document's front matter, the planted cases, and the expected-answ
 
 import datetime
 import re
-from functools import cache
-from pathlib import Path
-from typing import Literal
 
 import pytest
-import yaml
+from evidence_folder import EvidenceFolder, table_rows
 from isa_editions import GERMAN_5_1_1
-from pydantic import BaseModel, ConfigDict
 
-from vouch.documents import stale_because
-from vouch.evals import EXPECTED_ANSWERS as EXPECTED_ANSWERS_FILE
-from vouch.evals import load_cases
-from vouch.front_matter import split_front_matter
+from vouch.evals import EXPECTED_ANSWERS, load_cases
 from vouch.graph import JUDGED_VERDICTS
+from vouch.patch import RESPONSE_ID as PATCH
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile
 
 PROFILE = "alpenwerk"
-ALPENWERK = FIXTURES_DIR / PROFILE
-EXPECTED_ANSWERS = ALPENWERK / EXPECTED_ANSWERS_FILE
 OVERLAY = "AT NIS2 (illustrative)"
 TWELVE = ["1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
           "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9"]  # fmt: skip
 FOLDERS = {"policies": "documented", "records": "implemented", "patch": "implemented"}
-DOCUMENTS = sorted(p for folder in FOLDERS for p in (ALPENWERK / folder).glob("*.md"))
-PATCH = "patch-vulnerability-status"  # the recorded Patch response's id (vouch.patch)
+ALPENWERK = EvidenceFolder(FIXTURES_DIR / PROFILE, FOLDERS, "de")
+DOCUMENTS = ALPENWERK.documents
 GERMAN_WORDS = {"und", "der", "die", "das", "ist", "wird", "werden", "nicht", "mit", "für"}
 ENGLISH_WORDS = {"and", "the", "is", "are", "of", "with", "for", "not", "be", "to"}
 AS_OF = datetime.date(2026, 11, 4)  # the expected answers' as_of, the day staleness is judged on
 DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date (#22)
+# Any sign of a national incident report under NIS2: the team, the warning, or the law.
+EARLY_WARNING = (
+    r"CSIRT|\bCERT\b|CERT\.at|Computer-Notfall|Frühwarn|early warning"
+    r"|\bNIS(2|-2|G)?\b|NIS-Richtlinie|Netz- und Informationssystem"
+)
 
-
-class FrontMatter(BaseModel):
-    """The fields every evidence document carries (spec #2, Evidence documents), in German."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: str
-    title: str
-    kind: Literal["documented", "implemented"]
-    version: str
-    owner: str
-    approval_date: datetime.date
-    review_cycle: Literal["quarterly", "half-yearly", "yearly", "two-yearly"]
-    language: Literal["de"]
-
-
-def read(path: Path) -> tuple[FrontMatter, str]:
-    data, body = split_front_matter(path.read_text(encoding="utf-8"))
-    assert data is not None, f"{path.name} has no front matter"
-    return FrontMatter.model_validate(data), body
+read, document, mentioning = ALPENWERK.read, ALPENWERK.document, ALPENWERK.mentioning
+expected_answers, stale_on = ALPENWERK.expected_answers, ALPENWERK.stale_on
 
 
 def words(text: str) -> list[str]:
@@ -95,11 +74,22 @@ def test_the_profile_reads_the_german_isa_edition():
 
 
 @pytest.mark.parametrize("control_id", TWELVE)
-def test_every_high_protection_requirement_applies(control_id):
+def test_every_high_protection_requirement_applies_and_no_very_high_one(control_id):
     control = profile().isa_control(control_id)
-    every_high = {r.id for r in control.requirements if r.column == "high"}
+    by_column = {r.id: r.column for r in control.requirements}
+    applying = {r.id for r in applicable(control_id)}
 
-    assert every_high <= {r.id for r in applicable(control_id)}
+    assert {r for r, column in by_column.items() if column == "high"} <= applying
+    assert not {r for r, column in by_column.items() if column == "very high"} & applying
+
+
+def test_high_and_very_high_requirements_exist_among_the_twelve():
+    """So the test above can't pass on controls with no high or very high requirements."""
+    columns = [r.column for c in TWELVE for r in profile().isa_control(c).requirements]
+    applying = [r.column for c in TWELVE for r in applicable(c)]
+
+    assert "high" in applying
+    assert "very high" in columns
 
 
 def test_1_6_2_gains_the_overlays_early_warning_as_o1():
@@ -127,7 +117,7 @@ def test_the_folder_holds_policies_records_and_the_patch_response():
 
 @pytest.mark.parametrize("path", DOCUMENTS, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_every_document_has_valid_front_matter_and_is_written_in_german(path):
-    meta, body = read(path)
+    meta, body = read(path)  # checks the front matter says German
 
     assert meta.id == path.stem
     assert meta.kind == FOLDERS[path.parent.name]
@@ -143,45 +133,26 @@ def test_the_german_check_tells_german_from_english():
 # Planted cases.
 
 
-def document(doc_id: str) -> tuple[FrontMatter, str]:
-    [path] = [p for p in DOCUMENTS if p.stem == doc_id]
-    return read(path)
-
-
 def section(doc_id: str, heading: str) -> str:
     """The text under this `## ` heading, up to the next heading."""
     _, body = document(doc_id)
     return body.split(f"## {heading}\n", 1)[1].split("\n#", 1)[0]
 
 
-def mentioning(pattern: str) -> list[str]:
-    """The documents whose text matches this regular expression, ignoring case."""
-    return [
-        p.stem
-        for p in DOCUMENTS
-        if re.search(pattern, p.read_text(encoding="utf-8"), re.IGNORECASE)
-    ]
+def test_no_document_mentions_a_national_incident_report_or_nis2():
+    assert mentioning(EARLY_WARNING) == []
 
 
-def table_rows(body: str) -> list[dict[str, str]]:
-    """The first Markdown table in the body, one {header: cell} per data row."""
-    lines: list[str] = []
-    for line in map(str.strip, body.splitlines()):
-        if line.startswith("|"):
-            lines.append(line)
-        elif lines:  # the first table has ended
-            break
-    header, _, *rows = ([cell.strip() for cell in line.strip("|").split("|")] for line in lines)
-    return [dict(zip(header, row, strict=True)) for row in rows]
+@pytest.mark.parametrize(
+    "text",
+    ["Meldung an CERT.at", "eine Frühwarnmeldung", "nach NIS2", "das NISG", "Computer-Notfallteam"],
+)
+def test_the_early_warning_pattern_catches_each_way_of_naming_it(text):
+    assert re.search(EARLY_WARNING, text, re.IGNORECASE)
 
 
-def stale_on(day: datetime.date) -> list[str]:
-    """The documents stale on this day, by vouch's rule (vouch.documents)."""
-    return [p.stem for p in DOCUMENTS if stale_because(read(p)[0].model_dump(), day)]
-
-
-def test_no_document_mentions_a_csirt_or_an_early_warning():
-    assert mentioning(r"CSIRT|Frühwarnung|early warning") == []
+def test_the_early_warning_pattern_leaves_nist_and_certificates_alone():
+    assert not re.search(EARLY_WARNING, "NIST, Zertifikat, certificate", re.IGNORECASE)
 
 
 def test_the_register_holds_a_significant_incident_that_went_to_no_authority():
@@ -191,12 +162,11 @@ def test_the_register_holds_a_significant_incident_that_went_to_no_authority():
     assert "Meldung an die Datenschutzbehörde war daher nicht nötig" in incident
 
 
-def test_the_reporting_duties_name_data_protection_and_customers_but_not_nis2():
+def test_the_reporting_duties_name_data_protection_and_customers():
     duties = section("vorfallbehandlungsverfahren", "Meldepflichten")
 
     assert "Datenschutzbehörde" in duties
     assert "Kundenverträgen" in duties
-    assert "NIS" not in duties
 
 
 def test_the_cryptography_concept_demands_key_sovereignty_for_confidential_cloud_data():
@@ -226,6 +196,19 @@ def test_restore_tests_skipped_two_of_the_five_services_in_the_backup_concept():
     assert tested < services
 
 
+def test_the_backup_concepts_table_runs_in_restore_order():
+    """Each service comes after those it is restored after, and by recovery time, so the
+    "in the table's order" rule agrees with the dependencies column."""
+    rows = table_rows(document("datensicherungskonzept")[1])
+    order = [r["Dienst"] for r in rows]
+    hours = [int(r["RTO"].split()[0]) for r in rows]
+
+    for position, row in enumerate(rows):
+        after = [d.strip() for d in row["Wiederherstellung nach"].split(",") if "–" not in d]
+        assert set(after) <= set(order[:position]), row["Dienst"]
+    assert hours == sorted(hours)
+
+
 def test_the_logging_policy_is_stale():
     meta, _ = document("protokollierungsrichtlinie")
 
@@ -238,17 +221,43 @@ def test_only_the_logging_policy_is_stale(day):
     assert stale_on(day) == ["protokollierungsrichtlinie"]
 
 
+def test_each_document_is_reviewed_at_least_as_often_as_the_policy_says():
+    review = section("informationssicherheitsleitlinie", "Überprüfung")
+    cycles = {read(p)[0].review_cycle for p in DOCUMENTS if p.parent.name == "policies"}
+
+    assert "mindestens alle zwei Jahre" in review
+    assert cycles <= {"yearly", "two-yearly"}
+
+
+def test_the_supplier_portals_the_register_added_are_in_the_access_review():
+    lessons = section("sicherheitsereignis-register", "Nachbesprechungen")
+    reviewed = {r["System"] for r in table_rows(document("zugriffsrechte-ueberpruefung")[1])}
+
+    assert "Lieferantenportale" in lessons
+    assert "Lieferantenportale" in reviewed
+
+
+def test_customer_portals_stay_outside_the_access_review():
+    left_out = section("zugriffsrechte-ueberpruefung", "Nicht geprüft")
+
+    assert "Portalen von drei Kunden" in left_out
+
+
+def test_the_phishing_exercise_reached_the_groups_the_register_names():
+    lessons = section("sicherheitsereignis-register", "Nachbesprechungen")
+    [exercise] = [
+        r for r in table_rows(document("schulungsnachweis")[1]) if "Phishing" in r["Schulung"]
+    ]
+
+    assert exercise["Zielgruppe"] in lessons
+    assert "alle Mitarbeiter" not in lessons
+
+
 # The expected-answers draft.
 
 
-@cache
-def draft() -> dict:
-    return yaml.safe_load(EXPECTED_ANSWERS.read_text(encoding="utf-8"))
-
-
-def expected_answers() -> dict[str, dict[str, dict]]:
-    """The draft as {control id: {requirement id: entry}}."""
-    return {c["id"]: {r["id"]: r for r in c["requirements"]} for c in draft()["controls"]}
+def test_the_draft_lists_no_control_or_requirement_twice():
+    assert ALPENWERK.listed_twice() == []
 
 
 def test_the_draft_covers_exactly_alpenwerks_applicable_requirements():
@@ -258,7 +267,7 @@ def test_the_draft_covers_exactly_alpenwerks_applicable_requirements():
 
 
 def test_the_eval_reads_the_draft_as_alpenwerks_cases_judged_on_its_as_of_day():
-    cases = load_cases(EXPECTED_ANSWERS, PROFILE)
+    cases = load_cases(ALPENWERK.root / EXPECTED_ANSWERS, PROFILE)
 
     assert cases.today == AS_OF
     assert [c.control_id for c in cases.cases] == TWELVE
@@ -273,6 +282,21 @@ def test_each_answer_has_a_verdict_and_cites_only_real_documents():
             assert set(entry["cites"]) <= known, where
             assert bool(entry["cites"]) == (entry["verdict"] != "not-evidenced"), where
             assert entry["why"].strip(), where
+
+
+@pytest.mark.parametrize(
+    "control, req_id",
+    [("4.1.3", "M2"), ("4.1.3", "S2"), ("4.1.3", "S7"), ("4.1.3", "S8"), ("5.2.9", "H1")],
+)
+def test_requirements_about_doing_something_are_evidenced_only_with_implemented_evidence(
+    control, req_id
+):
+    """The draft's rule, on the cases the #49 review named: doing something needs implemented
+    evidence to be evidenced; a policy alone gives partly-evidenced at best."""
+    entry = expected_answers()[control][req_id]
+    kinds = {read(p)[0].kind for p in DOCUMENTS if p.stem in entry["cites"]}
+
+    assert entry["verdict"] != "evidenced" or "implemented" in kinds
 
 
 def test_the_overlays_early_warning_is_not_evidenced():
@@ -296,13 +320,14 @@ def test_key_sovereignty_is_partly_evidenced_by_the_concept_and_the_cloud_regist
     assert h1["cites"] == ["kryptografiekonzept", "cloud-dienste-register"]
 
 
-def test_the_high_protection_restore_test_is_partly_evidenced():
-    h2 = expected_answers()["5.2.9"]["H2"]
+def test_the_high_protection_restore_test_is_the_one_gap_in_5_2_9():
+    answers = expected_answers()["5.2.9"]
     [column] = {r.column for r in applicable("5.2.9") if r.id == "H2"}
 
     assert column == "high"
-    assert h2["verdict"] == "partly-evidenced"
-    assert h2["cites"] == ["datensicherungskonzept", "wiederherstellungstests"]
+    assert answers["H2"]["verdict"] == "partly-evidenced"
+    assert answers["H2"]["cites"] == ["datensicherungskonzept", "wiederherstellungstests"]
+    assert [r for r, e in answers.items() if e["verdict"] != "evidenced"] == ["H2"]
 
 
 def test_no_answer_resting_on_the_stale_logging_policy_is_evidenced():
@@ -315,3 +340,10 @@ def test_no_answer_resting_on_the_stale_logging_policy_is_evidenced():
 
     assert resting, "5.2.4 rests on the logging policy"
     assert all(verdict == "partly-evidenced" for _, _, verdict in resting), resting
+
+
+def test_5_2_5_s1_is_partly_evidenced_as_no_document_defines_patch_management():
+    s1 = expected_answers()["5.2.5"]["S1"]
+
+    assert s1["verdict"] == "partly-evidenced"
+    assert mentioning(r"Patch-Management|Patchmanagement") == []
