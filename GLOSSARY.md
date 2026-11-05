@@ -124,6 +124,14 @@ _Avoid_: Gap, fail, non-compliance, finding
 How much of a compliance profile's controls are backed by accepted verdicts, shown as controls by verdict.
 _Avoid_: Compliance score, maturity
 
+**Progress**:
+Where a user stands under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with.
+_Avoid_: Status, history
+
+**Long-term memory**:
+What Vouch keeps for a user under a compliance profile from one visit to the next (which assessments they started, when they last worked), in LangGraph's store. The assessments themselves wait in the checkpointer, keyed by the same user and profile.
+_Avoid_: Session, cache, history
+
 **Readiness report**:
 The summary of a compliance profile's reviewed verdicts, citations and remediation items, written in the profile's language.
 _Avoid_: Audit report, self-assessment, export

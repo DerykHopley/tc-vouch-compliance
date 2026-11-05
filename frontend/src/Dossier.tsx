@@ -1,4 +1,4 @@
-import { plural, VERDICT_WORDS } from './assessment.ts'
+import { plural, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { type ControlCard, controlPath, type NextStep, type Overview, type OverviewState, type Readiness,
   type ReviewState } from './overview.ts'
 
@@ -88,7 +88,7 @@ function Hero({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'
   )
 }
 
-/** The readiness bar's segments, by accepted verdict; the open rest stays the band's own colour. */
+/** Each verdict's count in the readiness figures, in the bar's order; the open rest stays the band's own colour. */
 const SEGMENTS = [
   ['evidenced', 'evidenced'],
   ['partly_evidenced', 'partly-evidenced'],
@@ -96,15 +96,16 @@ const SEGMENTS = [
   ['not_applicable', 'not-applicable'],
 ] as const
 
+/** A verdict as the band says it, from VERDICT_WORDS: the one place verdict words live (M4's verdictWord later). */
+const bandWord = (verdict: Verdict) => VERDICT_WORDS[verdict].toLowerCase()
+
 function Band({ readiness: r }: { readiness: Readiness }) {
-  const words = `${r.evidenced} evidenced, ${r.partly_evidenced} partly evidenced, ${r.not_evidenced} not evidenced`
-    + `${r.not_applicable ? `, ${r.not_applicable} not applicable` : ''}, ${r.open} open, of ${r.controls}`
+  // Not applicable gets a tile only when a control has it.
+  const counted = SEGMENTS.filter(([key]) => key !== 'not_applicable' || r[key] > 0)
+  const words = [...counted.map(([key, verdict]) => `${r[key]} ${bandWord(verdict)}`), `${r.open} open`].join(', ')
   const tiles: [number, string][] = [
     [r.accepted, `accepted of ${r.controls}`],
-    [r.evidenced, 'evidenced'],
-    [r.partly_evidenced, 'partly evidenced'],
-    [r.not_evidenced, 'not evidenced'],
-    ...(r.not_applicable ? [[r.not_applicable, 'not applicable'] as [number, string]] : []),
+    ...counted.map(([key, verdict]): [number, string] => [r[key], bandWord(verdict)]),
     [r.open, 'open'],
     [r.remediation_items, 'remediation items'],
   ]
@@ -112,7 +113,7 @@ function Band({ readiness: r }: { readiness: Readiness }) {
     <section className="band" aria-labelledby="readiness">
       <div><span className="pill">Where you stand</span><h2 id="readiness">Readiness</h2></div>
       <p>Only verdicts you accepted count; the figures describe evidence coverage, not audit results.</p>
-      <div className="readiness" role="img" aria-label={`Accepted verdicts: ${words}`}>
+      <div className="readiness" role="img" aria-label={`Accepted verdicts: ${words}, of ${r.controls}`}>
         {SEGMENTS.map(([key, verdict]) => r[key] > 0 && (
           <span key={key} className={`readiness-${verdict}`} style={{ width: `${(r[key] / r.controls) * 100}%` }} />
         ))}

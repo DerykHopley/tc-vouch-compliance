@@ -1,13 +1,16 @@
 """The Dossier overview (#40): readiness from accepted verdicts only, the 12 control cards, the
-evidence quotes, and the next step; read from the assessments kept per user and profile."""
+evidence quotes, and the next step; read from each user's assessments under the profile (#38's
+memory and checkpointer). The API cases run in memory, and on Postgres where CI's database job
+gives a server (VOUCH_TEST_DATABASE_URL; otherwise those are skipped)."""
 
 import pytest
+import test_memory
 from fastapi.testclient import TestClient
-from test_api import proposed_thread
+from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
+from test_memory import app_on, assess, restart
 
-from vouch.api import create_app, load_default_profile
 from vouch.citations import Citation
-from vouch.dossier import QUOTES_SHOWN, MemoryAssessmentRecords, overview
+from vouch.dossier import QUOTES_SHOWN, overview
 from vouch.graph import (
     Assessment,
     RemediationItem,
@@ -19,11 +22,15 @@ from vouch.graph import (
 )
 from vouch.isa import load_base_framework
 from vouch.profile import load_named_profile
-from vouch.settings import Settings
 
 NORDLICHT = load_named_profile("nordlicht")
 CONTROLS = load_base_framework().controls
 DEMO_CONTROL = "4.1.2"
+
+# #38's fixtures: each API case in memory and on Postgres, a new Postgres database, two new users.
+database_url = test_memory.database_url
+postgres = test_memory.postgres
+users = test_memory.users
 
 
 def quote(doc_id: str, text: str) -> Citation:
@@ -191,95 +198,106 @@ def test_quotes_come_from_assessed_controls_in_control_order_each_once_and_cappe
     }
 
 
-def test_records_keep_the_latest_assessment_per_user_profile_and_control():
-    records = MemoryAssessmentRecords()
-    first = seeded(DEMO_CONTROL, "not-evidenced", "rejected")
-    again = seeded(DEMO_CONTROL, "evidenced", "waiting-for-review")
-    other_profile = seeded("1.1.1", "evidenced", "accepted", profile_id="other")
-
-    records.keep("ann", first)
-    records.keep("ann", again)
-    records.keep("bob", seeded("1.1.1", "evidenced", "accepted"))
-    records.keep("ann", other_profile)
-
-    assert records.latest("ann", "nordlicht") == {DEMO_CONTROL: again}
-    assert records.latest("bob", "nordlicht") == {"1.1.1": seeded("1.1.1", "evidenced", "accepted")}
-    assert records.latest("ann", "other") == {"1.1.1": other_profile}
-    assert records.latest("cat", "nordlicht") == {}
+# --- Through the API, on #38's memory: in memory, and on Postgres in CI's database job ---------
 
 
-@pytest.fixture
-def client():
-    """The app in local mode on the bundled demo script, the profile read afresh."""
-    load_default_profile.cache_clear()
-    yield TestClient(create_app(Settings()), raise_server_exceptions=False)
-    load_default_profile.cache_clear()
+def overview_of(client: TestClient, user: dict[str, str]) -> dict:
+    response = client.get("/api/overview", headers=user)
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
-def card(client: TestClient, control_id: str) -> dict:
-    return next(c for c in client.get("/api/overview").json()["controls"] if c["id"] == control_id)
+def card(body: dict, control_id: str) -> dict:
+    return next(c for c in body["controls"] if c["id"] == control_id)
 
 
-def assess_demo(client: TestClient) -> str:
-    """Runs the demo control on the fake model; its thread id."""
-    return proposed_thread(client)
+def review(client: TestClient, user: dict[str, str], thread_id: str, decision: str) -> dict:
+    response = client.post(
+        f"/api/assessments/{thread_id}/review", json={"decision": decision}, headers=user
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
-def test_the_overview_route_starts_with_nothing_assessed(client):
-    response = client.get("/api/overview")
+def test_the_overview_starts_with_nothing_assessed(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        body = overview_of(client, alice)
 
-    assert response.status_code == 200
-    body = response.json()
     assert len(body["controls"]) == 12
     assert body["readiness"]["accepted"] == 0
     assert body["next_step"] == {"control_id": "1.1.1", "action": "assess"}
 
 
-def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(client):
-    thread_id = assess_demo(client)
+def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        thread_id = assess(client, alice)
 
-    proposed = client.get("/api/overview").json()
-    assert card(client, DEMO_CONTROL) | {"question": ""} == {
-        "id": DEMO_CONTROL,
-        "question": "",
-        "iso_27001": "ISO 27001:2022: A.5.15, A.8.5",
-        "status": "waiting-for-review",
-        "verdict": "partly-evidenced",
-    }
-    assert proposed["readiness"]["accepted"] == 0
-    assert proposed["readiness"]["partly_evidenced"] == 0
-    assert proposed["next_step"] == {"control_id": DEMO_CONTROL, "action": "review"}
-    assert {q["control_id"] for q in proposed["quotes"]} == {DEMO_CONTROL}
+        proposed = overview_of(client, alice)
+        assert card(proposed, DEMO_CONTROL) | {"question": ""} == {
+            "id": DEMO_CONTROL,
+            "question": "",
+            "iso_27001": "ISO 27001:2022: A.5.15, A.8.5",
+            "status": "waiting-for-review",
+            "verdict": "partly-evidenced",
+        }
+        assert proposed["readiness"]["accepted"] == 0
+        assert proposed["readiness"]["partly_evidenced"] == 0
+        assert proposed["next_step"] == {"control_id": DEMO_CONTROL, "action": "review"}
+        assert {q["control_id"] for q in proposed["quotes"]} == {DEMO_CONTROL}
 
-    review = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
-    assert review.status_code == 200
+        reviewed = review(client, alice, thread_id, "accept")
 
-    accepted = client.get("/api/overview").json()
-    assert card(client, DEMO_CONTROL)["status"] == "accepted"
+        accepted = overview_of(client, alice)
+    assert card(accepted, DEMO_CONTROL)["status"] == "accepted"
     assert accepted["readiness"]["accepted"] == 1
     assert accepted["readiness"]["partly_evidenced"] == 1
     assert accepted["readiness"]["open"] == 11
-    assert accepted["readiness"]["remediation_items"] == len(
-        review.json()["assessment"]["remediation"]
-    )
+    assert accepted["readiness"]["remediation_items"] == len(reviewed["assessment"]["remediation"])
 
 
-def test_a_rejected_control_is_not_counted_and_is_the_next_step(client):
-    thread_id = assess_demo(client)
-    client.post(f"/api/assessments/{thread_id}/review", json={"decision": "reject"})
+def test_a_rejected_control_is_not_counted_and_is_the_next_step(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        review(client, alice, assess(client, alice), "reject")
+        body = overview_of(client, alice)
 
-    body = client.get("/api/overview").json()
-
-    assert card(client, DEMO_CONTROL)["status"] == "rejected"
+    assert card(body, DEMO_CONTROL)["status"] == "rejected"
     assert body["readiness"]["accepted"] == 0
     assert body["next_step"] == {"control_id": DEMO_CONTROL, "action": "assess-again"}
 
 
-def test_each_app_starts_with_its_own_records():
-    load_default_profile.cache_clear()
-    first = TestClient(create_app(Settings()))
-    assess_demo(first)
+def test_the_newest_assessment_of_a_control_is_the_one_shown(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        review(client, alice, assess(client, alice), "accept")
+        assess(client, alice)  # assessed again: proposed, so no longer counted
+        body = overview_of(client, alice)
 
-    second = TestClient(create_app(Settings()))
+    assert card(body, DEMO_CONTROL)["status"] == "waiting-for-review"
+    assert body["readiness"]["accepted"] == 0
 
-    assert card(second, DEMO_CONTROL)["status"] == "not-assessed"
+
+def test_each_user_sees_only_their_own_overview(database_url, users):
+    alice, bob = users
+    with TestClient(app_on(database_url)) as client:
+        review(client, alice, assess(client, alice), "accept")
+        bobs = overview_of(client, bob)
+
+    assert card(bobs, DEMO_CONTROL)["status"] == "not-assessed"
+    assert bobs["readiness"]["accepted"] == 0
+
+
+@needs_postgres
+def test_the_overview_outlasts_a_restart_on_postgres(postgres, users):
+    alice, _ = users
+    with TestClient(app_on(postgres.url)) as client:
+        review(client, alice, assess(client, alice), "accept")
+
+    restart()
+    with TestClient(app_on(postgres.url)) as client:
+        body = overview_of(client, alice)
+
+    assert card(body, DEMO_CONTROL)["status"] == "accepted"
+    assert body["readiness"]["accepted"] == 1

@@ -1,13 +1,12 @@
-"""The Dossier overview (#40): where the compliance lead stands, from the assessments kept for
-them under one compliance profile.
+"""The Dossier overview (#40): where the compliance lead stands, from each control's newest
+assessment under one compliance profile (vouch.memory's `progress`, read from the threads).
 
 Readiness counts accepted verdicts only (GLOSSARY: Reviewed verdict, Readiness): a proposed or a
 rejected assessment shows on its control's card, but not in the counts.
 """
 
-import threading
 from collections.abc import Iterable, Mapping
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from vouch.graph import Assessment
 from vouch.isa import IsaControl
@@ -17,36 +16,6 @@ QUOTES_SHOWN = 6  # the evidence quote cards on the overview, at most
 NOT_ASSESSED = "not-assessed"
 
 NextAction = Literal["review", "assess-again", "assess"]
-
-
-class AssessmentRecords(Protocol):
-    """Each user's latest assessment of each control, per compliance profile."""
-
-    def keep(self, user_id: str, assessment: Assessment) -> None:
-        """Keep `assessment` as the latest of its control, proposed or reviewed."""
-        ...
-
-    def latest(self, user_id: str, profile_id: str) -> dict[str, Assessment]:
-        """The user's latest assessment of each control under the profile, by control id."""
-        ...
-
-
-class MemoryAssessmentRecords:
-    """The records in memory, one per app, until the Postgres store (#38): a restart forgets
-    them, as it forgets the paused runs in the in-memory checkpointer."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()  # the stream records from the threadpool
-        self._latest: dict[tuple[str, str], dict[str, Assessment]] = {}
-
-    def keep(self, user_id: str, assessment: Assessment) -> None:
-        with self._lock:
-            mine = self._latest.setdefault((user_id, assessment.profile_id), {})
-            mine[assessment.control_id] = assessment
-
-    def latest(self, user_id: str, profile_id: str) -> dict[str, Assessment]:
-        with self._lock:
-            return dict(self._latest.get((user_id, profile_id), {}))
 
 
 def overview(
