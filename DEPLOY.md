@@ -6,9 +6,10 @@ Cloud Run" and "the walking skeleton has no secrets").
 
 > **Easiest: run `scripts/deploy-wizard.sh`** from the repo root. It walks through the steps below
 > one at a time: it explains each, shows the command and asks before running it, and skips what
-> already exists, so you can stop and run it again. `--dry-run` prints every command, runs none and
-> writes nothing, even with no `gcloud` or `docker` installed; `--help` lists the steps. Its plain answers (project id, region, image tag) stay in
-> `deploy/cloudrun/wizard.env` (git-ignored). Inside Claude Code, `! scripts/deploy-wizard.sh` puts
+> already exists, so you can stop and run it again. `--dry-run` prints every command and writes nothing;
+> it runs only the registry's tag list (to name the real next tag), and works with no `gcloud` or
+> `docker` installed; `--help` lists the steps. Its plain answers (project id, region) stay in
+> `deploy/cloudrun/wizard.env` (git-ignored); the image tag comes from the registry. Inside Claude Code, `! scripts/deploy-wizard.sh` puts
 > its output in the chat. The steps below are the same commands by hand. From #118 it also puts
 > the secrets in Secret Manager from your keyring, grants the service's account its two roles and
 > deploys with the secrets and the Cloud SQL instance: see "Secrets and access" below.
@@ -89,7 +90,7 @@ docker build -t $IMAGE:v1 .
 docker push $IMAGE:v1
 ```
 
-Each deploy gets the next tag: `v2`, `v3`… The wizard counts them in `wizard.env`, and saves a tag only once its push has run. Skip the build and it deploys the last pushed tag, or stops if there is none (*checked*, `tests/test_deploy_wizard.py`).
+Each deploy gets the next tag: one past the highest `vN` already in the registry (`gcloud artifacts docker tags list $IMAGE`), or `v1` when there is none, so a tag that exists is never moved, whichever checkout runs it. Skip the build and it deploys the registry's highest tag, or stops if there is none (*checked*, `tests/test_deploy_wizard.py`; #135).
 
 ## 5. Deploy
 
