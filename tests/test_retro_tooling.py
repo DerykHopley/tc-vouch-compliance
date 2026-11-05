@@ -1,5 +1,5 @@
 """The M0 retro's checks: verdict tokens only where docs/design.md allows them, a contrast helper
-that computes rather than estimates, and a pre-push hook that names a missing front-end install."""
+that computes rather than estimates, and a pre-push hook that installs a missing front end (M3 retro, #127)."""
 
 import os
 import shutil
@@ -79,6 +79,9 @@ def _repo_copy(tmp_path, with_node_modules):
     repo = tmp_path / "repo"
     (repo / ".githooks").mkdir(parents=True)
     shutil.copy(ROOT / ".githooks" / "pre-push", repo / ".githooks" / "pre-push")
+    (repo / "scripts").mkdir()
+    for script in ("design-lint.py", "token-roles.py"):
+        shutil.copy(ROOT / "scripts" / script, repo / "scripts" / script)
     (repo / "frontend" / "src").mkdir(parents=True)
     (repo / "frontend" / "package.json").write_text("{}")
     if with_node_modules:
@@ -87,10 +90,41 @@ def _repo_copy(tmp_path, with_node_modules):
     return repo
 
 
-def test_the_hook_names_the_missing_front_end_install(tmp_path):
+def _fake_npm(tmp_path, ci_exit=0):
+    """An npm that logs each call, and whose `ci` makes node_modules (or fails with ci_exit)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    npm = bin_dir / "npm"
+    npm.write_text(f"""#!/bin/bash
+echo "$*" >> "{tmp_path}/npm.log"
+case " $* " in *" ci "*) [ {ci_exit} -eq 0 ] || exit {ci_exit}; mkdir -p frontend/node_modules;; esac
+""")
+    npm.chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin"}
+
+
+def test_the_hook_installs_a_missing_front_end_then_checks(tmp_path):
     repo = _repo_copy(tmp_path, with_node_modules=False)
     out = subprocess.run(["bash", ".githooks/pre-push"], check=False, capture_output=True, text=True, cwd=repo,
-                         env={**os.environ, "PATH": "/usr/bin:/bin"})
-    assert out.returncode == 1
-    assert "npm --prefix frontend ci" in out.stdout + out.stderr
-    assert "command not found" not in out.stdout + out.stderr
+                         env=_fake_npm(tmp_path))
+    assert out.returncode == 0, out.stdout + out.stderr
+    calls = (tmp_path / "npm.log").read_text().splitlines()
+    assert calls[0].startswith("--prefix frontend ci")
+    assert calls[1] == "--prefix frontend run lint"
+    assert "node_modules is missing" in out.stderr
+
+
+def test_the_hook_stops_when_the_install_fails(tmp_path):
+    repo = _repo_copy(tmp_path, with_node_modules=False)
+    out = subprocess.run(["bash", ".githooks/pre-push"], check=False, capture_output=True, text=True, cwd=repo,
+                         env=_fake_npm(tmp_path, ci_exit=3))
+    assert out.returncode != 0
+    assert (tmp_path / "npm.log").read_text().splitlines() == ["--prefix frontend ci --no-audit --no-fund --loglevel=error"]
+
+
+def test_the_hook_skips_the_install_when_node_modules_exists(tmp_path):
+    repo = _repo_copy(tmp_path, with_node_modules=True)
+    out = subprocess.run(["bash", ".githooks/pre-push"], check=False, capture_output=True, text=True, cwd=repo,
+                         env=_fake_npm(tmp_path))
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert (tmp_path / "npm.log").read_text().splitlines() == ["--prefix frontend run lint"]
