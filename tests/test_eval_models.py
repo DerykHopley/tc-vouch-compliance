@@ -122,22 +122,34 @@ def test_a_real_model_with_no_known_price_has_none_never_zero():
 DATED_SOURCE = re.compile(r"https://\S+, \d{4}-\d{2}-\d{2}")
 
 
-def test_the_list_compares_haiku_sonnet_one_other_provider_and_one_local_model():
+def test_the_list_is_what_ran_haiku_sonnet_the_jev_router_and_one_local_model():
+    """#54's runs (#53's comment, 2026-11-05): Mistral Small 4 was blocked by the owner's
+    OpenRouter guardrail and dropped; TypeSafe's Jev Router ran instead."""
     ids = [m.id for m in MODELS]
 
-    assert ids[:2] == [DEFAULT_MODEL, "anthropic/claude-sonnet-5.5"]
-    assert len(ids) == 4
-    other = [i for i in ids if not i.startswith(("anthropic/", OLLAMA_PREFIX))]
-    local = [i for i in ids if i.startswith(OLLAMA_PREFIX)]
-    assert len(other) == 1
-    assert len(local) == 1
+    assert ids == [
+        DEFAULT_MODEL,
+        "anthropic/claude-sonnet-5.5",
+        "typesafe/jev-router",
+        "ollama/gpt-oss:20b",
+    ]
 
 
 def test_each_model_and_the_judge_has_a_price_with_its_source_and_date_and_a_reason():
     for m in (*MODELS, JUDGE):
-        assert m.price is not None, m.id
+        assert m.price is not None or m.variable_price, m.id
         assert DATED_SOURCE.search(m.source), m.id
         assert m.why, m.id
+
+
+def test_the_router_has_no_fixed_price_so_only_openrouters_reported_cost_counts():
+    [router] = [m for m in MODELS if m.variable_price]
+
+    assert router.id == "typesafe/jev-router"
+    assert router.price is None  # an unreported cost stays unknown, never $0
+    assert router.id not in PRICES
+    assert "openai" in router.why.lower()  # it may route to the judge's provider
+    assert all(not m.variable_price for m in MODELS if m is not router)
 
 
 def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
@@ -148,7 +160,7 @@ def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
 
 def test_the_app_knows_each_hosted_models_price_so_its_cost_is_never_unknown():
     for m in (*MODELS, JUDGE):
-        if not m.id.startswith(OLLAMA_PREFIX):
+        if not m.id.startswith(OLLAMA_PREFIX) and not m.variable_price:
             assert PRICES[m.id] == m.price, m.id
 
 

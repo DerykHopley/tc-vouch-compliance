@@ -27,7 +27,7 @@ from pydantic import SecretStr
 
 from vouch.model_choice import DEFAULT_MODEL, OpenRouter
 from vouch.settings import OPENROUTER_API_KEY_ENV, Settings
-from vouch.spending import FAKE, GPT_TERRA, MISTRAL_SMALL, PRICES, SONNET, Price, Usage
+from vouch.spending import FAKE, GPT_TERRA, PRICES, SONNET, Price, Usage
 
 OLLAMA_PREFIX = "ollama/"
 OLLAMA_URL = "http://localhost:11434"
@@ -55,6 +55,9 @@ class EvalModel:
     id: str
     why: str
     source: str
+    variable_price: bool = False
+    """A router: each request costs what the model it picks costs, so there is no price to
+    list; only OpenRouter's reported cost counts, and a call without one has an unknown cost."""
 
     @property
     def price(self) -> Price | None:
@@ -65,6 +68,7 @@ class EvalModel:
 OPENROUTER_SOURCE = "https://openrouter.ai/api/v1/models, 2026-11-05"
 """Where the hosted models' prices were read (vouch.spending.PRICES), and when."""
 LOCAL_MODEL = "ollama/gpt-oss:20b"
+JEV_ROUTER = "typesafe/jev-router"
 
 MODELS: tuple[EvalModel, ...] = (
     EvalModel(
@@ -72,10 +76,12 @@ MODELS: tuple[EvalModel, ...] = (
     ),
     EvalModel(SONNET, "Anthropic's next size up: what more quality costs", OPENROUTER_SOURCE),
     EvalModel(
-        MISTRAL_SMALL,
-        "another provider at Haiku's price, EU-based (Mistral Small 4, tools and structured "
-        "outputs)",
-        OPENROUTER_SOURCE,
+        JEV_ROUTER,
+        "TypeSafe's Jev Router, another provider: picks a model per request (does routing reach "
+        "Sonnet's quality nearer Haiku's cost?); results record only the router, and it may "
+        "route to OpenAI, the judge's provider. Nordlicht only (#54)",
+        f"{OPENROUTER_SOURCE} (its pricing -1 / -1: set per request)",
+        variable_price=True,
     ),
     EvalModel(
         LOCAL_MODEL,
@@ -83,11 +89,12 @@ MODELS: tuple[EvalModel, ...] = (
         "https://ollama.com/library/gpt-oss, 2026-11-05",
     ),
 )
-"""The models compared: Haiku, Sonnet, one other provider, one local model (#53)."""
+"""The models compared: Haiku, Sonnet, one other provider (the Jev Router, after Mistral Small 4
+was blocked by the owner's OpenRouter guardrail), one local model (#53, #54)."""
 JUDGE = EvalModel(
     GPT_TERRA,
-    "a mid-tier judge from a provider none of the compared models share, so it never judges "
-    "its own answers",
+    "a mid-tier judge from a provider none of the compared models is, so it never judges its "
+    "own answers (the Jev Router may route to OpenAI, so it may judge the router's)",
     OPENROUTER_SOURCE,
 )
 """The faithfulness judge, on real models unless --judge names another; on the fake, only

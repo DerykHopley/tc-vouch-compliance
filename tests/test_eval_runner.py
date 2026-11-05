@@ -497,6 +497,7 @@ def test_the_model_list_is_printed(capsys):
     for m in eval_models.MODELS:
         assert m.id in out
         assert m.source in out
+    assert "typesafe/jev-router  price varies per request" in out
     assert f"Judge: {eval_models.JUDGE.id}" in out
     assert eval_models.JUDGE.source in out
 

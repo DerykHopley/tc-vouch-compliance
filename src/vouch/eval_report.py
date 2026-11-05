@@ -6,7 +6,9 @@ measure, a row per model and a column per profile. Each cell is the newest compl
 model on that profile; a partial run (interrupted) stands in only when there is no complete
 one, and a dry run only when there is nothing else, each marked in its cell. Nothing here calls
 a model or the network, so the page re-renders for free and the same results give the same
-page. The reading of the numbers and the recommendation are the owner's, around it (#55).
+page. In an `--out` file the rendered part sits between two marker comments (TABLES_START,
+TABLES_END); the reading of the numbers and the recommendation are written around them by hand
+(#55), and a re-render replaces only what is between the markers.
 
 The per-assessment measures (assessment_measures) are computed here once, from the raw cases,
 for this page and the runner's summary alike: failed cases are left out of the tokens, cost and
@@ -28,6 +30,11 @@ from vouch.paths import REPO_DIR
 
 KEPT_DIR = REPO_DIR / "evals" / "kept"
 NOT_RUN = "not run"
+TABLES_START = (
+    "<!-- eval tables: rendered by `python -m vouch.evals report`, edits here are lost -->"
+)
+TABLES_END = "<!-- end of eval tables -->"
+"""Around the rendered part of an `--out` page; the reading lives outside them."""
 
 Status = Literal["running", "complete", "interrupted", "stopped at the estimate"]
 """A run's state in its raw results. `running` left behind means it crashed: partial."""
@@ -251,9 +258,31 @@ def render(runs: Sequence[Run]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def keep_reading(page: str, existing: str | None) -> str:
+    """The rendered page inside its tables block, with whatever an existing file has around
+    that block (the reading) kept as it is. A file without the block is replaced whole; one
+    whose block is broken (a marker missing, doubled or out of order) raises ReportError, so
+    a reading is never lost."""
+    block = f"{TABLES_START}\n{page}{TABLES_END}\n"
+    if existing is None:
+        return block
+    starts, ends = existing.count(TABLES_START), existing.count(TABLES_END)
+    if starts == ends == 0:
+        return block
+    before, _, rest = existing.partition(TABLES_START)
+    if starts != 1 or ends != 1 or TABLES_END not in rest:
+        raise ReportError(
+            f"the page's tables block is broken: it needs one {TABLES_START} line, then one "
+            f"{TABLES_END} line; fix the page, or delete it to render it afresh"
+        )
+    after = rest.partition(TABLES_END)[2].removeprefix("\n")
+    return before + block + after
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Render the report to `--out` (written whole or not at all), or print it. Exits 2 when
-    there's nothing to render."""
+    """Render the report to `--out` (written whole or not at all; a reading around its tables
+    block kept, keep_reading), or print it. Exits 2 when there's nothing to render, or when
+    `--out`'s tables block is broken."""
     parser = argparse.ArgumentParser(
         prog="python -m vouch.evals report",
         description="Render the eval report from saved raw results (no model, no network).",
@@ -270,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         page = render(load_runs(args.paths))
+        if args.out is not None:
+            existing = args.out.read_text(encoding="utf-8") if args.out.exists() else None
+            page = keep_reading(page, existing)
     except ReportError as error:
         print(f"eval report: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT
