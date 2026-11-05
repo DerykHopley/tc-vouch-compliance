@@ -2,11 +2,14 @@
 
 The chat prompt asks the model to write every quote as a citation, `<cite doc="DOC_ID">exact
 words</cite>`, checked against its document. Any other form of citation (another case, other
-quotes or attributes, no document) fails unchecked, and so does one never closed; a cite tag
-that opens or closes no citation is removed alone.
+quotes or attributes, no document, whitespace or zero-width characters inside the tag) fails
+unchecked, and so does one never closed; a cite tag that opens or closes no citation is removed
+alone.
 
-Any other quotation, in any quotation marks, or a Markdown blockquote (`>` lines), is checked as
-citing no document: against what the tools returned this turn. It counts when it is long
+Any other quotation, in any quotation marks or `<q>`, or a Markdown blockquote (`>` lines), is
+checked as citing no document: against what the tools returned this turn. Any quotation mark
+may close it, a blank line doesn't end it, and one never closed runs to its paragraph's end
+(_quoted says which mark closes it). It counts when it is long
 enough to be a quote (MIN_QUOTE_WORDS words, or MIN_CJK_CHARS CJK characters) outside the
 citations in it; a quotation wrapping a citation is checked whole, the cite's words included,
 and the citation against its document too. A shorter one is plain text ("the term “ISMS”");
@@ -41,9 +44,14 @@ _CITE_HEAD = r'<cite doc="([^"<>]+)">'
 CITE = re.compile(_CITE_HEAD + r"(.*?)</cite>", re.DOTALL)
 """A citation in the one form the chat prompt asks for; the frontend reads the same form."""
 _HEAD = re.compile(_CITE_HEAD)
-_TAG = re.compile(r"<\s*(/?)\s*cite\b(?:[^<>\n]*>)?", re.IGNORECASE)
+_GAP = r"[\s\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]*"
+"""Whitespace, newlines included, and the characters that show as nothing (zero-width spaces
+and joiners, direction marks, a soft hyphen): inside a cite tag they still make it one."""
+_NAME = _GAP.join("cite") + r"\b"
+_ATTRIBUTES = r"[^<>]{0,500}>"
+_TAG = re.compile(rf"<{_GAP}(/?){_GAP}{_NAME}(?:{_ATTRIBUTES})?", re.IGNORECASE)
 """Anything shaped like a cite tag, opening or closing, in any case or spacing."""
-_CLOSING_TAG = re.compile(r"<\s*/\s*cite\b[^<>\n]*>", re.IGNORECASE)
+_CLOSING_TAG = re.compile(rf"<{_GAP}/{_GAP}{_NAME}{_ATTRIBUTES}", re.IGNORECASE)
 _NAMES_DOCUMENT = re.compile(r"""\bdoc\s*=\s*["']?[^"'\s>]""", re.IGNORECASE)
 _MASK = "\0"
 """Stands in for a cite tag's characters while quotations are found, so positions hold."""
@@ -69,31 +77,64 @@ PAIRS: dict[str, tuple[str, ...]] = {
     "『": ("』",),
     "〝": ("〞", "〟"),
     "`": ("`",),
+    "❝": ("❞",),
+    "《": ("》",),
+    "【": ("】",),
+    "<q>": ("</q>",),
 }
-"""Each opening quotation mark and the marks that may close it."""
+"""Each opening quotation mark and its own closing marks. Any other mark closes it too, when
+none of its own does in its paragraph (a model mixing “ and ")."""
 _APOSTROPHES = "'’"
-"""Marks that are also apostrophes: inside a word (company’s, don't) they neither open nor
-close a quotation."""
+"""Marks that are also apostrophes: inside a word (company’s, don't) or before a digit (’90s)
+they neither open nor close a quotation, and they close only a quotation opened by a single
+mark."""
+_SINGLE = "‘’‚‛'"
+_PARAGRAPH_END = re.compile(r"\n[ \t]*\n")
 
 
 def _mark(mark: str, *, opening: bool) -> str:
     escaped = re.escape(mark)
     if mark not in _APOSTROPHES:
         return escaped
-    return rf"(?<!\w){escaped}" if opening else rf"{escaped}(?!\w)"
+    return rf"(?<!\w){escaped}(?!\d)" if opening else rf"{escaped}(?!\w)"
 
 
-def _quoted(opening: str, closings: tuple[str, ...]) -> re.Pattern[str]:
-    """The quotation `opening` starts: to its first closing mark, within one paragraph."""
-    close = "(?:" + "|".join(_mark(c, opening=False) for c in closings) + ")"
-    inner = rf"(?:(?!{close})(?:[^\n]|\n(?![ \t]*\n)))+"
-    return re.compile(rf"{_mark(opening, opening=True)}(?P<inner>{inner}){close}")
+def _closing(marks: set[str]) -> re.Pattern[str]:
+    longest_first = sorted(marks, key=len, reverse=True)
+    return re.compile("|".join(_mark(m, opening=False) for m in longest_first))
 
 
-_QUOTED = {opening: _quoted(opening, closings) for opening, closings in PAIRS.items()}
+_ALL_MARKS = {*PAIRS, *(c for closings in PAIRS.values() for c in closings)}
+_OWN = {opening: _closing(set(closings)) for opening, closings in PAIRS.items()}
+_ANY = {
+    opening: _closing(_ALL_MARKS - (set() if opening in _SINGLE else set(_APOSTROPHES)))
+    for opening in PAIRS
+}
 _OPENING = re.compile(
     "|".join(_mark(m, opening=True) for m in sorted(PAIRS, key=len, reverse=True))
 )
+
+
+def _quoted(text: str, opening: re.Match[str]) -> tuple[int, int, bool]:
+    """Where the quotation `opening` starts ends: its words' end, its end, and whether a mark
+    closed it. It ends at its own closing mark in its paragraph, else at any other quotation
+    mark there, else at its own closing mark in a later paragraph (a blank line doesn't end a
+    quotation), else, never closed, at its paragraph's end. Own marks first, so a quotation
+    nested in it ("‘laptops’") doesn't end it. An apostrophe's quotation stays in its
+    paragraph: a stray one far apart from its pair is likelier an apostrophe."""
+    mark, start = opening.group(), opening.end()
+    blank = _PARAGRAPH_END.search(text, start)
+    paragraph_end = blank.start() if blank else len(text)
+    tries = [(_OWN[mark], paragraph_end), (_ANY[mark], paragraph_end)]
+    if mark not in _APOSTROPHES:
+        tries.append((_OWN[mark], len(text)))
+    for closing, end in tries:
+        if (closed := closing.search(text, start, end)) is not None:
+            return closed.start(), closed.end(), True
+    words_end = max(start, len(text[:paragraph_end].rstrip()))
+    return words_end, words_end, False
+
+
 _BLOCKQUOTE = re.compile(r"^[ \t]*>[^\n]*(?:\n[ \t]*>[^\n]*)*", re.MULTILINE)
 _BLOCKQUOTE_MARK = re.compile(r"^[ \t]*>[ \t]?", re.MULTILINE)
 _CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]")
@@ -213,14 +254,16 @@ def _quotations(masked: str, citations: list[_Citation]) -> list[_Quotation]:
     be quotes outside the citations in them. Overlapping ones, or one cutting through a
     citation, are taken together, as their text."""
     found: list[tuple[int, int, int, int]] = []  # start, end, and where its words are
+    closers: set[int] = set()  # where a mark closed a quotation: it opens none
     scan = 0
     while (opening := _OPENING.search(masked, scan)) is not None:
-        quoted = _QUOTED[opening.group()].match(masked, opening.start())
-        if quoted is None:
-            scan = opening.end()
+        scan = opening.start() + 1  # every mark is tried, nested ones too
+        if opening.start() in closers:
             continue
-        found.append((*quoted.span(), *quoted.span("inner")))
-        scan = quoted.end()
+        words_end, end, closed = _quoted(masked, opening)
+        if closed:
+            closers.update(range(words_end, end))
+        found.append((opening.start(), end, opening.end(), words_end))
     found += [(*b.span(), *b.span()) for b in _BLOCKQUOTE.finditer(masked)]
 
     def within_citation(start: int, end: int) -> bool:

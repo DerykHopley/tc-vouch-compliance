@@ -291,3 +291,143 @@ def test_prose_without_quotes_or_cites_passes_unchanged(reply):
     text, steps, check = checked(reply)
 
     assert (text, steps, check.asked) == (reply, [], [])
+
+
+# Verify round 2's leaks: mixed marks, unclosed quotations, more marks, broken cite tags
+
+INVENTED = "Every laptop is encrypted twice a day by the night shift."
+
+
+@pytest.mark.parametrize(
+    "quoted",
+    [
+        f'“{QUOTE}"',  # curly open, straight close
+        f'"{QUOTE}”',  # straight open, curly close
+        f"„{QUOTE}»",
+        f"«{QUOTE}”",
+        f"「{QUOTE}”",
+    ],
+)
+def test_any_quotation_mark_closes_any_other(quoted):
+    text, steps, check = checked(f"It says {quoted}, as noted.")
+
+    assert check.asked == [(QUOTE, None)]
+    assert text == f"It says {QUOTE_REMOVED}, as noted."
+    assert steps == [dropped_step(None, NOT_FOUND)]
+
+
+def test_a_quotation_never_closed_is_checked_to_the_end_of_the_answer():
+    text, steps, check = checked(f"The standard says “{INVENTED}")
+
+    assert check.asked == [(INVENTED, None)]
+    assert text == f"The standard says {QUOTE_REMOVED}"
+    assert steps == [dropped_step(None, NOT_FOUND)]
+
+
+def test_a_quotation_never_closed_is_kept_when_the_tools_returned_it():
+    reply = f"The standard says “{INVENTED}"
+
+    assert checked(reply, INVENTED)[:2] == (reply, [])
+
+
+def test_a_short_quotation_never_closed_is_text():
+    reply = "Use the term “ISMS here."
+
+    assert checked(reply)[:2] == (reply, [])
+
+
+NEW_MARKS = [("❝", "❞"), ("《", "》"), ("【", "】"), ("<q>", "</q>")]
+
+
+@pytest.mark.parametrize(("opening", "closing"), NEW_MARKS)
+def test_more_quotation_marks_and_q_tags_are_checked(opening, closing):
+    text, steps, check = checked(f"It says {opening}{QUOTE}{closing}, as noted.")
+
+    assert check.asked == [(QUOTE, None)]
+    assert text == f"It says {QUOTE_REMOVED}, as noted."
+    assert steps == [dropped_step(None, NOT_FOUND)]
+
+
+@pytest.mark.parametrize(("opening", "closing"), NEW_MARKS)
+def test_a_real_quote_in_the_new_marks_is_kept(opening, closing):
+    reply = f"It says {opening}{QUOTE}{closing}, as noted."
+
+    assert checked(reply, QUOTE)[:2] == (reply, [])
+
+
+def test_a_quotation_broken_by_a_blank_line_is_checked_whole():
+    text, steps, check = checked("It says “every laptop\n\nis encrypted daily” here.")
+
+    assert check.asked == [("every laptop\n\nis encrypted daily", None)]
+    assert text == f"It says {QUOTE_REMOVED} here."
+    assert len(steps) == 1
+
+
+@pytest.mark.parametrize(
+    "cite",
+    [
+        f'<cite\ndoc="doc">{QUOTE}</cite>',
+        f'<\u200bcite doc="doc">{QUOTE}</cite>',
+        f'<cite\u200b doc="doc">{QUOTE}</cite>',
+        f'<cite doc="doc">{QUOTE}</\u200bcite>',
+        f'<ci\u200bte doc="doc">{QUOTE}</cite>',
+    ],
+)
+def test_a_cite_tag_with_whitespace_or_zero_width_characters_inside_is_removed(cite):
+    text, steps, check = checked(f"It says {cite} here.", QUOTE)
+
+    assert check.asked == []
+    assert text == f"It says {QUOTE_REMOVED} here."
+    assert len(steps) == 1
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "The users' rights and the staff's list aren't changed by the company’s new policy text.",
+        "In the ’90s, and the '90s, the company changed its whole policy on laptops.",
+    ],
+)
+def test_apostrophes_open_no_quotation_never_closed(reply):
+    assert checked(reply)[:2] == (reply, [])
+
+
+OTHER = "staff lock every screen at night"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        f"It says “{QUOTE}” and “{OTHER}” here.",
+        f'It says "{QUOTE}" and "{OTHER}" here.',
+        f"It says <q>{QUOTE}</q> and ❝{OTHER}❞ here.",
+    ],
+)
+def test_two_real_quotes_in_one_sentence_are_each_kept(reply):
+    text, steps, check = checked(reply, QUOTE, OTHER)
+
+    assert check.asked == [(QUOTE, None), (OTHER, None)]
+    assert (text, steps) == (reply, [])
+
+
+def test_a_quotation_nested_in_another_is_checked_with_it():
+    nested = "The policy says ‘laptops’ are encrypted daily by staff"
+    reply = f"It says “{nested}”."
+
+    text, steps, check = checked(reply, nested)
+
+    assert check.asked == [(nested, None)]
+    assert (text, steps) == (reply, [])
+
+
+def test_the_sentence_after_a_quote_in_mixed_marks_stays():
+    reply = f'It says “{QUOTE}." Check it now please, auditor.'
+
+    assert checked(reply, f"{QUOTE}.")[:2] == (reply, [])
+
+
+def test_mixed_marks_around_two_quotations_leave_neither_unchecked():
+    text, _, check = checked(f'It says “{QUOTE}" more text “{OTHER}" end.', QUOTE, OTHER)
+
+    assert text == f"It says {QUOTE_REMOVED} end."
+    assert len(check.asked) == 1 and QUOTE in check.asked[0][0] and OTHER in check.asked[0][0]
