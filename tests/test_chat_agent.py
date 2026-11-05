@@ -15,7 +15,7 @@ import test_memory
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
-from test_api import read_events
+from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, restart
 
@@ -461,3 +461,17 @@ def test_a_start_assessment_call_without_a_control_id_says_its_arguments_are_inv
 
     assert "its arguments are invalid" in said and "isn't one of the chat's tools" not in said
     assert written == [("step", {"node": "guard", "text": said})]
+
+
+def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypatch):
+    note = "The key register is in records/, dated 2026."
+    events = read_events(client.post("/api/assessments", json={"control_id": "4.1.2"}))
+    thread_id = events[-1][1]["assessment"]["thread_id"]
+    review = {"decision": "reject", "note": note}
+    assert client.post(f"/api/assessments/{thread_id}/review", json=review).status_code == 200
+    prompts = recorded_prompts(monkeypatch)
+
+    events = say(client, "Assess 4.1.2")
+
+    assert "assessment" in names(events)
+    assert note in prompts[0][-1].content  # the same path as the working paper's (#42)
