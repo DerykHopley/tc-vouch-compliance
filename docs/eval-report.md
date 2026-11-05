@@ -80,6 +80,17 @@ Wall-clock seconds, the mean over the cases that ran.
 | ollama/gpt-oss:20b | not run | 31.4 s (7 failed, left out) |
 | typesafe/jev-router | not run | 65.9 s |
 
+## Served models
+
+The models OpenRouter named as serving the assessments' calls, with how many each served: a router's picks. "As requested" when the model asked for served them all; "not recorded" for a run saved before served models were (#185).
+
+| Model | alpenwerk | nordlicht |
+|---|---|---|
+| anthropic/claude-haiku-5.5 | not recorded | not recorded |
+| anthropic/claude-sonnet-5.5 | not recorded | not recorded |
+| ollama/gpt-oss:20b | not run | not recorded |
+| typesafe/jev-router | not run | not recorded |
+
 ## Runs
 
 - `20261105T140418420437Z-nordlicht-ollama_gpt-oss_20b.json`: ollama/gpt-oss:20b on nordlicht, judged by openai/gpt-6.1-terra, run 2026-11-05T14:04:18.420437+00:00, 12 cases, complete
@@ -97,8 +108,8 @@ Written by hand around the tables above (#55); `python -m vouch.evals report eva
 ### Before comparing
 
 - **Nordlicht is the stronger signal.** Its expected answers were reviewed by the owner (#111). Alpenwerk's were drafted by an agent; the owner reviewed 5 of the 100 requirements, found nothing to correct, and approved the set as drafted, so the other 95 stand as the agent wrote them (#50). **Alpenwerk's scores measure agreement with that draft**, not checked correctness.
-- **The Jev Router (`typesafe/jev-router`) ran on Nordlicht only.** It picks a model for each request, and the results record only the router, not which models it picked. It may route to OpenAI, the judge's provider, so **its faithfulness of 1.00 may include answers judged by their own provider**.
-- **Sonnet's judge step left requirements unjudged** (below, "Sonnet's unjudged requirements"): 27 of Alpenwerk's 100 and 2 of Nordlicht's 84 are recorded "not judged", which Vouch shows as not-evidenced. Haiku and the router have none.
+- **The Jev Router (`typesafe/jev-router`) ran on Nordlicht only.** It picks a model for each request. Its kept run predates #185, which records the model that served each call, so the "Served models" table shows "not recorded" and its picks are unknown. It may route to OpenAI, the judge's provider, so **its faithfulness of 1.00 may include answers judged by their own provider**.
+- **Sonnet's judge step left requirements unjudged** (below, "Sonnet's unjudged requirements"): 27 of Alpenwerk's 100 and 2 of Nordlicht's 84 are recorded "not judged", which Vouch shows as not-evidenced. Haiku and the router have none. Fix #184 handles it (the judge asked again for skipped requirements, and a warning when they stay skipped).
 - **Small samples, compared control by control.** Each run is 12 controls (84 requirements on Nordlicht, 100 on Alpenwerk). Requirements within one control share their evidence and the same judgement, so they aren't independent: counting requirements overstates the sample. The rule used here: for two models, count the controls where each got more requirements right (ties left out), and call the difference real only when one model leads on clearly more controls than chance gives (a sign test, two-sided p under 0.05). By that rule a lead on 10 of 11 controls is real (p = 0.01); 6 of 10 (p = 0.75) or 4 of 7 (p = 1.0) is noise.
 - **What the runs cost:** $4.27 for these six runs, the judge included (Sonnet $1.40 and $1.69, the router $0.59, Haiku $0.25 and $0.34, gpt-oss $0.01 for the judge alone). The cost table above leaves the judge out.
 
@@ -125,6 +136,32 @@ In five of Sonnet's 24 assessments the judge step kept a verdict for the first r
 - **Not German, not size.** It happened on English Nordlicht too (5.2.9), and not on Alpenwerk's largest control (4.1.3, 17 requirements, all judged). Haiku and the router, given the same prompts, have no unjudged requirement.
 - **What the saved results can't say:** whether Sonnet's structured judgement listed only M1, named the others differently, or gave them a verdict Vouch doesn't accept. Vouch keeps only the checked verdicts, not the judge's raw reply, and records no warning when requirements go unjudged, so the cause can't be read back without running the model again. Vouch sets no output-token limit, so a cut-off reply isn't from Vouch's side.
 - **What it means for the scores:** Sonnet's Alpenwerk verdicts and controls are understated (where the expected verdict was not-evidenced, a "not judged" happens to score right, as on Nordlicht 5.2.9, so it can cut both ways). For a user it is worse than a score: requirements the answer calls evidenced show as not-evidenced, with "not judged" as the reason.
+
+### Outside the pipeline: the models with all the evidence in front of them
+
+**A different setup from everything above, not comparable cell for cell.** Source: [#55's comment of 2026-11-05](https://github.com/DerykHopley/tc-vouch-compliance/issues/55#issuecomment-6664843496). Its raw answers aren't in `evals/kept`, so it lives here in the reading, not in the rendered tables.
+
+- **Setup:** one pass per model, with the rules (the spec's verdict and staleness rules), Nordlicht's 84 requirements and all 20 of Nordlicht's evidence documents in full (47k characters, about 12k tokens) in context. No retrieval, no call budget, no quote check, no output guard. One run each, on the Claude subscription (no API cost).
+- **Scored** against Nordlicht's owner-reviewed expected answers (#111), with the spec's roll-up. The models weren't shown those answers.
+
+| Model | Verdicts right | Controls right | Citations expected | Vouch's pipeline, same model (verdicts / controls) |
+|---|---|---|---|---|
+| Sonnet 5.5 | 90% (76/84) | 83% (10/12) | 88% | 76% / 75% |
+| Opus 5.5 | 89% (75/84) | 83% (10/12) | 85% | not run |
+| Fable 5.1 | 88% (74/84) | 83% (10/12) | 82% | not run |
+| Haiku 5.5 | 80% (67/84) | 75% (9/12) | 77% | 51% / 42% |
+
+**What it says: Vouch's pipeline, not the model, loses most of the points.** The same model scores 14 points of verdicts lower inside Vouch's search-and-judge graph (Sonnet, 90% to 76%), and 29 lower for Haiku (80% to 51%). With the evidence in front of it, Haiku (80%) beats Sonnet inside the pipeline (76%), and Sonnet, Opus and Fable tie near 90%: past Sonnet, a larger model buys nothing here. The likely losses, each from the pipeline:
+
+- **Retrieval:** the graph sees only the passages its searches find, so a requirement whose evidence it never searched for is judged on less.
+- **The call budget** of 12 model calls caps how much it can search.
+- **Skipped requirements** (Fix #184): a judgement that leaves requirements out records them as not judged (above).
+
+**Caveats:** one run each, so a point or two either way is noise; no quote check, so a citation here isn't checked word for word as it is in the pipeline; no output guard, so an answer claiming an audit result wasn't refused; and whole-profile context works only because Nordlicht's evidence is small (about 12k tokens). A real company's evidence won't fit, which is why the pipeline searches.
+
+### More pipeline runs to come
+
+GPT-6 Luna, GPT-6 Terra and GPT-6 Sol are to run through the pipeline, judged by Sonnet 5.5 (so the judge isn't their own provider). When their raw results are kept in `evals/kept`, a re-render adds their rows to the tables above; the reading and the recommendation will then be revisited against them. Until then they are not run, and nothing here depends on them.
 
 ### Citations
 
@@ -158,9 +195,12 @@ So keeping the evidence local, with this model on this hardware, costs about **6
 
 ### Recommendation: the default model
 
-**Recommended: Sonnet 5.5 (`anthropic/claude-sonnet-5.5`).** It is best on the owner-reviewed Nordlicht answers (76% of verdicts against Haiku's 51%, 75% of controls against 42%, ahead on 10 of 11 controls that differ), failed no case, and costs $0.10 to $0.12 per assessment, at most about $3.64 a user a day under the daily limit.
+**Recommended: Sonnet 5.5 (`anthropic/claude-sonnet-5.5`).** It is best on the owner-reviewed Nordlicht answers inside the pipeline (76% of verdicts against Haiku's 51%, 75% of controls against 42%, ahead on 10 of 11 controls that differ), and best with all the evidence in context too (90%, level with Opus and Fable). It failed no case, and costs $0.10 to $0.12 per assessment, at most about $3.64 a user a day under the daily limit.
 
-- **The caveat: Sonnet's judge step left requirements unjudged** in 5 of 24 assessments (27 of Alpenwerk's 100 requirements, 2 of Nordlicht's 84), shown to the user as not-evidenced. Until the cause is found and handled (the raw judge reply kept, missing requirements asked for again or flagged), choosing Sonnet means some assessments understate what the evidence shows. Haiku and the router didn't do this.
-- **Why not Haiku 5.5** (today's default): 15 to 16× cheaper, but 25 points lower on Nordlicht's verdicts (22 without its failed case), behind on 10 of 11 controls that differ, and one refused answer. Its Alpenwerk lead over Sonnet is within noise and comes from Sonnet's unjudged requirements.
-- **Why not the Jev Router:** close to Sonnet (70%, the same 9 of 12 controls, no difference control by control) at a third of the price, which makes it the one to watch. But it ran on one profile only, takes twice as long, and its results don't say which models answered, so where a company's evidence goes isn't known, which a compliance tool should be able to say. Worth a second run on Alpenwerk, with routing recorded, before choosing it.
+- **The caveat: Sonnet's judge step left requirements unjudged** in 5 of 24 assessments (27 of Alpenwerk's 100 requirements, 2 of Nordlicht's 84), shown to the user as not-evidenced. Until Fix #184 lands (skipped requirements asked for again, and a warning when they stay skipped), choosing Sonnet means some assessments understate what the evidence shows. Haiku and the router didn't do this.
+- **The pipeline matters more than the model.** Outside the pipeline Haiku reaches 80%, above Sonnet inside it. So the bigger gain is in Vouch's graph, not a bigger model: Fix #184 for the skipped requirements, then better retrieval and a call budget that lets the graph find each requirement's evidence. Fix #184 should lift Sonnet most (its Alpenwerk losses are mostly skipped requirements). Retrieval and budget work could lift every model, and could close enough of Haiku's gap to make it the default again at 15 to 16× less. **Rerun the pipeline eval after that work, and revisit this choice then.**
+- **Why not Haiku 5.5** (today's default) now: 15 to 16× cheaper, but inside today's pipeline 25 points lower on Nordlicht's verdicts (22 without its failed case), behind on 10 of 11 controls that differ, and one refused answer. Its Alpenwerk lead over Sonnet is within noise and comes from Sonnet's unjudged requirements.
+- **Why not Opus 5.5 or Fable 5.1:** outside the pipeline they tie with Sonnet (89% and 88% against 90%), so there is no sign a larger model is worth its price. Neither ran through the pipeline.
+- **Why not the Jev Router:** close to Sonnet (70%, the same 9 of 12 controls, no difference control by control) at a third of the price, which makes it the one to watch. But it ran on one profile only, takes twice as long, and its kept run predates #185, so which models answered isn't known, and a compliance tool should be able to say where a company's evidence goes. Worth a second run on Alpenwerk, now that served models are recorded, before choosing it.
+- **The GPT-6 runs to come** (above) may change this; the recommendation will be revisited when they are kept.
 - **Not decided here.** The owner chooses; `DEFAULT_MODEL` stays Haiku and Haiku's price stays in `PRICES` until then (#55's third criterion). This branch only took Mistral Small 4, which didn't run, out of `PRICES`.
