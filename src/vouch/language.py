@@ -8,11 +8,16 @@ never translates.
 
 Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict"). A
 negation ("not compliant", "nicht vollständig konform", "kein zertifiziertes ISMS") is not a
-claim, nor is a quote: the prompts ask for passages copied unchanged from the documents.
+claim, nor is a quote from the evidence: the prompts ask for passages copied unchanged from
+the documents, so a quoted span is left out only when a passage the assessment gathered holds
+it (#140). "Not only compliant" and "nicht nur konform" are claims, not negations.
 """
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
+
+from vouch.citations import occurs
 
 
 @dataclass(frozen=True)
@@ -43,7 +48,8 @@ LANGUAGES: dict[str, Language] = {
             # Handing something on ("passed to the CISO", "passed on to IT") is no claim.
             r"\b(?P<word>passed)\b(?!\s+(?:on\s+)?to\b)",
         ),
-        negation=r"\b(?:not|non|never|no)(?:\s+[\w-]+)?[\s-]*",
+        # "not only compliant" and "not just certified" claim it all the same.
+        negation=r"\b(?:not|non|never|no)(?!\s+(?:only|just)\b)(?:\s+[\w-]+)?[\s-]*",
     ),
     "de": Language(
         name="German",
@@ -59,7 +65,8 @@ LANGUAGES: dict[str, Language] = {
             rf"\b{_AUDIT}{_NEAR}(?P<word>bestanden{_IN_FORMS})\b",
             rf"\b(?P<word>bestanden{_IN_FORMS}){_NEAR}{_AUDIT}",
         ),
-        negation=r"\b(?:nicht|nie|kein\w*)(?:\s+[\w-]+)?[\s-]*",
+        # "nicht nur konform" and "nicht bloß zertifiziert" claim it all the same.
+        negation=r"\b(?:nicht|nie|kein\w*)(?!\s+(?:nur|bloß)\b)(?:\s+[\w-]+)?[\s-]*",
     ),
 }
 
@@ -72,6 +79,18 @@ _NEGATION_REACH = 40  # characters before a claim's word searched for its negati
 def without_quotes(text: str) -> str:
     """The text with every quoted span left out."""
     return _QUOTED.sub(" ", text)
+
+
+def without_evidence_quotes(text: str, passages: Iterable[str]) -> str:
+    """The text with each quoted span left out that a passage holds as evidence, by the
+    citations' quote-match rule (vouch.citations.occurs); every other span stays in."""
+    held = list(passages)
+
+    def from_evidence(span: re.Match[str]) -> str:
+        inner = span.group()[1:-1]  # the quote marks left out
+        return " " if any(occurs(inner, p) for p in held) else span.group()
+
+    return _QUOTED.sub(from_evidence, text)
 
 
 def language_name(code: str) -> str:
@@ -117,10 +136,11 @@ def mismatch(text: str, expected: str) -> str | None:
     return found if found is not None and found != expected else None
 
 
-def audit_claim(text: str) -> str | None:
+def audit_claim(text: str, passages: Iterable[str] = ()) -> str | None:
     """The word with which the text claims an audit result, in any language Vouch knows
-    (lower case), or None. Quoted spans and negated words are no claim."""
-    unquoted = without_quotes(text)
+    (lower case), or None. Negated words are no claim, nor is a quote from one of the
+    `passages` the assessment gathered; no passages, and every quote is checked."""
+    unquoted = without_evidence_quotes(text, passages)
     for lang in LANGUAGES.values():
         negated = re.compile(f"(?:{lang.negation})$", re.IGNORECASE)
         for claim in lang.claims:
