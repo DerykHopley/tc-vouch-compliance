@@ -3,6 +3,7 @@ and noted for developers, and each request answered under the profile its X-Vouc
 header names, so nothing is shared between profiles."""
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -273,3 +274,101 @@ def test_each_profiles_working_paper_requirements_are_its_own_and_built_once(
     assert "high" not in columns[0] and "high" in columns[1]
     assert shown[0] == shown[2] and shown[1] == shown[3]
     assert sorted(builds) == ["nordlicht", SECOND]
+
+
+# --- A profile file the loader can't read (#47's verify) --------------------------------------
+
+
+def _not_utf8(path: Path) -> None:
+    """The profile saved as Latin-1, as an editor on another system might: Prüfstand's ü is one
+    byte that isn't UTF-8."""
+    path.write_bytes(path.read_text(encoding="utf-8").encode("latin-1"))
+
+
+def _unreadable(path: Path) -> None:
+    path.chmod(0)
+
+
+def _nested_too_deeply(path: Path) -> None:
+    path.write_text("id: " + "[" * 5000 + "\n", encoding="utf-8")
+
+
+def _evidence_folder_name_too_long(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace("folder: records", "folder: " + "r" * 300), encoding="utf-8")
+
+
+BAD_FILES = {
+    "not-utf8": (_not_utf8, "UTF-8"),
+    "unreadable": (_unreadable, "ermission"),
+    "nested-too-deeply": (_nested_too_deeply, "nested"),
+    "evidence-folder-name-too-long": (_evidence_folder_name_too_long, "evidence_sources.records"),
+}
+
+
+@pytest.mark.parametrize("case", BAD_FILES)
+def test_a_profile_file_the_loader_cant_read_is_left_out_and_noted_path_free(
+    profiles, users, caplog, case
+):
+    spoil, said = BAD_FILES[case]
+    if case == "unreadable" and os.geteuid() == 0:
+        pytest.skip("root reads any file")
+    spoil(profiles / SECOND / "profile.yaml")
+    alice, _ = users
+    with caplog.at_level(logging.WARNING, "vouch.profile"), app_with(profiles) as client:
+        listed = client.get("/api/profiles", headers=alice)
+        overview = client.get("/api/overview", headers=alice)
+        developer = client.get("/api/developer/settings", headers=alice)
+
+    assert listed.status_code == 200, listed.text
+    assert [p["id"] for p in listed.json()["profiles"]] == ["nordlicht"]
+    assert overview.status_code == 200
+    problems = {n["id"]: n["problem"] for n in developer.json()["broken_profiles"]}
+    assert said in problems[SECOND]
+    assert str(profiles) not in problems[SECOND] and "/" not in problems[SECOND]
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING and SECOND in r.message]
+    assert len(warned) == 1
+
+
+def test_a_default_profile_that_isnt_utf8_stops_the_app_naming_the_setting(tmp_path):
+    make_profiles(tmp_path, broken=False)
+    nordlicht = tmp_path / "nordlicht" / "profile.yaml"
+    text = nordlicht.read_text(encoding="utf-8").replace("GmbH", "GmbH für Bauteile")
+    nordlicht.write_bytes(text.encode("latin-1"))
+    read_profile_once.cache_clear()
+    with pytest.raises(SystemExit) as stop:
+        create_app(Settings(profiles_dir=tmp_path))
+
+    assert PROFILES_DIR_ENV in str(stop.value.code)
+    assert "UTF-8" in str(stop.value.code)
+
+
+def _touched(path: Path, text: bytes, step: int) -> None:
+    """Writes `text` and moves the file's time on, so each version has its own."""
+    path.write_bytes(text)
+    stamp = path.stat().st_mtime_ns + step * 1_000_000_000
+    os.utime(path, ns=(stamp, stamp))
+
+
+def test_a_broken_profile_fixed_while_the_app_runs_comes_back_warned_once_per_version(
+    profiles, users, caplog
+):
+    alice, _ = users
+    second = profiles / SECOND / "profile.yaml"
+    good = second.read_bytes()
+    _touched(second, b"id: [unclosed\n", 1)
+
+    def listed(client: TestClient) -> list[str]:
+        return [p["id"] for p in client.get("/api/profiles", headers=alice).json()["profiles"]]
+
+    with caplog.at_level(logging.WARNING, "vouch.profile"), app_with(profiles) as client:
+        broken = [listed(client), listed(client)]
+        _touched(second, b"id: [still unclosed\n", 2)
+        broken_again = [listed(client), listed(client)]
+        _touched(second, good, 3)
+        fixed = listed(client)
+
+    assert broken == broken_again == [["nordlicht"], ["nordlicht"]]
+    assert fixed == ["nordlicht", SECOND]
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING and SECOND in r.message]
+    assert len(warned) == 2  # once per broken version

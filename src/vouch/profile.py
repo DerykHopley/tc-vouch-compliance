@@ -9,7 +9,7 @@ and risks.
 import logging
 import re
 from dataclasses import dataclass
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
@@ -106,7 +106,11 @@ class EvidenceSource(_Strict):
         resolved = (base / folder).resolve()
         if folder.is_absolute() or not resolved.is_relative_to(base):
             raise ValueError(f"must stay inside the profile's folder {base}, found {folder}")
-        if not resolved.is_dir():
+        try:
+            found = resolved.is_dir()
+        except OSError as error:  # a name the file system refuses, such as one too long
+            raise ValueError(f"folder {folder} can't be used: {error.strerror or error}") from None
+        if not found:
             raise ValueError(f"folder {resolved} does not exist")
         return resolved
 
@@ -253,6 +257,10 @@ def load_profile(path: Path) -> ComplianceProfile:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except OSError as error:
         raise ProfileError(path, error.strerror or str(error)) from error
+    except UnicodeDecodeError as error:  # saved in another encoding, such as Latin-1
+        raise ProfileError(path, f"not UTF-8 text (byte {error.start})") from error
+    except RecursionError as error:  # PyYAML composes nested collections recursively
+        raise ProfileError(path, "not valid YAML (nested too deeply)") from error
     except yaml.YAMLError as error:
         raise ProfileError(path, f"not valid YAML ({error.__class__.__name__})") from error
     try:
@@ -261,6 +269,10 @@ def load_profile(path: Path) -> ComplianceProfile:
         raise ProfileError(path, _describe(error)) from error
     except BaseFrameworkError as error:  # the controls it names couldn't be looked up
         raise ProfileError(path, str(error)) from error
+    except OSError as error:  # a backstop: a path it names the file system refuses
+        raise ProfileError(
+            path, f"a path it names can't be used: {error.strerror or error}"
+        ) from error
 
 
 PROFILE_LOAD_ERRORS: tuple[type[Exception], ...] = (ProfileError, BaseFrameworkError)
@@ -316,15 +328,35 @@ class BrokenProfile:
     problem: str
 
 
-@cache
-def read_profile_once(folder: Path, name: str) -> ComplianceProfile | BrokenProfile:
-    """The named profile in `folder`, read once, or why it can't be used (logged once). Raises
-    UnknownProfileError, which isn't kept: a profile folder added later is found."""
+def _version(folder: Path, name: str) -> tuple[int, int] | None:
+    """The profile file's version: its modification time and size; None when it can't be
+    looked at (then the load says why)."""
+    try:
+        stat = (folder / name / PROFILE_FILE).stat()
+    except (OSError, ValueError):
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+@lru_cache(maxsize=256)
+def _read_version(
+    folder: Path, name: str, version: tuple[int, int] | None
+) -> ComplianceProfile | BrokenProfile:
     try:
         return load_named_profile(name, folder)
     except PROFILE_LOAD_ERRORS as error:
         log.warning("compliance profile %s left out: %s", name, error)
         return BrokenProfile(name, load_problem(error))
+
+
+def read_profile_once(folder: Path, name: str) -> ComplianceProfile | BrokenProfile:
+    """The named profile in `folder`, or why it can't be used: read once per version of its
+    file (logged once per broken version), so a profile fixed or changed while the app runs is
+    read again. Raises UnknownProfileError, which isn't kept: a profile added later is found."""
+    return _read_version(folder, name, _version(folder, name))
+
+
+read_profile_once.cache_clear = _read_version.cache_clear  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
