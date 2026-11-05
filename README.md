@@ -47,6 +47,22 @@ to `evals/results/` (git-ignored). On the fake model it checks the harness, not 
 scripts are drafted from the expected answers: after those change, regenerate them with
 `uv run python evals/scripts/generate.py` and read the diff.
 
+On a real model (`--model <OpenRouter id>`, or `--model ollama/<name>` for a local model through
+Ollama) each case also records its tokens, cost and seconds, and with `--judge <model>` the
+faithfulness of its answer to the passages it cites (DeepEval, judged by that model). A real run
+is paid, so it runs one case first, prints a cost and time estimate, and runs the rest only when
+you type `yes`; anything else stops with nothing more sent. OpenRouter needs
+`OPENROUTER_API_KEY` from the keyring (`.envrc`); without it a real model is refused and the
+fake still runs. Ollama must be running (`ollama serve`). `--models` lists the runner's models
+and prices; `--profile alpenwerk` runs the second profile (it has no fake scripts yet).
+
+Raw results go to `evals/results/` (git-ignored); `--keep` also copies them to `evals/kept/`, to
+commit. The report renders from saved results without calling a model:
+
+```sh
+uv run python -m vouch.evals report evals/kept --out docs/eval-report.md
+```
+
 ### The API
 
 ```sh
