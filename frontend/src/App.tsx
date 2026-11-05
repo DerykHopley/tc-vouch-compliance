@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Control } from './assessment.ts'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { type Assessment, newestAssessment } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
 import TopBar from './TopBar.tsx'
-import { useAssessment } from './useAssessment.ts'
+import { type Run, useAssessment } from './useAssessment.ts'
 import WorkingPaper from './WorkingPaper.tsx'
 
 type Theme = 'light' | 'dark'
@@ -67,20 +67,34 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
     if (onDossier || !read.current) void load()
     read.current = true
   }, [load, onDossier])
-  // A control's working paper needs its question from the overview; a control the overview doesn't list shows the
-  // Dossier.
+  // The run sits above the views, so it carries on when the lead leaves its paper; a finished run reads the overview
+  // afresh when the Dossier is showing, so its card leaves Assessing.
+  const reloadIfDossier = useCallback(() => {
+    if (viewAt(window.location.pathname).name === 'dossier') void load()
+  }, [load])
+  const { run, controlId: runFor, start } = useAssessment(reloadIfDossier)
+  const running = run.status === 'running' ? runFor : null
+  // A control's working paper needs its question from the overview; a control the overview doesn't list, or an
+  // overview not read, shows the Dossier.
   const control = view.name === 'paper' && overview.state.status === 'ready'
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
-  const shown: View['name'] =
-    view.name === 'developer' && developer ? 'developer'
-      : view.name === 'paper' && (control || overview.state.status !== 'ready') ? 'paper'
-        : 'dossier'
-  // Set by the Dossier's "Assess" next step: the working paper starts the assessment as it opens.
-  const [assessOnOpen, setAssessOnOpen] = useState(false)
+  const shown: View['name'] = view.name === 'developer' && developer ? 'developer' : control ? 'paper' : 'dossier'
+  // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out.
+  const paperId = view.name === 'paper' ? view.controlId : null
+  const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
+  useEffect(() => {
+    if (paperId === null) return
+    let current = true
+    void newestAssessment(paperId).then((assessment) => current && setStored({ controlId: paperId, assessment }))
+    return () => { current = false }
+  }, [paperId])
+  const paperRun: Run | null = runFor === paperId && run.status !== 'idle' ? run
+    : stored?.controlId !== paperId ? null
+      : stored.assessment ? { status: 'done', steps: [], assessment: stored.assessment } : { status: 'idle', steps: [] }
   const open = (controlId: string, assess: boolean) => {
-    setAssessOnOpen(assess)
     showView({ name: 'paper', controlId })
+    if (assess) void start(controlId)
   }
 
   return (
@@ -102,23 +116,13 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
       {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
         : control && overview.state.status === 'ready' ? (
           <main>
-            <ControlPaper key={control.id} company={overview.state.overview.company}
-              control={{ id: control.id, title: control.question }} assessOnOpen={assessOnOpen} />
+            <WorkingPaper company={overview.state.overview.company} control={{ id: control.id, title: control.question }}
+              run={paperRun ?? { status: 'idle', steps: [] }} checking={paperRun === null}
+              onAssess={() => void start(control.id)} />
           </main>
         )
-          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} />}
+          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
       <AskVouch />
     </>
   )
-}
-
-/** One control's working paper and its assessment run; `assessOnOpen` starts the run as it opens. */
-function ControlPaper({ company, control, assessOnOpen }: { company: string; control: Control; assessOnOpen: boolean }) {
-  const { run, start } = useAssessment(control.id)
-  const startOnce = useRef(assessOnOpen)
-  useEffect(() => {
-    if (startOnce.current) void start()
-    startOnce.current = false
-  }, [start])
-  return <WorkingPaper company={company} control={control} run={run} onAssess={() => void start()} />
 }

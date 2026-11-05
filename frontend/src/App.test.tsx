@@ -26,20 +26,32 @@ const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1
 /** The overview with nothing assessed, as `GET /api/overview` sends it. */
 const OVERVIEW: Overview = {
   company: 'Nordlicht Komponenten GmbH', country: 'Germany',
-  readiness: { controls: 12, accepted: 0, evidenced: 0, partly_evidenced: 0, not_evidenced: 0, not_applicable: 0, open: 12,
+  readiness: { controls: 12, accepted: 0,
+    by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0 },
+  by_status: { 'not-assessed': 12, 'waiting-for-review': 0, accepted: 0, rejected: 0 },
   next_step: { control_id: '1.1.1', action: 'assess' },
   controls: IDS.map((id) => ({ id, question: `Question ${id}?`, iso_27001: 'ISO 27001:2022: A.5.1', status: 'not-assessed',
     verdict: null })),
   quotes: [],
 }
 
-/** The API: the overview, the assessment's stream when given, and nothing else ever answers. */
-function serve(assessment?: () => Promise<Response>) {
-  vi.stubGlobal('fetch', (url: string) =>
+/** A stored assessment as `GET /api/assessments/{thread_id}` sends it (#38). */
+const STORED = { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys for administrators.',
+  status: 'waiting-for-review', thread_id: 't1' }
+
+/**
+ * The API: the overview, the assessment's stream when given (POST), the stored assessments (GET: none unless given),
+ * and nothing else ever answers.
+ */
+function serve(assessment?: () => Promise<Response>, stored: (typeof STORED)[] = []) {
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
     url === '/api/overview' ? Promise.resolve(Response.json(OVERVIEW))
-      : url === '/api/assessments' && assessment ? assessment()
-        : new Promise(() => {}))
+      : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise(() => {}))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: stored }))
+          : url.startsWith('/api/assessments/') && stored.length
+            ? Promise.resolve(Response.json({ assessment: stored.find((a) => url.endsWith(a.thread_id)) }))
+            : new Promise(() => {}))
 }
 
 describe('Dossier landing', () => {
@@ -88,6 +100,52 @@ describe('the working paper', () => {
     window.history.back()
     await waitFor(() => expect(paper()).toBeNull())
     expect(window.location.pathname).toBe('/')
+  })
+
+  it("starts no second run when Back and Forward return to a paper opened by the hero's Assess", async () => {
+    const assessed = vi.fn(() => new Promise<Response>(() => {}))
+    serve(assessed)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 1.1.1' }))
+    act(() => window.history.back())
+    await waitFor(() => expect(paper()).toBeNull())
+    act(() => window.history.forward())
+    await waitFor(() => expect(paper()).toBeTruthy())
+    expect(assessed).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a run going while the lead leaves its paper, and starts no second one on return', async () => {
+    const assessed = vi.fn(() => new Promise<Response>(() => {}))
+    serve(assessed)
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
+    const card = await screen.findByRole('article', { name: 'Control 4.1.2' })
+    expect(within(card).getByText('Assessing')).toBeTruthy()
+    await userEvent.click(within(card).getByRole('link', { name: 'Open 4.1.2' }))
+    const busy = await within(paper()!).findByRole('button', { name: 'Assessing 4.1.2' })
+    expect((busy as HTMLButtonElement).disabled).toBe(true)
+    expect(assessed).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a control's newest stored assessment, proposed, when its paper opens", async () => {
+    serve(undefined, [STORED])
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const result = await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    expect(within(result).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(result).getByText('Keys for administrators.')).toBeTruthy()
+    expect(within(paper()!).getByText('Proposed')).toBeTruthy()
+  })
+
+  it('marks the Dossier current when the overview fails at a paper address, as the Dossier is what shows', async () => {
+    vi.stubGlobal('fetch', (url: string) =>
+      url === '/api/overview' ? Promise.resolve(new Response(null, { status: 503 })) : new Promise(() => {}))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await screen.findByRole('alert')
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
   })
 
   it("starts the assessment from the Dossier's next step", async () => {

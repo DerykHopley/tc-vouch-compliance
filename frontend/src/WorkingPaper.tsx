@@ -1,4 +1,4 @@
-import { type Control, usageWords, VERDICT_WORDS } from './assessment.ts'
+import { type Control, REVIEW_WORDS, usageWords, VERDICT_WORDS } from './assessment.ts'
 import type { Run } from './useAssessment.ts'
 
 /** The assess button's words for each state of the run; `running` is also the chip's and the steps' label. */
@@ -31,16 +31,21 @@ export function AssessButton({ control, run, onAssess }: { control: Control; run
   )
 }
 
-type PaperProps = { company: string; control: Control; run: Run; onAssess: () => void }
+/** `checking`: the control's stored assessment is still being read, so Assess isn't offered yet. */
+type PaperProps = { company: string; control: Control; run: Run; checking?: boolean; onAssess: () => void }
 
 /** A minimal working paper: the agent's steps as they stream in, then the verdict and the draft answer. */
-export default function WorkingPaper({ company, control, run, onAssess }: PaperProps) {
+export default function WorkingPaper({ company, control, run, checking = false, onAssess }: PaperProps) {
+  const review = run.status === 'done' ? run.assessment.status : undefined
   return (
     <section className="paper wrap" aria-label="Working paper">
       <div className="paper-head">
         <span className="lbl">Working paper · {company}</span>
         <h2><span className="mono">{control.id}</span> {control.title}</h2>
-        <div className="paper-meta"><span>Verdict</span><RunChip run={run} /></div>
+        <div className="paper-meta">
+          <span>Verdict</span><RunChip run={run} />
+          {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
+        </div>
       </div>
       {run.steps.length > 0 && (
         <div className="sheet">
@@ -63,7 +68,7 @@ export default function WorkingPaper({ company, control, run, onAssess }: PaperP
       {(run.status === 'failed' || run.status === 'unreachable') && (
         <p className="sheet notice" role="alert">{run.message}</p>
       )}
-      <div><AssessButton control={control} run={run} onAssess={onAssess} /></div>
+      {!checking && <div><AssessButton control={control} run={run} onAssess={onAssess} /></div>}
     </section>
   )
 }

@@ -1,24 +1,20 @@
-import { plural, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { type ControlCard, controlPath, type NextStep, type Overview, type OverviewState, type Readiness,
-  type ReviewState } from './overview.ts'
+import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
+import { type ControlCard, controlPath, type NextStep, type Overview, type OverviewState, type Readiness }
+  from './overview.ts'
 
 /** The Dossier overview (`docs/design.md`, Decisions: Screens): the headline with the next step, the readiness band,
- * the 12 control cards and the evidence quotes, all from `GET /api/overview`. */
+ * the control cards and the evidence quotes, all from `GET /api/overview`. */
 
 type Props = {
   state: OverviewState
   onRetry: () => void
   /** Opens the control's working paper; `assess` starts an assessment there too. */
   onOpen: (controlId: string, assess: boolean) => void
+  /** The control being assessed just now, if any: its card says so, and the hero offers no second run. */
+  running: string | null
 }
 
-const REVIEW_WORDS: Record<Exclude<ReviewState, 'not-assessed'>, string> = {
-  'waiting-for-review': 'Proposed',
-  accepted: 'Accepted',
-  rejected: 'Rejected',
-}
-
-export default function Dossier({ state, onRetry, onOpen }: Props) {
+export default function Dossier({ state, onRetry, onOpen, running }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -35,22 +31,22 @@ export default function Dossier({ state, onRetry, onOpen }: Props) {
   const { overview } = state
   return (
     <main className="dossier wrap">
-      <Hero overview={overview} onOpen={onOpen} />
+      <Hero overview={overview} onOpen={onOpen} running={running} />
       <Band readiness={overview.readiness} />
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
           <span className="pill">The controls</span>
-          <h2 id="controls-title">Twelve questions</h2>
+          <h2 id="controls-title">{overview.readiness.controls} controls</h2>
           <p>Open a control to work through its working paper.</p>
         </div>
-        <div className="cards">{overview.controls.map((c) => <Card key={c.id} card={c} onOpen={onOpen} />)}</div>
+        <div className="cards">
+          {overview.controls.map((c) => <Card key={c.id} card={c} onOpen={onOpen} assessing={c.id === running} />)}
+        </div>
       </section>
       <Quotes overview={overview} />
     </main>
   )
 }
-
-const nothingAssessed = (overview: Overview) => overview.controls.every((c) => c.status === 'not-assessed')
 
 const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string> = {
   review: (id) => `Review ${id}`,
@@ -58,20 +54,20 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
   assess: (id) => `Assess ${id}`,
 }
 
-function Hero({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'] }) {
-  const { readiness, next_step: next } = overview
-  const waiting = overview.controls.filter((c) => c.status === 'waiting-for-review').length
-  const rejected = overview.controls.filter((c) => c.status === 'rejected').length
+function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props['onOpen']; running: string | null }) {
+  const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
-  if (nothingAssessed(overview)) {
+  if (count['not-assessed'] === readiness.controls) {
     headline = 'Nothing is assessed yet.'
     detail = next ? `Start with ${next.control_id}: assess it, then review what Vouch finds.` : ''
   } else {
     headline = `${readiness.accepted} of ${readiness.controls} controls accepted.`
-    detail = `${plural(waiting, 'verdict')} waiting for your review, ${rejected} rejected.`
+    detail = `${plural(count['waiting-for-review'], 'verdict')} waiting for your review, ${count.rejected} rejected.`
       + (next ? ` Next: ${NEXT_WORDS[next.action](next.control_id).toLowerCase()}.` : ' Every control is accepted.')
   }
+  // While a run is in progress (one at a time), the next step opens its paper rather than starting another.
+  const assess = next !== null && next.action !== 'review' && running === null
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
@@ -79,8 +75,8 @@ function Hero({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'
       <p><b>{headline}</b> {detail}</p>
       {next && (
         <div className="next">
-          <button className="btn btn-primary" onClick={() => onOpen(next.control_id, next.action !== 'review')}>
-            {NEXT_WORDS[next.action](next.control_id)}
+          <button className="btn btn-primary" onClick={() => onOpen(next.control_id, assess)}>
+            {next.action === 'review' || assess ? NEXT_WORDS[next.action](next.control_id) : `Open ${next.control_id}`}
           </button>
         </div>
       )}
@@ -88,24 +84,19 @@ function Hero({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'
   )
 }
 
-/** Each verdict's count in the readiness figures, in the bar's order; the open rest stays the band's own colour. */
-const SEGMENTS = [
-  ['evidenced', 'evidenced'],
-  ['partly_evidenced', 'partly-evidenced'],
-  ['not_evidenced', 'not-evidenced'],
-  ['not_applicable', 'not-applicable'],
-] as const
+/** The verdicts in the readiness bar's order; the open rest stays the band's own colour. */
+const SEGMENTS: Verdict[] = ['evidenced', 'partly-evidenced', 'not-evidenced', 'not-applicable']
 
 /** A verdict as the band says it, from VERDICT_WORDS: the one place verdict words live (M4's verdictWord later). */
 const bandWord = (verdict: Verdict) => VERDICT_WORDS[verdict].toLowerCase()
 
 function Band({ readiness: r }: { readiness: Readiness }) {
   // Not applicable gets a tile only when a control has it.
-  const counted = SEGMENTS.filter(([key]) => key !== 'not_applicable' || r[key] > 0)
-  const words = [...counted.map(([key, verdict]) => `${r[key]} ${bandWord(verdict)}`), `${r.open} open`].join(', ')
+  const counted = SEGMENTS.filter((v) => v !== 'not-applicable' || r.by_verdict[v] > 0)
+  const words = [...counted.map((v) => `${r.by_verdict[v]} ${bandWord(v)}`), `${r.open} open`].join(', ')
   const tiles: [number, string][] = [
     [r.accepted, `accepted of ${r.controls}`],
-    ...counted.map(([key, verdict]): [number, string] => [r[key], bandWord(verdict)]),
+    ...counted.map((v): [number, string] => [r.by_verdict[v], bandWord(v)]),
     [r.open, 'open'],
     [r.remediation_items, 'remediation items'],
   ]
@@ -114,8 +105,8 @@ function Band({ readiness: r }: { readiness: Readiness }) {
       <div><span className="pill">Where you stand</span><h2 id="readiness">Readiness</h2></div>
       <p>Only verdicts you accepted count; the figures describe evidence coverage, not audit results.</p>
       <div className="readiness" role="img" aria-label={`Accepted verdicts: ${words}, of ${r.controls}`}>
-        {SEGMENTS.map(([key, verdict]) => r[key] > 0 && (
-          <span key={key} className={`readiness-${verdict}`} style={{ width: `${(r[key] / r.controls) * 100}%` }} />
+        {SEGMENTS.map((v) => r.by_verdict[v] > 0 && (
+          <span key={v} className={`readiness-${v}`} style={{ width: `${(r.by_verdict[v] / r.controls) * 100}%` }} />
         ))}
       </div>
       <div className="tiles">
@@ -125,7 +116,7 @@ function Band({ readiness: r }: { readiness: Readiness }) {
   )
 }
 
-function Card({ card, onOpen }: { card: ControlCard; onOpen: Props['onOpen'] }) {
+function Card({ card, onOpen, assessing }: { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean }) {
   const edge = card.verdict ?? 'none'
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
@@ -137,9 +128,9 @@ function Card({ card, onOpen }: { card: ControlCard; onOpen: Props['onOpen'] }) 
       <div className="control-title">{card.question}</div>
       <div className="card-meta">
         <span className="mono">{card.iso_27001.replace(/^ISO 27001:2022:? /, 'ISO ')}</span>
-        {card.verdict
-          ? <span className={`chip v-${card.verdict}`}>{VERDICT_WORDS[card.verdict]}</span>
-          : <span className="chip v-none">Not assessed</span>}
+        {assessing ? <span className="chip v-assessing">Assessing</span>
+          : card.verdict ? <span className={`chip v-${card.verdict}`}>{VERDICT_WORDS[card.verdict]}</span>
+            : <span className="chip v-none">Not assessed</span>}
       </div>
     </article>
   )
@@ -160,8 +151,9 @@ function Quotes({ overview }: { overview: Overview }) {
         </p>
       ) : (
         <div className="quotes">
-          {overview.quotes.map((q) => (
-            <article className="quote" key={`${q.doc_id}|${q.quote}`}>
+          {overview.quotes.map((q, i) => (
+            // By position: the quotes are a fixed list, and two may read alike once redacted.
+            <article className="quote" key={i}>
               <blockquote>{q.quote}</blockquote>
               <footer>
                 <span className="mono">{q.doc_id} v{q.version} · {q.section}</span>

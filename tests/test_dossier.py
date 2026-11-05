@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
 
+from vouch import memory
 from vouch.citations import Citation
 from vouch.dossier import QUOTES_SHOWN, overview
 from vouch.graph import (
@@ -75,12 +76,20 @@ def test_with_nothing_assessed_every_control_is_open_and_the_first_is_the_next_s
     assert shown["readiness"] == {
         "controls": 12,
         "accepted": 0,
-        "evidenced": 0,
-        "partly_evidenced": 0,
-        "not_evidenced": 0,
-        "not_applicable": 0,
+        "by_verdict": {
+            "evidenced": 0,
+            "partly-evidenced": 0,
+            "not-evidenced": 0,
+            "not-applicable": 0,
+        },
         "open": 12,
         "remediation_items": 0,
+    }
+    assert shown["by_status"] == {
+        "not-assessed": 12,
+        "waiting-for-review": 0,
+        "accepted": 0,
+        "rejected": 0,
     }
     assert [c["id"] for c in shown["controls"]][:3] == ["1.1.1", "1.6.1", "1.6.2"]
     assert len(shown["controls"]) == 12
@@ -107,13 +116,44 @@ def test_readiness_counts_accepted_verdicts_only():
     assert readiness == {
         "controls": 12,
         "accepted": 5,
-        "evidenced": 2,
-        "partly_evidenced": 1,
-        "not_evidenced": 1,
-        "not_applicable": 1,
+        "by_verdict": {
+            "evidenced": 2,
+            "partly-evidenced": 1,
+            "not-evidenced": 1,
+            "not-applicable": 1,
+        },
         "open": 7,
         "remediation_items": 5,  # the accepted controls' items; proposed and rejected ones wait
     }
+
+
+def test_the_status_counts_cover_every_listed_control():
+    latest = {
+        "1.1.1": seeded("1.1.1", "evidenced", "accepted"),
+        "4.1.2": seeded("4.1.2", "evidenced", "waiting-for-review"),
+        "4.2.1": seeded("4.2.1", "evidenced", "waiting-for-review"),
+        "4.1.3": seeded("4.1.3", "not-evidenced", "rejected"),
+    }
+
+    assert overview(NORDLICHT, CONTROLS, latest)["by_status"] == {
+        "not-assessed": 8,
+        "waiting-for-review": 2,
+        "accepted": 1,
+        "rejected": 1,
+    }
+
+
+def test_an_accepted_control_the_list_leaves_out_is_not_counted():
+    listed = CONTROLS[:2]
+    latest = {c.id: seeded(c.id, "evidenced", "accepted") for c in CONTROLS[:3]}
+
+    shown = overview(NORDLICHT, listed, latest)
+
+    assert shown["readiness"]["controls"] == 2
+    assert shown["readiness"]["accepted"] == 2
+    assert shown["readiness"]["by_verdict"]["evidenced"] == 2
+    assert shown["readiness"]["open"] == 0
+    assert shown["by_status"]["accepted"] == 2
 
 
 def test_each_card_has_its_review_state_and_verdict():
@@ -159,6 +199,19 @@ def test_with_every_control_accepted_there_is_no_next_step():
     assert overview(NORDLICHT, CONTROLS, latest)["next_step"] is None
 
 
+def test_quotes_leave_out_rejected_controls():
+    latest = {
+        "1.1.1": seeded("1.1.1", "evidenced", "rejected", citations=(quote("isms", "Gone."),)),
+        "4.1.2": seeded(
+            "4.1.2", "evidenced", "waiting-for-review", citations=(quote("auth", "Kept."),)
+        ),
+    }
+
+    quotes = overview(NORDLICHT, CONTROLS, latest)["quotes"]
+
+    assert [q["quote"] for q in quotes] == ["Kept."]
+
+
 def test_quotes_come_from_assessed_controls_in_control_order_each_once_and_capped():
     latest = {
         "4.1.2": seeded(
@@ -173,7 +226,7 @@ def test_quotes_come_from_assessed_controls_in_control_order_each_once_and_cappe
         "5.2.9": seeded(
             "5.2.9",
             "evidenced",
-            "rejected",
+            "accepted",
             citations=tuple(quote("backup", f"Backup rule {i}.") for i in range(10)),
         ),
     }
@@ -243,7 +296,7 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
             "verdict": "partly-evidenced",
         }
         assert proposed["readiness"]["accepted"] == 0
-        assert proposed["readiness"]["partly_evidenced"] == 0
+        assert proposed["readiness"]["by_verdict"]["partly-evidenced"] == 0
         assert proposed["next_step"] == {"control_id": DEMO_CONTROL, "action": "review"}
         assert {q["control_id"] for q in proposed["quotes"]} == {DEMO_CONTROL}
 
@@ -252,7 +305,7 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
         accepted = overview_of(client, alice)
     assert card(accepted, DEMO_CONTROL)["status"] == "accepted"
     assert accepted["readiness"]["accepted"] == 1
-    assert accepted["readiness"]["partly_evidenced"] == 1
+    assert accepted["readiness"]["by_verdict"]["partly-evidenced"] == 1
     assert accepted["readiness"]["open"] == 11
     assert accepted["readiness"]["remediation_items"] == len(reviewed["assessment"]["remediation"])
 
@@ -301,3 +354,19 @@ def test_the_overview_outlasts_a_restart_on_postgres(postgres, users):
 
     assert card(body, DEMO_CONTROL)["status"] == "accepted"
     assert body["readiness"]["accepted"] == 1
+
+
+def test_the_overview_reads_no_more_than_each_controls_newest_assessment(
+    database_url, users, monkeypatch
+):
+    alice, _ = users
+
+    def not_read(self):
+        raise AssertionError("the overview read when the user last worked")
+
+    monkeypatch.setattr(memory.Memory, "last_worked", not_read)
+    with TestClient(app_on(database_url)) as client:
+        assess(client, alice)
+        body = overview_of(client, alice)
+
+    assert card(body, DEMO_CONTROL)["status"] == "waiting-for-review"

@@ -5,13 +5,15 @@ import re
 from playwright.sync_api import Page, expect
 
 CONTROL = "4.1.2"
+# Assess, or Assess again once this server holds an assessment of the control (#40 reads it back).
+ASSESS = re.compile(rf"^Assess( again)? {re.escape(CONTROL)}$")
 
 
 def start_assessment(page: Page, vouch_url: str) -> None:
     page.goto(vouch_url)
     page.get_by_role("link", name=f"Open {CONTROL}", exact=True).click()
     paper = page.get_by_role("region", name="Working paper")
-    paper.get_by_role("button", name=f"Assess {CONTROL}", exact=True).click()
+    paper.get_by_role("button", name=ASSESS).click()
 
 
 def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page: Page, vouch_url):
@@ -84,11 +86,20 @@ def test_an_error_event_shows_its_message_in_place_of_the_result(
 
 def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page: Page, vouch_url):
     held = []  # the assessment's request, held open until the test lets it go
-    page.route("**/api/assessments", lambda route: held.append(route))
+    # Only the POST that starts a run is held; the paper's GET of stored assessments (#40) goes through.
+    page.route(
+        "**/api/assessments",
+        lambda route: held.append(route) if route.request.method == "POST" else route.continue_(),
+    )
     posts = []
-    page.on("request", lambda r: posts.append(r) if r.url.endswith("/api/assessments") else None)
+    page.on(
+        "request",
+        lambda r: posts.append(r)
+        if r.method == "POST" and r.url.endswith("/api/assessments")
+        else None,
+    )
     page.goto(f"{vouch_url}/controls/{CONTROL}")
-    button = page.get_by_role("button", name=f"Assess {CONTROL}", exact=True)
+    button = page.get_by_role("button", name=ASSESS)
 
     button.evaluate("b => { b.click(); b.click() }")  # two clicks before React re-renders
     paper = page.get_by_role("region", name="Working paper")
@@ -128,6 +139,9 @@ def test_the_working_paper_survives_a_refresh_and_opens_from_its_address(page: P
 
     page.reload()
     expect(paper.get_by_role("heading", name=CONTROL)).to_be_visible()
+    # The newest stored assessment is read back: proposed, with its verdict and draft answer (#40).
+    expect(paper.get_by_role("region", name="Verdict and draft answer")).to_be_visible()
+    expect(paper.get_by_text("Proposed", exact=True)).to_be_visible()
 
     page.goto(f"{vouch_url}/controls/{CONTROL}")
-    expect(paper.get_by_role("button", name=f"Assess {CONTROL}", exact=True)).to_be_enabled()
+    expect(paper.get_by_role("button", name=f"Assess again {CONTROL}", exact=True)).to_be_enabled()

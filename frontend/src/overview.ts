@@ -1,11 +1,11 @@
 import { useCallback, useRef, useState } from 'react'
-import type { Verdict } from './assessment.ts'
+import type { ReviewStatus, Verdict } from './assessment.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The Dossier overview from `GET /api/overview` (#40), as `vouch.dossier.overview` sends it. */
 
 /** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected. */
-export type ReviewState = 'not-assessed' | 'waiting-for-review' | 'accepted' | 'rejected'
+export type ReviewState = 'not-assessed' | ReviewStatus
 
 export type ControlCard = { id: string; question: string; iso_27001: string; status: ReviewState; verdict: Verdict | null }
 
@@ -13,10 +13,7 @@ export type ControlCard = { id: string; question: string; iso_27001: string; sta
 export type Readiness = {
   controls: number
   accepted: number
-  evidenced: number
-  partly_evidenced: number
-  not_evidenced: number
-  not_applicable: number
+  by_verdict: Record<Verdict, number>
   open: number
   remediation_items: number
 }
@@ -39,13 +36,15 @@ export type Overview = {
   company: string
   country: string
   readiness: Readiness
+  /** How many controls are in each review state. */
+  by_status: Record<ReviewState, number>
   next_step: NextStep
   controls: ControlCard[]
   quotes: Quote[]
 }
 
 /** A control's working paper's address. */
-export const controlPath = (id: string) => `/controls/${id}`
+export const controlPath = (id: string) => `/controls/${encodeURIComponent(id)}`
 
 export const OVERVIEW_FAILED = 'The overview could not be loaded just now. Please try again.'
 

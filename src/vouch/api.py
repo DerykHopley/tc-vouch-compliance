@@ -43,7 +43,7 @@ from vouch.graph import (
 )
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
-from vouch.memory import Memory, process_checkpointer, process_store, progress
+from vouch.memory import Memory, newest_by_control, process_checkpointer, process_store
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -507,7 +507,7 @@ def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) 
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step. Its
     quotes are redacted as the stream's events are."""
-    latest = progress(memory, saver).controls  # each control's newest assessment, from its thread
+    latest = newest_by_control(memory, saver)  # from each control's newest thread
     clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
     return clean
 
