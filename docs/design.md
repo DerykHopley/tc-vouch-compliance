@@ -22,6 +22,7 @@ Keep this file short enough to read before each UI ticket: a component gets a ro
 | Area | Decision | Why | Rejected |
 |---|---|---|---|
 | Screens | **Dossier** overview is the landing page (headline and next steps, a dark readiness band, the 12 controls as cards, evidence quotes); opening a control goes to its **Working paper** (control index on the left, one row per requirement with verdict and exact quotes, review at the foot) | overview to come back to; the working paper is where documents are worked through | chat-first (Counsel), one question at a time (Docket) |
+| Invitation page (2026-11-04, **pending design pass**) | Clerk mode, signed out: the top bar, a Dossier-style hero ("By invitation" pill, "Access is by invitation", one sentence in the formal voice), then Clerk's sign-in form drawn in our tokens (`appearance.variables` as `var(--…)`: `--sheet` card and inputs, `--ink` text and primary button, `--muted`, `--rule` borders, `--navy` focus ring, `--f-body`, 4px radius), so it follows light and dark | reuses the Dossier's parts until the design pass; tokens rather than values keep design-lint clean and the form in step with the theme. **Known, for the design pass (owner, 2026-11-04):** in dark mode Clerk's social button ("Continue with Discord") has no visible edge, as `--rule` is too close to `--sheet`. Sign-in is Discord only, and the text says so | Clerk's default look (cool grey, its own blue) |
 | Chat | Patch's pattern: an "Ask Vouch" button bottom right opens a bubble; enlarged it can be pinned beside the page; Ctrl/Cmd+K opens, Esc closes the bubble but never a pinned chat; at 700px or less a full-screen sheet; it shows the page it's on | the chat stays on top of what you're looking at; pinning covers side by side | chat as its own page; a fixed side rail |
 | Look | **Tailored**: warm glen-check greys, navy for links and focus, brass for small details, oxblood (light) or champagne (dark) for sign-off actions | carries the suit-and-tie persona | Plain (cool grey, IBM Plex Serif headings) |
 | Sign-off colour (2026-11-04) | `--sign` is oxblood `#7A2232` in light (champagne in dark, unchanged); the code had copied the prototype's ink | signing off reads as a weightier act than Assess, as this file's Look row says; sheet text on it 9.3:1 | ink, the same as the primary button |
@@ -44,8 +45,8 @@ Names and uses come from the prototype's Tailored block; M0 copies the values in
 | `--paper` | `tokens.css` `:root` | page background (glen-check grey) | panels |
 | `--sheet` | `tokens.css` `:root` | panels, cards, inputs | page background |
 | `--ink` | `tokens.css` `:root` | body text; primary buttons; the working paper's head rule | large fills other than buttons and bands |
-| `--muted` | `tokens.css` `:root` | secondary text, labels | anything that must be read to act |
-| `--rule` | `tokens.css` `:root` | borders and table rules | text |
+| `--muted` | `tokens.css` `:root` | secondary text, labels; the edge of input fields (5.45:1 on `--sheet` in light, 6.17:1 in dark, measured with `scripts/contrast.py`) | anything that must be read to act |
+| `--rule` | `tokens.css` `:root` | borders and table rules | text; the edge of an input field (1.47:1 on `--sheet` in light, 1.27:1 in dark, under the 3:1 a control's edge needs) |
 | `--navy` | `tokens.css` `:root` | links, focus ring, the running state | sign-off actions |
 | `--sign` | `tokens.css` `:root` | sign-off actions (Accept verdict, approve), decision-bar rule | links, decoration |
 | `--brass` | `tokens.css` `:root` | small details: active tab edge, quote rule, the brand mark, the top strip | text, buttons |
@@ -95,6 +96,9 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Control card | not assessed (dashed `--rule` edge), assessing, proposed, accepted, rejected; the verdict as a coloured bottom edge |
 | Readiness bar | segments by accepted verdict, with the counts in words beside it |
 | Chat | closed (button), bubble, enlarged, pinned; the page it's on |
+| Invitation page (**pending design pass**) | opening ("Opening Vouch…"), Clerk's sign-in, sign-in could not be loaded (Clerk's script or Vouch's chunk failed); and, before it, "Vouch could not be reached" when health can't be read |
+| Developer page (**pending design pass**, #34) | developer only (a compliance lead gets the Dossier and no link); the model, with a field to change it: saving, changed ("The next assessment runs on …"), refused (the API's message, the field marked invalid); "no OpenRouter key" notice, or "a fake script runs every assessment" notice (`ASSESS_FAKE_SCRIPT`); "the developer settings are unavailable just now" (the database is down: a 503 with `"unavailable": "database"`; any other refusal hides the page); "kept until the server restarts" note (no database: the model, the daily limit and counts, the usage); prompt version; the daily limit (#35), with a field like the model's ("Each user may now start N assessments a day."); usage totals: an OpenRouter line (assessments, tokens in and out, cost reported and estimated), a note when some have an incomplete cost, and a fake-model line apart ("estimated, not spent") when the fake ran; the OpenRouter link |
+| Usage line (**pending design pass**, #35) | under the draft answer, its own `Usage` region: tokens in, tokens out, cost ("(estimated)" when computed; "at least …" when some call's cost is unknown; "cost unknown" when none is known), in `.field-note .mono` |
 
 **Checklist:** every state in the row is reachable and looks as described, in light and dark.
 

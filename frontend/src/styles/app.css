@@ -44,6 +44,8 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .hero h1 { font-size: clamp(30px, 4.2vw, 50px); margin: 10px 0 14px; }
 .hero p { max-width: 52ch; margin: 0; color: var(--muted); }
 .hero p b { color: var(--ink); }
+/* The invitation page (clerk mode): Clerk's sign-in under the hero */
+.signin-note { color: var(--muted); margin: 0; }
 .band { background: var(--band); color: var(--band-fg); padding: 32px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 28px; }
 .band h2 { font-size: 30px; margin-top: 8px; }
 .band p { opacity: .8; margin: 0; max-width: 56ch; }
@@ -75,6 +77,17 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .trace b { font-weight: 500; color: var(--navy); margin-right: 6px; }
 .answer { margin: 0; max-width: 72ch; }
 .notice { border-left: 3px solid var(--ink); }
+
+/* Developer page (#34, pending design pass): working-paper sheets, one form row. The field's edge is --muted:
+   --rule on --sheet is 1.47:1, under the 3:1 a control's edge needs (--muted: 5.45:1 light, 6.17:1 dark). */
+.field-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; width: 100%; }
+.field-row label { font-weight: 500; }
+.field { flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 7px 12px; border: 1px solid var(--muted); border-radius: 4px; background: var(--sheet); color: var(--ink); font-size: 14px; }
+.field:hover { border-color: var(--navy); }
+.field[aria-invalid="true"] { border-color: var(--ink); border-width: 2px; }
+.field-note { margin: 0; color: var(--muted); max-width: 72ch; }
+.field-note.notice { color: var(--ink); padding-left: 10px; }
+.sheet a { color: var(--navy); }
 
 /* Ask Vouch: button and bubble */
 .fab, .bubble { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; }

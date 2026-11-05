@@ -81,7 +81,11 @@ describe('the working paper', () => {
   const sse = (event: string, data: object) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
   async function assessWith(stream: ReturnType<typeof heldStream>) {
-    vi.stubGlobal('fetch', async () => new Response(stream.body, { headers: { 'Content-Type': 'text/event-stream' } }))
+    // Only the assessment gets the stream; the page's other requests (the developer API's) wait.
+    vi.stubGlobal('fetch', (url: string) =>
+      url === '/api/assessments'
+        ? Promise.resolve(new Response(stream.body, { headers: { 'Content-Type': 'text/event-stream' } }))
+        : new Promise(() => {}))
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
   }
@@ -118,6 +122,24 @@ describe('the working paper', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
     expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
+  })
+
+  it("shows the assessment's tokens and cost beside its answer", async () => {
+    const result = {
+      assessment: { control_id: '4.1.2', verdict: 'evidenced', answer: 'Sign-in follows exposure.' },
+      usage: { model: 'fake', input_tokens: 1530, output_tokens: 98, reported_cost_usd: 0, estimated_cost_usd: 0.000202,
+        cost_usd: 0.000202, estimated: true, cost_complete: true },
+    }
+    const stream = `event: result\ndata: ${JSON.stringify(result)}\n\n`
+    vi.stubGlobal('fetch', (url: string) =>
+      url === '/api/assessments' ? Promise.resolve(new Response(stream, { status: 200 })) : new Promise(() => {}))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
+    const answer = await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    expect(within(answer).getByRole('region', { name: 'Usage' }).textContent).toBe(
+      '1,530 tokens in · 98 tokens out · $0.0002 (estimated)',
+    )
   })
 
   it('shows the Dossier for an address it does not know', () => {
@@ -219,5 +241,12 @@ describe('Ask Vouch', () => {
     render(<App />)
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(bubble()).toBeTruthy()
+  })
+})
+
+describe('local mode', () => {
+  it('has no sign-out: nobody is signed in', () => {
+    render(<App />)
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
   })
 })
