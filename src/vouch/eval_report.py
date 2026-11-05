@@ -311,33 +311,48 @@ def _run_line(name: str, data: dict[str, Any]) -> str:
     )
 
 
+PAGE_HEAD = (
+    "# Eval report\n\nRendered from the saved raw results by `python -m vouch.evals report`, "
+    "without calling a model. Each cell is the newest complete run of that model on that "
+    "profile; a partial run or a dry run stands in, marked, only when there is no complete one."
+)
+"""How every rendered page starts, whatever its results."""
+RUNS_HEADING = "## Runs"
+"""The rendered page's last section: one `- `file`: ...` line per run."""
+
+
 def render(runs: Sequence[Run]) -> str:
     """The report page for these runs: a table per measure, then the runs it was made from."""
     latest = _latest(runs)
-    lines = [
-        "# Eval report",
-        "",
-        (
-            "Rendered from the saved raw results by `python -m vouch.evals report`, without "
-            "calling a model. Each cell is the newest complete run of that model on that profile; "
-            "a partial run or a dry run stands in, marked, only when there is no complete one."
-        ),
-    ]
+    lines = [PAGE_HEAD]
     for title, explained, cell in MEASURES:
         lines += ["", f"## {title}", "", explained, "", *_table(latest, cell)]
-    lines += ["", "## Runs", ""]
+    lines += ["", RUNS_HEADING, ""]
     lines += [_run_line(*run) for run in sorted(latest.values(), key=lambda r: r[0])]
     return "\n".join(lines) + "\n"
 
 
+def _bare_render(text: str) -> bool:
+    """Whether the text is a rendered page and nothing else, by its content: it starts with the
+    page's head, has no markers, and after its Runs heading holds only run lines, so no reading
+    was written before or after it."""
+    if not text.lstrip().startswith(PAGE_HEAD) or TABLES_START in text or TABLES_END in text:
+        return False
+    _, runs_heading, runs = text.rpartition(f"\n{RUNS_HEADING}\n")
+    if not runs_heading:
+        return False
+    return all(not line.strip() or line.startswith("- `") for line in runs.splitlines())
+
+
 def keep_reading(page: str, existing: str | None) -> str:
     """The rendered page inside its tables block, with whatever an existing file has around
-    that block (the reading) kept as it is. A new file, or one that is exactly this page with
-    no markers (the renderer's own output, no reading), is written whole. Any other file whose
-    block is missing or broken (both markers gone, one missing, doubled or out of order) raises
-    ReportError and is left alone, so a reading is never lost."""
+    that block (the reading) kept as it is. A file with nothing to keep is written as new: no
+    file, an empty or blank one, or one without markers that is only a rendered page (from any
+    results, saved from stdout say: _bare_render). Any other file whose block is missing or
+    broken (both markers gone, one missing, doubled or out of order) raises ReportError and is
+    left alone, so a reading is never lost."""
     block = f"{TABLES_START}\n{page}{TABLES_END}\n"
-    if existing is None or existing == page:
+    if existing is None or not existing.strip() or _bare_render(existing):
         return block
     starts, ends = existing.count(TABLES_START), existing.count(TABLES_END)
     before, _, rest = existing.partition(TABLES_START)

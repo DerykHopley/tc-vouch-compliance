@@ -96,14 +96,14 @@ MODELS: tuple[EvalModel, ...] = (
     ),
     EvalModel(
         GPT_LUNA,
-        "OpenAI's small model, at Haiku's price (#55); judge it with --judge "
-        "anthropic/claude-sonnet-5.5, so OpenAI never judges its own answers",
+        "OpenAI's small model, at Haiku's price (#55); judged by default by Sonnet 5.5, so "
+        "OpenAI never judges its own answers",
         OPENROUTER_SOURCE,
     ),
     EvalModel(
         GPT_SOL,
-        "OpenAI's large model, at Sonnet's price (#55); judge it with --judge "
-        "anthropic/claude-sonnet-5.5, so OpenAI never judges its own answers",
+        "OpenAI's large model, at Sonnet's price (#55); judged by default by Sonnet 5.5, so "
+        "OpenAI never judges its own answers",
         OPENROUTER_SOURCE,
     ),
     EvalModel(
@@ -119,12 +119,26 @@ JUDGE = EvalModel(
     GPT_TERRA,
     "a mid-tier judge from another provider than Anthropic's models, so it never judges their "
     "answers (the Jev Router may route to OpenAI, so it may judge the router's). OpenAI's own "
-    "models (Luna, Sol, and Terra itself, which also ran in #55) are judged with --judge "
-    "anthropic/claude-sonnet-5.5",
+    "models (Luna, Sol, and Terra itself, which also ran in #55) get FALLBACK_JUDGE, Sonnet "
+    "5.5, by default",
     OPENROUTER_SOURCE,
 )
 """The faithfulness judge, on real models unless --judge names another; on the fake, only
-with --judge."""
+with --judge. A model from its own provider gets FALLBACK_JUDGE instead (default_judge)."""
+FALLBACK_JUDGE = SONNET
+"""The judge for a model from JUDGE's provider, as the owner chose for OpenAI's models (#55)."""
+
+
+def _provider(model_id: str) -> str:
+    return model_id.split("/", 1)[0]
+
+
+def default_judge(model_id: str) -> str:
+    """The judge a real model gets when --judge names none: JUDGE, unless the model comes from
+    JUDGE's provider, which would judge its own answers; then FALLBACK_JUDGE."""
+    if _provider(model_id) == _provider(JUDGE.id):
+        return FALLBACK_JUDGE
+    return JUDGE.id
 
 
 class ModelUnavailable(RuntimeError):

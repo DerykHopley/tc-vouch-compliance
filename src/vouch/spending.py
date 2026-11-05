@@ -80,12 +80,12 @@ PRICES = {
 """For a cost OpenRouter doesn't report: each model's list price, its cheapest standard
 endpoint (not a discounted "flex" or "batch" one), from OpenRouter's model list
 (openrouter.ai/api/v1/models and each model's `/endpoints`). Haiku 5.5 read 2026-11-04, the
-others 2026-11-05 (#53; GPT-6 Luna and GPT-6.1 Sol for #55's runs). EU in-region endpoints charge more: 10% for Haiku ($0.11/$0.55)
-and Sonnet ($2.20/$11), GPT-6 Luna ($0.11/$0.55) and GPT-6.1 Sol
-($2.20/$11), 20% for GPT-6.1 Terra (Azure EU, $1.20/$6). These are the eval runner's
-fixed-price hosted models and judge (vouch.eval_models), which the developer page can also pick;
-the runner's Jev Router has no fixed price, so it isn't here. A model missing here has no
-computed cost."""
+others 2026-11-05 (#53; GPT-6 Luna and GPT-6.1 Sol for #55's runs). EU in-region endpoints
+charge more: 10% for Haiku ($0.11/$0.55), Sonnet ($2.20/$11), GPT-6 Luna ($0.11/$0.55) and
+GPT-6.1 Sol ($2.20/$11), 20% for GPT-6.1 Terra (Azure EU, $1.20/$6). These are the eval
+runner's fixed-price hosted models and judge (vouch.eval_models), which the developer page can
+also pick; the runner's Jev Router has no fixed price, so it isn't here (a test keeps it out).
+A model missing here has no computed cost."""
 
 
 @dataclass(frozen=True)

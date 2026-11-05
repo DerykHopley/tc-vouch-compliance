@@ -417,6 +417,28 @@ def test_a_real_model_is_judged_by_the_lists_judge_unless_another_is_named(
     assert endpoint.asked == []
 
 
+@pytest.mark.parametrize(
+    ("model", "named", "judge"),
+    [
+        ("openai/gpt-6-luna", [], "anthropic/claude-sonnet-5.5"),
+        ("openai/gpt-6-luna", ["--judge", "j/other"], "j/other"),
+    ],
+)
+def test_a_model_from_the_judges_provider_gets_another_judge_unless_one_is_named(
+    model, named, judge, tmp_path, monkeypatch, capsys
+):
+    endpoint = FakeEndpoint()
+    monkeypatch.setattr(evals, "real_models", fake_endpoint_for(endpoint))
+
+    code = main(["--model", model, *named, "--results", str(tmp_path)])
+
+    assert code == 2  # the judge runs on OpenRouter, and no key is set
+    captured = capsys.readouterr()
+    assert f"The judge {judge} runs on OpenRouter" in captured.err
+    assert f"Judge: {judge}" in captured.out
+    assert endpoint.asked == []
+
+
 def test_a_fake_run_never_brings_in_the_lists_judge(tmp_path, monkeypatch):
     """With JUDGE named (#53), a plain fake run without a key still runs, free and unjudged."""
 

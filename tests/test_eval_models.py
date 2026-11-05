@@ -7,6 +7,7 @@ import pytest
 from pydantic import SecretStr
 
 from vouch.eval_models import (
+    FALLBACK_JUDGE,
     JUDGE,
     LOCAL_PRICE,
     MODELS,
@@ -14,6 +15,7 @@ from vouch.eval_models import (
     OllamaNotRunning,
     chat_models,
     check_ollama,
+    default_judge,
     price_of,
 )
 from vouch.model_choice import DEFAULT_MODEL, OpenRouter
@@ -168,10 +170,38 @@ def test_each_model_has_one_kind_of_price():
     }
 
 
-def test_the_judge_is_named_priced_and_judges_none_of_its_own_answers():
+def provider(model_id: str) -> str:
+    return model_id.split("/", 1)[0]
+
+
+def test_the_judge_is_named_and_priced_and_not_in_the_model_list():
     assert JUDGE.id not in {m.id for m in MODELS}
     assert JUDGE.price is not None
     assert price_of(JUDGE.id) == JUDGE.price
+
+
+def test_no_listed_model_is_judged_by_default_by_its_own_provider():
+    for m in MODELS:
+        judge = default_judge(m.id)
+        assert provider(judge) != provider(m.id), m.id
+        assert price_of(judge) is not None, judge
+
+
+def test_a_model_from_the_judges_provider_is_judged_by_the_fallback_judge():
+    """GPT-6.1 Terra, the judge, ran as a model too (#55): it is never its own judge."""
+    assert default_judge("openai/gpt-6.1-terra") == FALLBACK_JUDGE == "anthropic/claude-sonnet-5.5"
+    assert default_judge("openai/gpt-6-luna") == FALLBACK_JUDGE
+    assert default_judge(DEFAULT_MODEL) == JUDGE.id
+    assert default_judge("ollama/gpt-oss:20b") == JUDGE.id
+
+
+def test_no_model_with_a_variable_price_is_given_a_listed_one():
+    """The usage meter prices a call from PRICES when OpenRouter reports no cost, so a router in
+    PRICES would be priced as one fixed model: its unreported cost must stay unknown."""
+    variable = [m.id for m in (*MODELS, JUDGE) if m.price_kind == "variable"]
+
+    assert variable  # the Jev Router
+    assert not set(variable) & PRICES.keys()
 
 
 def test_the_app_knows_each_hosted_models_price_so_its_cost_is_never_unknown():

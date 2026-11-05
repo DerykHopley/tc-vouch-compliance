@@ -8,6 +8,8 @@ import pytest
 from test_eval_runner import FakeEndpoint, answers, models
 
 from vouch.eval_report import (
+    TABLES_END,
+    TABLES_START,
     assessment_measures,
     load_runs,
     main,
@@ -235,14 +237,45 @@ def test_a_page_with_its_markers_gone_is_refused_and_left_alone(tmp_path, capsys
     assert "markers" in err and "restore" in err
 
 
-def test_the_renderers_own_unmarked_page_with_no_reading_is_rendered_over(tmp_path):
+def test_the_renderers_own_unmarked_page_from_other_results_is_rendered_over(tmp_path):
+    """A page printed to stdout and saved, from older results: no reading, so nothing to keep."""
+    write(tmp_path, "old.json", raw("nordlicht", "m/old", "2026-11-04T10", 0.25))
     write(tmp_path, "a.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.5))
     out = tmp_path / "eval-report.md"
-    out.write_text(render(load_runs([tmp_path / "a.json"])), encoding="utf-8")
+    out.write_text(render(load_runs([tmp_path / "old.json"])), encoding="utf-8")
 
     assert main([str(tmp_path / "a.json"), "--out", str(out)]) == 0
 
-    assert "| m/x | 50% (20/40) |" in out.read_text(encoding="utf-8")
+    page = out.read_text(encoding="utf-8")
+    assert "| m/x | 50% (20/40) |" in page and "m/old" not in page
+    assert page.startswith(TABLES_START) and page.endswith(f"{TABLES_END}\n")
+
+
+@pytest.mark.parametrize("empty", ["", "\n", "  \n\t\n"])
+def test_an_empty_page_is_rendered_as_new(empty, tmp_path):
+    write(tmp_path, "a.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.5))
+    out = tmp_path / "eval-report.md"
+    out.write_text(empty, encoding="utf-8")
+
+    assert main([str(tmp_path / "a.json"), "--out", str(out)]) == 0
+
+    page = out.read_text(encoding="utf-8")
+    assert page.startswith(TABLES_START) and "| m/x | 50% (20/40) |" in page
+
+
+@pytest.mark.parametrize("where", ["before", "after"])
+def test_an_unmarked_render_with_a_reading_beside_it_is_refused(where, tmp_path, capsys):
+    write(tmp_path, "a.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.5))
+    out = tmp_path / "eval-report.md"
+    rendered = render(load_runs([tmp_path / "a.json"]))
+    reading = "## Reading\n\nWritten by hand.\n"
+    text = reading + "\n" + rendered if where == "before" else rendered + "\n" + reading
+    out.write_text(text, encoding="utf-8")
+
+    assert main([str(tmp_path / "a.json"), "--out", str(out)]) == 2
+
+    assert out.read_text(encoding="utf-8") == text
+    assert "restore" in capsys.readouterr().err
 
 
 def test_an_atomic_write_interrupted_leaves_the_old_file_whole(tmp_path, monkeypatch):

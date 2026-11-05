@@ -38,6 +38,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from vouch.eval_models import (
+    FALLBACK_JUDGE,
     JUDGE,
     MODELS,
     OLLAMA_TIMEOUT_SECONDS,
@@ -48,6 +49,7 @@ from vouch.eval_models import (
     OllamaNotRunning,
     chat_models,
     cost_of,
+    default_judge,
     price_of,
 )
 from vouch.eval_report import (
@@ -733,7 +735,10 @@ def model_list() -> str:
     lines = ["Models (US dollars per million tokens, input / output):"]
     for m in MODELS:
         lines.append(_listed(m))
-    lines.append(f"Judge: {JUDGE.id} (on real models; with {FAKE}, only when --judge names it)")
+    lines.append(
+        f"Judge: {JUDGE.id} (on real models, {FALLBACK_JUDGE} for a model from its provider; "
+        f"with {FAKE}, only when --judge names it)"
+    )
     lines.append(_listed(JUDGE))
     lines.append(f"Also: {FAKE} (the scripted fake model, free), and any ollama/<name> (local).")
     return "\n".join(lines)
@@ -759,7 +764,8 @@ def _parser() -> argparse.ArgumentParser:
         "--judge",
         metavar="<name>",
         help="the faithfulness judge: an OpenRouter model id or ollama/<name>; "
-        f"on a real model {JUDGE.id} unless named, on {FAKE} none unless named",
+        f"on a real model {JUDGE.id} unless named ({FALLBACK_JUDGE} for a model from its "
+        f"provider), on {FAKE} none unless named",
     )
     parser.add_argument("--ollama-url", default=OLLAMA_URL, metavar="<url>")
     parser.add_argument(
@@ -783,11 +789,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _judge_name(args: argparse.Namespace) -> str | None:
-    """The judge named, else the list's judge on a real model; on the fake, only one named, so
-    a free run never brings in a paid judge."""
+    """The judge named, else the default judge on a real model (the list's judge, or the
+    fallback for a model from the judge's provider: default_judge); on the fake, only one
+    named, so a free run never brings in a paid judge."""
     if args.judge is not None:
         return args.judge
-    return JUDGE.id if args.model != FAKE else None
+    return default_judge(args.model) if args.model != FAKE else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -805,6 +812,8 @@ def main(argv: list[str] | None = None) -> int:
         print(model_list())
         return 0
     judge_name = _judge_name(args)
+    if judge_name is not None:
+        print(f"Judge: {judge_name}" + ("" if args.judge else " (the default for this model)"))
     ollama = {"ollama_url": args.ollama_url, "ollama_timeout": args.ollama_timeout}
     try:
         profile = load_named_profile(args.profile)
