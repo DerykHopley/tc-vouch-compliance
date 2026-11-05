@@ -289,6 +289,44 @@ def test_a_real_quote_in_any_form_citing_its_document_is_kept(client, fake, form
     assert guard_steps(events) == []
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "The standard (encryption-standard) requires full-disk encryption on every laptop.",
+        "Your encryption standard [encryption-standard] says that every laptop is encrypted.",
+    ],
+)
+def test_a_document_id_in_the_middle_of_a_sentence_is_a_reference_left_as_written(
+    client, fake, answer
+):
+    fake.reply = answer
+
+    events = say(client, "Tell me about laptops.")
+
+    assert reply(events) == answer
+    assert guard_steps(events) == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        f"{INVENTED_TEXT[:-1]} [encryption-standard].",  # the id ends the sentence
+        f"It says ‘{INVENTED_TEXT}’ [encryption-standard] and more.",  # quoted: anywhere
+    ],
+)
+def test_an_invented_quote_cited_at_a_sentence_end_or_in_quotation_marks_is_dropped(
+    client, fake, answer
+):
+    fake.reply = answer
+
+    events = say(client, "Tell me about laptops.")
+
+    assert "night shift" not in reply(events)
+    assert guard_steps(events) == [
+        "Dropped a quote from encryption-standard: the quote isn't in that document."
+    ]
+
+
 def test_an_invented_german_quote_is_dropped_and_the_reply_after_it_still_sent(client, fake):
     fake.reply = (
         "Der Standard sagt „Jeder Laptop wird zweimal täglich verschlüsselt“ "

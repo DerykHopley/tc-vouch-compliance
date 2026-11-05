@@ -139,14 +139,48 @@ def test_the_blockquote_lines_before_a_document_id_are_checked_whole():
     assert "".join(text for text, _ in sent) == f"{QUOTE_REMOVED}\nThat is all."
 
 
-def test_the_sentence_before_a_document_id_is_held_until_its_bracket_closes_then_checked():
+def test_the_sentence_before_a_document_id_is_held_until_it_ends_then_checked():
     quotes = CheckedCitations(check := Checks(), DOCUMENTS)
 
     assert list(quotes.add(f"Noted. It says {QUOTE} [encryption-sta")) == [("Noted. ", [])]
-    sent = list(quotes.add("ndard] for each one."))
+    assert list(quotes.add("ndard]")) == []  # mid-sentence or at its end: not yet known
+    sent = list(quotes.add(". And more."))
 
     assert check.asked == [(f"It says {QUOTE}", "encryption-standard")]
     assert "".join(text for text, _ in sent).startswith(QUOTE_REMOVED)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        f"The standard (doc) says {QUOTE}.",
+        f"The standard [doc] says {QUOTE}.",
+        f"See the standard [doc], which says {QUOTE}.",
+        f"> {QUOTE} [doc] in a blockquote line that goes on.\n",
+    ],
+)
+def test_a_document_id_mid_sentence_is_a_reference_and_checks_nothing(reply):
+    text, steps, check = checked([reply[:20], reply[20:]])
+
+    assert (text, steps, check.asked) == (reply, [], [])
+
+
+@pytest.mark.parametrize("after", [".", "!", ").", ".”", "\n", ""])
+def test_a_document_id_ending_the_sentence_or_line_cites_it(after):
+    _, steps, check = checked([f"It says {QUOTE} [doc]{after}"])
+
+    assert check.asked == [(f"It says {QUOTE}", "doc")]
+    assert len(steps) == 1
+
+
+def test_whether_an_id_ends_its_sentence_is_waited_for_then_decided():
+    quotes = CheckedCitations(check := Checks(), DOCUMENTS)
+
+    assert list(quotes.add(f"It says {QUOTE} [doc]")) == []
+    sent = list(quotes.add(" and more besides. Next"))
+
+    assert check.asked == []
+    assert "".join(text for text, _ in sent) == f"It says {QUOTE} [doc] and more besides. "
 
 
 def test_a_finished_sentence_is_sent_once_the_next_one_starts():

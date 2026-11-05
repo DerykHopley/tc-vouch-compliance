@@ -62,6 +62,12 @@ _DOC_ID_SO_FAR = re.compile(r"\s*(?:[\[(]\s*[\w.-]*\s*)?")
 """What may follow a closed quotation while its document id is still being written."""
 _CITING = re.compile(r"[\[(]\s*([\w.-]+)\s*[\])]")
 _CITING_SO_FAR = re.compile(r"[\[(]\s*([\w.-]*)\s*$")
+_CLOSERS = r"[)\]}\"'”’»›」』]*"
+_ENDS = re.compile(rf"[ \t]*(?:\n|$)|{_CLOSERS}[.!?…]{_CLOSERS}(?:\s|$)")
+"""What follows a document id that ends its sentence or line: the end of the line, or the
+sentence's closing punctuation (closing brackets and quotation marks around it allowed)."""
+_MAY_END = re.compile(rf"[ \t]*|{_CLOSERS}(?:[.!?…]{_CLOSERS})?")
+"""What may follow such an id while the text after it is still being written."""
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+|\n\s*")
 _LIST_MARK = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
@@ -117,7 +123,10 @@ class CheckedCitations:
             opening = _OPENING.search(text, scan)
             citing = self._next_citing(text, scan)
             if citing is not None and (opening is None or citing.start() < opening.start()):
-                cited = self._cited_before(text, pos, citing)
+                cited = self._cited_before(text, pos, citing, final=final)
+                if isinstance(cited, int):  # whether the id ends its sentence is still to come
+                    hold = cited
+                    break
                 if cited is None:
                     scan = citing.end()
                     continue
@@ -162,10 +171,15 @@ class CheckedCitations:
         """The next complete [doc_id] or (doc_id) from `start`."""
         return _CITING.search(text, start)
 
-    def _cited_before(self, text: str, pos: int, citing: re.Match[str]) -> _Cited | None:
+    def _cited_before(
+        self, text: str, pos: int, citing: re.Match[str], *, final: bool
+    ) -> _Cited | int | None:
         """What the document id `citing` cites, from no earlier than `pos`: the nearest pair of
-        quotation marks just before it, the blockquote lines, or the sentence. None when it
-        cites nothing: an id naming no document, after anything but a long enough quotation."""
+        quotation marks just before it, wherever the id is; else, when the id ends its sentence
+        or line, the blockquote lines or the sentence. None when it cites nothing: an id naming
+        no document, after anything but a long enough quotation, or an id mid-sentence (a
+        reference). Where the text it may cite starts, when whether the id ends its sentence
+        can't be told yet."""
         doc_id = citing.group(1)
         quoted = _quoted_before(text, pos, citing.start())
         if quoted is not None:
@@ -174,6 +188,11 @@ class CheckedCitations:
                 return _Cited(start, citing.end(), quote, doc_id)
             return None
         if not self._names_document(doc_id):
+            return None
+        after = text[citing.end() :]
+        if not final and _MAY_END.fullmatch(after):
+            return _block_or_sentence_start(text, pos, citing.start())
+        if not _ENDS.match(after):
             return None
         start, quote = _block_or_sentence_before(text, pos, citing.start())
         return _Cited(start, citing.end(), quote, doc_id)
