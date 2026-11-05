@@ -1,4 +1,4 @@
-import { type Control, usageWords, VERDICT_WORDS } from './assessment.ts'
+import { type Control, usageWords, verdictWord } from './assessment.ts'
 import type { Run } from './useAssessment.ts'
 
 /** The assess button's words for each state of the run; `running` is also the chip's and the steps' label. */
@@ -15,7 +15,7 @@ export function RunChip({ run }: { run: Run }) {
   if (run.status === 'running') return <span className="chip v-assessing">{ACTION.running}</span>
   if (run.status === 'done') {
     const v = run.assessment.verdict
-    return <span className={`chip v-${v}`}>{VERDICT_WORDS[v]}</span>
+    return <span className={`chip v-${v}`}>{verdictWord(v, run.assessment.answer_language)}</span>
   }
   return <span className="chip v-none">Not assessed</span>
 }
