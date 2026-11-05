@@ -117,14 +117,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     def read_path(name: str) -> Path | None:
         return _read_path(env, name)
 
+    mode = read(AUTH_MODE_ENV)
     keys_set = [name for name in CLERK_KEY_ENVS if read(name)]
-    if keys_set and not read(AUTH_MODE_ENV):
+    if keys_set and not mode:
         # Keys without a mode is a deploy that lost its mode, not a developer's machine (#151).
         raise SettingsError(
             f"{AUTH_MODE_ENV} is not set, but Clerk keys are ({', '.join(keys_set)}): "
             f"set {AUTH_MODE_ENV}=clerk, or {AUTH_MODE_ENV}=local to run without sign-in"
         )
-    auth_mode = read(AUTH_MODE_ENV) or "local"
+    auth_mode = mode or "local"
     if auth_mode not in get_args(AuthMode):
         raise SettingsError(f"{AUTH_MODE_ENV} must be one of: {', '.join(get_args(AuthMode))}")
     clerk = None

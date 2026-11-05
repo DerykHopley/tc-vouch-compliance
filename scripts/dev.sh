@@ -8,7 +8,7 @@
 # A port already in use stops the run before anything starts. The API runs only the scripted fake
 # model: the bundled demo script, or the one ASSESS_FAKE_SCRIPT names. It drops
 # OPENROUTER_API_KEY, with which the API would run the paid model (vouch.model_choice). It runs
-# in local auth mode unless VOUCH_AUTH_MODE says otherwise: .envrc loads the Clerk keys, and keys
+# in local auth mode unless VOUCH_AUTH_MODE is set: .envrc loads the Clerk keys, and keys
 # with a blank mode refuse to start (#151).
 # Needs: bash 4.4 or newer, python3, curl, uv and npm; backend deps (uv sync) and front-end deps
 # (npm ci in frontend/). `wait -n` and an empty array under `set -u` need bash 4.4; macOS has 3.2.
