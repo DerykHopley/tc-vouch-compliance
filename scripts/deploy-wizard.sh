@@ -370,10 +370,11 @@ elif [[ $DRY == no ]]; then
 fi
 
 step  # Deploy
-# Sign-in accepts session tokens only from the service's own address: the one it has, or for a new
-# service the address Cloud Run will give it (https://SERVICE-PROJECT_NUMBER.REGION.run.app).
-URL_NOW=$(service_field status.url)
-AUTHORIZED_PARTIES="${URL_NOW:-https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app}"
+# Sign-in accepts session tokens from one address only, Cloud Run's fixed one (#178): it is known
+# before the service exists and never changes. Cloud Run also serves an older service at a hashed
+# address (what status.url gives); sign-in there is refused, so it is never the one to share.
+SHARE_URL="https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app"
+AUTHORIZED_PARTIES="$SHARE_URL"
 SECRETS_ARG=$(IFS=,; printf '%s' "${PINNED[*]}")
 ENV_VARS="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZED_PARTIES"
 if [[ -n "$DISCORD_SERVER_ID" ]]; then
@@ -396,16 +397,14 @@ run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --re
 step  # URL
 LOGS=(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\"" \
   --project="$PROJECT_ID" --limit=50 --freshness=1h)
-URL=$(service_field status.url)
-if [[ $DRY == yes ]]; then URL="https://the-service-address"
-else
-  [[ -n "$URL" ]] || stop "Cloud Run has no address for $SERVICE: was it deployed? The log: $(quoted "${LOGS[@]}")"
-  [[ "$URL" == "$AUTHORIZED_PARTIES" ]] || stop "Cloud Run gave the service $URL, but sign-in was set to accept $AUTHORIZED_PARTIES. Run scripts/deploy-wizard.sh again: it uses the service's own address."
+# status.url only shows the service exists; it may be the hashed address, which isn't shared (#178).
+if [[ $DRY == no ]]; then
+  [[ -n "$(service_field status.url)" ]] || stop "Cloud Run has no address for $SERVICE: was it deployed? The log: $(quoted "${LOGS[@]}")"
 fi
-ok "Vouch is at $URL"
+ok "Vouch is at $SHARE_URL (share this one: sign-in works only there)"
 
 step  # Health check
-HEALTH=(curl -fsS --max-time 90 "$URL/api/health")
+HEALTH=(curl -fsS --max-time 90 "$SHARE_URL/api/health")
 if [[ $DRY == yes ]]; then show "${HEALTH[@]}"
 else
   say "The first answer can take 10 to 30 s: it starts the container."
@@ -421,9 +420,9 @@ else
 $(setup_commands)
     then: $RERUN_DB_READY"
   done
-  [[ $healthy == yes ]] || stop "$URL/api/health didn't answer ok with the database reachable. The log says why: $(quoted "${LOGS[@]}")"
-  ok "$URL/api/health answers ok, the database reachable"
+  [[ $healthy == yes ]] || stop "$SHARE_URL/api/health didn't answer ok with the database reachable. The log says why: $(quoted "${LOGS[@]}")"
+  ok "$SHARE_URL/api/health answers ok, the database reachable"
 fi
 
 printf '\n%s%s✓ Done.%s %s\n\n' "$B" "$G" "$N" \
-  "$([[ $DRY == yes ]] && echo 'Dry run: nothing ran, nothing written.' || echo "Open $URL")"
+  "$([[ $DRY == yes ]] && echo 'Dry run: nothing ran, nothing written.' || echo "Open $SHARE_URL")"

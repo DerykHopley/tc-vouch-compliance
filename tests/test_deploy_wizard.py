@@ -14,10 +14,13 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 WIZARD = ROOT / "scripts" / "deploy-wizard.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 URL = "https://vouch-123.europe-west1.run.app"  # the deterministic URL, for project number 123
+HASHED = "https://vouch-abc123xyz-ew.a.run.app"  # the address status.url gives an older service
 IMAGE = "europe-west1-docker.pkg.dev/vouch-demo-123/vouch/vouch"
 SQL_INSTANCE = "vouch-demo-123:europe-west1:vouch-db"
 DEFAULT_ACCOUNT = "123-compute@developer.gserviceaccount.com"
@@ -227,6 +230,11 @@ def deploy_args(calls: str) -> dict[str, str]:
     return dict(arg.split("=", 1) for arg in deploy if arg.startswith("--") and "=" in arg)
 
 
+def env_vars(calls: str) -> dict[str, str]:
+    """The deploy's --set-env-vars, as NAME: value."""
+    return dict(item.split("=", 1) for item in deploy_args(calls)["--set-env-vars"].split(","))
+
+
 def pinned(calls: str) -> dict[str, str]:
     """The deploy's --set-secrets, as env var: secret:version."""
     return dict(pair.split("=", 1) for pair in deploy_args(calls)["--set-secrets"].split(","))
@@ -407,10 +415,10 @@ def test_the_deploy_pins_each_secret_s_version_and_carries_the_settings_and_inst
     assert result.returncode == 0, result.stdout + result.stderr
     assert pinned(calls) == {secret: f"{secret}:1" for secret, _ in SECRETS.values()}
     args = deploy_args(calls)
-    assert args["--set-env-vars"].split(",") == [
-        f"CLERK_PUBLISHABLE_KEY={PUBLISHABLE}",
-        f"CLERK_AUTHORIZED_PARTIES={URL}",
-    ]
+    assert env_vars(calls) == {
+        "CLERK_PUBLISHABLE_KEY": PUBLISHABLE,
+        "CLERK_AUTHORIZED_PARTIES": URL,
+    }
     assert args["--add-cloudsql-instances"] == SQL_INSTANCE
     assert args["--max-instances"] == "1" and args["--max"] == "1"
     assert args["--min-instances"] == "0"
@@ -524,16 +532,21 @@ def test_a_failed_gcloud_step_stops_there_naming_the_step_and_the_rerun(tmp_path
 def test_a_first_deploy_accepts_sign_in_from_the_deterministic_url(tmp_path):
     result, calls = deployed(tmp_path, existing=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert f"CLERK_AUTHORIZED_PARTIES={URL}" in deploy_args(calls)["--set-env-vars"]
+    assert env_vars(calls)["CLERK_AUTHORIZED_PARTIES"] == URL
 
 
-def test_a_service_url_other_than_the_one_set_says_to_run_again(tmp_path):
-    hashed = "https://vouch-abc123xyz-ew.a.run.app"
-    result, calls = deployed(tmp_path, existing=False, url=hashed)
-    assert result.returncode != 0
-    assert f"CLERK_AUTHORIZED_PARTIES={URL}" in deploy_args(calls)["--set-env-vars"]
-    assert hashed in result.stderr
-    assert "again" in result.stderr
+@pytest.mark.parametrize("existing", [True, False], ids=["redeploy", "first-deploy"])
+def test_a_service_whose_status_url_is_hashed_authorizes_and_checks_only_the_fixed_one(
+    tmp_path, existing
+):
+    """#178: Cloud Run's status.url may be the hashed address; sign-in, the health check and the
+    address to share are the fixed one, whatever status.url says."""
+    result, calls = deployed(tmp_path, existing=existing, url=HASHED)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert env_vars(calls)["CLERK_AUTHORIZED_PARTIES"] == URL
+    assert f"Vouch is at {URL}" in result.stdout
+    assert calls_to(calls, "curl ")[-1][-1] == f"{URL}/api/health"
+    assert HASHED not in result.stdout + result.stderr
 
 
 def test_the_deploy_caps_the_service_not_just_the_revision_at_one_instance(tmp_path):
@@ -672,7 +685,7 @@ def test_a_discord_server_id_in_wizard_env_reaches_the_service(tmp_path):
     saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1", DISCORD_SERVER_ID=server)
     result, calls = deployed(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert f"DISCORD_SERVER_ID={server}" in deploy_args(calls)["--set-env-vars"].split(",")
+    assert env_vars(calls)["DISCORD_SERVER_ID"] == server
     assert "members of Discord server 111111111111111111" in result.stdout
 
 
