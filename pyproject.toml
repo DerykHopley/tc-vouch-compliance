@@ -23,7 +23,7 @@ vouch-db-setup = "vouch.database:main"
 
 [dependency-groups]
 dev = [
-    "deepeval>=4.3.3",
+    "deepeval==4.3.1",
     "openpyxl>=3.1.5",
     "pyjwt[crypto]>=2.9",
     "pytest",
