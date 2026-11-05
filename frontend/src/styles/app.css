@@ -27,8 +27,9 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .btn-ghost { border-color: transparent; background: none; color: var(--navy); padding: 4px 10px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-/* Not assessed: --muted text, as --not-applicable on its -bg is 3.3:1 in light, under the 4.5:1 floor. */
-.v-none { color: var(--muted); background: var(--not-applicable-bg); }
+/* Not assessed (design.md, 2026-11-04): hollow, no colour of its own: a 1px --rule ring, a hollow dot, --muted text. */
+.v-none { color: var(--muted); background: none; box-shadow: inset 0 0 0 1px var(--rule); }
+.v-none::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
 .v-evidenced { color: var(--evidenced); background: var(--evidenced-bg); }
 .v-partly-evidenced { color: var(--partly-evidenced); background: var(--partly-evidenced-bg); }
 .v-not-evidenced { color: var(--not-evidenced); background: var(--not-evidenced-bg); }
@@ -44,12 +45,20 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .hero h1 { font-size: clamp(30px, 4.2vw, 50px); margin: 10px 0 14px; }
 .hero p { max-width: 52ch; margin: 0; color: var(--muted); }
 .hero p b { color: var(--ink); }
+.hero .next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 /* The invitation page (clerk mode): Clerk's sign-in under the hero */
 .signin-note { color: var(--muted); margin: 0; }
 .band { background: var(--band); color: var(--band-fg); padding: 32px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 28px; }
 .band h2 { font-size: 30px; margin-top: 8px; }
 .band p { opacity: .8; margin: 0; max-width: 56ch; }
 .band .pill { border-color: transparent; background: color-mix(in srgb, var(--band-fg) 14%, transparent); color: var(--band-fg); }
+/* The readiness bar: segments by accepted verdict; the open rest is the band's own colour, under a faint ring. */
+.readiness { grid-column: 1 / -1; display: flex; height: 10px; border-radius: 2px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--band-fg) 18%, transparent); }
+.readiness-evidenced { background: var(--evidenced); }
+.readiness-partly-evidenced { background: var(--partly-evidenced); }
+.readiness-not-evidenced { background: var(--not-evidenced); }
+.readiness-not-applicable { background: var(--not-applicable); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; grid-column: 1 / -1; }
 .tile { border: 1px solid color-mix(in srgb, var(--band-fg) 18%, transparent); border-radius: 2px; padding: 14px 16px; }
 .tile b { display: block; font: 400 38px/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
@@ -57,12 +66,34 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .controls { display: grid; gap: 16px; }
 .head { text-align: center; display: grid; gap: 8px; justify-items: center; }
 .head h2 { font-size: 30px; }
+.head p { margin: 0; color: var(--muted); max-width: 60ch; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; display: grid; gap: 8px; align-content: start; }
-.card-head { background: var(--paper); border-radius: 2px 2px 0 0; height: 74px; display: flex; align-items: flex-end; padding: 8px 10px; border-bottom: 4px solid var(--not-applicable); }
+.card-head { background: var(--paper); border-radius: 2px 2px 0 0; height: 74px; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 8px 10px; border-bottom: 4px solid var(--not-applicable); color: var(--ink); text-decoration: none; }
+.card-head:hover b { text-decoration: underline; text-decoration-color: var(--navy); }
 .card-head b { font: 400 24px/1 var(--f-display); }
+/* The verdict as the card's coloured bottom edge; not assessed is a dashed --rule edge (design.md, 2026-11-04). */
+.card-head.edge-evidenced { border-bottom-color: var(--evidenced); }
+.card-head.edge-partly-evidenced { border-bottom-color: var(--partly-evidenced); }
+.card-head.edge-not-evidenced { border-bottom-color: var(--not-evidenced); }
+.card-head.edge-not-applicable { border-bottom-color: var(--not-applicable); }
+.card-head.edge-none { border-bottom: 4px dashed var(--rule); }
+/* Review state tag: proposed, accepted, rejected, in words; accepted in ink, the others muted. */
+.tag { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--rule); border-radius: 2px; padding: 0 6px; background: var(--sheet); }
+.tag-accepted { color: var(--ink); border-color: var(--ink); }
 .control-title { font-size: 13px; line-height: 1.4; }
-.card-meta { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.card-meta { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* Evidence quote cards: quoted evidence in serif italic under a brass rule (design.md, Type and Citation) */
+.quotes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.quote { background: var(--sheet); border: 1px solid var(--rule); border-top: 2px solid var(--brass); border-radius: 4px; padding: 16px; display: grid; gap: 10px; align-content: space-between; min-width: 0; }
+.quote blockquote { margin: 0; font: italic 14px/1.5 var(--f-quote); overflow-wrap: anywhere; }
+.quote footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; overflow-wrap: anywhere; }
+.kind { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 2px; margin-right: 6px; }
+.kind-documented { border: 1px dashed var(--muted); }
+.kind-implemented { border: 1px solid var(--navy); color: var(--navy); }
+.flag { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--ink); margin-right: 6px; }
+.empty { color: var(--muted); justify-self: center; text-align: center; max-width: 60ch; }
 
 /* Working paper (minimal until M2): head ruled in ink, the agent's steps in mono, then the verdict and draft answer */
 .paper { max-width: 900px; margin: 0 auto; padding-block: 24px 110px; display: grid; gap: 16px; }

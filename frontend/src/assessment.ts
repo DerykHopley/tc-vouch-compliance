@@ -15,7 +15,7 @@ export const VERDICT_WORDS: Record<Verdict, string> = {
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 
-export type Control = { id: string; title: string; owner: string }
+export type Control = { id: string; title: string }
 
 export type Step = { node: string; text: string }
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */

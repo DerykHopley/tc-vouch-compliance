@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Control } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
+import Dossier from './Dossier.tsx'
+import { controlPath, useOverview } from './overview.ts'
 import TopBar from './TopBar.tsx'
 import { useAssessment } from './useAssessment.ts'
-import WorkingPaper, { AssessButton, RunChip } from './WorkingPaper.tsx'
+import WorkingPaper from './WorkingPaper.tsx'
 
 type Theme = 'light' | 'dark'
 
@@ -14,22 +16,21 @@ function systemTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-// Nordlicht and one VDA ISA control (its question, unchanged), until the Dossier lists all 12.
-const COMPANY = 'Nordlicht Komponenten GmbH'
-const CONTROL: Control = {
-  id: '4.1.2',
-  title: 'To what extent is the user access to IT services and IT systems secured?',
-  owner: 'IT Security Officer',
-}
+type View = { name: 'dossier' } | { name: 'developer' } | { name: 'paper'; controlId: string }
 
-type View = 'dossier' | 'paper' | 'developer'
+const DEVELOPER_PATH = '/developer'
+const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
-/** Each view's address: the control's working paper at /controls/<id>, the developer page at /developer, the Dossier at /. */
-const PATHS: Record<View, string> = { dossier: '/', paper: `/controls/${CONTROL.id}`, developer: '/developer' }
+/** Each view's address: a control's working paper at /controls/<id>, the developer page at /developer, the Dossier at /. */
+const pathOf = (view: View) =>
+  view.name === 'paper' ? controlPath(view.controlId) : view.name === 'developer' ? DEVELOPER_PATH : '/'
 
 /** The view an address shows; the Dossier for one it does not know. */
-const viewAt = (path: string): View =>
-  (Object.keys(PATHS) as View[]).find((view) => PATHS[view] === path) ?? 'dossier'
+function viewAt(path: string): View {
+  if (path === DEVELOPER_PATH) return { name: 'developer' }
+  const control = CONTROL_PATH.exec(path)
+  return control ? { name: 'paper', controlId: decodeURIComponent(control[1]) } : { name: 'dossier' }
+}
 
 /** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out. */
 export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
@@ -46,7 +47,7 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   }, [])
   /** Shows a view and gives it its address, so a refresh or a shared link opens it again. */
   const showView = (next: View) => {
-    if (window.location.pathname !== PATHS[next]) window.history.pushState(null, '', PATHS[next])
+    if (window.location.pathname !== pathOf(next)) window.history.pushState(null, '', pathOf(next))
     setView(next)
   }
   // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
@@ -57,11 +58,29 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
     void developerSettings().then((settings) => current && setDeveloper(settings))
     return () => { current = false }
   }, [])
-  const shown: View = view === 'developer' && !developer ? 'dossier' : view
-  const { run, start } = useAssessment(CONTROL.id)
-  const assess = () => {
-    showView('paper')
-    void start()
+  const overview = useOverview()
+  const { load } = overview
+  const onDossier = view.name === 'dossier'
+  // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
+  const read = useRef(false)
+  useEffect(() => {
+    if (onDossier || !read.current) void load()
+    read.current = true
+  }, [load, onDossier])
+  // A control's working paper needs its question from the overview; a control the overview doesn't list shows the
+  // Dossier.
+  const control = view.name === 'paper' && overview.state.status === 'ready'
+    ? overview.state.overview.controls.find((c) => c.id === view.controlId)
+    : undefined
+  const shown: View['name'] =
+    view.name === 'developer' && developer ? 'developer'
+      : view.name === 'paper' && (control || overview.state.status !== 'ready') ? 'paper'
+        : 'dossier'
+  // Set by the Dossier's "Assess" next step: the working paper starts the assessment as it opens.
+  const [assessOnOpen, setAssessOnOpen] = useState(false)
+  const open = (controlId: string, assess: boolean) => {
+    setAssessOnOpen(assess)
+    showView({ name: 'paper', controlId })
   }
 
   return (
@@ -69,10 +88,10 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
       <TopBar>
         <nav className="nav" aria-label="Main">
           <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
-            onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
+            onClick={(e) => { e.preventDefault(); showView({ name: 'dossier' }) }}>Dossier</a>
           {developer && (
-            <a href={PATHS.developer} aria-current={shown === 'developer' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); showView('developer') }}>Developer</a>
+            <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); showView({ name: 'developer' }) }}>Developer</a>
           )}
         </nav>
         <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
@@ -81,38 +100,25 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
         {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
       </TopBar>
       {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
-        : shown === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
-      <main className="dossier wrap">
-        <section className="hero">
-          <span className="pill">{COMPANY} · Germany</span>
-          <h1>Prepared for audit. One piece of evidence at a time.</h1>
-          <p><b>0 of 1 controls accepted.</b> Start with {CONTROL.id}: assess it and review what Vouch finds.</p>
-        </section>
-        <section className="band" aria-labelledby="readiness">
-          <div><span className="pill">Where you stand</span><h2 id="readiness">Readiness</h2></div>
-          <p>Only verdicts you accepted count; the figures describe evidence coverage, not audit results.</p>
-          <div className="tiles">
-            <div className="tile"><b>0</b><span>accepted of 1</span></div>
-            <div className="tile"><b>0</b><span>evidenced</span></div>
-            <div className="tile"><b>0</b><span>partly evidenced</span></div>
-            <div className="tile"><b>0</b><span>not evidenced</span></div>
-            <div className="tile"><b>1</b><span>not assessed</span></div>
-          </div>
-        </section>
-        <section className="controls">
-          <div className="head"><span className="pill">The controls</span><h2>One control to begin</h2></div>
-          <div className="cards">
-            <article className="card" aria-labelledby="control-title">
-              <div className="card-head"><b>{CONTROL.id}</b></div>
-              <div id="control-title" className="control-title">{CONTROL.title}</div>
-              <div className="card-meta"><span>{CONTROL.owner}</span><RunChip run={run} /></div>
-              <div><AssessButton control={CONTROL} run={run} onAssess={assess} /></div>
-            </article>
-          </div>
-        </section>
-      </main>
-      )}
+        : control && overview.state.status === 'ready' ? (
+          <main>
+            <ControlPaper key={control.id} company={overview.state.overview.company}
+              control={{ id: control.id, title: control.question }} assessOnOpen={assessOnOpen} />
+          </main>
+        )
+          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} />}
       <AskVouch />
     </>
   )
+}
+
+/** One control's working paper and its assessment run; `assessOnOpen` starts the run as it opens. */
+function ControlPaper({ company, control, assessOnOpen }: { company: string; control: Control; assessOnOpen: boolean }) {
+  const { run, start } = useAssessment(control.id)
+  const startOnce = useRef(assessOnOpen)
+  useEffect(() => {
+    if (startOnce.current) void start()
+    startOnce.current = false
+  }, [start])
+  return <WorkingPaper company={company} control={control} run={run} onAssess={() => void start()} />
 }

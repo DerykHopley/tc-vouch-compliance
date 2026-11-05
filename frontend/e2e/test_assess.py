@@ -1,4 +1,4 @@
-"""A compliance lead assesses a control from its card and watches the steps stream in (#12)."""
+"""A compliance lead opens a control from its card, assesses it and watches the steps stream in (#12)."""
 
 import re
 
@@ -9,8 +9,9 @@ CONTROL = "4.1.2"
 
 def start_assessment(page: Page, vouch_url: str) -> None:
     page.goto(vouch_url)
-    card = page.get_by_role("article").filter(has_text=CONTROL)
-    card.get_by_role("button", name=f"Assess {CONTROL}").click()
+    page.get_by_role("link", name=f"Open {CONTROL}", exact=True).click()
+    paper = page.get_by_role("region", name="Working paper")
+    paper.get_by_role("button", name=f"Assess {CONTROL}", exact=True).click()
 
 
 def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page: Page, vouch_url):
@@ -86,8 +87,8 @@ def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page
     page.route("**/api/assessments", lambda route: held.append(route))
     posts = []
     page.on("request", lambda r: posts.append(r) if r.url.endswith("/api/assessments") else None)
-    page.goto(vouch_url)
-    button = page.get_by_role("button", name=f"Assess {CONTROL}")
+    page.goto(f"{vouch_url}/controls/{CONTROL}")
+    button = page.get_by_role("button", name=f"Assess {CONTROL}", exact=True)
 
     button.evaluate("b => { b.click(); b.click() }")  # two clicks before React re-renders
     paper = page.get_by_role("region", name="Working paper")

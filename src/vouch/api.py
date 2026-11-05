@@ -1,5 +1,6 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, and the developer page's settings.
+compliance lead's review, the review that resumes it, the Dossier overview, and the developer
+page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -25,6 +26,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.database import Connection, Database, DatabaseUnavailable
+from vouch.dossier import AssessmentRecords, MemoryAssessmentRecords, overview
 from vouch.graph import (
     Assessment,
     InvalidReviewError,
@@ -36,7 +38,7 @@ from vouch.graph import (
     memory_checkpointer,
     resume,
 )
-from vouch.isa import IsaControl, UnknownControlError, load_isa_control
+from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.model_choice import (
     MODEL_ID,
@@ -320,6 +322,14 @@ def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(status_code=429, content=content, headers=headers)
 
 
+def app_records(request: Request) -> AssessmentRecords:
+    """Each user's latest assessment of each control (vouch.dossier), kept for the overview."""
+    return request.app.state.records
+
+
+AppRecords = Annotated[AssessmentRecords, Depends(app_records)]
+
+
 @router.post("/assessments", response_class=EventSourceResponse)
 def create_assessment(
     requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
@@ -333,6 +343,7 @@ def create_assessment(
     _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
     user: CurrentUser,
     spending: AppSpending,
+    records: AppRecords,
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, a `requirement` event per judged requirement, one
     `result` (the proposed Assessment, waiting for review, with the `thread_id` to review it
@@ -350,7 +361,7 @@ def create_assessment(
     The `result` carries the assessment's `usage`, its tokens and cost (vouch.spending), metered
     on every model call (the judge's and the remediation drafts' included), which is kept
     whether the assessment ends in its result or an `error`: the calls were made. Every event
-    is redacted (security layer 4).
+    is redacted (security layer 4). The proposed assessment is kept for the overview.
     """
     control = requested.control
     meter = UsageMeter(chosen)
@@ -363,6 +374,7 @@ def create_assessment(
         )
         for item in steps:
             if isinstance(item, Assessment):
+                records.keep(user.id, item)
                 result = {"assessment": item.to_dict(), "usage": meter.usage().to_dict()}
                 yield from _redacted("result", result)
             elif isinstance(item, RequirementVerdict):
@@ -394,7 +406,11 @@ def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
 
 @router.post("/assessments/{thread_id}/review")
 def review_assessment(
-    thread_id: str, decision: Annotated[ReviewDecision, Body()], saver: Checkpointer
+    thread_id: str,
+    decision: Annotated[ReviewDecision, Body()],
+    saver: Checkpointer,
+    user: CurrentUser,
+    records: AppRecords,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
@@ -410,7 +426,18 @@ def review_assessment(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except InvalidReviewError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    records.keep(user.id, reviewed)
     clean, _ = redact_data({"assessment": reviewed.to_dict()})
+    return clean
+
+
+@router.get("/overview")
+def dossier_overview(profile: Profile, user: CurrentUser, records: AppRecords) -> dict[str, Any]:
+    """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
+    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step. Its
+    quotes are redacted as the stream's events are."""
+    latest = records.latest(user.id, profile.id)
+    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
     return clean
 
 
@@ -515,6 +542,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
     app.state.spending = SpendingGuard(spending_store(app.state.database))
+    app.state.records = MemoryAssessmentRecords()
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)
