@@ -12,9 +12,10 @@ item; the lead's override of M1 to not evidenced gives M1 a "not drafted" item t
 """
 
 import threading
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import psycopg
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
@@ -24,10 +25,11 @@ from test_database import empty_database, needs_postgres  # noqa: F401 (a fixtur
 from test_memory import app_on, assess, restart
 from test_profile_switch import app_with
 
-from vouch import remediation
+from vouch import api, remediation
 from vouch.api import PROFILE_HEADER
 from vouch.database import AUDIT_TABLE, REMEDIATION_TABLE
-from vouch.graph import NO_OWNER, NOT_DRAFTED
+from vouch.graph import MAX_DUE_DAYS, NO_OWNER, NOT_DRAFTED
+from vouch.profile import DEFAULT_PROFILE
 
 database_url = test_memory.database_url
 postgres = test_memory.postgres
@@ -146,15 +148,28 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
     }
 
 
-def test_approve_without_changes_keeps_the_draft_as_it_was(database_url, users):
+def test_approve_with_only_an_owner_keeps_the_drafts_due_date(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
         (draft,) = items(client, alice, thread_id)
-        response = decide(client, alice, thread_id, decision="approve")
+        response = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
 
     assert response.status_code == 200, response.text
-    assert response.json()["item"] == draft | {"status": "approved"}
+    assert response.json()["item"] == draft | {"status": "approved", "owner_role": OWNER}
+
+
+def test_a_not_drafted_item_needs_an_owner_role_to_be_approved(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        thread_id = accepted_with_an_item(client, alice)
+        refused = decide(client, alice, thread_id, decision="approve")
+        placeholder = decide(client, alice, thread_id, decision="approve", owner_role=NO_OWNER)
+        shown = items(client, alice, thread_id)
+
+    assert (refused.status_code, placeholder.status_code) == (422, 422)
+    assert refused.json()["detail"] == remediation.OWNER_NEEDED
+    assert [i["status"] for i in shown] == ["draft"]
 
 
 def test_discard_takes_the_item_out_of_the_open_count_and_writes_one_entry(database_url, users):
@@ -177,17 +192,19 @@ def test_an_approved_item_stays_in_the_open_count(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
-        decide(client, alice, thread_id, decision="approve")
+        decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         assert open_items(client, alice) == 1
 
 
 def test_a_due_date_in_the_past_is_refused_with_a_hint_and_nothing_is_kept(database_url, users):
     alice, _ = users
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (date.today() - timedelta(days=2)).isoformat()  # past in every time zone
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
         before = trail(client, alice)
-        refused = decide(client, alice, thread_id, decision="approve", due_date=yesterday)
+        refused = decide(
+            client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=yesterday
+        )
         shown = items(client, alice, thread_id)
         after = trail(client, alice)
 
@@ -202,7 +219,12 @@ def test_a_due_date_of_today_is_accepted(database_url, users):
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
         response = decide(
-            client, alice, thread_id, decision="approve", due_date=date.today().isoformat()
+            client,
+            alice,
+            thread_id,
+            decision="approve",
+            owner_role=OWNER,
+            due_date=date.today().isoformat(),
         )
 
     assert response.status_code == 200, response.text
@@ -213,14 +235,107 @@ def test_approving_twice_keeps_one_item_and_one_entry(database_url, users):
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
         first = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
-        second = decide(client, alice, thread_id, decision="approve", owner_role="Someone else")
-        shown = items(client, alice, thread_id)
+        second = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         approvals = [e for e in trail(client, alice) if e["action"] == "approve"]
 
     assert (first.status_code, second.status_code) == (200, 200)
-    assert second.json() == first.json()  # the kept item, not the second request's
-    assert [i["owner_role"] for i in shown] == [OWNER]
+    assert second.json() == first.json()
     assert len(approvals) == 1
+
+
+def test_a_second_approval_with_other_values_is_refused_naming_the_kept_ones(database_url, users):
+    alice, _ = users
+    due = later()
+    with TestClient(app_on(database_url)) as client:
+        thread_id = accepted_with_an_item(client, alice)
+        decide(client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due)
+        other_owner = decide(
+            client, alice, thread_id, decision="approve", owner_role="Someone else"
+        )
+        other_date = decide(
+            client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=later(40)
+        )
+        shown = items(client, alice, thread_id)
+        approvals = [e for e in trail(client, alice) if e["action"] == "approve"]
+
+    assert (other_owner.status_code, other_date.status_code) == (409, 409)
+    assert other_owner.json()["detail"] == (
+        f"This remediation item was approved already, with owner {OWNER} and due {due}."
+    )
+    assert [(i["owner_role"], i["due_date"]) for i in shown] == [(OWNER, due)]
+    assert len(approvals) == 1
+
+
+def test_repeating_an_approval_after_its_due_date_gives_the_kept_item(
+    database_url, users, monkeypatch
+):
+    """#4: an existing decision is looked up before the due date is checked."""
+    alice, _ = users
+    due = date.today().isoformat()
+    with TestClient(app_on(database_url)) as client:
+        thread_id = accepted_with_an_item(client, alice)
+        first = decide(client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due)
+        later_on = datetime.now(UTC) + timedelta(days=3)
+        monkeypatch.setattr(remediation, "now", lambda: later_on)
+        again = decide(client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due)
+        approvals = [e for e in trail(client, alice) if e["action"] == "approve"]
+
+    assert (first.status_code, again.status_code) == (200, 200)
+    assert again.json() == first.json()
+    assert len(approvals) == 1
+
+
+def test_a_due_date_beyond_the_horizon_is_refused_with_a_hint(database_url, users):
+    alice, _ = users
+    too_far = (date.today() + timedelta(days=MAX_DUE_DAYS + 2)).isoformat()
+    with TestClient(app_on(database_url)) as client:
+        thread_id = accepted_with_an_item(client, alice)
+        refused = decide(
+            client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=too_far
+        )
+        within = decide(
+            client,
+            alice,
+            thread_id,
+            decision="approve",
+            owner_role=OWNER,
+            due_date=later(MAX_DUE_DAYS),
+        )
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == remediation.TOO_FAR.format(due=too_far, days=MAX_DUE_DAYS)
+    assert within.status_code == 200, within.text
+
+
+# The due date's bounds are calendar days current somewhere on Earth (#3): a lead west of UTC
+# may still be on yesterday's date, one east of it on tomorrow's.
+AT = datetime(2026, 11, 5, 5, 0, tzinfo=UTC)  # 2026-11-04 17:00 in UTC-12
+LATE = datetime(2026, 11, 5, 13, 0, tzinfo=UTC)  # 2026-11-05 01:00 in UTC-12
+
+
+@pytest.mark.parametrize(
+    "at, due, refused",
+    [
+        (AT, "2026-11-04", False),  # still today in UTC-12
+        (AT, "2026-11-03", True),
+        (LATE, "2026-11-05", False),
+        (LATE, "2026-11-04", True),  # past everywhere once UTC-12 reached the 5th
+    ],
+)
+def test_a_due_date_is_past_only_when_it_is_past_everywhere(at, due, refused):
+    if refused:
+        with pytest.raises(remediation.DueDateError, match="has passed"):
+            remediation.check_due(date.fromisoformat(due), at)
+    else:
+        remediation.check_due(date.fromisoformat(due), at)
+
+
+def test_the_horizon_counts_from_the_latest_calendar_day_current_anywhere():
+    at = datetime(2026, 11, 5, 11, 0, tzinfo=UTC)  # 2026-11-06 01:00 in UTC+14
+    last = date(2026, 11, 6) + timedelta(days=MAX_DUE_DAYS)
+    remediation.check_due(last, at)
+    with pytest.raises(remediation.DueDateError, match="days away"):
+        remediation.check_due(last + timedelta(days=1), at)
 
 
 def test_two_approvals_at_once_keep_one_item_and_one_entry(database_url, users):
@@ -232,7 +347,8 @@ def test_two_approvals_at_once_keep_one_item_and_one_entry(database_url, users):
 
         def approve() -> None:
             start.wait()
-            codes.append(decide(client, alice, thread_id, decision="approve").status_code)
+            response = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+            codes.append(response.status_code)
 
         threads = [threading.Thread(target=approve) for _ in range(2)]
         for thread in threads:
@@ -250,7 +366,7 @@ def test_a_decided_item_cannot_be_decided_the_other_way(database_url, users):
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="discard")
-        refused = decide(client, alice, thread_id, decision="approve")
+        refused = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         shown = items(client, alice, thread_id)
         actions = [e["action"] for e in trail(client, alice)]
 
@@ -356,7 +472,7 @@ def test_a_failing_trail_write_keeps_no_item(postgres, users):
         thread_id = accepted_with_an_item(client, alice)
         with postgres.connection() as conn:  # the entry breaks a constraint
             conn.execute(f"ALTER TABLE {AUDIT_TABLE} ADD CONSTRAINT no CHECK (action != 'approve')")
-        failed = decide(client, alice, thread_id, decision="approve")
+        failed = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         shown = items(client, alice, thread_id)
         with postgres.connection() as conn:
             kept = conn.execute(f"SELECT count(*) AS n FROM {REMEDIATION_TABLE}").fetchone()
@@ -398,3 +514,64 @@ def test_one_profiles_items_and_decisions_do_not_show_under_another(tmp_path, us
         assert open_items(client, nordlicht) == 1
         assert open_items(client, testwerk) == 0
         assert [i["status"] for i in items(client, nordlicht, thread_id)] == ["approved"]
+
+
+@needs_postgres
+def test_before_vouch_db_setup_adds_the_table_reads_see_no_decisions_and_writes_say_so(
+    postgres, users, caplog
+):
+    """#2: a deploy onto a database set up before #43 keeps its Dossier; deciding waits for
+    vouch-db-setup."""
+    alice, _ = users
+    with TestClient(app_on(postgres.url), raise_server_exceptions=False) as client:
+        thread_id = accepted_with_an_item(client, alice)
+        with postgres.connection() as conn:
+            conn.execute(f"DROP TABLE {REMEDIATION_TABLE}")
+        overview = client.get("/api/overview", headers=alice)
+        opened = client.get(f"/api/assessments/{thread_id}", headers=alice)
+        refused = decide(client, alice, thread_id, decision="discard")
+
+    assert overview.status_code == 200
+    assert overview.json()["readiness"]["remediation_items"] == 1
+    assert opened.status_code == 200
+    assert [i["status"] for i in opened.json()["assessment"]["remediation"]] == ["draft"]
+    assert refused.status_code == 503
+    assert "run vouch-db-setup" in caplog.text
+
+
+@needs_postgres
+def test_the_items_table_refuses_an_update_a_delete_and_a_truncate(postgres, users):
+    alice, _ = users
+    with TestClient(app_on(postgres.url)) as client:
+        thread_id = accepted_with_an_item(client, alice)
+        decide(client, alice, thread_id, decision="discard")
+
+    for statement in (
+        f"UPDATE {REMEDIATION_TABLE} SET status = 'approved'",
+        f"DELETE FROM {REMEDIATION_TABLE}",
+        f"TRUNCATE {REMEDIATION_TABLE}",
+    ):
+        with postgres.connection() as conn, pytest.raises(psycopg.errors.RaiseException) as error:
+            conn.execute(statement)
+        assert "final" in str(error.value)
+    with postgres.connection() as conn:
+        kept = conn.execute(f"SELECT status FROM {REMEDIATION_TABLE}").fetchall()
+    assert kept == [{"status": "discarded"}]
+
+
+def test_the_overview_asks_only_for_the_counted_threads_discarded_items(database_url, users):
+    """#9: the store answers for the threads named, discarded items only."""
+    alice, _ = users
+    app = app_on(database_url)
+    with TestClient(app) as client:
+        counted = accepted_with_an_item(client, alice)
+        other = accepted_with_an_item(client, alice)
+        decide(client, alice, counted, decision="discard")
+        decide(client, alice, other, decision="discard")
+        approved = accepted_with_an_item(client, alice)
+        decide(client, alice, approved, decision="approve", owner_role=OWNER)
+        store = api.remediation_items(app.state.database)
+        user, profile = alice["X-Test-User"], DEFAULT_PROFILE
+
+        assert store.discarded(user, profile, [counted, approved]) == {(counted, "M1")}
+        assert store.discarded(user, profile, []) == set()

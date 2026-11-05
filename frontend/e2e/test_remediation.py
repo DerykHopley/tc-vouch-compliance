@@ -76,7 +76,8 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_writes_an_audit_entry(
     paper = open_paper(page, paper_url)
     draft = item(paper)
     expect(draft).to_contain_text("Draft")
-
+    # Vouch suggested no owner for this item: Approve waits for one.
+    expect(draft.get_by_role("button", name="Approve M1")).to_be_disabled()
     draft.get_by_label("Owner role").fill(OWNER)
     with page.expect_response(re.compile(r"/remediation/M1$")) as answer:
         draft.get_by_role("button", name="Approve M1").click()
@@ -107,16 +108,17 @@ def test_discard_takes_the_item_out_of_the_open_count(page: Page, paper_url):
 def test_a_past_due_date_is_refused_with_a_hint(page: Page, paper_url):
     thread_id = accepted_with_an_item(page.request, paper_url)
     paper = open_paper(page, paper_url)
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    past = (date.today() - timedelta(days=2)).isoformat()  # past in every time zone
 
     draft = item(paper)
-    draft.get_by_label("Due date").fill(yesterday)
+    draft.get_by_label("Owner role").fill(OWNER)
+    draft.get_by_label("Due date").fill(past)
     with page.expect_response(re.compile(r"/remediation/M1$")) as answer:
         draft.get_by_role("button", name="Approve M1").click()
     assert answer.value.status == 422
 
     expect(draft.get_by_role("alert")).to_have_text(
-        f"The due date {yesterday} has passed. Choose today or a later date."
+        f"The due date {past} has passed. Choose today or a later date."
     )
     expect(draft.get_by_label("Due date")).to_have_attribute("aria-invalid", "true")
     expect(draft).to_contain_text("Draft")
@@ -127,6 +129,7 @@ def test_a_double_click_approves_once(page: Page, paper_url):
     thread_id = accepted_with_an_item(page.request, paper_url)
     paper = open_paper(page, paper_url)
 
+    item(paper).get_by_label("Owner role").fill(OWNER)
     with page.expect_response(re.compile(r"/remediation/M1$")):
         item(paper).get_by_role("button", name="Approve M1").dblclick()
     expect(item(paper)).to_contain_text("Approved")

@@ -187,6 +187,22 @@ CREATE_REMEDIATION = (
     "owner_role text NOT NULL, due_date date NOT NULL, decided_at timestamptz NOT NULL, "
     "PRIMARY KEY (user_id, profile_id, thread_id, requirement_id))"
 )
+CREATE_REMEDIATION_GUARD = (
+    "CREATE OR REPLACE FUNCTION vouch_remediation_final() RETURNS trigger LANGUAGE plpgsql AS "
+    "$$ BEGIN RAISE EXCEPTION 'a remediation decision is final'; END $$"
+)
+CREATE_REMEDIATION_TRIGGERS = (
+    (
+        f"CREATE OR REPLACE TRIGGER {REMEDIATION_TABLE}_final BEFORE UPDATE OR DELETE ON "
+        f"{REMEDIATION_TABLE} FOR EACH ROW EXECUTE FUNCTION vouch_remediation_final()"
+    ),
+    (
+        f"CREATE OR REPLACE TRIGGER {REMEDIATION_TABLE}_no_truncate BEFORE TRUNCATE ON "
+        f"{REMEDIATION_TABLE} FOR EACH STATEMENT EXECUTE FUNCTION vouch_remediation_final()"
+    ),
+)
+"""A decision is kept as made, as its audit entry is: the table refuses an update, a delete or
+a truncate, whoever asks."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -594,21 +610,44 @@ class Database:
                 "AND requirement_id = %(requirement_id)s",
                 item,
             ).fetchone()
-            assert existing is not None  # the insert met it, and nothing deletes one
+            if existing is None:  # the insert met it, and the guard lets nothing delete one
+                raise DatabaseUnavailable(f"a decision in {REMEDIATION_TABLE} vanished")
             return existing, False
 
     def remediation_items(
-        self, user_id: str, profile_id: str, thread_id: str | None = None
+        self, user_id: str, profile_id: str, thread_id: str
     ) -> list[dict[str, Any]]:
-        """The user's decided remediation items under the profile (of one assessment's thread,
-        when given): mappings of REMEDIATION_COLUMNS. Raises DatabaseUnavailable."""
-        with self.connection() as conn, self._needs_setup(REMEDIATION_TABLE):
-            return conn.execute(
-                f"SELECT {', '.join(REMEDIATION_COLUMNS)} FROM {REMEDIATION_TABLE} "
-                "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
-                "AND (%(thread_id)s::text IS NULL OR thread_id = %(thread_id)s)",
-                {"user_id": user_id, "profile_id": profile_id, "thread_id": thread_id},
-            ).fetchall()
+        """The user's decided remediation items of one assessment's thread under the profile:
+        mappings of REMEDIATION_COLUMNS. None before vouch-db-setup made the table (a deploy
+        that adds it, before setup runs): nothing is decided yet. Raises DatabaseUnavailable."""
+        return self._read_remediation(
+            f"SELECT {', '.join(REMEDIATION_COLUMNS)} FROM {REMEDIATION_TABLE} "
+            "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
+            "AND thread_id = %(thread_id)s",
+            {"user_id": user_id, "profile_id": profile_id, "thread_id": thread_id},
+        )
+
+    def discarded_remediation(
+        self, user_id: str, profile_id: str, thread_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """The thread and requirement ids of the user's discarded remediation items of those
+        threads under the profile; none before vouch-db-setup made the table. Raises
+        DatabaseUnavailable."""
+        return self._read_remediation(
+            f"SELECT thread_id, requirement_id FROM {REMEDIATION_TABLE} "
+            "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
+            "AND status = 'discarded' AND thread_id = ANY(%(thread_ids)s)",
+            {"user_id": user_id, "profile_id": profile_id, "thread_ids": thread_ids},
+        )
+
+    def _read_remediation(self, query: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Rows of REMEDIATION_TABLE; none when it isn't there yet (logged: run vouch-db-setup)."""
+        with self.connection() as conn:
+            try:
+                return conn.execute(query, params).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", REMEDIATION_TABLE)
+                return []
 
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
@@ -653,6 +692,9 @@ class Database:
                     conn.execute(trigger)
                 conn.execute(ADD_AUDIT_REVIEWER_NAME)
                 conn.execute(CREATE_REMEDIATION)
+                conn.execute(CREATE_REMEDIATION_GUARD)
+                for trigger in CREATE_REMEDIATION_TRIGGERS:
+                    conn.execute(trigger)
         finally:
             conn.close()
 

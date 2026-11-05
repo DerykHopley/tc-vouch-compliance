@@ -5,7 +5,7 @@ import { type ControlCard, controlPath, isoLabel, type Overview } from './overvi
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import Remediation from './Remediation.tsx'
-import { type RemediationItem, withItem } from './remediation.ts'
+import type { RemediationItem } from './remediation.ts'
 import { type Override, rollUp, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import VerdictChip from './VerdictChip.tsx'
@@ -62,9 +62,11 @@ type PaperProps = {
   onAssess: () => void
   onOpen: (controlId: string) => void
   onOverview: () => void
-  /** The lead's decision is recorded (a review, or a remediation item's approval or discard): the assessment as it
-   * now stands. */
+  /** The lead's decision is recorded: the reviewed assessment. */
   onReviewed: (assessment: Assessment) => void
+  /** A remediation item's approval or discard is recorded (#43): the item as kept, to put in the latest copy of the
+   * thread's assessment (two decisions may land in either order). */
+  onItemDecided: (threadId: string, item: RemediationItem) => void
   /** Reads the assessment again (another tab reviewed it first); false when it couldn't be. */
   onRefresh: () => Promise<boolean>
 }
@@ -75,7 +77,8 @@ type PaperProps = {
  * draft answer, then one row per requirement: its column, verdict, evidence kind, stale flag, reason and exact quotes.
  */
 export default function WorkingPaper(props: PaperProps) {
-  const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh } = props
+  const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
+    onItemDecided } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until the decision; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
@@ -170,7 +173,7 @@ export default function WorkingPaper(props: PaperProps) {
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
                   decidable: review === 'accepted',
-                  onDecided: (item) => { if (assessed) onReviewed(withItem(assessed, item)) },
+                  onDecided: (item) => { if (assessed?.thread_id) onItemDecided(assessed.thread_id, item) },
                 }} />
             ) : <Requirements requirements={requirements} />}
             {assessed?.status && assessed.thread_id && (
@@ -291,7 +294,7 @@ type Overrides = {
 }
 
 /** The assessment's remediation items, one per not-evidenced requirement (#43): `decidable` once it is accepted. */
-type Items = {
+type RemediationItems = {
   shown: RemediationItem[]
   threadId: string
   decidable: boolean
@@ -307,7 +310,7 @@ type JudgedProps = {
   onEdit: (requirementId: string | null) => void
   onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
-  items: Items
+  items: RemediationItems
 }
 
 /**
@@ -377,8 +380,9 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                     </figure>
                   ))}
                   {item && items.threadId && (
-                    <Remediation item={item} threadId={items.threadId} decidable={items.decidable}
-                      onDecided={items.onDecided} />
+                    // A new key when the item changes, so its fields start from the kept values.
+                    <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
+                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} />
                   )}
                 </div></td>
               </tr>,

@@ -764,3 +764,37 @@ describe('local mode', () => {
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
   })
 })
+
+describe('remediation items', () => {
+  const draft = (id: string) => ({ requirement_id: id, missing: `What ${id} lacks.`, owner_role: 'CISO',
+    due_date: '2027-02-01', status: 'draft' })
+  const ACCEPTED = { ...STORED, status: 'accepted', verdict: 'not-evidenced',
+    requirements: ['M1', 'M2'].map((id) => ({ id, column: 'must', text: `${id}.`, verdict: 'not-evidenced',
+      reason: 'Nothing on file.', citations: [] })),
+    remediation: [draft('M1'), draft('M2')] }
+
+  it('keeps both of two decisions in flight, whichever lands first', async () => {
+    const answers: Record<string, (r: Response) => void> = {}
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const decided = /\/remediation\/(M\d)$/.exec(url)
+      if (decided) return new Promise<Response>((resolve) => { answers[decided[1]] = resolve })
+      return url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [ACCEPTED] }))
+          : url.startsWith('/api/assessments/') ? Promise.resolve(Response.json({ assessment: ACCEPTED }))
+            : new Promise<Response>(() => {})
+    }))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const item = (id: string) => screen.getByRole('region', { name: `Remediation item ${id}` })
+    await screen.findByRole('region', { name: 'Remediation item M1' })
+
+    await userEvent.click(within(item('M1')).getByRole('button', { name: 'Approve M1' }))
+    await userEvent.click(within(item('M2')).getByRole('button', { name: 'Discard M2' }))
+    await act(async () => answers.M1(Response.json({ item: { ...draft('M1'), status: 'approved' } })))
+    await act(async () => answers.M2(Response.json({ item: { ...draft('M2'), status: 'discarded' } })))
+
+    expect(within(item('M1')).getByText('Approved')).toBeTruthy()
+    expect(within(item('M2')).getByText('Discarded')).toBeTruthy()
+    expect(within(item('M1')).queryByRole('button')).toBeNull()
+  })
+})

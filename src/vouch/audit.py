@@ -1,10 +1,10 @@
 """The audit trail (#39): the lead's every action, append-only, written with its decision.
 
 One entry per action of the compliance lead: the review's accept or reject, each override in
-it, and each remediation item approved or discarded (vouch.remediation, #43). An entry says who, when, under which
-profile, on which control (and requirement), the note, the verdict before and after, the
-versions of the evidence documents it rests on, and the model and prompt version of the run,
-read from the assessment's thread, never assumed.
+it, and each remediation item approved or discarded (vouch.remediation, #43). An entry says
+who, when, under which profile, on which control (and requirement), the note, the verdict
+before and after, the versions of the evidence documents it rests on, and the model and prompt
+version of the run, read from the assessment's thread, never assumed.
 
 A review is recorded or not at all (`review`). Its entries are built from the waiting
 assessment and the decision before anything is written, and the trail keeps the two together:
@@ -105,7 +105,8 @@ class Page:
     next: int | None
 
 
-def _now() -> datetime:
+def now() -> datetime:
+    """The time an action is recorded at, in UTC: the trail's and vouch.remediation's clock."""
     return datetime.now(UTC)
 
 
@@ -290,7 +291,7 @@ def review(
     *,
     reviewer: Reviewer,
     scope: str = "",
-    clock: Callable[[], datetime] = _now,
+    clock: Callable[[], datetime] = now,
 ) -> Assessment:
     """`resume` the thread with the lead's decision and record its entries, together: the
     entries are built first, and when they can't be built or written, the decision isn't

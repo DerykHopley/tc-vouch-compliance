@@ -1,11 +1,13 @@
 import type { Assessment } from './assessment.ts'
-import { refusedBecause } from './review.ts'
-import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
+import { authHeaders, refusedBecause, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The lead's decisions on remediation items (#43), through `POST .../remediation/{requirement_id}`. */
 
 /** A draft until the lead decides; then approved or discarded, for good (`vouch.remediation.ItemStatus`). */
 export type ItemStatus = 'draft' | 'approved' | 'discarded'
+
+/** The owner role of an item Vouch drafted no owner for (`vouch.graph.NO_OWNER`): the lead names one to approve it. */
+export const NO_OWNER = 'no owner suggested'
 
 export const ITEM_WORDS: Record<ItemStatus, string> = { draft: 'Draft', approved: 'Approved', discarded: 'Discarded' }
 

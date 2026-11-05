@@ -9,34 +9,52 @@ vouch.database's `decide_remediation`; without a database, this process's memory
 whose writes can't fail).
 
 A decision is final: the same decision again changes nothing and writes no entry (a double
-click approves once); the other one is refused. Only an accepted assessment's items are
-decided, as the review can still change a proposed one's (an override adds or removes items),
-and a rejected one is assessed again.
+click approves once); the other one, or an approval with other values, is refused, naming what
+was kept. Only an accepted assessment's items are decided, as the review can still change a
+proposed one's (an override adds or removes items), and a rejected one is assessed again.
+
+The lead picks a due date in their own calendar, which the server doesn't know: a date is
+refused only when it is past everywhere (before today in UTC-12), or further away than the
+graph's horizon from the latest calendar day current anywhere (today in UTC+14).
 """
 
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timedelta
 from functools import cache
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, NamedTuple, Protocol
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
 
-from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, process_trail
+from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, now, process_trail
 from vouch.database import Database
-from vouch.graph import NO_NUL_PATTERN, Assessment, RemediationItem, load_assessment
+from vouch.graph import (
+    MAX_DUE_DAYS,
+    NO_NUL_PATTERN,
+    NO_OWNER,
+    Assessment,
+    RemediationItem,
+    load_assessment,
+)
 
 ItemStatus = Literal["draft", "approved", "discarded"]
 Decision = Literal["approve", "discard"]
 DECIDED: dict[Decision, ItemStatus] = {"approve": "approved", "discard": "discarded"}
 MAX_OWNER_ROLE = 200
+EARLIEST_OFFSET = timedelta(hours=-12)  # UTC-12: the last place a calendar day is still current
+LATEST_OFFSET = timedelta(hours=14)  # UTC+14: the first place a calendar day begins
 
 PAST_DUE = "The due date {due} has passed. Choose today or a later date."
+TOO_FAR = "The due date {due} is more than {days} days away. Choose an earlier date."
+OWNER_NEEDED = "Vouch suggested no owner for this item. Name the role that owns the fix."
 NOT_ACCEPTED = "Remediation items are approved or discarded once the control's verdict is accepted."
 NO_ITEM = "This assessment has no remediation item for requirement {requirement_id}."
 DECIDED_ALREADY = "This remediation item was {status} already."
+APPROVED_WITH_OTHERS = (
+    "This remediation item was approved already, with owner {owner_role} and due {due_date}."
+)
 
 
 class DecisionRequest(BaseModel):
@@ -68,7 +86,7 @@ class DecidedItem:
     status: ItemStatus
     missing: str
     owner_role: str
-    due_date: str  # ISO 8601
+    due_date: date
     decided_at: datetime
 
     def shown(self) -> dict[str, Any]:
@@ -77,11 +95,24 @@ class DecidedItem:
 
 
 Key = tuple[str, str]
-"""An item's thread id and requirement id."""
+"""An item's thread id and requirement id, under one user and profile."""
 
 
-class PastDueError(ValueError):
-    """An approval with a due date before today (a 422)."""
+class ItemKey(NamedTuple):
+    """Where one decision is kept: the user, the profile, the thread and the requirement."""
+
+    user_id: str
+    profile_id: str
+    thread_id: str
+    requirement_id: str
+
+
+class DueDateError(ValueError):
+    """An approval's due date is past everywhere, or beyond the horizon (a 422)."""
+
+
+class OwnerNeededError(ValueError):
+    """An approval of an item Vouch suggested no owner for names none (a 422)."""
 
 
 class NotAcceptedError(RuntimeError):
@@ -93,15 +124,16 @@ class UnknownItemError(LookupError):
 
 
 class DecidedAlreadyError(RuntimeError):
-    """The item was decided the other way already (a 409)."""
+    """The item was decided already, the other way or with other values (a 409)."""
 
 
 def item_data(item: RemediationItem | DecidedItem, status: ItemStatus) -> dict[str, Any]:
+    due = item.due_date
     return {
         "requirement_id": item.requirement_id,
         "missing": item.missing,
         "owner_role": item.owner_role,
-        "due_date": item.due_date,
+        "due_date": due.isoformat() if isinstance(due, date) else due,
         "status": status,
     }
 
@@ -115,6 +147,15 @@ def shown_items(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> l
     return shown
 
 
+def check_due(due: date, at: datetime) -> None:
+    """DueDateError for a due date past everywhere at `at` (before the date in UTC-12), or more
+    than MAX_DUE_DAYS after the latest date current anywhere (the date in UTC+14)."""
+    if due < (at + EARLIEST_OFFSET).date():
+        raise DueDateError(PAST_DUE.format(due=due.isoformat()))
+    if due > (at + LATEST_OFFSET).date() + timedelta(days=MAX_DUE_DAYS):
+        raise DueDateError(TOO_FAR.format(due=due.isoformat(), days=MAX_DUE_DAYS))
+
+
 class RemediationItems(Protocol):
     """Where the lead's decisions are kept, each with its audit entry."""
 
@@ -125,10 +166,12 @@ class RemediationItems(Protocol):
         nothing is written. (The kept item, whether this call decided it.)"""
         ...
 
-    def decided(
-        self, user_id: str, profile_id: str, thread_id: str | None = None
-    ) -> dict[Key, DecidedItem]:
-        """The user's decided items under the profile (one thread's, when given)."""
+    def decided(self, user_id: str, profile_id: str, thread_id: str) -> dict[Key, DecidedItem]:
+        """The user's decided items of one thread under the profile."""
+        ...
+
+    def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
+        """Which of the user's items of those threads under the profile were discarded."""
         ...
 
 
@@ -138,13 +181,13 @@ class ProcessItems:
 
     def __init__(self, trail: Callable[[], ProcessTrail] = process_trail) -> None:
         self._trail = trail
-        self._items: dict[tuple[str, str, str, str], DecidedItem] = {}
+        self._items: dict[ItemKey, DecidedItem] = {}
         self._guard = threading.Lock()
 
     def decide(
         self, user_id: str, profile_id: str, item: DecidedItem, entry: AuditEntry
     ) -> tuple[DecidedItem, bool]:
-        key = (user_id, profile_id, item.thread_id, item.requirement_id)
+        key = ItemKey(user_id, profile_id, item.thread_id, item.requirement_id)
         with self._guard:
             kept = self._items.get(key)
             if kept is not None:
@@ -153,26 +196,33 @@ class ProcessItems:
             self._trail().keep([entry])
         return item, True
 
-    def decided(
-        self, user_id: str, profile_id: str, thread_id: str | None = None
-    ) -> dict[Key, DecidedItem]:
+    def _mine(self, user_id: str, profile_id: str, thread_ids: Iterable[str]) -> list[DecidedItem]:
+        threads = set(thread_ids)
         with self._guard:
-            return {
-                (thread, requirement): item
-                for (user, profile, thread, requirement), item in self._items.items()
-                if (user, profile) == (user_id, profile_id) and thread_id in (None, thread)
-            }
+            return [
+                item
+                for key, item in self._items.items()
+                if (key.user_id, key.profile_id) == (user_id, profile_id)
+                and key.thread_id in threads
+            ]
+
+    def decided(self, user_id: str, profile_id: str, thread_id: str) -> dict[Key, DecidedItem]:
+        mine = self._mine(user_id, profile_id, [thread_id])
+        return {(i.thread_id, i.requirement_id): i for i in mine}
+
+    def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
+        mine = self._mine(user_id, profile_id, thread_ids)
+        return {(i.thread_id, i.requirement_id) for i in mine if i.status == "discarded"}
 
 
 def _from_row(row: Mapping[str, Any]) -> DecidedItem:
-    due = row["due_date"]
     return DecidedItem(
         thread_id=row["thread_id"],
         requirement_id=row["requirement_id"],
         status=row["status"],
         missing=row["missing"],
         owner_role=row["owner_role"],
-        due_date=due.isoformat() if isinstance(due, date) else due,
+        due_date=row["due_date"],
         decided_at=row["decided_at"],
     )
 
@@ -191,12 +241,17 @@ class PostgresItems:
         kept, new = self.db.decide_remediation(row, [audit_row])
         return _from_row(kept), new
 
-    def decided(
-        self, user_id: str, profile_id: str, thread_id: str | None = None
-    ) -> dict[Key, DecidedItem]:
-        rows = self.db.remediation_items(user_id, profile_id, thread_id)
-        items = [_from_row(row) for row in rows]
+    def decided(self, user_id: str, profile_id: str, thread_id: str) -> dict[Key, DecidedItem]:
+        items = [
+            _from_row(row) for row in self.db.remediation_items(user_id, profile_id, thread_id)
+        ]
         return {(i.thread_id, i.requirement_id): i for i in items}
+
+    def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
+        if not thread_ids:
+            return set()
+        rows = self.db.discarded_remediation(user_id, profile_id, list(thread_ids))
+        return {(row["thread_id"], row["requirement_id"]) for row in rows}
 
 
 @cache
@@ -204,10 +259,6 @@ def process_items() -> ProcessItems:
     """Decisions without a database: one store per process, so a restart forgets them with the
     assessments."""
     return ProcessItems()
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
 
 
 def _entry(
@@ -227,13 +278,29 @@ def _entry(
         thread_id=assessment.thread_id,
         action=decision,
         requirement_id=item.requirement_id,
-        note=f"{item.missing} Owner: {item.owner_role}. Due {item.due_date}.",
+        note=f"{item.missing} Owner: {item.owner_role}. Due {item.due_date.isoformat()}.",
         verdict_before=verdict,
         verdict_after=verdict,
         evidence=evidence_versions([requirement] if requirement else []),
         model=assessment.model,
         prompt_version=assessment.prompt_version,
     )
+
+
+def _as_kept(kept: DecidedItem, request: DecisionRequest) -> DecidedItem:
+    """The kept item, when the request asks for what it already is; else DecidedAlreadyError,
+    naming what was kept, so the lead's other values aren't silently dropped."""
+    if kept.status != DECIDED[request.decision]:
+        raise DecidedAlreadyError(DECIDED_ALREADY.format(status=kept.status))
+    if request.decision == "approve" and (
+        request.owner_role not in (None, kept.owner_role)
+        or request.due_date not in (None, kept.due_date)
+    ):
+        due = kept.due_date.isoformat()
+        raise DecidedAlreadyError(
+            APPROVED_WITH_OTHERS.format(owner_role=kept.owner_role, due_date=due)
+        )
+    return kept
 
 
 def decide(
@@ -246,36 +313,41 @@ def decide(
     reviewer: Reviewer,
     profile_id: str,
     scope: str,
-    clock: Callable[[], datetime] = _now,
-    today: Callable[[], date] = date.today,
+    clock: Callable[[], datetime] | None = None,
 ) -> DecidedItem:
     """The lead's decision on the assessment's item for the requirement, kept with its audit
-    entry; the kept item. The same decision again returns the kept item, writing nothing.
+    entry; the kept item. A decision made already is looked up first: the same one again
+    returns it, writing nothing, whatever the date.
 
     Raises UnknownAssessmentError (another user's or profile's thread too), NotAcceptedError,
-    UnknownItemError, PastDueError (an approval due before today), DecidedAlreadyError, and
-    DatabaseUnavailable (Postgres)."""
+    UnknownItemError, DecidedAlreadyError, OwnerNeededError and DueDateError (an approval), and
+    DatabaseUnavailable (Postgres). `clock` defaults to vouch.audit's `now`."""
     assessment = load_assessment(thread_id, saver, scope=scope)
     if assessment.status != "accepted":
         raise NotAcceptedError(NOT_ACCEPTED)
     draft = next((i for i in assessment.remediation if i.requirement_id == requirement_id), None)
     if draft is None:
         raise UnknownItemError(NO_ITEM.format(requirement_id=requirement_id))
-    due = request.due_date.isoformat() if request.due_date else draft.due_date
-    if request.decision == "approve" and date.fromisoformat(due) < today():
-        raise PastDueError(PAST_DUE.format(due=due))
+    kept = items.decided(reviewer.id, profile_id, thread_id).get((thread_id, requirement_id))
+    if kept is not None:
+        return _as_kept(kept, request)
+    at = (clock or now)()
+    owner = request.owner_role or draft.owner_role
+    due = request.due_date or date.fromisoformat(draft.due_date)
+    if request.decision == "approve":
+        if owner == NO_OWNER:
+            raise OwnerNeededError(OWNER_NEEDED)
+        check_due(due, at)
     item = DecidedItem(
         thread_id=thread_id,
         requirement_id=requirement_id,
         status=DECIDED[request.decision],
         missing=draft.missing,
-        owner_role=request.owner_role or draft.owner_role,
+        owner_role=owner,
         due_date=due,
-        decided_at=clock(),
+        decided_at=at,
     )
-    kept, _ = items.decide(
+    kept, new = items.decide(
         reviewer.id, profile_id, item, _entry(assessment, item, request.decision, reviewer)
     )
-    if kept.status != item.status:
-        raise DecidedAlreadyError(DECIDED_ALREADY.format(status=kept.status))
-    return kept
+    return kept if new else _as_kept(kept, request)

@@ -5,6 +5,7 @@ import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './d
 import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
+import { type RemediationItem, withItem } from './remediation.ts'
 import TopBar from './TopBar.tsx'
 import { type Run, useAssessment } from './useAssessment.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
@@ -119,6 +120,15 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
   const decided = shownRun?.status === 'done' && shownRun.assessment.thread_id
     ? reviewed[shownRun.assessment.thread_id] : undefined
   const paperRun: Run | null = shownRun?.status === 'done' && decided ? { ...shownRun, assessment: decided } : shownRun
+  /** A remediation item's decision (#43), put in the newest copy of its thread's assessment when the update runs, so
+   * two decisions landing one after the other both stay; the paper's shown copy when there is none yet. */
+  const noteItem = (threadId: string, item: RemediationItem) => {
+    const shown = paperRun?.status === 'done' ? paperRun.assessment : undefined
+    setReviewed((now) => {
+      const base = now[threadId] ?? (shown?.thread_id === threadId ? shown : undefined)
+      return base ? { ...now, [threadId]: withItem(base, item) } : now
+    })
+  }
   /** Reads the paper's assessment again (another tab reviewed it first) and shows it as it now stands; false when it
    * couldn't be read. */
   const refresh = async () => {
@@ -155,7 +165,8 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
               run={paperRun ?? idle} checking={paperRun === null}
               onAssess={() => void start(control.id)} onOpen={(id) => open(id, false)}
-              onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh} />
+              onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh}
+              onItemDecided={noteItem} />
           </main>
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>

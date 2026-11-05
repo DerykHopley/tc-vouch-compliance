@@ -656,9 +656,10 @@ def decide_remediation(
     nothing and writes no entry.
 
     404 for an unknown thread (another user's or profile's too) or a requirement with no item;
-    409 for an assessment not accepted, or an item decided the other way; 422 for an approval
-    due before today, with the hint in `detail` (the request's shape is checked before, also
-    422)."""
+    409 for an assessment not accepted, an item decided the other way, or approved with other
+    values (`detail` names the kept ones); 422 for an approval due on a date past everywhere or
+    beyond the horizon, or naming no owner where Vouch suggested none, with the hint in `detail`
+    (the request's shape is checked before, also 422)."""
     try:
         kept = remediation.decide(
             items,
@@ -674,7 +675,7 @@ def decide_remediation(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (remediation.NotAcceptedError, remediation.DecidedAlreadyError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    except remediation.PastDueError as error:
+    except (remediation.DueDateError, remediation.OwnerNeededError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     clean, _ = redact_data({"item": kept.shown()})
     return clean
@@ -742,8 +743,8 @@ def dossier_overview(
     each control's requirements, for its working paper (#41). Redacted as the stream's events
     are."""
     latest = newest_by_control(memory, saver)  # from each control's newest thread
-    decided = items.decided(memory.user_id, memory.profile_id)
-    discarded = {key for key, item in decided.items() if item.status == "discarded"}
+    counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    discarded = items.discarded(memory.user_id, memory.profile_id, counted)
     clean, _ = redact_data(overview(profile, load_base_framework().controls, latest, discarded))
     return clean | {"requirements": paper_requirements(profile)}
 
