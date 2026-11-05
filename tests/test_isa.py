@@ -262,6 +262,97 @@ def test_a_yaml_error_names_its_line(tmp_path):
         load_base_framework(path)
 
 
+# German edition --------------------------------------------------------------------------------
+
+EXCEL_DE = FRAMEWORK_DIR / "isa2027.1-de.xlsx"
+
+
+@pytest.fixture(scope="module")
+def raw_rows_de() -> dict:
+    """The German Excel's rows by control number, read directly, without the extraction code."""
+    workbook = openpyxl.load_workbook(EXCEL_DE, read_only=True)
+    try:
+        return {r[2]: r for r in workbook["Informationssicherheit"].iter_rows(values_only=True)}
+    finally:
+        workbook.close()
+
+
+def test_the_german_edition_has_the_same_controls_requirement_ids_and_columns():
+    # Profiles, overlays and eval cases name requirements by id, so both editions must agree.
+    english, german = load_base_framework(), load_base_framework(language="de")
+
+    assert german.source == english.source == "VDA ISA 2027.1"
+    assert [(c.id, [(r.id, r.column) for r in c.requirements]) for c in german.controls] == [
+        (c.id, [(r.id, r.column) for r in c.requirements]) for c in english.controls
+    ]
+
+
+def test_shipped_german_edition_equals_a_fresh_extraction_from_the_german_excel():
+    from vouch.isa_extract import extract
+
+    fresh = extract(EXCEL_DE, language="de")
+    shipped = load_base_framework(language="de")
+
+    assert fresh["source"] == shipped.source
+    assert fresh["excel"] == "isa2027.1-de.xlsx"
+    assert [
+        (c["id"], c["question"], c["iso_27001"],
+         [(r["id"], r["column"], r["text"]) for r in c["requirements"]])
+        for c in fresh["controls"]
+    ] == [
+        (c.id, c.question, c.iso_27001, [(r.id, r.column, r.text) for r in c.requirements])
+        for c in shipped.controls
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize("control_id", EXPECTED_COUNTS)
+def test_each_german_text_appears_verbatim_in_its_german_excel_cell(control_id, raw_rows_de):
+    row = raw_rows_de[control_id]
+    cell_of = {"must": row[9], "should": row[10], "high": row[11], "very high": row[12]}
+    control = load_isa_control(control_id, language="de")
+
+    assert control.question == row[7]
+    assert "27001" in control.iso_27001 and control.iso_27001 in row[14]
+    for req in control.requirements:
+        assert f"+ {req.text}" in cell_of[req.column], req.id
+
+
+def test_a_german_control_reads_in_german():
+    control = load_isa_control("5.1.1", language="de")
+
+    assert control.question == "Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?"
+    assert control.requirements[2].text.startswith("Anforderungen an die Schlüsselhoheit")
+
+
+def test_an_empty_german_cell_says_keine_and_counts_as_no_requirement():
+    from vouch.isa_extract import split_requirements
+
+    assert split_requirements("Keine", language="de") == []
+    with pytest.raises(ValueError, match="bullet"):
+        split_requirements("Keine", language="en")  # English empty cells say "None"
+
+
+def test_german_extraction_refuses_an_excel_whose_columns_moved(tmp_path):
+    from vouch.isa_extract import extract
+
+    workbook = openpyxl.load_workbook(EXCEL_DE)
+    workbook["Informationssicherheit"].insert_cols(9)
+    moved = tmp_path / "moved.xlsx"
+    workbook.save(moved)
+
+    with pytest.raises(ValueError, match="header"):
+        extract(moved, language="de")
+
+
+def test_a_language_without_an_edition_falls_back_to_english():
+    assert load_isa_control("5.1.1", language="lt") == load_isa_control("5.1.1")
+
+
+def test_english_is_the_default_edition():
+    assert load_isa_control("5.1.1") == load_isa_control("5.1.1", language="en")
+    assert load_isa_control("5.1.1").question.startswith("To what extent")
+
+
 # Licence and credit ----------------------------------------------------------------------------
 
 
@@ -273,3 +364,4 @@ def test_the_licence_notice_and_credit_sit_beside_the_data():
     assert "CC BY-ND 4.0" in notice
     assert "https://creativecommons.org/licenses/by-nd/4.0/" in notice
     assert "isa2027.1-en.xlsx" in notice
+    assert "isa2027.1-de.xlsx" in notice and "controls-de.yaml" in notice

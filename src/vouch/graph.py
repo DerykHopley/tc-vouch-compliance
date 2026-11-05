@@ -1444,7 +1444,11 @@ def assess_steps(
     Without a checkpointer the thread is kept in a fresh in-memory saver, so it can't be
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
     again; `today` (default: the date now) is what due dates count from and what staleness is
-    judged on."""
+    judged on.
+
+    The control is assessed in the ISA edition of the profile's answer language, whichever
+    edition `control` came from (`ComplianceProfile.isa_control`)."""
+    control = profile.isa_control(control.id)
     thread_id = uuid.uuid4().hex  # always a new thread: never piled onto an earlier run's state
     graph = build_graph(model, profile, checkpointer or memory_checkpointer())
     loaded = _loaded_step(control, profile)

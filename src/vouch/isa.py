@@ -1,7 +1,9 @@
 """The base framework: Vouch's 12 VDA ISA 2027.1 controls and their requirements.
 
-Read from `data/vda-isa-2027.1/controls.yaml`, extracted unchanged from the ISA Excel beside it
-(`vouch.isa_extract`); licence and credit are in that folder's NOTICE.md.
+Read from `data/vda-isa-2027.1/controls.yaml` (English) or `controls-de.yaml` (German), each
+extracted unchanged from its ISA Excel beside it (`vouch.isa_extract`); licence and credit are
+in that folder's NOTICE.md. Both editions carry the same requirement ids, so a compliance
+profile picks its edition by its answer language without changing what it names.
 """
 
 from dataclasses import dataclass
@@ -12,7 +14,8 @@ from typing import Literal
 import yaml
 
 FRAMEWORK_DIR = Path(__file__).resolve().parent / "data" / "vda-isa-2027.1"
-CONTROLS_FILE = FRAMEWORK_DIR / "controls.yaml"
+CONTROLS_FILE = FRAMEWORK_DIR / "controls.yaml"  # the English edition, the default
+CONTROLS_DE_FILE = FRAMEWORK_DIR / "controls-de.yaml"
 NOTICE_FILE = FRAMEWORK_DIR / "NOTICE.md"
 SOURCE = "VDA ISA 2027.1"
 
@@ -117,14 +120,21 @@ def _load(path: Path) -> BaseFramework:
         raise BaseFrameworkError(path, str(error)) from error
 
 
-def load_base_framework(path: Path | None = None) -> BaseFramework:
-    """The base framework (read once per file), or BaseFrameworkError naming the file."""
-    return _load(CONTROLS_FILE if path is None else path)
+def edition_file(language: str) -> Path:
+    """The controls file of the ISA edition in this ISO 639-1 language; English for a
+    language the ISA isn't shipped in. Looked up on each call, so a test can swap a file."""
+    return {"en": CONTROLS_FILE, "de": CONTROLS_DE_FILE}.get(language, CONTROLS_FILE)
 
 
-def load_isa_control(control_id: str) -> IsaControl:
-    """The control with this ISA number, or UnknownControlError."""
-    for control in load_base_framework().controls:
+def load_base_framework(path: Path | None = None, *, language: str = "en") -> BaseFramework:
+    """The base framework in this language's edition, or the file at `path` (each read once),
+    or BaseFrameworkError naming the file."""
+    return _load(edition_file(language) if path is None else path)
+
+
+def load_isa_control(control_id: str, language: str = "en") -> IsaControl:
+    """The control with this ISA number, in this language's edition, or UnknownControlError."""
+    for control in load_base_framework(language=language).controls:
         if control.id == control_id:
             return control
     raise UnknownControlError(control_id)

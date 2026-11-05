@@ -198,6 +198,11 @@ class ComplianceProfile(_Strict):
                 )
         return self
 
+    def isa_control(self, control_id: str) -> IsaControl:
+        """The control in the ISA edition of this profile's answer language (English when
+        the ISA isn't shipped in it), or UnknownControlError."""
+        return load_isa_control(control_id, self.answer_language)
+
     def requirements_for(self, control: IsaControl) -> ControlRequirements:
         """The control's requirements under this profile: those its protection level and
         country overlays bring in, split into applicable and not applicable (with the reason)."""

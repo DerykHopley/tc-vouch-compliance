@@ -256,3 +256,35 @@ def test_a_broken_base_framework_comes_out_as_a_profile_error(tmp_path, monkeypa
 
 def test_the_base_framework_a_profile_accepts_is_the_one_vouch_ships():
     assert get_args(ComplianceProfile.model_fields["base_framework"].annotation) == (SOURCE,)
+
+
+# ISA edition by answer language ----------------------------------------------------------------
+
+GERMAN_5_1_1 = "Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?"
+
+
+def test_a_german_profile_reads_the_german_isa_edition(tmp_path):
+    profile = load_profile(write_profile(tmp_path, answer_language="de", protection_level="high"))
+
+    control = profile.isa_control("5.1.1")
+
+    assert control.question == GERMAN_5_1_1
+    [h1] = [r for r in profile.requirements_for(control).applicable if r.column == "high"]
+    assert h1.text.startswith("Anforderungen an die Schlüsselhoheit")
+
+
+def test_an_english_profile_reads_the_english_isa_edition():
+    assert load_profile(NORDLICHT_PROFILE).isa_control("5.1.1") == load_isa_control("5.1.1")
+
+
+def test_a_profile_in_a_language_without_an_isa_edition_reads_english(tmp_path):
+    profile = load_profile(write_profile(tmp_path, answer_language="lt"))
+
+    assert profile.isa_control("5.1.1") == load_isa_control("5.1.1")
+
+
+def test_an_unknown_control_in_a_profiles_edition_is_an_unknown_control_error(tmp_path):
+    profile = load_profile(write_profile(tmp_path, answer_language="de"))
+
+    with pytest.raises(isa.UnknownControlError, match="9.9.9"):
+        profile.isa_control("9.9.9")

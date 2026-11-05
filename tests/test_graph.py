@@ -328,3 +328,31 @@ def test_a_judgement_reason_claiming_an_audit_result_twice_fails():
 
     with pytest.raises(OutputCheckError, match="audit result"):
         assess("4.1.2", NORDLICHT, model)
+
+
+GERMAN = NORDLICHT.model_copy(update={"answer_language": "de"})
+GERMAN_5_1_1 = "Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?"
+
+
+def answering_only() -> ScriptedChatModel:
+    return ScriptedChatModel(
+        script={"gather": [{"answer": "Antwort."}], "judge": {"requirements": []}}
+    )
+
+
+def test_a_german_profile_is_assessed_against_the_german_isa_text():
+    result = assess("5.1.1", GERMAN, answering_only())
+
+    assert result.steps[0]["text"].startswith(f"Loaded control 5.1.1: {GERMAN_5_1_1}")
+
+
+def test_assess_steps_reads_the_profiles_isa_edition_whichever_edition_it_was_given():
+    from vouch.graph import Assessment, assess_steps
+    from vouch.isa import load_isa_control
+
+    english = load_isa_control("5.1.1")  # as the API looks it up, before it knows the profile
+
+    *_, assessment = assess_steps(english, GERMAN, answering_only())
+
+    assert isinstance(assessment, Assessment)
+    assert assessment.steps[0]["text"].startswith(f"Loaded control 5.1.1: {GERMAN_5_1_1}")
