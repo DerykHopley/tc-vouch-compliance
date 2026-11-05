@@ -34,6 +34,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import PrivateAttr, SecretStr
 
+from vouch.chat import CHAT_PROMPT_VERSION
+from vouch.chat_fake import CannedChatModel
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
 from vouch.settings import DEMO_SCRIPT, Settings, fake_model
@@ -287,6 +289,7 @@ class ModelChoice:
             "runs_on": self.runs_on,
             "fake_reason": self.fake_reason,
             "prompt_version": PROMPT_VERSION,
+            "chat_prompt_version": CHAT_PROMPT_VERSION,
             "usage_url": USAGE_URL,
             "kept_in": self.kept_in,
         }
@@ -317,6 +320,16 @@ class ModelChoice:
             fake = fake_model(self._settings, DEMO_SCRIPT)
             fake.callbacks = callbacks
             return fake
+        return self.openrouter.chat_model(chosen, callbacks)
+
+    def for_chat(
+        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+    ) -> BaseChatModel:
+        """A fresh model for one chat message (#44), on `chosen` (from `chosen()`), within
+        CALL_BUDGET calls; on the fake, the chat's canned answer. `callbacks` see every call
+        (the usage meter), as for_assessment's do."""
+        if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
+            return CannedChatModel(callbacks=callbacks)
         return self.openrouter.chat_model(chosen, callbacks)
 
     def close(self) -> None:

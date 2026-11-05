@@ -21,6 +21,7 @@ from test_auth import FakeClerk, bearer, clerk_app, token, unreachable
 
 from vouch import model_choice
 from vouch.api import create_app
+from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
 from vouch.model_choice import (
@@ -245,6 +246,7 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "runs_on": "openrouter",
         "fake_reason": None,
         "prompt_version": PROMPT_VERSION,
+        "chat_prompt_version": CHAT_PROMPT_VERSION,
         "usage_url": USAGE_URL,
         "kept_in": "memory",
         "daily_limit": 30,  # vouch.spending (#35)

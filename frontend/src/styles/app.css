@@ -125,17 +125,31 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .fab { background: var(--ink); color: var(--sheet); border: 0; border-radius: 999px; padding: 12px 18px; font-weight: 600; box-shadow: 0 8px 24px var(--shadow); display: flex; gap: 10px; align-items: center; }
 .fab kbd { font: 500 11px var(--f-mono); opacity: .65; }
 .bubble { width: min(390px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 16px 48px var(--shadow); display: flex; flex-direction: column; animation: rise .18s ease-out; }
-.bubble-head { display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.bubble-head { display: flex; flex-wrap: wrap; gap: 0 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.bubble-head .btn, .page-context { white-space: nowrap; }
+.bubble-head .btn { font-size: 12px; padding-inline: 8px; }
 .bubble-head b { font: 400 16px var(--f-display); letter-spacing: .04em; text-transform: uppercase; }
 .page-context { font-size: 11px; background: var(--paper); border-radius: 999px; padding: 1px 9px; color: var(--muted); margin-right: auto; }
-.bubble-log { flex: 1; overflow: auto; }
+.bubble-log { flex: 1; overflow: auto; padding: 12px; display: grid; gap: 8px; align-content: start; }
+.msg { margin: 0; background: var(--paper); border-radius: 3px; padding: 8px 10px; max-width: 92%; overflow-wrap: anywhere; white-space: pre-wrap; }
+.msg:empty { display: none; }
+.msg-lead { background: var(--ink); color: var(--sheet); justify-self: end; }
+.bubble-foot { display: flex; gap: 6px; border-top: 1px solid var(--rule); padding: 10px 12px; }
+.bubble-foot .field { flex: 1 1 auto; }
+/* Enlarged: wider and taller, still floating. Pinned: a column of 400px beside the page, which makes room for it
+   (design.md, Layout: only over 1000px; AskVouch offers no pin at 1000px or less). */
+.bubble.enlarged { width: min(640px, calc(100vw - 32px)); height: calc(100vh - 120px); }
+@media (min-width: 1001px) {
+  :root[data-chat="pinned"] body { padding-right: 400px; }
+  .bubble.pinned { top: 0; right: 0; bottom: 0; width: 400px; height: auto; border-width: 0 0 0 1px; border-radius: 0; box-shadow: none; animation: none; }
+}
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
 @media (max-width: 1000px) {
   .band { grid-template-columns: 1fr; padding: 22px; }
 }
 @media (max-width: 700px) {
-  .bubble { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
+  .bubble, .bubble.enlarged, .bubble.pinned { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
   .shortcut-hint { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
