@@ -6,7 +6,7 @@ rejected assessment shows on its control's card, but not in the counts.
 """
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Literal, TypedDict, get_args
 
 from vouch.citations import EvidenceKind
@@ -32,7 +32,7 @@ class Readiness(TypedDict):
     accepted: int
     by_verdict: dict[Verdict, int]
     open: int
-    remediation_items: int  # the accepted controls' items
+    remediation_items: int  # the accepted controls' items the lead hasn't discarded (#43)
 
 
 class ControlCard(TypedDict):
@@ -112,11 +112,14 @@ def overview(
     profile: ComplianceProfile,
     controls: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
+    discarded: Collection[tuple[str, str]] = (),
 ) -> Overview:
     """The overview: the company, the profile's protection level and answer language, readiness from accepted verdicts only, a card per control
     (in the base framework's order) with its review state and verdict, how many controls are in
     each state, the evidence quotes from assessed controls not rejected, and the next step (None
-    once every control is accepted). Assessments of controls not in `controls` are left out."""
+    once every control is accepted). Assessments of controls not in `controls` are left out.
+    `discarded` names the remediation items the lead discarded, by thread and requirement id:
+    the band counts the others (#43)."""
     controls = list(controls)
     listed = {c.id: latest[c.id] for c in controls if c.id in latest}
     accepted = [a for a in listed.values() if a.status == "accepted"]
@@ -133,7 +136,11 @@ def overview(
             "accepted": len(accepted),
             "by_verdict": {v: verdicts[v] for v in VERDICTS},
             "open": len(controls) - len(accepted),
-            "remediation_items": sum(len(a.remediation) for a in accepted),
+            "remediation_items": sum(
+                (a.thread_id, i.requirement_id) not in discarded
+                for a in accepted
+                for i in a.remediation
+            ),
         },
         "by_status": {status: statuses[status] for status in CARD_STATUSES},
         "next_step": _next_step(cards),

@@ -43,3 +43,11 @@ export function sessionEnded(response: Response): boolean {
   signedOut()
   return true
 }
+
+/** A refusal's detail (a 422's or a 409's) in words: FastAPI's own string, or each validation error's message. */
+export async function refusedBecause(response: Response): Promise<string> {
+  const { detail } = (await response.json().catch(() => ({}))) as { detail?: unknown }
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((d: { msg?: unknown }) => String(d.msg ?? '')).join('; ')
+  return ''
+}

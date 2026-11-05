@@ -4,6 +4,8 @@ import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWo
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
+import Remediation from './Remediation.tsx'
+import type { RemediationItem } from './remediation.ts'
 import { type Override, rollUp, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import VerdictChip from './VerdictChip.tsx'
@@ -62,6 +64,9 @@ type PaperProps = {
   onOverview: () => void
   /** The lead's decision is recorded: the reviewed assessment. */
   onReviewed: (assessment: Assessment) => void
+  /** A remediation item's approval or discard is recorded (#43): the item as kept, to put in the latest copy of the
+   * thread's assessment (two decisions may land in either order). */
+  onItemDecided: (threadId: string, item: RemediationItem) => void
   /** Reads the assessment again (another tab reviewed it first); false when it couldn't be. */
   onRefresh: () => Promise<boolean>
 }
@@ -72,7 +77,8 @@ type PaperProps = {
  * draft answer, then one row per requirement: its column, verdict, evidence kind, stale flag, reason and exact quotes.
  */
 export default function WorkingPaper(props: PaperProps) {
-  const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh } = props
+  const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
+    onItemDecided } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until the decision; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
@@ -164,7 +170,11 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
-                onEdit={setEditing} onSave={save} onUndo={undo} />
+                onEdit={setEditing} onSave={save} onUndo={undo} items={{
+                  shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
+                  decidable: review === 'accepted',
+                  onDecided: (item) => { if (assessed?.thread_id) onItemDecided(assessed.thread_id, item) },
+                }} />
             ) : <Requirements requirements={requirements} />}
             {assessed?.status && assessed.thread_id && (
               <ReviewBar key={`${assessed.thread_id}:${reads}`} status={assessed.status} threadId={assessed.thread_id}
@@ -283,6 +293,14 @@ type Overrides = {
   agentVerdicts: Record<string, Verdict>
 }
 
+/** The assessment's remediation items, one per not-evidenced requirement (#43): `decidable` once it is accepted. */
+type RemediationItems = {
+  shown: RemediationItem[]
+  threadId: string
+  decidable: boolean
+  onDecided: (item: RemediationItem) => void
+}
+
 type JudgedProps = {
   judged: RequirementVerdict[]
   listed: PaperRequirement[]
@@ -292,15 +310,16 @@ type JudgedProps = {
   onEdit: (requirementId: string | null) => void
   onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
+  items: RemediationItems
 }
 
 /**
  * The assessment's requirements: verdict, evidence kind and stale flag, then the reason and the exact quotes. An
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
  * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
- * it.
+ * it. A not-evidenced requirement shows its remediation item under its reason (#43).
  */
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo }: JudgedProps) {
+function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   return (
     <div className="table-wrap">
@@ -316,6 +335,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             const { kinds, stale } = evidenceOf(r)
             const applies = r.verdict !== 'not-applicable'
             const replaced = overrides.replaced[r.id]
+            const item = items.shown.find((i) => i.requirement_id === r.id)
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
@@ -359,6 +379,11 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                       </figcaption>
                     </figure>
                   ))}
+                  {item && items.threadId && (
+                    // A new key when the item changes, so its fields start from the kept values.
+                    <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
+                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} />
+                  )}
                 </div></td>
               </tr>,
               overrides.editable && editing === r.id && (

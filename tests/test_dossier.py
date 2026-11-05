@@ -3,6 +3,8 @@ evidence quotes, and the next step; read from each user's assessments under the 
 memory and checkpointer). The API cases run in memory, and on Postgres where CI's database job
 gives a server (VOUCH_TEST_DATABASE_URL; otherwise those are skipped)."""
 
+from dataclasses import replace
+
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
@@ -125,6 +127,24 @@ def test_readiness_counts_accepted_verdicts_only():
         "open": 7,
         "remediation_items": 5,  # the accepted controls' items; proposed and rejected ones wait
     }
+
+
+def test_a_discarded_remediation_item_is_not_open():
+    """#43: the band counts the accepted controls' items the lead hasn't discarded."""
+    latest = {
+        "2.1.3": replace(
+            seeded("2.1.3", "not-evidenced", "accepted", remediation=3), thread_id="t"
+        ),
+        "4.1.3": replace(
+            seeded("4.1.3", "not-evidenced", "rejected", remediation=2), thread_id="u"
+        ),
+    }
+
+    readiness = overview(NORDLICHT, CONTROLS, latest, discarded={("t", "M1"), ("u", "M0")})[
+        "readiness"
+    ]
+
+    assert readiness["remediation_items"] == 2
 
 
 def test_the_status_counts_cover_every_listed_control():

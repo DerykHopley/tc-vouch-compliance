@@ -20,9 +20,10 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
-limit, #35), the daily assessment counts, the usage (#35) and the append-only audit trail (#39);
-nothing else does. Before it has run, a setting reads as unset, and a write, a count, the usage
-or a review is DatabaseUnavailable (a 503).
+limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
+the remediation items the lead decided on (#43); nothing else does. Before it has run, a setting
+reads as unset, and a write, a count, the usage, a review or a remediation decision is
+DatabaseUnavailable (a 503).
 """
 
 import hashlib
@@ -164,6 +165,44 @@ ADD_AUDIT_REVIEWER_NAME = (
 the name then). One statement, so one transaction: the guard is off only inside it, for this
 one fill, and no other session sees it off. Runs after CREATE_AUDIT_TRIGGERS, so the trigger
 it lifts is there."""
+REMEDIATION_TABLE = "vouch_remediation_items"
+"""Each remediation item the lead approved or discarded (vouch.remediation), per user, profile,
+assessment thread and requirement: one decision each, written in its audit entry's transaction.
+A draft lives in its assessment's thread until then."""
+REMEDIATION_COLUMNS = (
+    "user_id",
+    "profile_id",
+    "thread_id",
+    "requirement_id",
+    "status",
+    "missing",
+    "owner_role",
+    "due_date",
+    "decided_at",
+)
+CREATE_REMEDIATION = (
+    f"CREATE TABLE IF NOT EXISTS {REMEDIATION_TABLE} (user_id text NOT NULL, "
+    "profile_id text NOT NULL, thread_id text NOT NULL, requirement_id text NOT NULL, "
+    "status text NOT NULL CHECK (status IN ('approved', 'discarded')), missing text NOT NULL, "
+    "owner_role text NOT NULL, due_date date NOT NULL, decided_at timestamptz NOT NULL, "
+    "PRIMARY KEY (user_id, profile_id, thread_id, requirement_id))"
+)
+CREATE_REMEDIATION_GUARD = (
+    "CREATE OR REPLACE FUNCTION vouch_remediation_final() RETURNS trigger LANGUAGE plpgsql AS "
+    "$$ BEGIN RAISE EXCEPTION 'a remediation decision is final'; END $$"
+)
+CREATE_REMEDIATION_TRIGGERS = (
+    (
+        f"CREATE OR REPLACE TRIGGER {REMEDIATION_TABLE}_final BEFORE UPDATE OR DELETE ON "
+        f"{REMEDIATION_TABLE} FOR EACH ROW EXECUTE FUNCTION vouch_remediation_final()"
+    ),
+    (
+        f"CREATE OR REPLACE TRIGGER {REMEDIATION_TABLE}_no_truncate BEFORE TRUNCATE ON "
+        f"{REMEDIATION_TABLE} FOR EACH STATEMENT EXECUTE FUNCTION vouch_remediation_final()"
+    ),
+)
+"""A decision is kept as made, as its audit entry is: the table refuses an update, a delete or
+a truncate, whoever asks."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -179,6 +218,7 @@ SETUP_TABLES = (
     COUNTS_TABLE,
     USAGE_TABLE,
     AUDIT_TABLE,
+    REMEDIATION_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -535,15 +575,79 @@ class Database:
                 raise ReviewInProgress(lock_key)
 
             def append(entries: list[Mapping[str, Any]]) -> None:
-                columns = ", ".join(AUDIT_COLUMNS)
-                values = ", ".join(f"%({c})s" for c in AUDIT_COLUMNS)
-                with conn.cursor() as cur:
-                    cur.executemany(
-                        f"INSERT INTO {AUDIT_TABLE} ({columns}) VALUES ({values})",
-                        [entry | {"evidence": Jsonb(entry["evidence"])} for entry in entries],
-                    )
+                _insert_audit(conn, entries)
 
             yield PostgresSaver(conn, serde=serde), append
+
+    def decide_remediation(
+        self, item: Mapping[str, Any], entries: list[Mapping[str, Any]]
+    ) -> tuple[dict[str, Any], bool]:
+        """Keep the lead's decision on a remediation item (a mapping of REMEDIATION_COLUMNS) and
+        its audit entries, in one transaction: both, or neither. When the item was decided
+        already, nothing is written: (the kept item, False); else (the item, True). Two at once
+        take turns on the item's key, so one decides. Raises DatabaseUnavailable, also before
+        vouch-db-setup ran."""
+        columns = ", ".join(REMEDIATION_COLUMNS)
+        tables = f"{REMEDIATION_TABLE} or {AUDIT_TABLE}"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            values = ", ".join(f"%({c})s" for c in REMEDIATION_COLUMNS)
+            kept = conn.execute(
+                f"INSERT INTO {REMEDIATION_TABLE} ({columns}) VALUES ({values}) "
+                f"ON CONFLICT DO NOTHING RETURNING {columns}",
+                item,
+            ).fetchone()
+            if kept is not None:
+                _insert_audit(conn, entries)
+                return kept, True
+            existing = conn.execute(
+                f"SELECT {columns} FROM {REMEDIATION_TABLE} WHERE user_id = %(user_id)s "
+                "AND profile_id = %(profile_id)s AND thread_id = %(thread_id)s "
+                "AND requirement_id = %(requirement_id)s",
+                item,
+            ).fetchone()
+            if existing is None:  # the insert met it, and the guard lets nothing delete one
+                raise DatabaseUnavailable(f"a decision in {REMEDIATION_TABLE} vanished")
+            return existing, False
+
+    def remediation_items(
+        self, user_id: str, profile_id: str, thread_id: str
+    ) -> list[dict[str, Any]]:
+        """The user's decided remediation items of one assessment's thread under the profile:
+        mappings of REMEDIATION_COLUMNS. None before vouch-db-setup made the table (a deploy
+        that adds it, before setup runs): nothing is decided yet. Raises DatabaseUnavailable."""
+        return self._read_remediation(
+            f"SELECT {', '.join(REMEDIATION_COLUMNS)} FROM {REMEDIATION_TABLE} "
+            "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
+            "AND thread_id = %(thread_id)s",
+            {"user_id": user_id, "profile_id": profile_id, "thread_id": thread_id},
+        )
+
+    def discarded_remediation(
+        self, user_id: str, profile_id: str, thread_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """The thread and requirement ids of the user's discarded remediation items of those
+        threads under the profile; none before vouch-db-setup made the table. Raises
+        DatabaseUnavailable."""
+        return self._read_remediation(
+            f"SELECT thread_id, requirement_id FROM {REMEDIATION_TABLE} "
+            "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
+            "AND status = 'discarded' AND thread_id = ANY(%(thread_ids)s)",
+            {"user_id": user_id, "profile_id": profile_id, "thread_ids": thread_ids},
+        )
+
+    def _read_remediation(self, query: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Rows of REMEDIATION_TABLE; none when it isn't there yet (logged: run vouch-db-setup)."""
+        with self.connection() as conn:
+            try:
+                return conn.execute(query, params).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", REMEDIATION_TABLE)
+                return []
 
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
@@ -587,6 +691,10 @@ class Database:
                 for trigger in CREATE_AUDIT_TRIGGERS:
                     conn.execute(trigger)
                 conn.execute(ADD_AUDIT_REVIEWER_NAME)
+                conn.execute(CREATE_REMEDIATION)
+                conn.execute(CREATE_REMEDIATION_GUARD)
+                for trigger in CREATE_REMEDIATION_TRIGGERS:
+                    conn.execute(trigger)
         finally:
             conn.close()
 
@@ -647,6 +755,17 @@ class Database:
         for secret in self._secrets:
             message = message.replace(secret, "**********")
         return message.strip()
+
+
+def _insert_audit(conn: Connection, entries: list[Mapping[str, Any]]) -> None:
+    """Append audit entries (mappings of AUDIT_COLUMNS) on `conn`, in its transaction."""
+    columns = ", ".join(AUDIT_COLUMNS)
+    values = ", ".join(f"%({c})s" for c in AUDIT_COLUMNS)
+    with conn.cursor() as cur:
+        cur.executemany(
+            f"INSERT INTO {AUDIT_TABLE} ({columns}) VALUES ({values})",
+            [entry | {"evidence": Jsonb(entry["evidence"])} for entry in entries],
+        )
 
 
 def lock_id(key: str) -> int:

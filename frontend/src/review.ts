@@ -1,5 +1,5 @@
 import type { Assessment, Column, RequirementVerdict, Verdict } from './assessment.ts'
-import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
+import { authHeaders, refusedBecause, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The compliance lead's review of a proposed assessment (#42), through #39's review route. */
 
@@ -64,14 +64,6 @@ export const REVIEW_REFUSED = 'Vouch refused this decision, and nothing was chan
 export type Refusal = 'conflict' | 'refused' | 'failed'
 
 export type ReviewAnswer = { ok: true; assessment: Assessment } | { ok: false; refusal: Refusal; message: string }
-
-/** A 422's detail in words: FastAPI's own string, or each validation error's message. */
-async function refusedBecause(response: Response): Promise<string> {
-  const { detail } = (await response.json().catch(() => ({}))) as { detail?: unknown }
-  if (typeof detail === 'string') return detail
-  if (Array.isArray(detail)) return detail.map((d: { msg?: unknown }) => String(d.msg ?? '')).join('; ')
-  return ''
-}
 
 /** Records the decision: the reviewed assessment, or why not. */
 export async function submitReview(threadId: string, decision: ReviewDecision): Promise<ReviewAnswer> {

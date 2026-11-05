@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Assessment, RequirementVerdict } from './assessment.ts'
+import { NO_OWNER, type RemediationItem } from './remediation.ts'
 import type { ControlCard } from './overview.ts'
 import type { PaperRequirement } from './paper.ts'
 import { withOverrides } from './review.ts'
@@ -55,13 +56,16 @@ type Shown = {
   onOverview?: () => void
   onReviewed?: (assessment: Assessment) => void
   onRefresh?: () => Promise<boolean>
+  onItemDecided?: (threadId: string, item: RemediationItem) => void
 }
 
 function paper({ run = { status: 'idle', steps: [] }, running = null, checking = false, onAssess = () => {},
-  onOpen = () => {}, onOverview = () => {}, onReviewed = () => {}, onRefresh = () => Promise.resolve(true) }: Shown) {
+  onOpen = () => {}, onOverview = () => {}, onReviewed = () => {}, onRefresh = () => Promise.resolve(true),
+  onItemDecided = () => {} }: Shown) {
   const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION }
   return <WorkingPaper overview={OVERVIEW} card={card} running={running} run={run} checking={checking}
-    onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} onReviewed={onReviewed} onRefresh={onRefresh} />
+    onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} onReviewed={onReviewed} onRefresh={onRefresh}
+    onItemDecided={onItemDecided} />
 }
 
 /** Shows the paper; the function returned shows it again with other props, as App does when they change. */
@@ -442,5 +446,112 @@ describe('a reviewed control', () => {
     again({ run: done({ ...PROPOSED, status: 'accepted', review: REJECTED.review }) })
     expect(screen.queryByRole('form', { name: 'Override M1' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+})
+
+describe("a not-evidenced requirement's remediation item (#43)", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const DRAFT: RemediationItem = { requirement_id: 'S1', missing: 'A record of access reviews.',
+    owner_role: 'IT operations lead', due_date: '2027-02-01', status: 'draft' }
+  const ACCEPTED: Assessment = { ...PROPOSED, status: 'accepted', remediation: [DRAFT] }
+  const item = () => screen.getByRole('region', { name: 'Remediation item S1' })
+
+  /** The remediation route answering `status` with `body`; the decisions it got. */
+  function itemRoute(status = 200, body: unknown = {}) {
+    const sent: { url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      sent.push({ url, body: JSON.parse(init!.body as string) })
+      return Promise.resolve(Response.json(body, { status }))
+    }))
+    return sent
+  }
+
+  it("shows the draft in its requirement's row: what's missing, the owner role and the due date", () => {
+    review({ assessment: ACCEPTED })
+    expect(within(row('S1')).getByRole('region', { name: 'Remediation item S1' })).toBeTruthy()
+    expect(within(item()).getByText('A record of access reviews.')).toBeTruthy()
+    expect((within(item()).getByLabelText('Owner role') as HTMLInputElement).value).toBe('IT operations lead')
+    expect((within(item()).getByLabelText('Due date') as HTMLInputElement).value).toBe('2027-02-01')
+    expect(within(item()).getByText('Draft')).toBeTruthy()
+  })
+
+  it("approves with the lead's owner role and due date, and hands on the item as kept", async () => {
+    const kept = { ...DRAFT, owner_role: 'CISO', due_date: '2027-03-01', status: 'approved' }
+    const sent = itemRoute(200, { item: kept })
+    const onItemDecided = vi.fn()
+    review({ assessment: ACCEPTED, onItemDecided })
+    await userEvent.clear(within(item()).getByLabelText('Owner role'))
+    await userEvent.type(within(item()).getByLabelText('Owner role'), 'CISO')
+    await userEvent.clear(within(item()).getByLabelText('Due date'))
+    await userEvent.type(within(item()).getByLabelText('Due date'), '2027-03-01')
+    await userEvent.click(within(item()).getByRole('button', { name: 'Approve S1' }))
+    expect(sent).toEqual([{ url: '/api/assessments/t1/remediation/S1',
+      body: { decision: 'approve', owner_role: 'CISO', due_date: '2027-03-01' } }])
+    expect(onItemDecided).toHaveBeenCalledWith('t1', kept)
+  })
+
+  it('discards, sending only the decision', async () => {
+    const sent = itemRoute(200, { item: { ...DRAFT, status: 'discarded' } })
+    review({ assessment: ACCEPTED })
+    await userEvent.click(within(item()).getByRole('button', { name: 'Discard S1' }))
+    expect(sent.map((s) => s.body)).toEqual([{ decision: 'discard' }])
+  })
+
+  it('sends one decision for a double click', async () => {
+    const sent = itemRoute(200, { item: { ...DRAFT, status: 'approved' } })
+    review({ assessment: ACCEPTED })
+    await userEvent.dblClick(within(item()).getByRole('button', { name: 'Approve S1' }))
+    expect(sent).toHaveLength(1)
+  })
+
+  it("shows a refused approval with the server's hint, and keeps the draft", async () => {
+    const hint = 'The due date 2026-11-01 has passed. Choose today or a later date.'
+    itemRoute(422, { detail: hint })
+    const onItemDecided = vi.fn()
+    review({ assessment: ACCEPTED, onItemDecided })
+    await userEvent.click(within(item()).getByRole('button', { name: 'Approve S1' }))
+    expect(within(item()).getByRole('alert').textContent).toBe(hint)
+    expect(within(item()).getByLabelText('Due date').getAttribute('aria-invalid')).toBe('true')
+    expect(onItemDecided).not.toHaveBeenCalled()
+  })
+
+  it("asks for an owner role where Vouch suggested none: Approve waits for one, saying why", async () => {
+    review({ assessment: { ...ACCEPTED, remediation: [{ ...DRAFT, owner_role: NO_OWNER }] } })
+    const owner = within(item()).getByLabelText('Owner role') as HTMLInputElement
+    const approve = within(item()).getByRole('button', { name: 'Approve S1' }) as HTMLButtonElement
+    expect(owner.value).toBe('')
+    expect(approve.disabled).toBe(true)
+    expect(within(item()).getByText('Name the role that owns the fix to approve it.')).toBeTruthy()
+    await userEvent.type(owner, 'CISO')
+    expect(approve.disabled).toBe(false)
+    expect(within(item()).queryByText('Name the role that owns the fix to approve it.')).toBeNull()
+  })
+
+  it("shows the item's own values again when it changes, dropping unsent edits", async () => {
+    const again = review({ assessment: ACCEPTED })
+    await userEvent.type(within(item()).getByLabelText('Owner role'), ' and CISO')
+    again({ run: done({ ...ACCEPTED, remediation: [{ ...DRAFT, owner_role: 'Head of IT', due_date: '2027-04-01' }] }) })
+    expect((within(item()).getByLabelText('Owner role') as HTMLInputElement).value).toBe('Head of IT')
+    expect((within(item()).getByLabelText('Due date') as HTMLInputElement).value).toBe('2027-04-01')
+  })
+
+  it('shows an approved item with its owner role and due date, and nothing to decide', () => {
+    review({ assessment: { ...ACCEPTED, remediation: [{ ...DRAFT, status: 'approved' }] } })
+    expect(within(item()).getByText('Approved')).toBeTruthy()
+    expect(within(item()).getByText('Owner: IT operations lead · Due 2027-02-01')).toBeTruthy()
+    expect(within(item()).queryByRole('button')).toBeNull()
+  })
+
+  it('shows a discarded item as discarded', () => {
+    review({ assessment: { ...ACCEPTED, remediation: [{ ...DRAFT, status: 'discarded' }] } })
+    expect(within(item()).getByText('Discarded')).toBeTruthy()
+    expect(within(item()).queryByRole('button')).toBeNull()
+  })
+
+  it("offers no decision on a proposed control's draft, saying when it can be made", () => {
+    review({ assessment: { ...PROPOSED, remediation: [DRAFT] } })
+    expect(within(item()).queryByRole('button')).toBeNull()
+    expect(within(item()).getByText('Approve or discard it once the verdict is accepted.')).toBeTruthy()
   })
 })
