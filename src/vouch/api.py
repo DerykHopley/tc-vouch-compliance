@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from vouch import audit
 from vouch.allow_list import GUARD, allowed_tools
-from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
+from vouch.auth import ClerkAuth, ClerkUnavailable, ClerkUser, Role, SignedOut
 from vouch.chat import (
     CHAT_FAILED,
     CHAT_PROMPT_VERSION,
@@ -36,7 +36,7 @@ from vouch.chat import (
 )
 from vouch.chat_agent import ChatTools, chat_graph, chat_turn
 from vouch.database import Connection, Database, DatabaseUnavailable
-from vouch.dossier import overview
+from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
     InvalidReviewError,
@@ -216,19 +216,43 @@ def database_unavailable(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content=content)
 
 
-def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
-    """The user's role, for a route that needs it. Local mode's one user is a developer: local
-    mode is for a developer's machine. In clerk mode Clerk's API is asked (cached, auth.py);
-    when it can't answer, a 503, never access."""
+def _clerk_user(request: Request, user: User, settings: Settings) -> ClerkUser | None:
+    """Clerk's lookup of the user (role and display name, cached, auth.py); None in local mode,
+    where Clerk isn't asked. A user Clerk doesn't know is a 401. ClerkUnavailable is raised for
+    the caller to answer."""
     if settings.auth_mode == "local":
-        return "developer"
+        return None
     auth: ClerkAuth = request.app.state.auth
     try:
-        return auth.role(user)
+        return auth.lookup(user)
     except SignedOut:
         raise _signed_out() from None
+
+
+def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
+    """The user's role, for a route that needs it. Local mode's one user is a developer: local
+    mode is for a developer's machine. In clerk mode Clerk's API is asked; when it can't
+    answer, a 503, never access."""
+    try:
+        found = _clerk_user(request, user, settings)
     except ClerkUnavailable:
         raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
+    return "developer" if found is None else found.role
+
+
+def reviewer_name(request: Request, user: CurrentUser, settings: AppSettings) -> str:
+    """The user's display name as it is now, for their audit entries (#154): local mode's
+    setting; in clerk mode Clerk's, from the role's lookup. When Clerk can't be asked, the user
+    id, so the review still goes on."""
+    try:
+        found = _clerk_user(request, user, settings)
+    except ClerkUnavailable:
+        log.warning("the reviewer's name lookup failed: the entry keeps the user id as the name")
+        return user.id
+    return settings.local_user_name if found is None else found.name
+
+
+ReviewerName = Annotated[str, Depends(reviewer_name)]
 
 
 def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
@@ -504,6 +528,7 @@ def review_assessment(
     trail: AuditTrail,
     memory: UserMemory,
     user: CurrentUser,
+    name: ReviewerName,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
@@ -514,7 +539,9 @@ def review_assessment(
     already); 422 for an override naming a requirement the assessment didn't judge, or naming
     one twice (the decision's shape is checked before, also 422)."""
     try:
-        reviewed = audit.review(trail, thread_id, decision, user_id=user.id, scope=memory.scope)
+        reviewed = audit.review(
+            trail, thread_id, decision, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
+        )
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:
@@ -546,14 +573,29 @@ def read_audit_trail(
     return clean | {"next": page.next}
 
 
+_paper_requirements: dict[str, Any] = {}
+"""The last profile's requirements, redacted: {"profile": the profile object, "requirements": …}."""
+
+
+def paper_requirements(profile: ComplianceProfile) -> dict[str, list[PaperRequirement]]:
+    """Each control's requirements under the profile (vouch.dossier.requirements_by_control),
+    redacted as the overview is; built once per loaded profile, as they change only with it."""
+    if _paper_requirements.get("profile") is not profile:
+        built = requirements_by_control(profile, load_base_framework().controls)
+        clean, _ = redact_data(built)
+        _paper_requirements.update(profile=profile, requirements=clean)
+    return _paper_requirements["requirements"]
+
+
 @router.get("/overview")
 def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
-    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step. Its
-    quotes are redacted as the stream's events are."""
+    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
+    each control's requirements, for its working paper (#41). Redacted as the stream's events
+    are."""
     latest = newest_by_control(memory, saver)  # from each control's newest thread
     clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
-    return clean
+    return clean | {"requirements": paper_requirements(profile)}
 
 
 class ChatRequest(BaseModel):
@@ -746,7 +788,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
-    app.state.rate_limit = RateLimit()
+    app.state.rate_limit = RateLimit(requests=settings.rate_requests)
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))

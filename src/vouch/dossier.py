@@ -11,8 +11,8 @@ from typing import Literal, TypedDict, get_args
 
 from vouch.citations import EvidenceKind
 from vouch.graph import Assessment, Status, Verdict
-from vouch.isa import IsaControl
-from vouch.profile import ComplianceProfile
+from vouch.isa import Column, IsaControl, Requirement
+from vouch.profile import ComplianceProfile, ProtectionLevel
 
 QUOTES_SHOWN = 6  # the evidence quote cards on the overview, at most
 
@@ -59,9 +59,20 @@ class NextStep(TypedDict):
     action: NextAction
 
 
+class PaperRequirement(TypedDict):
+    id: str
+    column: Column
+    text: str
+    source: str  # the base framework, or the country overlay's name
+    not_applicable: str | None  # the profile's reason; None when it applies
+
+
 class Overview(TypedDict):
     company: str
     country: str
+    # The working paper's head shows the profile's protection level and answer language (#41).
+    protection_level: ProtectionLevel
+    answer_language: str  # ISO 639-1
     readiness: Readiness
     by_status: dict[CardStatus, int]  # how many listed controls are in each status
     next_step: NextStep | None
@@ -69,12 +80,40 @@ class Overview(TypedDict):
     quotes: list[Quote]
 
 
+def control_requirements(profile: ComplianceProfile, control: IsaControl) -> list[PaperRequirement]:
+    """Each requirement the profile brings in for the control: applicable ones first, then the
+    not applicable ones with the profile's reason (the order an assessment lists them in)."""
+    requirements = profile.requirements_for(control)
+
+    def row(r: Requirement, not_applicable: str | None) -> PaperRequirement:
+        return {
+            "id": r.id,
+            "column": r.column,
+            "text": r.text,
+            "source": r.source,
+            "not_applicable": not_applicable,
+        }
+
+    return [row(r, None) for r in requirements.applicable] + [
+        row(n.requirement, n.reason) for n in requirements.not_applicable
+    ]
+
+
+def requirements_by_control(
+    profile: ComplianceProfile, controls: Iterable[IsaControl]
+) -> dict[str, list[PaperRequirement]]:
+    """Each control's requirements under the profile, by control id: what its working paper
+    lists before an assessment (#41). They change only with the profile; the API sends them with
+    the overview, so opening a paper costs no request of its own (each counts to the rate limit)."""
+    return {c.id: control_requirements(profile, c) for c in controls}
+
+
 def overview(
     profile: ComplianceProfile,
     controls: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
 ) -> Overview:
-    """The overview: the company, readiness from accepted verdicts only, a card per control
+    """The overview: the company, the profile's protection level and answer language, readiness from accepted verdicts only, a card per control
     (in the base framework's order) with its review state and verdict, how many controls are in
     each state, the evidence quotes from assessed controls not rejected, and the next step (None
     once every control is accepted). Assessments of controls not in `controls` are left out."""
@@ -87,6 +126,8 @@ def overview(
     return {
         "company": profile.company,
         "country": profile.country,
+        "protection_level": profile.protection_level,
+        "answer_language": profile.answer_language,
         "readiness": {
             "controls": len(controls),
             "accepted": len(accepted),

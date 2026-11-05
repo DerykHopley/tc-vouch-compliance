@@ -19,8 +19,14 @@ def dossier_url() -> str:
 
 
 @pytest.fixture
+def paper_url() -> str:
+    """A third Vouch like vouch_url, for the working paper's checks (#41), for the same reason."""
+    return os.environ["PAPER_URL"]
+
+
+@pytest.fixture
 def chat_url() -> str:
-    """A third Vouch like vouch_url, for the chat's checks (#44): its own request-rate budget."""
+    """A fourth Vouch like vouch_url, for the chat's checks (#44): its own request-rate budget."""
     return os.environ["CHAT_URL"]
 
 

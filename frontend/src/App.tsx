@@ -7,7 +7,7 @@ import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
 import TopBar from './TopBar.tsx'
 import { type Run, useAssessment } from './useAssessment.ts'
-import WorkingPaper from './WorkingPaper.tsx'
+import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
 type Theme = 'light' | 'dark'
 
@@ -25,11 +25,17 @@ const CONTROL_PATH = /^\/controls\/([^/]+)$/
 const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'developer' ? DEVELOPER_PATH : '/'
 
-/** The view an address shows; the Dossier for one it does not know. */
+/** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
+ * so its paper says not found. */
 function viewAt(path: string): View {
   if (path === DEVELOPER_PATH) return { name: 'developer' }
   const control = CONTROL_PATH.exec(path)
-  return control ? { name: 'paper', controlId: decodeURIComponent(control[1]) } : { name: 'dossier' }
+  if (!control) return { name: 'dossier' }
+  try {
+    return { name: 'paper', controlId: decodeURIComponent(control[1]) }
+  } catch {
+    return { name: 'paper', controlId: control[1] }
+  }
 }
 
 /** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out. */
@@ -59,7 +65,7 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
     return () => { current = false }
   }, [])
   const overview = useOverview()
-  const { load } = overview
+  const { load, noteAssessed } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
   const read = useRef(false)
@@ -67,32 +73,40 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
     if (onDossier || !read.current) void load()
     read.current = true
   }, [load, onDossier])
-  // The run sits above the views, so it carries on when the lead leaves its paper; a finished run reads the overview
-  // afresh when the Dossier is showing, so its card leaves Assessing.
-  const reloadIfDossier = useCallback(() => {
+  // The run sits above the views, so it carries on when the lead leaves its paper. A finished run puts its verdict on
+  // its card (the working paper's index), and reads the overview afresh when the Dossier is showing (readiness too).
+  const finished = useCallback((assessment: Assessment) => {
+    noteAssessed(assessment)
     if (viewAt(window.location.pathname).name === 'dossier') void load()
-  }, [load])
-  const { run, controlId: runFor, start } = useAssessment(reloadIfDossier)
+  }, [load, noteAssessed])
+  const { run, controlId: runFor, start } = useAssessment(finished)
   const running = run.status === 'running' ? runFor : null
-  // A control's working paper needs its question from the overview; a control the overview doesn't list, or an
-  // overview not read, shows the Dossier.
+  // A control's working paper needs its question from the overview; an overview not read shows the Dossier, and a
+  // control the overview doesn't list says it isn't found.
   const control = view.name === 'paper' && overview.state.status === 'ready'
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
-  const shown: View['name'] = view.name === 'developer' && developer ? 'developer' : control ? 'paper' : 'dossier'
-  // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out.
-  const paperId = view.name === 'paper' ? view.controlId : null
+  const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
+  const shown: View['name'] | null = view.name === 'developer' && developer ? 'developer' : control ? 'paper'
+    : notFound !== null ? null : 'dossier'
+  // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
+  // is read for a control its card says is not assessed (a run in this page puts its result on the card), nor for the
+  // one this page's run is of, which holds its result: each read counts to the rate limit.
+  const paperId = control ? control.id : null
+  const readStored = control !== undefined && control.status !== 'not-assessed' && runFor !== control.id
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
   const [paperRead, setPaperRead] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
   useEffect(() => {
-    if (paperId === null) return
-    let current = true
-    void newestAssessment(paperId).then((assessment) => current && setStored({ controlId: paperId, assessment }))
-    return () => { current = false }
-  }, [paperId, paperRead])
+    if (paperId === null || !readStored) return
+    const answer = { wanted: true } // until the paper changes
+    void newestAssessment(paperId).then((assessment) => answer.wanted && setStored({ controlId: paperId, assessment }))
+    return () => { answer.wanted = false }
+  }, [paperId, readStored, paperRead])
+  const idle: Run = { status: 'idle', steps: [] }
   const paperRun: Run | null = runFor === paperId && run.status !== 'idle' ? run
-    : stored?.controlId !== paperId ? null
-      : stored.assessment ? { status: 'done', steps: [], assessment: stored.assessment } : { status: 'idle', steps: [] }
+    : !readStored ? idle
+      : stored?.controlId !== paperId ? null
+        : stored.assessment ? { status: 'done', steps: [], assessment: stored.assessment } : idle
   const open = (controlId: string, assess: boolean) => {
     showView({ name: 'paper', controlId })
     if (assess) void start(controlId)
@@ -117,16 +131,20 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
       {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
         : control && overview.state.status === 'ready' ? (
           <main>
-            <WorkingPaper company={overview.state.overview.company} control={{ id: control.id, title: control.question }}
-              run={paperRun ?? { status: 'idle', steps: [] }} checking={paperRun === null}
-              onAssess={() => void start(control.id)} />
+            <WorkingPaper overview={overview.state.overview} card={control} running={running}
+              run={paperRun ?? idle} checking={paperRun === null}
+              onAssess={() => void start(control.id)} onOpen={(id) => open(id, false)}
+              onOverview={() => showView({ name: 'dossier' })} />
           </main>
         )
+          : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
-      <AskVouch context={{ page: shown, controlId: shown === 'paper' && control ? control.id : null }}
+      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads. An
+          assessment from the chat reads the overview afresh (its card, readiness), and its paper's newest if open. */}
+      <AskVouch context={{ page: shown ?? 'dossier', controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         onAssessed={(controlId) => {
-          reloadIfDossier()
+          void load()
           if (controlId === paperId) setPaperRead((n) => n + 1)
         }} />
     </>

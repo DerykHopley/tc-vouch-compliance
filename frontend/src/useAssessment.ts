@@ -15,9 +15,9 @@ const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0))
 /**
  * The page's assessment run, one at a time, of the control `start` names: held above the views, so it carries on
  * while the lead leaves the working paper. `start` is ignored while a run is in progress; `onDone` is called once a
- * run has its result.
+ * run has its result, with it.
  */
-export function useAssessment(onDone?: () => void) {
+export function useAssessment(onDone?: (assessment: Assessment) => void) {
   const [current, setCurrent] = useState<{ controlId: string | null; run: Run }>(
     { controlId: null, run: { status: 'idle', steps: [] } })
   const running = useRef(false) // a ref, so two clicks in one tick still start one run
@@ -38,7 +38,7 @@ export function useAssessment(onDone?: () => void) {
           continue // the result carries every requirement too; the page shows none yet
         } else if (item.event === 'result') {
           setRun({ status: 'done', steps, assessment: item.data.assessment, usage: item.data.usage })
-          onDone?.()
+          onDone?.(item.data.assessment)
         } else {
           setRun({ status: 'failed', steps, message: item.data.message })
         }
