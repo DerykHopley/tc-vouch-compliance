@@ -171,6 +171,48 @@ describe('the working paper', () => {
     expect(within(paper()!).getByText('Proposed')).toBeTruthy()
   })
 
+  describe('reviewing a stored proposed assessment (#42; from #40\'s verify)', () => {
+    const WAITING = { ...STORED, requirements: [{ id: 'M1', column: 'must', text: 'Keys.', verdict: 'partly-evidenced',
+      reason: 'Policy only.', citations: [] }], review: null }
+    const ACCEPTED = { ...WAITING, status: 'accepted', review: { decision: 'accept', note: '', overrides: [] } }
+
+    /** The API with WAITING stored; the review route answers `review`; GET of the thread answers `reread`. */
+    function serveReview(review: Response, reread = ACCEPTED) {
+      const fetch = vi.fn((url: string, init?: RequestInit) =>
+        url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
+          : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [STORED] }))
+            : url === '/api/assessments/t1/review' && init?.method === 'POST' ? Promise.resolve(review)
+              : url === '/api/assessments/t1'
+                ? Promise.resolve(Response.json({ assessment: fetch.mock.calls.some(([u]) => u.endsWith('/review'))
+                  ? reread : WAITING }))
+                : url.startsWith('/api/audit-trail') ? Promise.resolve(Response.json({ entries: [] }))
+                  : new Promise<Response>(() => {}))
+      vi.stubGlobal('fetch', fetch)
+      return fetch
+    }
+
+    it('accepts it from its paper: the paper and the control index show it accepted', async () => {
+      serveReview(Response.json({ assessment: ACCEPTED }))
+      window.history.replaceState(null, '', '/controls/4.1.2')
+      render(<App />)
+      const bar = await screen.findByRole('region', { name: 'Review' })
+      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
+      const index = screen.getByRole('navigation', { name: 'Controls' })
+      expect(within(within(index).getByRole('link', { name: /^4\.1\.2/ })).getByText('Accepted')).toBeTruthy()
+    })
+
+    it('after "already reviewed", Refresh reads the assessment again and shows the decision made elsewhere', async () => {
+      serveReview(Response.json({ detail: 'not waiting' }, { status: 409 }))
+      window.history.replaceState(null, '', '/controls/4.1.2')
+      render(<App />)
+      const bar = await screen.findByRole('region', { name: 'Review' })
+      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      await userEvent.click(await within(bar).findByRole('button', { name: 'Refresh' }))
+      expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
+    })
+  })
+
   it('marks the Dossier current when the overview fails at a paper address, as the Dossier is what shows', async () => {
     vi.stubGlobal('fetch', (url: string) =>
       url === '/api/overview' ? Promise.resolve(new Response(null, { status: 503 })) : new Promise(() => {}))

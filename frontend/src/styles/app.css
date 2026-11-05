@@ -141,6 +141,21 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .cite { margin: 0; display: grid; gap: 2px; }
 .cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); overflow-wrap: anywhere; }
 .cite figcaption { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 12px; }
+/* The review (#42): "Change" under a requirement's verdict opens the override row (a verdict and a required reason).
+   The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). Unlike the prototype
+   it doesn't stick to the window's foot, where the Ask Vouch button floats over it. */
+.verdict-cell { display: grid; gap: 4px; justify-items: start; }
+.verdict-cell .btn-ghost { margin-left: -10px; }
+.override-row td { background: var(--paper); }
+.override { display: grid; gap: 6px; max-width: 60ch; }
+.override label { font-weight: 500; }
+textarea.field { resize: vertical; font-family: inherit; }
+.review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.btn-sign { background: var(--sign); color: var(--sheet); border-color: var(--sign); }
+.review-bar { background: var(--sheet); border: 1px solid var(--rule);
+  border-top: 2px solid var(--sign); border-radius: 0; padding: 12px; display: grid; gap: 8px; }
+.review-bar .decided { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); }
+.review-bar .note { margin: 0; border-left: 2px solid var(--rule); padding: 2px 10px; overflow-wrap: anywhere; }
 
 /* Developer page (#34, pending design pass): working-paper sheets, one form row. The field's edge is --muted:
    --rule on --sheet is 1.47:1, under the 3:1 a control's edge needs (--muted: 5.45:1 light, 6.17:1 dark). */

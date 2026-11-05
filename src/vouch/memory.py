@@ -183,3 +183,19 @@ def progress(memory: Memory, saver: BaseCheckpointSaver) -> Progress:
     """The user's progress under the memory's profile: `newest_by_control`, and when they last
     worked."""
     return Progress(controls=newest_by_control(memory, saver), last_worked=memory.last_worked())
+
+
+def rejection_note(memory: Memory, saver: BaseCheckpointSaver, control_id: str) -> str:
+    """The lead's note on the control's newest assessment when it was rejected, else nothing:
+    what a new run of a rejected control carries to the model however it was started (#42).
+    A run that never reached the review (the new one itself, say) is passed over."""
+    load = assessment_loader(saver, scope=memory.scope)
+    for entry in memory.entries():
+        if entry.control_id != control_id:
+            continue
+        assessment = load(entry.thread_id)
+        if assessment is None:
+            continue
+        rejected = assessment.status == "rejected" and assessment.review is not None
+        return assessment.review.note if rejected and assessment.review else ""
+    return ""

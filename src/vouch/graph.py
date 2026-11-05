@@ -17,7 +17,7 @@ import textwrap
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple, TypedDict, get_args
 
@@ -400,11 +400,16 @@ class Override:
 
 @dataclass(frozen=True)
 class Review:
-    """The lead's recorded decision on the control."""
+    """The lead's recorded decision on the control, with who made it and when (#42): the
+    reviewer's user id and display name at review time (#154), and the time in ISO 8601. A
+    review kept before #42 has them empty."""
 
     decision: Decision
     note: str
     overrides: list[Override]
+    reviewer_id: str = ""
+    reviewer_name: str = ""
+    reviewed_at: str = ""
 
     @property
     def status(self) -> "Status":
@@ -1125,7 +1130,8 @@ def build_graph(
     def review(state: AssessState) -> dict[str, Any]:
         """Pause for the compliance lead. This node re-runs from its start on resume, so
         nothing before the interrupt writes; the decision comes back as its value."""
-        decision = ReviewDecision.model_validate(interrupt({"control_id": state["control"].id}))
+        answer = interrupt({"control_id": state["control"].id})
+        decision = ReviewDecision.model_validate(answer)
         requirements, overrides = apply_overrides(state["requirements"], decision.overrides)
         today = date.fromisoformat(state["today"])
         overridden = {o.requirement_id for o in overrides}
@@ -1136,7 +1142,14 @@ def build_graph(
         return {
             "requirements": requirements,
             "remediation": remediation,
-            "review": Review(decision.decision, decision.note, overrides),
+            "review": Review(
+                decision.decision,
+                decision.note,
+                overrides,
+                reviewer_id=answer.get(REVIEWED_BY, {}).get("id", ""),
+                reviewer_name=answer.get(REVIEWED_BY, {}).get("name", ""),
+                reviewed_at=answer.get(REVIEWED_AT, ""),
+            ),
         }
 
     def after_gather(state: AssessState) -> str:
@@ -1568,12 +1581,25 @@ def load_assessment(
     return assessment
 
 
+REVIEWED_BY = "reviewed_by"
+REVIEWED_AT = "reviewed_at"
+"""Who decided and when: sent to the review node with the decision, beside its fields."""
+
+
 def resume(
-    thread_id: str, decision: ReviewDecision, checkpointer: BaseCheckpointSaver, *, scope: str = ""
+    thread_id: str,
+    decision: ReviewDecision,
+    checkpointer: BaseCheckpointSaver,
+    *,
+    scope: str = "",
+    reviewer_id: str = "",
+    reviewer_name: str = "",
+    reviewed_at: datetime | None = None,
 ) -> Assessment:
     """Resume a thread waiting for review with the lead's decision and return the reviewed
     Assessment: overrides applied, the roll-up and remediation items recalculated, the decision
-    recorded. No model is called.
+    recorded with who made it and when (the review's `reviewer_*` and `reviewed_at`). No model
+    is called.
 
     Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
     review), NotWaitingForReviewError for one not waiting (reviewed already), and
@@ -1591,5 +1617,9 @@ def resume(
     if not snapshot.interrupts:
         raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
     _check_overrides(snapshot.values["requirements"], decision.overrides)
-    values = graph.invoke(Command(resume=decision.model_dump()), config)
+    answer = decision.model_dump() | {
+        REVIEWED_BY: {"id": reviewer_id, "name": reviewer_name},
+        REVIEWED_AT: reviewed_at.isoformat() if reviewed_at else "",
+    }
+    values = graph.invoke(Command(resume=answer), config)
     return _assessment(values, thread_id)

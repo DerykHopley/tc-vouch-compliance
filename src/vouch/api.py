@@ -50,7 +50,13 @@ from vouch.graph import (
 )
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
-from vouch.memory import Memory, newest_by_control, process_checkpointer, process_store
+from vouch.memory import (
+    Memory,
+    newest_by_control,
+    process_checkpointer,
+    process_store,
+    rejection_note,
+)
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -467,7 +473,7 @@ def create_assessment(
             profile,
             cast(BaseChatModel, model),
             saver,
-            note=requested.note,
+            note=requested.note or rejection_note(memory, saver, control.id),
             thread_id=thread_id,
             scope=memory.scope,
         )

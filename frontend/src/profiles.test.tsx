@@ -179,3 +179,46 @@ describe('ProfiledApp', () => {
     expect(screen.queryByRole('combobox', { name: 'Profile' })).toBeNull()
   })
 })
+
+describe('switching profile on a working paper', () => {
+  const judged = [{ id: 'M1', column: 'must', text: 'Transfers are encrypted.', verdict: 'partly-evidenced',
+    reason: 'Only some.', citations: [] }]
+  const proposed = { control_id: '5.1.2', verdict: 'partly-evidenced', answer: 'Partly.', status: 'waiting-for-review',
+    thread_id: 't1', requirements: judged }
+  const paperOverview = (company: string): Overview => ({
+    ...overviewOf(company),
+    controls: [{ id: '5.1.2', question: 'Question 5.1.2?', iso_27001: 'A.5.14', status: 'waiting-for-review',
+      verdict: 'partly-evidenced' }],
+    requirements: { '5.1.2': [{ id: 'M1', column: 'must', text: 'Transfers are encrypted.', source: 'VDA ISA 2027.1',
+      not_applicable: null }] },
+  })
+
+  it("drops the paper's unsaved overrides, which belonged to the other profile's assessment", async () => {
+    window.history.replaceState(null, '', '/controls/5.1.2')
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const named = new Headers(init?.headers).get('X-Vouch-Profile')
+      const company = named === 'testwerk' ? TESTWERK.company : NORDLICHT.company
+      if (url === '/api/profiles') {
+        return Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
+      }
+      if (url === '/api/overview') return Promise.resolve(Response.json(paperOverview(company)))
+      if (url === '/api/assessments') return Promise.resolve(Response.json({ assessments: [proposed] }))
+      if (url === '/api/assessments/t1') return Promise.resolve(Response.json({ assessment: proposed }))
+      return new Promise<Response>(() => {})
+    })
+    render(<ProfiledApp />)
+    const row = async () => (await screen.findByText('M1', { selector: 'th .mono' })).closest('tr')!
+    await userEvent.click(within(await row()).getByRole('button', { name: 'Change M1' }))
+    const editor = screen.getByRole('form', { name: 'Override M1' })
+    await userEvent.selectOptions(within(editor).getByLabelText('Verdict'), 'evidenced')
+    await userEvent.type(within(editor).getByLabelText('Reason (required)'), 'The rollout record shows it.')
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+    expect(within(await row()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Profile' }), 'testwerk')
+
+    await screen.findByText(/Working paper · Testwerk/)
+    expect(within(await row()).queryByText(/Overridden from/)).toBeNull()
+    expect(within(await row()).queryByText('The rollout record shows it.')).toBeNull()
+  })
+})

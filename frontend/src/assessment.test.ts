@@ -87,6 +87,7 @@ describe('assess, signed in', () => {
   })
 })
 
+
 describe('usageWords', () => {
   const usage = { input_tokens: 10, output_tokens: 5, cost_usd: 1.5, estimated: false, cost_complete: true }
 
