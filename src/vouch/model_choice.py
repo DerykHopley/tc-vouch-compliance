@@ -48,8 +48,9 @@ DEFAULT_MODEL = "anthropic/claude-haiku-5.5"
 """docs/requirements.md, Decisions (2026-11-03)."""
 USAGE_URL = "https://openrouter.ai/activity"
 """OpenRouter's own usage and cost per request, beside Vouch's totals (vouch.spending)."""
-CALL_BUDGET = 8
-"""Model calls one assessment may make; a run on the demo script makes 3 (2 gather, 1 judge).
+CALL_BUDGET = 12
+"""Model calls one assessment may make (12: the owner's call, 2026-11-05, as M1's graph uses
+about 6); a run on the demo script makes 3 (2 gather, 1 judge).
 The judge and the remediation drafts are calls too (the drafts only when a requirement is not
 evidenced), and each, like the answer, may be asked for once more by the output check."""
 MAX_RETRIES = 1

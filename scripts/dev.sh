@@ -7,7 +7,9 @@
 #
 # A port already in use stops the run before anything starts. The API runs only the scripted fake
 # model: the bundled demo script, or the one ASSESS_FAKE_SCRIPT names. It drops
-# OPENROUTER_API_KEY, with which the API would run the paid model (vouch.model_choice).
+# OPENROUTER_API_KEY, with which the API would run the paid model (vouch.model_choice). It runs
+# in local auth mode unless VOUCH_AUTH_MODE says otherwise: .envrc loads the Clerk keys, and keys
+# with a blank mode refuse to start (#151).
 # Needs: bash 4.4 or newer, python3, curl, uv and npm; backend deps (uv sync) and front-end deps
 # (npm ci in frontend/). `wait -n` and an empty array under `set -u` need bash 4.4; macOS has 3.2.
 if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
@@ -97,7 +99,8 @@ trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 trap cleanup EXIT
 
-(cd "$ROOT" && unset OPENROUTER_API_KEY VOUCH_FRONTEND && in_own_group \
+(cd "$ROOT" && unset OPENROUTER_API_KEY VOUCH_FRONTEND && export VOUCH_AUTH_MODE="${VOUCH_AUTH_MODE:-local}" \
+  && in_own_group \
   uv run uvicorn vouch.api:app --host 127.0.0.1 --port "$API_PORT" --reload --reload-dir src) \
   </dev/null &
 PIDS+=($!)
