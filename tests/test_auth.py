@@ -598,6 +598,8 @@ def test_someone_outside_the_course_server_gets_403_not_a_member_on_every_route(
         client.post(
             "/api/assessments", json={"control_id": "4.1.2"}, headers=bearer(token("user_bob"))
         ),
+        # The chat (#45), its greeting included, is behind the same gate.
+        client.post("/api/chat", json={"page": "dossier"}, headers=bearer(token("user_bob"))),
     ):
         assert response.status_code == 403
         assert response.json()["reason"] == "not-a-member"

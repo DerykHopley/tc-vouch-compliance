@@ -1,5 +1,9 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
-import { CHAT_UNREACHABLE, type PageContext, pageLabel, sendChat } from './chat.ts'
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, VERDICT_WORDS } from './assessment.ts'
+import {
+  CHAT_UNREACHABLE, GREETING_UNREACHABLE, type PageContext, pageLabel, sendChat, suggestionLabel, suggestionMessage,
+} from './chat.ts'
+import { controlPath, type NextStep } from './overview.ts'
 
 // Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
 const SHEET_QUERY = '(max-width: 700px)'
@@ -40,10 +44,56 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
   pinned: { className: 'bubble pinned', size: null, pin: 'enlarged' },
 }
 
-type Message = { from: 'lead' | 'vouch'; text: string; failed?: boolean }
+/** A line in the chat: the lead's message, Vouch's reply (or a notice that it failed), an assessment's step, or an
+ * assessment's verdict with the way to its working paper. */
+type Message =
+  | { from: 'lead' | 'vouch'; text: string; failed?: boolean }
+  | { from: 'step'; step: Step }
+  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus }
 
-/** The "Ask Vouch" button, bottom right, and the chat it opens; `context` is the page the compliance lead is on. */
-export default function AskVouch({ context }: { context: PageContext }) {
+type OnOpen = ((controlId: string) => void) | undefined
+
+/** A link to a control's working paper: shown in the app (`onOpen`), or followed as a link without it. */
+function PaperLink({ controlId, onOpen, className, children }:
+  { controlId: string; onOpen: OnOpen; className?: string; children: ReactNode }) {
+  return (
+    <a className={className} href={controlPath(controlId)}
+      onClick={(e) => { if (onOpen) { e.preventDefault(); onOpen(controlId) } }}>
+      {children}
+    </a>
+  )
+}
+
+/** An assessment's step, as the working paper's trace shows it: its node, then what it did; a guard step marked
+ * apart (design.md, Agent steps). */
+function StepLine({ step }: { step: Step }) {
+  return <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}><b>{step.node}</b> {step.text}</p>
+}
+
+/** The verdict an assessment from the chat ended with, its review state tag, and "Open the working paper". */
+function VerdictLine({ controlId, verdict, status, onOpen }:
+  { controlId: string; verdict: Verdict; status: ReviewStatus; onOpen: OnOpen }) {
+  return (
+    <p className="msg">
+      {controlId}: <span className={`chip v-${verdict}`}>{VERDICT_WORDS[verdict]}</span>{' '}
+      <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>{' '}
+      <PaperLink controlId={controlId} onOpen={onOpen}>Open the working paper</PaperLink>
+    </p>
+  )
+}
+
+type Props = {
+  /** The page the compliance lead is on. */
+  context: PageContext
+  /** Shows a control's working paper (a link from the chat). */
+  onOpen?: (controlId: string) => void
+  /** An assessment the chat started has its verdict. */
+  onAssessed?: (controlId: string) => void
+}
+
+/** The "Ask Vouch" button, bottom right, and the chat it opens: on first opening, Vouch's greeting (where the lead
+ * stands, and the next step as a chip). */
+export default function AskVouch({ context, onOpen, onAssessed }: Props) {
   const [state, setState] = useState<ChatState>('closed')
   const open = state !== 'closed'
   const fabRef = useRef<HTMLButtonElement>(null)
@@ -107,34 +157,69 @@ export default function AskVouch({ context }: { context: PageContext }) {
 
   const [draft, setDraft] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
+  const [suggestion, setSuggestion] = useState<NonNullable<NextStep> | null>(null)
   const [busy, setBusy] = useState(false)
   const sending = useRef(false) // a ref, so Enter twice in one tick still sends once
+  const threadId = useRef<string | null>(null) // the chat thread, named first in the first reply
+  const greeted = useRef(false) // asked for the greeting
+  const greetAgain = useRef(false) // it failed: asked for again on the next opening
 
-  async function send(e: FormEvent) {
-    e.preventDefault()
-    const text = draft.trim()
-    if (!text || sending.current) return
+  /** Sends `text` (null: asks for the greeting) and shows the reply as it streams: Vouch's words, an assessment's
+   * steps and its verdict, the next step as a chip. A failure is a notice; a typed message is kept, to send again. */
+  async function converse(text: string | null) {
+    if (sending.current) return
     sending.current = true
     setBusy(true)
-    setDraft('')
-    setMessages((all) => [...all, { from: 'lead', text }, { from: 'vouch', text: '' }])
-    const reply = (change: (m: Message) => Message) =>
-      setMessages((all) => [...all.slice(0, -1), change(all[all.length - 1])])
+    setSuggestion(null)
+    if (text !== null) setMessages((all) => [...all, { from: 'lead', text }])
+    const add = (m: Message) => setMessages((all) => [...all, m])
+    const write = (piece: string) => setMessages((all) => {
+      const last = all[all.length - 1]
+      return last?.from === 'vouch' && !last.failed
+        ? [...all.slice(0, -1), { ...last, text: last.text + piece }] : [...all, { from: 'vouch', text: piece }]
+    })
     const failed = (message: string) => {
-      reply(() => ({ from: 'vouch', text: message, failed: true }))
-      setDraft((now) => now || text) // the typed message is kept, to send again
+      add({ from: 'vouch', text: message, failed: true })
+      if (text !== null) setDraft((now) => now || text)
+      else greetAgain.current = true
     }
     try {
-      for await (const item of sendChat(text, context)) {
-        if (item.event === 'token') reply((m) => ({ ...m, text: m.text + item.data.text }))
-        else if (item.event === 'error') failed(item.data.message)
+      for await (const item of sendChat(text, context, threadId.current)) {
+        if (item.event === 'token') write(item.data.text)
+        else if (item.event === 'thread') threadId.current = item.data.thread_id
+        else if (item.event === 'step') add({ from: 'step', step: item.data })
+        else if (item.event === 'suggestion') setSuggestion(item.data)
+        else if (item.event === 'assessment') {
+          add({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status })
+          onAssessed?.(item.data.control_id)
+        } else if (item.event === 'error') failed(item.data.message)
       }
     } catch {
-      failed(CHAT_UNREACHABLE)
+      failed(text === null ? GREETING_UNREACHABLE : CHAT_UNREACHABLE)
     } finally {
       sending.current = false
       setBusy(false)
     }
+  }
+
+  // Vouch greets the lead the first time the chat opens: where they stand, and the next step. A greeting that failed
+  // is asked for again the next time the chat opens (never over and over while it stays open).
+  useEffect(() => {
+    if (!open && greetAgain.current) {
+      greetAgain.current = false
+      greeted.current = false
+    }
+    if (!open || greeted.current) return
+    greeted.current = true
+    void converse(null)
+  })
+
+  function send(e: FormEvent) {
+    e.preventDefault()
+    const text = draft.trim()
+    if (!text || sending.current) return
+    setDraft('')
+    void converse(text)
   }
 
   if (!open) {
@@ -164,9 +249,17 @@ export default function AskVouch({ context }: { context: PageContext }) {
       </div>
       {/* Busy while a reply streams, so assistive tech announces the finished message, not each piece. */}
       <div className="bubble-log" role="log" aria-live="polite" aria-busy={busy}>
-        {messages.map((m, i) => (
-          <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : m.failed ? 'msg notice' : 'msg'}>{m.text}</p>
-        ))}
+        {messages.map((m, i) => m.from === 'verdict'
+          ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} onOpen={onOpen} />
+          : m.from === 'step' ? <StepLine key={i} step={m.step} />
+            : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : m.failed ? 'msg notice' : 'msg'}>{m.text}</p>)}
+        {suggestion && !busy && (suggestion.action === 'review'
+          ? <PaperLink className="btn btn-ghost suggestion" controlId={suggestion.control_id} onOpen={onOpen}>
+            {suggestionLabel(suggestion)}
+          </PaperLink>
+          : <button className="btn btn-ghost suggestion" onClick={() => void converse(suggestionMessage(suggestion))}>
+            {suggestionLabel(suggestion)}
+          </button>)}
       </div>
       <form className="bubble-foot" onSubmit={(e) => void send(e)}>
         <input ref={inputRef} className="field" type="text" aria-label="Message to Vouch" placeholder="Ask a question"

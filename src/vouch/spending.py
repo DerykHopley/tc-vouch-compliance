@@ -419,3 +419,15 @@ class SpendingGuard:
     def settings(self) -> dict[str, Any]:
         """What the developer page shows. Raises DatabaseUnavailable."""
         return {"daily_limit": self.store.daily_limit(), "usage": self.store.totals().to_dict()}
+
+
+def count_assessment(spending: SpendingGuard, user_id: str, paid: bool) -> None:
+    """Count one assessment against the user's daily limit, wherever it was started (the
+    working paper, the chat); `paid`: it runs on OpenRouter. Raises DailyLimitReached,
+    NoSharedCounter (logged: a paid model needs the database's counter) or DatabaseUnavailable:
+    then no assessment starts."""
+    try:
+        spending.start(user_id, paid=paid)
+    except NoSharedCounter:
+        log.error("assessments on OpenRouter need %s for the daily limit", DATABASE_URL_ENV)
+        raise

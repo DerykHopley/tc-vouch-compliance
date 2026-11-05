@@ -4,12 +4,13 @@ import logging
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from pydantic import SecretStr
 from test_api import read_events
 
 from vouch.api import create_app
-from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext, chat_messages, streamed_reply
+from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext, RedactedText
+from vouch.chat_agent import chat_prompt
 from vouch.chat_fake import CHAT_REPLY, CannedChatModel
 from vouch.isa import load_isa_control
 from vouch.model_choice import ModelChoice
@@ -31,14 +32,14 @@ def chat(client, **body):
 
 
 def test_the_chat_streams_the_reply_as_token_events_then_done(client):
-    response = chat(client, message="Where do I stand?")
+    response = chat(client, message="What does TISAX ask of us?")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = read_events(response)
     names = [name for name, _ in events]
-    assert names[-1] == "done" and names.count("done") == 1
-    assert set(names[:-1]) == {"token"} and len(names) > 2  # streamed, not one block
+    assert names[0] == "thread" and names[-1] == "done" and names.count("done") == 1
+    assert set(names[1:-1]) == {"token"} and len(names) > 3  # streamed, not one block
     assert "".join(data["text"] for name, data in events if name == "token") == CHAT_REPLY
 
 
@@ -108,6 +109,13 @@ def test_a_secret_in_the_reply_is_removed_with_a_guard_step(client, monkeypatch)
 # The chat entry point
 
 
+def sent(chunks: list[str]) -> list[tuple[str, list[str]]]:
+    """What RedactedText sends of a reply written in `chunks`: piece by piece, then the rest."""
+    text = RedactedText()
+    pieces = [piece for chunk in chunks for piece in text.add(chunk)]
+    return pieces + list(text.flush())
+
+
 def nordlicht():
     return load_named_profile(DEFAULT_PROFILE)
 
@@ -115,9 +123,9 @@ def nordlicht():
 def test_the_prompt_asks_for_the_formal_voice_in_the_profiles_language():
     profile = nordlicht().model_copy(update={"answer_language": "de"})
 
-    system, human = chat_messages("Wo stehe ich?", profile, PageContext("dossier"))
+    system = chat_prompt(profile, PageContext("dossier"))
 
-    assert isinstance(system, SystemMessage) and isinstance(human, HumanMessage)
+    assert isinstance(system, SystemMessage)
     assert "formal" in system.content
     assert "ISO 639-1 code 'de'" in system.content
     assert profile.company in system.content
@@ -127,7 +135,7 @@ def test_the_prompt_asks_for_the_formal_voice_in_the_profiles_language():
 def test_the_prompt_names_the_control_on_its_working_paper():
     control = load_isa_control("5.1.1")
 
-    system, _ = chat_messages("Hello", nordlicht(), PageContext("paper", control))
+    system = chat_prompt(nordlicht(), PageContext("paper", control))
 
     assert f"{control.id}" in system.content and control.question in system.content
 
@@ -141,9 +149,7 @@ def test_the_prompt_names_the_control_on_its_working_paper():
     ],
 )
 def test_a_secret_split_across_chunks_is_still_removed(chunks):
-    fake = CannedChatModel(chunks=chunks)
-
-    pieces = list(streamed_reply(fake, []))
+    pieces = sent(chunks)
 
     assert "".join(text for text, _ in pieces) == "Bearer [removed] end"
     assert any(removed for _, removed in pieces)
@@ -164,7 +170,7 @@ def test_a_secret_split_across_chunks_is_still_removed(chunks):
     ],
 )
 def test_a_secret_split_across_whitespace_or_lines_is_never_half_sent(chunks, expected):
-    pieces = list(streamed_reply(CannedChatModel(chunks=chunks), []))
+    pieces = sent(chunks)
 
     assert "".join(text for text, _ in pieces) == expected
 
@@ -173,7 +179,7 @@ def test_a_remembered_secret_with_spaces_is_removed_across_chunks():
     remember_secrets(Settings(openrouter_api_key=SecretStr("open sesame key 0047 plus")))
     chunks = ["The key is open ", "sesame", " key 0047", " plus and", " that is all."]
 
-    pieces = list(streamed_reply(CannedChatModel(chunks=chunks), []))
+    pieces = sent(chunks)
 
     assert "".join(text for text, _ in pieces) == "The key is [removed] and that is all."
 
@@ -181,7 +187,7 @@ def test_a_remembered_secret_with_spaces_is_removed_across_chunks():
 def test_a_long_reply_is_sent_as_it_is_written_not_held_to_the_end():
     words = [f" word{i}" for i in range(200)]
 
-    seen = [text for text, _ in streamed_reply(CannedChatModel(chunks=words), [])]
+    seen = [text for text, _ in sent(words)]
 
     assert len(seen) > 150  # sent along the way, a few words behind
     assert "".join(seen) == "".join(words)

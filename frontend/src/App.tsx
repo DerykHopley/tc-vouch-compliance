@@ -98,12 +98,13 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
   const paperId = control ? control.id : null
   const readStored = control !== undefined && control.status !== 'not-assessed' && runFor !== control.id
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
+  const [paperReloads, setPaperReloads] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
   useEffect(() => {
     if (paperId === null || !readStored) return
     const answer = { wanted: true } // until the paper changes
     void newestAssessment(paperId).then((assessment) => answer.wanted && setStored({ controlId: paperId, assessment }))
     return () => { answer.wanted = false }
-  }, [paperId, readStored])
+  }, [paperId, readStored, paperReloads])
   // The lead's decisions made in this page (#42), by thread: newer than the run's result or the stored read.
   const [reviewed, setReviewed] = useState<Record<string, Assessment>>({})
   const noteReviewed = (assessment: Assessment) => {
@@ -159,8 +160,14 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
-      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads. */}
-      <AskVouch context={{ page: shown ?? 'dossier', controlId: shown === 'paper' && control ? control.id : null }} />
+      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads. An
+          assessment from the chat reads the overview afresh (its card, readiness), and its paper's newest if open. */}
+      <AskVouch context={{ page: shown ?? 'dossier', controlId: shown === 'paper' && control ? control.id : null }}
+        onOpen={(controlId) => open(controlId, false)}
+        onAssessed={(controlId) => {
+          void load()
+          if (controlId === paperId) setPaperReloads((n) => n + 1)
+        }} />
     </>
   )
 }
