@@ -1,0 +1,452 @@
+# Expected answers for Alpenwerk Präzision GmbH: DRAFT, for the owner's review (#50).
+#
+# Per applicable requirement of the 12 ISA questions (high protection: must, should and high;
+# the AT NIS2 (illustrative) overlay adds O1 to 1.6.2; nothing is not applicable): the verdict
+# a good assessment gives, and the evidence documents a good answer cites (ids from policies/,
+# records/ and patch/). `why` is our own one-line reasoning in English, for the owner's
+# review, never ISA text.
+#
+# Rules applied (spec #2): a requirement about doing something needs implemented evidence
+# to be evidenced; stale evidence caps a requirement at partly-evidenced.
+# Planted cases: no CSIRT early warning (1.6.2 O1), a high-protection requirement only partly
+# evidenced (5.2.9 H2), key sovereignty for cloud services (5.1.1 H1), and one stale document
+# (protokollierungsrichtlinie, approved 2023 with a yearly review).
+profile: alpenwerk
+as_of: 2026-11-04 # the date staleness is judged on
+status: draft
+controls:
+  - id: "1.1.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie]
+        why: Requirements are derived each year from strategy, contracts and law, and kept in a list management confirms.
+      - id: M2
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie]
+        why: The policy records management's approval on 20 July 2026.
+      - id: M3
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie]
+        why: The policy states three objectives and why security matters to a supplier of confidential customer drawings.
+      - id: M4
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie, leitlinien-veroeffentlichung]
+        why: Published on the intranet since 22 July 2026; the record shows the page and its views.
+      - id: M5
+        verdict: partly-evidenced
+        cites: [leitlinien-veroeffentlichung]
+        why: Employees and agency staff were told of the July change, but suppliers and service providers haven't been yet.
+      - id: S1
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie]
+        why: Requirements come from the company strategy, customer contracts and Austrian and European law.
+      - id: S2
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie]
+        why: A section names the consequences, from a warning to dismissal, and contract termination for partners.
+      - id: S3
+        verdict: evidenced
+        cites: [informationssicherheitsleitlinie]
+        why: The policy lists ten supporting policies and procedures, each with an owner.
+      - id: S4
+        verdict: partly-evidenced
+        cites: [informationssicherheitsleitlinie, leitlinien-veroeffentlichung, protokollierungsrichtlinie]
+        why: A yearly review is set and the policy's July 2026 review is recorded, but the logging policy it names hasn't been reviewed since May 2023.
+
+  - id: "1.6.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse, schulungsnachweis]
+        why: The procedure defines what to report for personnel, physical, IT and supplier events; the yearly training covers it and 96 percent completed it.
+      - id: M2
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse, sicherheitsereignis-register]
+        why: Email, ticket and a hotline are set, and the register shows reports arriving by each.
+      - id: M3
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse]
+        why: The security desk is reachable by email, ticket and a hotline staffed around the clock.
+      - id: S1
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse]
+        why: The security desk is the single point of contact.
+      - id: S2
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse]
+        why: The hotline for urgent events, email or ticket for the rest.
+      - id: S3
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse, schulungsnachweis]
+        why: The duty to report is in the employment contract and covered by the yearly training.
+      - id: S4
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse, sicherheitsereignis-register]
+        why: Outsiders report to an address published on the website, handled like any report; the register shows two external reports.
+      - id: S5
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse]
+        why: Contacts are on the intranet, at every time clock and in the welcome pack for agency staff and visitors.
+      - id: S6
+        verdict: evidenced
+        cites: [meldeverfahren-sicherheitsereignisse, sicherheitsereignis-register]
+        why: Every reporter gets feedback within a working day, and the register shows it was given.
+
+  - id: "1.6.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren, sicherheitsereignis-register]
+        why: Every report was recorded the day it came in; the median first action came after 2 hours.
+      - id: M2
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren, sicherheitsereignis-register]
+        why: Responsibilities and response times are set, and the register shows an action for each entry.
+      - id: M3
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren, sicherheitsereignis-register]
+        why: Reviews after high and critical incidents are required, and two are recorded with their improvements done.
+      - id: S1
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren, sicherheitsereignis-register]
+        why: Reports are categorised, qualified and prioritised, as the register's columns show.
+      - id: S2
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren]
+        why: A table assigns each category an owner and deputy; cross-category events are coordinated and urgent ones phoned.
+      - id: S3
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren]
+        why: Criminal acts go to the police, with management deciding.
+      - id: H1
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren]
+        why: Maximum times for the first action and closure are set per priority.
+      - id: H2
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren, sicherheitsereignis-register]
+        why: Escalation thresholds and contacts up to management are set, and entry 2026-031 shows one escalation.
+      - id: H3
+        verdict: partly-evidenced
+        cites: [vorfallbehandlungsverfahren]
+        why: Data protection, customer and police duties are listed with contacts, but not the duty to report significant incidents under NIS2.
+      - id: H4
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren]
+        why: Management approves every outside message and decides with the security officer who is told, when and by whom.
+      - id: H5
+        verdict: evidenced
+        cites: [vorfallbehandlungsverfahren, sicherheitsereignis-register]
+        why: Supplier incidents are analysed for their impact and logged like our own; entry 2026-015 is one.
+      - id: O1
+        verdict: not-evidenced
+        cites: []
+        why: Nothing provides for an early warning to the national CSIRT, and the significant incident of February 2026 went to no authority.
+
+  - id: "2.1.3"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [schulungsnachweis]
+        why: 96 percent completed the 2026 basic training, every new starter in their first week.
+      - id: S1
+        verdict: evidenced
+        cites: [schulungskonzept]
+        why: The concept covers the policy, reporting, malware, accounts and passwords, and compliance topics.
+      - id: S2
+        verdict: partly-evidenced
+        cites: [schulungskonzept]
+        why: Managers and administrators are target groups, but staff with access to customer networks and production staff are not.
+      - id: S3
+        verdict: evidenced
+        cites: [schulungskonzept]
+        why: Management approved the concept on 26 January 2026.
+      - id: S4
+        verdict: evidenced
+        cites: [schulungskonzept, schulungsnachweis]
+        why: Training is yearly, and a phishing exercise followed the February 2026 incident.
+      - id: S5
+        verdict: evidenced
+        cites: [schulungsnachweis]
+        why: The e-learning platform's export records attendance per course.
+      - id: S6
+        verdict: evidenced
+        cites: [schulungskonzept]
+        why: The security officer is named on the intranet and at the end of every course.
+
+  - id: "4.1.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie, risikobewertung-anmeldeverfahren]
+        why: The 2026 risk assessment rates each system, including internet exposure, and picks its sign-in method.
+      - id: M2
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie]
+        why: The methods follow BSI baseline protection and NIST password guidance.
+      - id: S1
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie, risikobewertung-anmeldeverfahren]
+        why: Methods are chosen per system from its data and exposure, and all are recorded as in place.
+      - id: S2
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie]
+        why: Passwords have at least 14 characters and are checked against leaked-password lists.
+      - id: S3
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie, risikobewertung-anmeldeverfahren]
+        why: Administrators use a separate account with a hardware token, in place for all 9 since March 2026.
+      - id: H1
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie, risikobewertung-anmeldeverfahren]
+        why: Lockout after five failures, screen locks, session limits and alerts on unusual countries, all recorded as in place.
+
+  - id: "4.1.3"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
+        why: Accounts are created, changed and blocked through the service portal, as the record of joiners and leavers shows.
+      - id: M2
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren]
+        why: Everyone gets their own personal account.
+      - id: M3
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren]
+        why: Shared accounts are allowed only on display-only production terminals, kept on a list.
+      - id: M4
+        verdict: partly-evidenced
+        cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
+        why: Six of seven leavers were blocked on their last day; one was blocked six days late.
+      - id: M5
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren, zugriffsrechte-ueberpruefung]
+        why: Accounts are reviewed every six months; the first-half 2026 review is recorded.
+      - id: M6
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
+        why: First passwords go by text message, user names separately by email, as done for all 14 joiners.
+      - id: M7
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie, schulungsnachweis]
+        why: The rules on credentials cover no sharing, no notes and changing on suspicion, and the yearly training covers them.
+      - id: S1
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren]
+        why: New accounts start with a basic profile of email, intranet and the service portal.
+      - id: S2
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren]
+        why: Vendor default accounts are disabled or get a new password before a system goes live.
+      - id: S3
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
+        why: HR requests and IT creates each account, as the record shows for every joiner.
+      - id: S4
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
+        why: The line manager approves before IT creates the account, a four-eyes step the record confirms.
+      - id: S5
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren, benutzerkonten-protokoll]
+        why: Service provider accounts end with the job; three were blocked on their end dates.
+      - id: S6
+        verdict: evidenced
+        cites: [benutzerkonten-verfahren]
+        why: Blocked accounts are deleted after 6 months, mailboxes after 12.
+      - id: S7
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie]
+        why: The directory rejects default and leaked passwords.
+      - id: S8
+        verdict: evidenced
+        cites: [authentifizierungsrichtlinie]
+        why: Hardware tokens are personal, never passed on and blocked at once when lost.
+      - id: S9
+        verdict: partly-evidenced
+        cites: [benutzerkonten-verfahren, zugriffsrechte-ueberpruefung]
+        why: Accounts in our own systems are reviewed, but Alpenwerk's accounts in three customers' portals are not.
+      - id: S10
+        verdict: not-evidenced
+        cites: []
+        why: No document says interactive sign-in with service accounts is prevented.
+
+  - id: "4.2.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [berechtigungskonzept, benutzerkonten-protokoll]
+        why: Rights are requested, checked and approved, granted by least privilege and withdrawn, as the leaver and role-change entries show.
+      - id: M2
+        verdict: partly-evidenced
+        cites: [berechtigungskonzept, zugriffsrechte-ueberpruefung]
+        why: Normal and privileged rights are reviewed every six months, but technical accounts and customers' systems are left out.
+      - id: S1
+        verdict: evidenced
+        cites: [berechtigungskonzept]
+        why: The concept sets out how access to information is granted.
+      - id: S2
+        verdict: evidenced
+        cites: [berechtigungskonzept]
+        why: Rights are granted through roles such as design, purchasing and accounting.
+      - id: S3
+        verdict: evidenced
+        cites: [berechtigungskonzept]
+        why: Each role holds only what its tasks need.
+      - id: S4
+        verdict: evidenced
+        cites: [berechtigungskonzept, zugriffsrechte-ueberpruefung]
+        why: Administrators use separate accounts, and the review found no normal account with privileged rights.
+      - id: S5
+        verdict: evidenced
+        cites: [berechtigungskonzept, benutzerkonten-protokoll]
+        why: Roles change on the day of a move; four moves are recorded with old rights withdrawn.
+      - id: H1
+        verdict: evidenced
+        cites: [berechtigungskonzept, zugriffsrechte-ueberpruefung]
+        why: Each system's information owner releases rights before IT sets them up, and confirmed each role in the review.
+
+  - id: "5.1.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [kryptografiekonzept]
+        why: Methods and key strengths follow BSI TR-02102 and are checked yearly.
+      - id: S1
+        verdict: evidenced
+        cites: [kryptografiekonzept]
+        why: The concept covers methods, key strengths and the key life cycle from creation to deletion.
+      - id: H1
+        verdict: partly-evidenced
+        cites: [kryptografiekonzept, cloud-dienste-register]
+        why: Confidential data at providers must use keys only Alpenwerk holds; payroll does, but the CAD exchange platform leaves its keys with the provider.
+
+  - id: "5.1.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [netzwerkdienste-verzeichnis]
+        why: The register lists the five network services used to transfer information.
+      - id: M2
+        verdict: evidenced
+        cites: [netzwerk-uebertragungsrichtlinie]
+        why: A table sets which services each classification may use.
+      - id: M3
+        verdict: evidenced
+        cites: [netzwerk-uebertragungsrichtlinie, netzwerkdienste-verzeichnis]
+        why: All transfers are encrypted and unencrypted protocols are blocked, confirmed from the firewall in September 2026.
+      - id: S1
+        verdict: evidenced
+        cites: [netzwerk-uebertragungsrichtlinie]
+        why: Mail warns before sending outside, and drawings go only to recipients enabled for the project.
+      - id: S2
+        verdict: evidenced
+        cites: [netzwerk-uebertragungsrichtlinie, netzwerkdienste-verzeichnis]
+        why: Confidential content is also content-encrypted, with S/MIME or on the CAD exchange platform.
+      - id: S3
+        verdict: evidenced
+        cites: [netzwerk-uebertragungsrichtlinie, netzwerkdienste-verzeichnis]
+        why: Remote access is VPN only, with TLS 1.3 and multi-factor sign-in, granted and ended through the account procedure.
+      - id: H1
+        verdict: evidenced
+        cites: [netzwerk-uebertragungsrichtlinie, netzwerkdienste-verzeichnis]
+        why: At least transport encryption everywhere, and the register shows it for every service.
+
+  - id: "5.2.4"
+    requirements:
+      - id: M1
+        verdict: partly-evidenced
+        cites: [protokollierungsrichtlinie]
+        why: The logging policy sets requirements for handling logs, but it is stale (approved May 2023, yearly review).
+      - id: M2
+        verdict: partly-evidenced
+        cites: [protokollierungsrichtlinie]
+        why: User and administrator activity logging is set, but only in the stale logging policy.
+      - id: M3
+        verdict: partly-evidenced
+        cites: [protokollierungsrichtlinie]
+        why: Each new system is assessed for logging, but only the stale logging policy says so.
+      - id: M4
+        verdict: evidenced
+        cites: [cloud-dienste-register]
+        why: Each cloud service's monitoring options were recorded at approval and feed the monthly log review.
+      - id: M5
+        verdict: evidenced
+        cites: [protokollauswertung]
+        why: Logs were reviewed every month from January to September 2026, with findings counted.
+      - id: S1
+        verdict: evidenced
+        cites: [protokollauswertung]
+        why: Findings that suggest a security event go to the security desk, as five did.
+      - id: S2
+        verdict: partly-evidenced
+        cites: [protokollierungsrichtlinie]
+        why: Logs sit on a dedicated server where entries can't be changed, but only the stale policy says so.
+      - id: S3
+        verdict: partly-evidenced
+        cites: [protokollierungsrichtlinie]
+        why: Firewall and intrusion detection watch the network, but only the stale policy says so.
+      - id: H1
+        verdict: not-evidenced
+        cites: []
+        why: No document identifies contractual or other requirements for handling logs.
+      - id: H2
+        verdict: evidenced
+        cites: [protokollauswertung]
+        why: Setting up and ending each remote maintenance session is logged; 23 sessions were.
+
+  - id: "5.2.5"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Patch gathers manufacturer and CVE advisories nightly and scores them with CVSS.
+      - id: M2
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Each vulnerability names the affected systems and software.
+      - id: M3
+        verdict: partly-evidenced
+        cites: [patch-vulnerability-status]
+        why: Most are treated, but a high one on the production PCs is 12 days overdue with no stopgap.
+      - id: S1
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: Patches are tracked as tickets with priorities and due dates.
+      - id: S2
+        verdict: partly-evidenced
+        cites: [patch-vulnerability-status]
+        why: The CAD vault's accepted risk is reduced by network limits, but the overdue production PCs have no measure.
+      - id: S3
+        verdict: evidenced
+        cites: [patch-vulnerability-status]
+        why: A rescan confirms each closed patch ticket, as for PT-204 and PT-209.
+
+  - id: "5.2.9"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [datensicherungskonzept]
+        why: The concept covers the five key services, with encrypted, immutable, access-limited backups off site.
+      - id: M2
+        verdict: evidenced
+        cites: [datensicherungskonzept]
+        why: Recovery times, order and resources are set for each key service.
+      - id: S1
+        verdict: evidenced
+        cites: [datensicherungskonzept]
+        why: Each service has its backup and recovery, with dependencies and recovery order.
+      - id: H1
+        verdict: evidenced
+        cites: [datensicherungskonzept]
+        why: The concept is reviewed methodically each year against the restore tests, last in October 2026.
+      - id: H2
+        verdict: partly-evidenced
+        cites: [datensicherungskonzept, wiederherstellungstests]
+        why: Three services were restored in tests in 2026, but the CAD vault and file server weren't, the file server never.
+      - id: H3
+        verdict: evidenced
+        cites: [datensicherungskonzept]
+        why: RPO, RTO, recovery resources and avoiding overload are set.
