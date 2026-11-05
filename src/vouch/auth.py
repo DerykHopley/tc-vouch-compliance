@@ -177,6 +177,28 @@ class ClerkAuth:
         self._roles[user.id] = _CachedRole(expires=now + self.ROLE_TTL, role=role)
         return role
 
+    def _fetch_role(self, user_id: str) -> Role:
+        """Developer when the user's private metadata says so exactly; else compliance lead."""
+        try:
+            response = self._client.get(
+                f"{CLERK_API}/users/{user_id}",
+                headers={"Authorization": f"Bearer {self._secret_key.get_secret_value()}"},
+            )
+            if response.status_code == 404:  # deleted since the token was issued
+                log.info("signed out: Clerk does not know the token's user")
+                raise SignedOut()
+            response.raise_for_status()
+            metadata = response.json()["private_metadata"]
+        except SignedOut:
+            raise
+        # Unreachable or refused (HTTPError), or not the answer expected (the rest).
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as error:
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            log.error("Clerk's user lookup failed: %s %s", type(error).__name__, status or "")
+            raise ClerkUnavailable() from None
+        developer = isinstance(metadata, dict) and metadata.get("role") == "developer"
+        return "developer" if developer else "compliance-lead"
+
     def access(self, user: User) -> None:
         """Returns when the user may use Vouch; always, with no Discord server set. Cached.
 
@@ -196,13 +218,9 @@ class ClerkAuth:
         if cached.access == "sign-in-again":
             raise SignInAgain()
 
-    def _fetch_role(self, user_id: str) -> Role:
-        """Developer when the user's private metadata says so exactly; else compliance lead."""
-        return _role_of(self._fetch_user(user_id))
-
     def _fetch_access(self, user_id: str) -> Access:
         """The developer, then the invited, then the Discord server's members are allowed."""
-        found = self._fetch_user(user_id)
+        found = self._user_for_access(user_id)
         if _role_of(found) == "developer" or _flagged_invited(found):
             return "allowed"
         if any(self._was_invited(address) for address in _verified_addresses(found)):
@@ -229,7 +247,7 @@ class ClerkAuth:
             log.error("Clerk's API failed: %s %s", type(error).__name__, status or "")
             raise ClerkUnavailable() from None
 
-    def _fetch_user(self, user_id: str) -> dict[str, Any]:
+    def _user_for_access(self, user_id: str) -> dict[str, Any]:
         """The user as Clerk's Backend API has it. Raises SignedOut when Clerk doesn't know them
         (deleted since the token was issued), ClerkUnavailable when Clerk can't answer."""
         response = self._clerk(f"/users/{user_id}")
