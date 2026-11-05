@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
 
-from vouch import memory
+from vouch import api, memory
 from vouch.citations import Citation
-from vouch.dossier import QUOTES_SHOWN, overview
+from vouch.dossier import QUOTES_SHOWN, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
     RemediationItem,
@@ -22,7 +22,7 @@ from vouch.graph import (
     Verdict,
 )
 from vouch.isa import load_base_framework
-from vouch.profile import load_named_profile
+from vouch.profile import CountryOverlay, load_named_profile
 
 NORDLICHT = load_named_profile("nordlicht")
 CONTROLS = load_base_framework().controls
@@ -370,3 +370,76 @@ def test_the_overview_reads_no_more_than_each_controls_newest_assessment(
         body = overview_of(client, alice)
 
     assert card(body, DEMO_CONTROL)["status"] == "waiting-for-review"
+
+
+# The working paper (#41): the overview carries what its head shows (the profile's protection
+# level and answer language) and what it lists before an assessment (each control's requirements
+# under the profile), so opening a paper costs no request of its own. The requirements change only
+# with the profile, so the API builds them once per profile.
+
+
+def test_the_overview_names_the_profiles_protection_level_and_answer_language():
+    body = overview(NORDLICHT, CONTROLS, {})
+
+    assert (body["protection_level"], body["answer_language"]) == ("normal", "en")
+
+
+def test_the_overview_lists_each_controls_requirements_not_applicable_ones_last_with_why():
+    requirements = requirements_by_control(NORDLICHT, CONTROLS)
+
+    assert list(requirements) == [c.id for c in CONTROLS]
+    listed = requirements["5.1.2"]
+    assert {r["column"] for r in listed} == {"must", "should"}  # normal protection: no high
+    s3 = listed[-1]  # applicable first, then not applicable: as an assessment lists them
+    assert s3["id"] == "S3"
+    assert s3["not_applicable"].startswith("Nordlicht allows no remote access")
+    assert all(r["not_applicable"] is None for r in listed[:-1])
+    assert all(r["source"] == "VDA ISA 2027.1" for r in listed)
+
+
+def test_the_overview_lists_an_overlays_requirement_with_the_overlays_name():
+    overlay = CountryOverlay.model_validate(
+        {
+            "name": "AT NIS2 (illustrative)",
+            "requirements": [{"control": "1.6.2", "id": "O1", "text": "An early warning."}],
+        }
+    )
+    with_overlay = NORDLICHT.model_copy(update={"overlays": (overlay,)})
+
+    requirements = requirements_by_control(with_overlay, CONTROLS)
+
+    assert requirements["1.6.2"][-1] == {
+        "id": "O1",
+        "column": "overlay",
+        "text": "An early warning.",
+        "source": "AT NIS2 (illustrative)",
+        "not_applicable": None,
+    }
+
+
+def test_the_overview_route_sends_the_working_papers_requirements(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        body = overview_of(client, alice)
+
+    assert body["requirements"] == requirements_by_control(NORDLICHT, CONTROLS)
+    assert body["protection_level"] == "normal"
+
+
+def test_the_overview_route_builds_the_requirements_once_per_profile(
+    database_url, users, monkeypatch
+):
+    alice, _ = users
+    built = []
+
+    def counted(profile, controls):
+        built.append(profile)
+        return requirements_by_control(profile, controls)
+
+    monkeypatch.setattr(api, "requirements_by_control", counted)
+    with TestClient(app_on(database_url)) as client:
+        first = overview_of(client, alice)
+        second = overview_of(client, alice)
+
+    assert len(built) == 1
+    assert first["requirements"] == second["requirements"]

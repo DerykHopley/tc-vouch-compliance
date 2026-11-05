@@ -35,7 +35,7 @@ from vouch.chat import (
     streamed_reply,
 )
 from vouch.database import Connection, Database, DatabaseUnavailable
-from vouch.dossier import overview
+from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
     InvalidReviewError,
@@ -575,14 +575,31 @@ def list_profiles(settings: AppSettings, user: CurrentUser) -> dict[str, Any]:
     return {"profiles": listed, "default": default.id if default in scan.loaded else None}
 
 
+_paper_requirements: dict[str, tuple[ComplianceProfile, Any]] = {}
+"""Each profile's requirements, redacted, by profile id, with the profile object they were built
+from (#47: one entry per profile, so a switch neither rebuilds nor mixes them)."""
+
+
+def paper_requirements(profile: ComplianceProfile) -> dict[str, list[PaperRequirement]]:
+    """Each control's requirements under the profile (vouch.dossier.requirements_by_control),
+    redacted as the overview is; built once per loaded profile, as they change only with it."""
+    kept = _paper_requirements.get(profile.id)
+    if kept is None or kept[0] is not profile:
+        built = requirements_by_control(profile, load_base_framework().controls)
+        clean, _ = redact_data(built)
+        kept = _paper_requirements[profile.id] = (profile, clean)
+    return kept[1]
+
+
 @router.get("/overview")
 def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
-    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step. Its
-    quotes are redacted as the stream's events are."""
+    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
+    each control's requirements, for its working paper (#41). Redacted as the stream's events
+    are."""
     latest = newest_by_control(memory, saver)  # from each control's newest thread
     clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
-    return clean
+    return clean | {"requirements": paper_requirements(profile)}
 
 
 class ChatRequest(BaseModel):

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from profiles_dir import BROKEN, SECOND, SECOND_COMPANY, make_profiles
 from test_memory import as_user, assess, restart
 
+from vouch import api
 from vouch.api import PROFILE_HEADER, create_app, current_user
 from vouch.chat_fake import CannedChatModel
 from vouch.isa import BaseFrameworkError
@@ -244,3 +245,31 @@ def test_choosing_the_broken_profile_is_a_500_before_any_stream(profiles, users)
     assert response.status_code == 500
     assert not response.headers["content-type"].startswith("text/event-stream")
     assert str(profiles) not in response.text
+
+
+def test_each_profiles_working_paper_requirements_are_its_own_and_built_once(
+    profiles, users, monkeypatch
+):
+    """The overview's requirements (#41) are kept per profile: switching back and forth never
+    shows one profile's requirements under the other, nor builds them again."""
+    second = profiles / SECOND / "profile.yaml"
+    raised = second.read_text(encoding="utf-8").replace(
+        "protection_level: normal", "protection_level: high"
+    )
+    second.write_text(raised, encoding="utf-8")
+    builds = []
+    real = api.requirements_by_control
+    monkeypatch.setattr(
+        api, "requirements_by_control", lambda p, c: builds.append(p.id) or real(p, c)
+    )
+    alice, _ = users
+    with app_with(profiles) as client:
+        shown = [
+            client.get("/api/overview", headers=under(alice, profile_id)).json()["requirements"]
+            for profile_id in ("nordlicht", SECOND, "nordlicht", SECOND)
+        ]
+
+    columns = [{r["column"] for rs in each.values() for r in rs} for each in shown]
+    assert "high" not in columns[0] and "high" in columns[1]
+    assert shown[0] == shown[2] and shown[1] == shown[3]
+    assert sorted(builds) == ["nordlicht", SECOND]
