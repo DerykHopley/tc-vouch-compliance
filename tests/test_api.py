@@ -1,4 +1,5 @@
 import json
+import shutil
 from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -8,7 +9,9 @@ from assess_steps import in_order
 from fastapi.testclient import TestClient
 
 from vouch import ScriptedChatModel, profile
-from vouch.api import create_app, load_default_profile
+from vouch.api import PROFILE_HEADER, create_app
+from vouch.paths import FIXTURES_DIR
+from vouch.profile import read_profile_once
 from vouch.settings import Settings
 
 DEMO_CONTROL = "4.1.2"
@@ -17,9 +20,9 @@ DEMO_CONTROL = "4.1.2"
 @pytest.fixture
 def client():
     """The app in local mode on the bundled demo script, the profile read afresh."""
-    load_default_profile.cache_clear()
+    read_profile_once.cache_clear()
     yield TestClient(create_app(Settings()), raise_server_exceptions=False)
-    load_default_profile.cache_clear()
+    read_profile_once.cache_clear()
 
 
 def client_playing(script) -> TestClient:
@@ -27,12 +30,16 @@ def client_playing(script) -> TestClient:
     return TestClient(create_app(Settings(fake_script=Path(script))), raise_server_exceptions=False)
 
 
-def test_a_broken_profile_is_a_500_before_any_stream(client, monkeypatch, tmp_path):
-    (tmp_path / profile.DEFAULT_PROFILE).mkdir()
-    (tmp_path / profile.DEFAULT_PROFILE / profile.PROFILE_FILE).write_text("id: [unclosed\n")
-    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+def test_a_broken_profile_is_a_500_before_any_stream(tmp_path):
+    shutil.copytree(FIXTURES_DIR / profile.DEFAULT_PROFILE, tmp_path / profile.DEFAULT_PROFILE)
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / profile.PROFILE_FILE).write_text("id: [unclosed\n")
+    read_profile_once.cache_clear()
+    client = TestClient(create_app(Settings(profiles_dir=tmp_path)), raise_server_exceptions=False)
 
-    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
+    response = client.post(
+        "/api/assessments", json={"control_id": DEMO_CONTROL}, headers={PROFILE_HEADER: "broken"}
+    )
 
     assert response.status_code == 500
     assert not response.headers["content-type"].startswith("text/event-stream")
@@ -44,8 +51,9 @@ def test_the_profile_is_read_once_across_requests(client, monkeypatch):
     reads = []
     real = profile.load_named_profile
     monkeypatch.setattr(
-        "vouch.api.load_named_profile", lambda name: reads.append(name) or real(name)
+        profile, "load_named_profile", lambda name, folder: reads.append(name) or real(name, folder)
     )
+    read_profile_once.cache_clear()
 
     for _ in range(2):
         client.post("/api/assessments", json={"control_id": DEMO_CONTROL})

@@ -18,9 +18,9 @@ afterEach(() => {
 })
 
 describe('Root', () => {
-  it('shows the app in local mode', () => {
+  it('shows the app in local mode', async () => {
     render(<Root auth={{ mode: 'local' }} />)
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy() // once the profiles are read
   })
 
   it('says Vouch could not be reached, and never shows the app, when health could not be read', () => {

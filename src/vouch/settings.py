@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Literal, cast, get_args, overload
 from pydantic import SecretStr
 
 from vouch.limits import RATE_REQUESTS
+from vouch.paths import FIXTURES_DIR
 
 if TYPE_CHECKING:  # imported when called: the model's modules read settings themselves
     from vouch.fake_model import ScriptedChatModel
@@ -35,6 +36,7 @@ MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 FRONTEND_ENV = "VOUCH_FRONTEND"
 DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
+PROFILES_DIR_ENV = "VOUCH_PROFILES_DIR"
 LOCAL_USER_NAME_ENV = "VOUCH_LOCAL_USER_NAME"
 RATE_REQUESTS_ENV = "VOUCH_RATE_REQUESTS"
 
@@ -45,6 +47,7 @@ ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?")
 ENV_NAMES = frozenset(
     {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {FRONTEND_ENV}
+    | {DATABASE_URL_ENV, PROFILES_DIR_ENV}
     | {DATABASE_URL_ENV, LOCAL_USER_NAME_ENV}
     | {RATE_REQUESTS_ENV}
 )
@@ -91,6 +94,8 @@ class Settings:
     frontend: Path | None = None
     database_url: SecretStr | None = None
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
+    profiles_dir: Path = FIXTURES_DIR
+    """The folder of compliance profiles, one folder each (#47); by default the repository's."""
     local_user_name: str = DEFAULT_USER_NAME
     """Local mode's one user's display name, kept on their audit entries (#154)."""
     rate_requests: int = RATE_REQUESTS
@@ -169,6 +174,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fake_script=read_path(FAKE_SCRIPT_ENV),
         frontend=read_path(FRONTEND_ENV),
         database_url=SecretStr(database_url) if database_url else None,
+        profiles_dir=read_path(PROFILES_DIR_ENV) or FIXTURES_DIR,
         local_user_name=read(LOCAL_USER_NAME_ENV) or DEFAULT_USER_NAME,
         rate_requests=_rate_requests(read(RATE_REQUESTS_ENV)),
     )
