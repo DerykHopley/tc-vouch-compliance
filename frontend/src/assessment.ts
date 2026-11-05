@@ -18,8 +18,27 @@ export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 export type Control = { id: string; title: string }
 
 export type Step = { node: string; text: string }
+/** Documented (a policy says so) or implemented (a record shows it done): `vouch.documents.EvidenceKind`. */
+export type EvidenceKind = 'documented' | 'implemented'
+/** A quote checked word for word in this version of the document (`vouch.citations.Citation`). */
+export type Citation = {
+  doc_id: string
+  version: string
+  section: string
+  quote: string
+  kind: EvidenceKind
+  stale: boolean
+  stale_because: string | null
+}
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
-export type RequirementVerdict = { id: string; column: Column; text: string; verdict: Verdict; reason: string }
+export type RequirementVerdict = {
+  id: string
+  column: Column
+  text: string
+  verdict: Verdict
+  reason: string
+  citations: Citation[]
+}
 /** An assessment's review state (`vouch.graph.Status`); the screen says Proposed for waiting-for-review. */
 export type ReviewStatus = 'waiting-for-review' | 'accepted' | 'rejected'
 
@@ -29,8 +48,14 @@ export const REVIEW_WORDS: Record<ReviewStatus, string> = {
   rejected: 'Rejected',
 }
 
-// The page reads only these of the Assessment's fields so far.
-export type Assessment = { control_id: string; verdict: Verdict; answer: string; status?: ReviewStatus }
+// The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
+export type Assessment = {
+  control_id: string
+  verdict: Verdict
+  answer: string
+  status?: ReviewStatus
+  requirements?: RequirementVerdict[]
+}
 
 /**
  * One assessment's tokens and cost (#35): `cost_usd` is OpenRouter's reported part plus the part computed from a
@@ -117,14 +142,17 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
 }
 
 /**
- * Starts the assessment and yields its events until the `result` or `error`.
- * Throws when the service can't be reached, or the stream breaks off before either.
+ * POSTs `body` as JSON to a server-sent event stream and yields its events until one named in `last` (the `error`
+ * event always ends it). A refusal is one `error`: the session ended, a limit's 429 with its own detail, or
+ * `refused` for any other. Throws when the service can't be reached, or the stream breaks off before its last event.
  */
-export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent> {
-  const response = await fetch('/api/assessments', {
+export async function* postEvents<E extends { event: string; data: unknown }>(
+  url: string, body: unknown, last: E['event'][], refused: string,
+): AsyncGenerator<E | { event: 'error'; data: { message: string } }> {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(await authHeaders()) },
-    body: JSON.stringify({ control_id: controlId }),
+    body: JSON.stringify(body),
   })
   if (response.status >= 500 || !response.body) throw new Error(`service answered ${response.status}`)
   if (sessionEnded(response)) {
@@ -135,14 +163,22 @@ export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent
   if (!response.ok) {
     // A limit's 429 (the daily limit, with its reset time, or the request rate) says why; any other refusal doesn't.
     const detail = response.status === 429
-      ? await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
+      ? await response.json().then((answer: { detail?: unknown }) => answer.detail, () => undefined)
       : undefined
-    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : NOT_STARTED } }
+    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : refused } }
     return
   }
   for await (const item of readEvents(response.body)) {
-    yield item as AssessmentEvent
-    if (item.event === 'result' || item.event === 'error') return
+    yield item as E
+    if (item.event === 'error' || last.includes(item.event)) return
   }
-  throw new Error('the stream ended before the assessment')
+  throw new Error(`the stream from ${url} ended before its last event`)
+}
+
+/**
+ * Starts the assessment and yields its events until the `result` or `error`.
+ * Throws when the service can't be reached, or the stream breaks off before either.
+ */
+export function assess(controlId: string): AsyncGenerator<AssessmentEvent> {
+  return postEvents<AssessmentEvent>('/api/assessments', { control_id: controlId }, ['result'], NOT_STARTED)
 }

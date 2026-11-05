@@ -400,6 +400,29 @@ class Database:
         assert row is not None  # a SELECT of two values always gives one row
         return row["taken"], row["lim"]
 
+    def under_assessment_limit(
+        self, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Whether the user started fewer assessments that day than the limit (as
+        take_assessment reads it), counting nothing: (under it, the limit). Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
+            row = conn.execute(
+                "WITH lim AS (SELECT coalesce((SELECT value::integer FROM "
+                f"{SETTINGS_TABLE} WHERE name = %(setting)s), %(default)s) AS n) "
+                "SELECT (SELECT n FROM lim) AS lim, coalesce((SELECT count FROM "
+                f"{COUNTS_TABLE} WHERE user_id = %(user_id)s AND day = %(day)s), 0) "
+                "< (SELECT n FROM lim) AS under",
+                {
+                    "setting": limit_setting,
+                    "default": default_limit,
+                    "user_id": user_id,
+                    "day": day,
+                },
+            ).fetchone()
+        assert row is not None  # a SELECT of two values always gives one row
+        return row["under"], row["lim"]
+
     def record_usage(
         self,
         *,
@@ -435,18 +458,20 @@ class Database:
                 ),
             )
 
-    def usage_totals(self, fake_model: str) -> dict[str, dict[str, Any]]:
-        """Every assessment's usage added up, by "openrouter" and "fake" (runs on `fake_model`);
-        a kind with no runs is left out. Raises DatabaseUnavailable."""
+    def usage_totals(self, fake_model: str, not_assessments: str) -> dict[str, dict[str, Any]]:
+        """Every usage added up, by "openrouter" and "fake" (runs on `fake_model`); rows whose
+        control is `not_assessments` (chat messages) count in the tokens and cost but not as
+        assessments. A kind with no runs is left out. Raises DatabaseUnavailable."""
         with self.connection() as conn, self._needs_setup(USAGE_TABLE):
             rows = conn.execute(
                 "SELECT CASE WHEN model = %s THEN 'fake' ELSE 'openrouter' END AS kind, "
-                "count(*) AS assessments, sum(input_tokens)::bigint AS input_tokens, "
+                "count(*) FILTER (WHERE control_id <> %s) AS assessments, "
+                "sum(input_tokens)::bigint AS input_tokens, "
                 "sum(output_tokens)::bigint AS output_tokens, sum(reported_cost_usd) AS reported_cost_usd, "
                 "sum(estimated_cost_usd) AS estimated_cost_usd, "
                 "count(*) FILTER (WHERE NOT cost_complete) AS incomplete "
                 f"FROM {USAGE_TABLE} GROUP BY kind",
-                (fake_model,),
+                (fake_model, not_assessments),
             ).fetchall()
         return {row.pop("kind"): row for row in rows}
 

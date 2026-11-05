@@ -4,11 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
+/** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
+let resizeTo: (width: number) => void = () => {}
+
 function systemPrefers(dark: boolean | null, width = 1400) {
+  let now = width
+  const listeners = new Set<() => void>()
+  resizeTo = (next) => act(() => {
+    now = next
+    for (const listener of listeners) listener()
+  })
   window.matchMedia = (query: string) => {
     const maxWidth = /^\(max-width: (\d+)px\)$/.exec(query)
-    const matches = maxWidth ? width <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
-    return { matches, media: query } as MediaQueryList
+    return {
+      get matches() {
+        return maxWidth ? now <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    } as unknown as MediaQueryList
   }
 }
 
@@ -17,6 +32,7 @@ beforeEach(() => systemPrefers(null))
 afterEach(() => {
   cleanup()
   delete document.documentElement.dataset.theme
+  delete document.documentElement.dataset.chat
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
 })
@@ -25,7 +41,8 @@ const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1
 
 /** The overview with nothing assessed, as `GET /api/overview` sends it. */
 const OVERVIEW: Overview = {
-  company: 'Nordlicht Komponenten GmbH', country: 'Germany',
+  company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
+  requirements: {},
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0 },
@@ -40,19 +57,34 @@ const OVERVIEW: Overview = {
 const STORED = { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys for administrators.',
   status: 'waiting-for-review', thread_id: 't1' }
 
+/** The overview with each stored assessment's control on its card, as the API would send it. */
+const overviewWith = (stored: (typeof STORED)[]): Overview => ({
+  ...OVERVIEW,
+  controls: OVERVIEW.controls.map((c) => {
+    const a = stored.find((s) => s.control_id === c.id)
+    return a ? { ...c, status: 'waiting-for-review', verdict: 'partly-evidenced' } : c
+  }),
+})
+
 /**
- * The API: the overview, the assessment's stream when given (POST), the stored assessments (GET: none unless given),
- * and nothing else ever answers.
+ * The API: the overview (each stored assessment on its card), the assessment's stream when given (POST), the stored
+ * assessments (GET: none unless given), and nothing else ever answers. Returns the fetch, to count its calls.
  */
 function serve(assessment?: () => Promise<Response>, stored: (typeof STORED)[] = []) {
-  vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
-    url === '/api/overview' ? Promise.resolve(Response.json(OVERVIEW))
-      : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise(() => {}))
+  const fetch = vi.fn((url: string, init?: RequestInit) =>
+    url === '/api/overview' ? Promise.resolve(Response.json(overviewWith(stored)))
+      : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise<Response>(() => {}))
         : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: stored }))
           : url.startsWith('/api/assessments/') && stored.length
             ? Promise.resolve(Response.json({ assessment: stored.find((a) => url.endsWith(a.thread_id)) }))
-            : new Promise(() => {}))
+            : new Promise<Response>(() => {}))
+  vi.stubGlobal('fetch', fetch)
+  return fetch
 }
+
+/** How many times the page asked for the stored assessments. */
+const storedReads = (fetch: ReturnType<typeof serve>) =>
+  fetch.mock.calls.filter(([url, init]) => url === '/api/assessments' && init?.method !== 'POST').length
 
 describe('Dossier landing', () => {
   it('shows the top bar, headline, readiness band and the 12 controls from the API', async () => {
@@ -240,11 +272,66 @@ describe('the working paper', () => {
     )
   })
 
-  it('shows the Dossier for a control the overview does not list', async () => {
+  it('says a control the overview does not list is not found, and "Overview" returns to the Dossier', async () => {
     serve()
     window.history.replaceState(null, '', '/controls/9.9.9')
     render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control 9.9.9')
+    expect(paper()).toBeNull()
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+    await userEvent.click(within(notFound).getByRole('link', { name: '← Overview' }))
     expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('says an address with a broken escape is not found, rather than failing blank', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/%E0')
+    render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control %E0')
+  })
+
+  it('reads no stored assessment for a control its card says is not assessed, and one for a control it says is', async () => {
+    const fetch = serve(undefined, [STORED])
+    window.history.replaceState(null, '', '/controls/5.2.4')
+    render(<App />)
+    expect(await within(await screen.findByRole('region', { name: 'Working paper' })).findByRole('button',
+      { name: 'Assess 5.2.4' })).toBeTruthy()
+    expect(storedReads(fetch)).toBe(0)
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^4\.1\.2/ }))
+    expect(await screen.findByRole('region', { name: 'Verdict and draft answer' })).toBeTruthy()
+    expect(storedReads(fetch)).toBe(1)
+  })
+
+  it("keeps a finished run's control current in the index after the lead opens another paper", async () => {
+    const result = { assessment: { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys.',
+      status: 'waiting-for-review' } }
+    const fetch = serve(() => Promise.resolve(new Response(`event: result\ndata: ${JSON.stringify(result)}\n\n`)))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
+    await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    const overviewReads = fetch.mock.calls.filter(([url]) => url === '/api/overview').length
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^5\.2\.4/ }))
+    await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })
+    const entry = within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^4\.1\.2/ })
+    expect(within(entry).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(entry).getByText('Proposed')).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/overview').length).toBe(overviewReads) // no read for it
+  })
+
+  it('opens another control from the index, and "Overview" returns to the Dossier', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const index = await screen.findByRole('navigation', { name: 'Controls' })
+    await userEvent.click(within(index).getByRole('link', { name: /^5\.2\.4/ }))
+    expect(window.location.pathname).toBe('/controls/5.2.4')
+    expect(await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
   })
 })
@@ -340,6 +427,175 @@ describe('Ask Vouch', () => {
     render(<App />)
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(bubble()).toBeTruthy()
+  })
+
+  it('opens with Cmd+K, ready to type', async () => {
+    render(<App />)
+    await userEvent.keyboard('{Meta>}k{/Meta}')
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message to Vouch' }))
+  })
+
+  const open = () => userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+  const press = (name: string | RegExp) => userEvent.click(screen.getByRole('button', { name }))
+
+  it('enlarges, pins, and goes back the same way', async () => {
+    render(<App />)
+    await open()
+    expect(bubble()!.className).toBe('bubble')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    const pin = screen.getByRole('button', { name: 'Pin beside the page' })
+    expect(pin.getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(pin)
+    expect(bubble()!.className).toBe('bubble pinned')
+    expect(document.documentElement.dataset.chat).toBe('pinned')
+    expect(screen.queryByRole('button', { name: 'Make smaller' })).toBeNull()
+    // One label, its state in aria-pressed: pressed again, it unpins.
+    expect(screen.getByRole('button', { name: 'Pin beside the page' }).getAttribute('aria-pressed')).toBe('true')
+    await press('Pin beside the page')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    await press('Make smaller')
+    expect(bubble()!.className).toBe('bubble')
+  })
+
+  it('offers no pin at 1000px or less: bubble and enlarged only', async () => {
+    systemPrefers(null, 900)
+    render(<App />)
+    await open()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+  })
+
+  it('falls back from pinned to enlarged at 1000px or less, and to the sheet at 700px', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(900)
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await userEvent.keyboard('{Escape}') // enlarged now: Esc closes it
+    expect(bubble()).toBeNull()
+  })
+
+  it('as a full-screen sheet, closes on Esc even when it was pinned', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(400)
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+  })
+
+  it('closes an enlarged chat on Esc, but never a pinned one', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeTruthy()
+    await press('Close the chat')
+    expect(bubble()).toBeNull()
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+  })
+
+  it('names the page it is on in its header', async () => {
+    serve()
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Dossier')).toBeTruthy()
+  })
+
+  it("names the control on its working paper", async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    await open()
+    expect(within(bubble()!).getByText('on 4.1.2 · Working paper')).toBeTruthy()
+  })
+
+  /** The API as `serve` has it, and `/api/chat` answering with `chat`. */
+  function serveChat(chat: (body: { message: string; page: string; control_id: string | null }) => Promise<Response>) {
+    serve()
+    const others = fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url === '/api/chat' ? chat(JSON.parse(init!.body as string)) : others(url, init))
+  }
+  const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+
+  it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
+    let write: (block: string) => void = () => {}
+    let end: () => void = () => {}
+    serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder()
+        write = (block) => controller.enqueue(encoder.encode(block))
+        end = () => controller.close()
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } })))
+    render(<App />)
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await act(async () => write('event: token\ndata: {"text":"Thank"}\n\n'))
+    await within(log).findByText('Thank')
+    expect(log.getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      write('event: token\ndata: {"text":" you."}\n\nevent: done\ndata: {}\n\n')
+      end()
+    })
+    await within(log).findByText('Thank you.')
+    await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'))
+  })
+
+  it('keeps Send disabled while the message is empty', async () => {
+    render(<App />)
+    await open()
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), '   ')
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello')
+    expect(send.disabled).toBe(false)
+  })
+
+  it("sends the message with the page, and shows Vouch's reply as it streams", async () => {
+    const asked: unknown[] = []
+    serveChat((body) => {
+      asked.push(body)
+      return Promise.resolve(sse(['event: token\ndata: {"text":"Thank"}\n\n', 'event: token\ndata: {"text":" you."}\n\n',
+        'event: done\ndata: {}\n\n']))
+    })
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' })
+    await userEvent.type(field, 'Where do I stand?{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await within(log).findByText('Thank you.')
+    expect(within(log).getByText('Where do I stand?')).toBeTruthy()
+    expect((field as HTMLInputElement).value).toBe('')
+    expect(asked).toEqual([{ message: 'Where do I stand?', page: 'dossier', control_id: null }])
+  })
+
+  it('with the chat endpoint down, says so and keeps the typed message', async () => {
+    serveChat(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' }) as HTMLInputElement
+    await userEvent.type(field, 'Where do I stand?')
+    await press('Send')
+    await within(bubble()!).findByText(/Vouch could not be reached/)
+    expect(field.value).toBe('Where do I stand?')
   })
 })
 
