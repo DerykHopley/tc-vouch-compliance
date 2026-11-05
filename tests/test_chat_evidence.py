@@ -71,7 +71,7 @@ def test_whats_missing_on_the_working_paper_names_each_requirement_not_evidenced
     for requirement in missing:
         assert requirement["id"] in text and requirement["text"] in text
     for quote, doc_id in quotes:
-        assert f"“{quote}” [{doc_id}]" in text
+        assert f'<cite doc="{doc_id}">{quote}</cite>' in text
     assert guard_steps(events) == []  # every quote passed the check
     assert ("suggestion", {"control_id": "5.1.1", "action": "review"}) in events
     assert names(events)[-1] == "done"
@@ -93,7 +93,7 @@ def test_a_control_not_assessed_yet_is_said_so_with_its_requirements_and_the_nex
     text = reply(events)
     assert "Control 1.1.1" in text and "has not been assessed yet" in text
     assert "The next step is to assess control 1.1.1." in text
-    assert "[" not in text  # no quotes cited: nothing was read
+    assert "<cite" not in text  # no quotes cited: nothing was read
     assert ("suggestion", {"control_id": "1.1.1", "action": "assess"}) in events
 
 
@@ -140,8 +140,7 @@ def test_a_question_with_evidence_is_answered_with_quotes_from_the_documents(cli
     events = say(client, "Is there evidence of full-disk encryption?")
 
     text = reply(events)
-    assert "- “Every company laptop uses full-disk encryption with AES-256." in text
-    assert "[encryption-standard]" in text
+    assert f"- {cite(REAL_TEXT)[:-7]}" in text  # its first line, cited
     assert guard_steps(events) == []  # each quote passed the check
     searched = [data["text"] for name, data in events if name == "step"]
     assert any(s.startswith("Searched the policies for “full-disk encryption”") for s in searched)
@@ -173,7 +172,7 @@ def test_only_the_sources_the_profile_allows_are_searched(tmp_path, lead):
 
     searched = [data["text"] for name, data in events if name == "step"]
     assert [s.split(" for ")[0] for s in searched] == ["Searched the policies"]
-    assert "[access-review-record]" not in reply(events)  # a record: not allowed
+    assert 'doc="access-review-record"' not in reply(events)  # a record: not allowed
 
 
 def test_a_profile_allowing_neither_policies_nor_records_has_nothing_to_search(tmp_path, lead):
@@ -189,46 +188,60 @@ def test_a_question_with_no_evidence_gets_the_no_evidence_reply_and_no_invented_
     assert names(events)[-1] == "done"
 
 
-# The quote check on the answer
+# The quote check on the answer: the whole reply, before it is shown
 
 
-INVENTED = "“Every laptop is encrypted twice a day by the night shift.” [encryption-standard]"
-REAL = "“Every company laptop uses full-disk encryption with AES-256.” [encryption-standard]"
+def cite(quote: str, doc_id: str = "encryption-standard") -> str:
+    return f'<cite doc="{doc_id}">{quote}</cite>'
 
 
-def test_an_invented_quote_in_a_chat_answer_is_dropped_and_a_real_one_kept(client, fake):
+INVENTED_TEXT = "Every laptop is encrypted twice a day by the night shift."
+REAL_TEXT = "Every company laptop uses full-disk encryption with AES-256."
+INVENTED = cite(INVENTED_TEXT)
+REAL = cite(REAL_TEXT)
+NOT_IN_DOCUMENT = "Dropped a quote from encryption-standard: the quote isn't in that document."
+UNCITED = "Dropped a quote citing no document: it isn't in what Vouch found for this question."
+
+
+def test_an_invented_cite_in_a_chat_answer_is_dropped_and_a_real_one_kept(client, fake):
     fake.reply = f"The encryption standard says {INVENTED}, and {REAL}."
 
     events = say(client, "Tell me about laptops.")
 
     assert reply(events) == f"The encryption standard says [quote removed], and {REAL}."
-    assert guard_steps(events) == [
-        "Dropped a quote from encryption-standard: the quote isn't in that document."
-    ]
+    assert guard_steps(events) == [NOT_IN_DOCUMENT]
 
 
-def test_an_invented_quote_split_across_the_streamed_pieces_is_still_dropped(client, fake):
+def test_an_invented_cite_split_across_the_streamed_pieces_is_still_dropped(client, fake):
     fake.chunks = [
-        "It says “Every laptop is enc",
-        "rypted twice a day by the night shift.” [encr",
-        "yption-standard] today.",
+        'It says <cite doc="encr',
+        'yption-standard">Every laptop is enc',
+        "rypted twice a day by the night shift.</ci",
+        "te> today.",
     ]
 
     events = say(client, "Tell me about laptops.")
 
     assert reply(events) == "It says [quote removed] today."
-    assert len(guard_steps(events)) == 1
+    assert guard_steps(events) == [NOT_IN_DOCUMENT]
 
 
-def test_a_quote_from_a_document_outside_the_profile_is_dropped(client, fake):
-    fake.reply = (
-        "It says “Every company laptop uses full-disk encryption with AES-256.” [secret-plan]."
-    )
+def test_a_cite_of_a_document_outside_the_profile_is_dropped(client, fake):
+    fake.reply = f"It says {cite(REAL_TEXT, 'secret-plan')}."
 
     events = say(client, "Tell me about laptops.")
 
     assert reply(events) == "It says [quote removed]."
     assert guard_steps(events) == ["Dropped a quote from secret-plan: no such document."]
+
+
+def test_a_cite_naming_no_document_is_dropped(client, fake):
+    fake.reply = f"It says <cite>{REAL_TEXT}</cite>."
+
+    events = say(client, "Tell me about laptops.")
+
+    assert reply(events) == "It says [quote removed]."
+    assert len(guard_steps(events)) == 1
 
 
 def test_the_chat_thread_keeps_the_answer_with_the_invented_quote_dropped(client, fake):
@@ -251,54 +264,47 @@ def test_a_short_quoted_phrase_that_cites_no_document_is_left_as_written(client,
     assert guard_steps(events) == []
 
 
-INVENTED_TEXT = "Every laptop is encrypted twice a day by the night shift."
-REAL_TEXT = "Every company laptop uses full-disk encryption with AES-256."
-CITED_FORMS = [
-    "‘{}’ [encryption-standard]",  # curly single quotes
-    "'{}' [encryption-standard]",  # ASCII single quotes
-    "”{}” [encryption-standard]",  # a closing mark used to open
-    "「{}」 [encryption-standard]",
-    "`{}` [encryption-standard]",
-    "> {}\n[encryption-standard]",  # a markdown blockquote
-    "{} [encryption-standard]",  # the sentence before the document id
-    "“{}” (encryption-standard)",
-]
+UNCITED_MARKS = ["‘{}’", "'{}'", "“{}”", '"{}"', "„{}“", "«{}»", "「{}」", "`{}`"]
 
 
-@pytest.mark.parametrize("form", CITED_FORMS)
-def test_an_invented_quote_in_any_form_citing_a_document_is_dropped(client, fake, form):
-    fake.reply = f"The standard says:\n\n{form.format(INVENTED_TEXT)}\n\nPlease check it."
+@pytest.mark.parametrize("marks", UNCITED_MARKS)
+def test_an_uncited_invented_quote_in_any_marks_is_dropped(client, fake, marks):
+    fake.reply = f"The standard says {marks.format(INVENTED_TEXT)} Please check it."
 
     events = say(client, "Tell me about laptops.")
 
-    text = reply(events)
-    assert "night shift" not in text
-    assert "[quote removed]" in text and text.endswith("Please check it.")
-    assert guard_steps(events) == [
-        "Dropped a quote from encryption-standard: the quote isn't in that document."
-    ]
+    assert reply(events) == "The standard says [quote removed] Please check it."
+    assert guard_steps(events) == [UNCITED]
 
 
-@pytest.mark.parametrize("form", CITED_FORMS)
-def test_a_real_quote_in_any_form_citing_its_document_is_kept(client, fake, form):
-    fake.reply = f"The standard says:\n\n{form.format(REAL_TEXT)}\n\nPlease check it."
+@pytest.mark.parametrize("marks", UNCITED_MARKS)
+def test_an_uncited_quote_the_tools_returned_this_turn_is_kept(client, fake, marks):
+    fake.after_tool = f"The standard says {marks.format(REAL_TEXT)} Please check it."
 
-    events = say(client, "Tell me about laptops.")
+    events = say(client, "Is there evidence of full-disk encryption?")
 
-    assert reply(events) == fake.reply
+    assert reply(events) == fake.after_tool
     assert guard_steps(events) == []
+
+
+def test_an_uncited_real_quote_with_no_search_this_turn_is_dropped(client, fake):
+    fake.reply = f"The standard says “{REAL_TEXT}”"
+
+    events = say(client, "Tell me about laptops.")
+
+    assert reply(events) == "The standard says [quote removed]"
+    assert guard_steps(events) == [UNCITED]
 
 
 @pytest.mark.parametrize(
     "answer",
     [
+        "For details, see encryption-standard.",
         "The standard (encryption-standard) requires full-disk encryption on every laptop.",
         "Your encryption standard [encryption-standard] says that every laptop is encrypted.",
     ],
 )
-def test_a_document_id_in_the_middle_of_a_sentence_is_a_reference_left_as_written(
-    client, fake, answer
-):
+def test_prose_naming_a_document_is_left_as_written(client, fake, answer):
     fake.reply = answer
 
     events = say(client, "Tell me about laptops.")
@@ -307,62 +313,33 @@ def test_a_document_id_in_the_middle_of_a_sentence_is_a_reference_left_as_writte
     assert guard_steps(events) == []
 
 
-@pytest.mark.parametrize(
-    "answer",
-    [
-        f"{INVENTED_TEXT[:-1]} [encryption-standard].",  # the id ends the sentence
-        f"It says ‘{INVENTED_TEXT}’ [encryption-standard] and more.",  # quoted: anywhere
-    ],
-)
-def test_an_invented_quote_cited_at_a_sentence_end_or_in_quotation_marks_is_dropped(
-    client, fake, answer
-):
-    fake.reply = answer
+def test_a_cite_with_html_inside_is_dropped_as_it_isnt_in_the_document(client, fake):
+    fake.reply = f"It says {cite('<script>alert(1)</script> every laptop is encrypted')}."
 
     events = say(client, "Tell me about laptops.")
 
-    assert "night shift" not in reply(events)
-    assert guard_steps(events) == [
-        "Dropped a quote from encryption-standard: the quote isn't in that document."
-    ]
+    assert "<script>" not in reply(events)
+    assert guard_steps(events) == [NOT_IN_DOCUMENT]
 
 
-def test_an_invented_german_quote_is_dropped_and_the_reply_after_it_still_sent(client, fake):
-    fake.reply = (
-        "Der Standard sagt „Jeder Laptop wird zweimal täglich verschlüsselt“ "
-        "[encryption-standard]. Bitte prüfen Sie den Standard."
-    )
-
-    events = say(client, "Was sagt der Standard?")
-
-    assert reply(events) == "Der Standard sagt [quote removed]. Bitte prüfen Sie den Standard."
-    assert guard_steps(events) == [
-        "Dropped a quote from encryption-standard: the quote isn't in that document."
-    ]
-
-
-UNCITED_REAL = "“Every company laptop uses full-disk encryption with AES-256.”"
-UNCITED_INVENTED = "“every laptop is encrypted twice a day”"
-
-
-def test_an_uncited_quote_is_kept_only_when_the_tools_returned_it_this_turn(client, fake):
-    fake.after_tool = f"The standard says {UNCITED_REAL}, and {UNCITED_INVENTED}."
-
+def test_the_answer_is_sent_whole_after_the_steps_which_still_stream_before_it(client):
     events = say(client, "Is there evidence of full-disk encryption?")
 
-    assert reply(events) == f"The standard says {UNCITED_REAL}, and [quote removed]."
-    assert guard_steps(events) == [
-        "Dropped a quote citing no document: it isn't in what Vouch found for this question."
-    ]
+    kinds = names(events)
+    answer = kinds.index("token")
+    assert kinds.count("token") == 1  # the answer, whole
+    assert "step" in kinds[:answer]  # the searches, streamed before it
+    assert "step" not in kinds[answer:]
+    assert cite(REAL_TEXT)[:-7] in reply(events)  # a cite, kept
 
 
-def test_an_uncited_quote_with_no_search_this_turn_is_dropped(client, fake):
-    fake.reply = f"The standard says {UNCITED_REAL}"
+def test_a_dropped_quotes_guard_step_comes_before_the_answer(client, fake):
+    fake.reply = f"It says {INVENTED}."
 
     events = say(client, "Tell me about laptops.")
 
-    assert reply(events) == "The standard says [quote removed]"  # cut off at the end: checked
-    assert len(guard_steps(events)) == 1
+    kinds = names(events)
+    assert kinds.index("step") < kinds.index("token")
 
 
 def test_a_quote_spanning_a_removed_email_address_still_matches_its_record(tmp_path, lead):
@@ -378,7 +355,7 @@ def test_a_quote_spanning_a_removed_email_address_still_matches_its_record(tmp_p
     events = say_on(profiles_app(tmp_path), lead, "Is there evidence of zeppelin reviews?")
 
     text = reply(events)
-    assert "[review-mailbox-record]" in text  # cited, and kept
+    assert '<cite doc="review-mailbox-record">' in text  # cited, and kept
     assert "jan.kowalski" not in text
     assert not [step for step in guard_steps(events) if step.startswith("Dropped")]
 
@@ -399,7 +376,7 @@ def test_a_source_folder_swapped_for_a_link_elsewhere_is_refused_with_a_guard_st
     assert "Refused search_evidence: the records folder now points outside its allowed folder." in (
         guard_steps(events)
     )
-    assert "[access-review-record]" not in reply(events)
+    assert 'doc="access-review-record"' not in reply(events)
     assert any("folder_escaped" in record.getMessage() for record in caplog.records)
 
 

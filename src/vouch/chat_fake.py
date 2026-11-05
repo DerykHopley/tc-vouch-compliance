@@ -5,7 +5,8 @@ chat agent's tools (#45, #46), it calls one as a model would: `start_assessment`
 <id>", `progress` for the greeting or "where do I stand", `explain_control` for "What's missing
 for <id>?" (the page's control when none is named) or with `sign_off` for "Accept <id>", and
 `search_evidence` for "Is there evidence of <words>?". Then it passes the tool's words on as its
-answer, each passage of evidence cited as the chat prompt asks: “its first line” [doc_id].
+answer, each passage of evidence cited as the chat prompt asks:
+<cite doc="doc_id">its first line</cite>.
 """
 
 import json
@@ -58,7 +59,7 @@ def _words(text: str) -> list[str]:
 
 def _cited(tool_words: str) -> str:
     """A tool's words with its evidence data given as citations: each passage's first line,
-    in curly quotes, then its document id in square brackets."""
+    in a cite naming its document id."""
 
     def cite(found: re.Match[str]) -> str:
         lines = []
@@ -67,7 +68,7 @@ def _cited(tool_words: str) -> str:
                 continue
             first = _LIST_MARK.sub("", passage["text"].splitlines()[0].strip())
             label = f"{passage['requirement']}: " if "requirement" in passage else ""
-            lines.append(f"- {label}“{first}” [{passage['doc_id']}]")
+            lines.append(f'- {label}<cite doc="{passage["doc_id"]}">{first}</cite>')
         return "\n".join(lines)
 
     def findings(found: re.Match[str]) -> str:
