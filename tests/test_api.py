@@ -72,7 +72,7 @@ def test_health_answers_ok_with_the_version(client):
     assert response.json() == {
         "status": "ok",
         "version": version("vouch"),
-        "auth": {"mode": "local", "publishable_key": None},
+        "auth": {"mode": "local", "publishable_key": None, "gate": "none"},
     }
 
 

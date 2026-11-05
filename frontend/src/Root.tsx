@@ -12,9 +12,9 @@ export default function Root({ auth }: { auth: AuthConfig }) {
   if (auth.mode === 'local') return <App />
   if (auth.mode === 'unreachable') return <Unreachable />
   return (
-    <ChunkFailed fallback={<Invitation><LoadFailed /></Invitation>}>
+    <ChunkFailed fallback={<Invitation gate={auth.gate}><LoadFailed /></Invitation>}>
       <Suspense fallback={null}>
-        <ClerkApp publishableKey={auth.publishableKey} />
+        <ClerkApp publishableKey={auth.publishableKey} gate={auth.gate} />
       </Suspense>
     </ChunkFailed>
   )

@@ -30,6 +30,7 @@ CLERK_SECRET_KEY_ENV = "CLERK_SECRET_KEY"
 CLERK_PUBLISHABLE_KEY_ENV = "CLERK_PUBLISHABLE_KEY"
 CLERK_JWT_KEY_ENV = "CLERK_JWT_KEY"
 CLERK_AUTHORIZED_PARTIES_ENV = "CLERK_AUTHORIZED_PARTIES"
+DISCORD_SERVER_ID_ENV = "DISCORD_SERVER_ID"
 OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
@@ -41,8 +42,11 @@ CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
 """What clerk mode needs: the three keys, and the origins its pages are served from (not secret)."""
 ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?")
+SNOWFLAKE = re.compile(r"[0-9]{17,20}")
+"""A Discord id (a snowflake): 17 to 20 digits."""
 ENV_NAMES = frozenset(
-    {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
+    {AUTH_MODE_ENV, *CLERK_ENVS, DISCORD_SERVER_ID_ENV, OPENROUTER_API_KEY_ENV, MODEL_ENV}
+    | {FAKE_SCRIPT_ENV}
     | {FRONTEND_ENV}
     | {DATABASE_URL_ENV}
     | {RATE_REQUESTS_ENV}
@@ -74,6 +78,9 @@ class ClerkKeys:
     publishable_key: str
     jwt_key: SecretStr
     authorized_parties: tuple[str, ...]
+    discord_server_id: str | None = None
+    """The course's Discord server (#152): set, a user gets in as a member of it (vouch.auth);
+    unset, Clerk's own restrictions decide. Not a secret."""
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,16 @@ def _origins(value: str) -> tuple[str, ...]:
             "https://vouch.example.com,http://localhost:5173 (no path, no trailing /)"
         )
     return origins
+
+
+def _discord_server_id(value: str | None) -> str | None:
+    """A Discord server id, or None when unset. Raises SettingsError."""
+    if value is not None and not (value.isascii() and SNOWFLAKE.fullmatch(value)):
+        raise SettingsError(
+            f"{DISCORD_SERVER_ID_ENV} must be a Discord server id: 17 to 20 digits "
+            "(Discord's Developer Mode, Copy Server ID)"
+        )
+    return value
 
 
 def _rate_requests(value: str | None) -> int:
@@ -153,6 +170,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             publishable_key=env[CLERK_PUBLISHABLE_KEY_ENV].strip(),
             jwt_key=SecretStr(env[CLERK_JWT_KEY_ENV].strip()),
             authorized_parties=_origins(env[CLERK_AUTHORIZED_PARTIES_ENV]),
+            discord_server_id=_discord_server_id(read(DISCORD_SERVER_ID_ENV)),
         )
     api_key = read(OPENROUTER_API_KEY_ENV)
     database_url = read(DATABASE_URL_ENV)

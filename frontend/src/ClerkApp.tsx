@@ -1,13 +1,17 @@
 import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk } from '@clerk/react'
-import { useLayoutEffect } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
+import { type Access, checkAccess } from './access.ts'
 import App from './App.tsx'
-import Invitation, { SignInFailed } from './Invitation.tsx'
+import type { Gate } from './authConfig.ts'
+import Invitation, { Page, SignInFailed } from './Invitation.tsx'
 import { setOnSignedOut, setTokenSource } from './session.ts'
+import { BY_INVITATION, COURSE_MEMBERS } from './words.ts'
 
 // Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
 // mode fetches nothing of Clerk's. Signed out: the invitation page with Clerk's sign-in (the instance is invitation
 // only, so an account without an invitation never gets past it). Signed in: the app, each API call with a fresh token;
-// an API 401 signs out, back to the invitation page.
+// an API 401 signs out, back to the invitation page. With the course's Discord server as the gate (#152), Clerk lets
+// anyone sign in with Discord, and the app shows only once the API says this user may use Vouch.
 
 /** Clerk's form in Vouch's tokens (docs/design.md), read from the page's CSS, so it follows light and dark. */
 const APPEARANCE = {
@@ -29,20 +33,20 @@ const APPEARANCE = {
   },
 }
 
-export default function ClerkApp({ publishableKey }: { publishableKey: string }) {
+export default function ClerkApp({ publishableKey, gate = 'clerk' }: { publishableKey: string; gate?: Gate }) {
   return (
     <ClerkProvider publishableKey={publishableKey}>
-      <Gate />
+      <SignedInOrOut gate={gate} />
     </ClerkProvider>
   )
 }
 
-function Gate() {
+function SignedInOrOut({ gate }: { gate: Gate }) {
   const { isSignedIn } = useAuth()
-  return isSignedIn ? <SignedInApp /> : <SignedOut />
+  return isSignedIn ? <SignedInApp gate={gate} /> : <SignedOut gate={gate} />
 }
 
-function SignedInApp() {
+function SignedInApp({ gate }: { gate: Gate }) {
   const { getToken } = useAuth()
   const { signOut } = useClerk()
   // A layout effect runs before the app's own effects make their first API calls.
@@ -54,12 +58,63 @@ function SignedInApp() {
       setOnSignedOut(null)
     }
   }, [getToken, signOut])
-  return <App onSignOut={() => void signOut()} />
+  // Asked once on sign-in, and again on each "Try again" (`attempt`); an answer for a page that has gone is dropped.
+  const [access, setAccess] = useState<Access | 'checking'>('checking')
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let current = true
+    void checkAccess().then((answer) => current && setAccess(answer))
+    return () => { current = false }
+  }, [attempt])
+  const check = () => {
+    setAccess('checking')
+    setAttempt((n) => n + 1)
+  }
+  const leave = () => void signOut()
+  if (access === 'allowed') return <App onSignOut={leave} />
+  const [title, text] = BEFORE_THE_APP[access]
+  return (
+    <Page pill={(gate === 'discord-server' ? COURSE_MEMBERS : BY_INVITATION).pill} title={title} text={text}>
+      <section className="signin">
+        {access === 'checking' && <p className="signin-note">Opening Vouch…</p>}
+        {access === 'not-a-member' && <p><button className="btn btn-primary" onClick={leave}>Sign out</button></p>}
+        {access === 'sign-in-again' && (
+          <p><button className="btn btn-primary" onClick={leave}>Sign out and sign in again</button></p>
+        )}
+        {access === 'unavailable' && (
+          <>
+            <p className="signin-note" role="alert">Vouch cannot check your sign-in just now. Please try again shortly.</p>
+            <p>
+              <button className="btn btn-primary" onClick={check}>Try again</button>{' '}
+              <button className="btn" onClick={leave}>Sign out</button>
+            </p>
+          </>
+        )}
+      </section>
+    </Page>
+  )
 }
 
-function SignedOut() {
+const OPENING = 'Vouch checks that your account may use it before it opens.'
+
+/** Each answer's heading and sentence, on the page shown before the app (docs/design.md, Invitation page states). */
+const BEFORE_THE_APP: Record<Exclude<Access, 'allowed'> | 'checking', [string, string]> = {
+  checking: ['Opening Vouch', OPENING],
+  'signed-out': ['Opening Vouch', OPENING], // a moment, while Clerk signs out
+  unavailable: ['Opening Vouch', OPENING],
+  'not-a-member': [
+    'Open to course members',
+    "Vouch is open to members of the course's Discord server, and the Discord account you signed in with is not in it. Sign out, then sign in with the Discord account you use there.",
+  ],
+  'sign-in-again': [
+    'Please sign in again',
+    'Vouch needs to see which Discord servers you are in, and your sign-in does not allow it yet. Sign out, then sign in with Discord again.',
+  ],
+}
+
+function SignedOut({ gate }: { gate: Gate }) {
   return (
-    <Invitation>
+    <Invitation gate={gate}>
       <ClerkLoading><p className="signin-note">Opening Vouch…</p></ClerkLoading>
       <ClerkFailed><SignInFailed /></ClerkFailed>
       <ClerkLoaded>

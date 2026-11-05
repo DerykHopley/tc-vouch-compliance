@@ -31,7 +31,7 @@ describe('Root', () => {
   })
 
   it('shows the invitation page with "Vouch could not be loaded" when Clerk\'s chunk fails', async () => {
-    render(<Root auth={{ mode: 'clerk', publishableKey: 'pk_test_x' }} />)
+    render(<Root auth={{ mode: 'clerk', publishableKey: 'pk_test_x', gate: 'clerk' }} />)
     // Not "sign-in could not be loaded": the boundary also catches the signed-in app's errors
     expect((await screen.findByRole('alert')).textContent).toBe('Vouch could not be loaded. Please reload the page.')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Access is by invitation')
