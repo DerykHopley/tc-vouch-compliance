@@ -1,5 +1,6 @@
 import json
 from importlib.metadata import version
+from pathlib import Path
 
 import pytest
 from assess_steps import in_order
@@ -7,19 +8,23 @@ from fastapi.testclient import TestClient
 from isa_editions import GERMAN_5_1_1
 
 from vouch import ScriptedChatModel, isa, profile
-from vouch.api import app, load_default_profile
-from vouch.settings import FAKE_SCRIPT_ENV
+from vouch.api import create_app, load_default_profile
+from vouch.settings import Settings
 
 DEMO_CONTROL = "4.1.2"
 
 
 @pytest.fixture
-def client(monkeypatch):
-    monkeypatch.delenv(FAKE_SCRIPT_ENV, raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+def client():
+    """The app in local mode on the bundled demo script, the profile read afresh."""
     load_default_profile.cache_clear()
-    yield TestClient(app, raise_server_exceptions=False)
+    yield TestClient(create_app(Settings()), raise_server_exceptions=False)
     load_default_profile.cache_clear()
+
+
+def client_playing(script) -> TestClient:
+    """The app in local mode, its fake model playing `script`."""
+    return TestClient(create_app(Settings(fake_script=Path(script))), raise_server_exceptions=False)
 
 
 def test_a_broken_profile_is_a_500_before_any_stream(client, monkeypatch, tmp_path):
@@ -64,7 +69,11 @@ def test_health_answers_ok_with_the_version(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": version("vouch")}
+    assert response.json() == {
+        "status": "ok",
+        "version": version("vouch"),
+        "auth": {"mode": "local", "publishable_key": None},
+    }
 
 
 def test_demo_control_streams_steps_then_requirement_events_then_waits_for_review(client):
@@ -179,13 +188,14 @@ def test_reviewing_an_unknown_thread_is_404(client):
     assert "no-such-thread" in response.json()["detail"]
 
 
-def test_review_needs_no_model_script(client, monkeypatch, tmp_path):
+def test_review_needs_no_model_script(client, tmp_path):
     thread_id = proposed_thread(client)
     broken = tmp_path / "broken.json"
     broken.write_text('{"gather": [')
-    monkeypatch.setenv(FAKE_SCRIPT_ENV, str(broken))
+    # Another app on a broken script: the paused thread waits in the process's checkpointer.
+    reviewer = client_playing(broken)
 
-    response = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
+    response = reviewer.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
 
     assert response.status_code == 200
     assert response.json()["assessment"]["model"] == "scripted-fake"
@@ -233,12 +243,10 @@ def test_a_bad_override_is_422_and_the_thread_still_waits(client, override):
     assert client.post(url, json={"decision": "accept"}).status_code == 200
 
 
-def test_an_answer_claiming_an_audit_result_twice_ends_with_one_error_event(
-    client, monkeypatch, tmp_path
-):
+def test_an_answer_claiming_an_audit_result_twice_ends_with_one_error_event(tmp_path):
     script = tmp_path / "compliant.json"
     script.write_text('{"gather": [{"answer": "We are compliant."}, {"answer": "Compliant."}]}')
-    monkeypatch.setenv(FAKE_SCRIPT_ENV, str(script))
+    client = client_playing(script)
 
     response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
@@ -264,10 +272,10 @@ def test_empty_or_missing_control_id_gets_422(client, body):
     assert response.status_code == 422
 
 
-def test_a_broken_fake_script_ends_the_stream_with_one_error_event(client, monkeypatch, tmp_path):
+def test_a_broken_fake_script_ends_the_stream_with_one_error_event(tmp_path):
     script = tmp_path / "broken.json"
     script.write_text('{"gather": [')
-    monkeypatch.setenv(FAKE_SCRIPT_ENV, str(script))
+    client = client_playing(script)
 
     response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
 
@@ -304,9 +312,9 @@ def german_default_profile(client):
     from vouch.api import compliance_profile
 
     german = load_default_profile().model_copy(update={"answer_language": "de"})
-    app.dependency_overrides[compliance_profile] = lambda: german
+    client.app.dependency_overrides[compliance_profile] = lambda: german
     yield german
-    app.dependency_overrides.pop(compliance_profile)
+    client.app.dependency_overrides.pop(compliance_profile)
 
 
 def test_a_german_profile_is_assessed_against_the_german_isa_text(client, german_default_profile):

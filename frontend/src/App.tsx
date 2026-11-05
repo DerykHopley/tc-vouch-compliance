@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Control } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
+import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
+import DeveloperPage from './DeveloperPage.tsx'
+import TopBar from './TopBar.tsx'
 import { useAssessment } from './useAssessment.ts'
 import WorkingPaper, { AssessButton, RunChip } from './WorkingPaper.tsx'
 
@@ -19,16 +22,17 @@ const CONTROL: Control = {
   owner: 'IT Security Officer',
 }
 
-type View = 'dossier' | 'paper'
+type View = 'dossier' | 'paper' | 'developer'
 
-/** Each view's address: the control's working paper at /controls/<id>, the Dossier at /. */
-const PATHS: Record<View, string> = { dossier: '/', paper: `/controls/${CONTROL.id}` }
+/** Each view's address: the control's working paper at /controls/<id>, the developer page at /developer, the Dossier at /. */
+const PATHS: Record<View, string> = { dossier: '/', paper: `/controls/${CONTROL.id}`, developer: '/developer' }
 
 /** The view an address shows; the Dossier for one it does not know. */
 const viewAt = (path: string): View =>
   (Object.keys(PATHS) as View[]).find((view) => PATHS[view] === path) ?? 'dossier'
 
-export default function App() {
+/** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out. */
+export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   const [theme, setTheme] = useState<Theme>(systemTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -45,6 +49,15 @@ export default function App() {
     if (window.location.pathname !== PATHS[next]) window.history.pushState(null, '', PATHS[next])
     setView(next)
   }
+  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
+  // shows the Dossier.
+  const [developer, setDeveloper] = useState<DeveloperSettings | typeof UNAVAILABLE | null>(null)
+  useEffect(() => {
+    let current = true
+    void developerSettings().then((settings) => current && setDeveloper(settings))
+    return () => { current = false }
+  }, [])
+  const shown: View = view === 'developer' && !developer ? 'dossier' : view
   const { run, start } = useAssessment(CONTROL.id)
   const assess = () => {
     showView('paper')
@@ -53,19 +66,22 @@ export default function App() {
 
   return (
     <>
-      <header className="top">
-        <div className="top-in wrap">
-          <div className="brand"><b>Vouch</b><span>Audit preparation</span></div>
-          <nav className="nav" aria-label="Main">
-            <a href="/" aria-current={view === 'dossier' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
-          </nav>
-          <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
-            {other === 'dark' ? 'Dark theme' : 'Light theme'}
-          </button>
-        </div>
-      </header>
-      {view === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
+      <TopBar>
+        <nav className="nav" aria-label="Main">
+          <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
+            onClick={(e) => { e.preventDefault(); showView('dossier') }}>Dossier</a>
+          {developer && (
+            <a href={PATHS.developer} aria-current={shown === 'developer' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); showView('developer') }}>Developer</a>
+          )}
+        </nav>
+        <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
+          {other === 'dark' ? 'Dark theme' : 'Light theme'}
+        </button>
+        {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
+      </TopBar>
+      {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
+        : shown === 'paper' ? <main><WorkingPaper company={COMPANY} control={CONTROL} run={run} onAssess={() => void start()} /></main> : (
       <main className="dossier wrap">
         <section className="hero">
           <span className="pill">{COMPANY} · Germany</span>

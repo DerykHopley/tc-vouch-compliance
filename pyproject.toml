@@ -10,16 +10,21 @@ dependencies = [
     "langchain-openai>=1.7.3",
     "fastapi>=0.162.0",
     "uvicorn>=0.54.0",
+    "clerk-backend-api>=7.0.0,<7.1",
+    "httpx>=0.28.1",
+    "langgraph-checkpoint-postgres>=3.2.0",
+    "psycopg[binary]>=3.3.8,<3.4",  # vouch.database.BoundedConnection reads a private name (#119)
     "pydantic>=2.14.2",
 ]
 
 [project.scripts]
 assess = "vouch.cli:main"
+vouch-db-setup = "vouch.database:main"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "openpyxl>=3.1.5",
+    "pyjwt[crypto]>=2.9",
     "pytest",
     "pytest-socket>=0.8.1",
     "ruff",

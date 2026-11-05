@@ -29,8 +29,8 @@ the scripted fake model, offline and free, and prints the Assessment as JSON: a 
 requirement, the control's rolled-up verdict and its should score. The profile and policies it
 reads are the demo company's, in `fixtures/nordlicht/`.
 
-To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTER_API_KEY` and
-`ASSESS_MODEL`. That is a paid call: load the key from the system keyring, never from a file in
+To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTER_API_KEY`
+(`ASSESS_MODEL` names the model; `anthropic/claude-haiku-5.5` without it). That is a paid call: load the key from the system keyring, never from a file in
 the repo.
 
 ### The offline eval
@@ -57,15 +57,40 @@ curl -N -X POST localhost:8000/api/assessments \
 ```
 
 `POST /api/assessments` streams server-sent events: a `step` per agent step, a `requirement` per
-judged requirement, one `result`, then the stream closes (or one `error`). The API runs only the scripted fake model: the bundled demo
-script, or the one `ASSESS_FAKE_SCRIPT` names. It never builds the real model until sign-in
-exists.
+judged requirement, one `result`, then
+the stream closes (or one `error`). The model (`vouch.model_choice`): the script
+`ASSESS_FAKE_SCRIPT` names, when set; else OpenRouter, when `OPENROUTER_API_KEY` is set (a paid
+call; on Cloud Run only a signed-in user reaches it); else the bundled demo script. OpenRouter
+runs the model a developer chose on the developer page (`/developer`, `GET /api/developer/settings`
+and `PUT /api/developer/model`, developers only), else `ASSESS_MODEL`, else
+`anthropic/claude-haiku-5.5`. The choice is kept in the database (its table made by
+`vouch-db-setup`), or in memory without one. One assessment makes at most 8 model calls, each
+retried at most once.
+`scripts/dev.sh` drops the key, so it always runs the fake.
+
+### Sign-in (clerk mode)
+
+Locally there is no sign-in: one default user. In `clerk` mode, as on Cloud Run, every `/api`
+route but `/api/health` needs a Clerk session token (`Authorization: Bearer ...`); without a
+valid one the API answers 401. The token is checked offline, and only from the origins in
+`CLERK_AUTHORIZED_PARTIES` (comma-separated, not a secret, so set in the shell rather than the
+keyring). The front end shows the "access is by invitation" page with Clerk's sign-in until a
+user signs in. A user is a developer when their **private** metadata in Clerk is
+`{"role": "developer"}`; anyone else is a compliance lead. Only routes that need the role ask
+Clerk's API for it, and answer 503 when Clerk can't be reached. To try it locally on the
+development instance, with the Clerk keys loaded from the keyring by `.envrc`:
+
+```sh
+npm --prefix frontend run build
+VOUCH_AUTH_MODE=clerk CLERK_AUTHORIZED_PARTIES=http://localhost:8000 \
+  VOUCH_FRONTEND=frontend/dist uv run uvicorn vouch.api:app --port 8000
+```
 
 ### One container, as on Cloud Run
 
 ```sh
 docker build -t vouch:dev .
-docker run --rm -p 127.0.0.1:8081:8080 vouch:dev     # open http://localhost:8081
+docker run --rm -p 127.0.0.1:8081:8080 -e VOUCH_AUTH_MODE=local vouch:dev   # open http://localhost:8081
 ```
 
 FastAPI serves the API under `/api` and the built front end (`VOUCH_FRONTEND`, `frontend/dist`)
