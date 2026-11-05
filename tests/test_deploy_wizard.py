@@ -48,7 +48,8 @@ ALL_APIS = (
 # A fake for each outside tool: it logs its arguments, then answers like a signed-in gcloud would.
 # $FAIL makes the calls that start with it fail. $FAIL_LOOKUP=entry:N makes the Nth lookup of that
 # entry print part of its value and fail. Secrets live in $STATE: NAME.vN holds version N's bytes
-# exactly as they came on standard input, NAME.vN.disabled marks it disabled.
+# exactly as they came on standard input, NAME.vN.disabled marks it disabled. The registry's tags
+# are $TAGS plus each tag `docker push` sends (in $STATE/tags); $TAGS_ERROR makes listing them fail.
 FAKE = r"""#!/bin/sh
 tool=$(basename "$0")
 echo "$tool $*" >> "$CALLS"
@@ -65,6 +66,11 @@ case "$tool $*" in
     cat "$KEYRING/$3" ;;
   "gcloud auth list"*) [ -n "$SIGNED_IN" ] && echo owner@example.com ;;
   "gcloud services list"*) printf '%s\n' $APIS_ON ;;
+  "gcloud artifacts docker tags list"*) [ -z "$TAGS_ERROR" ] || { echo "ERROR: $TAGS_ERROR" >&2; exit 1; }
+    for t in $TAGS $(cat "$STATE/tags" 2>/dev/null); do
+      echo "projects/vouch-demo-123/locations/europe-west1/repositories/vouch/packages/vouch/tags/$t"
+    done ;;
+  "docker push"*) echo "${2##*:}" >> "$STATE/tags" ;;
   "gcloud projects describe"*"projectNumber"*) echo 123 ;;
   "gcloud sql instances describe"*) [ -n "$SQL" ] || exit 1; echo "$SQL" ;;
   "gcloud run services describe"*"serviceAccountName"*) echo "$SERVICE_ACCOUNT" ;;
@@ -148,6 +154,8 @@ def run_wizard(
     service_account: str = "",
     fail: str = "",
     fail_lookup: str = "",
+    tags: str = "",
+    tags_error: str = "",
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -177,6 +185,8 @@ def run_wizard(
         "APIS_ON": ALL_APIS,
         "FAIL": fail,
         "FAIL_LOOKUP": fail_lookup,
+        "TAGS": tags,
+        "TAGS_ERROR": tags_error,
         "WIZARD_ENV": str(tmp_path / "wizard.env"),
     }
     proc = subprocess.Popen(
@@ -276,7 +286,8 @@ def test_an_unknown_option_is_refused_on_stderr(tmp_path):
 def test_a_dry_run_prints_every_command_runs_none_and_writes_nothing(tmp_path):
     result, calls = run_wizard(tmp_path, "--dry-run")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls == ""  # no gcloud, docker, curl or secret-tool call
+    # no gcloud, docker, curl or secret-tool call but one read: the registry's tags (#135)
+    assert calls.splitlines() == [f"gcloud artifacts docker tags list {IMAGE} --format=value(tag)"]
     assert not (tmp_path / "wizard.env").exists()
     for command in (
         "gcloud auth list --filter=status:ACTIVE --format=value\\(account\\)",
@@ -319,8 +330,7 @@ def test_a_deploy_saves_only_plain_answers_and_finishes(tmp_path):
     assert (tmp_path / "wizard.env").read_text().splitlines() == [
         "PROJECT_ID=vouch-demo-123",
         "REGION=europe-west1",
-        "TAG=v1",
-    ]
+    ]  # the tag comes from the registry, not this file (#135)
 
 
 def test_secret_values_reach_gcloud_only_on_standard_input(tmp_path):
@@ -543,13 +553,60 @@ def test_the_project_id_is_asked_once(tmp_path):
     assert f"gcloud run deploy vouch --image={IMAGE}:v2" in result.stdout
 
 
-def test_a_skipped_build_deploys_the_last_pushed_image(tmp_path):
-    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1", TAG="v3")
-    result, calls = deployed(tmp_path, no=("Build the image",))
+def test_a_skipped_build_deploys_the_registry_s_highest_tag(tmp_path):
+    result, calls = deployed(tmp_path, no=("Build the image",), tags="v1 v3 v2")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "\ndocker " not in "\n" + calls
     assert f"gcloud run deploy vouch --image={IMAGE}:v3" in calls
-    assert "TAG=v3" in (tmp_path / "wizard.env").read_text()
+
+
+def test_the_next_tag_is_one_past_the_registry_s_highest_with_no_wizard_env(tmp_path):
+    result, calls = deployed(tmp_path, tags="v1 v2")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"docker build -t {IMAGE}:v3 ." in calls
+    assert f"gcloud run deploy vouch --image={IMAGE}:v3" in calls
+    assert "TAG=" not in (tmp_path / "wizard.env").read_text()
+
+
+def test_the_next_tag_counts_numbers_not_letters_and_ignores_other_tags(tmp_path):
+    result, calls = deployed(tmp_path, tags="latest v2 v10 v9")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"docker push {IMAGE}:v11" in calls
+
+
+def test_with_no_tags_in_the_registry_the_first_tag_is_v1(tmp_path):
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"docker push {IMAGE}:v1" in calls
+
+
+def test_an_old_wizard_env_tag_is_ignored_and_dropped(tmp_path):
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1", TAG="v1")
+    result, calls = deployed(tmp_path, tags="v1 v2")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"docker push {IMAGE}:v3" in calls
+    assert "TAG=" not in (tmp_path / "wizard.env").read_text()
+
+
+def test_the_dry_run_names_the_tag_it_would_use_from_the_registry(tmp_path):
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1")
+    result, _ = run_wizard(tmp_path, "--dry-run", tags="v1 v2")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "as v3 (the registry's highest: v2)" in result.stdout
+    assert f"docker push {IMAGE}:v3" in result.stdout
+
+
+def test_a_registry_that_can_t_be_read_stops_before_the_build(tmp_path):
+    result, calls = deployed(tmp_path, tags_error="(fake) PERMISSION_DENIED")
+    assert result.returncode != 0
+    assert "registry's tags" in result.stderr
+    assert not calls_to(calls, "docker ")
+
+
+def test_an_image_not_in_the_registry_yet_counts_as_no_tags(tmp_path):
+    result, calls = deployed(tmp_path, tags_error="NOT_FOUND: Package not found")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"docker push {IMAGE}:v1" in calls
 
 
 def test_a_skipped_first_build_stops_before_the_deploy(tmp_path):
