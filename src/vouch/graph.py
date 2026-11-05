@@ -12,7 +12,6 @@ the verdicts in code, never from the model.
 import json
 import logging
 import operator
-import re
 import textwrap
 import threading
 import uuid
@@ -51,12 +50,16 @@ from vouch.guards import (
     refusal_step,
 )
 from vouch.isa import Column, IsaControl, Requirement
+from vouch.language import audit_claim, audit_words_in, language_name, mismatch
 from vouch.patch import EVIDENCE_PENDING, TIMED_OUT, vulnerability_status
 from vouch.profile import (
     ComplianceProfile,
     ControlRequirements,
     EvidenceSourceName,
     NotApplicableRequirement,
+    ProfileError,
+    UnknownProfileError,
+    load_named_profile,
 )
 from vouch.search import (
     DEFAULT_LIMIT,
@@ -74,7 +77,7 @@ SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-kind-stale-patch-5"
+PROMPT_VERSION = "m4-answer-language-1"
 """The version of the prompts below: change it whenever a prompt changes, so a run can say
 which prompts drafted it (the developer page, #34; the audit trail, M2)."""
 
@@ -103,13 +106,6 @@ CAPPED = "At most partly evidenced:"
 DOCUMENTED_ONLY = "it asks for something to be done, and only documented evidence shows it"
 # The columns the roll-up counts: should requirements only give the should score.
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
-# Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
-# A negation ("non-compliant", "not certified") and handing something on ("passed to the
-# CISO", "passed on to IT") are not claims; "passed on 3 March" is. English only: German answers come with the second profile (M4).
-AUDIT_RESULT = re.compile(
-    r"(?<!non-)(?<!non )(?<!not )\b(compliant|certified|passed(?!\s+(?:on\s+)?to\b))\b",
-    re.IGNORECASE,
-)
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
 USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
 QUESTION_SHOWN = 90  # the load step shortens a longer control question to this many characters
@@ -128,9 +124,9 @@ class OutputCheckError(RuntimeError):
 
 
 def claims_audit_result(text: str) -> str | None:
-    """The word with which the text claims an audit result (lower case), or None."""
-    found = AUDIT_RESULT.search(text)
-    return found.group(1).lower() if found else None
+    """The word with which the text claims an audit result (lower case), or None: in any
+    answer language, outside quotes, not negated (vouch.language)."""
+    return audit_claim(text)
 
 
 class SubmitAnswer(BaseModel):
@@ -436,6 +432,7 @@ class Assessment:
     token_usage: dict[str, int] = field(default_factory=dict)
     model: str = ""
     prompt_version: str = PROMPT_VERSION
+    answer_language: str = "en"  # the profile's: the answer, reasons and drafts are in it
     remediation: list[RemediationItem] = field(default_factory=list)
     thread_id: str = ""  # resume this thread with the lead's review decision
     status: Status = WAITING
@@ -501,6 +498,9 @@ class AssessState(TypedDict, total=False):
     answer: str | None
     answer_retries: int
     rejected_word: str | None  # the audit-result word that made check_answer refuse the answer
+    language_retries: int
+    wrong_language: str | None  # the language that made check_answer ask for the answer again
+    kept_language: str | None  # the wrong language of an answer kept after that retry
     judge_rejected_word: str | None  # the one that made the judge ask for a new judgement
     requirements: list[RequirementVerdict]
     not_judged: list[str]
@@ -519,10 +519,18 @@ class AssessState(TypedDict, total=False):
     steps: Annotated[list[dict[str, str]], operator.add]  # each node's described step
     model: str  # the model that drafted it, and its prompt version
     prompt_version: str
+    answer_language: str  # the profile's, ISO 639-1
 
 
 def _format_requirements(requirements: Iterable[Requirement]) -> str:
     return "\n".join(f"- {r.id} ({r.column}): {r.text}" for r in requirements)
+
+
+def _never_claim(profile: ComplianceProfile) -> str:
+    """The rule against claiming an audit result, naming the words in the answer language."""
+    words = audit_words_in(profile.answer_language) if profile.answer_language != "en" else ""
+    in_language = f" ({words})" if words else ""
+    return f"never call the company {audit_words_in('en')}{in_language}."
 
 
 def _note_text(note: str) -> str:
@@ -566,9 +574,8 @@ def _prompt(
             f"You assess one {control.source} control for {profile.company} against the "
             f"company's own evidence. {search} When you are "
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
-            f"the language with ISO 639-1 code '{profile.answer_language}'. "
-            "Say what the evidence shows; never call the company compliant, "
-            f"certified or passed. {DATA_RULE}"
+            f"{language_name(profile.answer_language)}; quote a document only unchanged, in its "
+            f"own language. Say what the evidence shows; {_never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -586,7 +593,7 @@ def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage
     )
 
 
-def _judge_prompt(state: AssessState) -> list[AnyMessage]:
+def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMessage]:
     control = state["control"]
     pending = [
         f"{label} could not be read, so its evidence is pending" for label in state["pending"]
@@ -605,8 +612,9 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
             "done; documented: says what should be done) and whether it is stale (past its "
             "review date). For a requirement that asks for something to be done, set "
             "about_doing and say so in the reason: it is evidenced only with implemented "
-            "evidence. Stale evidence shows a requirement partly at most. "
-            f"{DATA_RULE}"
+            "evidence. Stale evidence shows a requirement partly at most. Write each reason in "
+            f"{language_name(profile.answer_language)}; copy each quote unchanged, in its "
+            f"document's language, never translated. {_never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -632,7 +640,7 @@ def _to_remediate(
 
 
 def _remediation_prompt(
-    control: IsaControl, requirements: list[RequirementVerdict]
+    control: IsaControl, requirements: list[RequirementVerdict], profile: ComplianceProfile
 ) -> list[AnyMessage]:
     not_evidenced = "\n".join(
         f"- {r.id} ({r.column}): {r.text}\n  Why: {r.reason}" for r in requirements
@@ -642,8 +650,8 @@ def _remediation_prompt(
             "Draft one remediation item for each requirement listed, which the company's "
             "evidence does not show: what is missing, the role that should own the fix (a "
             f"role, never a person's name), and how many days from today (1 to {MAX_DUE_DAYS}) "
-            "until it is due. Say what is missing; never call the company compliant, "
-            f"certified or passed. {DATA_RULE}"
+            f"until it is due. Write each item in {language_name(profile.answer_language)}. "
+            f"Say what is missing; {_never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(f"Control {control.id}: {control.question}\nNot evidenced:\n{not_evidenced}"),
     ]
@@ -969,20 +977,42 @@ def build_graph(
 
     def check_answer(state: AssessState) -> dict[str, Any]:
         """The answer may not claim an audit result: asked for again once, then an error.
+        Written in another language than the profile's, it is asked for again once in the
+        profile's language, then kept as it is, the step noting the mismatch (#51).
 
         A refusal answers every tool call of the model's message, as a provider requires
         before the next call; a search asked for alongside the answer is not run.
         """
-        word = claims_audit_result(state["answer"] or "")
-        if word is None:
-            return {"rejected_word": None}
-        retries = state.get("answer_retries", 0)
-        if retries >= OUTPUT_RETRIES:
-            raise OutputCheckError(f"the answer claimed an audit result (“{word}”) again")
+        answer = state["answer"] or ""
+        word = claims_audit_result(answer)
+        if word is not None:
+            retries = state.get("answer_retries", 0)
+            if retries >= OUTPUT_RETRIES:
+                raise OutputCheckError(f"the answer claimed an audit result (“{word}”) again")
+            refusal = (
+                f"Answer refused: it says “{word}”, an audit result Vouch never claims. "
+                f"Say what the evidence shows instead, and call {SUBMIT_ANSWER} again."
+            )
+            update = {"answer_retries": retries + 1, "rejected_word": word}
+            return _refused(state, refusal, update)
+        clean = {"rejected_word": None, "wrong_language": None, "kept_language": None}
+        found = mismatch(answer, profile.answer_language)
+        if found is None:
+            return clean
+        language_retries = state.get("language_retries", 0)
+        if language_retries >= OUTPUT_RETRIES:
+            return {**clean, "kept_language": found}
+        expected = language_name(profile.answer_language)
         refusal = (
-            f"Answer refused: it says “{word}”, an audit result Vouch never claims. "
-            f"Say what the evidence shows instead, and call {SUBMIT_ANSWER} again."
+            f"Answer refused: it is written in {language_name(found)}, but the answer must be "
+            f"in {expected}. Write it in {expected}, quoting documents unchanged in their own "
+            f"language, and call {SUBMIT_ANSWER} again."
         )
+        update = {**clean, "language_retries": language_retries + 1, "wrong_language": found}
+        return _refused(state, refusal, update)
+
+    def _refused(state: AssessState, refusal: str, update: dict[str, Any]) -> dict[str, Any]:
+        """The answer refused with this reply to its call, and the update to record."""
         not_run = "Not run: the answer in the same message was refused. Call it again if needed."
         replies = [
             ToolMessage(
@@ -990,12 +1020,7 @@ def build_graph(
             )
             for call in state["messages"][-1].tool_calls
         ]
-        return {
-            "answer": None,
-            "answer_retries": retries + 1,
-            "rejected_word": word,
-            "messages": replies,
-        }
+        return {**update, "answer": None, "messages": replies}
 
     def judge(state: AssessState) -> dict[str, Any]:
         """The model judges each requirement; the code keeps only valid verdicts for them.
@@ -1014,7 +1039,7 @@ def build_graph(
 
         judged, usage, rejected = _ask_until_clean(
             judge_model,
-            _judge_prompt(state),
+            _judge_prompt(state, profile),
             read,
             what="a judgement's reason",
             refusal=lambda word: (
@@ -1098,7 +1123,7 @@ def build_graph(
 
         (drafts, not_drafted), usage, rejected = _ask_until_clean(
             remediation_model,
-            _remediation_prompt(state["control"], not_evidenced),
+            _remediation_prompt(state["control"], not_evidenced, profile),
             read,
             what="a remediation draft",
             refusal=lambda word: (
@@ -1230,7 +1255,23 @@ class Step:
             word = update.get("rejected_word")
             if word:
                 return f"The answer claimed an audit result (“{word}”), so it was asked for again."
-            return "Checked the answer: it claims no audit result."
+            expected = (
+                language_name(self.profile.answer_language)
+                if self.profile
+                else "the profile's language"
+            )
+            if wrong := update.get("wrong_language"):
+                return (
+                    f"The answer was written in {language_name(wrong)}, not {expected}, so it "
+                    f"was asked for again in {expected}."
+                )
+            text = "Checked the answer: it claims no audit result."
+            if kept := update.get("kept_language"):
+                text += (
+                    f" It is still written in {language_name(kept)}, not {expected}; it was "
+                    "kept as it is."
+                )
+            return text
         if self.node == "check_quotes":
             kept = sum(len(r.citations) for r in update["requirements"])
             dropped = len(update["dropped_citations"])
@@ -1398,6 +1439,16 @@ def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id}}
 
 
+def _profile_language(profile_id: str) -> str:
+    """The answer language of the profile a thread saved before #51 ran under (its state
+    doesn't say), or English when that profile can't be read."""
+    try:
+        return load_named_profile(profile_id).answer_language
+    except (ProfileError, UnknownProfileError):
+        log.warning("thread for profile %s: answer language unknown, so English", profile_id)
+        return "en"
+
+
 def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
     """The Assessment from the thread's state: proposed while it waits, reviewed after."""
     requirements = values["requirements"]
@@ -1422,6 +1473,7 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
         token_usage=_total_usage(values["usage"]),
         model=values["model"],
         prompt_version=values["prompt_version"],
+        answer_language=values.get("answer_language") or _profile_language(values["profile_id"]),
         remediation=values["remediation"],
         thread_id=thread_id,
         status=status,
@@ -1458,6 +1510,7 @@ def assess_steps(
         "profile_id": profile.id,
         "model": _model_name(model),
         "prompt_version": PROMPT_VERSION,
+        "answer_language": profile.answer_language,
         "evidence": [],
         "warnings": [],
         "pending": {},

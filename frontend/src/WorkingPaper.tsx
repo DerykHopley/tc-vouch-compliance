@@ -1,4 +1,4 @@
-import { type Control, usageWords, VERDICT_WORDS } from './assessment.ts'
+import { type Control, usageWords, verdictWord } from './assessment.ts'
 import type { Run } from './useAssessment.ts'
 
 /** The assess button's words for each state of the run; `running` is also the chip's and the steps' label. */
@@ -15,7 +15,8 @@ export function RunChip({ run }: { run: Run }) {
   if (run.status === 'running') return <span className="chip v-assessing">{ACTION.running}</span>
   if (run.status === 'done') {
     const v = run.assessment.verdict
-    return <span className={`chip v-${v}`}>{VERDICT_WORDS[v]}</span>
+    const language = run.assessment.answer_language
+    return <span className={`chip v-${v}`} lang={language}>{verdictWord(v, language)}</span>
   }
   return <span className="chip v-none">Not assessed</span>
 }
@@ -54,7 +55,7 @@ export default function WorkingPaper({ company, control, run, onAssess }: PaperP
         <section className="sheet" aria-label="Verdict and draft answer">
           <span className="lbl">Draft answer</span>
           <RunChip run={run} />
-          <p className="answer">{run.assessment.answer}</p>
+          <p className="answer" lang={run.assessment.answer_language}>{run.assessment.answer}</p>
           {run.usage && (
             <section aria-label="Usage"><p className="field-note mono">{usageWords(run.usage)}</p></section>
           )}
