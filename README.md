@@ -64,7 +64,7 @@ call; on Cloud Run only a signed-in user reaches it); else the bundled demo scri
 runs the model a developer chose on the developer page (`/developer`, `GET /api/developer/settings`
 and `PUT /api/developer/model`, developers only), else `ASSESS_MODEL`, else
 `anthropic/claude-haiku-5.5`. The choice is kept in the database (its table made by
-`vouch-db-setup`), or in memory without one. One assessment makes at most 8 model calls, each
+`vouch-db-setup`), or in memory without one. One assessment makes at most 12 model calls, each
 retried at most once.
 `scripts/dev.sh` drops the key, so it always runs the fake.
 
@@ -77,7 +77,9 @@ memory until the server restarts.
 
 ### Sign-in (clerk mode)
 
-Locally there is no sign-in: one default user. In `clerk` mode, as on Cloud Run, every `/api`
+Locally there is no sign-in: one default user. With any Clerk key set (`.envrc` loads them),
+`VOUCH_AUTH_MODE` must be set too, `local` or `clerk`, or the API refuses to start, naming it;
+`scripts/dev.sh` sets `local` (#151). In `clerk` mode, as on Cloud Run, every `/api`
 route but `/api/health` needs a Clerk session token (`Authorization: Bearer ...`); without a
 valid one the API answers 401. The token is checked offline, and only from the origins in
 `CLERK_AUTHORIZED_PARTIES` (comma-separated, not a secret, so set in the shell rather than the
