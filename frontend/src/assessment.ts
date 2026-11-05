@@ -48,6 +48,13 @@ export const REVIEW_WORDS: Record<ReviewStatus, string> = {
   rejected: 'Rejected',
 }
 
+/** The lead's recorded decision on the control (`vouch.graph.Review`); its overrides keep the agent's verdicts. */
+export type Review = {
+  decision: 'accept' | 'reject'
+  note: string
+  overrides: { requirement_id: string; verdict: Verdict; reason: string; agent_verdict: Verdict; agent_reason: string }[]
+}
+
 // The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
 export type Assessment = {
   control_id: string
@@ -55,6 +62,9 @@ export type Assessment = {
   answer: string
   status?: ReviewStatus
   requirements?: RequirementVerdict[]
+  /** The thread to review it by (#38, #39). */
+  thread_id?: string
+  review?: Review | null
 }
 
 /**
@@ -102,8 +112,16 @@ export async function newestAssessment(controlId: string): Promise<Assessment | 
     if (sessionEnded(list) || !list.ok) return null
     const { assessments } = (await list.json()) as { assessments: { thread_id: string; control_id: string }[] }
     const newest = assessments.find((a) => a.control_id === controlId)
-    if (!newest) return null
-    const one = await fetch(`/api/assessments/${encodeURIComponent(newest.thread_id)}`, { headers: await authHeaders() })
+    return newest ? await storedAssessment(newest.thread_id) : null
+  } catch {
+    return null
+  }
+}
+
+/** One stored assessment, by its thread (`GET /api/assessments/{thread_id}`); null when it can't be read just now. */
+export async function storedAssessment(threadId: string): Promise<Assessment | null> {
+  try {
+    const one = await fetch(`/api/assessments/${encodeURIComponent(threadId)}`, { headers: await authHeaders() })
     return one.ok ? ((await one.json()) as { assessment: Assessment }).assessment : null
   } catch {
     return null
@@ -176,9 +194,11 @@ export async function* postEvents<E extends { event: string; data: unknown }>(
 }
 
 /**
- * Starts the assessment and yields its events until the `result` or `error`.
+ * Starts the assessment and yields its events until the `result` or `error`; `note` is the lead's note from a
+ * rejected review, for the control assessed again (#42).
  * Throws when the service can't be reached, or the stream breaks off before either.
  */
-export function assess(controlId: string): AsyncGenerator<AssessmentEvent> {
-  return postEvents<AssessmentEvent>('/api/assessments', { control_id: controlId }, ['result'], NOT_STARTED)
+export function assess(controlId: string, note?: string): AsyncGenerator<AssessmentEvent> {
+  const body = note ? { control_id: controlId, note } : { control_id: controlId }
+  return postEvents<AssessmentEvent>('/api/assessments', body, ['result'], NOT_STARTED)
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { type Assessment, newestAssessment } from './assessment.ts'
+import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
@@ -101,11 +101,25 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
     void newestAssessment(paperId).then((assessment) => answer.wanted && setStored({ controlId: paperId, assessment }))
     return () => { answer.wanted = false }
   }, [paperId, readStored])
+  // The lead's decisions made in this page (#42), by thread: newer than the run's result or the stored read.
+  const [reviewed, setReviewed] = useState<Record<string, Assessment>>({})
+  const noteReviewed = (assessment: Assessment) => {
+    if (assessment.thread_id) setReviewed((now) => ({ ...now, [assessment.thread_id!]: assessment }))
+    noteAssessed(assessment)
+  }
   const idle: Run = { status: 'idle', steps: [] }
-  const paperRun: Run | null = runFor === paperId && run.status !== 'idle' ? run
+  const shownRun: Run | null = runFor === paperId && run.status !== 'idle' ? run
     : !readStored ? idle
       : stored?.controlId !== paperId ? null
         : stored.assessment ? { status: 'done', steps: [], assessment: stored.assessment } : idle
+  const decided = shownRun?.status === 'done' && shownRun.assessment.thread_id
+    ? reviewed[shownRun.assessment.thread_id] : undefined
+  const paperRun: Run | null = shownRun?.status === 'done' && decided ? { ...shownRun, assessment: decided } : shownRun
+  /** Reads the paper's assessment again (another tab reviewed it first), and shows it as it now stands. */
+  const refresh = () => {
+    const threadId = paperRun?.status === 'done' ? paperRun.assessment.thread_id : undefined
+    if (threadId) void storedAssessment(threadId).then((again) => again && noteReviewed(again))
+  }
   const open = (controlId: string, assess: boolean) => {
     showView({ name: 'paper', controlId })
     if (assess) void start(controlId)
@@ -132,8 +146,8 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
               run={paperRun ?? idle} checking={paperRun === null}
-              onAssess={() => void start(control.id)} onOpen={(id) => open(id, false)}
-              onOverview={() => showView({ name: 'dossier' })} />
+              onAssess={(note) => void start(control.id, note)} onOpen={(id) => open(id, false)}
+              onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh} />
           </main>
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>

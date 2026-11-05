@@ -14,22 +14,22 @@ const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 /**
  * The page's assessment run, one at a time, of the control `start` names: held above the views, so it carries on
- * while the lead leaves the working paper. `start` is ignored while a run is in progress; `onDone` is called once a
- * run has its result, with it.
+ * while the lead leaves the working paper. `start` is ignored while a run is in progress; its `note` (the lead's
+ * note from a rejected review) goes to the model. `onDone` is called once a run has its result, with it.
  */
 export function useAssessment(onDone?: (assessment: Assessment) => void) {
   const [current, setCurrent] = useState<{ controlId: string | null; run: Run }>(
     { controlId: null, run: { status: 'idle', steps: [] } })
   const running = useRef(false) // a ref, so two clicks in one tick still start one run
 
-  const start = useCallback(async (controlId: string) => {
+  const start = useCallback(async (controlId: string, note?: string) => {
     if (running.current) return
     running.current = true
     const setRun = (run: Run) => setCurrent({ controlId, run })
     const steps: Step[] = []
     setRun({ status: 'running', steps })
     try {
-      for await (const item of assess(controlId)) {
+      for await (const item of assess(controlId, note)) {
         if (item.event === 'step') {
           steps.push(item.data)
           flushSync(() => setRun({ status: 'running', steps: [...steps] }))

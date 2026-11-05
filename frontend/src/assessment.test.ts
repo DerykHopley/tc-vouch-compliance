@@ -87,6 +87,21 @@ describe('assess, signed in', () => {
   })
 })
 
+describe('assess again', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("sends the lead's note from the rejected review with the control; a first run sends none", async () => {
+    const bodies: unknown[] = []
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string))
+      return Promise.resolve(new Response(streamOf('event: error\ndata: {"message":"x"}\n\n'), { status: 200 }))
+    })
+    for await (const item of assess('4.1.2', 'See the MFA record.')) void item
+    for await (const item of assess('4.1.2')) void item
+    expect(bodies).toEqual([{ control_id: '4.1.2', note: 'See the MFA record.' }, { control_id: '4.1.2' }])
+  })
+})
+
 describe('usageWords', () => {
   const usage = { input_tokens: 10, output_tokens: 5, cost_usd: 1.5, estimated: false, cost_complete: true }
 
