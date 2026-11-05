@@ -11,8 +11,15 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('authConfig', () => {
   it('is clerk, with the publishable key, when health says so', async () => {
+    health({ status: 'ok', auth: { mode: 'clerk', publishable_key: 'pk_test_x', gate: 'clerk' } })
+    expect(await authConfig()).toEqual({ mode: 'clerk', publishableKey: 'pk_test_x', gate: 'clerk' })
+  })
+
+  it("says when the course's Discord server gates sign-in, and Clerk alone otherwise (ticket 152)", async () => {
+    health({ status: 'ok', auth: { mode: 'clerk', publishable_key: 'pk_test_x', gate: 'discord-server' } })
+    expect(await authConfig()).toEqual({ mode: 'clerk', publishableKey: 'pk_test_x', gate: 'discord-server' })
     health({ status: 'ok', auth: { mode: 'clerk', publishable_key: 'pk_test_x' } })
-    expect(await authConfig()).toEqual({ mode: 'clerk', publishableKey: 'pk_test_x' })
+    expect(await authConfig()).toEqual({ mode: 'clerk', publishableKey: 'pk_test_x', gate: 'clerk' })
   })
 
   it('is local when health says local', async () => {

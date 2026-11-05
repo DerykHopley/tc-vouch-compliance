@@ -48,6 +48,14 @@ _Avoid_: Check, evaluation, audit
 One person using Vouch: signed in with Clerk on the live app, or the one default user on a developer's machine. Their id scopes everything they store. A user's role is compliance lead (the default) or developer.
 _Avoid_: Account, tenant
 
+**Course's Discord server**:
+The Discord server of the course Vouch is built for; its members may sign in without an invitation (`DISCORD_SERVER_ID`).
+_Avoid_: Guild, community, channel
+
+**Access**:
+Whether a signed-in user may use Vouch: a member of the course's Discord server, a developer, or an invited user. Anyone else is not a member.
+_Avoid_: Permission, entitlement, allow-list (that is the tools')
+
 **Developer page**:
 The page, and its API, where a developer sees and changes the model assessments run on and the daily limit, and sees the prompt version and every assessment's usage totalled. Only a user with the developer role reaches it; a compliance lead never sees it.
 _Avoid_: Admin page, settings page

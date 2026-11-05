@@ -86,7 +86,15 @@ valid one the API answers 401. The token is checked offline, and only from the o
 keyring). The front end shows the "access is by invitation" page with Clerk's sign-in until a
 user signs in. A user is a developer when their **private** metadata in Clerk is
 `{"role": "developer"}`; anyone else is a compliance lead. Only routes that need the role ask
-Clerk's API for it, and answer 503 when Clerk can't be reached. To try it locally on the
+Clerk's API for it, and answer 503 when Clerk can't be reached.
+
+With `DISCORD_SERVER_ID` set (#152), every route but health also needs access: a member of that
+Discord server (read with the user's Discord token, which Clerk keeps from the sign-in), a
+developer, a user with an accepted Clerk invitation, or one whose private metadata says
+`{"access": "invited"}`. The answer is cached per user for 5 minutes. Anyone else gets a 403
+with `reason: "not-a-member"`, and the page says Vouch is open to the course's server; a Discord
+token Vouch can't use gets `reason: "sign-in-again"`; Clerk or Discord failing, a 503. The page
+asks `GET /api/access` before it opens. To try it locally on the
 development instance, with the Clerk keys loaded from the keyring by `.envrc`:
 
 ```sh
