@@ -294,7 +294,7 @@ def test_the_role_is_asked_once_per_user_then_cached_until_it_expires(clerk):
     assert [call.url.path for call in clerk.calls] == ["/v1/users/user_dev", "/v1/users/user_alice"]
 
     clerk.metadata["user_dev"] = {}  # the owner takes the role away
-    now[0] += ClerkAuth.ROLE_TTL + 1
+    now[0] += ClerkAuth.USER_TTL + 1
     response = client.get("/role", headers=bearer(token("user_dev")))
 
     assert response.json()["role"] == "compliance-lead"

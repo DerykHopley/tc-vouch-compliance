@@ -23,7 +23,7 @@ from test_memory import DEMO_CONTROL, app_on, assess
 
 from vouch import audit, load_named_profile
 from vouch.api import compliance_profile
-from vouch.audit import MAX_PAGE, AuditEntry, EvidenceVersion, review_entries
+from vouch.audit import MAX_PAGE, AuditEntry, EvidenceVersion, Reviewer, review_entries
 from vouch.citations import Citation
 from vouch.database import (
     AUDIT_COLUMNS,
@@ -434,7 +434,9 @@ def test_the_decisions_evidence_is_what_the_control_verdict_rests_on():
     )
     decision = ReviewDecision(decision="accept")
 
-    (entry,) = review_entries(waiting, decision, "u", datetime(2026, 11, 5, tzinfo=UTC), "U")
+    (entry,) = review_entries(
+        waiting, decision, Reviewer("u", "U"), datetime(2026, 11, 5, tzinfo=UTC)
+    )
 
     assert entry.evidence == (EvidenceVersion("counted", "1"),)
 
