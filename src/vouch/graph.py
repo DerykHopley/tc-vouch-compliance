@@ -229,7 +229,7 @@ class EvidencePassage(Passage):
     stale: bool
 
 
-def _with_facts(
+def with_facts(
     passages: list[Passage], source: str, folder: Path, today: date
 ) -> list[EvidencePassage]:
     """Each passage with its document's source, kind and staleness, each document read once.
@@ -920,11 +920,11 @@ def build_graph(
             else:
                 result = tool.run(args, folder)
                 if isinstance(result, list):
-                    result = _with_facts(result, tool.source, folder, today)
+                    result = with_facts(result, tool.source, folder, today)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)
                 if isinstance(result, list):
                     run += 1
-                    found = _plural(len(result), "passage")
+                    found = plural(len(result), "passage")
                     searched.append(f"{tool.label}{_for_query(args)}: {found}")
                     if pending.pop(tool.label, None):  # it answered after all
                         changed[tool.label] = ""
@@ -1082,7 +1082,7 @@ def build_graph(
         results, pending_ids = _noted_pending(results, state["pending"])
         judged = {r.id: r.verdict for r in state["requirements"]}
         changes = [
-            f"{r.id} to {r.verdict.replace('-', ' ')}" for r in results if r.verdict != judged[r.id]
+            f"{r.id} to {verdict_words(r.verdict)}" for r in results if r.verdict != judged[r.id]
         ]
         return {
             "requirements": results,
@@ -1214,7 +1214,7 @@ class Step:
             applicable, excluded = len(requirements.applicable), len(requirements.not_applicable)
             text = (
                 f"Loaded control {control.id}: {question} "
-                f"{_plural(applicable, 'requirement')} {_verb(applicable, 'applies', 'apply')} "
+                f"{plural(applicable, 'requirement')} {_verb(applicable, 'applies', 'apply')} "
                 f"under {self.profile.company}'s profile"
             )
             if excluded:
@@ -1255,7 +1255,7 @@ class Step:
         if self.node == "check_quotes":
             kept = sum(len(r.citations) for r in update["requirements"])
             dropped = len(update["dropped_citations"])
-            text = f"Checked each quote against its document: kept {_plural(kept, 'citation')}"
+            text = f"Checked each quote against its document: kept {plural(kept, 'citation')}"
             text += f", dropped {dropped}." if dropped else "."
             changes = update.get("verdict_changes")
             if changes:  # the judge step showed the verdicts before these checks
@@ -1294,7 +1294,7 @@ class Step:
             not_drafted = update.get("not_drafted", [])
             made = len(drafts) - len(not_drafted)  # not the placeholders
             text = (
-                f"Drafted {_plural(made, 'remediation item')}."
+                f"Drafted {plural(made, 'remediation item')}."
                 if made
                 else "No remediation item drafted by the model."
             )
@@ -1372,8 +1372,14 @@ def _apply_rules(requirement: RequirementVerdict, about_doing: bool) -> Requirem
     return replace(requirement, verdict="partly-evidenced", reason=reason)
 
 
-def _plural(count: int, noun: str) -> str:
+def plural(count: int, noun: str) -> str:
+    """The count and the noun agreeing with it: plural(2, "passage") is "2 passages"."""
     return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def verdict_words(verdict: Verdict) -> str:
+    """A verdict as words in a sentence: "partly-evidenced" is "partly evidenced"."""
+    return verdict.replace("-", " ")
 
 
 def _verb(count: int, one: str, many: str) -> str:
