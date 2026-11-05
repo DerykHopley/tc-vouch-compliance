@@ -95,7 +95,8 @@ def test_accept_records_the_decision_and_the_overviews_counts_change(page: Page,
         bar.get_by_role("button", name="Accept verdict").click()
     assert answer.value.ok, answer.value.status
     expect(bar.get_by_text("Accepted", exact=True)).to_be_visible()
-    expect(bar).to_contain_text(re.compile(r"by \S+ on "))  # who and when, from the audit trail
+    # Who and when, from the audit trail: local mode's reviewer name (#154).
+    expect(bar).to_contain_text(re.compile(r"by Local user on \d+ \w+ \d{4}, \d\d:\d\d"))
     expect(bar.get_by_role("button", name="Accept verdict")).to_have_count(0)
 
     trail = page.request.get(f"{paper_url}/api/audit-trail?limit=1").json()["entries"]
