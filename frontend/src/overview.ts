@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
-import type { ReviewStatus, Verdict } from './assessment.ts'
+import type { EvidenceKind, ReviewStatus, Verdict } from './assessment.ts'
+import type { PaperRequirement } from './paper.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The Dossier overview from `GET /api/overview` (#40), as `vouch.dossier.overview` sends it. */
@@ -25,7 +26,7 @@ export type Quote = {
   version: string
   section: string
   quote: string
-  kind: 'documented' | 'implemented'
+  kind: EvidenceKind
   stale: boolean
 }
 
@@ -35,6 +36,13 @@ export type NextStep = { control_id: string; action: 'review' | 'assess-again' |
 export type Overview = {
   company: string
   country: string
+  /** The working paper's head shows both (#41). */
+  protection_level: 'normal' | 'high' | 'very high'
+  /** ISO 639-1: the language the answers are written in; the interface stays English. */
+  answer_language: string
+  /** Each control's requirements under the profile, by control id: the working paper lists them before an
+   * assessment, at no request of its own (#41). */
+  requirements: Record<string, PaperRequirement[]>
   readiness: Readiness
   /** How many controls are in each review state. */
   by_status: Record<ReviewState, number>

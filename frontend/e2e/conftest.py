@@ -19,6 +19,12 @@ def dossier_url() -> str:
 
 
 @pytest.fixture
+def paper_url() -> str:
+    """A third Vouch like vouch_url, for the working paper's checks (#41), for the same reason."""
+    return os.environ["PAPER_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

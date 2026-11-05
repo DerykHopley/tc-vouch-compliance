@@ -18,8 +18,27 @@ export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 export type Control = { id: string; title: string }
 
 export type Step = { node: string; text: string }
+/** Documented (a policy says so) or implemented (a record shows it done): `vouch.documents.EvidenceKind`. */
+export type EvidenceKind = 'documented' | 'implemented'
+/** A quote checked word for word in this version of the document (`vouch.citations.Citation`). */
+export type Citation = {
+  doc_id: string
+  version: string
+  section: string
+  quote: string
+  kind: EvidenceKind
+  stale: boolean
+  stale_because: string | null
+}
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
-export type RequirementVerdict = { id: string; column: Column; text: string; verdict: Verdict; reason: string }
+export type RequirementVerdict = {
+  id: string
+  column: Column
+  text: string
+  verdict: Verdict
+  reason: string
+  citations: Citation[]
+}
 /** An assessment's review state (`vouch.graph.Status`); the screen says Proposed for waiting-for-review. */
 export type ReviewStatus = 'waiting-for-review' | 'accepted' | 'rejected'
 
@@ -29,8 +48,14 @@ export const REVIEW_WORDS: Record<ReviewStatus, string> = {
   rejected: 'Rejected',
 }
 
-// The page reads only these of the Assessment's fields so far.
-export type Assessment = { control_id: string; verdict: Verdict; answer: string; status?: ReviewStatus }
+// The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
+export type Assessment = {
+  control_id: string
+  verdict: Verdict
+  answer: string
+  status?: ReviewStatus
+  requirements?: RequirementVerdict[]
+}
 
 /**
  * One assessment's tokens and cost (#35): `cost_usd` is OpenRouter's reported part plus the part computed from a

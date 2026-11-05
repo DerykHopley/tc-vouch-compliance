@@ -15,7 +15,8 @@ function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verd
   }))
   const assessed = Object.keys(cards).length > 0
   return {
-    company: 'Nordlicht Komponenten GmbH', country: 'Germany',
+    company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
+    requirements: {},
     readiness: { controls: 12, accepted: 2,
       by_verdict: { evidenced: 1, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 10,
       remediation_items: 3 },

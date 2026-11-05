@@ -7,7 +7,7 @@ import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
 import TopBar from './TopBar.tsx'
 import { type Run, useAssessment } from './useAssessment.ts'
-import WorkingPaper from './WorkingPaper.tsx'
+import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
 type Theme = 'light' | 'dark'
 
@@ -74,11 +74,12 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
   }, [load])
   const { run, controlId: runFor, start } = useAssessment(reloadIfDossier)
   const running = run.status === 'running' ? runFor : null
-  // A control's working paper needs its question from the overview; a control the overview doesn't list, or an
-  // overview not read, shows the Dossier.
+  // A control's working paper needs its question from the overview; an overview not read shows the Dossier, and a
+  // control the overview doesn't list says it isn't found.
   const control = view.name === 'paper' && overview.state.status === 'ready'
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
+  const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
   const shown: View['name'] = view.name === 'developer' && developer ? 'developer' : control ? 'paper' : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out.
   const paperId = view.name === 'paper' ? view.controlId : null
@@ -116,11 +117,14 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
       {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
         : control && overview.state.status === 'ready' ? (
           <main>
-            <WorkingPaper company={overview.state.overview.company} control={{ id: control.id, title: control.question }}
+            <WorkingPaper overview={overview.state.overview} control={{ id: control.id, title: control.question }}
+              running={running}
               run={paperRun ?? { status: 'idle', steps: [] }} checking={paperRun === null}
-              onAssess={() => void start(control.id)} />
+              onAssess={() => void start(control.id)} onOpen={(id) => open(id, false)}
+              onOverview={() => showView({ name: 'dossier' })} />
           </main>
         )
+          : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
       <AskVouch />
     </>

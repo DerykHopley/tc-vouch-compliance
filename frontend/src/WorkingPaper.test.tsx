@@ -1,0 +1,161 @@
+import { cleanup, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Assessment, RequirementVerdict } from './assessment.ts'
+import type { ControlCard } from './overview.ts'
+import type { PaperRequirement } from './paper.ts'
+import type { Run } from './useAssessment.ts'
+import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
+
+const QUESTION = 'To what extent is information protected during transfer?'
+
+/** 5.1.2's requirements as the overview lists them: one from each column, one not applicable. */
+const LISTED: PaperRequirement[] = [
+  { id: 'M1', column: 'must', text: 'Transfers are encrypted.', source: 'VDA ISA 2027.1', not_applicable: null },
+  { id: 'S1', column: 'should', text: 'Keys are rotated.', source: 'VDA ISA 2027.1', not_applicable: null },
+  { id: 'H1', column: 'high', text: 'Transfers are logged.', source: 'VDA ISA 2027.1', not_applicable: null },
+  { id: 'O1', column: 'overlay', text: 'An early warning goes out.', source: 'AT NIS2 (illustrative)',
+    not_applicable: null },
+  { id: 'S3', column: 'should', text: 'Remote access is protected.', source: 'VDA ISA 2027.1',
+    not_applicable: 'Nordlicht allows no remote access.' },
+]
+
+const judged: RequirementVerdict[] = [
+  { id: 'M1', column: 'must', text: 'Transfers are encrypted.', verdict: 'evidenced', reason: 'TLS everywhere.',
+    citations: [{ doc_id: 'network-transfer-standard', version: '2.0', section: 'Encryption', quote: 'All transfers use TLS 1.3.',
+      kind: 'implemented', stale: false, stale_because: null }] },
+  { id: 'S1', column: 'should', text: 'Keys are rotated.', verdict: 'partly-evidenced', reason: 'The standard is old.',
+    citations: [{ doc_id: 'encryption-standard', version: '1.0', section: 'Keys', quote: 'Keys are rotated yearly.',
+      kind: 'documented', stale: true, stale_because: 'approved 2022-03-14, yearly review' }] },
+  { id: 'H1', column: 'high', text: 'Transfers are logged.', verdict: 'not-evidenced', reason: 'Nothing on file.',
+    citations: [] },
+  { id: 'O1', column: 'overlay', text: 'An early warning goes out.', verdict: 'not-evidenced', reason: 'No procedure.',
+    citations: [] },
+  { id: 'S3', column: 'should', text: 'Remote access is protected.', verdict: 'not-applicable',
+    reason: 'Nordlicht allows no remote access.', citations: [] },
+]
+
+const ASSESSED: Assessment = { control_id: '5.1.2', verdict: 'partly-evidenced', answer: 'Transfers are encrypted.',
+  status: 'waiting-for-review', requirements: judged }
+
+const IDS = ['1.1.1', '1.6.1', '2.1.3', '4.1.2', '5.1.1', '5.1.2']
+const CONTROLS: ControlCard[] = IDS.map((id) => ({ id, question: `Question ${id}?`,
+  iso_27001: id === '5.1.2' ? 'ISO 27001:2022: A.5.14' : 'ISO 27001:2022: A.5.1',
+  status: id === '1.1.1' ? 'accepted' : 'not-assessed', verdict: id === '1.1.1' ? 'evidenced' : null }))
+const OVERVIEW = { company: 'Nordlicht Komponenten GmbH', protection_level: 'high', answer_language: 'en',
+  requirements: { '5.1.2': LISTED }, controls: CONTROLS } as const
+
+type Shown = { run?: Run; onAssess?: () => void; onOpen?: (id: string) => void; onOverview?: () => void }
+
+function show({ run = { status: 'idle', steps: [] }, onAssess = () => {}, onOpen = () => {}, onOverview = () => {} }: Shown = {}) {
+  render(<WorkingPaper overview={OVERVIEW} control={{ id: '5.1.2', title: QUESTION }}
+    running={null} run={run} onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} />)
+}
+
+/** The requirement's row, by the id in its header cell. */
+const row = (id: string) => screen.getByText(id, { selector: 'th .mono' }).closest('tr')!
+
+afterEach(cleanup)
+
+describe('the working paper of an assessed control', () => {
+  beforeEach(() => show({ run: { status: 'done', steps: [], assessment: ASSESSED } }))
+
+  it('shows the head: question, ISO reference, protection and answer language', () => {
+    const paper = screen.getByRole('region', { name: 'Working paper' })
+    expect(within(paper).getByRole('heading', { name: /5\.1\.2 To what extent is information protected/ })).toBeTruthy()
+    expect(within(paper).getByText('ISO 27001:2022: A.5.14')).toBeTruthy()
+    expect(within(paper).getByText('Protection: high')).toBeTruthy()
+    expect(within(paper).getByText('Answer language: English')).toBeTruthy()
+  })
+
+  it('shows each requirement with its column, verdict, evidence kind, stale flag, reason and exact quotes', () => {
+    const m1 = row('M1')
+    expect(within(m1).getByText('Must')).toBeTruthy()
+    expect(within(m1).getByText('Evidenced')).toBeTruthy()
+    expect(within(m1).getByText('implemented')).toBeTruthy()
+    expect(within(m1).getByText('Current')).toBeTruthy()
+    expect(within(m1).getByText('TLS everywhere.')).toBeTruthy()
+    expect(within(m1).getByText('All transfers use TLS 1.3.').closest('blockquote')).toBeTruthy()
+    expect(within(m1).getByText('network-transfer-standard v2.0 · Encryption')).toBeTruthy()
+
+    const s1 = row('S1')
+    expect(within(s1).getByText('Should')).toBeTruthy()
+    expect(within(s1).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(s1).getByText('documented')).toBeTruthy()
+    expect(within(s1).getByText('Stale')).toBeTruthy()
+    expect(within(s1).getByText('Stale: approved 2022-03-14, yearly review')).toBeTruthy()
+
+    expect(within(row('H1')).getByText('High protection')).toBeTruthy()
+    expect(within(row('H1')).getByText('No evidence')).toBeTruthy()
+    expect(within(row('O1')).getByText('Country overlay')).toBeTruthy()
+  })
+
+  it('shows a not-applicable requirement with its reason', () => {
+    expect(within(row('S3')).getByText('Not applicable')).toBeTruthy()
+    expect(within(row('S3')).getByText('Nordlicht allows no remote access.')).toBeTruthy()
+  })
+})
+
+describe('the working paper of a control not yet assessed', () => {
+  it('lists its requirements, not-applicable ones with their reason, and an Assess button', async () => {
+    const onAssess = vi.fn()
+    show({ onAssess })
+    expect(screen.getByText('Not assessed yet. 4 requirements apply in this profile.')).toBeTruthy()
+    expect(screen.getAllByRole('rowheader').map((h) => h.querySelector('.mono')?.textContent)).toEqual(
+      ['M1', 'S1', 'H1', 'O1', 'S3'])
+    expect(within(row('S3')).getByText('Not applicable: Nordlicht allows no remote access.')).toBeTruthy()
+    expect(within(row('O1')).getByText('AT NIS2 (illustrative)')).toBeTruthy()
+    expect(within(row('M1')).queryByText('Evidenced')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Assess 5.1.2' }))
+    expect(onAssess).toHaveBeenCalledOnce()
+  })
+})
+
+describe('the control index', () => {
+  it('lists the controls by area, each with its verdict and state, the open one marked', () => {
+    show()
+    const index = screen.getByRole('navigation', { name: 'Controls' })
+    expect(within(index).getAllByRole('heading').map((h) => h.textContent)).toEqual(
+      ['Policies and incidents', 'People', 'Access', 'IT security'])
+    const current = within(index).getByRole('link', { name: /^5\.1\.2/ })
+    expect(current.getAttribute('aria-current')).toBe('page')
+    const accepted = within(index).getByRole('link', { name: /^1\.1\.1/ })
+    expect(within(accepted).getByText('Evidenced')).toBeTruthy()
+    expect(within(accepted).getByText('Accepted')).toBeTruthy()
+    expect(within(index).getByRole('link', { name: /^2\.1\.3/ }).textContent).toContain('Not assessed')
+  })
+
+  it("shows the open control's own run: assessing, then its verdict and state", () => {
+    show({ run: { status: 'running', steps: [] } })
+    const index = screen.getByRole('navigation', { name: 'Controls' })
+    expect(within(within(index).getByRole('link', { name: /^5\.1\.2/ })).getByText('Assessing')).toBeTruthy()
+    cleanup()
+    show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+    const done = within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^5\.1\.2/ })
+    expect(within(done).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(done).getByText('Proposed')).toBeTruthy()
+  })
+
+  it('opens another control, and "Overview" returns', async () => {
+    const onOpen = vi.fn()
+    const onOverview = vi.fn()
+    show({ onOpen, onOverview })
+    const index = screen.getByRole('navigation', { name: 'Controls' })
+    await userEvent.click(within(index).getByRole('link', { name: /^4\.1\.2/ }))
+    expect(onOpen).toHaveBeenCalledWith('4.1.2')
+    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    expect(onOverview).toHaveBeenCalledOnce()
+  })
+})
+
+describe('a control that does not exist', () => {
+  it('says so, with a way back to the overview', async () => {
+    const onOverview = vi.fn()
+    render(<ControlNotFound controlId="9.9.9" onOverview={onOverview} />)
+    expect(screen.getByRole('heading').textContent).toBe('No control 9.9.9')
+    const back = screen.getByRole('link', { name: '← Overview' })
+    expect(back.getAttribute('href')).toBe('/')
+    await userEvent.click(back)
+    expect(onOverview).toHaveBeenCalledOnce()
+  })
+})

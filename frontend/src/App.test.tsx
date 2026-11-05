@@ -25,7 +25,8 @@ const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1
 
 /** The overview with nothing assessed, as `GET /api/overview` sends it. */
 const OVERVIEW: Overview = {
-  company: 'Nordlicht Komponenten GmbH', country: 'Germany',
+  company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
+  requirements: {},
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0 },
@@ -240,11 +241,28 @@ describe('the working paper', () => {
     )
   })
 
-  it('shows the Dossier for a control the overview does not list', async () => {
+  it('says a control the overview does not list is not found, and "Overview" returns to the Dossier', async () => {
     serve()
     window.history.replaceState(null, '', '/controls/9.9.9')
     render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control 9.9.9')
+    expect(paper()).toBeNull()
+    await userEvent.click(within(notFound).getByRole('link', { name: '← Overview' }))
     expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('opens another control from the index, and "Overview" returns to the Dossier', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const index = await screen.findByRole('navigation', { name: 'Controls' })
+    await userEvent.click(within(index).getByRole('link', { name: /^5\.2\.4/ }))
+    expect(window.location.pathname).toBe('/controls/5.2.4')
+    expect(await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
   })
 })
