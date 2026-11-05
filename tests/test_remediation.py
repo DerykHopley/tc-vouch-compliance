@@ -18,10 +18,14 @@ from typing import Any
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from profiles_dir import SECOND, make_profiles
+from test_auth import api_routes
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
+from test_profile_switch import app_with
 
 from vouch import remediation
+from vouch.api import PROFILE_HEADER
 from vouch.database import AUDIT_TABLE, REMEDIATION_TABLE
 from vouch.graph import NO_OWNER, NOT_DRAFTED
 
@@ -54,7 +58,11 @@ def accepted_with_an_item(client: TestClient, user: dict[str, str]) -> str:
 
 
 def decide(
-    client: TestClient, user: dict[str, str], thread_id: str, requirement_id: str = "M1", **body: Any
+    client: TestClient,
+    user: dict[str, str],
+    thread_id: str,
+    requirement_id: str = "M1",
+    **body: Any,
 ) -> Any:
     return client.post(
         f"/api/assessments/{thread_id}/remediation/{requirement_id}", json=body, headers=user
@@ -102,7 +110,9 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
     due = later()
     with TestClient(app_on(database_url)) as client:
         thread_id = accepted_with_an_item(client, alice)
-        response = decide(client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due)
+        response = decide(
+            client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due
+        )
         shown = items(client, alice, thread_id)
         entry = trail(client, alice)[0]
         reviewed = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
@@ -130,7 +140,7 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
         "note": f"{NOT_DRAFTED} Owner: {OWNER}. Due {due}.",
         "verdict_before": "not-evidenced",
         "verdict_after": "not-evidenced",
-        "evidence": [],
+        "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],  # M1's quotes
         "model": reviewed["model"],
         "prompt_version": reviewed["prompt_version"],
     }
@@ -345,7 +355,7 @@ def test_a_failing_trail_write_keeps_no_item(postgres, users):
     with TestClient(app_on(postgres.url), raise_server_exceptions=False) as client:
         thread_id = accepted_with_an_item(client, alice)
         with postgres.connection() as conn:  # the entry breaks a constraint
-            conn.execute(f"ALTER TABLE {AUDIT_TABLE} ADD CONSTRAINT short CHECK (length(note) < 3)")
+            conn.execute(f"ALTER TABLE {AUDIT_TABLE} ADD CONSTRAINT no CHECK (action != 'approve')")
         failed = decide(client, alice, thread_id, decision="approve")
         shown = items(client, alice, thread_id)
         with postgres.connection() as conn:
@@ -360,11 +370,31 @@ def test_a_failing_trail_write_keeps_no_item(postgres, users):
 def test_no_route_lists_changes_or_removes_a_decision_but_the_decision_route(users):
     alice, _ = users
     app = app_on(None)
-    paths = {route.path for route in app.routes if "remediation" in getattr(route, "path", "")}
+    routes = {(method, path) for method, path in api_routes(app) if "remediation" in path}
     with TestClient(app) as client:
         thread_id = accepted_with_an_item(client, alice)
         url = f"/api/assessments/{thread_id}/remediation/M1"
-        changed = [getattr(client, verb)(url, headers=alice).status_code for verb in ("put", "delete")]
+        changed = [
+            getattr(client, verb)(url, headers=alice).status_code for verb in ("put", "delete")
+        ]
 
-    assert paths == {"/api/assessments/{thread_id}/remediation/{requirement_id}"}
+    assert routes == {("POST", "/api/assessments/{thread_id}/remediation/{requirement_id}")}
     assert changed == [405, 405]
+
+
+def test_one_profiles_items_and_decisions_do_not_show_under_another(tmp_path, users):
+    """#47: the profile comes from X-Vouch-Profile; items are kept per user and profile."""
+    alice, _ = users
+    nordlicht, testwerk = (alice | {PROFILE_HEADER: p} for p in ("nordlicht", SECOND))
+    with app_with(make_profiles(tmp_path / "profiles")) as client:
+        thread_id = accepted_with_an_item(client, nordlicht)
+        approved = decide(client, nordlicht, thread_id, decision="approve", owner_role=OWNER)
+        elsewhere = decide(client, testwerk, thread_id, decision="discard")
+        opened_elsewhere = client.get(f"/api/assessments/{thread_id}", headers=testwerk)
+
+        assert approved.status_code == 200, approved.text
+        assert elsewhere.status_code == 404
+        assert opened_elsewhere.status_code == 404
+        assert open_items(client, nordlicht) == 1
+        assert open_items(client, testwerk) == 0
+        assert [i["status"] for i in items(client, nordlicht, thread_id)] == ["approved"]

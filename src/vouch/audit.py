@@ -1,7 +1,7 @@
 """The audit trail (#39): the lead's every action, append-only, written with its decision.
 
 One entry per action of the compliance lead: the review's accept or reject, each override in
-it, and (#43) each remediation item approved or discarded. An entry says who, when, under which
+it, and each remediation item approved or discarded (vouch.remediation, #43). An entry says who, when, under which
 profile, on which control (and requirement), the note, the verdict before and after, the
 versions of the evidence documents it rests on, and the model and prompt version of the run,
 read from the assessment's thread, never assumed.
@@ -109,7 +109,7 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _versions(requirements: list[RequirementVerdict]) -> tuple[EvidenceVersion, ...]:
+def evidence_versions(requirements: list[RequirementVerdict]) -> tuple[EvidenceVersion, ...]:
     """Each document the requirements cite, at its version, once, sorted."""
     cited = {EvidenceVersion(c.doc_id, c.version) for r in requirements for c in r.citations}
     return tuple(sorted(cited))
@@ -146,7 +146,7 @@ def review_entries(
             note=o.reason,
             verdict_before=o.agent_verdict,
             verdict_after=o.verdict,
-            evidence=_versions([by_id[o.requirement_id]]),
+            evidence=evidence_versions([by_id[o.requirement_id]]),
         )
         for o in overrides
     ]
@@ -157,7 +157,7 @@ def review_entries(
             note=decision.note,
             verdict_before=waiting.verdict,
             verdict_after=roll_up(reviewed),
-            evidence=_versions([r for r in reviewed if counts_towards_roll_up(r)]),
+            evidence=evidence_versions([r for r in reviewed if counts_towards_roll_up(r)]),
         )
     )
     return entries
@@ -210,14 +210,18 @@ class ProcessTrail:
         try:
             staged: list[AuditEntry] = []
             yield self._checkpointer(), staged.extend
-            with self._guard:
-                first = len(self._entries) + 1
-                self._entries.extend(
-                    AuditEntry(**(asdict(e) | {"id": first + n})) for n, e in enumerate(staged)
-                )
+            self.keep(staged)
         finally:
             with self._guard:
                 self._reviewing.discard(key)
+
+    def keep(self, entries: list[AuditEntry]) -> None:
+        """Append entries, each given the trail's next id: a list append, which can't fail."""
+        with self._guard:
+            first = len(self._entries) + 1
+            self._entries.extend(
+                AuditEntry(**(asdict(e) | {"id": first + n})) for n, e in enumerate(entries)
+            )
 
     def entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None

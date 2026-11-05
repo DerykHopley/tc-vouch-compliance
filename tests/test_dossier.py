@@ -132,8 +132,12 @@ def test_readiness_counts_accepted_verdicts_only():
 def test_a_discarded_remediation_item_is_not_open():
     """#43: the band counts the accepted controls' items the lead hasn't discarded."""
     latest = {
-        "2.1.3": replace(seeded("2.1.3", "not-evidenced", "accepted", remediation=3), thread_id="t"),
-        "4.1.3": replace(seeded("4.1.3", "not-evidenced", "rejected", remediation=2), thread_id="u"),
+        "2.1.3": replace(
+            seeded("2.1.3", "not-evidenced", "accepted", remediation=3), thread_id="t"
+        ),
+        "4.1.3": replace(
+            seeded("4.1.3", "not-evidenced", "rejected", remediation=2), thread_id="u"
+        ),
     }
 
     readiness = overview(NORDLICHT, CONTROLS, latest, discarded={("t", "M1"), ("u", "M0")})[
