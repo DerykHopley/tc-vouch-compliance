@@ -19,8 +19,8 @@ MAX_MESSAGE_BYTES = 8_192
 MESSAGE_TOO_LONG = f"That message is too long for Vouch: at most {MAX_MESSAGE_BYTES} bytes."
 RATE_REQUESTS = 60
 RATE_SECONDS = 60
-"""A user's request rate: one a second, well above a person working in the app (and the
-browser suite, on its one local user), and far below a script flooding it."""
+"""A user's request rate: one a second, well above a person working in the app, and far below
+a script flooding it. VOUCH_RATE_REQUESTS (vouch.settings) changes the count (#138)."""
 TOO_MANY_REQUESTS = "Too many requests. Please wait a moment and try again."
 
 

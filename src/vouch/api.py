@@ -766,7 +766,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
-    app.state.rate_limit = RateLimit()
+    app.state.rate_limit = RateLimit(requests=settings.rate_requests)
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
