@@ -1,3 +1,4 @@
+import type { RemediationItem } from './remediation.ts'
 import type { Review } from './review.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
@@ -59,6 +60,8 @@ export type Assessment = {
   /** The thread to review it by (#38, #39). */
   thread_id?: string
   review?: Review | null
+  /** One per not-evidenced requirement, each with the lead's decision (#43). */
+  remediation?: RemediationItem[]
 }
 
 /**
