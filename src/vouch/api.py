@@ -12,39 +12,37 @@ import logging
 import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from functools import cache
 from importlib.metadata import version
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
 from vouch import audit
-from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
+from vouch.allow_list import GUARD, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.chat import (
     CHAT_FAILED,
     CHAT_PROMPT_VERSION,
+    GREETING_REQUEST,
     Page,
     PageContext,
-    chat_messages,
-    streamed_reply,
+    chat_prompt,
 )
+from vouch.chat_agent import ChatTools, chat_graph, chat_turn
 from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.dossier import overview
 from vouch.graph import (
     Assessment,
     InvalidReviewError,
     NotWaitingForReviewError,
-    RequirementVerdict,
     ReviewDecision,
     UnknownAssessmentError,
-    assess_steps,
     load_assessment,
     new_thread_id,
     state_serializer,
@@ -68,6 +66,7 @@ from vouch.profile import (
     load_named_profile,
 )
 from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
+from vouch.runs import RunningAssessments, assessment_events
 from vouch.settings import (
     DATABASE_URL_ENV,
     DEFAULT_USER,
@@ -310,6 +309,14 @@ def app_spending(request: Request) -> SpendingGuard:
 AppSpending = Annotated[SpendingGuard, Depends(app_spending)]
 
 
+def running_assessments(request: Request) -> RunningAssessments:
+    """Whose assessments are running in this process (vouch.runs)."""
+    return request.app.state.running
+
+
+Running = Annotated[RunningAssessments, Depends(running_assessments)]
+
+
 def within_daily_limit(
     user: CurrentUser,
     spending: AppSpending,
@@ -398,6 +405,7 @@ def create_assessment(
     memory: UserMemory,
     user: CurrentUser,
     spending: AppSpending,
+    running: Running,
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, a `requirement` event per judged requirement, one
     `result` (the proposed Assessment, waiting for review, with the `thread_id` to review it
@@ -420,28 +428,26 @@ def create_assessment(
     control = requested.control
     meter = UsageMeter(chosen)
     try:
-        assessed = models.for_assessment(chosen, callbacks=[meter])
-        model = ToolAllowList(assessed, tools)
-        # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
-        steps = assess_steps(
-            control,
-            profile,
-            cast(BaseChatModel, model),
-            saver,
-            note=requested.note,
-            thread_id=thread_id,
-            scope=memory.scope,
-        )
-        for item in steps:
-            if isinstance(item, Assessment):
-                result = {"assessment": item.to_dict(), "usage": meter.usage().to_dict()}
-                yield from _redacted("result", result)
-            elif isinstance(item, RequirementVerdict):
-                yield from _redacted("requirement", {"requirement": asdict(item)})
-            else:
-                yield from _redacted("step", item.to_dict())
-            for refusal in model.take_refusals():
-                yield from _redacted("step", {"node": GUARD, "text": refusal})
+        # Noted while it runs, so the chat starts no other for the lead meanwhile (#45).
+        with running.running(memory.scope):
+            events = assessment_events(
+                control,
+                profile,
+                models,
+                chosen,
+                tools,
+                saver,
+                meter,
+                thread_id=thread_id,
+                scope=memory.scope,
+                note=requested.note,
+            )
+            for event, data in events:
+                if isinstance(data, Assessment):
+                    result = {"assessment": data.to_dict(), "usage": meter.usage().to_dict()}
+                    yield from _redacted("result", result)
+                else:
+                    yield from _redacted(event, data)
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": FAILED})
@@ -551,9 +557,12 @@ def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) 
 
 
 class ChatRequest(BaseModel):
-    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    # None: a new chat's greeting (#45), the lead asking where they stand (GREETING_REQUEST).
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
     page: Page
     control_id: str | None = None  # the control whose working paper is open
+    # The chat thread to go on with, from an earlier reply's `done`; None starts a new one.
+    thread_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")] | None = None
 
 
 def page_context(request: Annotated[ChatRequest, Body()]) -> PageContext:
@@ -594,25 +603,38 @@ def chat(
     chosen: Annotated[str | None, Depends(chosen_model)],
     user: CurrentUser,
     spending: AppSpending,
+    memory: UserMemory,
+    saver: Checkpointer,
+    tools: Annotated[frozenset[str], Depends(profile_tools)],
+    running: Running,
 ) -> Iterable[ServerSentEvent]:
-    """The chat agent's reply to the compliance lead's message (vouch.chat), knowing the page
-    and control they are on: a `token` event per piece of the reply as it is written, then
-    `done`; or one `error`, then close. Secrets and personal data are removed from the reply,
-    a guard `step` saying what (security layer 4). The model is the assessments'
+    """The chat agent's reply to the compliance lead's message (vouch.chat_agent), knowing the
+    page and control they are on: a `token` event per piece of the reply as it is written, a
+    `step` per step of an assessment it starts, a `suggestion` (the next step) and an
+    `assessment` (one finished) as its tools give them, then `done` with the chat thread's
+    `thread_id`, to send with the next message; or one `error`, then close. Without a message,
+    the greeting: where the lead stands and the next step. Secrets and personal data are
+    removed, a guard `step` saying what (security layer 4). The model is the assessments'
     (vouch.model_choice): OpenRouter when a key is set, else the chat's canned fake. Its tokens
     and cost are metered and kept with the assessments' (vouch.spending), whether the reply
-    ends in `done` or an `error`: the call was made."""
+    ends in `done` or an `error`: the calls were made. An assessment it starts is counted and
+    metered as one from the working paper is."""
     meter = UsageMeter(chosen)
+    thread_id = request.thread_id or new_thread_id()
+
+    def record(control_id: str, usage: Usage) -> None:
+        record_off_the_event_loop(spending, user.id, control_id, usage)
+
     try:
         model = models.for_chat(chosen, callbacks=[meter])
-        messages = chat_messages(request.message, profile, context)
-        for text, removed in streamed_reply(model, messages):
-            if removed:
-                step = {"node": GUARD, "text": removal_step(removed, "reply")}
-                yield ServerSentEvent(event="step", data=step)
-            if text:
-                yield ServerSentEvent(event="token", data={"text": text})
-        yield ServerSentEvent(event="done", data={})
+        chat_tools = ChatTools(
+            profile, memory, saver, models, chosen, tools, spending, running, record
+        )
+        graph = chat_graph(model, chat_tools, chat_prompt(profile, context), saver)
+        message = request.message or GREETING_REQUEST
+        for event, data in chat_turn(graph, message, thread_id, memory.scope):
+            yield ServerSentEvent(event=event, data=data)
+        yield ServerSentEvent(event="done", data={"thread_id": thread_id})
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("the chat could not answer")
         yield ServerSentEvent(event="error", data={"message": CHAT_FAILED})
@@ -729,6 +751,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
     app.state.spending = SpendingGuard(spending_store(app.state.database))
+    app.state.running = RunningAssessments()
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

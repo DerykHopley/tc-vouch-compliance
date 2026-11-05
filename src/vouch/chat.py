@@ -1,9 +1,8 @@
 """Vouch's chat (#44): the chat agent's prompt, and its reply streamed with secrets removed.
 
-For now the agent has no tools (#45 and #46 add them): it answers the compliance lead's message
-in Vouch's formal voice, in the compliance profile's answer language, knowing which page and
-control the compliance lead is on. Each message is answered on its own; the chat keeps no
-history yet.
+The agent (vouch.chat_agent, #45) answers the compliance lead in Vouch's formal voice, in the
+compliance profile's answer language, knowing which page and control the compliance lead is on.
+Its tools read the lead's progress and start assessments; it never signs off a verdict.
 
 The reply is streamed as it is written, a few words behind the model (security layer 4,
 vouch.redaction): a secret can span several words ("Authorization: Bearer <token>", or a key
@@ -23,11 +22,17 @@ from vouch.isa import IsaControl
 from vouch.profile import ComplianceProfile
 from vouch.redaction import match_words, redact
 
-CHAT_PROMPT_VERSION = "chat-1"
+CHAT_PROMPT_VERSION = "chat-2"
 """The chat agent's prompt version, beside the assessments' (vouch.graph.PROMPT_VERSION): on the
 developer page, and in the log line with each chat message's usage."""
 CHAT_FAILED = "Vouch could not answer just now. Please try again shortly."
 """Must match NOT_ANSWERED in frontend/src/chat.ts: the one sentence for a chat that failed."""
+
+PROGRESS = "progress"
+START_ASSESSMENT = "start_assessment"
+GREETING_REQUEST = "I have just opened the chat. Please tell me where I stand and what to do next."
+"""The message a new chat starts with (#45): the lead asks where they stand, and the agent
+answers from its `progress` tool. It is kept in the chat thread; the chat doesn't show it."""
 
 Page = Literal["dossier", "paper", "developer"]
 """The page the compliance lead is on: the Dossier overview, a control's working paper, the
@@ -54,22 +59,31 @@ class PageContext:
         return f"{where} of VDA ISA control {self.control.id}: “{self.control.question}”"
 
 
-def chat_messages(
-    message: str, profile: ComplianceProfile, context: PageContext
-) -> list[BaseMessage]:
-    """The chat agent's prompt and the compliance lead's message."""
+def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessage:
+    """The chat agent's system prompt: its voice, its tools, and where the lead is."""
     system = (
         f"You are Vouch, an assistant helping the compliance lead of {profile.company} prepare "
         "for a TISAX assessment against VDA ISA. Write in a formal register, as an experienced "
         "auditor would: complete sentences, no slang, no emoji, no exclamation marks. Answer in "
         f"the language with ISO 639-1 code '{profile.answer_language}', whatever language the "
         "compliance lead writes in. Never say that the company is compliant, certified, or has "
-        "passed an audit: you prepare for the audit, you do not decide it. You cannot yet read "
-        "the evidence or start an assessment from the chat; when asked to, say so plainly and "
-        "point the compliance lead to the control's working paper, where an assessment starts. "
+        "passed an audit: you prepare for the audit, you do not decide it. Use the "
+        f"`{PROGRESS}` tool when asked where the compliance lead stands, and the "
+        f"`{START_ASSESSMENT}` tool when asked to assess a control; pass on what a tool says in "
+        "full, every control id it lists included, and give its message as it is when it "
+        "declines. You never accept, reject or change a verdict: the compliance lead signs off "
+        "on the control's working paper. You cannot yet read the evidence from the chat; when "
+        "asked to, say so plainly. "
         f"The compliance lead is on {context.describe()}."
     )
-    return [SystemMessage(system), HumanMessage(message)]
+    return SystemMessage(system)
+
+
+def chat_messages(
+    message: str, profile: ComplianceProfile, context: PageContext
+) -> list[BaseMessage]:
+    """The chat agent's prompt and the compliance lead's message."""
+    return [chat_prompt(profile, context), HumanMessage(message)]
 
 
 _WORD = re.compile(r"\S+")
@@ -84,21 +98,37 @@ def streamed_reply(
 
 
 def _redacted_pieces(chunks: Iterable[str]) -> Iterator[tuple[str, list[str]]]:
-    """Sends the reply a few words behind the model: only text before a safe cut, redacted on
-    its own, and only the text not yet sent is ever redacted again (linear in the reply)."""
-    span = match_words()
-    pending = ""  # written, not yet sent
-    found: list[str] = []
+    """The chunks as RedactedText sends them, then what it holds at the end."""
+    text = RedactedText()
     for chunk in chunks:
-        pending += chunk
-        cut = _safe_cut(pending, span)
+        yield from text.add(chunk)
+    yield from text.flush()
+
+
+class RedactedText:
+    """Sends a reply a few words behind the model: only text before a safe cut, redacted on its
+    own, and only the text not yet sent is ever redacted again (linear in the reply). `flush`
+    sends the rest, at the end of a reply or before something else is sent (a tool's step).
+    Each label removed is reported once, the first time."""
+
+    def __init__(self) -> None:
+        self._span = match_words()
+        self._pending = ""  # written, not yet sent
+        self._found: list[str] = []
+
+    def add(self, chunk: str) -> Iterator[tuple[str, list[str]]]:
+        self._pending += chunk
+        cut = _safe_cut(self._pending, self._span)
         if cut:
-            clean, labels = redact(pending[:cut])
-            pending = pending[cut:]
-            yield clean, _new(labels, found)
-    if pending:
-        clean, labels = redact(pending)
-        yield clean, _new(labels, found)
+            clean, labels = redact(self._pending[:cut])
+            self._pending = self._pending[cut:]
+            yield clean, _new(labels, self._found)
+
+    def flush(self) -> Iterator[tuple[str, list[str]]]:
+        if self._pending:
+            clean, labels = redact(self._pending)
+            self._pending = ""
+            yield clean, _new(labels, self._found)
 
 
 def _safe_cut(pending: str, span: int) -> int:

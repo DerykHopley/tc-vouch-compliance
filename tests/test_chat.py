@@ -31,7 +31,7 @@ def chat(client, **body):
 
 
 def test_the_chat_streams_the_reply_as_token_events_then_done(client):
-    response = chat(client, message="Where do I stand?")
+    response = chat(client, message="What does TISAX ask of us?")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")

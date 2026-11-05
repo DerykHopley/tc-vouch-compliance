@@ -453,14 +453,21 @@ describe('Ask Vouch', () => {
     expect(within(bubble()!).getByText('on 4.1.2 · Working paper')).toBeTruthy()
   })
 
-  /** The API as `serve` has it, and `/api/chat` answering with `chat`. */
-  function serveChat(chat: (body: { message: string; page: string; control_id: string | null }) => Promise<Response>) {
+  type ChatBody = { message?: string; page: string; control_id: string | null; thread_id: string | null }
+  const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+  /** A greeting with nothing to say, on chat thread t0. */
+  const QUIET = () => Promise.resolve(sse(['event: done\ndata: {"thread_id":"t0"}\n\n']))
+
+  /** The API as `serve` has it, and `/api/chat` answering a message with `chat`, the greeting with `greeting`. */
+  function serveChat(chat: (body: ChatBody) => Promise<Response>, greeting: (body: ChatBody) => Promise<Response> = QUIET) {
     serve()
     const others = fetch
-    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
-      url === '/api/chat' ? chat(JSON.parse(init!.body as string)) : others(url, init))
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url !== '/api/chat') return others(url, init)
+      const body = JSON.parse(init!.body as string) as ChatBody
+      return body.message === undefined ? greeting(body) : chat(body)
+    })
   }
-  const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
 
   it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
     let write: (block: string) => void = () => {}
@@ -513,7 +520,82 @@ describe('Ask Vouch', () => {
     await within(log).findByText('Thank you.')
     expect(within(log).getByText('Where do I stand?')).toBeTruthy()
     expect((field as HTMLInputElement).value).toBe('')
-    expect(asked).toEqual([{ message: 'Where do I stand?', page: 'dossier', control_id: null }])
+    expect(asked).toEqual([{ message: 'Where do I stand?', page: 'dossier', control_id: null, thread_id: 't0' }])
+  })
+
+  it('greets the lead once, on first opening, with where they stand and the next step as a chip', async () => {
+    const greetings: ChatBody[] = []
+    const asked: ChatBody[] = []
+    serveChat((body) => {
+      asked.push(body)
+      return Promise.resolve(sse(['event: done\ndata: {"thread_id":"t1"}\n\n']))
+    }, (body) => {
+      greetings.push(body)
+      return Promise.resolve(sse(['event: suggestion\ndata: {"control_id":"1.1.1","action":"assess"}\n\n',
+        'event: token\ndata: {"text":"You have not assessed any of the 12 controls yet."}\n\n',
+        'event: done\ndata: {"thread_id":"t1"}\n\n']))
+    })
+    render(<App />)
+    await open()
+    const log = within(bubble()!).getByRole('log')
+    await within(log).findByText('You have not assessed any of the 12 controls yet.')
+    expect(greetings).toEqual([{ page: 'dossier', control_id: null, thread_id: null }])
+
+    await userEvent.click(within(log).getByRole('button', { name: 'Assess 1.1.1' }))
+
+    await waitFor(() => expect(asked).toEqual([{ message: 'Assess 1.1.1', page: 'dossier', control_id: null, thread_id: 't1' }]))
+    expect(within(log).getByText('Assess 1.1.1')).toBeTruthy() // the chip's message, as the lead's
+    expect(within(log).queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
+    await press('Close the chat')
+    await open()
+    expect(greetings).toHaveLength(1)
+  })
+
+  it('offers a waiting review as a link to its working paper', async () => {
+    serveChat(QUIET, () => Promise.resolve(sse(['event: suggestion\ndata: {"control_id":"4.1.2","action":"review"}\n\n',
+      'event: done\ndata: {"thread_id":"t1"}\n\n'])))
+    render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    await open()
+
+    await userEvent.click(await within(bubble()!).findByRole('link', { name: 'Review 4.1.2' }))
+
+    expect(window.location.pathname).toBe('/controls/4.1.2')
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+  })
+
+  it("shows an assessment's steps, then its verdict with a link that opens its working paper", async () => {
+    serveChat(() => Promise.resolve(sse([
+      'event: step\ndata: {"node":"load_control","text":"Loaded control 4.1.2."}\n\n',
+      'event: step\ndata: {"node":"judge","text":"Judged 1 of 2 requirements evidenced."}\n\n',
+      'event: assessment\ndata: {"control_id":"4.1.2","verdict":"partly-evidenced","status":"waiting-for-review","thread_id":"a1"}\n\n',
+      'event: token\ndata: {"text":"The assessment of control 4.1.2 has finished."}\n\n',
+      'event: done\ndata: {"thread_id":"t0"}\n\n'])))
+    render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+    const log = within(bubble()!).getByRole('log')
+
+    await within(log).findByText('The assessment of control 4.1.2 has finished.')
+    expect(within(log).getByText('Loaded control 4.1.2.')).toBeTruthy()
+    expect(within(log).getByText('Judged 1 of 2 requirements evidenced.')).toBeTruthy()
+    expect(within(log).getByText('Partly evidenced').className).toBe('chip v-partly-evidenced')
+    await userEvent.click(within(log).getByRole('link', { name: 'Open the working paper' }))
+
+    expect(window.location.pathname).toBe('/controls/4.1.2')
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    expect(bubble()).toBeTruthy() // the chat stays open beside the paper
+  })
+
+  it("at the daily limit, the greeting shows the limit's message", async () => {
+    const limit = "You have reached today's limit of 0 assessments. It resets at 00:00 UTC on 6 November 2026."
+    serveChat(QUIET, () => Promise.resolve(Response.json({ detail: limit, limit: 'daily' }, { status: 429 })))
+    render(<App />)
+    await open()
+
+    expect(await within(bubble()!).findByText(limit)).toBeTruthy()
+    expect((screen.getByRole('textbox', { name: 'Message to Vouch' }) as HTMLInputElement).value).toBe('')
   })
 
   it('with the chat endpoint down, says so and keeps the typed message', async () => {
