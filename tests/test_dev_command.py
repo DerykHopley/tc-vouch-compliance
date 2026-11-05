@@ -52,7 +52,8 @@ time.sleep(120)
 # exit 3 after n answers (a negative n: at once; 0: never); CRASH_AFTER=hang, never listen.
 FAKE_SERVER = """
 import http.server, json, os, sys, time
-env = {k: os.environ.get(k) for k in ("ASSESS_FAKE_SCRIPT", "OPENROUTER_API_KEY", "VOUCH_API")}
+names = ("ASSESS_FAKE_SCRIPT", "OPENROUTER_API_KEY", "VOUCH_API", "VOUCH_AUTH_MODE")
+env = {k: os.environ.get(k) for k in names}
 log = os.path.join(os.environ["FAKE_ENV_LOG"], os.environ["FAKE_TOOL"] + ".json")
 with open(log + ".tmp", "w") as f:
     json.dump(env, f)
@@ -276,6 +277,20 @@ def test_the_api_gets_no_key_and_an_absolute_fake_script(tmp_path: Path) -> None
     assert api["ASSESS_FAKE_SCRIPT"] == str(elsewhere / "scripts" / "demo.json")
     assert api["OPENROUTER_API_KEY"] is None
     assert seen_env(tmp_path, "npm")["VOUCH_API"].startswith("http://127.0.0.1:")
+
+
+def test_with_the_clerk_keys_loaded_and_no_auth_mode_the_api_runs_in_local_mode(
+    tmp_path: Path,
+) -> None:
+    """.envrc loads the Clerk keys; a blank mode with keys set refuses to start (#151)."""
+    _, output, _ = run_fake(tmp_path, {"npm": 1}, CLERK_SECRET_KEY="sk_test_fake_not_a_key")
+    assert "Vouch is running" in output
+    assert seen_env(tmp_path, "uv")["VOUCH_AUTH_MODE"] == "local"
+
+
+def test_an_auth_mode_set_by_the_developer_is_kept(tmp_path: Path) -> None:
+    run_fake(tmp_path, {"npm": 1}, VOUCH_AUTH_MODE="clerk")
+    assert seen_env(tmp_path, "uv")["VOUCH_AUTH_MODE"] == "clerk"
 
 
 def test_a_missing_tool_stops_with_a_clear_message(tmp_path: Path) -> None:

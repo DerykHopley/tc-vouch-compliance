@@ -19,7 +19,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from vouch.allow_list import GUARD, ToolAllowList
 from vouch.graph import Assessment, RequirementVerdict, assess_steps, new_thread_id
 from vouch.isa import IsaControl
-from vouch.memory import Memory
+from vouch.memory import Memory, rejection_note
 from vouch.model_choice import ModelChoice
 from vouch.profile import ComplianceProfile
 from vouch.spending import UsageMeter
@@ -64,13 +64,16 @@ def assessment_events(
     control: IsaControl,
     profile: ComplianceProfile,
     run: AssessmentRun,
+    memory: Memory,
     *,
     thread_id: str,
     note: str = "",
 ) -> Iterator[tuple[str, Any]]:
     """The run up to the review interrupt, as (event, data): a `step` per agent step (and per
     refused tool call), a `requirement` per judged requirement, then one `result`, the proposed
-    Assessment itself. The run's meter sees every model call."""
+    Assessment itself. The run's meter sees every model call. Without a `note`, the lead's note
+    from the control's last rejection is carried in (#42), wherever the run was started."""
+    note = note or rejection_note(memory, run.saver, control.id)
     model = ToolAllowList(run.models.for_assessment(run.chosen, callbacks=[run.meter]), run.tools)
     # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
     steps = assess_steps(

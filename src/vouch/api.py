@@ -49,7 +49,12 @@ from vouch.graph import (
 )
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
-from vouch.memory import Memory, newest_by_control, process_checkpointer, process_store
+from vouch.memory import (
+    Memory,
+    newest_by_control,
+    process_checkpointer,
+    process_store,
+)
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -441,6 +446,7 @@ def create_assessment(
     # Held, remembered and counted only once the control, the profile and the model passed
     # (new_assessment depends on each).
     thread_id: Annotated[str, Depends(new_assessment)],
+    memory: UserMemory,
     user: CurrentUser,
     spending: AppSpending,
 ) -> Iterable[ServerSentEvent]:
@@ -464,7 +470,9 @@ def create_assessment(
     """
     control = requested.control
     try:
-        events = assessment_events(control, profile, run, thread_id=thread_id, note=requested.note)
+        events = assessment_events(
+            control, profile, run, memory, thread_id=thread_id, note=requested.note
+        )
         for event, data in events:
             if isinstance(data, Assessment):
                 data = {"assessment": data.to_dict(), "usage": run.meter.usage().to_dict()}

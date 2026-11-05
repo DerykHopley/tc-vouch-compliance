@@ -408,7 +408,7 @@ def test_a_failed_call_carrying_nothing_leaves_the_cost_incomplete():
 def test_a_call_stopped_by_the_call_budget_was_never_sent_so_nothing_is_missing():
     meter = UsageMeter(DEFAULT_MODEL)
 
-    meter.on_llm_error(CallBudgetSpent("more than 8 model calls"))
+    meter.on_llm_error(CallBudgetSpent("more than 12 model calls"))
 
     assert meter.usage().cost_complete is True
 

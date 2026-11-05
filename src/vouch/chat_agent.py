@@ -293,7 +293,9 @@ class ChatTools:
         assessment = None
         try:
             events = _in_own_thread(
-                lambda: assessment_events(control, self.profile, run, thread_id=thread_id),
+                lambda: assessment_events(
+                    control, self.profile, run, self.memory, thread_id=thread_id
+                ),
                 stop=stop,
                 ended=ended,
             )

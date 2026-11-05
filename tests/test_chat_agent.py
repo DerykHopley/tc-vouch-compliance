@@ -425,7 +425,7 @@ def test_a_chat_left_mid_assessment_neither_waits_for_it_nor_ends_its_run_early(
     gate = threading.Event()
     made: list[int] = []
 
-    def slow_run(control, profile, run, *, thread_id, note=""):
+    def slow_run(control, profile, run, memory, *, thread_id, note=""):
         for n in range(50):
             made.append(n)
             yield "step", {"node": "gather", "text": f"Step {n}."}
