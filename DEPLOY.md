@@ -117,6 +117,8 @@ carries all six. Each `<n>` is a version number, pinned ("Secrets and access", b
 
 The image sets `VOUCH_FRONTEND`, `PORT` and `VOUCH_AUTH_MODE=clerk` (*checked* in the `Dockerfile`). In clerk mode it refuses to start without the three Clerk keys and `CLERK_AUTHORIZED_PARTIES`, naming them (*checked*, `tests/test_settings.py` and CI), so a deploy from M3 on needs the keys from Secret Manager and `CLERK_AUTHORIZED_PARTIES` set to the service's URL as a plain environment variable (not a secret).
 
+**Who may sign in (#152).** With `DISCORD_SERVER_ID` set (the course's Discord server id, not a secret: Discord's Developer Mode, **Copy Server ID**), a signed-in user gets in as a member of that server, or as a developer, a user with an accepted Clerk invitation, or one whose private metadata says `{"access": "invited"}`; anyone else sees the members-only page. Vouch reads the user's servers with the Discord token Clerk keeps, so Clerk's Discord connection needs custom credentials and the `guilds` scope (#153). Unset, Clerk's own restrictions decide. The wizard passes it on when `wizard.env` has a `DISCORD_SERVER_ID=` line (*checked*, `tests/test_deploy_wizard.py`); by hand, add `,DISCORD_SERVER_ID=<id>` to `--set-env-vars`.
+
 ## Secrets and access (from #118)
 
 Four settings are secrets; each lives in Secret Manager under its own env var's name, and its

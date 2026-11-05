@@ -24,7 +24,15 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from vouch import audit, remediation
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
-from vouch.auth import ClerkAuth, ClerkUnavailable, ClerkUser, Role, SignedOut
+from vouch.auth import (
+    ClerkAuth,
+    ClerkUnavailable,
+    ClerkUser,
+    NotAMember,
+    Role,
+    SignedOut,
+    SignInAgain,
+)
 from vouch.chat import (
     CHAT_FAILED,
     CHAT_PROMPT_VERSION,
@@ -99,6 +107,10 @@ FAILED = "The assessment could not be completed. Please try again later."
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
+NOT_A_MEMBER = (
+    "Vouch is open to members of the course's Discord server. This Discord account is not in it."
+)
+SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Discord servers."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
 NO_KEY = (
@@ -249,6 +261,39 @@ def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
         raise HTTPException(status_code=403, detail=DEVELOPERS_ONLY)
 
 
+def require_access(request: Request, user: CurrentUser, settings: AppSettings) -> None:
+    """With the course's Discord server set (#152), a user outside it, and not invited, gets a
+    403 with `reason: "not-a-member"`; one whose Discord token can't be used, a 403 with
+    `reason: "sign-in-again"`. Clerk or Discord failing is a 503, never access (auth.py)."""
+    if settings.auth_mode == "local":
+        return
+    auth: ClerkAuth = request.app.state.auth
+    try:
+        auth.access(user)
+    except SignedOut:
+        raise _signed_out() from None
+    except ClerkUnavailable:
+        raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
+    except NotAMember:
+        raise _refused(NOT_A_MEMBER, "not-a-member") from None
+    except SignInAgain:
+        raise _refused(SIGN_IN_AGAIN, "sign-in-again") from None
+
+
+class _Refused(HTTPException):
+    """A 403 whose body also carries a reason code the page acts on."""
+
+
+def _refused(detail: str, reason: str) -> HTTPException:
+    return _Refused(status_code=403, detail={"detail": detail, "reason": reason})
+
+
+def refused(request: Request, error: Exception) -> JSONResponse:
+    """A _Refused 403 as `{"detail": ..., "reason": ...}`, beside FastAPI's own `detail`."""
+    assert isinstance(error, _Refused)
+    return JSONResponse(status_code=403, content=error.detail)
+
+
 def rate_limit(request: Request, user: CurrentUser) -> None:
     """Security layer 1: a user over the request rate gets a 429 with a Retry-After."""
     wait = request.app.state.rate_limit.wait_for(user.id)
@@ -334,8 +379,12 @@ def assessment_data(
 public = APIRouter(prefix="/api")
 """The routes open to anyone: health alone."""
 
-router = APIRouter(prefix="/api", dependencies=[Depends(current_user), Depends(rate_limit)])
-"""Every other route: a route added here needs a signed-in user in clerk mode, within the rate."""
+router = APIRouter(
+    prefix="/api",
+    dependencies=[Depends(current_user), Depends(rate_limit), Depends(require_access)],
+)
+"""Every other route: a route added here needs a signed-in user in clerk mode, within the rate,
+and, with the course's Discord server set, one who may use Vouch (#152)."""
 
 
 @public.get("/health")
@@ -344,7 +393,12 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     database URL set, whether the database is reachable, set up by vouch-db-setup (#123).
     `status` is liveness: ok while the app answers, whatever the database says."""
     publishable_key = settings.clerk.publishable_key if settings.clerk else None
-    auth = {"mode": settings.auth_mode, "publishable_key": publishable_key}
+    # Who may sign in, for the signed-out page's words: the course's Discord server (#152), or
+    # Clerk's own restrictions; local mode signs nobody in.
+    gate = "none"
+    if settings.clerk is not None:
+        gate = "discord-server" if settings.clerk.discord_server_id else "clerk"
+    auth = {"mode": settings.auth_mode, "publishable_key": publishable_key, "gate": gate}
     answer: dict[str, Any] = {"status": "ok", "version": version("vouch"), "auth": auth}
     if db is not None:
         answer["database"] = db.health()
@@ -833,6 +887,13 @@ def change_model(request: ModelRequest, models: AppModels, spending: AppSpending
     return _developer_page(models, spending, model)
 
 
+@router.get("/access")
+def access() -> dict[str, str]:
+    """The page asks this first after sign-in (#152): reaching here, past require_access, the
+    user may use Vouch; a 403 carries the reason to show."""
+    return {"access": "allowed"}
+
+
 @router.get("/{path:path}", include_in_schema=False)
 def unknown_api_path(path: str) -> None:
     """Under /api, a path that isn't a route is a 404, never the front end's page."""
@@ -895,6 +956,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     no_map: dict[str, Any] = {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.add_exception_handler(DatabaseUnavailable, database_unavailable)
+    app.add_exception_handler(_Refused, refused)
     app.add_exception_handler(DailyLimitReached, daily_limit_reached)
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
