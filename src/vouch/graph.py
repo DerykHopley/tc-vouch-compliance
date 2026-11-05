@@ -30,7 +30,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, StateSnapshot, interrupt
 from pydantic import BaseModel, Field, StringConstraints
 
 from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
@@ -1398,10 +1398,14 @@ def memory_checkpointer() -> InMemorySaver:
     return InMemorySaver(serde=state_serializer())
 
 
-def _config(thread_id: str, scope: str = "") -> dict[str, Any]:
+def _thread_key(thread_id: str, scope: str = "") -> str:
     """The checkpointer's thread: `scope` (whose it is, vouch.memory) before the thread id, so
     one user's thread id names nothing for another."""
-    return {"configurable": {"thread_id": scope + thread_id}}
+    return scope + thread_id
+
+
+def _config(thread_id: str, scope: str = "") -> dict[str, Any]:
+    return {"configurable": {"thread_id": _thread_key(thread_id, scope)}}
 
 
 def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
@@ -1535,6 +1539,26 @@ def new_thread_id() -> str:
     return uuid.uuid4().hex
 
 
+def _reached_review(snapshot: StateSnapshot) -> bool:
+    """Whether a thread holds an assessment: its run reached the review (waiting at it, or
+    reviewed). A run that failed on the way has state, but no assessment."""
+    return bool(snapshot.values) and bool(snapshot.interrupts or snapshot.values.get("review"))
+
+
+def assessment_loader(
+    checkpointer: BaseCheckpointSaver, *, scope: str = ""
+) -> Callable[[str], Assessment | None]:
+    """Reads Assessments from `scope`'s threads, the graph compiled once: proposed while one
+    waits for review, reviewed after; None for a thread that holds no assessment."""
+    graph = build_graph(None, checkpointer=checkpointer)
+
+    def load(thread_id: str) -> Assessment | None:
+        snapshot = graph.get_state(_config(thread_id, scope))
+        return _assessment(snapshot.values, thread_id) if _reached_review(snapshot) else None
+
+    return load
+
+
 def load_assessment(
     thread_id: str, checkpointer: BaseCheckpointSaver, *, scope: str = ""
 ) -> Assessment:
@@ -1542,10 +1566,10 @@ def load_assessment(
 
     Raises UnknownAssessmentError for a thread with no state, or one whose run never reached the
     review (it failed on the way): there's no assessment to show."""
-    snapshot = build_graph(None, checkpointer=checkpointer).get_state(_config(thread_id, scope))
-    if not snapshot.values or not (snapshot.interrupts or snapshot.values.get("review")):
+    assessment = assessment_loader(checkpointer, scope=scope)(thread_id)
+    if assessment is None:
         raise UnknownAssessmentError(f"no assessment {thread_id}")
-    return _assessment(snapshot.values, thread_id)
+    return assessment
 
 
 def resume(
@@ -1555,15 +1579,16 @@ def resume(
     Assessment: overrides applied, the roll-up and remediation items recalculated, the decision
     recorded. No model is called.
 
-    Raises UnknownAssessmentError for an unknown thread, NotWaitingForReviewError for one not
-    waiting (reviewed already, perhaps at the same moment), and InvalidReviewError for an
+    Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
+    review), NotWaitingForReviewError for one not waiting (reviewed already, perhaps at the same
+    moment), and InvalidReviewError for an
     override `_check_overrides` refuses. Nothing is resumed when any is raised. `scope` says
     whose thread it is (see `_config`): another user's thread id is unknown."""
     graph = build_graph(None, checkpointer=checkpointer)
     config = _config(thread_id, scope)
-    with _review_lock(scope + thread_id):
+    with _review_lock(_thread_key(thread_id, scope)):
         snapshot = graph.get_state(config)
-        if not snapshot.values:
+        if not _reached_review(snapshot):
             raise UnknownAssessmentError(f"no assessment {thread_id}")
         if not snapshot.interrupts:
             raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")

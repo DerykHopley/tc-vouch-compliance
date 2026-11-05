@@ -41,7 +41,7 @@ from vouch.graph import (
 )
 from vouch.isa import IsaControl, UnknownControlError, load_isa_control
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
-from vouch.memory import Memory, memory_saver, memory_store
+from vouch.memory import Memory, process_checkpointer, process_store
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -178,7 +178,7 @@ def checkpointer(db: AppDatabase) -> Iterator[BaseCheckpointSaver]:
     """Where assessments wait for review (#38): Postgres with a database URL, so they outlast a
     restart; else this process's memory. A failure of the database is a 503."""
     if db is None:
-        yield memory_saver()
+        yield process_checkpointer()
         return
     with db.checkpointer(state_serializer()) as saver:
         yield saver
@@ -239,7 +239,7 @@ def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterato
     """The user's long-term memory under the compliance profile (#38): Postgres's store with a
     database URL, else this process's. A failure of the database is a 503."""
     if db is None:
-        yield Memory(memory_store(), user.id, profile.id)
+        yield Memory(process_store(), user.id, profile.id)
         return
     with db.store() as store:
         yield Memory(store, user.id, profile.id)
@@ -298,9 +298,9 @@ def within_daily_limit(
     chosen: Annotated[str | None, Depends(chosen_model)],
 ) -> None:
     """Counts the assessment against the user's daily limit before the stream starts, and only
-    once the control, the compliance profile and the model are known: FastAPI skips a
-    dependency whose own dependencies failed, so a 422, a 404, a broken profile's 500 or the
-    model choice's 503 takes no count. Over the limit, a 429
+    once the control, the compliance profile and the model are known (new_assessment calls it,
+    and FastAPI skips a dependency whose own dependencies failed, so a 422, a 404, a broken
+    profile's 500 or the model choice's 503 takes no count). Over the limit, a 429
     saying when it resets (daily_limit_reached); the counter unavailable, or only in memory for
     a paid model, a 503."""
     try:
@@ -311,14 +311,26 @@ def within_daily_limit(
 
 
 def new_assessment(
-    memory: UserMemory,
     requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
-    _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
+    profile: Profile,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+    user: CurrentUser,
+    spending: AppSpending,
+    memory: UserMemory,
 ) -> str:
-    """A new thread for the assessment, remembered for the user before the stream starts (#38),
-    once it's counted: a write that fails is a 503, and no model runs."""
+    """A new thread for the assessment, before the stream starts: remembered for the user (#38),
+    then counted against the daily limit (within_daily_limit). A write that fails is a 503 with
+    nothing counted; a count refused removes what was remembered. No model runs either way."""
     thread_id = new_thread_id()
     memory.remember_assessment(thread_id, requested.control.id)
+    try:
+        within_daily_limit(user, spending, requested, profile, chosen)
+    except Exception:
+        try:
+            memory.forget_assessment(thread_id)
+        except Exception:  # left in the index, it's never listed: its run never started
+            log.exception("a refused assessment stays in the index")
+        raise
     return thread_id
 
 
@@ -360,8 +372,8 @@ def create_assessment(
     saver: Checkpointer,
     models: AppModels,
     chosen: Annotated[str | None, Depends(chosen_model)],
-    # Counted only once the control, the profile and the model passed (within_daily_limit
-    # depends on each), then remembered for the user.
+    # Remembered and counted only once the control, the profile and the model passed
+    # (new_assessment depends on each).
     thread_id: Annotated[str, Depends(new_assessment)],
     memory: UserMemory,
     user: CurrentUser,
@@ -472,7 +484,6 @@ def review_assessment(
     404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
     already); 422 for an override naming a requirement the assessment didn't judge, or naming
     one twice (the decision's shape is checked before, also 422)."""
-    memory.note_session()  # before the review, so a failure here leaves the thread waiting
     try:
         reviewed = resume(thread_id, decision, saver, scope=memory.scope)
     except UnknownAssessmentError as error:
@@ -481,6 +492,10 @@ def review_assessment(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except InvalidReviewError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    try:  # the review stands whatever happens here: noting when is a convenience
+        memory.note_worked()
+    except Exception:
+        log.exception("a review's time wasn't kept")
     clean, _ = redact_data({"assessment": reviewed.to_dict()})
     return clean
 

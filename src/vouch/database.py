@@ -387,17 +387,17 @@ class Database:
     def checkpointer(self, serde: SerializerProtocol | None = None) -> Iterator[PostgresSaver]:
         """LangGraph's Postgres checkpointer on the pool, writing and reading with `serde`
         (LangGraph's default when None; the API passes vouch.graph.state_serializer). Raises
-        DatabaseUnavailable, also for a failure while it's in use."""
+        DatabaseUnavailable, also for a failure while it's in use or before vouch-db-setup ran."""
         pool = self._open_pool()
-        with self._unavailable_on_drop():
+        with self._unavailable_on_drop(), self._needs_setup("checkpoints"):
             yield PostgresSaver(pool, serde=serde)
 
     @contextmanager
     def store(self) -> Iterator[PostgresStore]:
         """LangGraph's Postgres store on the pool: long-term memory (vouch.memory). Raises
-        DatabaseUnavailable, also for a failure while it's in use."""
+        DatabaseUnavailable, also for a failure while it's in use or before vouch-db-setup ran."""
         pool = self._open_pool()
-        with self._unavailable_on_drop():
+        with self._unavailable_on_drop(), self._needs_setup("store"):
             yield PostgresStore(pool)
 
     def setup(self) -> None:

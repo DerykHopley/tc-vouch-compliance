@@ -7,16 +7,21 @@ in for the sign-in token: #32 proves each token gives its own user id.
 """
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from langgraph.store.base import BaseStore
+from langgraph.store.memory import InMemoryStore
 from pydantic import SecretStr
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
 
-from vouch import memory
+from vouch import graph, memory
 from vouch.api import create_app, current_user, load_default_profile
 from vouch.database import Database, DatabaseUnavailable
 from vouch.graph import state_serializer
@@ -32,8 +37,8 @@ def as_user(request: Request) -> User:
 
 def restart() -> None:
     """What a restart of the process forgets: its in-memory saver and store."""
-    memory.memory_saver.cache_clear()
-    memory.memory_store.cache_clear()
+    memory.process_checkpointer.cache_clear()
+    memory.process_store.cache_clear()
 
 
 def app_on(url: SecretStr | None) -> Any:
@@ -62,6 +67,40 @@ def database_url(request) -> SecretStr | None:
 def users() -> tuple[dict[str, str], dict[str, str]]:
     """Two users, new to this test (the in-memory backend is one per process)."""
     return tuple({"X-Test-User": f"user_{who}_{uuid.uuid4().hex[:8]}"} for who in ("a", "b"))
+
+
+@contextmanager
+def user_memory(
+    url: SecretStr | None, headers: dict[str, str], profile: str = DEFAULT_PROFILE
+) -> Iterator[memory.Memory]:
+    """What the app keeps for the user under the profile, read the way another process would."""
+    user_id = headers["X-Test-User"]
+    if url is None:
+        yield memory.Memory(memory.process_store(), user_id, profile)
+        return
+    with Database(url) as db, db.store() as store:
+        yield memory.Memory(store, user_id, profile)
+
+
+@pytest.fixture(params=["memory", pytest.param("postgres", marks=needs_postgres)])
+def any_store(request) -> Iterator[BaseStore]:
+    """A new, empty store: in memory, or Postgres's."""
+    if request.param == "memory":
+        yield InMemoryStore()
+        return
+    with request.getfixturevalue("postgres").store() as store:
+        yield store
+
+
+def failing_write(self, *args: Any) -> None:
+    raise DatabaseUnavailable("the database connection failed: test")
+
+
+def set_daily_limit(client: TestClient, headers: dict[str, str], limit: int) -> None:
+    response = client.put(
+        "/api/developer/daily-limit", json={"daily_limit": limit}, headers=headers
+    )
+    assert response.status_code == 200, response.text
 
 
 def assess(client: TestClient, headers: dict[str, str], control_id: str = DEMO_CONTROL) -> str:
@@ -137,7 +176,7 @@ def test_the_list_is_newest_first_and_shows_each_review(database_url, users):
     ]
 
 
-# --- Restart and sessions (Postgres) --------------------------------------------------------
+# --- A restart (Postgres) -----------------------------------------------------------------
 
 
 @needs_postgres
@@ -161,12 +200,12 @@ def test_a_run_waiting_for_review_survives_a_restart_then_resumes_and_completes(
 
 
 @needs_postgres
-def test_progress_written_in_one_session_is_read_in_the_next(postgres, users):
+def test_progress_written_before_a_restart_is_read_after_it(postgres, users):
     alice, _ = users
     url = postgres.url
-    with TestClient(app_on(url)) as first_session:
-        thread_id = assess(first_session, alice)
-        first_session.post(
+    with TestClient(app_on(url)) as before:
+        thread_id = assess(before, alice)
+        before.post(
             f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=alice
         )
     restart()
@@ -179,7 +218,7 @@ def test_progress_written_in_one_session_is_read_in_the_next(postgres, users):
     assert progress.controls[DEMO_CONTROL].status == "accepted"
     assert progress.controls[DEMO_CONTROL].thread_id == thread_id
     assert progress.counts() == {"accepted": 1, "rejected": 0, "waiting-for-review": 0}
-    assert progress.last_session is not None
+    assert progress.last_worked is not None
 
 
 def test_progress_takes_each_controls_latest_assessment(users):
@@ -193,7 +232,7 @@ def test_progress_takes_each_controls_latest_assessment(users):
         )
         again = assess(client, alice)
 
-    store, saver = memory.memory_store(), memory.memory_saver()
+    store, saver = memory.process_store(), memory.process_checkpointer()
     progress = memory.progress(memory.Memory(store, alice["X-Test-User"], DEFAULT_PROFILE), saver)
 
     assert progress.controls[DEMO_CONTROL].thread_id == again
@@ -205,11 +244,11 @@ def test_progress_is_kept_per_profile(users):
     with TestClient(app_on(None)) as client:
         assess(client, alice)
 
-    store, saver = memory.memory_store(), memory.memory_saver()
+    store, saver = memory.process_store(), memory.process_checkpointer()
     other = memory.progress(memory.Memory(store, alice["X-Test-User"], "another-profile"), saver)
 
     assert other.controls == {}
-    assert other.last_session is None
+    assert other.last_worked is None
 
 
 # --- The database down: 503, nothing half-written --------------------------------------------
@@ -219,7 +258,11 @@ def test_progress_is_kept_per_profile(users):
     "method, path, body",
     [
         ("post", "/api/assessments", {"control_id": DEMO_CONTROL}),
-        ("post", "/api/assessments/0123456789abcdef0123456789abcdef/review", {"decision": "accept"}),
+        (
+            "post",
+            "/api/assessments/0123456789abcdef0123456789abcdef/review",
+            {"decision": "accept"},
+        ),
         ("get", "/api/assessments", None),
         ("get", "/api/assessments/0123456789abcdef0123456789abcdef", None),
     ],
@@ -247,7 +290,7 @@ def test_a_failed_write_of_the_assessment_answers_503_and_leaves_nothing_behind(
 
     def failing(self, thread_id: str, control_id: str) -> None:
         started.append(thread_id)
-        raise DatabaseUnavailable("the database connection failed: test")
+        failing_write(self)
 
     with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
         monkeypatch.setattr(memory.Memory, "remember_assessment", failing)
@@ -260,3 +303,147 @@ def test_a_failed_write_of_the_assessment_answers_503_and_leaves_nothing_behind(
     assert not response.headers["content-type"].startswith("text/event-stream")
     assert listed.json()["assessments"] == []
     assert opened.status_code == 404
+
+
+def test_a_failed_write_of_the_assessment_leaves_the_daily_count_untouched(
+    database_url, users, monkeypatch
+):
+    alice, _ = users
+    with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
+        set_daily_limit(client, alice, 1)
+        monkeypatch.setattr(memory.Memory, "remember_assessment", failing_write)
+        refused = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=alice)
+        monkeypatch.undo()
+
+        assert refused.status_code == 503
+        assess(client, alice)  # the day's one assessment is still there to start
+
+
+def test_an_assessment_the_daily_limit_refuses_leaves_no_entry(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
+        set_daily_limit(client, alice, 1)
+        kept = assess(client, alice)
+        over = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=alice)
+
+    assert over.status_code == 429
+    with user_memory(database_url, alice) as mine:
+        assert mine.thread_ids() == [kept]
+
+
+# --- What counts as work, and what's kept -----------------------------------------------------
+
+
+def test_only_a_successful_review_counts_as_work(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
+        thread_id = assess(client, alice)
+        url = f"/api/assessments/{thread_id}/review"
+        with user_memory(database_url, alice) as mine:
+            started = mine.last_worked()
+
+        unknown = client.post(
+            "/api/assessments/no-such-thread/review", json={"decision": "accept"}, headers=alice
+        )
+        bad = client.post(
+            url,
+            json={
+                "decision": "accept",
+                "overrides": [{"requirement_id": "M9", "verdict": "evidenced", "reason": "x"}],
+            },
+            headers=alice,
+        )
+        with user_memory(database_url, alice) as mine:
+            after_refusals = mine.last_worked()
+        accepted = client.post(url, json={"decision": "accept"}, headers=alice)
+        with user_memory(database_url, alice) as mine:
+            after_review = mine.last_worked()
+        again = client.post(url, json={"decision": "accept"}, headers=alice)
+        with user_memory(database_url, alice) as mine:
+            after_again = mine.last_worked()
+
+    assert (unknown.status_code, bad.status_code, accepted.status_code, again.status_code) == (
+        404,
+        422,
+        200,
+        409,
+    )
+    assert started is not None
+    assert after_refusals == started
+    assert after_review is not None and after_review > started
+    assert after_again == after_review
+
+
+def test_a_review_stands_when_noting_the_work_fails(database_url, users, monkeypatch):
+    alice, _ = users
+    with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
+        thread_id = assess(client, alice)
+        monkeypatch.setattr(memory.Memory, "note_worked", failing_write)
+        response = client.post(
+            f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=alice
+        )
+
+    assert response.status_code == 200
+    assert response.json()["assessment"]["status"] == "accepted"
+
+
+def test_over_the_cap_the_newest_assessments_are_kept_on_every_store(any_store, monkeypatch):
+    monkeypatch.setattr(memory, "MAX_ASSESSMENTS", 2)
+    monkeypatch.setattr(memory, "PAGE_SIZE", 2)  # more than one page to read
+    started = iter(datetime(2026, 11, day, tzinfo=UTC) for day in (1, 3, 2))
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE, clock=lambda: next(started))
+    for thread_id in ("oldest", "newest", "middle"):
+        mine.remember_assessment(thread_id, DEMO_CONTROL)
+
+    assert mine.thread_ids() == ["newest", "middle"]
+
+
+def test_any_user_and_profile_id_can_be_kept_dots_included(any_store):
+    dotted = memory.Memory(any_store, "user.a", "acme.example.de")
+    split_otherwise = memory.Memory(any_store, "user", "a.acme.example.de")
+
+    dotted.remember_assessment("t1", DEMO_CONTROL)
+
+    assert dotted.thread_ids() == ["t1"]
+    assert dotted.last_worked() is not None
+    assert split_otherwise.thread_ids() == []
+    assert dotted.scope != split_otherwise.scope
+
+
+def test_listing_compiles_the_graph_once_and_progress_loads_each_controls_newest_only(
+    users, monkeypatch
+):
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        for _ in range(3):
+            assess(client, alice)
+    saver = memory.process_checkpointer()
+    builds: list[object] = []
+    real_build = graph.build_graph
+    monkeypatch.setattr(
+        graph, "build_graph", lambda *a, **k: builds.append(1) or real_build(*a, **k)
+    )
+    reads: list[object] = []
+    real_read = saver.get_tuple
+    monkeypatch.setattr(saver, "get_tuple", lambda config: reads.append(1) or real_read(config))
+
+    with user_memory(None, alice) as mine:
+        assert len(mine.assessments(saver)) == 3
+        assert len(builds) == 1
+        reads_for_three = len(reads)
+        reads.clear()
+        memory.progress(mine, saver)
+
+    assert len(reads) == reads_for_three // 3
+
+
+@needs_postgres
+def test_before_the_setup_has_run_the_list_answers_503_naming_it(request, users, caplog):
+    alice, _ = users
+    url = request.getfixturevalue("empty_database").url  # no vouch-db-setup
+
+    with TestClient(app_on(url), raise_server_exceptions=False) as client:
+        listed = client.get("/api/assessments", headers=alice)
+
+    assert listed.status_code == 503
+    assert "vouch-db-setup" in caplog.text
