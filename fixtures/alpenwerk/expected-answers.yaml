@@ -1,10 +1,9 @@
-# Expected answers for Alpenwerk Präzision GmbH: DRAFT, for the owner's review (#50).
+# Expected answers for Alpenwerk Präzision GmbH: approved by the owner as drafted (#50, 2026-11-05).
 #
 # Per applicable requirement of the 12 ISA questions (high protection: must, should and high;
 # the AT NIS2 (illustrative) overlay adds O1 to 1.6.2; nothing is not applicable): the verdict
 # a good assessment gives, and the evidence documents a good answer cites (ids from policies/,
-# records/ and patch/). `why` is our own one-line reasoning in English, for the owner's
-# review, never ISA text.
+# records/ and patch/). `why` is our own one-line reasoning in English, never ISA text.
 #
 # Rules applied (spec #2): a requirement about doing something needs implemented evidence
 # to be evidenced; stale evidence caps a requirement at partly-evidenced.
@@ -13,7 +12,7 @@
 # (protokollierungsrichtlinie, approved 2023 with a yearly review).
 profile: alpenwerk
 as_of: 2026-11-04 # the date staleness is judged on
-status: draft
+status: approved
 controls:
   - id: "1.1.1"
     requirements:

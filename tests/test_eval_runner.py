@@ -473,7 +473,7 @@ def test_the_model_list_is_printed(capsys):
 
 
 def test_both_profiles_have_twelve_cases_that_fit_them_about_24_in_all():
-    """Alpenwerk's cases come from its draft expected answers (#50 reviews them); on a model
+    """Alpenwerk's cases come from its expected answers (approved in #50); on a model
     that fails every case they are failed cases, never bad ones."""
     total = 0
     for name in ("nordlicht", "alpenwerk"):
