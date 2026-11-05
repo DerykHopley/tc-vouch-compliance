@@ -50,7 +50,7 @@ from vouch.guards import (
     flagged_steps,
     refusal_step,
 )
-from vouch.isa import Column, IsaControl, Requirement, load_isa_control
+from vouch.isa import Column, IsaControl, Requirement
 from vouch.patch import EVIDENCE_PENDING, TIMED_OUT, vulnerability_status
 from vouch.profile import (
     ComplianceProfile,
@@ -1446,9 +1446,8 @@ def assess_steps(
     again; `today` (default: the date now) is what due dates count from and what staleness is
     judged on.
 
-    The control is assessed in the ISA edition of the profile's answer language, whichever
-    edition `control` came from (`ComplianceProfile.isa_control`)."""
-    control = profile.isa_control(control.id)
+    The control is assessed as given: a caller picks its ISA edition, normally the profile's
+    (`ComplianceProfile.isa_control`)."""
     thread_id = uuid.uuid4().hex  # always a new thread: never piled onto an earlier run's state
     graph = build_graph(model, profile, checkpointer or memory_checkpointer())
     loaded = _loaded_step(control, profile)
@@ -1501,9 +1500,10 @@ def assess(
     review interrupt and return the proposed Assessment; `resume` its `thread_id` with the
     lead's decision. Assessing a rejected control again is a new run, with the lead's `note`.
 
-    An unknown control raises UnknownControlError before the model is called."""
+    The control is read in the ISA edition of the profile's answer language. An unknown
+    control raises UnknownControlError before the model is called."""
     *_, assessment = assess_steps(
-        load_isa_control(control_id), profile, model, checkpointer, note=note, today=today
+        profile.isa_control(control_id), profile, model, checkpointer, note=note, today=today
     )
     if not isinstance(assessment, Assessment):
         raise TypeError(f"the graph ended without an Assessment for {control_id}")

@@ -325,11 +325,41 @@ def test_a_german_control_reads_in_german():
 
 
 def test_an_empty_german_cell_says_keine_and_counts_as_no_requirement():
-    from vouch.isa_extract import split_requirements
+    from vouch.isa_extract import EDITIONS, split_requirements
 
-    assert split_requirements("Keine", language="de") == []
+    assert split_requirements("Keine", EDITIONS["de"]) == []
     with pytest.raises(ValueError, match="bullet"):
-        split_requirements("Keine", language="en")  # English empty cells say "None"
+        split_requirements("Keine", EDITIONS["en"])  # English empty cells say "None"
+
+
+def test_the_extraction_writes_each_edition_to_the_controls_file_vouch_reads():
+    from vouch.isa import edition_files
+    from vouch.isa_extract import EDITIONS
+
+    assert set(EDITIONS) == set(edition_files())
+
+
+def test_a_failing_edition_leaves_every_controls_file_unwritten(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from vouch import isa, isa_extract
+
+    english, german = tmp_path / "controls.yaml", tmp_path / "controls-de.yaml"
+    english.write_text("before", encoding="utf-8")
+    german.write_text("before", encoding="utf-8")
+    monkeypatch.setattr(isa, "CONTROLS_FILE", english)
+    monkeypatch.setattr(isa, "CONTROLS_DE_FILE", german)
+    workbook = openpyxl.load_workbook(EXCEL_DE)
+    workbook["Informationssicherheit"].insert_cols(9)
+    moved = tmp_path / "moved.xlsx"
+    workbook.save(moved)
+    monkeypatch.setitem(isa_extract.EDITIONS, "de", replace(isa_extract.EDITIONS["de"], excel=moved))
+
+    with pytest.raises(ValueError, match="header"):
+        isa_extract.main()
+
+    assert english.read_text(encoding="utf-8") == "before"
+    assert german.read_text(encoding="utf-8") == "before"
 
 
 def test_german_extraction_refuses_an_excel_whose_columns_moved(tmp_path):

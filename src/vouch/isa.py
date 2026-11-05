@@ -120,10 +120,17 @@ def _load(path: Path) -> BaseFramework:
         raise BaseFrameworkError(path, str(error)) from error
 
 
+def edition_files() -> dict[str, Path]:
+    """Each shipped ISA edition's controls file, by ISO 639-1 language: the one map of
+    editions, which `vouch.isa_extract` writes to. Built on each call, so a test can swap a
+    file."""
+    return {"en": CONTROLS_FILE, "de": CONTROLS_DE_FILE}
+
+
 def edition_file(language: str) -> Path:
-    """The controls file of the ISA edition in this ISO 639-1 language; English for a
-    language the ISA isn't shipped in. Looked up on each call, so a test can swap a file."""
-    return {"en": CONTROLS_FILE, "de": CONTROLS_DE_FILE}.get(language, CONTROLS_FILE)
+    """The controls file of the ISA edition in this language; English for a language the
+    ISA isn't shipped in."""
+    return edition_files().get(language, CONTROLS_FILE)
 
 
 def load_base_framework(path: Path | None = None, *, language: str = "en") -> BaseFramework:

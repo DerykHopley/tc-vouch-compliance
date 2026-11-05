@@ -100,10 +100,11 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
 
 def list_requirements(control_id: str, profile_name: str | None = None) -> int:
     try:
-        control = load_isa_control(control_id)
         profile = None if profile_name is None else load_named_profile(profile_name)
-        if profile is not None:
-            control = profile.isa_control(control_id)  # in the profile's ISA edition
+        # in the profile's ISA edition when there is one
+        control = (
+            load_isa_control(control_id) if profile is None else profile.isa_control(control_id)
+        )
     except (UnknownControlError, BaseFrameworkError, UnknownProfileError, ProfileError) as error:
         print(f"assess: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT

@@ -5,6 +5,7 @@ from typing import get_args
 
 import pytest
 import yaml
+from isa_editions import GERMAN_5_1_1
 
 from vouch import isa
 from vouch.isa import SOURCE, load_isa_control
@@ -260,8 +261,6 @@ def test_the_base_framework_a_profile_accepts_is_the_one_vouch_ships():
 
 # ISA edition by answer language ----------------------------------------------------------------
 
-GERMAN_5_1_1 = "Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?"
-
 
 def test_a_german_profile_reads_the_german_isa_edition(tmp_path):
     profile = load_profile(write_profile(tmp_path, answer_language="de", protection_level="high"))
@@ -288,3 +287,46 @@ def test_an_unknown_control_in_a_profiles_edition_is_an_unknown_control_error(tm
 
     with pytest.raises(isa.UnknownControlError, match="9.9.9"):
         profile.isa_control("9.9.9")
+
+
+def german_edition(tmp_path, monkeypatch, controls: str) -> None:
+    """Swap the German edition's controls file for one holding these controls."""
+    path = tmp_path / "controls-de.yaml"
+    path.write_text(f"source: VDA ISA 2027.1\ncontrols:\n{controls}", encoding="utf-8")
+    monkeypatch.setattr(isa, "CONTROLS_DE_FILE", path)
+
+
+def test_a_german_profiles_controls_are_checked_against_the_german_edition(tmp_path, monkeypatch):
+    german_edition(
+        tmp_path,
+        monkeypatch,
+        "- {id: 5.2.4, question: Q, iso_27001: ISO 27001, requirements: []}\n",
+    )
+    path = write_profile(tmp_path, answer_language="de")  # Nordlicht's 5.1.2 S3 is not applicable
+
+    with pytest.raises(ProfileError, match=r"not_applicable\.0\.control: unknown control 5\.1\.2"):
+        load_profile(path)
+
+
+def test_a_german_profiles_requirement_ids_are_checked_against_the_german_edition(
+    tmp_path, monkeypatch
+):
+    german_edition(
+        tmp_path,
+        monkeypatch,
+        "- id: 5.1.2\n  question: Q?\n  iso_27001: ISO 27001\n"
+        "  requirements:\n  - {id: M1, column: must, text: T}\n",
+    )
+    path = write_profile(tmp_path, answer_language="de")
+
+    with pytest.raises(ProfileError, match=r"control 5\.1\.2 has no requirement S3"):
+        load_profile(path)
+
+
+def test_a_broken_german_edition_is_a_profile_error_naming_it(tmp_path, monkeypatch):
+    broken = tmp_path / "controls-de.yaml"
+    broken.write_text("controls: [\n", encoding="utf-8")
+    monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+
+    with pytest.raises(ProfileError, match="controls-de.yaml"):
+        load_profile(write_profile(tmp_path, answer_language="de"))
