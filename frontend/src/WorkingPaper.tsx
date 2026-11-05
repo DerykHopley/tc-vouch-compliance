@@ -15,7 +15,8 @@ export function RunChip({ run }: { run: Run }) {
   if (run.status === 'running') return <span className="chip v-assessing">{ACTION.running}</span>
   if (run.status === 'done') {
     const v = run.assessment.verdict
-    return <span className={`chip v-${v}`}>{verdictWord(v, run.assessment.answer_language)}</span>
+    const language = run.assessment.answer_language
+    return <span className={`chip v-${v}`} lang={language}>{verdictWord(v, language)}</span>
   }
   return <span className="chip v-none">Not assessed</span>
 }
@@ -54,7 +55,7 @@ export default function WorkingPaper({ company, control, run, onAssess }: PaperP
         <section className="sheet" aria-label="Verdict and draft answer">
           <span className="lbl">Draft answer</span>
           <RunChip run={run} />
-          <p className="answer">{run.assessment.answer}</p>
+          <p className="answer" lang={run.assessment.answer_language}>{run.assessment.answer}</p>
           {run.usage && (
             <section aria-label="Usage"><p className="field-note mono">{usageWords(run.usage)}</p></section>
           )}

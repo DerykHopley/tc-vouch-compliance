@@ -5,7 +5,7 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** A requirement's or a control's verdict, as the API sends it (`vouch.graph.Verdict`). */
 export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced' | 'not-applicable'
 
-export const VERDICT_WORDS: Record<Verdict, string> = {
+const VERDICT_WORDS: Record<Verdict, string> = {
   evidenced: 'Evidenced',
   'partly-evidenced': 'Partly evidenced',
   'not-evidenced': 'Not evidenced',

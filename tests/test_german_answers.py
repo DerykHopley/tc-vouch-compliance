@@ -7,8 +7,8 @@ import pytest
 from assess_steps import step_texts
 from langchain_core.messages import ToolMessage
 
-from vouch import ScriptedChatModel, assess, load_named_profile
-from vouch.graph import claims_audit_result
+from vouch import ScriptedChatModel, assess, language, load_named_profile
+from vouch.graph import ReviewDecision, Step, claims_audit_result, memory_checkpointer, resume
 from vouch.language import written_in
 
 
@@ -16,12 +16,18 @@ from vouch.language import written_in
     "text, word",
     [
         ("Alpenwerk ist konform.", "konform"),
-        ("Das Verfahren ist ISA-konform umgesetzt.", "konform"),
+        ("Das Verfahren ist ISA-konform umgesetzt.", "isa-konform"),
         ("Alpenwerk ist eine konforme Organisation.", "konforme"),
+        ("Die Ablage ist normkonform.", "normkonform"),
+        ("Das Verfahren ist regelkonform.", "regelkonform"),
+        ("Die Löschung erfolgt gesetzeskonform.", "gesetzeskonform"),
+        ("Die Verarbeitung ist DSGVO-konform.", "dsgvo-konform"),
         ("Alpenwerk ist nach TISAX zertifiziert.", "zertifiziert"),
         ("Ein zertifiziertes Unternehmen.", "zertifiziertes"),
         ("Alpenwerk hat das Audit bestanden.", "bestanden"),
         ("Die Prüfung gilt als BESTANDEN.", "bestanden"),
+        ("Die Zertifizierung ist bestanden.", "bestanden"),
+        ("Ein bestandenes TISAX-Assessment liegt vor.", "bestandenes"),
     ],
 )
 def test_a_german_claim_of_an_audit_result_is_caught(text, word):
@@ -37,10 +43,53 @@ def test_a_german_claim_of_an_audit_result_is_caught(text, word):
         "Die Linie bestand aus zwei Fertigungs-PCs.",
         "Die Lücken bestanden aus fehlenden Nachweisen.",
         "Die Meldepflichten sind im Notfallordner hinterlegt.",
+        # bestehen in its everyday senses: no audit, test or certification near it.
+        "Die Mängel bestanden fort.",
+        "Bis März hat kein Notfallplan bestanden.",
+        "Die Prüfung ergab, dass zwei Mängel bestanden.",
+        "Das Audit wurde nicht bestanden.",
+        # Negations, with a word between or more spaces.
+        "Die Ablage ist nicht vollständig konform.",
+        "Der Dienst ist nicht mehr zertifiziert.",
+        "Die Löschung ist nicht ganz gesetzeskonform.",
+        "Alpenwerk hat kein zertifiziertes ISMS.",
+        "Es gibt keine konforme Lösung.",
+        "Der Dienst ist nicht DSGVO-konform.",
+        "Der Lieferant ist nicht   zertifiziert.",
     ],
 )
-def test_german_negations_and_bestehen_aus_are_not_audit_claims(text):
+def test_german_negations_and_everyday_bestehen_are_not_audit_claims(text):
     assert claims_audit_result(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nordlicht is not fully compliant with S2.",
+        "The supplier is not  certified.",
+        "Nordlicht is not yet compliant.",
+    ],
+)
+def test_english_negations_with_a_word_between_or_more_spaces_are_not_audit_claims(text):
+    assert claims_audit_result(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Der Vertrag sagt: „Das Rechenzentrum ist nach ISO 27001 zertifiziert.“",
+        "Laut Lieferant ist der Dienst «DSGVO-konform».",
+        'The contract says "the data centre is certified to ISO 27001".',
+        "The register reads “the supplier passed its audit”.",
+    ],
+)
+def test_an_audit_word_inside_a_quote_is_not_a_claim(text):
+    """Quotes are copied unchanged from the documents, as the prompts ask (#51 review)."""
+    assert claims_audit_result(text) is None
+
+
+def test_an_audit_word_outside_a_quote_is_still_caught():
+    assert claims_audit_result("„Der Plan gilt.“ Alpenwerk ist zertifiziert.") == "zertifiziert"
 
 
 # 1.6.2 for Alpenwerk, at the assess seam.
@@ -202,3 +251,61 @@ def test_an_english_answer_for_nordlicht_is_not_asked_for_again():
 )
 def test_the_language_of_a_text_is_told_by_its_function_words(text, language):
     assert written_in(text) == language
+
+
+@pytest.mark.parametrize(
+    "text, language",
+    [
+        (
+            (
+                "Die Richtlinie ist kurz. Der Lieferant schreibt: „The policy is reviewed and the "
+                "keys are stored with the provider, not with the customer, for all of the data.“"
+            ),
+            "de",
+        ),
+        (
+            (
+                'The policy is short. It quotes the contract: "Die Schlüssel werden beim Anbieter '
+                'und nicht beim Kunden gespeichert, das ist für die Daten der Fall."'
+            ),
+            "en",
+        ),
+    ],
+)
+def test_the_language_of_a_text_leaves_out_what_it_quotes(text, language):
+    assert written_in(text) == language
+
+
+def test_ids_such_as_is_01_are_not_read_as_english_words():
+    text = "IS-01, IS-02 und IS-03: Die Richtlinie wird geprüft und ist für alle gültig."
+
+    assert written_in(text) == "de"
+
+
+def test_the_language_is_told_with_only_one_language_known(monkeypatch):
+    monkeypatch.setattr(language, "LANGUAGES", {"de": language.LANGUAGES["de"]})
+
+    assert written_in(GERMAN_ANSWER) == "de"
+    assert written_in(ENGLISH_ANSWER) is None
+
+
+def test_a_wrong_language_step_without_a_profile_still_reads_as_a_sentence():
+    text = Step("check_answer", {"wrong_language": "en"}).describe()
+
+    assert text == (
+        "The answer was written in English, not the profile's language, so it was asked for "
+        "again in the profile's language."
+    )
+
+
+def test_a_thread_saved_before_51_reads_its_profiles_answer_language_on_resume():
+    """Its state has no answer_language: the reviewed Assessment takes the profile's."""
+    saver = memory_checkpointer()
+    result = assess("1.6.2", ALPENWERK, ScriptedChatModel(script=german_1_6_2_script()), saver)
+    # What a thread saved before #51 lacks: the answer_language channel.
+    for key in [k for k in saver.blobs if k[2] == "answer_language"]:
+        del saver.blobs[key]
+
+    reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), saver)
+
+    assert reviewed.answer_language == "de"

@@ -12,7 +12,6 @@ the verdicts in code, never from the model.
 import json
 import logging
 import operator
-import re
 import textwrap
 import threading
 import uuid
@@ -51,13 +50,16 @@ from vouch.guards import (
     refusal_step,
 )
 from vouch.isa import Column, IsaControl, Requirement
-from vouch.language import language_name, mismatch
+from vouch.language import audit_claim, audit_words_in, language_name, mismatch
 from vouch.patch import EVIDENCE_PENDING, TIMED_OUT, vulnerability_status
 from vouch.profile import (
     ComplianceProfile,
     ControlRequirements,
     EvidenceSourceName,
     NotApplicableRequirement,
+    ProfileError,
+    UnknownProfileError,
+    load_named_profile,
 )
 from vouch.search import (
     DEFAULT_LIMIT,
@@ -104,18 +106,6 @@ CAPPED = "At most partly evidenced:"
 DOCUMENTED_ONLY = "it asks for something to be done, and only documented evidence shows it"
 # The columns the roll-up counts: should requirements only give the should score.
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
-# Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
-# A negation ("non-compliant", "not certified") and handing something on ("passed to the
-# CISO", "passed on to IT") are not claims; "passed on 3 March" is. German (#51): "konform",
-# "zertifiziert", "bestanden" and their inflected forms, except negated ("nicht konform") and
-# "bestanden aus" (consisted of).
-AUDIT_RESULT = re.compile(
-    r"(?<!non-)(?<!non )(?<!not )\b(compliant|certified|passed(?!\s+(?:on\s+)?to\b))\b"
-    r"|(?<!nicht )(?<!nicht-)\b((?:konform|zertifiziert|bestanden)(?:e[mnrs]?)?)\b(?!\s+aus\b)",
-    re.IGNORECASE,
-)
-# The audit-result words AUDIT_RESULT catches, as the prompts name them in an answer language.
-AUDIT_WORDS = {"de": "konform, zertifiziert or bestanden"}
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
 USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
 QUESTION_SHOWN = 90  # the load step shortens a longer control question to this many characters
@@ -134,9 +124,9 @@ class OutputCheckError(RuntimeError):
 
 
 def claims_audit_result(text: str) -> str | None:
-    """The word with which the text claims an audit result (lower case), or None."""
-    found = AUDIT_RESULT.search(text)
-    return (found.group(1) or found.group(2)).lower() if found else None
+    """The word with which the text claims an audit result (lower case), or None: in any
+    answer language, outside quotes, not negated (vouch.language)."""
+    return audit_claim(text)
 
 
 class SubmitAnswer(BaseModel):
@@ -538,9 +528,9 @@ def _format_requirements(requirements: Iterable[Requirement]) -> str:
 
 def _never_claim(profile: ComplianceProfile) -> str:
     """The rule against claiming an audit result, naming the words in the answer language."""
-    words = AUDIT_WORDS.get(profile.answer_language)
+    words = audit_words_in(profile.answer_language) if profile.answer_language != "en" else ""
     in_language = f" ({words})" if words else ""
-    return f"never call the company compliant, certified or passed{in_language}."
+    return f"never call the company {audit_words_in('en')}{in_language}."
 
 
 def _note_text(note: str) -> str:
@@ -1009,7 +999,8 @@ def build_graph(
         found = mismatch(answer, profile.answer_language)
         if found is None:
             return clean
-        if state.get("language_retries", 0) >= OUTPUT_RETRIES:
+        language_retries = state.get("language_retries", 0)
+        if language_retries >= OUTPUT_RETRIES:
             return {**clean, "kept_language": found}
         expected = language_name(profile.answer_language)
         refusal = (
@@ -1017,7 +1008,7 @@ def build_graph(
             f"in {expected}. Write it in {expected}, quoting documents unchanged in their own "
             f"language, and call {SUBMIT_ANSWER} again."
         )
-        update = {**clean, "language_retries": 1, "wrong_language": found}
+        update = {**clean, "language_retries": language_retries + 1, "wrong_language": found}
         return _refused(state, refusal, update)
 
     def _refused(state: AssessState, refusal: str, update: dict[str, Any]) -> dict[str, Any]:
@@ -1264,7 +1255,11 @@ class Step:
             word = update.get("rejected_word")
             if word:
                 return f"The answer claimed an audit result (“{word}”), so it was asked for again."
-            expected = language_name(self.profile.answer_language) if self.profile else ""
+            expected = (
+                language_name(self.profile.answer_language)
+                if self.profile
+                else "the profile's language"
+            )
             if wrong := update.get("wrong_language"):
                 return (
                     f"The answer was written in {language_name(wrong)}, not {expected}, so it "
@@ -1444,6 +1439,16 @@ def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id}}
 
 
+def _profile_language(profile_id: str) -> str:
+    """The answer language of the profile a thread saved before #51 ran under (its state
+    doesn't say), or English when that profile can't be read."""
+    try:
+        return load_named_profile(profile_id).answer_language
+    except (ProfileError, UnknownProfileError):
+        log.warning("thread for profile %s: answer language unknown, so English", profile_id)
+        return "en"
+
+
 def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
     """The Assessment from the thread's state: proposed while it waits, reviewed after."""
     requirements = values["requirements"]
@@ -1468,7 +1473,7 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
         token_usage=_total_usage(values["usage"]),
         model=values["model"],
         prompt_version=values["prompt_version"],
-        answer_language=values.get("answer_language", "en"),  # threads saved before #51
+        answer_language=values.get("answer_language") or _profile_language(values["profile_id"]),
         remediation=values["remediation"],
         thread_id=thread_id,
         status=status,
