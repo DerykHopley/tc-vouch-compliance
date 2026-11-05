@@ -23,6 +23,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
+from vouch import audit
 from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
 from vouch.auth import ClerkAuth, ClerkUnavailable, Role, SignedOut
 from vouch.database import Connection, Database, DatabaseUnavailable
@@ -36,7 +37,6 @@ from vouch.graph import (
     assess_steps,
     load_assessment,
     new_thread_id,
-    resume,
     state_serializer,
 )
 from vouch.isa import IsaControl, UnknownControlError, load_isa_control
@@ -246,6 +246,15 @@ def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterato
 
 
 UserMemory = Annotated[Memory, Depends(user_memory)]
+
+
+def audit_trail(db: AppDatabase) -> audit.AuditTrail:
+    """Where reviewed verdicts and overrides are recorded (#39): Postgres with a database URL,
+    else this process."""
+    return audit.process_trail() if db is None else audit.PostgresTrail(db)
+
+
+AuditTrail = Annotated[audit.AuditTrail, Depends(audit_trail)]
 
 
 public = APIRouter(prefix="/api")
@@ -475,17 +484,20 @@ def open_assessment(thread_id: str, memory: UserMemory, saver: Checkpointer) -> 
 def review_assessment(
     thread_id: str,
     decision: Annotated[ReviewDecision, Body()],
-    saver: Checkpointer,
+    trail: AuditTrail,
     memory: UserMemory,
+    user: CurrentUser,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
+    The decision and its audit entries are written together (vouch.audit): when the entries
+    can't be, nothing is, and it's a 503.
 
     404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
     already); 422 for an override naming a requirement the assessment didn't judge, or naming
     one twice (the decision's shape is checked before, also 422)."""
     try:
-        reviewed = resume(thread_id, decision, saver, scope=memory.scope)
+        reviewed = audit.review(trail, thread_id, decision, user_id=user.id, scope=memory.scope)
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:
@@ -497,6 +509,15 @@ def review_assessment(
     except Exception:
         log.exception("a review's time wasn't kept")
     clean, _ = redact_data({"assessment": reviewed.to_dict()})
+    return clean
+
+
+@router.get("/audit-trail")
+def read_audit_trail(trail: AuditTrail, user: CurrentUser, profile: Profile) -> dict[str, Any]:
+    """The user's audit entries under the compliance profile, newest first, redacted as every
+    answer is. The trail is append-only: no route changes or removes an entry."""
+    entries = [entry.to_dict() for entry in trail.entries(user.id, profile.id)]
+    clean, _ = redact_data({"entries": entries})
     return clean
 
 
