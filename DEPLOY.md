@@ -280,6 +280,10 @@ it has run, changing the model answers 503 and the log says to run `vouch-db-set
 It prints `vouch-db-setup: LangGraph's tables are ready (checkpointer and store)`, or why it
 couldn't connect, without the password.
 
+**Run `vouch-db-setup` again after any deploy that adds a table** (as #43 adds the remediation
+items' table). It is safe to rerun. Until it has run, what reads the new table carries on as if
+it were empty, and what writes to it answers 503, the log saying to run `vouch-db-setup`.
+
 **When the trial ends** the instance stops unless the billing account is upgraded, as Cloud Run
 does; health then says `unavailable` (docs/requirements.md, 2026-11-04).
 

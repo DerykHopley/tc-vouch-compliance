@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
@@ -582,6 +582,42 @@ describe('Ask Vouch', () => {
     })
   }
 
+  it('keeps the log on the newest message at its bottom, and leaves a lead who scrolled up to read where they are',
+    async () => {
+      let write: (block: string) => void = () => {}
+      serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder()
+          write = (block) => controller.enqueue(encoder.encode(block))
+        },
+      }), { headers: { 'Content-Type': 'text/event-stream' } })))
+      render(<App />)
+      await open()
+      await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+      const log = within(bubble()!).getByRole('log')
+      // jsdom lays nothing out: the log is 1000px of content in a 400px box.
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 })
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 400 })
+      const step = (n: number) => act(async () =>
+        write(`event: step\ndata: {"node":"gather","text":"Step ${n}."}\n\n`))
+
+      await step(1)
+      await within(log).findByText('Step 1.')
+      expect(log.scrollTop).toBe(1000) // followed to the newest
+
+      log.scrollTop = 100 // the lead scrolls up to read
+      fireEvent.scroll(log)
+      await step(2)
+      await within(log).findByText('Step 2.')
+      expect(log.scrollTop).toBe(100) // left where they are
+
+      log.scrollTop = 580 // back near the bottom
+      fireEvent.scroll(log)
+      await step(3)
+      await within(log).findByText('Step 3.')
+      expect(log.scrollTop).toBe(1000)
+    })
+
   it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
     let write: (block: string) => void = () => {}
     let end: () => void = () => {}
@@ -762,5 +798,39 @@ describe('local mode', () => {
   it('has no sign-out: nobody is signed in', () => {
     render(<App />)
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+  })
+})
+
+describe('remediation items', () => {
+  const draft = (id: string) => ({ requirement_id: id, missing: `What ${id} lacks.`, owner_role: 'CISO',
+    due_date: '2027-02-01', status: 'draft' })
+  const ACCEPTED = { ...STORED, status: 'accepted', verdict: 'not-evidenced',
+    requirements: ['M1', 'M2'].map((id) => ({ id, column: 'must', text: `${id}.`, verdict: 'not-evidenced',
+      reason: 'Nothing on file.', citations: [] })),
+    remediation: [draft('M1'), draft('M2')] }
+
+  it('keeps both of two decisions in flight, whichever lands first', async () => {
+    const answers: Record<string, (r: Response) => void> = {}
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const decided = /\/remediation\/(M\d)$/.exec(url)
+      if (decided) return new Promise<Response>((resolve) => { answers[decided[1]] = resolve })
+      return url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [ACCEPTED] }))
+          : url.startsWith('/api/assessments/') ? Promise.resolve(Response.json({ assessment: ACCEPTED }))
+            : new Promise<Response>(() => {})
+    }))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const item = (id: string) => screen.getByRole('region', { name: `Remediation item ${id}` })
+    await screen.findByRole('region', { name: 'Remediation item M1' })
+
+    await userEvent.click(within(item('M1')).getByRole('button', { name: 'Approve M1' }))
+    await userEvent.click(within(item('M2')).getByRole('button', { name: 'Discard M2' }))
+    await act(async () => answers.M1(Response.json({ item: { ...draft('M1'), status: 'approved' } })))
+    await act(async () => answers.M2(Response.json({ item: { ...draft('M2'), status: 'discarded' } })))
+
+    expect(within(item('M1')).getByText('Approved')).toBeTruthy()
+    expect(within(item('M2')).getByText('Discarded')).toBeTruthy()
+    expect(within(item('M1')).queryByRole('button')).toBeNull()
   })
 })

@@ -35,10 +35,45 @@ def test_assess_in_the_chat_streams_its_steps_and_links_the_verdict_to_its_paper
     verdict = log.locator(".msg .chip")
     expect(verdict).to_have_count(1)
     link = log.get_by_role("link", name="Open the working paper")
+    # The log follows the newest message: the verdict line, last, is in view without scrolling.
+    expect(log.locator(".msg").last).to_contain_text("Open the working paper")
+    expect(link).to_be_in_viewport()
     link.click()
     expect(page).to_have_url(re.compile(r"/controls/5\.1\.1$"))
     paper = page.get_by_role("region", name="Working paper")
     expect(paper.get_by_text("Proposed", exact=True)).to_be_attached()
+
+
+TOKEN = """(name) => {
+  const probe = document.createElement('div')
+  probe.style.color = `var(${name})`
+  document.body.append(probe)
+  const colour = getComputedStyle(probe).color
+  probe.remove()
+  return colour
+}"""
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_working_paper_link_in_the_chat_is_drawn_in_the_navy_token_with_a_focus_ring(
+    page: Page, chat_url, scheme
+):
+    page.emulate_media(color_scheme=scheme)
+    log = open_chat(page, chat_url, 1400)
+    field = page.get_by_role("textbox", name="Message to Vouch")
+    field.fill("Assess 5.1.1")
+    page.get_by_role("button", name="Send").click()
+    link = log.get_by_role("link", name="Open the working paper")
+    expect(link).to_be_visible()
+
+    assert link.evaluate("el => getComputedStyle(el).color") == page.evaluate(TOKEN, "--navy")
+    field.focus()
+    page.keyboard.press("Shift")  # a keyboard user: focus is shown
+    link.focus()
+    ring = link.evaluate(
+        "el => [getComputedStyle(el).outlineStyle, getComputedStyle(el).outlineColor]"
+    )
+    assert ring == ["solid", page.evaluate(TOKEN, "--navy")]
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])

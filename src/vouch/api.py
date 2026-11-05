@@ -1,7 +1,6 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, the user's assessments, the Dossier
-overview, and the developer
-page's settings.
+compliance lead's review, the review that resumes it, the lead's remediation decisions, the
+user's assessments, the Dossier overview, and the developer page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -22,7 +21,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit
+from vouch import audit, remediation
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -364,6 +363,25 @@ def audit_trail(db: AppDatabase) -> audit.AuditTrail:
 AuditTrail = Annotated[audit.AuditTrail, Depends(audit_trail)]
 
 
+def remediation_items(db: AppDatabase) -> remediation.RemediationItems:
+    """Where the lead's remediation decisions are kept, with their audit entries (#43): Postgres
+    with a database URL, else this process."""
+    return remediation.process_items() if db is None else remediation.PostgresItems(db)
+
+
+RemediationItems = Annotated[remediation.RemediationItems, Depends(remediation_items)]
+
+
+def assessment_data(
+    assessment: Assessment, decided: dict[remediation.Key, remediation.DecidedItem] | None = None
+) -> dict[str, Any]:
+    """The assessment as the API sends it, each remediation item with its status (#43): a draft,
+    or as the lead decided it (`decided`, none for a run just made or just reviewed)."""
+    return assessment.to_dict() | {
+        "remediation": remediation.shown_items(assessment, decided or {})
+    }
+
+
 public = APIRouter(prefix="/api")
 """The routes open to anyone: health alone."""
 
@@ -544,7 +562,7 @@ def create_assessment(
         )
         for event, data in events:
             if isinstance(data, Assessment):
-                data = {"assessment": data.to_dict(), "usage": run.meter.usage().to_dict()}
+                data = {"assessment": assessment_data(data), "usage": run.meter.usage().to_dict()}
             for name, clean in redacted_event(event, data):
                 yield ServerSentEvent(event=name, data=clean)
     except Exception:  # any failure reaches the browser as one formal sentence
@@ -571,14 +589,17 @@ def list_assessments(memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
 
 
 @router.get("/assessments/{thread_id}")
-def open_assessment(thread_id: str, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
+def open_assessment(
+    thread_id: str, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+) -> dict[str, Any]:
     """One of the user's assessments, proposed or reviewed, redacted as the stream's events are.
     404 for an unknown thread, another user's included."""
     try:
         assessment = load_assessment(thread_id, saver, scope=memory.scope)
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    clean, _ = redact_data({"assessment": assessment.to_dict()})
+    decided = items.decided(memory.user_id, memory.profile_id, thread_id)
+    clean, _ = redact_data({"assessment": assessment_data(assessment, decided)})
     return clean
 
 
@@ -613,7 +634,50 @@ def review_assessment(
         memory.note_worked()
     except Exception:
         log.exception("a review's time wasn't kept")
-    clean, _ = redact_data({"assessment": reviewed.to_dict()})
+    clean, _ = redact_data({"assessment": assessment_data(reviewed)})
+    return clean
+
+
+@router.post("/assessments/{thread_id}/remediation/{requirement_id}")
+def decide_remediation(
+    thread_id: str,
+    requirement_id: str,
+    request: Annotated[remediation.DecisionRequest, Body()],
+    items: RemediationItems,
+    memory: UserMemory,
+    saver: Checkpointer,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead approves or discards one of an accepted assessment's remediation items (#43),
+    an approval maybe with another owner role or due date: the item as kept, redacted. The
+    decision and its audit entry are kept together, under the user and the compliance profile;
+    when the entry can't be written, neither is (a 503). The same decision again changes
+    nothing and writes no entry.
+
+    404 for an unknown thread (another user's or profile's too) or a requirement with no item;
+    409 for an assessment not accepted, an item decided the other way, or approved with other
+    values (`detail` names the kept ones); 422 for an approval due on a date past everywhere or
+    beyond the horizon, or naming no owner where Vouch suggested none, with the hint in `detail`
+    (the request's shape is checked before, also 422)."""
+    try:
+        kept = remediation.decide(
+            items,
+            saver,
+            thread_id,
+            requirement_id,
+            request,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=memory.profile_id,
+            scope=memory.scope,
+        )
+    except (UnknownAssessmentError, remediation.UnknownItemError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (remediation.NotAcceptedError, remediation.DecidedAlreadyError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (remediation.DueDateError, remediation.OwnerNeededError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    clean, _ = redact_data({"item": kept.shown()})
     return clean
 
 
@@ -671,13 +735,17 @@ def paper_requirements(profile: ComplianceProfile) -> dict[str, list[PaperRequir
 
 
 @router.get("/overview")
-def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
+def dossier_overview(
+    profile: Profile, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
     each control's requirements, for its working paper (#41). Redacted as the stream's events
     are."""
     latest = newest_by_control(memory, saver)  # from each control's newest thread
-    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest))
+    counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    discarded = items.discarded(memory.user_id, memory.profile_id, counted)
+    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest, discarded))
     return clean | {"requirements": paper_requirements(profile)}
 
 
