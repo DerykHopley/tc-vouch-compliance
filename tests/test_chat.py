@@ -9,9 +9,17 @@ from pydantic import SecretStr
 from test_api import read_events
 
 from vouch.api import create_app
-from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, PageContext, RedactedText
+from vouch.chat import (
+    CHAT_FAILED,
+    CHAT_PROMPT_VERSION,
+    CheckedCitations,
+    PageContext,
+    RedactedText,
+    dropped_step,
+)
 from vouch.chat_agent import chat_prompt
 from vouch.chat_fake import CHAT_REPLY, CannedChatModel
+from vouch.citations import CitationClaim, DropReason
 from vouch.isa import load_isa_control
 from vouch.model_choice import ModelChoice
 from vouch.profile import DEFAULT_PROFILE, load_named_profile, read_profile_once
@@ -118,6 +126,55 @@ def sent(chunks: list[str]) -> list[tuple[str, list[str]]]:
 
 def nordlicht():
     return load_named_profile(DEFAULT_PROFILE)
+
+
+# Quotes in a chat answer (#46)
+
+
+def none_found(claim: CitationClaim) -> DropReason:
+    return DropReason.NOT_FOUND
+
+
+def checked(chunks: list[str]) -> tuple[str, list[str]]:
+    """What CheckedCitations sends of a reply written in `chunks`, every quote failing the
+    check: the text, and the guard steps."""
+    quotes = CheckedCitations(none_found)
+    pieces = [piece for chunk in chunks for piece in quotes.add(chunk)] + list(quotes.flush())
+    return "".join(text for text, _ in pieces), [step for _, steps in pieces for step in steps]
+
+
+def test_text_before_a_quote_is_sent_at_once_and_the_quote_held_until_its_citation_ends():
+    quotes = CheckedCitations(none_found)
+
+    assert list(quotes.add("It says “every laptop")) == [("It says ", [])]
+    assert list(quotes.add(" is encrypted” [encr")) == []
+    assert list(quotes.add("yption-standard] daily.")) == [
+        ("[quote removed] daily.", [dropped_step("encryption-standard", DropReason.NOT_FOUND)])
+    ]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "It is “unclosed to the end",  # an open quote at the end: text
+        "“A phrase” with no document after it.",
+        "“Nested “phrase” [doc] is cut” here.",  # the inner quote is the citation
+    ],
+)
+def test_text_that_isnt_a_whole_citation_is_sent_as_written(reply):
+    text, _ = checked([reply[:9], reply[9:]])
+
+    expected = reply.replace("“phrase” [doc]", "[quote removed]")
+    assert text == expected
+
+
+def test_the_quote_check_drops_a_citation_whole_and_keeps_text_around_it():
+    text, steps = checked(["Before “a b c d” [x-1] and “e f g h” [y]."])
+
+    assert text == "Before [quote removed] and [quote removed]."
+    assert steps == ["Dropped a quote from x-1: the quote isn't in that document."] + [
+        "Dropped a quote from y: the quote isn't in that document."
+    ]
 
 
 def test_the_prompt_asks_for_the_formal_voice_in_the_profiles_language():

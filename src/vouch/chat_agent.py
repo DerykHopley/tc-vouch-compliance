@@ -1,15 +1,23 @@
-"""The chat agent (#45): a ReAct agent over two tools, its chat threads kept in the checkpointer.
+"""The chat agent (#45, #46): a ReAct agent over four tools, its chat threads kept in the
+checkpointer.
 
 `progress` reads the lead's progress from the store (vouch.memory) and says where they stand
 and what to do next, in the Dossier's order (vouch.dossier); a chat opens with it (the
 greeting). `start_assessment` runs the assessment graph (vouch.runs) and streams its steps into
-the chat. The two agent layers stay apart: the chat agent never writes or reviews a verdict; the
-lead signs off on the working paper.
+the chat. `explain_control` says what a control's newest assessment found, requirement by
+requirement, with the quotes it kept; `search_evidence` searches the policies and records the
+compliance profile allows (vouch.search, behind the same guards as an assessment's searches).
+
+The two agent layers stay apart: the chat agent never writes or reviews a verdict; the lead
+signs off on the working paper. Asked to sign off, the chat says so and links the working paper
+(`explain_control` with `sign_off`). Every quote in an answer is checked against its document
+(vouch.citations), and one that isn't there is dropped, as in an assessment.
 
 Each turn's events, as the chat stream sends them: a `token` per piece of the reply, a `step`
-per assessment step (or a guard step, when something was removed), a `suggestion` (the next
-step, from `progress`), an `assessment` when one has finished. All are redacted (security
-layer 4), and so is what the thread keeps: the lead's message, the replies, the tools' words.
+per assessment step or search (or a guard step: something removed, refused, flagged or
+dropped), a `suggestion` (the next step, or the working paper to open), an `assessment` when one
+has finished. All are redacted (security layer 4), and so is what the thread keeps: the lead's
+message, the replies, the tools' words.
 """
 
 import logging
@@ -17,8 +25,9 @@ import queue
 import threading
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from functools import cache
+from datetime import UTC, date, datetime
+from functools import cache, cached_property
+from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -38,11 +47,29 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
-from vouch.chat import PageContext, RedactedText
+from vouch.chat import (
+    CheckedCitations,
+    CheckQuote,
+    PageContext,
+    RedactedText,
+    check_citations,
+)
+from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.dossier import CardStatus, NextStep, overview
-from vouch.graph import GUARD, Assessment, thread_key
+from vouch.graph import (
+    EVIDENCE_TOOLS,
+    GUARD,
+    NOT_APPLICABLE,
+    SEARCH_POLICIES,
+    SEARCH_RECORDS,
+    Assessment,
+    RequirementVerdict,
+    thread_key,
+    with_facts,
+)
+from vouch.guards import DATA_RULE, allowed_folder, as_data, flagged_steps
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
-from vouch.memory import Memory, progress
+from vouch.memory import Memory, newest_by_control, progress
 from vouch.profile import ComplianceProfile
 from vouch.redaction import redact, redacted_event, removal_step
 from vouch.runs import (
@@ -54,6 +81,7 @@ from vouch.runs import (
     assessment_events,
     begin_run,
 )
+from vouch.search import INVALID_INPUT, MAX_QUERY_CHARS, Passage
 from vouch.spending import (
     DailyLimitReached,
     NoSharedCounter,
@@ -105,7 +133,62 @@ START_ASSESSMENT_TOOL = {
         },
     },
 }
-CHAT_TOOLS = [PROGRESS_TOOL, START_ASSESSMENT_TOOL]
+EXPLAIN_CONTROL = "explain_control"
+SIGN_OFFS = ("accept", "reject", "override")
+EXPLAIN_CONTROL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": EXPLAIN_CONTROL,
+        "description": (
+            "What one VDA ISA control asks and what its newest assessment found: each "
+            "requirement's verdict and reason, what is missing, and the exact quotes the "
+            "verdicts rest on. With sign_off, when the compliance lead asks you to accept, "
+            "reject or override a verdict: why that is theirs to do, and where."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "control_id": {"type": "string", "description": "e.g. 5.1.1"},
+                "sign_off": {
+                    "type": "string",
+                    "enum": list(SIGN_OFFS),
+                    "description": "What the compliance lead asked you to do with a verdict.",
+                },
+            },
+            "required": ["control_id"],
+        },
+    },
+}
+SEARCH_EVIDENCE = "search_evidence"
+SEARCH_EVIDENCE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": SEARCH_EVIDENCE,
+        "description": (
+            "Search the company's policies and records by keyword; returns passages with "
+            "doc_id, heading, text, source, kind (documented or implemented) and stale."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS}
+            },
+            "required": ["query"],
+        },
+    },
+}
+CHAT_TOOLS = [PROGRESS_TOOL, START_ASSESSMENT_TOOL, EXPLAIN_CONTROL_TOOL, SEARCH_EVIDENCE_TOOL]
+SEARCHED = (SEARCH_POLICIES, SEARCH_RECORDS)
+"""The evidence tools `search_evidence` runs, each only where the profile allows its source."""
+NO_EVIDENCE = "I found no evidence for that in your documents."
+NO_SEARCH_ALLOWED = "This compliance profile allows no policies or records to be searched."
+_CONTROL_ID = "a control_id, the control's number as text, such as 5.1.1"
+_NEEDS = {
+    START_ASSESSMENT: _CONTROL_ID,
+    EXPLAIN_CONTROL: f"{_CONTROL_ID}, and a sign_off of {', '.join(SIGN_OFFS)} or none",
+    SEARCH_EVIDENCE: "a query, the words to search for",
+}
+"""What a call to each tool with arguments needs, said when a call is refused without them."""
 GREETING_REQUEST = "I have just opened the chat. Please tell me where I stand and what to do next."
 """The message a new chat starts with: the lead asks where they stand, and the agent answers
 from its `progress` tool. It is kept in the chat thread; the chat doesn't show it."""
@@ -124,9 +207,18 @@ def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessa
         f"`{PROGRESS}` tool when asked where the compliance lead stands, and the "
         f"`{START_ASSESSMENT}` tool when asked to assess a control; pass on what a tool says in "
         "full, every control id it lists included, and give its message as it is when it "
-        "declines. You never accept, reject or change a verdict: the compliance lead signs off "
-        "on the control's working paper. You cannot yet read the evidence from the chat; when "
-        "asked to, say so plainly. "
+        f"declines. Use the `{EXPLAIN_CONTROL}` tool for questions about a control, such as "
+        f"what is missing for it, and the `{SEARCH_EVIDENCE}` tool for questions about the "
+        "company's evidence. Answer only from what these tools return; when they find nothing, "
+        f"say “{NO_EVIDENCE}” and nothing more, never an answer of your own. Cite evidence only "
+        "as an exact quote in curly quotes followed by its document id in square brackets, "
+        "such as “Every company laptop uses full-disk encryption with AES-256.” "
+        "[encryption-standard]: copy the quote word for word from one paragraph, list item or "
+        "table row, in the document's own language, never translated. A quote that isn't in "
+        f"its document is removed. {DATA_RULE} "
+        "You never accept, reject or override a verdict: the compliance lead signs off on the "
+        f"control's working paper. When asked to, call `{EXPLAIN_CONTROL}` with sign_off and "
+        "give its message as it is. "
         f"The compliance lead is on {context.describe()}."
     )
     return SystemMessage(system)
@@ -184,6 +276,85 @@ def unknown_control(control_id: str) -> str:
     return f"There is no VDA ISA control “{control_id}”. The controls are {ids}."
 
 
+def sign_off_words(control_id: str, sign_off: str, *, assessed: bool) -> str:
+    """Why the chat doesn't accept, reject or override a verdict, and where the lead does."""
+    said = (
+        f"I cannot {sign_off} a verdict: signing off is yours, and Vouch never writes or changes "
+        "a verdict for you. "
+    )
+    if not assessed:
+        return said + (
+            f"Control {control_id} has not been assessed yet, so there is no verdict to sign off. "
+            "Its working paper is linked below."
+        )
+    where = (
+        f"override a requirement of control {control_id}, with your reason,"
+        if sign_off == "override"
+        else f"accept or reject control {control_id}, with a note,"
+    )
+    return said + f"You can {where} at the foot of its working paper, linked below."
+
+
+def not_assessed_words(control: IsaControl, profile: ComplianceProfile) -> str:
+    """A control not yet assessed: what it asks, under this profile, and the next step."""
+    requirements = profile.requirements_for(control).applicable
+    listed = "\n".join(f"- {r.id} ({r.column}): {r.text}" for r in requirements)
+    return (
+        f"Control {control.id}, “{control.question}”, has not been assessed yet, so no evidence "
+        f"has been read for it. Its requirements under this profile:\n{listed}\n"
+        f"The next step is to assess control {control.id}."
+    )
+
+
+def assessed_words(control: IsaControl, assessment: Assessment) -> str:
+    """What the control's newest assessment found: what is missing first, then what is
+    evidenced, and the quotes it kept as data (document text, never instructions)."""
+    status = dict(_STATUS_WORDS)[assessment.status]
+    judged = [r for r in assessment.requirements if r.verdict != NOT_APPLICABLE]
+    missing = [r for r in judged if r.verdict != "evidenced"]
+    evidenced = [r for r in judged if r.verdict == "evidenced"]
+    verdict = assessment.verdict.replace("-", " ")
+    said = [
+        f"Control {control.id}, “{control.question}”: its newest assessment is {verdict}, {status}."
+    ]
+    if missing:
+        said.append("Not yet evidenced:\n" + "\n".join(_requirement_line(r) for r in missing))
+    else:
+        said.append("Every requirement that applies is evidenced.")
+    if evidenced:
+        said.append("Evidenced:\n" + "\n".join(_requirement_line(r) for r in evidenced))
+    quotes = [_quote_data(r, c) for r in judged for c in r.citations]
+    if quotes:
+        said.append("The quotes these verdicts rest on, checked against each document:")
+        said.append(as_data(quotes))  # type: ignore[arg-type]  # Passage-shaped, with more keys
+    return "\n".join(said)
+
+
+def _requirement_line(requirement: RequirementVerdict) -> str:
+    verdict = requirement.verdict.replace("-", " ").capitalize()
+    return (
+        f"- {requirement.id} ({requirement.column}): {requirement.text} "
+        f"{verdict}: {requirement.reason}"
+    )
+
+
+def _quote_data(requirement: RequirementVerdict, citation: Citation) -> dict[str, Any]:
+    """A kept citation, shaped as a passage (doc_id, heading, text) so the guards read it."""
+    return {
+        "requirement": requirement.id,
+        "doc_id": citation.doc_id,
+        "version": citation.version,
+        "heading": citation.section,
+        "text": citation.quote,
+        "kind": citation.kind,
+        "stale": citation.stale,
+    }
+
+
+def _passages(count: int) -> str:
+    return f"{count} passage{'' if count == 1 else 's'}"
+
+
 @dataclass
 class ChatTools:
     """What the chat agent's tools need: the lead's memory, what an assessment runs on (`run`),
@@ -203,13 +374,18 @@ class ChatTools:
         step. `stop` is set once the chat stream has been left."""
         if name == PROGRESS:
             return self.progress(write)
-        if name == START_ASSESSMENT and isinstance(args.get("control_id"), str):
-            return self.start_assessment(args["control_id"].strip(), write, stop)
-        if name == START_ASSESSMENT:
-            refused = (
-                f"Refused a call to {name}: its arguments are invalid. It needs a control_id, "
-                "the control's number as text, such as 5.1.1."
-            )
+        given = args.get("control_id")
+        control_id = given.strip() if isinstance(given, str) else None
+        sign_off = args.get("sign_off")
+        if name == START_ASSESSMENT and control_id is not None:
+            return self.start_assessment(control_id, write, stop)
+        if name == EXPLAIN_CONTROL and control_id is not None and sign_off in (None, *SIGN_OFFS):
+            return self.explain_control(control_id, sign_off, write)
+        if name == SEARCH_EVIDENCE and isinstance(args.get("query"), str):
+            return self.search_evidence(args["query"], write)
+        needs = _NEEDS.get(name)
+        if needs:
+            refused = f"Refused a call to {name}: its arguments are invalid. It needs {needs}."
         else:
             refused = f"Refused a call to {name}: it isn't one of the chat's tools."
         write(("step", {"node": GUARD, "text": refused}))
@@ -261,6 +437,77 @@ class ChatTools:
             f"The assessment of control {assessment.control_id} has finished: {verdict}. The "
             "verdict is proposed and waits for your review on the control's working paper."
         )
+
+    def explain_control(self, control_id: str, sign_off: str | None, write: Write) -> str:
+        """What the control asks and its newest assessment found, its kept quotes as data, and
+        its working paper as a suggestion; asked to sign off (`sign_off`), only why that is the
+        lead's, and where. Nothing is written: no review, no override."""
+        try:
+            control = load_isa_control(control_id)
+        except UnknownControlError:
+            return unknown_control(control_id)
+        assessment = newest_by_control(self.memory, self.run.saver).get(control.id)
+        if sign_off is not None:
+            write(("suggestion", {"control_id": control.id, "action": "review"}))
+            return sign_off_words(control.id, sign_off, assessed=assessment is not None)
+        if assessment is None:
+            write(("suggestion", {"control_id": control.id, "action": "assess"}))
+            return not_assessed_words(control, self.profile)
+        write(("suggestion", {"control_id": control.id, "action": "review"}))
+        return assessed_words(control, assessment)
+
+    def search_evidence(self, query: str, write: Write) -> str:
+        """The passages matching the query in the policies and records the profile allows,
+        as data, each search a step and each instruction-like passage a guard step; nothing
+        found, NO_EVIDENCE. A source the profile doesn't allow is never read."""
+        today = self.today
+        found: list[Passage] = []
+        unread: list[str] = []
+        allowed = 0
+        for name in SEARCHED:
+            tool = EVIDENCE_TOOLS[name]
+            folder = allowed_folder(self.profile, tool.source)
+            if not isinstance(folder, Path) or tool.run is None:
+                continue
+            allowed += 1
+            result = tool.run({"query": query}, folder)
+            if isinstance(result, list):
+                passages = with_facts(result, tool.source, folder, today)
+                found += passages
+                said = f"Searched {tool.label} for “{query.strip()}”: {_passages(len(passages))}."
+                write(("step", {"node": SEARCH_EVIDENCE, "text": said}))
+            elif result["error"] == INVALID_INPUT:
+                return f"Refused a search: the {result.get('detail', 'query is invalid')}."
+            else:
+                unread.append(tool.label)
+        if not allowed:
+            return NO_SEARCH_ALLOWED
+        for flagged in flagged_steps(found):
+            write(("step", {"node": GUARD, "text": flagged}))
+        not_read = f" {' and '.join(unread).capitalize()} could not be read." if unread else ""
+        if not found:
+            return NO_EVIDENCE + not_read
+        return (
+            f"Found {_passages(len(found))} for “{query.strip()}”.{not_read} Cite them as the "
+            f"chat prompt says.\n{as_data(found)}"
+        )
+
+    @property
+    def today(self) -> date:
+        return datetime.now(UTC).date()
+
+    @cached_property
+    def _quotes(self) -> QuoteChecker:
+        folders = {name: source.folder for name, source in self.profile.evidence_sources.items()}
+        return QuoteChecker(folders, today=self.today)
+
+    def check_quote(self, claim: CitationClaim) -> Citation | DropReason:
+        """A quote in a chat answer, checked against its document in a source the profile
+        allows (each document read once per chat message); one that fails is logged."""
+        checked = self._quotes.check(claim)
+        if isinstance(checked, DropReason):
+            log.warning("dropped a quote in a chat answer from %s (%s)", claim.doc_id, checked)
+        return checked
 
     def _refusal_at_daily_limit(self, refused: Exception, control_id: str) -> str:
         """What the chat says when an assessment can't start: another is running, the daily
@@ -377,8 +624,9 @@ class ChatState(TypedDict):
 def _agent(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     chat = runtime.context
     reply = chat.model.invoke([chat.prompt, *_window(state["messages"])])
-    if isinstance(reply.content, str):  # kept as sent: redacted
-        reply = reply.model_copy(update={"content": redact(reply.content)[0]})
+    if isinstance(reply.content, str):  # kept as sent: its quotes checked, then redacted
+        checked, _ = check_citations(reply.content, chat.tools.check_quote)
+        reply = reply.model_copy(update={"content": redact(checked)[0]})
     return {"messages": [reply]}
 
 
@@ -448,8 +696,9 @@ def chat_turn(
     """One turn on the lead's chat thread: the reply and the tools' events, redacted, in order.
     The reply's text not yet sent goes out before a tool's event, so nothing is reordered. When
     the turn is left (the stream closed), `chat.stop` is set, so no tool waits on an assessment
-    still running."""
-    text = RedactedText()
+    still running. Each quote in the reply is checked before it is redacted (on the words the
+    document has); a dropped one's guard step follows the text it was dropped from."""
+    reply = _Reply(chat.tools.check_quote)
     try:
         parts = graph.stream(
             {"messages": [HumanMessage(redact(message)[0])]},
@@ -462,14 +711,39 @@ def chat_turn(
             if part["type"] == "messages":
                 chunk, meta = part["data"]
                 if isinstance(chunk, AIMessageChunk) and meta.get("langgraph_node") == "agent":
-                    yield from _tokens(text.add(chunk.text))
+                    yield from reply.add(chunk.text)
             elif part["type"] == "custom":
-                yield from _tokens(text.flush())
+                yield from reply.flush()
                 event, data = part["data"]
                 yield from redacted_event(event, data)
-        yield from _tokens(text.flush())
+        yield from reply.flush()
     finally:
         chat.stop.set()
+
+
+class _Reply:
+    """The reply's text as the chat stream sends it: quotes checked (CheckedCitations), then
+    redacted (RedactedText); the guard steps for dropped quotes held until the text before
+    them has been sent."""
+
+    def __init__(self, check: CheckQuote) -> None:
+        self._quotes = CheckedCitations(check)
+        self._text = RedactedText()
+        self._dropped: list[str] = []
+
+    def add(self, chunk: str) -> Iterator[tuple[str, dict[str, Any]]]:
+        for piece, dropped in self._quotes.add(chunk):
+            self._dropped += dropped
+            yield from _tokens(self._text.add(piece))
+
+    def flush(self) -> Iterator[tuple[str, dict[str, Any]]]:
+        for piece, dropped in self._quotes.flush():
+            self._dropped += dropped
+            yield from _tokens(self._text.add(piece))
+        yield from _tokens(self._text.flush())
+        for said in self._dropped:
+            yield "step", {"node": GUARD, "text": redact(said)[0]}
+        self._dropped = []
 
 
 def _tokens(pieces: Iterator[tuple[str, list[str]]]) -> Iterator[tuple[str, dict[str, Any]]]:

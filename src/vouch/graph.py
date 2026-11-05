@@ -229,7 +229,7 @@ class EvidencePassage(Passage):
     stale: bool
 
 
-def _with_facts(
+def with_facts(
     passages: list[Passage], source: str, folder: Path, today: date
 ) -> list[EvidencePassage]:
     """Each passage with its document's source, kind and staleness, each document read once.
@@ -920,7 +920,7 @@ def build_graph(
             else:
                 result = tool.run(args, folder)
                 if isinstance(result, list):
-                    result = _with_facts(result, tool.source, folder, today)
+                    result = with_facts(result, tool.source, folder, today)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)
                 if isinstance(result, list):
                     run += 1

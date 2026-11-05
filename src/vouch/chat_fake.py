@@ -1,9 +1,11 @@
 """The chat's fake model (#44): a canned formal answer, streamed, never touching the network.
 
 Offline, and in tests, the chat runs on it (vouch.model_choice.ModelChoice.for_chat). Given the
-chat agent's tools (#45), it calls one as a model would: `start_assessment` for "Assess <id>",
-`progress` for the greeting or "where do I stand"; then it passes the tool's words on as its
-answer.
+chat agent's tools (#45, #46), it calls one as a model would: `start_assessment` for "Assess
+<id>", `progress` for the greeting or "where do I stand", `explain_control` for "What's missing
+for <id>?" (the page's control when none is named) or with `sign_off` for "Accept <id>", and
+`search_evidence` for "Is there evidence of <words>?". Then it passes the tool's words on as its
+answer, each passage of evidence cited as the chat prompt asks: “its first line” [doc_id].
 """
 
 import json
@@ -17,26 +19,64 @@ from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
     HumanMessage,
+    SystemMessage,
     ToolCall,
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import ConfigDict, Field
 
-from vouch.chat_agent import GREETING_REQUEST, PROGRESS, START_ASSESSMENT
+from vouch.chat_agent import (
+    EXPLAIN_CONTROL,
+    GREETING_REQUEST,
+    PROGRESS,
+    SEARCH_EVIDENCE,
+    START_ASSESSMENT,
+)
 from vouch.fake_model import _usage
 
 CHAT_REPLY = (
-    "Thank you for your question. I cannot yet read your evidence from the chat; please open a "
-    "control's working paper to see its quotes."
+    "Thank you for your question. Please ask what is missing for a control, or whether there "
+    "is evidence of something in your documents."
 )
 """The chat's fake answer: formal, in English, whatever else is asked."""
+_ID = r"(\d+(?:\.\d+)+)"
 ASSESS = re.compile(r"\bassess\s+(?:control\s+)?(\S+)", re.IGNORECASE)
 WHERE = re.compile(r"where do I stand|my progress", re.IGNORECASE)
+SIGN_OFF = re.compile(rf"\b(accept|reject|override|approve|sign off)\b\D*{_ID}", re.IGNORECASE)
+MISSING = re.compile(rf"\b(?:missing|explain)\b(?:\D*{_ID})?", re.IGNORECASE)
+EVIDENCE = re.compile(r"\bevidence (?:of|for|about|on) (.+?)[?.!]*$", re.IGNORECASE)
+PAGE_CONTROL = re.compile(rf"VDA ISA control {_ID}:")
+_EVIDENCE_DATA = re.compile(r"<evidence>\n(.*?)\n</evidence>", re.DOTALL)
+_LIST_MARK = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
 
 def _words(text: str) -> list[str]:
     return re.findall(r"\s*\S+", text)
+
+
+def _cited(tool_words: str) -> str:
+    """A tool's words with its evidence data given as citations: each passage's first line,
+    in curly quotes, then its document id in square brackets."""
+
+    def cite(found: re.Match[str]) -> str:
+        lines = []
+        for passage in json.loads(found.group(1)):
+            if "text" not in passage:
+                continue
+            first = _LIST_MARK.sub("", passage["text"].splitlines()[0].strip())
+            label = f"{passage['requirement']}: " if "requirement" in passage else ""
+            lines.append(f"- {label}“{first}” [{passage['doc_id']}]")
+        return "\n".join(lines)
+
+    return _EVIDENCE_DATA.sub(cite, tool_words)
+
+
+def _page(messages: list[BaseMessage]) -> str | None:
+    """The control of the page the lead is on, as the system prompt names it."""
+    prompt = next((m for m in messages if isinstance(m, SystemMessage)), None)
+    found = PAGE_CONTROL.search(str(prompt.content)) if prompt else None
+    return found.group(1) if found else None
 
 
 class CannedChatModel(BaseChatModel):
@@ -73,20 +113,31 @@ class CannedChatModel(BaseChatModel):
             raise self.fail_with
         last = messages[-1] if messages else None
         if isinstance(last, ToolMessage):
-            return _words(str(last.content)), []
-        call = self._tool_call(last) if isinstance(last, HumanMessage) else None
+            return _words(_cited(str(last.content))), []
+        call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
         if call is not None:
             return [], [call]
         return (self.chunks if self.chunks is not None else _words(self.reply)), []
 
-    def _tool_call(self, message: HumanMessage) -> ToolCall | None:
+    def _tool_call(self, message: HumanMessage, messages: list[BaseMessage]) -> ToolCall | None:
         text = str(message.content)
         call_id = f"call-{len(self.prompts)}"
-        if START_ASSESSMENT in self.tools and (asked := ASSESS.search(text)):
-            control_id = asked.group(1).rstrip(".?!,;:")
-            return ToolCall(name=START_ASSESSMENT, args={"control_id": control_id}, id=call_id)
-        if PROGRESS in self.tools and (text == GREETING_REQUEST or WHERE.search(text)):
-            return ToolCall(name=PROGRESS, args={}, id=call_id)
+
+        def call(name: str, **args: str) -> ToolCall | None:
+            return ToolCall(name=name, args=args, id=call_id) if name in self.tools else None
+
+        if asked := SIGN_OFF.search(text):
+            verb = asked.group(1).lower()
+            sign_off = verb if verb in ("reject", "override") else "accept"
+            return call(EXPLAIN_CONTROL, control_id=asked.group(2), sign_off=sign_off)
+        if asked := ASSESS.search(text):
+            return call(START_ASSESSMENT, control_id=asked.group(1).rstrip(".?!,;:"))
+        if text == GREETING_REQUEST or WHERE.search(text):
+            return call(PROGRESS)
+        if (asked := MISSING.search(text)) and (control_id := asked.group(1) or _page(messages)):
+            return call(EXPLAIN_CONTROL, control_id=control_id)
+        if asked := EVIDENCE.search(text):
+            return call(SEARCH_EVIDENCE, query=asked.group(1))
         return None
 
     def _generate(
