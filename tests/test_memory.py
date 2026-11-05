@@ -22,7 +22,7 @@ from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
 
 from vouch import audit, graph, memory
-from vouch.api import create_app, current_user, load_default_profile
+from vouch.api import cached_profile, create_app, current_user
 from vouch.database import Database, DatabaseUnavailable
 from vouch.graph import state_serializer
 from vouch.profile import DEFAULT_PROFILE
@@ -44,7 +44,7 @@ def restart() -> None:
 
 def app_on(url: SecretStr | None) -> Any:
     """A new app (a new process, as far as the database is concerned) on `url`'s database."""
-    load_default_profile.cache_clear()
+    cached_profile.cache_clear()
     app = create_app(Settings(database_url=url))
     app.dependency_overrides[current_user] = as_user
     return app

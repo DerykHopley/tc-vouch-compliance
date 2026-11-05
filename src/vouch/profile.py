@@ -6,6 +6,7 @@ applicable, the evidence sources the agent may use, and (unused for now) an asse
 and risks.
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,8 @@ from vouch.isa import (
     load_isa_control,
 )
 from vouch.paths import FIXTURES_DIR
+
+log = logging.getLogger(__name__)
 
 PROFILE_FILE = "profile.yaml"
 DEFAULT_PROFILE = "nordlicht"  # the one profile until a user can choose theirs
@@ -77,6 +80,7 @@ class ProfileError(ValueError):
     def __init__(self, path: Path, problem: str):
         super().__init__(f"invalid compliance profile {path}: {problem}")
         self.path = path
+        self.problem = problem  # without the path: what a developer page may show
 
 
 def _profile_dir(info: ValidationInfo) -> Path:
@@ -258,6 +262,17 @@ def load_profile(path: Path) -> ComplianceProfile:
         raise ProfileError(path, str(error)) from error
 
 
+PROFILE_LOAD_ERRORS: tuple[type[Exception], ...] = (ProfileError, BaseFrameworkError)
+"""What loading a profile that is there raises when it can't be used: the profile file invalid,
+or the base framework it needs unreadable. Add a new load error here, and every caller that
+leaves out or refuses a broken profile catches it (vouch.api)."""
+
+
+def load_problem(error: Exception) -> str:
+    """A load error's problem in words, without the server's paths."""
+    return error.problem if isinstance(error, ProfileError) else str(error)
+
+
 class UnknownProfileError(LookupError):
     """No profile folder with this name under the fixtures."""
 
@@ -266,9 +281,25 @@ class UnknownProfileError(LookupError):
         self.name = name
 
 
-def load_named_profile(name: str) -> ComplianceProfile:
-    """The profile in `fixtures/<name>/profile.yaml`; a name is one lowercase word or slug."""
-    path = FIXTURES_DIR / name / PROFILE_FILE
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not path.is_file():
+PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
+"""A profile's name, its folder's: one lowercase word or slug, so it never names a path."""
+
+
+def load_named_profile(name: str, folder: Path | None = None) -> ComplianceProfile:
+    """The profile in `<folder>/<name>/profile.yaml`, the folder by default the fixtures."""
+    path = (folder or FIXTURES_DIR) / name / PROFILE_FILE
+    if not PROFILE_NAME.fullmatch(name) or not path.is_file():
         raise UnknownProfileError(name)
     return load_profile(path)
+
+
+def profile_names(folder: Path | None = None) -> tuple[str, ...]:
+    """The names of the profiles in `folder` (by default the fixtures), sorted: each a folder
+    with a profile file, valid or not; none when the folder can't be read."""
+    folder = folder or FIXTURES_DIR
+    try:
+        found = [path.parent.name for path in folder.glob(f"*/{PROFILE_FILE}") if path.is_file()]
+    except OSError:
+        log.exception("the compliance profiles in %s could not be listed", folder)
+        return ()
+    return tuple(sorted(name for name in found if PROFILE_NAME.fullmatch(name)))

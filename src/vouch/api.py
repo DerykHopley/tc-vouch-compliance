@@ -15,9 +15,10 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from functools import cache
 from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -54,10 +55,12 @@ from vouch.model_choice import (
 )
 from vouch.profile import (
     DEFAULT_PROFILE,
+    PROFILE_LOAD_ERRORS,
     ComplianceProfile,
-    ProfileError,
     UnknownProfileError,
     load_named_profile,
+    load_problem,
+    profile_names,
 )
 from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
 from vouch.settings import (
@@ -86,6 +89,7 @@ SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
+UNKNOWN_PROFILE = "There is no such compliance profile."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -115,28 +119,16 @@ def requested_assessment(request: Annotated[AssessmentRequest, Body()]) -> Reque
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
+PROFILE_HEADER = "X-Vouch-Profile"
+"""Names the compliance profile a request is for (#47): the top bar's profile switcher sets it on
+every call. Without it, the default profile."""
+
+
 @cache
-def load_default_profile() -> ComplianceProfile:
-    """The default compliance profile, read once; a failed read isn't kept, so it's tried again."""
-    return load_named_profile(DEFAULT_PROFILE)
-
-
-def compliance_profile() -> ComplianceProfile:
-    """Loaded before the stream starts, so a broken profile is a plain 500, not an event."""
-    try:
-        return load_default_profile()
-    except (ProfileError, UnknownProfileError):
-        log.exception("the compliance profile %s could not be loaded", DEFAULT_PROFILE)
-        raise HTTPException(status_code=500, detail=FAILED) from None
-
-
-Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
-
-
-def profile_tools(profile: Profile) -> frozenset[str]:
-    """The tools the API lets the model call: the compliance profile's allow-list (security
-    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
-    return allowed_tools(profile)
+def cached_profile(folder: Path | None, name: str) -> ComplianceProfile:
+    """A compliance profile in `folder` (None: the fixtures), read once; a failed read isn't
+    kept, so it's tried again."""
+    return load_named_profile(name, folder)
 
 
 def app_settings(request: Request) -> Settings:
@@ -145,6 +137,56 @@ def app_settings(request: Request) -> Settings:
 
 
 AppSettings = Annotated[Settings, Depends(app_settings)]
+
+
+def compliance_profile(
+    settings: AppSettings,
+    chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
+) -> ComplianceProfile:
+    """The profile the request names, else the default. Loaded before the stream starts, so a
+    broken profile is a plain 500, not an event; one that isn't there, when named, a 404."""
+    name = chosen or DEFAULT_PROFILE
+    try:
+        return cached_profile(settings.profiles_dir, name)
+    except UnknownProfileError:
+        if chosen is None:  # the default missing is the server's fault
+            log.exception("the default compliance profile %s is missing", name)
+            raise HTTPException(status_code=500, detail=FAILED) from None
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE) from None
+    except PROFILE_LOAD_ERRORS:
+        log.exception("the compliance profile %s could not be loaded", name)
+        raise HTTPException(status_code=500, detail=FAILED) from None
+
+
+Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
+
+
+@dataclass(frozen=True)
+class Profiles:
+    """The profiles a user may switch between, and those left out because they can't be loaded
+    (each name with its problem, for the developer page)."""
+
+    loaded: tuple[ComplianceProfile, ...]
+    broken: tuple[tuple[str, str], ...]
+
+
+def available_profiles(settings: Settings) -> Profiles:
+    """Every profile in the profiles folder that loads; a broken one is left out and logged,
+    never a failure of the list."""
+    loaded, broken = [], []
+    for name in profile_names(settings.profiles_dir):
+        try:
+            loaded.append(cached_profile(settings.profiles_dir, name))
+        except PROFILE_LOAD_ERRORS as error:
+            log.warning("compliance profile %s left out: %s", name, error)
+            broken.append((name, load_problem(error)))
+    return Profiles(tuple(loaded), tuple(broken))
+
+
+def profile_tools(profile: Profile) -> frozenset[str]:
+    """The tools the API lets the model call: the compliance profile's allow-list (security
+    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
+    return allowed_tools(profile)
 
 
 def _signed_out() -> HTTPException:
@@ -531,6 +573,26 @@ def read_audit_trail(
     return clean | {"next": page.next}
 
 
+@router.get("/profiles")
+def list_profiles(settings: AppSettings) -> dict[str, Any]:
+    """The compliance profiles the user may switch between (#47): each one's id, company,
+    country and answer language. A profile that can't be loaded is left out (the developer page
+    names it). `default` is the profile a request without X-Vouch-Profile is under; null when
+    that one is left out."""
+    loaded = available_profiles(settings).loaded
+    listed = [
+        {
+            "id": p.id,
+            "company": p.company,
+            "country": p.country,
+            "answer_language": p.answer_language,
+        }
+        for p in loaded
+    ]
+    default = DEFAULT_PROFILE if any(p.id == DEFAULT_PROFILE for p in loaded) else None
+    return {"profiles": listed, "default": default}
+
+
 @router.get("/overview")
 def dossier_overview(profile: Profile, memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
@@ -560,10 +622,14 @@ def _developer_page(
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
-def developer_settings(models: AppModels, spending: AppSpending) -> dict[str, Any]:
+def developer_settings(
+    models: AppModels, spending: AppSpending, settings: AppSettings
+) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
-    limit, and every assessment's usage totalled."""
-    return _developer_page(models, spending)
+    limit, every assessment's usage totalled, and the compliance profiles left out of the
+    profile switcher because they can't be loaded (#47), each with its problem."""
+    notes = [{"id": n, "problem": p} for n, p in available_profiles(settings).broken]
+    return _developer_page(models, spending) | {"broken_profiles": notes}
 
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)

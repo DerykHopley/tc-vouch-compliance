@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { type Assessment, newestAssessment } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
@@ -11,8 +11,10 @@ import WorkingPaper from './WorkingPaper.tsx'
 
 type Theme = 'light' | 'dark'
 
-/** The system setting, or light when there is none. */
+/** The theme the page already shows (the app opens afresh on a profile switch), else the system setting, else light. */
 function systemTheme(): Theme {
+  const shown = document.documentElement.dataset.theme
+  if (shown === 'light' || shown === 'dark') return shown
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
@@ -32,8 +34,9 @@ function viewAt(path: string): View {
   return control ? { name: 'paper', controlId: decodeURIComponent(control[1]) } : { name: 'dossier' }
 }
 
-/** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out. */
-export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
+/** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out.
+ * `profileSwitcher`: the top bar's profile switcher (Profiled.tsx, #47). */
+export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => void; profileSwitcher?: ReactNode } = {}) {
   const [theme, setTheme] = useState<Theme>(systemTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -108,6 +111,7 @@ export default function App({ onSignOut }: { onSignOut?: () => void } = {}) {
               onClick={(e) => { e.preventDefault(); showView({ name: 'developer' }) }}>Developer</a>
           )}
         </nav>
+        {profileSwitcher}
         <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
           {other === 'dark' ? 'Dark theme' : 'Light theme'}
         </button>

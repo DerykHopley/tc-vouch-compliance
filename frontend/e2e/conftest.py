@@ -19,6 +19,13 @@ def dossier_url() -> str:
 
 
 @pytest.fixture
+def profiles_url() -> str:
+    """A third Vouch like vouch_url on a profiles folder of its own (#47): nordlicht, testwerk
+    and a broken profile; its own request-rate budget too."""
+    return os.environ["PROFILES_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

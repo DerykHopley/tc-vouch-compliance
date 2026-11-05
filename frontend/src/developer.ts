@@ -18,6 +18,8 @@ export type DeveloperSettings = {
   daily_limit: number
   /** Every assessment's usage added up: real spend on OpenRouter, and the fake model's estimates apart. */
   usage: { openrouter: RunTotals; fake: RunTotals }
+  /** The compliance profiles left out of the profile switcher because they could not be loaded (#47). */
+  broken_profiles: { id: string; problem: string }[]
 }
 
 /** Some assessments' usage added up; `incomplete` of them have a cost not wholly known. */

@@ -32,6 +32,7 @@ MODEL_ENV = "ASSESS_MODEL"
 FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 FRONTEND_ENV = "VOUCH_FRONTEND"
 DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
+PROFILES_DIR_ENV = "VOUCH_PROFILES_DIR"
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
@@ -40,7 +41,7 @@ ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?")
 ENV_NAMES = frozenset(
     {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {FRONTEND_ENV}
-    | {DATABASE_URL_ENV}
+    | {DATABASE_URL_ENV, PROFILES_DIR_ENV}
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
@@ -83,6 +84,8 @@ class Settings:
     frontend: Path | None = None
     database_url: SecretStr | None = None
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
+    profiles_dir: Path | None = None
+    """The folder of compliance profiles, one folder each (#47). None: the repository's fixtures."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -140,6 +143,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fake_script=read_path(FAKE_SCRIPT_ENV),
         frontend=read_path(FRONTEND_ENV),
         database_url=SecretStr(database_url) if database_url else None,
+        profiles_dir=read_path(PROFILES_DIR_ENV),
     )
 
 

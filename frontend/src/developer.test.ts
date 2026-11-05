@@ -13,6 +13,7 @@ const SETTINGS: DeveloperSettings = {
   kept_in: 'database',
   daily_limit: 30,
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
+  broken_profiles: [],
 }
 
 const answer = (status: number, body: unknown) => () => Promise.resolve(new Response(JSON.stringify(body), { status }))

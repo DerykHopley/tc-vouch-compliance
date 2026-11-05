@@ -7,7 +7,7 @@ from assess_steps import in_order
 from fastapi.testclient import TestClient
 
 from vouch import ScriptedChatModel, profile
-from vouch.api import create_app, load_default_profile
+from vouch.api import cached_profile, create_app
 from vouch.settings import Settings
 
 DEMO_CONTROL = "4.1.2"
@@ -16,9 +16,9 @@ DEMO_CONTROL = "4.1.2"
 @pytest.fixture
 def client():
     """The app in local mode on the bundled demo script, the profile read afresh."""
-    load_default_profile.cache_clear()
+    cached_profile.cache_clear()
     yield TestClient(create_app(Settings()), raise_server_exceptions=False)
-    load_default_profile.cache_clear()
+    cached_profile.cache_clear()
 
 
 def client_playing(script) -> TestClient:
@@ -43,7 +43,8 @@ def test_the_profile_is_read_once_across_requests(client, monkeypatch):
     reads = []
     real = profile.load_named_profile
     monkeypatch.setattr(
-        "vouch.api.load_named_profile", lambda name: reads.append(name) or real(name)
+        "vouch.api.load_named_profile",
+        lambda name, folder: reads.append(name) or real(name, folder),
     )
 
     for _ in range(2):
