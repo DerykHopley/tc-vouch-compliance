@@ -103,9 +103,12 @@ DOCUMENTED_ONLY = "it asks for something to be done, and only documented evidenc
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 # Vouch prepares for an audit; it never claims the audit's result (GLOSSARY.md, "Verdict").
 # A negation ("non-compliant", "not certified") and handing something on ("passed to the
-# CISO", "passed on to IT") are not claims; "passed on 3 March" is. English only: German answers come with the second profile (M4).
+# CISO", "passed on to IT") are not claims; "passed on 3 March" is. German (#51): "konform",
+# "zertifiziert", "bestanden" and their inflected forms, except negated ("nicht konform") and
+# "bestanden aus" (consisted of).
 AUDIT_RESULT = re.compile(
-    r"(?<!non-)(?<!non )(?<!not )\b(compliant|certified|passed(?!\s+(?:on\s+)?to\b))\b",
+    r"(?<!non-)(?<!non )(?<!not )\b(compliant|certified|passed(?!\s+(?:on\s+)?to\b))\b"
+    r"|(?<!nicht )(?<!nicht-)\b((?:konform|zertifiziert|bestanden)(?:e[mnrs]?)?)\b(?!\s+aus\b)",
     re.IGNORECASE,
 )
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
@@ -128,7 +131,7 @@ class OutputCheckError(RuntimeError):
 def claims_audit_result(text: str) -> str | None:
     """The word with which the text claims an audit result (lower case), or None."""
     found = AUDIT_RESULT.search(text)
-    return found.group(1).lower() if found else None
+    return (found.group(1) or found.group(2)).lower() if found else None
 
 
 class SubmitAnswer(BaseModel):
