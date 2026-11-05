@@ -67,6 +67,27 @@ def test_clerk_mode_without_a_key_refuses_naming_it(missing):
     assert [name for name in CLERK_KEYS if name in str(refused.value)] == [missing]
 
 
+@pytest.mark.parametrize("key", ["CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "CLERK_JWT_KEY"])
+@pytest.mark.parametrize("mode", [None, "", "  "])
+def test_a_clerk_key_with_a_blank_auth_mode_refuses_naming_the_auth_mode(key, mode):
+    """A key set but the mode forgotten is a deploy gone wrong, not local mode (#151)."""
+    env = {key: CLERK_KEYS[key]} | ({} if mode is None else {"VOUCH_AUTH_MODE": mode})
+
+    with pytest.raises(SettingsError, match="VOUCH_AUTH_MODE") as refused:
+        load_settings(env)
+
+    assert key in str(refused.value)
+    assert CLERK_KEYS[key][:12] not in str(refused.value)  # names the setting, never its value
+
+
+def test_clerk_keys_with_auth_mode_local_start_in_local_mode():
+    """Explicit local with keys set is a developer's choice (#151)."""
+    settings = load_settings({"VOUCH_AUTH_MODE": "local"} | CLERK_KEYS)
+
+    assert settings.auth_mode == "local"
+    assert settings.clerk is None
+
+
 def test_clerk_mode_with_its_keys_starts_and_refuses_a_request_without_sign_in():
     client = client_seeing_the_user({"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS)
 
@@ -151,6 +172,7 @@ def test_a_secret_value_never_reaches_a_log_or_an_error(caplog, monkeypatch):
     # and printed forms are covered above).
     for name, value in secrets.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv("VOUCH_AUTH_MODE", "local")  # keys and a blank mode refuse to start (#151)
     monkeypatch.setenv("ASSESS_FAKE_SCRIPT", str(ROOT / "tests" / "scripts" / "broken.json"))
     client = TestClient(create_app(settings=load_settings()), raise_server_exceptions=False)
     seen.append(client.post("/api/assessments", json={"control_id": "4.1.2"}).text)
@@ -164,9 +186,9 @@ def test_the_image_runs_in_clerk_mode():
     assert re.search(r"^ENV .*\bVOUCH_AUTH_MODE=clerk\b", DOCKERFILE.read_text(), re.MULTILINE)
 
 
-def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
-    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES} | {"VOUCH_AUTH_MODE": "clerk"}
-
+def refused_start(settings: dict[str, str]) -> str:
+    """The app started in a fresh process with only `settings` set: its stderr, once it refused."""
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES} | settings
     started = subprocess.run(
         [sys.executable, "-c", "import vouch.api"],
         check=False,
@@ -174,11 +196,16 @@ def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
         capture_output=True,
         text=True,
     )
-
     assert started.returncode != 0
     assert "Vouch cannot start" in started.stderr
-    assert all(name in started.stderr for name in CLERK_KEYS)
     assert "Traceback" not in started.stderr
+    return started.stderr
+
+
+def test_started_in_clerk_mode_without_its_keys_the_app_exits_naming_them():
+    stderr = refused_start({"VOUCH_AUTH_MODE": "clerk"})
+
+    assert all(name in stderr for name in CLERK_KEYS)
 
 
 def test_a_blank_clerk_key_counts_as_missing():
@@ -191,3 +218,28 @@ def test_a_blank_clerk_key_counts_as_missing():
 def test_the_tests_start_from_no_vouch_settings():
     """tests/conftest.py: a developer's exported settings can't change the tests' results."""
     assert not ENV_NAMES & set(os.environ)
+
+
+def test_local_mode_names_its_user_local_user_unless_a_setting_names_another():
+    assert load_settings({}).local_user_name == "Local user"
+    assert load_settings({"VOUCH_LOCAL_USER_NAME": "  "}).local_user_name == "Local user"
+    named = load_settings({"VOUCH_LOCAL_USER_NAME": " Dana Lead "})
+    assert named.local_user_name == "Dana Lead"
+
+
+def test_with_no_rate_setting_the_rate_is_60_requests_a_minute():
+    assert load_settings({}).rate_requests == 60
+
+
+def test_the_rate_setting_is_read_as_requests_a_minute():
+    assert load_settings({"VOUCH_RATE_REQUESTS": " 5000 "}).rate_requests == 5000
+
+
+@pytest.mark.parametrize("value", ["lots", "0", "-3", "1.5", "60/min"])
+def test_a_rate_setting_that_isnt_a_whole_number_above_zero_refuses_naming_it(value):
+    with pytest.raises(SettingsError, match="VOUCH_RATE_REQUESTS"):
+        load_settings({"VOUCH_RATE_REQUESTS": value})
+
+
+def test_started_with_a_bad_rate_setting_the_app_exits_naming_it():
+    assert "VOUCH_RATE_REQUESTS" in refused_start({"VOUCH_RATE_REQUESTS": "x"})

@@ -7,11 +7,13 @@
 #   - a second Vouch the same way, for the Dossier's checks (#40): its own assessments and its own
 #     request-rate budget, as local mode's one user would otherwise spend the 60 a minute across the suite;
 #   - a third Vouch on a profiles folder of its own, for the profile switcher's checks (#47): Nordlicht,
-#     a second test profile and a broken one (tests/profiles_dir.py), and again its own request-rate budget;
+#     a second test profile and a broken one (tests/profiles_dir.py);
 #   - a fourth the same way, for the working paper's checks (#41), for the same reason;
 #   - a fifth, for the chat's checks (#44), for the same reason;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
+# Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):
+# the suite is local mode's one user, and the default 60 a minute would answer it 429 (#138).
 #
 #   frontend/e2e/run.sh                                  # build the front end, Chromium
 #   frontend/e2e/run.sh --browser firefox                # extra arguments go to pytest
@@ -28,6 +30,7 @@ LOG_DIR="${E2E_LOG_DIR:-$(mktemp -d)}"
 CONTAINER="${CONTAINER:-docker}"
 NAME="vouch-e2e-$$"
 PIDS=()
+RATE="${VOUCH_RATE_REQUESTS:-100000}"
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
   if [ -n "${VOUCH_IMAGE:-}" ]; then
@@ -53,10 +56,10 @@ start_vouch() { # port, log name, container name, then a profiles folder if not 
   if [ -n "${VOUCH_IMAGE:-}" ]; then
     local profiles=()
     if [ -n "${4:-}" ]; then profiles=(-v "$4:/profiles:ro,Z" -e VOUCH_PROFILES_DIR=/profiles); fi
-    "$CONTAINER" run --rm --name "$3" -p "127.0.0.1:$1:8080" -e VOUCH_AUTH_MODE=local "${profiles[@]}" "$VOUCH_IMAGE" \
-      >"$LOG_DIR/$2.log" 2>&1 &
+    "$CONTAINER" run --rm --name "$3" -p "127.0.0.1:$1:8080" -e VOUCH_AUTH_MODE=local -e VOUCH_RATE_REQUESTS="$RATE" \
+      "${profiles[@]}" "$VOUCH_IMAGE" >"$LOG_DIR/$2.log" 2>&1 &
   else
-    (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_AUTH_MODE=local VOUCH_FRONTEND="$ROOT/frontend/dist" \
+    (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" VOUCH_FRONTEND="$ROOT/frontend/dist" \
       VOUCH_PROFILES_DIR="${4:-}" uv run uvicorn vouch.api:app --port "$1") >"$LOG_DIR/$2.log" 2>&1 &
   fi
   PIDS+=($!)
@@ -69,7 +72,7 @@ start_vouch "$DOSSIER_PORT" dossier "$NAME-dossier"
 start_vouch "$PROFILES_PORT" profiles "$NAME-profiles" "$PROFILES_DIR/profiles"
 start_vouch "$PAPER_PORT" paper "$NAME-paper"
 start_vouch "$CHAT_PORT" chat "$NAME-chat"
-(cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
+(cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
   uv run uvicorn vouch.api:app --port "$FAILING_PORT") >"$LOG_DIR/failing-api.log" 2>&1 &
 PIDS+=($!)
 

@@ -4,8 +4,8 @@ Below 700px the bubble is a full-screen sheet: the page behind can't be seen, so
 reach it, whatever had focus first. jsdom ignores `inert` and focus starting points, so these
 paths are checked in a real browser.
 
-They run on DOSSIER_URL (#47): the main server's request-rate budget (60 a minute, one user) no
-longer covers them once every page load also reads the profiles. Fix #138 lifts the limit.
+They run on DOSSIER_URL: #47 moved them off the main server while the request rate was capped at
+60 a minute. Fix #138 lifted that cap for the suite, so they could move back.
 """
 
 import pytest

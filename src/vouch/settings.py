@@ -3,7 +3,8 @@
 Locally the committed `.envrc` fills the secrets from the keyring; on Cloud Run, Secret Manager
 does. `.env.example` lists every name in ENV_NAMES (checked by tests/test_settings.py).
 
-Auth mode `local`, the default, is for a developer's machine: no sign-in, one default user. The
+Auth mode `local`, the default, is for a developer's machine: no sign-in, one default user. With
+any Clerk key set, the mode must be set too: keys and a blank mode refuse to start (#151). The
 container sets `clerk` (Dockerfile), and then the Clerk keys and CLERK_AUTHORIZED_PARTIES (the
 origins Vouch's pages are served from; not secret, so not in `.envrc`) are required.
 """
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Literal, cast, get_args, overload
 
 from pydantic import SecretStr
 
+from vouch.limits import RATE_REQUESTS
 from vouch.paths import FIXTURES_DIR
 
 if TYPE_CHECKING:  # imported when called: the model's modules read settings themselves
@@ -35,6 +37,8 @@ FAKE_SCRIPT_ENV = "ASSESS_FAKE_SCRIPT"
 FRONTEND_ENV = "VOUCH_FRONTEND"
 DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
 PROFILES_DIR_ENV = "VOUCH_PROFILES_DIR"
+LOCAL_USER_NAME_ENV = "VOUCH_LOCAL_USER_NAME"
+RATE_REQUESTS_ENV = "VOUCH_RATE_REQUESTS"
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
@@ -44,6 +48,8 @@ ENV_NAMES = frozenset(
     {AUTH_MODE_ENV, *CLERK_ENVS, OPENROUTER_API_KEY_ENV, MODEL_ENV, FAKE_SCRIPT_ENV}
     | {FRONTEND_ENV}
     | {DATABASE_URL_ENV, PROFILES_DIR_ENV}
+    | {DATABASE_URL_ENV, LOCAL_USER_NAME_ENV}
+    | {RATE_REQUESTS_ENV}
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
@@ -62,6 +68,8 @@ class User:
 
 DEFAULT_USER = User(id="local-user")
 """Local mode's one user: no sign-in on a developer's machine."""
+DEFAULT_USER_NAME = "Local user"
+"""Local mode's one user's display name, unless VOUCH_LOCAL_USER_NAME names another."""
 
 
 @dataclass(frozen=True)
@@ -88,6 +96,10 @@ class Settings:
     """Postgres; it holds the password. None: no database, and its routes answer 503."""
     profiles_dir: Path = FIXTURES_DIR
     """The folder of compliance profiles, one folder each (#47); by default the repository's."""
+    local_user_name: str = DEFAULT_USER_NAME
+    """Local mode's one user's display name, kept on their audit entries (#154)."""
+    rate_requests: int = RATE_REQUESTS
+    """A user's requests a minute before 429: VOUCH_RATE_REQUESTS, else vouch.limits's 60."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -111,6 +123,15 @@ def _origins(value: str) -> tuple[str, ...]:
     return origins
 
 
+def _rate_requests(value: str | None) -> int:
+    """Requests a minute: a whole number above 0, else RATE_REQUESTS. Raises SettingsError."""
+    if value is None:
+        return RATE_REQUESTS
+    if not (value.isascii() and value.isdigit()) or int(value) < 1:
+        raise SettingsError(f"{RATE_REQUESTS_ENV} must be a whole number of requests above 0")
+    return int(value)
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """The settings in `env` (the process environment by default). Raises SettingsError."""
     env = os.environ if env is None else env
@@ -121,7 +142,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     def read_path(name: str) -> Path | None:
         return _read_path(env, name)
 
-    auth_mode = read(AUTH_MODE_ENV) or "local"
+    mode = read(AUTH_MODE_ENV)
+    keys_set = [name for name in CLERK_KEY_ENVS if read(name)]
+    if keys_set and not mode:
+        # Keys without a mode is a deploy that lost its mode, not a developer's machine (#151).
+        raise SettingsError(
+            f"{AUTH_MODE_ENV} is not set, but Clerk keys are ({', '.join(keys_set)}): "
+            f"set {AUTH_MODE_ENV}=clerk, or {AUTH_MODE_ENV}=local to run without sign-in"
+        )
+    auth_mode = mode or "local"
     if auth_mode not in get_args(AuthMode):
         raise SettingsError(f"{AUTH_MODE_ENV} must be one of: {', '.join(get_args(AuthMode))}")
     clerk = None
@@ -146,6 +175,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         frontend=read_path(FRONTEND_ENV),
         database_url=SecretStr(database_url) if database_url else None,
         profiles_dir=read_path(PROFILES_DIR_ENV) or FIXTURES_DIR,
+        local_user_name=read(LOCAL_USER_NAME_ENV) or DEFAULT_USER_NAME,
+        rate_requests=_rate_requests(read(RATE_REQUESTS_ENV)),
     )
 
 

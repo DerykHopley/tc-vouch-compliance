@@ -4,8 +4,8 @@ The servers run in local mode, whose one user is a developer, with no OpenRouter
 model, nothing paid). A compliance lead is the same app with the developer API answering as it
 does for one, 403 (tests/test_model_choice.py proves the API's 403 in clerk mode).
 
-They run on PROFILES_URL (#47): the main server's request-rate budget (60 a minute, one user) no
-longer covers them once every page load also reads the profiles. Fix #138 lifts the limit.
+They run on PROFILES_URL: #47 moved them off the main server while the request rate was capped at
+60 a minute. Fix #138 lifted that cap for the suite, so they could move back.
 """
 
 import re

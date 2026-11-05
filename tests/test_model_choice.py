@@ -511,7 +511,7 @@ def test_a_model_that_never_calls_a_tool_stops_at_the_call_budget_with_one_error
     names = events(response)
     assert names[-1] == "error" and names.count("error") == 1
     assert "result" not in names
-    assert len(chat.requests) == CALL_BUDGET == 8
+    assert len(chat.requests) == CALL_BUDGET == 12  # the 12th call is made, a 13th never (#151)
     assert "call budget" in caplog.text
 
 

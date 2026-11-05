@@ -1,13 +1,9 @@
 """The top bar's profile switcher (#47): with two profiles, switching shows each one's own
 progress; with one, its name and no menu; a broken profile is left out.
 
-Request budget (local mode: one user, 60 requests a minute per server; health isn't counted). The
-two-profile checks run on PROFILES_URL: 3 seeding calls, 3 counted calls a page load (profiles,
-overview, developer settings) and 2 a switch (overview, developer settings), plus 2 chat messages:
-21 in all; with the developer page's checks, which share that server, about 33. The
-one-profile check spends 3 on DOSSIER_URL (the fixtures' one profile). Each page load now reads
-the profiles, one more request, so the developer page's and Ask Vouch's checks moved off VOUCH_URL,
-which was near the limit (Fix #138 lifts it): VOUCH_URL 46, DOSSIER_URL 44."""
+They run on PROFILES_URL, whose profiles folder holds Nordlicht, a second test profile and a
+broken one; the one-profile check on DOSSIER_URL (the fixtures' one profile). Every server runs
+with the suite's raised request rate (Fix #138)."""
 
 import json
 
