@@ -32,11 +32,12 @@ from vouch.api import create_app, record_off_the_event_loop
 from vouch.database import Database
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import Judgement
-from vouch.model_choice import DEFAULT_MODEL, CallBudgetSpent
+from vouch.model_choice import DEFAULT_MODEL, CallBudgetSpent, OpenRouter
 from vouch.settings import DEMO_SCRIPT, Settings
 from vouch.spending import (
     DAILY_LIMIT,
     PRICES,
+    SONNET,
     DatabaseSpendingStore,
     MemorySpendingStore,
     SpendingGuard,
@@ -629,3 +630,74 @@ def test_without_the_setup_a_setting_write_names_the_setup(empty_database, caplo
         empty_database.set_setting("daily_limit", "5")
 
     assert "vouch-db-setup" in caplog.text
+
+
+# --- The served model (#185) -------------------------------------------------------------------
+
+ROUTER = "typesafe/jev-router"
+LUNA = "openai/gpt-6-luna"
+
+
+class RoutingChat(FakeChat):
+    """OpenRouter behind a router: each answer names the model that served it, in turn."""
+
+    def __init__(self, served: list[str]) -> None:
+        super().__init__()
+        self.served = served
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        body = super().__call__(request).json()
+        body["model"] = self.served[(len(self.requests) - 1) % len(self.served)]
+        return httpx2.Response(200, json=body)
+
+
+def openrouter_model(chat: FakeChat, model: str, meter: UsageMeter):
+    openrouter = OpenRouter(
+        SecretStr("sk-test"), chat_client=httpx2.Client(transport=httpx2.MockTransport(chat))
+    )
+    return openrouter.chat_model(model, [meter])
+
+
+def test_a_router_answer_naming_another_model_is_recorded_as_served_per_call():
+    meter = UsageMeter(ROUTER)
+    model = openrouter_model(RoutingChat([LUNA, SONNET, LUNA]), ROUTER, meter)
+
+    for _ in range(3):
+        model.invoke([HumanMessage("Is the laptop encrypted?")])
+
+    usage = meter.usage()
+    assert usage.model == ROUTER  # the requested model stays the usage's model
+    assert usage.served_models == {LUNA: 2, SONNET: 1}
+
+
+def test_a_model_asked_for_directly_is_served_as_itself():
+    meter = UsageMeter(DEFAULT_MODEL)
+    model = openrouter_model(FakeChat(), DEFAULT_MODEL, meter)
+
+    model.invoke([HumanMessage("Is the laptop encrypted?")])
+    model.invoke([HumanMessage("And the backups?")])
+
+    assert meter.usage().served_models == {DEFAULT_MODEL: 2}
+
+
+def test_a_call_whose_answer_names_no_model_records_no_served_model():
+    meter = UsageMeter(UNPRICED_MODEL)
+
+    meter.on_llm_end(llm_result(12, 5, cost=0.001))
+
+    assert meter.usage().served_models == {}
+
+
+def test_a_streamed_call_names_its_served_model_in_the_messages_metadata():
+    message = AIMessage("", response_metadata={"model_name": LUNA})
+    meter = UsageMeter(ROUTER)
+
+    meter.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]))
+
+    assert meter.usage().served_models == {LUNA: 1}
+
+
+def test_the_apps_usage_answer_is_unchanged_by_the_served_model(chat, catalogue):
+    usage = result_of(assess(TestClient(app_with_key(chat, catalogue))))["usage"]
+
+    assert "served_models" not in usage
