@@ -229,6 +229,10 @@ VOUCH_IMAGE=vouch:dev frontend/e2e/run.sh --browser firefox
 - Keys live in the system keyring, never in a file in the repo. The committed `.envrc` reads
   them from the keyring (`secret-tool`) and exports them, through
   [direnv](https://direnv.net/): install direnv, then run `direnv allow` once in the repo.
+- To store a key, pipe it into `scripts/store-secret.sh <service>` (for example
+  `pbpaste | scripts/store-secret.sh openrouter`). It keeps multi-line keys whole, PEM blocks
+  included, checks the read-back and never prints the value; `secret-tool store` typed at its
+  prompt keeps only the first line.
 - `.env.example` lists the names of every setting Vouch reads, keys included, with no values.
 - Don't create a `.env` file: keys stay in the keyring, where no commit can pick them up.
 - **Nothing local needs a key.** The app, the `assess` command with a script, the offline eval
