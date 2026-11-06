@@ -118,19 +118,27 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     expect(excluded).to_contain_text(NORDLICHT_REASON)
 
     # The trail, newest first, each with who, action and evidence versions (story 6).
+    # Asserted with expect, which retries: a response's event fires before the page renders (#240).
+    # 4.1.2's accept and its S1 override are one review, kept in either order.
     trail = report.get_by_role("table", name="Audit trail").locator("tbody tr")
-    actions = [(cells[2], cells[3], cells[4]) for cells in rows_of(trail)]
-    order = [
-        actions.index(("4.1.2", "M1", "Approved")),
-        actions.index(("1.1.1", "", "Accepted")),
-        actions.index(("4.1.2", "S1", "Discarded")),
-        actions.index(("4.1.2", "", "Accepted")),
-    ]
-    assert order == sorted(order), actions
-    for cells in rows_of(trail):
-        assert cells[1] == LOCAL_USER
-    accepts = trail.filter(has_text="Accepted")
-    expect(accepts.first.locator("td").nth(8)).to_contain_text(re.compile(r"\S+ v\S+"))
+
+    def entry(control: str, requirement: str, action: str) -> re.Pattern:
+        """A row's who, control, requirement and action, with the cells between them."""
+        cells = r"\s*".join([re.escape(LOCAL_USER), re.escape(control), requirement, action])
+        return re.compile(cells)
+
+    one_review = entry("4.1.2", "(S1)?", "(Overridden|Accepted)")
+    expect(trail).to_have_text(
+        [
+            entry("4.1.2", "M1", "Approved"),
+            entry("1.1.1", "", "Accepted"),
+            entry("4.1.2", "S1", "Discarded"),
+            one_review,
+            one_review,
+        ]
+    )
+    for kept in (trail.nth(0), trail.nth(1), trail.filter(has_text="Accepted").last):
+        expect(kept.locator("td").nth(8)).to_have_text(re.compile(r"\S+ v\S+"))
 
     # The disclaimer, as served (story 7).
     expect(report.locator(".report-disclaimer")).to_have_text(
@@ -141,10 +149,6 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     report = open_report(page, report_url)
     expect(page.get_by_role("link", name="Report")).to_have_attribute("aria-current", "page")
     expect(report.locator(".report-lead")).to_have_text("2 of 12 controls accepted")
-
-
-def rows_of(rows: Locator) -> list[list[str]]:
-    return [[c.strip() for c in r.locator("td").all_inner_texts()] for r in rows.all()]
 
 
 def test_alpenwerks_report_is_german_and_the_page_around_it_english(page: Page, report_url):
