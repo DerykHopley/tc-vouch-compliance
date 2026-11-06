@@ -2,7 +2,8 @@ name: Ticket lint
 
 # A ready-for-agent issue is checked against the ticket standard when it's opened, edited or
 # labelled (#242): one comment names what's missing, updated on later edits. Nothing is blocked
-# or relabelled. The linter is vendored in scripts/ticket-lint.py: the rig lives outside this repo.
+# or relabelled; removing ready-for-agent leaves its last comment as it was. The linter is vendored in
+# scripts/ticket-lint.py: the rig lives outside this repo. Spec issues are skipped, as the CLI does.
 on:
   issues:
     types: [opened, edited, labeled]

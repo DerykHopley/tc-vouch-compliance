@@ -24,7 +24,8 @@ args = sys.argv[1:]
 with open(os.environ["CALLS"], "a") as log:
     log.write(" ".join(args) + "\n")
 if args[:2] == ["api", "--paginate"]:
-    print(json.dumps(comments))
+    for c in comments:  # as --jq prints them: one object a line
+        print(json.dumps({"id": c["id"], "body": c["body"], "login": c.get("login", "github-actions[bot]")}))
 elif args[:3] == ["api", "-X", "POST"]:
     body = args[args.index("-f") + 1].split("=", 1)[1]
     comments.append({"id": len(comments) + 1, "body": body})
@@ -67,7 +68,11 @@ def action(tmp_path):
     comments.write_text("[]")
     calls.write_text("")
 
-    def run(body: str, labels=("ready-for-agent", "bug")):
+    def run(body: str, labels=("ready-for-agent", "bug"), others=()):
+        if others:  # comments people wrote, before the run
+            kept = json.loads(comments.read_text())
+            kept += [{"id": 100 + i, "body": b, "login": "someone"} for i, b in enumerate(others)]
+            comments.write_text(json.dumps(kept))
         event = tmp_path / "event.json"
         issue = {
             "number": 7,
@@ -128,3 +133,21 @@ def test_a_clean_ticket_gets_no_comment(action):
 
 def test_an_issue_without_ready_for_agent_is_skipped(action):
     assert action(NO_CHECKS, labels=("needs-triage", "bug")) == []
+
+
+def test_a_spec_issue_is_skipped(action):
+    assert action(NO_CHECKS, labels=("ready-for-agent", "spec")) == []
+
+
+def test_a_brief_in_a_comment_is_the_one_checked(action):
+    comments = action("Short note; the brief is below.", others=["## Agent Brief\n\n" + GOOD])
+
+    assert [c for c in comments if c.get("login") != "someone"] == []
+
+
+def test_a_persons_comment_quoting_the_marker_is_left_alone(action):
+    quoted = "<!-- ticket-lint -->\nI copied this from the bot."
+    comments = action(NO_CHECKS, others=[quoted])
+
+    assert [c["body"] for c in comments if c.get("login") == "someone"] == [quoted]
+    assert len(comments) == 2

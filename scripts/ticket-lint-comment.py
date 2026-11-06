@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 MARKER = "<!-- ticket-lint -->"
+BOT = "github-actions[bot]"  # the Action's own comments: a person quoting the marker isn't one
 READY = "ready-for-agent"
 SHOWN = {"fail", "labels"}  # what the standard requires; notes and staleness aren't for this
 
@@ -31,15 +32,16 @@ def gh(*args: str) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
 
-def findings(issue: dict) -> list[str]:
-    """What the linter says this ticket breaks, one line each."""
+def findings(issue: dict, comments: list[dict]) -> list[str]:
+    """What the linter says this ticket breaks, one line each. `comments` count as the CLI's do:
+    the latest "Agent Brief" comment is the brief, when there is one."""
     checked = {
         "number": issue["number"],
         "body": issue.get("body") or "",
         "labels": issue.get("labels", []),
         "createdAt": issue["created_at"],
         "updatedAt": issue["updated_at"],
-        "comments": [],  # the event carries none; a brief in a comment is checked by hand
+        "comments": [{"body": c["body"]} for c in comments],
     }
     found = linter().check(checked, datetime.now(UTC), closed=set(), merged_prs=[])
     return [text for kind, text in found if kind in SHOWN]
@@ -51,10 +53,20 @@ def main() -> int:
     if READY not in {label["name"] for label in issue.get("labels", [])}:
         print(f"#{issue['number']} isn't {READY}: skipped")
         return 0
+    if linter().is_spec(issue):  # a spec issue isn't a ticket: the CLI skips it too
+        print(f"#{issue['number']} is a spec: skipped")
+        return 0
     repo, number = os.environ["GH_REPO"], issue["number"]
-    found = findings(issue)
-    comments = json.loads(gh("api", "--paginate", f"repos/{repo}/issues/{number}/comments"))
-    mine = next((c for c in comments if c["body"].startswith(MARKER)), None)
+    listed = gh(
+        "api",
+        "--paginate",
+        f"repos/{repo}/issues/{number}/comments?per_page=100",
+        "--jq",
+        ".[] | {id, body, login: .user.login}",
+    )
+    comments = [json.loads(line) for line in listed.splitlines() if line.strip()]
+    mine = next((c for c in comments if c["login"] == BOT and c["body"].startswith(MARKER)), None)
+    found = findings(issue, [c for c in comments if c is not mine])
     if found:
         lines = "\n".join(f"- {text}" for text in found)
         body = f"{MARKER}\n**Ticket lint:** this ticket doesn't meet the standard yet:\n{lines}"
