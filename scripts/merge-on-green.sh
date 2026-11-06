@@ -35,12 +35,13 @@ echo "PR #$pr at ${head:0:7} into $base: waiting for checks (limit $limit)"
 # main doesn't already contain. A PR into a spec branch (a ticket) isn't checked.
 check_open_specs() {
   [ "$base" = main ] || return 0
-  git fetch -q origin main "$head_branch" '+refs/heads/spec/*:refs/remotes/origin/spec/*'
-  if [ "$(git rev-parse FETCH_HEAD 2>/dev/null)" != "$head" ] && ! git cat-file -e "$head^{commit}" 2>/dev/null; then
-    echo "PR #$pr: could not fetch its head ${head:0:7}; not merging." >&2
+  # --prune, so a spec branch deleted on origin stops counting as open.
+  if ! git fetch -q --prune origin main '+refs/heads/spec/*:refs/remotes/origin/spec/*' \
+    || ! git fetch -q origin "$head_branch" || ! git cat-file -e "$head^{commit}" 2>/dev/null; then
+    echo "PR #$pr: could not fetch main, the spec branches or the PR's head ${head:0:7}; not merging." >&2
     return 1
   fi
-  local tree result spec specs=() refused=() files
+  local spec specs=()
   while read -r spec; do
     git merge-base --is-ancestor "$spec" origin/main || specs+=("$spec")
   done < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/spec/')
@@ -48,27 +49,40 @@ check_open_specs() {
     echo "PR #$pr: no open spec branches"
     return 0
   fi
-  if ! tree=$(git merge-tree --write-tree origin/main "$head" | head -n 1) \
-    || ! result=$(GIT_AUTHOR_NAME=merge-gate GIT_AUTHOR_EMAIL=merge-gate@localhost \
-      GIT_COMMITTER_NAME=merge-gate GIT_COMMITTER_EMAIL=merge-gate@localhost \
-      git commit-tree "$tree" -p origin/main -p "$head" -m "merge-gate: PR #$pr into main"); then
+
+  # git merge-tree exits 0 when clean, 1 on a conflict, and higher on an error.
+  local out rc=0 merged
+  out=$(git merge-tree --write-tree origin/main "$head") || rc=$?
+  if [ $rc -eq 1 ]; then
     echo "PR #$pr: it conflicts with main itself; not merging." >&2
     return 1
+  elif [ $rc -ne 0 ]; then
+    echo "PR #$pr: git merge-tree failed (exit $rc); not merging." >&2
+    return 1
   fi
+  merged=$(git -c user.name=merge-gate -c user.email=merge-gate@localhost \
+    commit-tree "${out%%$'\n'*}" -p origin/main -p "$head" -m "merge-gate: PR #$pr into main")
+
+  local name allowed spec_ok refused=()
   for spec in "${specs[@]}"; do
-    if files=$(git merge-tree --write-tree --name-only "$result" "$spec"); then
-      continue
+    rc=0
+    out=$(git merge-tree --write-tree --name-only "$merged" "$spec") || rc=$?
+    [ $rc -eq 0 ] && continue
+    name=${spec#origin/}
+    if [ $rc -ne 1 ]; then
+      echo "PR #$pr: git merge-tree against $name failed (exit $rc); not merging." >&2
+      return 1
     fi
-    local name=${spec#origin/} allowed=0 ok
-    for ok in "${conflicts_ok[@]}"; do [ "$ok" = "$name" ] && allowed=1; done
-    # merge-tree prints the tree, then the conflicting files, then a blank line and messages.
-    files=$(printf '%s\n' "$files" | sed -n '2,/^$/p' | sed '/^$/d' | sed 's/^/    /')
+    allowed=0
+    for spec_ok in "${conflicts_ok[@]}"; do [ "$spec_ok" = "$name" ] && allowed=1; done
+    # The output is the tree, the conflicting files, a blank line, then messages.
+    out=$(printf '%s\n' "$out" | sed -n '2,/^$/{/^$/!s/^/    /p}')
     if [ $allowed = 1 ]; then
       echo "PR #$pr: conflicts with $name, allowed by --conflicts-ok:"
-      echo "$files"
+      echo "$out"
     else
       echo "PR #$pr: merging it into main would make $name conflict in:" >&2
-      echo "$files" >&2
+      echo "$out" >&2
       refused+=("--conflicts-ok $name")
     fi
   done
