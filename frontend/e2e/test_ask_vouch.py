@@ -18,6 +18,7 @@ FOCUS_OUTSIDE_SHEET = f"""() => {{
   return el.closest("{SHEET}") ? null : (el.textContent || el.tagName).trim()
 }}"""
 TABS = 7  # the top bar's stops, the profile menu among them (the fixtures hold two profiles)
+REACH = 40  # Shift+Tabs from inside the bubble back to the top bar at 1400px (about 20 on the Dossier)
 
 
 def open_sheet(page: Page, dossier_url: str, width: int, double: bool = False) -> None:
@@ -66,13 +67,18 @@ def test_at_400px_tab_reaches_close_inside_the_sheet(page: Page, dossier_url):
 
 
 def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, dossier_url):
+    # Backwards from inside the bubble, so it holds in every browser: the bubble is the page's last
+    # stop, and Tab past the end wraps round in Chromium but not in headless Firefox (#225). The
+    # keyboard, not a script's focus(), must reach the top bar's controls beside the open bubble.
     open_sheet(page, dossier_url, 1400)
     page.locator(SHEET).click(position={"x": 100, "y": 300})
     reached = set()
-    for _ in range(TABS):
-        page.keyboard.press("Tab")
-        reached.add(page.evaluate("() => document.activeElement?.textContent?.trim()"))
-    assert "Dossier" in reached
+    for _ in range(REACH):
+        page.keyboard.press("Shift+Tab")
+        reached.add(page.evaluate(FOCUS_OUTSIDE_SHEET))
+        if "Dossier" in reached:
+            break
+    assert "Dossier" in reached, reached
     assert any(name and name.endswith("theme") for name in reached), reached
 
 
