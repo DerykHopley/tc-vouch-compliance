@@ -13,7 +13,6 @@ this process's memory.
 """
 
 import json
-import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -107,7 +106,8 @@ class Memory:
         self.store.delete(self._namespace(ASSESSMENTS), thread_id)
 
     def current_chat(self) -> str | None:
-        """The chat thread the user's chat opens on under this profile (#251); None for none."""
+        """The chat thread the user's chat opens on under this profile (#251); None for none.
+        Raises DatabaseUnavailable (Postgres)."""
         item = self.store.get(self._namespace(), CURRENT_CHAT)
         return item.value.get("thread_id") if item is not None else None
 
@@ -119,22 +119,28 @@ class Memory:
         else:
             self.store.put(self._namespace(), CURRENT_CHAT, {"thread_id": thread_id})
 
-    def add_chat_turn(self, thread_id: str, lines: list[dict]) -> None:
-        """Keep one chat turn's lines on `thread_id`, after the turns before it. Its key is the
-        time, so the turns read back in order. Raises DatabaseUnavailable (Postgres)."""
-        key = f"{time.time_ns():020d}"
+    def add_chat_turn(self, thread_id: str, lines: list[dict], started_ns: int) -> None:
+        """Keep one chat turn's lines on `thread_id`. Its key is when the turn began, so turns
+        read back in the order they were asked, even when one ends before another that began
+        first. Raises DatabaseUnavailable (Postgres)."""
+        key = f"{started_ns:020d}"
         self.store.put(self._namespace(CHAT_LINES, thread_id), key, {"lines": lines})
 
     def chat_lines(self, thread_id: str) -> list[dict]:
         """`thread_id`'s kept lines, every turn in order (#251); none for a thread of another
-        user or profile, as the namespace is this user's and profile's."""
-        namespace = self._namespace(CHAT_LINES, thread_id)
-        turns: list = []
-        while page := self.store.search(namespace, limit=PAGE_SIZE, offset=len(turns)):
-            turns += page
+        user or profile, as the namespace is this user's and profile's. Raises
+        DatabaseUnavailable (Postgres)."""
+        turns = sorted(self._all(self._namespace(CHAT_LINES, thread_id)), key=lambda t: t.key)
+        return [line for turn in turns for line in turn.value["lines"]]
+
+    def _all(self, namespace: tuple[str, ...]) -> list:
+        """Every item under `namespace`, read PAGE_SIZE at a time."""
+        items: list = []
+        while page := self.store.search(namespace, limit=PAGE_SIZE, offset=len(items)):
+            items += page
             if len(page) < PAGE_SIZE:
                 break
-        return [line for turn in sorted(turns, key=lambda t: t.key) for line in turn.value["lines"]]
+        return items
 
     def note_worked(self) -> None:
         """Note that the user reviewed an assessment under this profile now."""
@@ -153,12 +159,7 @@ class Memory:
     def entries(self) -> list[Entry]:
         """The index, newest first, at most MAX_ASSESSMENTS. Every page is read first: the
         stores return entries in different orders (Postgres's by last write, memory's by first)."""
-        namespace = self._namespace(ASSESSMENTS)
-        items = []
-        while page := self.store.search(namespace, limit=PAGE_SIZE, offset=len(items)):
-            items.extend(page)
-            if len(page) < PAGE_SIZE:
-                break
+        items = self._all(self._namespace(ASSESSMENTS))
         entries = [
             Entry(
                 item.key,

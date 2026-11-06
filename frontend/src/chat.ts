@@ -33,14 +33,17 @@ export function restoredMessages(lines: KeptLine[]): ChatMessage[] {
 /** The conversation the chat opens on (#251): its thread and its messages; none yet, none. `note`: it couldn't be read. */
 export type Conversation = { threadId: string | null; messages: ChatMessage[]; note: string | null }
 
-/** Shown where the kept conversation can't be reached at all. */
+/** Shown where the kept conversation can't be reached at all. Must match CHAT_HISTORY_UNAVAILABLE in
+ * src/vouch/api.py, said where the server can't read it. */
 export const HISTORY_UNREACHABLE = "Your earlier conversation can't be shown just now. New messages work as usual."
 
 /** The user's current conversation under this profile (`GET /api/chat/current`), kept on the server (#251). */
 export async function fetchConversation(): Promise<Conversation> {
   try {
     const response = await fetch('/api/chat/current', { headers: await authHeaders() })
-    if (sessionEnded(response) || !response.ok) return { threadId: null, messages: [], note: null }
+    if (sessionEnded(response)) return { threadId: null, messages: [], note: null }
+    // The database down answers before the route can (a 503): the earlier conversation exists, but not now.
+    if (!response.ok) return { threadId: null, messages: [], note: HISTORY_UNREACHABLE }
     const body = (await response.json()) as { thread_id: string | null; lines: KeptLine[]; note?: string }
     return { threadId: body.thread_id, messages: restoredMessages(body.lines), note: body.note ?? null }
   } catch {

@@ -48,8 +48,6 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
   pinned: { className: 'bubble pinned', size: null, pin: 'enlarged' },
 }
 
-type Message = ChatMessage
-
 type OnOpen = ((controlId: string) => void) | undefined
 
 /** The chat's action style (#176, design.md, Components: Chat): a ghost pill at least 44px tall, on one line, for
@@ -179,7 +177,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
   }, [open])
 
   const [draft, setDraft] = useState('')
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [suggestion, setSuggestion] = useState<NonNullable<NextStep> | null>(null)
   const [busy, setBusy] = useState(false)
   const sending = useRef(false) // a ref, so Enter twice in one tick still sends once
@@ -207,7 +205,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     setBusy(true)
     setSuggestion(null)
     if (text !== null) setMessages((all) => [...all, { from: 'lead', text }])
-    const add = (m: Message) => setMessages((all) => [...all, m])
+    const add = (m: ChatMessage) => setMessages((all) => [...all, m])
     // The controls this turn's answer may name (a `papers` event, #217), for its working-paper links. The tool sends
     // it as it runs, before the answer's words, so each piece of the answer written after it carries it.
     let papers: string[] | undefined
@@ -223,7 +221,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
       else greetAgain.current = true
     }
     // A finished assessment's verdict line, with its link, is the last thing the turn adds: after Vouch's words on it.
-    const verdicts: Message[] = []
+    const verdicts: ChatMessage[] = []
     try {
       for await (const item of sendChat(text, context, threadId.current)) {
         if (item.event === 'token') write(item.data.text)
@@ -257,7 +255,12 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     if (!open || greeted.current) return
     greeted.current = true
     void (async () => {
+      // Busy while it reads, so nothing sent meanwhile is overwritten by the conversation coming back.
+      sending.current = true
+      setBusy(true)
       const kept = await fetchConversation()
+      sending.current = false
+      setBusy(false)
       if (kept.threadId && kept.messages.length > 0) {
         threadId.current = kept.threadId
         setMessages(kept.messages)
@@ -271,11 +274,16 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
   /** A new conversation (#251): the chat empties, and the next message starts a thread; the old one is kept. */
   async function startAfresh() {
     if (sending.current) return
+    // Busy until the server has let the old one go, so the next message's new thread can't race it.
+    sending.current = true
+    setBusy(true)
     threadId.current = null
     setMessages([])
     setSuggestion(null)
-    inputRef.current?.focus()
     await newConversation()
+    sending.current = false
+    setBusy(false)
+    inputRef.current?.focus()
   }
 
   function send(e: FormEvent) {

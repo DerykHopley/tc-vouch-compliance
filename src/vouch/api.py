@@ -9,6 +9,7 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
@@ -821,15 +822,19 @@ def chat_within_spending(
 CHAT_HISTORY_UNAVAILABLE = (
     "Your earlier conversation can't be shown just now. New messages work as usual."
 )
-"""Said where the kept conversation can't be read (#251): the chat opens empty, never an error."""
+"""Said where the kept conversation can't be read (#251): the chat opens empty, never an error. Must
+match HISTORY_UNREACHABLE in frontend/src/chat.ts, said where it can't be reached at all."""
 
 
 class ShownTurn:
     """One chat turn's lines as the chat shows them (#251), built from the events it is sent: the
     lead's message, Vouch's words (with a cross-control answer's working papers, #217), each
-    step, and each finished assessment's verdict last, as the chat adds it after the words."""
+    step, and each finished assessment's verdict last, as the chat adds it after the words. Must
+    match how the chat builds its lines from the same events (AskVouch.tsx `converse`): a new
+    event the chat shows needs a line here too, or a restored conversation reads differently."""
 
     def __init__(self, message: str | None) -> None:
+        self.started = time.time_ns()  # its place in the conversation: when the turn began
         self.lines: list[dict[str, Any]] = []
         self.verdicts: list[dict[str, Any]] = []
         self.papers: list[str] | None = None
@@ -920,7 +925,9 @@ def chat(
     meter = UsageMeter(chosen)
     thread_id = request.thread_id or new_thread_id()
     turn = ShownTurn(request.message)
-    if request.thread_id is None:  # a new conversation: the one the chat opens on next time (#251)
+    # The lead's own message makes this the conversation the chat opens on next time (#251); a
+    # greeting alone never does, so a stale or failed greeting isn't what comes back.
+    if request.message is not None:
         try:
             memory.set_current_chat(thread_id)
         except Exception:  # the chat answers whether or not it can be kept
@@ -946,7 +953,8 @@ def chat(
         yield ServerSentEvent(event="error", data={"message": CHAT_FAILED})
     finally:
         try:
-            memory.add_chat_turn(thread_id, turn.shown())  # as shown, so it comes back the same
+            # As shown, so it comes back the same; keyed by when the turn began.
+            memory.add_chat_turn(thread_id, turn.shown(), turn.started)
         except Exception:  # never at the cost of the answer
             log.exception("the chat turn could not be kept")
         usage = meter.usage()

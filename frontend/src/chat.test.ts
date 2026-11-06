@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  CHAT_UNREACHABLE, type ChatEvent, fetchConversation, namedControls, newConversation, restoredMessages, pageLabel, sendChat, suggestionLabel, suggestionMessage,
+  CHAT_UNREACHABLE, type ChatEvent, fetchConversation, HISTORY_UNREACHABLE, namedControls, newConversation, restoredMessages, pageLabel, sendChat, suggestionLabel, suggestionMessage,
 } from './chat.ts'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -147,6 +147,8 @@ describe('the kept conversation (issue 251)', () => {
     vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ thread_id: null, lines: [], note: 'Not now.' })))
     expect(await fetchConversation()).toEqual({ threadId: null, messages: [], note: 'Not now.' })
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
-    expect((await fetchConversation()).messages).toEqual([])
+    expect(await fetchConversation()).toEqual({ threadId: null, messages: [], note: HISTORY_UNREACHABLE })
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 503 })))
+    expect(await fetchConversation()).toEqual({ threadId: null, messages: [], note: HISTORY_UNREACHABLE })
   })
 })

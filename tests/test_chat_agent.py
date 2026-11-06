@@ -676,6 +676,15 @@ def test_a_turn_is_kept_as_the_chat_showed_it_and_its_thread_becomes_current(cli
     ]
 
 
+def test_a_greeting_alone_never_becomes_the_conversation_the_chat_opens_on(client, fake):
+    # A greeting's counts go stale by the next visit, and a failed one would stick (#251's review).
+    greet(client)
+    assert current(client) == {"thread_id": None, "lines": []}
+    fake.fail_with = RuntimeError("the model is down")
+    greet(client)
+    assert current(client) == {"thread_id": None, "lines": []}
+
+
 def test_the_greeting_is_kept_without_a_lead_line_and_a_next_message_adds_to_it(client):
     thread_id = thread_of(greet(client))
     events = say(client, "Where do I stand?", thread_id=thread_id)
