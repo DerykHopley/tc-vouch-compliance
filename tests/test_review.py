@@ -157,6 +157,74 @@ def test_nothing_not_evidenced_means_no_remediation_call():
     assert RemediationPlan not in model.turns
 
 
+# Partly evidenced requirements get remediation too (#212, the owner's decision 2026-11-06)
+
+STALE_QUOTE = {
+    "doc_id": "encryption-standard",  # approved 2022, reviewed yearly: stale
+    "quote": "Every company laptop uses full-disk encryption with AES-256.",
+}
+
+
+def partly_5_1_1(remediate: list[dict] | None = None) -> dict:
+    """5.1.1 as in the owner's live test: M1 (must) and S1 (should) partly evidenced, so the
+    control rolls up to not evidenced."""
+    return {
+        "gather": [
+            {"tool": "search_policies", "args": {"query": "encryption"}},
+            {"answer": "Encryption is defined, but its standard is past review."},
+        ],
+        "judge": {
+            "requirements": [
+                {
+                    "requirement_id": r,
+                    "verdict": "partly-evidenced",
+                    "reason": "The standard covers part of it.",
+                    "citations": [STALE_QUOTE],
+                }
+                for r in ("M1", "S1")
+            ]
+        },
+        "remediate": {"items": drafted("M1", "S1") if remediate is None else remediate},
+    }
+
+
+def test_partly_evidenced_requirements_get_one_draft_each():
+    result, _, _ = proposed("5.1.1", partly_5_1_1())
+
+    assert result.verdict == "not-evidenced"  # the roll-up rule is unchanged
+    assert [r.verdict for r in result.requirements] == ["partly-evidenced"] * 2
+    assert [d.requirement_id for d in result.remediation] == ["M1", "S1"]
+    remediate = next(s for s in result.steps if s["node"] == "remediate")
+    assert remediate["text"] == "Drafted 2 remediation items (2 partly evidenced)."
+
+
+def test_the_remediation_prompt_names_each_requirements_verdict_and_what_partly_needs():
+    _, model, _ = proposed("5.1.1", partly_5_1_1())
+
+    [prompt] = [
+        text
+        for call in model.prompts
+        if "remediation item" in (text := "\n".join(str(m.content) for m in call))
+    ]
+    assert "- M1 (must, partly evidenced):" in prompt
+    assert "For a partly evidenced requirement, say what is still missing" in prompt
+
+
+def test_only_partly_and_not_evidenced_requirements_get_drafts():
+    script = mixed_4_1_2()  # M1, S1, S3 evidenced; M2, S2 not evidenced
+    verdicts = {"M1": "evidenced", "M2": "not-evidenced", "S1": "partly-evidenced"}
+    for item in script["judge"]["requirements"]:
+        if item["requirement_id"] in verdicts:
+            item["verdict"] = verdicts[item["requirement_id"]]
+    script["remediate"] = {"items": drafted("M2", "S1", "S2")}
+
+    result, _, _ = proposed("4.1.2", script)
+
+    assert [d.requirement_id for d in result.remediation] == ["M2", "S1", "S2"]
+    remediate = next(s for s in result.steps if s["node"] == "remediate")
+    assert remediate["text"] == "Drafted 3 remediation items (1 partly evidenced)."
+
+
 def test_a_draft_claiming_an_audit_result_is_asked_for_again_once():
     first = drafted("M1", "M2", "S1", missing="Nothing; backups are compliant.")
     result, model, _ = proposed("5.2.9", script_5_2_9([first, drafted("M1", "M2", "S1")]))
@@ -312,6 +380,7 @@ def test_resuming_an_unknown_thread_is_refused():
 
 def test_a_run_that_failed_before_the_review_is_unknown_to_open_and_to_review():
     """#38: it has state in the checkpointer, but no assessment: 404 either way, never 409."""
+
     class Unreachable(ScriptedChatModel):
         def _generate(self, *args, **kwargs):
             raise RuntimeError("the model is unreachable")
@@ -421,7 +490,8 @@ def override(requirement_id: str, verdict: str) -> dict:
     return {"requirement_id": requirement_id, "verdict": verdict, "reason": "The lead's call."}
 
 
-def test_an_override_away_from_not_evidenced_drops_its_draft():
+def test_an_override_to_evidenced_drops_its_draft_and_to_partly_keeps_it():
+    # Partly evidenced still needs a fix (#212): only an override to evidenced drops the draft.
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
     decision = ReviewDecision(
         decision="accept",
@@ -431,7 +501,8 @@ def test_an_override_away_from_not_evidenced_drops_its_draft():
     reviewed = resume(result.thread_id, decision, saver)
 
     assert [d.requirement_id for d in result.remediation] == ["M2", "S2"]
-    assert reviewed.remediation == []
+    assert [d.requirement_id for d in reviewed.remediation] == ["S2"]
+    assert reviewed.remediation[0] == result.remediation[1]
 
 
 def test_an_override_to_not_evidenced_adds_a_not_drafted_item_for_the_lead():

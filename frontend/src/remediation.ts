@@ -11,7 +11,7 @@ export const NO_OWNER = 'no owner suggested'
 
 export const ITEM_WORDS: Record<ItemStatus, string> = { draft: 'Draft', approved: 'Approved', discarded: 'Discarded' }
 
-/** A remediation item as the assessment carries it: one per not-evidenced requirement. `due_date` is ISO 8601. */
+/** A remediation item as the assessment carries it: one per requirement not or partly evidenced (#212). `due_date` is ISO 8601. */
 export type RemediationItem = {
   requirement_id: string
   missing: string

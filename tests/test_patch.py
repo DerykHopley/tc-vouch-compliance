@@ -356,7 +356,9 @@ def test_a_pending_patch_keeps_the_verdicts_other_evidence_shows(monkeypatch):
 
     by_id = {r.id: r for r in result.requirements}
     assert by_id["M2"].verdict == "partly-evidenced"
-    assert by_id["M2"].reason == "Requirements are worked out yearly."
+    # Partly evidenced, the pending source may hold the rest: noted, and no draft (#212).
+    assert by_id["M2"].reason == f"Requirements are worked out yearly. ({PENDING})"
+    assert result.remediation == []
     assert by_id["M2"].citations[0].doc_id == "information-security-policy"
     assert by_id["M1"].verdict == "not-evidenced"
     assert by_id["M1"].reason == f"Nothing shows it. ({PENDING})"

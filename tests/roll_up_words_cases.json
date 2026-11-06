@@ -1,0 +1,15 @@
+{
+  "about": "The roll-up's explanation in English (#212): checked against graph.roll_up_words (tests/test_roll_up_parity.py) and the working paper's copy, review.ts rollUpWords (frontend/src/review.test.ts), so the two can't drift apart. null: every applicable row's verdict matches the control's, so no explanation.",
+  "cases": [
+    {"name": "5.1.1 live: must and should partly", "requirements": [["must", "partly-evidenced"], ["should", "partly-evidenced"]], "words": "Not evidenced: no must requirement is fully evidenced (1 of 1 partly evidenced)."},
+    {"name": "two musts partly", "requirements": [["must", "partly-evidenced"], ["must", "partly-evidenced"]], "words": "Not evidenced: no must requirement is fully evidenced (2 of 2 partly evidenced)."},
+    {"name": "musts not evidenced, a should evidenced", "requirements": [["must", "not-evidenced"], ["should", "evidenced"]], "words": "Not evidenced: no must requirement is evidenced; should requirements count towards the should score only."},
+    {"name": "partly: one of two", "requirements": [["must", "evidenced"], ["must", "not-evidenced"]], "words": "Partly evidenced: 1 of 2 must requirements is fully evidenced."},
+    {"name": "partly: mixed columns", "requirements": [["must", "evidenced"], ["high", "evidenced"], ["overlay", "partly-evidenced"]], "words": "Partly evidenced: 2 of 3 must, protection-level or overlay requirements are fully evidenced."},
+    {"name": "evidenced with a should not", "requirements": [["must", "evidenced"], ["must", "evidenced"], ["should", "not-evidenced"]], "words": "Evidenced: all 2 must requirements are fully evidenced; should requirements count towards the should score only."},
+    {"name": "evidenced, one must", "requirements": [["must", "evidenced"], ["should", "partly-evidenced"]], "words": "Evidenced: its one must requirement is fully evidenced; should requirements count towards the should score only."},
+    {"name": "not applicable with a should", "requirements": [["must", "not-applicable"], ["should", "evidenced"]], "words": "Not applicable: no must, protection-level or overlay requirement applies; should requirements count towards the should score only."},
+    {"name": "every row matches: all not evidenced", "requirements": [["must", "not-evidenced"], ["should", "not-evidenced"]], "words": null},
+    {"name": "every row matches: all evidenced", "requirements": [["must", "evidenced"], ["should", "evidenced"], ["should", "not-applicable"]], "words": null}
+  ]
+}

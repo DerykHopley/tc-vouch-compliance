@@ -121,7 +121,7 @@ A requirement's verdict changed by the compliance lead before signing off a cont
 _Avoid_: Correction, manual verdict, edit
 
 **Remediation item**:
-A drafted fix for a requirement that is not evidenced (what's missing, an owner role, a due date), kept once the compliance lead approves it.
+A drafted fix for a requirement that is not evidenced or only partly evidenced (what's missing, an owner role, a due date), kept once the compliance lead approves it.
 _Avoid_: Ticket, task, action item
 
 **Not evidenced**:

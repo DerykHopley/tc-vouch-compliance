@@ -89,6 +89,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Review state tag | proposed, accepted, rejected |
 | Evidence kind tag | documented (dashed), implemented (solid navy); stale flag |
 | Model text (#209) | chat replies and the draft answer show the Markdown the models write, through one renderer (`Prose`): **bold**, *italics*, bulleted and numbered lists (also when written inline after a colon), and paragraphs; lists indented 20px with 4px between items, 8px between blocks; the draft answer keeps its 72ch measure. Anything else (HTML, links, images) stays text, as written. Quotes and citations as below |
+| Roll-up explanation (#212) | on the working paper, under the head's Verdict line, a `field-note` (`--muted`) saying why the control has its verdict, shown only when a row's verdict differs from it: "Not evidenced: no must requirement is fully evidenced (2 of 2 partly evidenced)."; in the profile's language (English and German), as the verdict words are; it follows the lead's overrides as the verdict chip does |
 | Citation | quote (serif italic, brass rule), document id and version, section, kind, stale flag, "quote verified". In the chat: the quote and its document id only |
 | Agent steps (trace) | streaming, done; a guard step and an overlay branch step marked apart |
 | Requirement row | must, should, high protection, country overlay; each verdict; override with reason; not applicable with reason |

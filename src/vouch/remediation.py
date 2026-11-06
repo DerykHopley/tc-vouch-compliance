@@ -1,6 +1,6 @@
 """Remediation items the compliance lead approves or discards (#43).
 
-The assessment graph drafts one item per not-evidenced requirement (vouch.graph's
+The assessment graph drafts one item per requirement not or partly evidenced (vouch.graph's
 RemediationItem), kept in the assessment's thread. Once the control's verdict is accepted, the
 lead approves each draft (maybe with another owner role or due date) or discards it. The
 decision is kept per user and compliance profile, keyed by the assessment's thread and the

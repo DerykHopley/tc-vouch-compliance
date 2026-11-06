@@ -11,7 +11,7 @@ type Props = {
 }
 
 /**
- * A not-evidenced requirement's remediation item (`docs/design.md`, Components: Remediation item): draft (approve,
+ * The remediation item of a requirement not or partly evidenced (#212) (`docs/design.md`, Components: Remediation item): draft (approve,
  * discard), approved, discarded. On an accepted control a draft's owner role and due date can be changed before
  * Approve; a refusal (a past due date, an item decided in another tab) shows the server's reason. One decision is
  * sent at a time, so a double click approves once. Where Vouch suggested no owner, the field starts empty and Approve

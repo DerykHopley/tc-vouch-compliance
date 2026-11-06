@@ -61,6 +61,10 @@ def test_an_assessed_controls_rows_show_verdict_kind_stale_flag_and_quotes(page:
         "We decide how people sign in to a system by looking at what could go wrong with it."
     )
     expect(row(paper, "M1").get_by_text("Must", exact=True)).to_be_visible()
+    # M1 partly, M2 evidenced: the control is partly evidenced, and the paper says why (#212).
+    expect(paper.locator(".paper-head .roll-up")).to_have_text(
+        "Partly evidenced: 1 of 2 must requirements is fully evidenced."
+    )
 
 
 def test_an_unassessed_control_lists_its_requirements_and_assess_streams_steps(

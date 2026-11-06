@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Column, RequirementVerdict, Verdict } from './assessment.ts'
-import { ALREADY_REVIEWED, REVIEW_FAILED, REVIEW_REFUSED, rollUp, submitReview, withOverrides } from './review.ts'
+import {
+  ALREADY_REVIEWED, REVIEW_FAILED, REVIEW_REFUSED, rollUp, rollUpWords, submitReview, withOverrides,
+} from './review.ts'
 
 const req = (id: string, column: Column, verdict: Verdict): RequirementVerdict =>
   ({ id, column, text: `${id}.`, verdict, reason: `Why ${id}.`, citations: [] })
@@ -17,6 +19,32 @@ const { cases } = JSON.parse(readFileSync(resolve(process.cwd(), '../tests/roll_
 describe('rollUp', () => {
   it.each(cases)("gives $verdict for the shared case, as graph.roll_up does", ({ requirements, verdict }) => {
     expect(rollUp(requirements.map(([column, v], n) => req(`R${n}`, column, v)))).toBe(verdict)
+  })
+})
+
+/** The explanation's English cases, which graph.roll_up_words is checked against too (#212). */
+const wordsCases = (JSON.parse(readFileSync(resolve(process.cwd(), '../tests/roll_up_words_cases.json'), 'utf8')) as
+  { cases: { name: string; requirements: [Column, Verdict][]; words: string | null }[] }).cases
+
+const of = (requirements: [Column, Verdict][]) => requirements.map(([column, v], n) => req(`R${n}`, column, v))
+
+describe('rollUpWords', () => {
+  it.each(wordsCases)('explains "$name" as graph.roll_up_words does', ({ requirements, words }) => {
+    expect(rollUpWords(of(requirements), 'en')).toBe(words)
+  })
+
+  it('explains in German for a German profile', () => {
+    expect(rollUpWords(of([['must', 'partly-evidenced'], ['must', 'partly-evidenced']]), 'de')).toBe(
+      'Nicht nachgewiesen: keine Muss-Anforderung ist vollständig nachgewiesen (2 von 2 teilweise nachgewiesen).')
+    expect(rollUpWords(of([['must', 'evidenced'], ['must', 'not-evidenced']]), 'de')).toBe(
+      'Teilweise nachgewiesen: 1 von 2 Muss-Anforderungen ist vollständig nachgewiesen.')
+    expect(rollUpWords(of([['must', 'evidenced'], ['should', 'not-evidenced']]), 'de')).toBe(
+      'Nachgewiesen: die eine Muss-Anforderung ist vollständig nachgewiesen; Soll-Anforderungen zählen nur zur '
+      + 'Soll-Quote.')
+  })
+
+  it('falls back to English for a language it has no words for', () => {
+    expect(rollUpWords(of([['must', 'partly-evidenced']]), 'fr')).toBe(rollUpWords(of([['must', 'partly-evidenced']]), 'en'))
   })
 })
 
