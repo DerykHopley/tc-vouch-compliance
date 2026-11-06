@@ -525,6 +525,15 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     return sent
   }
 
+  it("marks a German profile's draft lang=\"de\", and an English profile's not (issue 244)", () => {
+    const missing = 'Ein Nachweis der Zugriffsprüfungen.'
+    review({ assessment: { ...ACCEPTED, answer_language: 'de', remediation: [{ ...DRAFT, missing }] } })
+    expect(within(item()).getByText(missing).getAttribute('lang')).toBe('de')
+    cleanup()
+    review({ assessment: { ...ACCEPTED, answer_language: 'en' } })
+    expect(within(item()).getByText('A record of access reviews.').getAttribute('lang')).not.toBe('de')
+  })
+
   it("shows the draft in its requirement's row: what's missing, the owner role and the due date", () => {
     review({ assessment: ACCEPTED })
     expect(within(row('S1')).getByRole('region', { name: 'Remediation item S1' })).toBeTruthy()
