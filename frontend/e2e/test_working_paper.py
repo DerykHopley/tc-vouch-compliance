@@ -159,6 +159,45 @@ def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400
     assert not scrolls_sideways(page), "the working paper scrolls sideways at 400px in dark"
 
 
+# The assessment graph's nodes, as its steps name them.
+NODE_NAMES = {
+    "load_control",
+    "apply_overlays",
+    "overlay_branch",
+    "gather",
+    "tools",
+    "check_answer",
+    "judge",
+    "check_quotes",
+    "remediate",
+    "review",
+    "guard",
+}
+
+
+def test_after_assess_each_step_names_its_node_in_a_chip_and_the_answer_shows_at_every_width(
+    page: Page, paper_url
+):
+    """Story 18 (#232): how Vouch reached this, a node-name chip per step, and the draft answer,
+    with no sideways scroll at 400, 900 and 1400px."""
+    control_id = "2.1.3"  # assessed by this check only
+    page.set_viewport_size({"width": 1400, "height": 900})
+    paper = open_paper(page, paper_url, control_id, assessed=False)
+    paper.get_by_role("button", name=f"Assess {control_id}", exact=True).click()
+
+    answer = paper.get_by_role("region", name="Verdict and draft answer")
+    expect(answer.locator(".answer")).to_be_visible()
+    steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
+    expect(steps.first.locator(".step-node")).to_have_text("load_control")
+    expect(steps.locator(".step-node")).to_have_count(steps.count())  # one chip in every step
+    names = steps.locator(".step-node").all_inner_texts()
+    assert names and set(names) <= NODE_NAMES, names
+    for width in (400, 900, 1400):
+        page.set_viewport_size({"width": width, "height": 900})
+        expect(answer.locator(".answer")).to_be_visible()
+        assert not scrolls_sideways(page), f"the working paper scrolls sideways at {width}px"
+
+
 # Every card's parts, read in one go once the fonts have loaded and layout has settled (two frames):
 # measured one call at a time, a late font or a toggle showing or hiding moved the rows between
 # reads on CI (#211). Page coordinates, so scrolling can't skew them either.
