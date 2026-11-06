@@ -1,5 +1,7 @@
 /** The signed-in user's session for API calls. Clerk mode sets both hooks (ClerkApp.tsx); local mode neither. */
 
+import { readStored, store } from './stored.ts'
+
 type TokenSource = () => Promise<string | null>
 
 let source: TokenSource | null = null
@@ -18,26 +20,17 @@ export function setProfile(next: string | null) {
 }
 
 // The profile last chosen in the switcher, kept in this browser so a reload or a pasted link opens it (#201).
-// Storage can be missing or refused (a private window, blocked site data): then nothing is remembered.
+// Storage refused: nothing is remembered, and the next visit opens the default.
 const REMEMBERED = 'vouch.profile'
 
 /** The profile last chosen in this browser, or null. */
 export function rememberedProfile(): string | null {
-  try {
-    return window.localStorage.getItem(REMEMBERED)
-  } catch {
-    return null
-  }
+  return readStored(REMEMBERED)
 }
 
 /** Keeps `id` as the profile to open next time; null forgets it. */
 export function rememberProfile(id: string | null) {
-  try {
-    if (id) window.localStorage.setItem(REMEMBERED, id)
-    else window.localStorage.removeItem(REMEMBERED)
-  } catch {
-    // nothing kept: the next visit opens the default
-  }
+  store(REMEMBERED, id || null)
 }
 
 /** The headers every API call carries: Authorization (none in local mode or signed out), and the chosen profile. */

@@ -126,7 +126,13 @@ function Card({ card, onOpen, assessing, language }:
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
-        onClick={(e) => { e.preventDefault(); onOpen(card.id, false) }}>
+        onClick={(e) => {
+          // The link covers the whole card (#231): a Ctrl/Cmd/Shift/Alt or non-primary click is the browser's (a new
+          // tab or window), not an open in place.
+          if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+          e.preventDefault()
+          onOpen(card.id, false)
+        }}>
         <b>{card.id}</b>
         {card.status !== 'not-assessed' && <span className={`tag tag-${card.status}`}>{REVIEW_WORDS[card.status]}</span>}
       </a>
