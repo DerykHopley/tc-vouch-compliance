@@ -52,6 +52,32 @@ describe('proseBlocks', () => {
     expect(proseBlocks('Found:\n- \n1. ')).toEqual([{ kind: 'p', lines: [[{ text: 'Found:' }]] }])
   })
 
+  it('leaves a German date at a line start as written, not a list item (ticket 218)', () => {
+    expect(proseBlocks('15. März 2026 wurde der Vorfall nicht gemeldet.')).toEqual([
+      { kind: 'p', lines: [[{ text: '15. März 2026 wurde der Vorfall nicht gemeldet.' }]] },
+    ])
+    expect(proseBlocks('Antwort:\n15. März 2026 wurde der Vorfall gemeldet.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Antwort:' }], [{ text: '15. März 2026 wurde der Vorfall gemeldet.' }]] },
+    ])
+  })
+
+  it('reads a numbered line as a list item only from 1, or as the next number (ticket 218)', () => {
+    expect(proseBlocks('1. first\n2. second\n4. März')).toEqual([
+      { kind: 'ol', items: [[{ text: 'first' }], [{ text: 'second' }]] },
+      { kind: 'p', lines: [[{ text: '4. März' }]] },
+    ])
+  })
+
+  it('leaves a star inside a word as written, as German gender stars are (ticket 218)', () => {
+    expect(proseBlocks('Alle Mitarbeiter*innen und Lieferant*innen werden geschult.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Alle Mitarbeiter*innen und Lieferant*innen werden geschult.' }]] },
+    ])
+    expect(proseBlocks('Mitarbeiter*innen sind *verpflichtet*, **sofort** zu melden.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Mitarbeiter*innen sind ' }, { text: 'verpflichtet', italic: true },
+        { text: ', ' }, { text: 'sofort', bold: true }, { text: ' zu melden.' }]] },
+    ])
+  })
+
   it('leaves a dash or a number in running text alone', () => {
     expect(proseBlocks('Keys rotate yearly - not monthly - per 2. rule')).toEqual([
       { kind: 'p', lines: [[{ text: 'Keys rotate yearly - not monthly - per 2. rule' }]] },

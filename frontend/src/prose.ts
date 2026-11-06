@@ -9,10 +9,11 @@ export type TextRun = { text: string; bold?: true; italic?: true }
 /** A paragraph's lines (shown with line breaks between), or a list's items. */
 export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul' | 'ol'; items: TextRun[][] }
 
-// `**bold**`, then `*italic*` (no space just inside the stars, so "2 * 3 * 4" stays as written).
-const EMPHASIS = /\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*/g
+// `**bold**`, then `*italic*` (no space just inside the stars, so "2 * 3 * 4" stays as written), only at a word's
+// edges: a star inside a word is text, as German gender stars are ("Mitarbeiter*innen", #218).
+const EMPHASIS = /(?<![\p{L}\p{N}])(?:\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*)(?![\p{L}\p{N}])/gu
 const BULLET = /^\s*[-*•]\s+(.*)$/
-const NUMBERED = /^\s*\d+[.)]\s+(.*)$/
+const NUMBERED = /^\s*(\d+)[.)]\s+(.*)$/
 // A list written on one line after a colon, as the models do: "What exists: - one - two", "Next: 1. one 2. two",
 // also after a bold or italic lead-in ("**M1 (must):** - one - two").
 const INLINE_BULLETS = /^(.*?:\**)\s+-\s+(.+)$/
@@ -60,6 +61,14 @@ function unfold(line: string): string[] {
   return [line]
 }
 
+/** A numbered line's match while it starts a list at 1 or is the next number of the list above it; null otherwise,
+ * so "15. März 2026 …" stays text (#218). */
+function listNumber(match: RegExpExecArray | null, open: Block | null): RegExpExecArray | null {
+  if (!match) return null
+  const next = open?.kind === 'ol' ? open.items.length + 1 : 1
+  return Number(match[1]) === next || Number(match[1]) === 1 ? match : null
+}
+
 /** The text as paragraphs and lists. */
 export function proseBlocks(text: string): Block[] {
   const blocks: Block[] = []
@@ -79,11 +88,12 @@ export function proseBlocks(text: string): Block[] {
       continue
     }
     const bullet = BULLET.exec(line)
-    const numbered = bullet ? null : NUMBERED.exec(line)
+    const numbered = bullet ? null : listNumber(NUMBERED.exec(line), open)
+    const item = bullet ? bullet[1] : numbered?.[2]
     // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet.
-    if ((bullet ?? numbered)?.[1].trim() === '') continue
+    if (item?.trim() === '') continue
     if (bullet) add('ul', runs(bullet[1]))
-    else if (numbered) add('ol', runs(numbered[1]))
+    else if (numbered) add('ol', runs(numbered[2]))
     else add('p', runs(line))
   }
   return blocks
