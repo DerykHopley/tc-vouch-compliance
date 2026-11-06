@@ -206,8 +206,8 @@ else
   (( ${#BAD[@]} == 0 )) || stop "The keyring has nothing usable under ${BAD[*]}. Nothing has changed.
     Each needs a value; clerk-vouch-jwt-key a PEM starting -----BEGIN PUBLIC KEY----- (on one line
     or several); clerk-vouch-publishable one pk_test_ or pk_live_ key. Store each with
-    secret-tool store --label=<entry> service <entry> (it reads the value; #28, #30), then run this
-    again."
+    scripts/store-secret.sh <entry> < <file> (it stores the value whole, multi-line too, and says
+    only its size; #130), then run this again."
   PUBLISHABLE=$(secret-tool lookup service "$PUBLISHABLE_ENTRY")
   [[ $PUBLISHABLE =~ $PUBLISHABLE_FORM ]] \
     || stop "$PUBLISHABLE_ENTRY changed since the check and isn't a pk_test_ or pk_live_ key now (not shown). Run this again."
