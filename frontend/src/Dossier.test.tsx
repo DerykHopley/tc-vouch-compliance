@@ -30,6 +30,18 @@ function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verd
 
 const tile = (label: string) => screen.getByText(label, { selector: '.tile span' }).previousElementSibling?.textContent
 
+/** One card of each verdict. */
+const ALL_VERDICTS = {
+  '1.1.1': { status: 'accepted', verdict: 'evidenced' },
+  '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' },
+  '4.1.3': { status: 'rejected', verdict: 'not-evidenced' },
+  '5.2.9': { status: 'accepted', verdict: 'not-applicable' },
+} as const
+
+/** The verdict chip on a control's card. */
+const cardChip = (id: string) =>
+  within(screen.getByRole('article', { name: `Control ${id}` })).getByText(/./, { selector: '.chip' })
+
 describe('the Dossier overview', () => {
   it('shows the readiness band from the overview, in figures and words', () => {
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
@@ -86,6 +98,25 @@ describe('the Dossier overview', () => {
     expect(within(card('4.1.2')).getByText('Proposed')).toBeTruthy()
     expect(within(card('4.1.3')).getByText('Rejected')).toBeTruthy()
     expect(within(card('5.2.9')).getByText('Not assessed').className).toBe('chip v-none')
+  })
+
+  it("shows a German profile's card verdicts in German, marked lang=\"de\" (ticket 200)", () => {
+    const overview = { ...seeded(ALL_VERDICTS), company: 'Alpenwerk Präzision GmbH', country: 'Austria',
+      answer_language: 'de' }
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    expect(['1.1.1', '4.1.2', '4.1.3', '5.2.9'].map(cardChip).map((c) => [c.textContent, c.lang])).toEqual([
+      ['Nachgewiesen', 'de'], ['Teilweise nachgewiesen', 'de'], ['Nicht nachgewiesen', 'de'], ['Nicht anwendbar', 'de']])
+    // The interface stays English: the review state and Not assessed.
+    expect(within(screen.getByRole('article', { name: 'Control 1.1.1' })).getByText('Accepted')).toBeTruthy()
+    expect(cardChip('5.1.1').textContent).toBe('Not assessed')
+    expect(cardChip('5.1.1').hasAttribute('lang')).toBe(false)
+  })
+
+  it("shows an English profile's card verdicts in English, with no lang (ticket 200)", () => {
+    render(<Dossier state={{ status: 'ready', overview: seeded(ALL_VERDICTS) }} onRetry={() => {}} onOpen={() => {}}
+      running={null} />)
+    expect(['1.1.1', '4.1.2', '4.1.3', '5.2.9'].map(cardChip).map((c) => [c.textContent, c.hasAttribute('lang')]))
+      .toEqual([['Evidenced', false], ['Partly evidenced', false], ['Not evidenced', false], ['Not applicable', false]])
   })
 
   it('opens a control from its card', async () => {
