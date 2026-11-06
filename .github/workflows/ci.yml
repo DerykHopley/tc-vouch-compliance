@@ -122,3 +122,25 @@ jobs:
         with:
           name: server-logs-${{ matrix.browser }}
           path: ${{ runner.temp }}/*.log
+
+  main-red:
+    # A red run on main (a push, the nightly full lane, or by hand) opens a Fix by itself (#241),
+    # or comments on the one already open: main was red five hours unnoticed on 2026-11-06. Never
+    # on a PR, never on a green run. GITHUB_TOKEN only: issues to write, the run's jobs to read.
+    needs: [fast-lane, frontend, database, browser]
+    if: failure() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/main-is-red.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
