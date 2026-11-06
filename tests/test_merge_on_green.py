@@ -212,6 +212,8 @@ def test_a_conflict_main_already_has_with_a_spec_warns_and_merges(tmp_path):
     assert merged(calls)
     assert "main already conflicts with spec/x" in done.stdout
     assert "a.txt" in done.stdout
+    assert "no new conflict with open specs" in done.stdout
+    assert "no conflict with open specs" not in done.stdout
 
 
 def test_a_conflict_the_pr_adds_is_refused_naming_only_its_file(tmp_path):
@@ -232,3 +234,27 @@ def test_a_conflict_the_pr_adds_is_refused_naming_only_its_file(tmp_path):
     refusal = done.stderr.split("would make spec/x conflict in:", 1)[1]
     assert "c.txt" in refusal
     assert "a.txt" not in refusal
+
+
+def test_a_new_conflict_inside_a_file_main_already_conflicts_in_is_refused(tmp_path):
+    work, head = repo(tmp_path, spec_line=None, fix_line="fix says", fix_file="b.txt")
+    ten = [f"line {n}" for n in range(1, 11)]
+    git(work, "switch", "-q", "main")
+    commit(work, "d.txt", "\n".join(ten) + "\n", "d")
+    git(work, "push", "-q", "origin", "main")
+    spec_branch(work, "spec/z", "d.txt", "\n".join(["spec one", *ten[1:9], "spec ten"]) + "\n")
+    git(work, "switch", "-q", "fix")
+    git(work, "merge", "-q", "origin/main")
+    commit(work, "d.txt", "\n".join([*ten[:9], "fix ten"]) + "\n", "fix changes line ten")
+    git(work, "push", "-q", "origin", "fix")
+    head = git(work, "rev-parse", "HEAD")
+    git(work, "switch", "-q", "main")
+    commit(work, "d.txt", "\n".join(["main one", *ten[1:]]) + "\n", "main changes line one")
+    git(work, "push", "-q", "origin", "main")
+
+    done, calls = gate(tmp_path, work, head)
+
+    assert done.returncode != 0, done.stdout
+    assert not merged(calls)
+    assert "main already conflicts with spec/z" in done.stdout
+    assert "would make spec/z conflict in:\n  d.txt" in done.stderr
