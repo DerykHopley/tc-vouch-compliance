@@ -74,7 +74,10 @@ def assessment_events(
     Assessment itself. The run's meter sees every model call. Without a `note`, the lead's note
     from the control's last rejection is carried in (#42), wherever the run was started."""
     note = note or rejection_note(memory, run.saver, control.id)
-    model = ToolAllowList(run.models.for_assessment(run.chosen, callbacks=[run.meter]), run.tools)
+    chosen = run.models.for_assessment(
+        run.chosen, callbacks=[run.meter], answer_language=profile.answer_language
+    )
+    model = ToolAllowList(chosen, run.tools)
     # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
     steps = assess_steps(
         control,
