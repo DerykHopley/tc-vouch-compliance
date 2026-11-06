@@ -88,3 +88,10 @@ def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url):
         page.get_by_role("button", name="Send").click()
     expect(page.locator("aside[aria-label='Chat with Vouch']")).to_contain_text(GERMAN_REPLY)
     assert_marked(page, "Was fehlt?")  # the lead's own words are theirs, in any language
+
+    # The readiness report: its words follow the profile's language (#56).
+    page.get_by_role("link", name="Report").click()
+    report = page.locator("article.report-doc")
+    expect(report).to_have_attribute("lang", "de")
+    expect(report.get_by_role("heading", level=1)).to_have_text("Bereitschaftsbericht")
+    assert_marked(page, "Was fehlt?")
