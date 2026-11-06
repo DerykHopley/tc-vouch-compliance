@@ -187,7 +187,9 @@ describe('the working paper of a control not yet assessed', () => {
     expect(screen.getByText('Not assessed yet. 4 requirements apply in this profile.')).toBeTruthy()
     expect(screen.getAllByRole('rowheader').map((h) => h.querySelector('.mono')?.textContent)).toEqual(
       ['M1', 'S1', 'H1', 'O1', 'S3'])
-    expect(within(row('S3')).getByText('Not applicable: Nordlicht allows no remote access.')).toBeTruthy()
+    expect(row('S3').querySelector('.why')?.textContent).toBe('Not applicable: Nordlicht allows no remote access.')
+    // The reason is the profile's words, marked in its language; the label is the interface's (issue 244).
+    expect(within(row('S3')).getByText('Nordlicht allows no remote access.').getAttribute('lang')).toBe('en')
     expect(within(row('O1')).getByText('AT NIS2 (illustrative)')).toBeTruthy()
     expect(within(row('M1')).queryByText('Evidenced')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Assess 5.1.2' }))

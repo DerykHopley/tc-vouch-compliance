@@ -11,6 +11,7 @@ import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
 import { type Override, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
+import StepText from './StepText.tsx'
 import VerdictChip from './VerdictChip.tsx'
 
 /** The assess button's words for each state of the run; `running` is also the steps' label. */
@@ -137,7 +138,7 @@ export default function WorkingPaper(props: PaperProps) {
         </nav>
         <div className="paper-head">
           <span className="lbl">Working paper · {overview.company}</span>
-          <h2><span className="mono">{card.id}</span> {card.question}</h2>
+          <h2><span className="mono">{card.id}</span> <span lang={overview.answer_language}>{card.question}</span></h2>
           <div className="paper-meta">
             <span>{isoLabel(card.iso_27001)}</span>
             <span>Protection level: {overview.protection_level}</span>
@@ -159,7 +160,7 @@ export default function WorkingPaper(props: PaperProps) {
               <div className="sheet">
                 <span className="lbl">{run.status === 'running' ? ACTION.running : 'How Vouch reached this'}</span>
                 <ol className="trace" aria-label="Agent steps" aria-live="polite">
-                  {run.steps.map((step, i) => <li key={i}><b>{step.node}</b> {step.text}</li>)}
+                  {run.steps.map((step, i) => <li key={i}><b>{step.node}</b> <StepText step={step} language={overview.answer_language} /></li>)}
                 </ol>
               </div>
             )}
@@ -194,7 +195,7 @@ export default function WorkingPaper(props: PaperProps) {
                   decidable: review === 'accepted',
                   onDecided: (item) => { if (assessed?.thread_id) onItemDecided(assessed.thread_id, item) },
                 }} />
-            ) : <Requirements requirements={requirements} />}
+            ) : <Requirements requirements={requirements} language={overview.answer_language} />}
             {assessed?.status && assessed.thread_id && (
               <ReviewBar key={`${assessed.thread_id}:${reads}`} status={assessed.status} threadId={assessed.thread_id}
                 review={assessed.review} overrides={overrides} editing={editing} onReviewed={onReviewed}
@@ -259,7 +260,7 @@ function ControlIndex({ controls, openId, running, run, onOpen, language }: Inde
                   <VerdictChip verdict={verdict} assessing={assessing} language={language} />
                   {!assessing && status && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
                 </span>
-                <span className="wp-q">{card.question}</span>
+                <span className="wp-q" lang={language}>{card.question}</span>
               </PaperLink>
             )
           })}
@@ -281,7 +282,7 @@ function RequirementId({ id, column, source }: { id: string; column: PaperRequir
 }
 
 /** The requirements before any assessment: what the profile brings in, not applicable ones with their reason. */
-function Requirements({ requirements }: { requirements: PaperRequirement[] }) {
+function Requirements({ requirements, language }: { requirements: PaperRequirement[]; language: string }) {
   return (
     <div className="table-wrap">
       <table className="reqs" aria-label="Requirements">
@@ -291,8 +292,8 @@ function Requirements({ requirements }: { requirements: PaperRequirement[] }) {
             <tr key={r.id}>
               <RequirementId id={r.id} column={r.column} source={r.source} />
               <td className="rq">
-                {r.text}
-                {r.not_applicable && <p className="why">Not applicable: {r.not_applicable}</p>}
+                <span lang={language}>{r.text}</span>
+                {r.not_applicable && <p className="why">Not applicable: <span lang={language}>{r.not_applicable}</span></p>}
               </td>
             </tr>
           ))}
@@ -348,7 +349,7 @@ type JudgedProps = {
 /** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
  * "Show less" toggles it (`aria-expanded`), offered only when the clamp hides some of it (measured again as the width
  * changes; where nothing can be measured, it is offered). On a desktop the toggle is hidden and the text shown whole. */
-function RequirementText({ text }: { text: string }) {
+function RequirementText({ text, language }: { text: string; language?: string }) {
   const [expanded, setExpanded] = useState(false)
   const [cut, setCut] = useState(true)
   const shown = useRef<HTMLSpanElement>(null)
@@ -365,7 +366,7 @@ function RequirementText({ text }: { text: string }) {
   }, [expanded, text])
   return (
     <td className="rq">
-      <span ref={shown} id={id} className={expanded ? 'rq-text' : 'rq-text clamped'}>{text}</span>
+      <span ref={shown} id={id} className={expanded ? 'rq-text' : 'rq-text clamped'} lang={language}>{text}</span>
       {(cut || expanded) && (
         <button className="btn btn-ghost rq-toggle" aria-expanded={expanded} aria-controls={id}
           onClick={() => setExpanded((now) => !now)}>{expanded ? 'Show less' : 'Show full requirement'}</button>
@@ -396,7 +397,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
-                <RequirementText text={r.text} />
+                <RequirementText text={r.text} language={language} />
                 <td className="verdict-col">
                   <div className="verdict-cell">
                     <VerdictChip verdict={r.verdict} language={language} />
@@ -423,7 +424,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   ))}
                 </td>
                 <td className="quotes-cell"><div>
-                  <p className="why reason">{r.reason}</p>
+                  <p className="why reason" lang={language}>{r.reason}</p>
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
                     <CitedQuote key={i} quote={c.quote}>
@@ -436,7 +437,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   {item && items.threadId && (
                     // A new key when the item changes, so its fields start from the kept values.
                     <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
-                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} />
+                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language} />
                   )}
                 </div></td>
               </tr>,
