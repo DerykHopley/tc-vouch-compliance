@@ -7,6 +7,7 @@ server's checks already spend most of that."""
 
 import re
 
+import pytest
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -40,6 +41,13 @@ def row(paper: Locator, requirement_id: str) -> Locator:
     return paper.locator("tr").filter(
         has=paper.page.locator("th[scope=row] .mono").get_by_text(requirement_id, exact=True)
     )
+
+
+def box(locator: Locator) -> dict:
+    """The element's bounding box, which it must have."""
+    found = locator.bounding_box()
+    assert found, locator
+    return found
 
 
 def test_an_assessed_controls_rows_show_verdict_kind_stale_flag_and_quotes(page: Page, paper_url):
@@ -149,3 +157,93 @@ def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400
     expect(row(paper, "M1")).to_be_visible()
     expect(page.locator("body")).to_have_css("background-color", "rgb(13, 13, 14)")  # dark --paper
     assert not scrolls_sideways(page), "the working paper scrolls sideways at 400px in dark"
+
+
+# Every card's parts, read in one go once the fonts have loaded and layout has settled (two frames):
+# measured one call at a time, a late font or a toggle showing or hiding moved the rows between
+# reads on CI (#211). Page coordinates, so scrolling can't skew them either.
+CARD_PARTS = """async () => {
+  await document.fonts.ready
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const rect = (el) => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left, width: r.width }
+  }
+  const cards = {}
+  for (const tr of document.querySelectorAll('table[aria-label="Requirements"] tbody tr:not(.override-row)')) {
+    cards[tr.querySelector('th[scope=row] .mono').textContent] = {
+      card: rect(tr), head: rect(tr.querySelector('th[scope=row]')),
+      verdict: rect(tr.querySelector('.verdict-cell .chip')), text: rect(tr.querySelector('.rq-text')),
+      evidence: rect(tr.querySelector('.evidence')), reason: rect(tr.querySelector('.reason')),
+    }
+  }
+  return cards
+}"""
+
+
+def settled_cards(page: Page) -> dict:
+    return page.evaluate(CARD_PARTS)
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_on_a_phone_each_requirement_is_a_card_in_order(page: Page, paper_url, scheme):
+    """#211 (the owner's option A): at 400px each row is a card: id, column and verdict on one
+    line; the text; the evidence kinds and stale flag; the reason and quotes."""
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 400, "height": 900})
+    page.emulate_media(color_scheme=scheme)
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+
+    assert not scrolls_sideways(page)
+    expect(paper.locator("tbody tr")).to_have_count(5)
+    for requirement_id, card in settled_cards(page).items():
+        head, verdict, text = card["head"], card["verdict"], card["text"]
+        evidence, reason = card["evidence"], card["reason"]
+        # One line: the id and the chip share a band, the chip to the right.
+        assert verdict["top"] < head["bottom"] and head["top"] < verdict["bottom"], requirement_id
+        assert verdict["left"] > head["left"], requirement_id
+        assert head["bottom"] <= text["top"] + 1, requirement_id
+        assert text["bottom"] <= evidence["top"] + 1, requirement_id
+        assert evidence["bottom"] <= reason["top"] + 1, requirement_id
+        assert card["card"]["width"] <= 400, requirement_id
+
+
+def test_on_a_phone_show_full_requirement_works_from_the_keyboard(page: Page, paper_url):
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 400, "height": 900})
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+    card = row(paper, "M1")
+    toggle = card.locator(".rq-toggle")
+    expect(toggle).to_have_text("Show full requirement")
+    text = card.locator(".rq-text")
+    clamped = box(text)["height"]
+
+    toggle.focus()
+    page.keyboard.press("Enter")
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+    expect(toggle).to_have_text("Show less")
+    assert box(text)["height"] > clamped  # M1's text runs past 2 lines at this width
+    page.keyboard.press("Enter")
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    assert box(text)["height"] == clamped
+
+
+def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(page: Page, paper_url):
+    # #211's verifier: a toggle that expands nothing is noise. A long text gets one, a short none.
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 400, "height": 900})
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+    for requirement_id in ("M1", "M2", "S1", "S2", "S3"):
+        text = row(paper, requirement_id).locator(".rq-text")
+        cut = text.evaluate("el => el.scrollHeight > el.clientHeight + 1")
+        expect(row(paper, requirement_id).locator(".rq-toggle")).to_have_count(1 if cut else 0)
+    expect(row(paper, "M1").locator(".rq-toggle")).to_have_count(1)
+
+
+def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, paper_url):
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+
+    expect(paper.get_by_role("columnheader", name="Requirement", exact=True)).to_be_visible()
+    expect(paper.get_by_role("button", name="Show full requirement")).to_have_count(0)

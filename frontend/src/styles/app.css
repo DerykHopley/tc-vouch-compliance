@@ -143,6 +143,8 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .reqs th[scope="row"] { width: 7em; }
 .reqs .col { display: block; font-size: 11px; color: var(--muted); }
 .reqs .rq { max-width: 52ch; overflow-wrap: anywhere; }
+.rq-text { display: block; }
+.rq-toggle { display: none; } /* phone only (#211) */
 .reqs .why { color: var(--muted); font-size: 12px; margin: 0; }
 .reqs .evidence { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .quotes-cell { min-width: 280px; }
@@ -229,6 +231,27 @@ textarea.field { resize: vertical; font-family: inherit; }
      into view (scrolled to, tapped, tabbed to) stops above it. 88px: the button's 45px, its 20px inset, a gap. */
   main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  /* Phone: requirements as stacked cards (#211; the owner's option A, 2026-11-06). The same markup as the desktop
+     table: each row a card, in order: id, column and verdict on one line; the text, 2 lines with a toggle; the
+     evidence kinds and stale flag; the reason, quotes and remediation item. The headings stay for screen readers. */
+  .reqs.judged { min-width: 0; }
+  .reqs.judged, .reqs.judged tbody { display: block; }
+  .reqs.judged thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .reqs.judged tbody tr:not(.override-row) {
+    display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; padding: 12px 8px; border-bottom: 1px solid var(--rule);
+  }
+  .reqs.judged tbody tr > * { display: block; padding: 0; border-bottom: 0; width: auto; max-width: none; }
+  .reqs.judged th[scope="row"] { grid-row: 1; grid-column: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .reqs.judged th[scope="row"] .col { display: inline; }
+  .reqs.judged .verdict-col { grid-row: 1; grid-column: 2; justify-self: end; }
+  .reqs.judged .verdict-cell { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0 4px; }
+  .reqs.judged .verdict-cell .btn-ghost { margin-left: 0; }
+  .reqs.judged .rq { grid-row: 2; grid-column: 1 / -1; }
+  .reqs.judged .evidence-col { grid-row: 3; grid-column: 1 / -1; }
+  .reqs.judged .quotes-cell { grid-row: 4; grid-column: 1 / -1; min-width: 0; }
+  .rq-text.clamped { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .rq-toggle { display: inline-flex; align-items: center; margin-left: -10px; }
+  .reqs.judged .override-row, .reqs.judged .override-row td { display: block; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

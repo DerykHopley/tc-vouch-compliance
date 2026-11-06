@@ -1,4 +1,4 @@
-import { type AnchorHTMLAttributes, type ReactNode, useState } from 'react'
+import { type AnchorHTMLAttributes, type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
   type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
@@ -338,8 +338,38 @@ type JudgedProps = {
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
  * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
  * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
- * to evidenced on screen hides its draft, which the review drops.
+ * to evidenced on screen hides its draft, which the review drops. On a phone each row is a stacked card, by CSS, its
+ * text clamped to 2 lines with a toggle (`RequirementText`, #211).
  */
+/** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
+ * "Show less" toggles it (`aria-expanded`), offered only when the clamp hides some of it (measured again as the width
+ * changes; where nothing can be measured, it is offered). On a desktop the toggle is hidden and the text shown whole. */
+function RequirementText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [cut, setCut] = useState(true)
+  const shown = useRef<HTMLSpanElement>(null)
+  const id = useId()
+  useLayoutEffect(() => {
+    const el = shown.current
+    if (!el || expanded) return
+    const measure = () => setCut(el.clientHeight === 0 || el.scrollHeight > el.clientHeight + 1)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [expanded, text])
+  return (
+    <td className="rq">
+      <span ref={shown} id={id} className={expanded ? 'rq-text' : 'rq-text clamped'}>{text}</span>
+      {(cut || expanded) && (
+        <button className="btn btn-ghost rq-toggle" aria-expanded={expanded} aria-controls={id}
+          onClick={() => setExpanded((now) => !now)}>{expanded ? 'Show less' : 'Show full requirement'}</button>
+      )}
+    </td>
+  )
+}
+
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language }:
   JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
@@ -362,8 +392,8 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
-                <td className="rq">{r.text}</td>
-                <td>
+                <RequirementText text={r.text} />
+                <td className="verdict-col">
                   <div className="verdict-cell">
                     <VerdictChip verdict={r.verdict} language={language} />
                     {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
@@ -380,7 +410,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                     )}
                   </div>
                 </td>
-                <td>
+                <td className="evidence-col">
                   {applies && (kinds.length === 0 ? <span className="why">No evidence</span> : (
                     <span className="evidence">
                       {kinds.map((k) => <span key={k} className={`kind kind-${k}`}>{k}</span>)}
@@ -389,7 +419,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   ))}
                 </td>
                 <td className="quotes-cell"><div>
-                  <p className="why">{r.reason}</p>
+                  <p className="why reason">{r.reason}</p>
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
                     <CitedQuote key={i} quote={c.quote}>

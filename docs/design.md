@@ -64,7 +64,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 
 | Width | What changes |
 |---|---|
-| under 700px | one column; the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide; the page leaves room at its foot for the Ask Vouch button (88px of padding and scroll padding), so a field scrolled to, tapped or tabbed to stops above it (#198) |
+| under 700px | one column; the working paper's requirements as stacked cards (Components, Requirement row); the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide; the page leaves room at its foot for the Ask Vouch button (88px of padding and scroll padding), so a field scrolled to, tapped or tabbed to stops above it (#198) |
 | 700–1000px | the working paper's control index stacks above the paper; Dossier's hero, band and ask panel go to one column |
 | over 1000px | working paper: index (about 250px) beside the paper; a pinned chat takes a column of about 400px beside the page |
 
@@ -92,7 +92,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | Roll-up explanation (#212) | on the working paper, under the head's Verdict line, a `field-note` (`--muted`) saying why the control has its verdict, shown only when a row's verdict differs from it: "Not evidenced: no must requirement is fully evidenced (2 of 2 partly evidenced)."; in the profile's language (English and German), as the verdict words are; it follows the lead's overrides as the verdict chip does |
 | Citation | quote (serif italic, brass rule), document id and version, section, kind, stale flag, "quote verified". In the chat: the quote and its document id only |
 | Agent steps (trace) | streaming, done; a guard step and an overlay branch step marked apart |
-| Requirement row | must, should, high protection, country overlay; each verdict; override with reason; not applicable with reason |
+| Requirement row | must, should, high protection, country overlay; each verdict; override with reason; not applicable with reason. **Phone: requirements as stacked cards (owner, 2026-11-06; #211, option A):** under 700px each row is a card, from the same markup: the id, the column and the verdict chip on one line; the requirement text at full width, clamped to 2 lines with a "Show full requirement" toggle (`aria-expanded`, a 44px ghost button); the evidence kinds and stale flag; the reason, then the quotes and the remediation item as on desktop. The desktop table is unchanged |
 | Review bar | proposed (note and Accept / Reject), accepted, rejected (with "Assess again") |
 | Remediation item | draft (approve, discard), approved, discarded |
 | Control card | not assessed (dashed `--rule` edge), assessing, proposed, accepted, rejected; the verdict as a coloured bottom edge |
