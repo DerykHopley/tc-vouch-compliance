@@ -12,6 +12,7 @@ import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from datetime import date
 from importlib.metadata import version
 from typing import Annotated, Any
 
@@ -21,7 +22,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, remediation
+from vouch import audit, remediation, report
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -124,6 +125,7 @@ SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Disc
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
+REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -771,6 +773,37 @@ def dossier_overview(
         raise _unreadable_edition(profile, OVERVIEW_FAILED) from None
     clean, _ = redact_data(overview(profile, controls, latest, discarded))
     return clean | {"requirements": paper_requirements(profile, controls)}
+
+
+@router.get("/report")
+def readiness_report(
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    trail: AuditTrail,
+) -> dict[str, Any]:
+    """The readiness report for the user's compliance profile (vouch.report, #234), in its
+    answer language: readiness as the overview counts it, each control's reviewed verdict, the
+    approved remediation items, the not-applicable list, the newest page of the audit trail
+    (`trail.next` reads on at GET /api/audit-trail) and the disclaimer, with the report's words.
+    No model runs. Dated the server's date; an unreadable ISA edition is a plain 500. Redacted
+    as every answer is."""
+    latest = newest_by_control(memory, saver)
+    decided: dict[remediation.Key, remediation.DecidedItem] = {}
+    for assessment in latest.values():
+        if assessment.status == "accepted":
+            decided |= items.decided(memory.user_id, memory.profile_id, assessment.thread_id)
+    page = audit.read(trail, memory.user_id, profile.id)
+    try:
+        controls = profile.isa_edition().controls
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, REPORT_FAILED) from None
+    built = report.readiness_report(
+        profile, controls, latest, decided=decided, trail=page, today=date.today()
+    )
+    clean, _ = redact_data(built)
+    return clean
 
 
 class ChatRequest(BaseModel):
