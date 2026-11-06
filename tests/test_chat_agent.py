@@ -181,6 +181,7 @@ def test_assess_in_the_chat_streams_the_steps_and_ends_with_the_verdict_and_its_
     assert len(finished) == 1
     assert finished[0]["control_id"] == "5.1.1"
     assert finished[0]["status"] == "waiting-for-review"
+    assert finished[0]["answer_language"] == "en"  # its verdict chip's words (#200)
     assert names(events).index("assessment") > names(events).index("step")
     assert "waits for your review on the control's working paper" in reply(events)
     assert names(events)[-1] == "done"
