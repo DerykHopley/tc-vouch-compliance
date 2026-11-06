@@ -3,9 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
-import { fetchProfiles, type ProfileSummary, profileLabel } from './profiles.ts'
+import { fetchProfiles, type ProfileSummary, profileLabel, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
-import { authHeaders, setOnSignedOut, setProfile, setTokenSource } from './session.ts'
+import {
+  authHeaders, rememberedProfile, rememberProfile, setOnSignedOut, setProfile, setTokenSource,
+} from './session.ts'
 
 const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany',
   answer_language: 'en' }
@@ -23,7 +25,9 @@ afterEach(() => {
   setOnSignedOut(null)
   delete document.documentElement.dataset.theme
   window.history.replaceState(null, '', '/')
+  window.localStorage.clear()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('profileLabel', () => {
@@ -48,6 +52,42 @@ describe('authHeaders', () => {
     setProfile('testwerk')
     giveToken('t0ken')
     expect(await headers).toEqual({ Authorization: 'Bearer t0ken', 'X-Vouch-Profile': 'nordlicht' })
+  })
+})
+
+describe('the remembered profile, issue 201', () => {
+  it('is the one last remembered, and none before', () => {
+    expect(rememberedProfile()).toBeNull()
+    rememberProfile('testwerk')
+    expect(rememberedProfile()).toBe('testwerk')
+  })
+
+  it('is none, without failing, where the browser keeps no storage', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('denied') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('denied') })
+    expect(() => rememberProfile('testwerk')).not.toThrow()
+    expect(rememberedProfile()).toBeNull()
+  })
+})
+
+describe('startingProfile', () => {
+  const both = { profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }
+
+  it('is the remembered profile while it is listed', () => {
+    expect(startingProfile(both, 'testwerk')).toEqual({ id: 'testwerk', fellBack: false })
+  })
+
+  it('is the default, saying it fell back, when the remembered one is no longer listed', () => {
+    expect(startingProfile(both, 'alpenwerk')).toEqual({ id: 'nordlicht', fellBack: true })
+  })
+
+  it('is the default, or the first listed, with none remembered', () => {
+    expect(startingProfile(both, null)).toEqual({ id: 'nordlicht', fellBack: false })
+    expect(startingProfile({ profiles: [TESTWERK], default: null }, null)).toEqual({ id: 'testwerk', fellBack: false })
+  })
+
+  it("is none without a list: the API's default answers", () => {
+    expect(startingProfile(null, 'testwerk')).toEqual({ id: null, fellBack: false })
   })
 })
 
@@ -153,6 +193,35 @@ describe('ProfiledApp', () => {
     expect((screen.getByRole('combobox', { name: 'Profile' }) as HTMLSelectElement).value).toBe('testwerk')
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(screen.getByRole('button', { name: 'Light theme' })).toBeTruthy()
+  })
+
+  it('opens the profile chosen before a reload, and remembers each switch, issue 201', async () => {
+    rememberProfile('testwerk')
+    const fetch = serve([NORDLICHT, TESTWERK])
+    render(<ProfiledApp />)
+    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['testwerk'])
+    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Profile' }), 'nordlicht')
+
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    expect(rememberedProfile()).toBe('nordlicht')
+  })
+
+  it('a remembered profile no longer listed opens the default, and the top bar says so, issue 201', async () => {
+    rememberProfile('alpenwerk')
+    const fetch = serve([NORDLICHT, TESTWERK])
+    render(<ProfiledApp />)
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['nordlicht'])
+    const notice = within(screen.getByRole('banner')).getByRole('status')
+    expect(notice.textContent).toBe('Your last profile is no longer available: showing Nordlicht Komponenten GmbH.')
+    expect(rememberedProfile()).toBeNull() // said once: the next reload opens the default quietly
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Profile' }), 'testwerk')
+    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
+    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
   })
 
   it('with one profile, shows its name in the top bar and no menu', async () => {

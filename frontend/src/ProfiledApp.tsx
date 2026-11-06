@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import App from './App.tsx'
-import { fetchProfiles, type Profiles } from './profiles.ts'
+import { fetchProfiles, type Profiles, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
-import { setProfile } from './session.ts'
+import { rememberedProfile, rememberProfile, setProfile } from './session.ts'
 import TopBar from './TopBar.tsx'
 
 /** The profile list as read: not yet, or what came back (null: it couldn't be read). */
@@ -13,21 +13,30 @@ type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | nu
  * once the list has answered, under the default profile (or the first listed), so its first calls already name it.
  * Switching names the new profile on every API call and opens the app afresh, so nothing the page holds (overview,
  * working paper, run, chat) carries over from the profile before. Without a list, calls name none and the API's
- * default answers.
+ * default answers. The browser remembers the last switch, so a reload or a pasted link opens that profile while it is
+ * still listed; otherwise the default, and the top bar says so (#201).
  */
 export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
   const [chosen, setChosen] = useState<string | null>(null)
+  const [fellBack, setFellBack] = useState(false)
   const choose = (id: string) => {
     setProfile(id) // before the app opens again, so its first calls name it
     setChosen(id)
+  }
+  const switchTo = (id: string) => {
+    rememberProfile(id)
+    setFellBack(false)
+    choose(id)
   }
   useEffect(() => {
     let current = true
     void fetchProfiles().then((found) => {
       if (!current) return
-      const first = found?.default ?? found?.profiles[0]?.id
-      if (first) choose(first)
+      const start = startingProfile(found, rememberedProfile())
+      if (start.fellBack) rememberProfile(null) // said once; the next reload opens the default quietly
+      if (start.id) choose(start.id)
+      setFellBack(start.fellBack)
       setListing({ status: 'read', profiles: found })
     })
     return () => {
@@ -38,7 +47,7 @@ export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
 
   if (listing.status === 'reading') return <TopBar />
   const switcher = listing.profiles && chosen
-    ? <ProfileSwitcher profiles={listing.profiles.profiles} selected={chosen} onSwitch={choose} />
+    ? <ProfileSwitcher profiles={listing.profiles.profiles} selected={chosen} onSwitch={switchTo} fellBack={fellBack} />
     : undefined
   return <App key={chosen ?? ''} onSignOut={onSignOut} profileSwitcher={switcher} />
 }

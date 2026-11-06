@@ -21,9 +21,11 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .nav a[aria-current="page"] { color: var(--ink); background: var(--sheet); box-shadow: inset 0 -2px 0 var(--brass); }
 .theme { margin-left: auto; }
 /* The profile switcher (#47), as the prototype's (variant E, Tailored): a pill menu, or one profile's name. */
-.prof { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.prof { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
 .prof + .theme { margin-left: 0; }
 .prof .field { flex: 0 1 auto; max-width: 100%; border-radius: 999px; }
+/* A remembered profile no longer listed (#201): a quiet line under the menu, naming the one shown. */
+.prof-note { flex-basis: 100%; text-align: right; font-size: 12px; color: var(--muted); }
 
 /* Buttons and chips */
 /* A link on its own line meets the 44px touch-target floor (design.md, Accessibility floor). */
