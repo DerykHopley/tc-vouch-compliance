@@ -1,11 +1,12 @@
 import { type FormEvent, Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, verdictLang, verdictWord } from './assessment.ts'
 import {
-  CHAT_UNREACHABLE, GREETING_UNREACHABLE, namedControls, type PageContext, pageLabel, sendChat, suggestionLabel,
+  type ChatMessage, CHAT_UNREACHABLE, fetchConversation, GREETING_UNREACHABLE, namedControls, newConversation, type PageContext, pageLabel, sendChat, suggestionLabel,
   suggestionMessage,
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
 import { controlPath, type NextStep } from './overview.ts'
+import StepText from './StepText.tsx'
 
 // Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
 const SHEET_QUERY = '(max-width: 700px)'
@@ -48,15 +49,6 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
   pinned: { className: 'bubble pinned', size: null, pin: 'enlarged' },
 }
 
-/** A line in the chat: the lead's message, Vouch's reply (or a notice that it failed), an assessment's step, or an
- * assessment's verdict with the way to its working paper. */
-type Message =
-  | { from: 'lead'; text: string }
-  /** `papers`: the controls a cross-control answer may name, linked to their working papers when named (#217). */
-  | { from: 'vouch'; text: string; failed?: boolean; papers?: string[] }
-  | { from: 'step'; step: Step }
-  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus; language?: string }
-
 type OnOpen = ((controlId: string) => void) | undefined
 
 /** The chat's action style (#176, design.md, Components: Chat): a ghost pill at least 44px tall, on one line, for
@@ -94,8 +86,12 @@ function PaperLinks({ reply, papers, onOpen }: { reply: string; papers: string[]
 
 /** An assessment's step, as the working paper's trace shows it: its node, then what it did; a guard step marked
  * apart (design.md, Agent steps). */
-function StepLine({ step }: { step: Step }) {
-  return <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}><b>{step.node}</b> {step.text}</p>
+function StepLine({ step, language }: { step: Step; language?: string }) {
+  return (
+    <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}>
+      <b>{step.node}</b> <StepText step={step} language={language} />
+    </p>
+  )
 }
 
 /** The verdict an assessment from the chat ended with (in the profile's words, #200), its review state tag, and
@@ -119,11 +115,13 @@ type Props = {
   onOpen?: (controlId: string) => void
   /** An assessment the chat started has its verdict. */
   onAssessed?: (controlId: string) => void
+  /** The profile's answer language (ISO 639-1), once the overview is read: Vouch's replies are marked with it (#244). */
+  language?: string
 }
 
 /** The "Ask Vouch" button, bottom right, and the chat it opens: on first opening, Vouch's greeting (where the lead
  * stands, and the next step as a chip). */
-export default function AskVouch({ context, onOpen, onAssessed }: Props) {
+export default function AskVouch({ context, onOpen, onAssessed, language }: Props) {
   const [state, setState] = useState<ChatState>('closed')
   const open = state !== 'closed'
   const fabRef = useRef<HTMLButtonElement>(null)
@@ -186,7 +184,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
   }, [open])
 
   const [draft, setDraft] = useState('')
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [suggestion, setSuggestion] = useState<NonNullable<NextStep> | null>(null)
   const [busy, setBusy] = useState(false)
   const sending = useRef(false) // a ref, so Enter twice in one tick still sends once
@@ -214,7 +212,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     setBusy(true)
     setSuggestion(null)
     if (text !== null) setMessages((all) => [...all, { from: 'lead', text }])
-    const add = (m: Message) => setMessages((all) => [...all, m])
+    const add = (m: ChatMessage) => setMessages((all) => [...all, m])
     // The controls this turn's answer may name (a `papers` event, #217), for its working-paper links. The tool sends
     // it as it runs, before the answer's words, so each piece of the answer written after it carries it.
     let papers: string[] | undefined
@@ -230,7 +228,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
       else greetAgain.current = true
     }
     // A finished assessment's verdict line, with its link, is the last thing the turn adds: after Vouch's words on it.
-    const verdicts: Message[] = []
+    const verdicts: ChatMessage[] = []
     try {
       for await (const item of sendChat(text, context, threadId.current)) {
         if (item.event === 'token') write(item.data.text)
@@ -253,8 +251,9 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     }
   }
 
-  // Vouch greets the lead the first time the chat opens: where they stand, and the next step. A greeting that failed
-  // is asked for again the next time the chat opens (never over and over while it stays open).
+  // The first time the chat opens, the conversation kept on the server comes back as it was (#251); with none, Vouch
+  // greets the lead: where they stand, and the next step. A greeting that failed is asked for again the next time the
+  // chat opens (never over and over while it stays open).
   useEffect(() => {
     if (!open && greetAgain.current) {
       greetAgain.current = false
@@ -262,8 +261,37 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     }
     if (!open || greeted.current) return
     greeted.current = true
-    void converse(null)
+    void (async () => {
+      // Busy while it reads, so nothing sent meanwhile is overwritten by the conversation coming back.
+      sending.current = true
+      setBusy(true)
+      const kept = await fetchConversation()
+      sending.current = false
+      setBusy(false)
+      if (kept.threadId && kept.messages.length > 0) {
+        threadId.current = kept.threadId
+        setMessages(kept.messages)
+        return
+      }
+      if (kept.note) setMessages([{ from: 'vouch', text: kept.note, failed: true }])
+      await converse(null)
+    })()
   })
+
+  /** A new conversation (#251): the chat empties, and the next message starts a thread; the old one is kept. */
+  async function startAfresh() {
+    if (sending.current) return
+    // Busy until the server has let the old one go, so the next message's new thread can't race it.
+    sending.current = true
+    setBusy(true)
+    threadId.current = null
+    setMessages([])
+    setSuggestion(null)
+    await newConversation()
+    sending.current = false
+    setBusy(false)
+    inputRef.current?.focus()
+  }
 
   function send(e: FormEvent) {
     e.preventDefault()
@@ -285,7 +313,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
       <div className="bubble-head">
         <b>Vouch</b>
-        <span className="page-context">{pageLabel(context)}</span>
+        <span className="page-context" title={pageLabel(context)}>{pageLabel(context)}</span>
         {!sheet && pinnable && pin && (
           <button className="btn btn-ghost" aria-pressed={state === 'pinned'} onClick={() => setState(pin)}>
             Pin beside the page
@@ -294,6 +322,9 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         {!sheet && size && (
           <button className="btn btn-ghost" onClick={() => setState(size.to)}>{size.label}</button>
         )}
+        {/* "New" on screen, so the 390px bubble's header keeps to one line; its name says what it starts. */}
+        <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}
+          aria-label="New conversation" title="New conversation">New</button>
         <button className="btn btn-ghost" onClick={() => setState('closed')} aria-label="Close the chat">
           Close
         </button>
@@ -303,10 +334,10 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         {messages.map((m, i) => m.from === 'verdict'
           ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} language={m.language}
             onOpen={onOpen} />
-          : m.from === 'step' ? <StepLine key={i} step={m.step} />
+          : m.from === 'step' ? <StepLine key={i} step={m.step} language={language} />
             : m.from === 'vouch' && !m.failed ? (
               <Fragment key={i}>
-                <ChatReply text={m.text} />
+                <ChatReply text={m.text} language={language} />
                 {m.papers && <PaperLinks reply={m.text} papers={m.papers} onOpen={onOpen} />}
               </Fragment>
             )

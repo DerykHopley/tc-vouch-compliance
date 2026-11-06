@@ -117,12 +117,17 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ matrix.browser }}-${{ hashFiles('frontend/e2e/uv.lock') }}
-      - name: install the browser and its system packages, bounded and tried twice
+      # The system packages once, bounded by the step only: a `timeout` around apt killed uv but not
+      # apt, which kept the dpkg lock, so its retry failed (#290).
+      - name: install the browser's system packages
+        timeout-minutes: 6
+        run: uv run --locked --project frontend/e2e playwright install-deps ${{ matrix.browser }}
+      - name: download the browser, bounded and tried twice
         timeout-minutes: 7
         run: |
           for attempt in 1 2; do
-            timeout 180 uv run --locked --project frontend/e2e playwright install --with-deps ${{ matrix.browser }} && exit 0
-            echo "::warning::playwright install attempt $attempt failed or timed out"
+            timeout --kill-after=10 180 uv run --locked --project frontend/e2e playwright install ${{ matrix.browser }} && exit 0
+            echo "::warning::browser download attempt $attempt failed or timed out"
           done
           exit 1
       - run: frontend/e2e/run.sh --browser ${{ matrix.browser }}
