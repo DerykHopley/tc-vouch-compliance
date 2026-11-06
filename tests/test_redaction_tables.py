@@ -16,7 +16,8 @@ SECRET = "sk-or-v1-0123456789abcdefabcdef"
 
 # Each pattern in REDACTIONS, by its regex: secrets it must remove (the text, the part that must
 # go, and the label it's removed as), and prose it must leave as written, near misses where it
-# can. A case-insensitive pattern is also checked in lower, upper and mixed case.
+# can. Each is checked in lower, upper and mixed case too, but the key and JWT shapes, which are
+# lower case by their issuers' design (LOWER_ONLY): their upper case is pinned as left alone.
 CASES: dict[str, tuple[list[tuple[str, str, str]], list[str]]] = {
     r"\b([A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)([^\s@/]+)@": (
         [("postgresql://vouch:s3cretPass@db.example/vouch", "s3cretPass", PASSWORD)],
@@ -61,16 +62,28 @@ CASES: dict[str, tuple[list[tuple[str, str, str]], list[str]]] = {
 }
 
 
+LOWER_ONLY = {p for p in CASES if p.startswith((r"\beyJ", r"(?<![A-Za-z0-9])"))}
 FLAGS = {r.pattern.pattern: r.pattern.flags for r in REDACTIONS}
 
 
 def cased(text: str, pattern: str) -> list[str]:
-    """`text`, and for a case-insensitive pattern (by its compiled flags) its lower, upper and
-    mixed-case forms too."""
-    if not FLAGS.get(pattern, 0) & re.IGNORECASE:
+    """`text`, and but for a LOWER_ONLY pattern its lower, upper and mixed-case forms too."""
+    if pattern in LOWER_ONLY:
         return [text]
     mixed = "".join(c.upper() if i % 2 else c.lower() for i, c in enumerate(text))
     return [text, text.lower(), text.upper(), mixed]
+
+
+def test_only_the_key_and_jwt_shapes_are_lower_case_only_and_neither_is_case_insensitive():
+    assert len(LOWER_ONLY) == 2
+    assert not any(FLAGS[p] & re.IGNORECASE for p in LOWER_ONLY)
+
+
+@pytest.mark.parametrize(
+    "text", [text.upper() for p in sorted(LOWER_ONLY) for text, _, _ in CASES[p][0]]
+)
+def test_a_lower_case_only_shape_in_upper_case_is_left_alone(text):
+    assert redact(text) == (text, [])
 
 
 def test_every_pattern_has_a_case_row():
