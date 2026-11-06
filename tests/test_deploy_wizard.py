@@ -19,8 +19,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 WIZARD = ROOT / "scripts" / "deploy-wizard.sh"
 BASH = shutil.which("bash") or "/bin/bash"
-URL = "https://vouch-123.europe-west1.run.app"  # the deterministic URL, for project number 123
-HASHED = "https://vouch-abc123xyz-ew.a.run.app"  # the address status.url gives an older service
+URL = "https://vouch-123.europe-west1.run.app"  # Cloud Run's fixed address, for project number 123
+HASHED = "https://vouch-abc123xyz-ew.a.run.app"  # status.url on the live service
 IMAGE = "europe-west1-docker.pkg.dev/vouch-demo-123/vouch/vouch"
 SQL_INSTANCE = "vouch-demo-123:europe-west1:vouch-db"
 DEFAULT_ACCOUNT = "123-compute@developer.gserviceaccount.com"
@@ -527,12 +527,6 @@ def test_a_failed_gcloud_step_stops_there_naming_the_step_and_the_rerun(tmp_path
     assert "scripts/deploy-wizard.sh again" in result.stderr
     assert "gcloud secrets versions add" not in calls
     assert "gcloud run deploy" not in calls
-
-
-def test_a_first_deploy_accepts_sign_in_from_the_deterministic_url(tmp_path):
-    result, calls = deployed(tmp_path, existing=False)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert env_vars(calls)["CLERK_AUTHORIZED_PARTIES"] == URL
 
 
 @pytest.mark.parametrize("existing", [True, False], ids=["redeploy", "first-deploy"])

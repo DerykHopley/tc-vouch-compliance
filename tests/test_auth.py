@@ -117,12 +117,14 @@ def clerk() -> FakeClerk:
     return FakeClerk({"user_alice": {}, "user_bob": {}, "user_dev": {"role": "developer"}})
 
 
-def clerk_app(clerk: FakeClerk, clock: Callable[[], float] = time.monotonic):
+def clerk_app(
+    clerk: FakeClerk, clock: Callable[[], float] = time.monotonic, keys: ClerkKeys = KEYS
+):
     """The app in clerk mode, its Clerk Backend API the fake, plus routes that show the user,
     their role, and one only a developer may use (as #34's developer page will)."""
-    app = create_app(Settings(auth_mode="clerk", clerk=KEYS))
+    app = create_app(Settings(auth_mode="clerk", clerk=keys))
     http = httpx.Client(transport=httpx.MockTransport(clerk))
-    app.state.auth = ClerkAuth(KEYS, client=http, clock=clock)
+    app.state.auth = ClerkAuth(keys, client=http, clock=clock)
 
     @app.get("/whoami")
     def whoami(user: Annotated[User, Depends(current_user)]) -> dict[str, str]:
@@ -215,10 +217,7 @@ def test_only_a_token_from_cloud_run_s_fixed_address_is_accepted(clerk):
         }
     )
     assert settings.clerk
-    app = create_app(settings)
-    http = httpx.Client(transport=httpx.MockTransport(clerk))
-    app.state.auth = ClerkAuth(settings.clerk, client=http)
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(clerk_app(clerk, keys=settings.clerk), raise_server_exceptions=False)
 
     def access(azp: str) -> int:
         return client.get("/api/access", headers=bearer(token(azp=azp))).status_code

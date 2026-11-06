@@ -371,12 +371,12 @@ fi
 
 step  # Deploy
 # Sign-in accepts session tokens from one address only, Cloud Run's fixed one (#178): it is known
-# before the service exists and never changes. Cloud Run also serves an older service at a hashed
-# address (what status.url gives); sign-in there is refused, so it is never the one to share.
+# before the service exists and never changes. Cloud Run may also serve the service at a hashed
+# address, which is what status.url gives on the live one; sign-in there is refused, so it is
+# never the one to share.
 SHARE_URL="https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app"
-AUTHORIZED_PARTIES="$SHARE_URL"
 SECRETS_ARG=$(IFS=,; printf '%s' "${PINNED[*]}")
-ENV_VARS="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$AUTHORIZED_PARTIES"
+ENV_VARS="CLERK_PUBLISHABLE_KEY=$PUBLISHABLE,CLERK_AUTHORIZED_PARTIES=$SHARE_URL"
 if [[ -n "$DISCORD_SERVER_ID" ]]; then
   ENV_VARS+=",DISCORD_SERVER_ID=$DISCORD_SERVER_ID"
   say "Sign-in lets in members of Discord server $DISCORD_SERVER_ID, invited users and developers."
@@ -385,7 +385,7 @@ else
   say "With Clerk's sign-up open (#153), that is anyone with a Discord account.${N}"
 fi
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on OpenRouter, signed in"
-say "through Clerk. Each secret's version is pinned; sign-in accepts $AUTHORIZED_PARTIES."
+say "through Clerk. Each secret's version is pinned; sign-in accepts $SHARE_URL alone."
 run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --region="$REGION" \
   --project="$PROJECT_ID" --allow-unauthenticated --min-instances=0 --max-instances=1 --max=1 \
   --set-secrets="$SECRETS_ARG" \

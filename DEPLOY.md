@@ -106,8 +106,10 @@ gcloud run deploy vouch --image=$IMAGE:v1 --region=$REGION --project=$PROJECT_ID
 ```
 
 **One address to share (#178).** `$URL` is Cloud Run's fixed address,
-`https://vouch-<project number>.$REGION.run.app` (live: `https://vouch-828715466396.europe-west1.run.app`),
-built from the project number and region, so it is known before the first deploy. Cloud Run also
+`https://vouch-<project number>.$REGION.run.app`, built from the project number and region, so it
+is known before the first deploy (*checked*, Cloud Run's "Invoke with an HTTPS request" page: the
+deterministic URL; live, *checked* 2026-11-05: `https://vouch-828715466396.europe-west1.run.app`
+answers `/api/health`). Cloud Run also
 serves the service at a hashed address, `https://vouch-<hash>-ew.a.run.app`, and that is what
 `status.url` gives on the live service (*checked* 2026-11-05: `gcloud run services describe` lists
 both in its `run.googleapis.com/urls` annotation). Sign-in accepts session tokens only from
