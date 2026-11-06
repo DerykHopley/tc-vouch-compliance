@@ -384,8 +384,10 @@ textarea.field { resize: vertical; font-family: inherit; }
   /* No table scrolls or clips: each fits the page's width, its long values wrapping. */
   .table-wrap { overflow: visible; }
   .report-table { min-width: 0; font-size: 10px; }
-  /* `anywhere` (not `break-word`) also narrows each column's least width, so an auto-laid table fits the page. */
-  .report-table th, .report-table td { overflow-wrap: anywhere; }
+  /* Words wrap at spaces only; a long id, document or model name (the mono values) may break anywhere, which also
+     narrows its column's least width, so an auto-laid table fits the page. */
+  .report-table th, .report-table td { overflow-wrap: break-word; }
+  .report-table .mono { overflow-wrap: anywhere; }
   .report-table .report-q, .report-trail .report-q { min-width: 0; max-width: none; }
   .report-trail .mono { font-size: 9px; }
   .report-line { white-space: normal; }
