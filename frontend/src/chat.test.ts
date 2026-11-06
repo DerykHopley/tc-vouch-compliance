@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CHAT_UNREACHABLE, type ChatEvent, pageLabel, sendChat, suggestionLabel, suggestionMessage } from './chat.ts'
+import {
+  CHAT_UNREACHABLE, type ChatEvent, namedControls, pageLabel, sendChat, suggestionLabel, suggestionMessage,
+} from './chat.ts'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -81,6 +83,21 @@ describe('suggestion chips', () => {
     expect(suggestionLabel({ control_id: '1.6.1', action: 'assess-again' })).toBe('Assess 1.6.1 again')
     expect(suggestionLabel({ control_id: '5.1.1', action: 'review' })).toBe('Review 5.1.1')
     expect(suggestionMessage({ control_id: '1.6.1', action: 'assess-again' })).toBe('Assess 1.6.1')
+  })
+})
+
+describe('namedControls (issue 217)', () => {
+  const ids = ['1.1.1', '5.1.1', '5.1.2', '5.1.10']
+
+  it("gives the tool's controls the reply names, whole ids only, in the tool's order", () => {
+    expect(namedControls('Documented only: **5.1.2** and 5.1.1. Not assessed: 1.1.1.', ids))
+      .toEqual(['1.1.1', '5.1.1', '5.1.2'])
+    expect(namedControls('Only 5.1.10 is stale.', ids)).toEqual(['5.1.10'])
+    expect(namedControls('Version 15.1.1 and 5.1.1x are no ids.', ids)).toEqual([])
+  })
+
+  it("never gives an id the tool didn't list", () => {
+    expect(namedControls('See 9.9.9 and 5.1.1.', ['5.1.1'])).toEqual(['5.1.1'])
   })
 })
 

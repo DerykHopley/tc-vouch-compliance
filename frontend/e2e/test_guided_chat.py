@@ -238,7 +238,10 @@ def test_a_question_across_controls_is_answered_from_the_reviewed_assessments(pa
     page.get_by_role("button", name="Send").click()
 
     expect(log.locator(".msg-step").last).to_contain_text("Read the newest assessments of")
-    answer = log.locator(".msg").last
+    answer = log.locator(".msg:not(.paper-links)").last
     expect(answer).to_contain_text("Documented evidence only:")
     expect(answer).to_contain_text("Not assessed yet:")
     expect(answer).not_to_contain_text("5.1.1: not assessed yet")
+    # #217: after it, each control it names links to its working paper.
+    links = log.locator(".paper-links").last
+    expect(links.get_by_role("link", name="Working paper 5.1.1")).to_be_visible()
