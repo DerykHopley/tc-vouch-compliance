@@ -246,10 +246,11 @@ def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessa
         "full, every control id it lists included, and give its message as it is when it "
         f"declines. Use the `{EXPLAIN_CONTROL}` tool for questions about a control, such as "
         f"what is missing for it, and the `{SEARCH_EVIDENCE}` tool for questions about the "
-        f"company's evidence. Use the `{ASSESSED_CONTROLS}` tool for questions across controls, "
-        "such as which controls have documented evidence only, stale evidence, or musts not "
-        "evidenced: name each control by its id, and the controls not assessed yet as such, "
-        "never guessing their evidence. Answer only from what these tools return; when they find nothing, "
+        f"company's evidence. Use the `{ASSESSED_CONTROLS}` tool for questions across "
+        "controls, such as which controls have documented evidence only, stale evidence, or "
+        "musts not evidenced: name each control by its id, and the controls not assessed yet "
+        "as such, never guessing their evidence. Answer only from what these tools return; "
+        "when they find nothing, "
         f"say “{NO_EVIDENCE}” and nothing more, never an answer of your own. Cite evidence only "
         'as an exact quote inside a cite tag naming its document id, <cite doc="DOC_ID">exact '
         'words</cite>, such as <cite doc="encryption-standard">Every company laptop uses '
@@ -315,10 +316,23 @@ def _next_words(next_step: NextStep | None) -> str:
     }[next_step["action"]]
 
 
-def _kinds(requirements: list[RequirementVerdict]) -> str:
-    """The evidence kinds the requirements' citations rest on, in words."""
-    kinds = sorted({c.kind for r in requirements for c in r.citations})
-    return " and ".join(kinds) + (" only" if len(kinds) == 1 else "") if kinds else "none cited"
+def _kinds(requirements: list[RequirementVerdict]) -> list[EvidenceKind]:
+    """The evidence kinds the requirements' citations rest on, sorted."""
+    return sorted({c.kind for r in requirements for c in r.citations})
+
+
+def _is_stale(requirement: RequirementVerdict) -> bool:
+    return any(c.stale for c in requirement.citations)
+
+
+def _requirement_words(requirement: RequirementVerdict) -> str:
+    """A requirement in brief: its id, column, verdict, evidence kinds and staleness."""
+    kinds = _kinds([requirement])
+    return (
+        f"{requirement.id} ({requirement.column}) {verdict_words(requirement.verdict)}"
+        + (f", {' and '.join(kinds)}" if kinds else "")
+        + (", stale" if _is_stale(requirement) else "")
+    )
 
 
 def assessed_controls_words(controls: list[IsaControl], latest: dict[str, Assessment]) -> str:
@@ -339,24 +353,20 @@ def assessed_controls_words(controls: list[IsaControl], latest: dict[str, Assess
             lines.append(f"- {control.id}: not assessed yet.")
             continue
         applying = judged(assessment)
-        counted = [r for r in applying if counts_towards_roll_up(r)]
-        if {c.kind for r in counted for c in r.citations} == {"documented"}:
+        counted = _kinds([r for r in applying if counts_towards_roll_up(r)])
+        if counted == ["documented"]:
             documented_only.append(control.id)
-        if any(c.stale for r in applying for c in r.citations):
+        if any(_is_stale(r) for r in applying):
             stale.append(control.id)
         missing = [r.id for r in applying if r.column == "must" and r.verdict != "evidenced"]
         if missing:
             musts_missing.append(f"{control.id} ({', '.join(missing)})")
-        found = "; ".join(
-            f"{r.id} ({r.column}) {verdict_words(r.verdict)}"
-            + (f", {_kinds([r]).removesuffix(' only')}" if r.citations else "")
-            + (", stale" if any(c.stale for c in r.citations) else "")
-            for r in applying
-        )
+        rest_on = " and ".join(counted) + (" only" if len(counted) == 1 else "") or "no cited"
+        requirement_words = "; ".join(_requirement_words(r) for r in applying)
         status = dict(_STATUS_WORDS)[assessment.status]
         lines.append(
             f"- {control.id}: {verdict_words(assessment.verdict)}, {status}; its counted "
-            f"requirements rest on {_kinds(counted)} evidence. {found}."
+            f"requirements rest on {rest_on} evidence. {requirement_words}."
         )
     for label, ids in (
         ("Documented evidence only", documented_only),

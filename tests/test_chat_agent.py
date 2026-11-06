@@ -37,6 +37,7 @@ from vouch.chat_agent import (
 from vouch.chat_fake import CannedChatModel
 from vouch.citations import Citation
 from vouch.database import Database
+from vouch.documents import EvidenceKind
 from vouch.graph import (
     Assessment,
     RequirementVerdict,
@@ -515,8 +516,8 @@ def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypat
 # Questions across controls (#210): every control's newest assessment at once
 
 
-def _cite(kind: str, *, stale: bool = False) -> Citation:
-    return Citation("doc", "1.0", "Scope", "Quoted words here.", kind, stale, None)  # type: ignore[arg-type]
+def _cite(kind: EvidenceKind, *, stale: bool = False) -> Citation:
+    return Citation("doc", "1.0", "Scope", "Quoted words here.", kind, stale, None)
 
 
 def _assessed(control_id: str, *requirements: RequirementVerdict) -> Assessment:
