@@ -476,6 +476,7 @@ class ChatTools:
                     "verdict": assessment.verdict,
                     "status": assessment.status,
                     "thread_id": assessment.thread_id,
+                    "answer_language": assessment.answer_language,  # its verdict's words (#200)
                 },
             )
         )

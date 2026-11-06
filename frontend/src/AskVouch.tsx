@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, VERDICT_WORDS } from './assessment.ts'
+import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, verdictLang, verdictWord } from './assessment.ts'
 import {
   CHAT_UNREACHABLE, GREETING_UNREACHABLE, type PageContext, pageLabel, sendChat, suggestionLabel, suggestionMessage,
 } from './chat.ts'
@@ -52,7 +52,7 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
 type Message =
   | { from: 'lead' | 'vouch'; text: string; failed?: boolean }
   | { from: 'step'; step: Step }
-  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus }
+  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus; language?: string }
 
 type OnOpen = ((controlId: string) => void) | undefined
 
@@ -78,12 +78,14 @@ function StepLine({ step }: { step: Step }) {
   return <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}><b>{step.node}</b> {step.text}</p>
 }
 
-/** The verdict an assessment from the chat ended with, its review state tag, and "Open the working paper". */
-function VerdictLine({ controlId, verdict, status, onOpen }:
-  { controlId: string; verdict: Verdict; status: ReviewStatus; onOpen: OnOpen }) {
+/** The verdict an assessment from the chat ended with (in the profile's words, #200), its review state tag, and
+ * "Open the working paper". */
+function VerdictLine({ controlId, verdict, status, language, onOpen }:
+  { controlId: string; verdict: Verdict; status: ReviewStatus; language?: string; onOpen: OnOpen }) {
   return (
     <p className="msg">
-      {controlId}: <span className={`chip v-${verdict}`}>{VERDICT_WORDS[verdict]}</span>{' '}
+      {controlId}: <span className={`chip v-${verdict}`} lang={verdictLang(language)}>
+        {verdictWord(verdict, language)}</span>{' '}
       <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>{' '}
       <PaperLink controlId={controlId} onOpen={onOpen}>Open the working paper</PaperLink>
     </p>
@@ -212,7 +214,8 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         else if (item.event === 'step') add({ from: 'step', step: item.data })
         else if (item.event === 'suggestion') setSuggestion(item.data)
         else if (item.event === 'assessment') {
-          verdicts.push({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status })
+          verdicts.push({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status,
+            language: item.data.answer_language })
           onAssessed?.(item.data.control_id)
         } else if (item.event === 'error') failed(item.data.message)
       }
@@ -273,7 +276,8 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
       {/* Busy while a reply streams, so assistive tech announces the finished message, not each piece. */}
       <div ref={logRef} onScroll={noteWhereRead} className="bubble-log" role="log" aria-live="polite" aria-busy={busy}>
         {messages.map((m, i) => m.from === 'verdict'
-          ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} onOpen={onOpen} />
+          ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} language={m.language}
+            onOpen={onOpen} />
           : m.from === 'step' ? <StepLine key={i} step={m.step} />
             : m.from === 'vouch' && !m.failed ? <ChatReply key={i} text={m.text} />
               : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : 'msg notice'}>{m.text}</p>)}

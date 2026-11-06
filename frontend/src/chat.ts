@@ -11,7 +11,14 @@ import type { NextStep } from './overview.ts'
 export type PageContext = { page: 'dossier' | 'paper' | 'developer'; controlId: string | null }
 
 /** An assessment the chat started has finished: proposed, waiting for the lead's review on its working paper. */
-export type ChatAssessment = { control_id: string; verdict: Verdict; status: ReviewStatus; thread_id: string }
+export type ChatAssessment = {
+  control_id: string
+  verdict: Verdict
+  status: ReviewStatus
+  thread_id: string
+  /** The profile's (ISO 639-1): the verdict chip's words are in it (#200). */
+  answer_language?: string
+}
 
 export type ChatEvent =
   | { event: 'token'; data: { text: string } }
