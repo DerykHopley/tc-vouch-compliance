@@ -23,6 +23,7 @@ from vouch import model_choice
 from vouch.api import create_app
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
+from vouch.fake_model import ScriptedChatModel
 from vouch.graph import PROMPT_VERSION
 from vouch.model_choice import (
     CALL_BUDGET,
@@ -34,7 +35,7 @@ from vouch.model_choice import (
     ModelChoice,
     OpenRouter,
 )
-from vouch.settings import Settings
+from vouch.settings import DEMO_SCRIPT, DEMO_SCRIPT_DE, Settings
 from vouch.spending import MemorySpendingStore
 
 # langchain-openai probes which TCP keep-alive options the OS takes by opening (never
@@ -207,7 +208,7 @@ def test_assess_model_sets_the_default_until_a_developer_chooses(chat, catalogue
 
 
 def test_a_fake_script_still_wins_over_the_key(chat, catalogue):
-    settings = Settings(openrouter_api_key=SecretStr(KEY), fake_script=model_choice.DEMO_SCRIPT)
+    settings = Settings(openrouter_api_key=SecretStr(KEY), fake_script=DEMO_SCRIPT)
 
     response = assess(TestClient(app_with_key(chat, catalogue, settings)))
 
@@ -326,7 +327,7 @@ def test_the_model_list_is_kept_for_ten_minutes(chat, catalogue):
 
 
 def test_with_a_fake_script_the_id_is_kept_without_asking_openrouter(chat, catalogue):
-    settings = Settings(openrouter_api_key=SecretStr(KEY), fake_script=model_choice.DEMO_SCRIPT)
+    settings = Settings(openrouter_api_key=SecretStr(KEY), fake_script=DEMO_SCRIPT)
     client = TestClient(app_with_key(chat, catalogue, settings))
 
     changed = client.put("/api/developer/model", json={"model": OTHER_MODEL})
@@ -624,3 +625,30 @@ def test_the_role_lookups_503_does_not_say_the_database_is_unavailable(clerk):
 
     assert response.status_code == 503
     assert "unavailable" not in response.json()
+
+
+# --- The fake's demo script follows the profile's answer language (#234) ---------------------
+
+
+def test_on_the_fake_a_german_profile_plays_the_german_demo_and_any_other_the_english_one():
+    choice = ModelChoice(Settings(), MemoryModelStore())
+
+    german = choice.for_assessment(None, answer_language="de")
+    english = choice.for_assessment(None, answer_language="en")
+    lithuanian = choice.for_assessment(None, answer_language="lt")
+    unnamed = choice.for_assessment(None)
+
+    demo = ScriptedChatModel.from_file(DEMO_SCRIPT).script
+    assert german.script == ScriptedChatModel.from_file(DEMO_SCRIPT_DE).script
+    assert german.script != demo
+    assert english.script == lithuanian.script == unnamed.script == demo
+
+
+def test_a_fake_script_runs_every_assessment_whatever_the_language(tmp_path):
+    script = tmp_path / "own.json"
+    script.write_text('{"gather": [{"answer": "Nothing found."}]}')
+    choice = ModelChoice(Settings(fake_script=script), MemoryModelStore())
+
+    own = ScriptedChatModel.from_file(script).script
+    assert choice.for_assessment(None, answer_language="de").script == own
+    assert choice.for_assessment(None, answer_language="en").script == own

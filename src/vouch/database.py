@@ -615,16 +615,17 @@ class Database:
             return existing, False
 
     def remediation_items(
-        self, user_id: str, profile_id: str, thread_id: str
+        self, user_id: str, profile_id: str, thread_ids: list[str]
     ) -> list[dict[str, Any]]:
-        """The user's decided remediation items of one assessment's thread under the profile:
-        mappings of REMEDIATION_COLUMNS. None before vouch-db-setup made the table (a deploy
-        that adds it, before setup runs): nothing is decided yet. Raises DatabaseUnavailable."""
+        """The user's decided remediation items of those assessments' threads under the profile,
+        in one query: mappings of REMEDIATION_COLUMNS. None before vouch-db-setup made the table
+        (a deploy that adds it, before setup runs): nothing is decided yet. Raises
+        DatabaseUnavailable."""
         return self._read_remediation(
             f"SELECT {', '.join(REMEDIATION_COLUMNS)} FROM {REMEDIATION_TABLE} "
             "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
-            "AND thread_id = %(thread_id)s",
-            {"user_id": user_id, "profile_id": profile_id, "thread_id": thread_id},
+            "AND thread_id = ANY(%(thread_ids)s)",
+            {"user_id": user_id, "profile_id": profile_id, "thread_ids": thread_ids},
         )
 
     def discarded_remediation(

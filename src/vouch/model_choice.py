@@ -1,8 +1,9 @@
 """Which model an assessment runs on, and the developer's choice of it (#34).
 
 The order, for the API and the CLI alike: ASSESS_FAKE_SCRIPT's scripted fake when set (tests,
-development); else OpenRouter when OPENROUTER_API_KEY is set; else the bundled demo script, so a
-missing key costs nothing. On Cloud Run every assessment route needs a signed-in user (clerk
+development); else OpenRouter when OPENROUTER_API_KEY is set; else the bundled demo script in the
+profile's answer language (vouch.settings.DEMO_SCRIPTS: German for a German profile, demo.json
+for every other), so a missing key costs nothing. On Cloud Run every assessment route needs a signed-in user (clerk
 mode, vouch.api), so only signed-in users reach the paid model; locally a key in the environment
 is the opt-in.
 
@@ -37,7 +38,7 @@ from pydantic import PrivateAttr, SecretStr
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
-from vouch.settings import DEMO_SCRIPT, Settings, fake_model
+from vouch.settings import Settings, demo_script, fake_model
 
 log = logging.getLogger(__name__)
 
@@ -317,12 +318,18 @@ class ModelChoice:
         return self.current() if self.runs_on == "openrouter" else None
 
     def for_assessment(
-        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+        self,
+        chosen: str | None,
+        callbacks: list[BaseCallbackHandler] | None = None,
+        *,
+        answer_language: str = "en",
     ) -> BaseChatModel:
         """A fresh model for one assessment, on `chosen` (from `chosen()`): its own call budget,
-        or the fake at the start of its script. `callbacks` see every call (the usage meter)."""
+        or the fake at the start of its script. `callbacks` see every call (the usage meter).
+        On the fake: ASSESS_FAKE_SCRIPT when set, else the demo script in the profile's
+        `answer_language` (vouch.settings.demo_script, #234)."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
-            fake = fake_model(self._settings, DEMO_SCRIPT)
+            fake = fake_model(self._settings, demo_script(answer_language))
             fake.callbacks = callbacks
             return fake
         return self.openrouter.chat_model(chosen, callbacks)

@@ -1,0 +1,21 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "Authentifizierung Passwort Hardware-Token Administratorkonten Risikobewertung"}},
+    {"answer": "Die Anmeldeverfahren richten sich nach einer jährlichen Risikobewertung, die die Erreichbarkeit aus dem Internet und die zu erwartenden Angriffe berücksichtigt. Passwörter haben mindestens 14 Zeichen und werden gegen eine Liste geleakter Passwörter geprüft. Für Administratorkonten, den Fernzugriff über VPN und die Cloud-Dienste ist ein Hardware-Token als zweiter Faktor Pflicht."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "Die Richtlinie nennt die jährliche Risikobewertung der Anmeldeverfahren, aber kein Nachweis zeigt, dass sie erstellt wurde.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Die Anmeldeverfahren dieser Richtlinie folgen aus der Risikobewertung der Anmeldeverfahren, die der IT-Leiter jedes Jahr erstellt."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Die Verfahren folgen den Empfehlungen des BSI und des NIST.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Die Verfahren richten sich nach den Empfehlungen des BSI-Grundschutzes und des NIST zu Passwörtern."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Die Verfahren werden nach der Erreichbarkeit, den Daten und den erwarteten Angriffen festgelegt.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Sie berücksichtigt, ob ein System direkt aus dem Internet erreichbar ist, welche Daten es enthält und welche Angriffe zu erwarten sind"}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Passwörter haben mindestens 14 Zeichen und werden gegen geleakte Passwörter geprüft.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Passwörter haben mindestens 14 Zeichen."}, {"doc_id": "authentifizierungsrichtlinie", "quote": "Der Verzeichnisdienst lehnt Standard-Passwörter und solche aus der Liste technisch ab."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Für alle Administratorkonten ist ein Hardware-Token Pflicht.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Eine zweite Anmeldung mit einem Hardware-Token ist Pflicht für alle Administratorkonten, für den Fernzugriff über VPN und für alle Cloud-Dienste."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Kontosperren, Bildschirmsperren und Warnungen bei ungewöhnlichen Anmeldungen verstärken die Anmeldung.", "citations": [{"doc_id": "authentifizierungsrichtlinie", "quote": "Nach fünf Fehlversuchen wird ein Konto für 15 Minuten gesperrt."}]}
+    ]
+  },
+  "remediate": {
+    "items": [
+      {"requirement_id": "M1", "missing": "Ein Nachweis, dass die jährliche Risikobewertung der Anmeldeverfahren erstellt wurde, mit Datum und der Person, die sie erstellt hat.", "owner_role": "IT-Leiter", "due_in_days": 60}
+    ]
+  }
+}

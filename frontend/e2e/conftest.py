@@ -38,6 +38,13 @@ def chat_url() -> str:
 
 
 @pytest.fixture
+def report_url() -> str:
+    """A sixth Vouch like vouch_url, for the readiness report's checks (#234): Nordlicht and
+    Alpenwerk on the demo fake, its own assessments and request-rate budget."""
+    return os.environ["REPORT_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]
