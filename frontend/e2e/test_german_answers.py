@@ -59,7 +59,7 @@ def overview_with_the_run(route: Route) -> None:
     route.fulfill(json=overview)
 
 
-def test_the_working_paper_shows_german_verdict_words_for_alpenwerk_in_an_english_interface(
+def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier_in_an_english_interface(
     page: Page, vouch_url
 ):
     page.route("**/api/assessments", seeded_stream)

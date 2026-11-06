@@ -20,10 +20,13 @@ const ACTION: Record<Run['status'], string> = {
   unreachable: 'Retry',
 }
 
+/** The run's answer language, once it is done: its verdicts are in it (#48, #200). */
+const answerLanguage = (run: Run) => run.status === 'done' ? run.assessment.answer_language : undefined
+
 /** The run's verdict chip: Assessing, the verdict (in the answer's language, #48), or Not assessed. */
 const RunChip = ({ run }: { run: Run }) =>
   <VerdictChip verdict={run.status === 'done' ? run.assessment.verdict : null} assessing={run.status === 'running'}
-    language={run.status === 'done' ? run.assessment.answer_language : undefined} />
+    language={answerLanguage(run)} />
 
 /** The assess button: busy while running, Retry when the service could not be reached; `held` while another runs. */
 function AssessButton({ id, run, held, onAssess }: { id: string; run: Run; held: boolean; onAssess: () => void }) {
@@ -173,7 +176,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
-                language={run.status === 'done' ? run.assessment.answer_language : undefined}
+                language={answerLanguage(run)}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
                   decidable: review === 'accepted',
