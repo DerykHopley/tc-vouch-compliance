@@ -8,7 +8,7 @@ import CitedQuote from './CitedQuote.tsx'
 import Prose from './Prose.tsx'
 import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
-import { type Override, rollUp, withOverrides } from './review.ts'
+import { type Override, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -99,6 +99,8 @@ export default function WorkingPaper(props: PaperProps) {
   const run = overridden(props.run, overrides)
   // Before an assessment the paper lists the profile's requirements; after one, the assessment's own.
   const judged = run.status === 'done' ? run.assessment.requirements : undefined
+  // Why the control has its verdict when a row's differs from it (#212), as the lead's overrides change it.
+  const explained = judged ? rollUpWords(judged, overview.answer_language) : null
   const requirements = overview.requirements[card.id] ?? []
   const applying = requirements.filter((r) => r.not_applicable === null).length
   const review = run.status === 'done' ? run.assessment.status : undefined
@@ -136,6 +138,7 @@ export default function WorkingPaper(props: PaperProps) {
               {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
             </div>
           )}
+          {!checking && explained && <p className="field-note roll-up">{explained}</p>}
         </div>
         {checking ? <p className="field-note" role="status">Reading the working paper…</p> : (
           <>

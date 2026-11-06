@@ -263,7 +263,7 @@ def test_a_fake_model_assessment_records_every_calls_tokens_and_a_computed_cost_
     assert kept.usage.to_dict() == usage
 
 
-def test_a_fake_run_meters_its_gather_turns_and_its_judge():
+def test_a_fake_run_meters_its_gather_turns_its_judge_and_its_remediation():
     app, _ = app_at(NOV_4_AFTERNOON)
     script = ScriptedChatModel.from_file(DEMO_SCRIPT).script
     seen = CallsSeen()
@@ -274,7 +274,7 @@ def test_a_fake_run_meters_its_gather_turns_and_its_judge():
 
     assess(TestClient(app))
 
-    assert len(seen.ended) == len(script.gather) + 1
+    assert len(seen.ended) == len(script.gather) + 2  # the judge, and M1's draft (#212)
 
 
 def test_a_fake_run_meters_its_remediation_drafts_too(tmp_path):

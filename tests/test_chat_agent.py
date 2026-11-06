@@ -8,6 +8,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -29,6 +30,7 @@ from vouch.chat_agent import (
     START_ASSESSMENT,
     ChatTools,
     assessed_controls_words,
+    assessed_words,
     chat_config,
     chat_context,
     chat_graph,
@@ -598,3 +600,21 @@ def test_assessed_controls_reads_only_the_signed_in_users_own_assessments(client
 
     assert "- 5.1.1: not assessed yet." in answer
     assert "- 5.1.2: " in answer and "- 5.1.2: not assessed yet." not in answer
+
+
+def test_explain_control_says_why_partly_evidenced_rows_roll_up_to_not_evidenced():
+    # #212: the chat carries the working paper's roll-up explanation, not a disagreement.
+    control = load_base_framework().controls[0]
+    partly = (_cite("documented", stale=True),)
+    assessment = _assessed(
+        control.id,
+        RequirementVerdict("M1", "must", "T.", "partly-evidenced", "R.", partly),
+        RequirementVerdict("S1", "should", "T.", "partly-evidenced", "R.", partly),
+    )
+
+    words = assessed_words(control, replace(assessment, verdict="not-evidenced"))
+
+    assert (
+        "Not evidenced: no must requirement is fully evidenced (1 of 1 partly evidenced)."
+        in (words.splitlines()[1])
+    )

@@ -6,9 +6,10 @@ Through the HTTP API, on the bundled fake model, on both backends: in memory (no
 and Postgres (CI's `database` job gives a server through VOUCH_TEST_DATABASE_URL; without one
 those cases are skipped). The user is set per request by a test header (test_memory's).
 
-The fake model's 4.1.2 run judges M1 partly evidenced and the rest evidenced, so it drafts no
-item; the lead's override of M1 to not evidenced gives M1 a "not drafted" item to fill in
-(graph._reviewed_remediation), which is the item these cases decide on.
+The fake model's 4.1.2 run judges M1 partly evidenced and the rest evidenced, so it drafts one
+item, for M1 (#212). The lead's overrides of M1 to evidenced (its draft dropped) and of S1 to not
+evidenced give S1 a "not drafted" item to fill in (graph._reviewed_remediation), which is the item
+these cases decide on.
 """
 
 import threading
@@ -35,11 +36,11 @@ database_url = test_memory.database_url
 postgres = test_memory.postgres
 users = test_memory.users
 
-M1_NOT_EVIDENCED = {
-    "requirement_id": "M1",
-    "verdict": "not-evidenced",
-    "reason": "No record shows the exposure assessment.",
-}
+ITEM = "S1"
+OVERRIDES = [
+    {"requirement_id": "M1", "verdict": "evidenced", "reason": "The exposure record exists."},
+    {"requirement_id": ITEM, "verdict": "not-evidenced", "reason": "No per-system list."},
+]
 OWNER = "IT security officer"
 
 
@@ -48,11 +49,12 @@ def later(days: int = 30) -> str:
 
 
 def accepted_with_an_item(client: TestClient, user: dict[str, str]) -> str:
-    """An accepted 4.1.2 assessment with M1 overridden to not evidenced: its thread id."""
+    """An accepted 4.1.2 assessment with M1 overridden to evidenced and S1 to not evidenced:
+    its thread id."""
     thread_id = assess(client, user)
     response = client.post(
         f"/api/assessments/{thread_id}/review",
-        json={"decision": "accept", "overrides": [M1_NOT_EVIDENCED]},
+        json={"decision": "accept", "overrides": OVERRIDES},
         headers=user,
     )
     assert response.status_code == 200, response.text
@@ -63,7 +65,7 @@ def decide(
     client: TestClient,
     user: dict[str, str],
     thread_id: str,
-    requirement_id: str = "M1",
+    requirement_id: str = ITEM,
     **body: Any,
 ) -> Any:
     return client.post(
@@ -97,7 +99,7 @@ def test_a_reviewed_assessment_shows_its_items_as_drafts(database_url, users):
 
     (item,) = shown
     assert item | {"due_date": ""} == {
-        "requirement_id": "M1",
+        "requirement_id": ITEM,
         "missing": NOT_DRAFTED,
         "owner_role": NO_OWNER,
         "due_date": "",
@@ -120,7 +122,7 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
         reviewed = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
 
     approved = {
-        "requirement_id": "M1",
+        "requirement_id": ITEM,
         "missing": NOT_DRAFTED,
         "owner_role": OWNER,
         "due_date": due,
@@ -138,11 +140,11 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
         "control_id": "4.1.2",
         "thread_id": thread_id,
         "action": "approve",
-        "requirement_id": "M1",
+        "requirement_id": ITEM,
         "note": f"{NOT_DRAFTED} Owner: {OWNER}. Due {due}.",
         "verdict_before": "not-evidenced",
         "verdict_after": "not-evidenced",
-        "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],  # M1's quotes
+        "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],  # S1's quotes
         "model": reviewed["model"],
         "prompt_version": reviewed["prompt_version"],
     }
@@ -185,7 +187,7 @@ def test_discard_takes_the_item_out_of_the_open_count_and_writes_one_entry(datab
     assert response.status_code == 200, response.text
     assert (before, after) == (1, 0)
     assert [i["status"] for i in shown] == ["discarded"]
-    assert [(e["action"], e["requirement_id"]) for e in entries[:1]] == [("discard", "M1")]
+    assert [(e["action"], e["requirement_id"]) for e in entries[:1]] == [("discard", ITEM)]
 
 
 def test_an_approved_item_stays_in_the_open_count(database_url, users):
@@ -383,7 +385,7 @@ def test_items_of_a_control_not_accepted_wait_for_the_review(database_url, users
         rejected = assess(client, alice)
         client.post(
             f"/api/assessments/{rejected}/review",
-            json={"decision": "reject", "overrides": [M1_NOT_EVIDENCED]},
+            json={"decision": "reject", "overrides": OVERRIDES},
             headers=alice,
         )
         codes = [
@@ -489,7 +491,7 @@ def test_no_route_lists_changes_or_removes_a_decision_but_the_decision_route(use
     routes = {(method, path) for method, path in api_routes(app) if "remediation" in path}
     with TestClient(app) as client:
         thread_id = accepted_with_an_item(client, alice)
-        url = f"/api/assessments/{thread_id}/remediation/M1"
+        url = f"/api/assessments/{thread_id}/remediation/{ITEM}"
         changed = [
             getattr(client, verb)(url, headers=alice).status_code for verb in ("put", "delete")
         ]
@@ -573,5 +575,5 @@ def test_the_overview_asks_only_for_the_counted_threads_discarded_items(database
         store = api.remediation_items(app.state.database)
         user, profile = alice["X-Test-User"], DEFAULT_PROFILE
 
-        assert store.discarded(user, profile, [counted, approved]) == {(counted, "M1")}
+        assert store.discarded(user, profile, [counted, approved]) == {(counted, ITEM)}
         assert store.discarded(user, profile, []) == set()

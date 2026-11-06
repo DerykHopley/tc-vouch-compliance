@@ -57,13 +57,14 @@ type Shown = {
   onReviewed?: (assessment: Assessment) => void
   onRefresh?: () => Promise<boolean>
   onItemDecided?: (threadId: string, item: RemediationItem) => void
+  language?: string
 }
 
 function paper({ run = { status: 'idle', steps: [] }, running = null, checking = false, onAssess = () => {},
   onOpen = () => {}, onOverview = () => {}, onReviewed = () => {}, onRefresh = () => Promise.resolve(true),
-  onItemDecided = () => {} }: Shown) {
+  onItemDecided = () => {}, language = 'en' }: Shown) {
   const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION }
-  return <WorkingPaper overview={OVERVIEW} card={card} running={running} run={run} checking={checking}
+  return <WorkingPaper overview={{ ...OVERVIEW, answer_language: language }} card={card} running={running} run={run} checking={checking}
     onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} onReviewed={onReviewed} onRefresh={onRefresh}
     onItemDecided={onItemDecided} />
 }
@@ -78,6 +79,33 @@ function show(props: Shown = {}) {
 const row = (id: string) => screen.getByText(id, { selector: 'th .mono' }).closest('tr')!
 
 afterEach(cleanup)
+
+describe("the roll-up's explanation, issue 212", () => {
+  /** 5.1.2 judged with these verdicts per requirement, the control's verdict rolled up from them. */
+  const judgedAs = (verdicts: Record<string, RequirementVerdict['verdict']>, verdict: Assessment['verdict']): Run =>
+    ({ status: 'done', steps: [], assessment: { ...ASSESSED, verdict,
+      requirements: judged.map((r) => (r.id in verdicts ? { ...r, verdict: verdicts[r.id] } : r)) } })
+  const explanation = () => document.querySelector('.roll-up')
+
+  it("says why partly evidenced rows roll up to not evidenced, next to the control's verdict", () => {
+    show({ run: judgedAs({ M1: 'partly-evidenced', H1: 'partly-evidenced', O1: 'partly-evidenced' }, 'not-evidenced') })
+    expect(explanation()?.textContent).toBe('Not evidenced: no must, protection-level or overlay requirement is '
+      + 'fully evidenced (3 of 3 partly evidenced).')
+    expect(explanation()?.closest('.paper-head')).not.toBeNull()
+  })
+
+  it('says nothing when every row matches the verdict', () => {
+    show({ run: judgedAs({ M1: 'not-evidenced', S1: 'not-evidenced' }, 'not-evidenced') })
+    expect(explanation()).toBeNull()
+  })
+
+  it('says it in German for a German profile', () => {
+    show({ run: judgedAs({ M1: 'partly-evidenced', H1: 'partly-evidenced', O1: 'partly-evidenced' }, 'not-evidenced'),
+      language: 'de' })
+    expect(explanation()?.textContent).toBe('Nicht nachgewiesen: keine Muss-, Schutzbedarfs- oder '
+      + 'Overlay-Anforderung ist vollständig nachgewiesen (3 von 3 teilweise nachgewiesen).')
+  })
+})
 
 describe('the working paper of an assessed control', () => {
   beforeEach(() => { show({ run: { status: 'done', steps: [], assessment: ASSESSED } }) })

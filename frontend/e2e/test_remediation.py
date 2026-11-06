@@ -3,9 +3,9 @@ with its audit entry; discarded and gone from the overview's open count; a past 
 a double click approving once; one profile's items not shown under another.
 
 On the working paper's server (paper_url), as #42's review checks. Each check assesses 4.1.2
-afresh (the demo script: M1 partly evidenced, the rest evidenced, so no item is drafted) and
-accepts it through the API with M1 overridden to not evidenced, which gives M1 a "not drafted"
-item for the lead to fill in. The per-profile check runs on profiles_url (#47)."""
+afresh (the demo script: M1 partly evidenced, the rest evidenced, so M1's item is drafted, #212)
+and accepts it through the API with M1 overridden to evidenced (its draft dropped) and S1 to not
+evidenced, which gives S1 a "not drafted" item for the lead to fill in. The per-profile check runs on profiles_url (#47)."""
 
 import json
 import re
@@ -15,19 +15,20 @@ from playwright.sync_api import APIRequestContext, Locator, Page, expect
 from test_review import CONTROL, assessed, open_paper, row
 
 OWNER = "IT security officer"
-NOT_EVIDENCED = {
-    "requirement_id": "M1",
-    "verdict": "not-evidenced",
-    "reason": "No record shows the exposure assessment.",
-}
+ITEM = "S1"
+OVERRIDES = [
+    {"requirement_id": "M1", "verdict": "evidenced", "reason": "The exposure record exists."},
+    {"requirement_id": ITEM, "verdict": "not-evidenced", "reason": "No per-system list."},
+]
 
 
 def accepted_with_an_item(request: APIRequestContext, url: str, headers: dict | None = None) -> str:
-    """4.1.2 assessed and accepted with M1 overridden to not evidenced: its thread id."""
+    """4.1.2 assessed and accepted with M1 overridden to evidenced and S1 to not evidenced:
+    its thread id."""
     thread_id = assessed_on(request, url, headers)
     response = request.post(
         f"{url}/api/assessments/{thread_id}/review",
-        data={"decision": "accept", "overrides": [NOT_EVIDENCED]},
+        data={"decision": "accept", "overrides": OVERRIDES},
         headers=headers or {},
     )
     assert response.ok, response.status
@@ -45,7 +46,7 @@ def assessed_on(request: APIRequestContext, url: str, headers: dict | None) -> s
 
 
 def item(paper: Locator) -> Locator:
-    return row(paper, "M1").get_by_role("region", name="Remediation item M1")
+    return row(paper, ITEM).get_by_role("region", name=f"Remediation item {ITEM}")
 
 
 def stored_items(request: APIRequestContext, url: str, thread_id: str) -> list[dict]:
@@ -77,10 +78,10 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_writes_an_audit_entry(
     draft = item(paper)
     expect(draft).to_contain_text("Draft")
     # Vouch suggested no owner for this item: Approve waits for one.
-    expect(draft.get_by_role("button", name="Approve M1")).to_be_disabled()
+    expect(draft.get_by_role("button", name=f"Approve {ITEM}")).to_be_disabled()
     draft.get_by_label("Owner role").fill(OWNER)
-    with page.expect_response(re.compile(r"/remediation/M1$")) as answer:
-        draft.get_by_role("button", name="Approve M1").click()
+    with page.expect_response(re.compile(rf"/remediation/{ITEM}$")) as answer:
+        draft.get_by_role("button", name=f"Approve {ITEM}").click()
     assert answer.value.ok, answer.value.status
 
     expect(draft).to_contain_text("Approved")
@@ -98,8 +99,8 @@ def test_discard_takes_the_item_out_of_the_open_count(page: Page, paper_url):
     before = overview_count(page)
     paper = open_paper(page, paper_url)
 
-    with page.expect_response(re.compile(r"/remediation/M1$")):
-        item(paper).get_by_role("button", name="Discard M1").click()
+    with page.expect_response(re.compile(rf"/remediation/{ITEM}$")):
+        item(paper).get_by_role("button", name=f"Discard {ITEM}").click()
     expect(item(paper)).to_contain_text("Discarded")
 
     assert overview_count(page) == before - 1
@@ -113,8 +114,8 @@ def test_a_past_due_date_is_refused_with_a_hint(page: Page, paper_url):
     draft = item(paper)
     draft.get_by_label("Owner role").fill(OWNER)
     draft.get_by_label("Due date").fill(past)
-    with page.expect_response(re.compile(r"/remediation/M1$")) as answer:
-        draft.get_by_role("button", name="Approve M1").click()
+    with page.expect_response(re.compile(rf"/remediation/{ITEM}$")) as answer:
+        draft.get_by_role("button", name=f"Approve {ITEM}").click()
     assert answer.value.status == 422
 
     expect(draft.get_by_role("alert")).to_have_text(
@@ -130,8 +131,8 @@ def test_a_double_click_approves_once(page: Page, paper_url):
     paper = open_paper(page, paper_url)
 
     item(paper).get_by_label("Owner role").fill(OWNER)
-    with page.expect_response(re.compile(r"/remediation/M1$")):
-        item(paper).get_by_role("button", name="Approve M1").dblclick()
+    with page.expect_response(re.compile(rf"/remediation/{ITEM}$")):
+        item(paper).get_by_role("button", name=f"Approve {ITEM}").dblclick()
     expect(item(paper)).to_contain_text("Approved")
 
     kept = stored_items(page.request, paper_url, thread_id)
@@ -151,7 +152,7 @@ def test_the_draft_fits_at_400px_in_light_and_dark(page: Page, paper_url):
     for scheme in ("light", "dark"):
         page.emulate_media(color_scheme=scheme)
         paper = open_paper(page, paper_url)
-        expect(item(paper).get_by_role("button", name="Approve M1")).to_be_visible()
+        expect(item(paper).get_by_role("button", name=f"Approve {ITEM}")).to_be_visible()
         assert not scrolls_sideways(page), f"the draft scrolls sideways at 400px in {scheme}"
 
 
@@ -159,7 +160,7 @@ def test_one_profiles_approved_items_do_not_show_under_another(page: Page, profi
     nordlicht = {"X-Vouch-Profile": "nordlicht"}
     thread_id = accepted_with_an_item(page.request, profiles_url, nordlicht)
     approved = page.request.post(
-        f"{profiles_url}/api/assessments/{thread_id}/remediation/M1",
+        f"{profiles_url}/api/assessments/{thread_id}/remediation/{ITEM}",
         data={"decision": "approve", "owner_role": OWNER},
         headers=nordlicht,
     )

@@ -45,6 +45,68 @@ export function rollUp(requirements: Pick<RequirementVerdict, 'column' | 'verdic
   return 'partly-evidenced'
 }
 
+type Counts = { n: number; evidenced: number; partly: number; mustsOnly: boolean }
+
+/** The roll-up's explanation, per answer language; English is also `vouch.graph.roll_up_words`'s. */
+const ROLL_UP_WORDS: Record<string, (verdict: Verdict, c: Counts) => string> = {
+  en: (verdict, { n, evidenced, partly, mustsOnly }) => {
+    const noun = mustsOnly ? 'must requirement' : 'must, protection-level or overlay requirement'
+    const shoulds = 'should requirements count towards the should score only'
+    if (verdict === 'evidenced') {
+      return n === 1 ? `Evidenced: its one ${noun} is fully evidenced; ${shoulds}.`
+        : `Evidenced: all ${n} ${noun}s are fully evidenced; ${shoulds}.`
+    }
+    if (verdict === 'partly-evidenced') {
+      return `Partly evidenced: ${evidenced} of ${n} ${noun}s ${evidenced === 1 ? 'is' : 'are'} fully evidenced.`
+    }
+    if (verdict === 'not-evidenced') {
+      return partly > 0 ? `Not evidenced: no ${noun} is fully evidenced (${partly} of ${n} partly evidenced).`
+        : `Not evidenced: no ${noun} is evidenced; ${shoulds}.`
+    }
+    return `Not applicable: no ${noun} applies; ${shoulds}.`
+  },
+  de: (verdict, { n, evidenced, partly, mustsOnly }) => {
+    const noun = mustsOnly ? 'Muss-Anforderung' : 'Muss-, Schutzbedarfs- oder Overlay-Anforderung'
+    const shoulds = 'Soll-Anforderungen zählen nur zur Soll-Quote'
+    if (verdict === 'evidenced') {
+      return n === 1 ? `Nachgewiesen: die eine ${noun} ist vollständig nachgewiesen; ${shoulds}.`
+        : `Nachgewiesen: alle ${n} ${noun}en sind vollständig nachgewiesen; ${shoulds}.`
+    }
+    if (verdict === 'partly-evidenced') {
+      return `Teilweise nachgewiesen: ${evidenced} von ${n} ${noun}en ${evidenced === 1 ? 'ist' : 'sind'} vollständig `
+        + 'nachgewiesen.'
+    }
+    if (verdict === 'not-evidenced') {
+      return partly > 0
+        ? `Nicht nachgewiesen: keine ${noun} ist vollständig nachgewiesen (${partly} von ${n} teilweise nachgewiesen).`
+        : `Nicht nachgewiesen: keine ${noun} ist nachgewiesen; ${shoulds}.`
+    }
+    return `Nicht anwendbar: keine ${noun} ist anwendbar; ${shoulds}.`
+  },
+}
+
+/**
+ * Why the control has its verdict, in the profile's `language` (English for one without words of its own), when a
+ * row's verdict differs from it, as when partly evidenced musts roll up to not evidenced (#212); null when every
+ * applicable row matches. The roll-up rule is `rollUp`'s; the English matches `vouch.graph.roll_up_words`
+ * (`tests/roll_up_words_cases.json`).
+ */
+export function rollUpWords(
+  requirements: Pick<RequirementVerdict, 'column' | 'verdict'>[], language: string,
+): string | null {
+  const verdict = rollUp(requirements)
+  const applying = requirements.filter((r) => r.verdict !== 'not-applicable')
+  if (applying.every((r) => r.verdict === verdict)) return null
+  const counted = requirements.filter(countsTowardsRollUp)
+  const counts = {
+    n: counted.length,
+    evidenced: counted.filter((r) => r.verdict === 'evidenced').length,
+    partly: counted.filter((r) => r.verdict === 'partly-evidenced').length,
+    mustsOnly: counted.length > 0 && counted.every((r) => r.column === 'must'),
+  }
+  return (ROLL_UP_WORDS[language] ?? ROLL_UP_WORDS.en)(verdict, counts)
+}
+
 /** The requirements with the lead's overrides in place (`vouch.graph.apply_overrides`). */
 export function withOverrides(requirements: RequirementVerdict[], overrides: Override[]): RequirementVerdict[] {
   return requirements.map((r) => {

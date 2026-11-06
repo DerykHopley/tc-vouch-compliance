@@ -73,7 +73,7 @@ SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m1-kind-stale-patch-5"
+PROMPT_VERSION = "m1-kind-stale-patch-6"
 """The version of the prompts below: change it whenever a prompt changes, so a run can say
 which prompts drafted it (the developer page, #34; the audit trail, M2)."""
 
@@ -477,6 +477,38 @@ def roll_up(requirements: Iterable[RequirementVerdict]) -> Verdict:
     return "partly-evidenced"
 
 
+def roll_up_words(requirements: Iterable[RequirementVerdict]) -> str | None:
+    """Why the control has its verdict (`roll_up`), when a row's verdict differs from it, as
+    when partly evidenced musts roll up to not evidenced (#212); None when every applicable row
+    matches. English; the working paper's copy (review.ts rollUpWords) says it in the profile's
+    language too, and both are checked against tests/roll_up_words_cases.json."""
+    requirements = list(requirements)
+    verdict = roll_up(requirements)
+    if all(r.verdict == verdict for r in requirements if r.verdict != NOT_APPLICABLE):
+        return None
+    counted = [r for r in requirements if counts_towards_roll_up(r)]
+    n = len(counted)
+    evidenced = sum(r.verdict == "evidenced" for r in counted)
+    partly = sum(r.verdict == "partly-evidenced" for r in counted)
+    musts_only = bool(counted) and all(r.column == "must" for r in counted)
+    noun = "must requirement" if musts_only else "must, protection-level or overlay requirement"
+    shoulds = "should requirements count towards the should score only"
+    if verdict == "evidenced":
+        if n == 1:
+            return f"Evidenced: its one {noun} is fully evidenced; {shoulds}."
+        return f"Evidenced: all {n} {noun}s are fully evidenced; {shoulds}."
+    if verdict == "partly-evidenced":
+        agree = "is" if evidenced == 1 else "are"
+        return f"Partly evidenced: {evidenced} of {n} {noun}s {agree} fully evidenced."
+    if verdict == "not-evidenced":
+        if partly:
+            return (
+                f"Not evidenced: no {noun} is fully evidenced ({partly} of {n} partly evidenced)."
+            )
+        return f"Not evidenced: no {noun} is evidenced; {shoulds}."
+    return f"Not applicable: no {noun} applies; {shoulds}."
+
+
 def should_score(requirements: Iterable[RequirementVerdict]) -> ShouldScore:
     """How many applicable should requirements are evidenced, of how many."""
     should = [r for r in requirements if r.column == "should" and r.verdict != NOT_APPLICABLE]
@@ -527,6 +559,7 @@ class AssessState(TypedDict, total=False):
     note: str  # the lead's note from a rejected review, when this run was asked for again
     remediation: list[RemediationItem]
     remediate_rejected_word: str | None
+    partly_drafted: int  # of the drafts made, those for partly evidenced requirements (#212)
     not_drafted: list[str]
     review: Review
     steps: Annotated[list[dict[str, str]], operator.add]  # each node's described step
@@ -635,30 +668,38 @@ def _not_evidenced(requirements: list[RequirementVerdict]) -> list[RequirementVe
     return [r for r in requirements if r.verdict == "not-evidenced"]
 
 
+TO_FIX: frozenset[Verdict] = frozenset({"not-evidenced", "partly-evidenced"})
+"""The verdicts a remediation item is drafted for: every applicable requirement that isn't
+evidenced, partly evidenced too (#212, the owner's decision 2026-11-06)."""
+
+
 def _to_remediate(
     requirements: list[RequirementVerdict], pending_ids: Iterable[str]
 ) -> list[RequirementVerdict]:
-    """The not-evidenced requirements a remediation item is for: not those whose evidence is
-    pending, which would show a gap that may not be there."""
+    """The requirements a remediation item is for, not or partly evidenced: not those whose
+    evidence is pending, which would show a gap that may not be there."""
     pending = set(pending_ids)
-    return [r for r in _not_evidenced(requirements) if r.id not in pending]
+    return [r for r in requirements if r.verdict in TO_FIX and r.id not in pending]
 
 
 def _remediation_prompt(
     control: IsaControl, requirements: list[RequirementVerdict]
 ) -> list[AnyMessage]:
-    not_evidenced = "\n".join(
-        f"- {r.id} ({r.column}): {r.text}\n  Why: {r.reason}" for r in requirements
+    to_fix = "\n".join(
+        f"- {r.id} ({r.column}, {verdict_words(r.verdict)}): {r.text}\n  Why: {r.reason}"
+        for r in requirements
     )
     return [
         SystemMessage(
             "Draft one remediation item for each requirement listed, which the company's "
-            "evidence does not show: what is missing, the role that should own the fix (a "
+            "evidence does not fully show: what is missing, the role that should own the fix (a "
             f"role, never a person's name), and how many days from today (1 to {MAX_DUE_DAYS}) "
-            "until it is due. Say what is missing; never call the company compliant, "
-            f"certified or passed. {DATA_RULE}"
+            "until it is due. For a partly evidenced requirement, say what is still missing for "
+            "it to be fully evidenced, such as a stale document to review and approve again, or "
+            "implemented records for steps that are only documented. Say what is missing; never "
+            f"call the company compliant, certified or passed. {DATA_RULE}"
         ),
-        HumanMessage(f"Control {control.id}: {control.question}\nNot evidenced:\n{not_evidenced}"),
+        HumanMessage(f"Control {control.id}: {control.question}\nNot fully evidenced:\n{to_fix}"),
     ]
 
 
@@ -1092,26 +1133,27 @@ def build_graph(
         }
 
     def remediate(state: AssessState) -> dict[str, Any]:
-        """The model drafts one remediation item per not-evidenced requirement; none of those,
-        no call. A draft claiming an audit result gets the plan asked for again once, then an
-        error. Before the interrupt, so it only reads and asks the model."""
-        not_evidenced = _to_remediate(state["requirements"], state["pending_ids"])
-        if not not_evidenced:
+        """The model drafts one remediation item per requirement not or partly evidenced (#212);
+        none of those, no call. A draft claiming an audit result gets the plan asked for again
+        once, then an error. Before the interrupt, so it only reads and asks the model."""
+        to_fix = _to_remediate(state["requirements"], state["pending_ids"])
+        if not to_fix:
             return {
                 "remediation": [],
                 "not_drafted": [],
                 "remediate_rejected_word": None,
+                "partly_drafted": 0,
                 "pending_ids": state["pending_ids"],
             }
         today = date.fromisoformat(state["today"])
 
         def read(plan: RemediationPlan | None) -> tuple[Any, list[str]]:
-            drafts, not_drafted = _drafts(not_evidenced, plan, today)
+            drafts, not_drafted = _drafts(to_fix, plan, today)
             return (drafts, not_drafted), [f"{d.missing} {d.owner_role}" for d in drafts]
 
         (drafts, not_drafted), usage, rejected = _ask_until_clean(
             remediation_model,
-            _remediation_prompt(state["control"], not_evidenced),
+            _remediation_prompt(state["control"], to_fix),
             read,
             what="a remediation draft",
             refusal=lambda word: (
@@ -1119,10 +1161,12 @@ def build_graph(
                 "claims. Draft again, saying only what is missing."
             ),
         )
+        partly = {r.id for r in to_fix if r.verdict == "partly-evidenced"}
         return {
             "remediation": drafts,
             "not_drafted": not_drafted,
             "remediate_rejected_word": rejected,
+            "partly_drafted": len(partly - set(not_drafted)),
             "usage": usage,
             "pending_ids": state["pending_ids"],
         }
@@ -1290,11 +1334,13 @@ class Step:
             if not drafts and pending:
                 return f"No remediation item drafted: {waiting}."
             if not drafts:
-                return "No requirement is not evidenced, so no remediation item was drafted."
+                return "Every requirement that applies is evidenced, so no remediation item was drafted."
             not_drafted = update.get("not_drafted", [])
             made = len(drafts) - len(not_drafted)  # not the placeholders
+            partly = update.get("partly_drafted", 0)
             text = (
-                f"Drafted {plural(made, 'remediation item')}."
+                f"Drafted {plural(made, 'remediation item')}"
+                + (f" ({partly} partly evidenced)." if partly else ".")
                 if made
                 else "No remediation item drafted by the model."
             )

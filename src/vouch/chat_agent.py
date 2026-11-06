@@ -64,6 +64,7 @@ from vouch.graph import (
     RequirementVerdict,
     counts_towards_roll_up,
     plural,
+    roll_up_words,
     thread_key,
     verdict_words,
     with_facts,
@@ -451,6 +452,8 @@ def assessed_words(control: IsaControl, assessment: Assessment) -> str:
     said = [
         f"Control {control.id}, “{control.question}”: its newest assessment is {verdict}, {status}."
     ]
+    if explained := roll_up_words(assessment.requirements):
+        said.append(f"Why: {explained}")  # the working paper's explanation (#212)
     if missing:
         said.append(f"Not yet evidenced: {', '.join(missing)}.")
     else:
