@@ -1,4 +1,4 @@
-import { type AnchorHTMLAttributes, type ReactNode, useState } from 'react'
+import { type AnchorHTMLAttributes, type ReactNode, useId, useState } from 'react'
 import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS }
   from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
@@ -329,6 +329,14 @@ type JudgedProps = {
  */
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
+  // On a phone each row is a card and its text is clamped to 2 lines (#211): the requirements shown in full.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const toggle = (id: string) => setExpanded((now) => {
+    const next = new Set(now)
+    if (!next.delete(id)) next.add(id)
+    return next
+  })
+  const textId = useId()
   return (
     <div className="table-wrap">
       <table className="reqs judged" aria-label="Requirements">
@@ -348,7 +356,15 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
-                <td className="rq">{r.text}</td>
+                <td className="rq">
+                  <span id={`${textId}-${r.id}`} className={expanded.has(r.id) ? 'rq-text' : 'rq-text clamped'}>
+                    {r.text}
+                  </span>
+                  <button className="btn btn-ghost rq-toggle" aria-expanded={expanded.has(r.id)}
+                    aria-controls={`${textId}-${r.id}`} onClick={() => toggle(r.id)}>
+                    {expanded.has(r.id) ? 'Show less' : 'Show full requirement'}
+                  </button>
+                </td>
                 <td>
                   <div className="verdict-cell">
                     <VerdictChip verdict={r.verdict} />

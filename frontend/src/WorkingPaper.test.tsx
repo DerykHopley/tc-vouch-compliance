@@ -80,6 +80,34 @@ const row = (id: string) => screen.getByText(id, { selector: 'th .mono' }).close
 
 afterEach(cleanup)
 
+describe('the requirement text on a phone, issue 211', () => {
+  it('clamps to 2 lines; "Show full requirement" expands it and "Show less" collapses it', async () => {
+    show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+    const text = within(row('M1')).getByText('Transfers are encrypted.')
+    const toggle = within(row('M1')).getByRole('button', { name: 'Show full requirement' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-controls')).toBe(text.id)
+    expect(text.classList.contains('clamped')).toBe(true)
+
+    await userEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(toggle.textContent).toBe('Show less')
+    expect(text.classList.contains('clamped')).toBe(false)
+
+    toggle.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(text.classList.contains('clamped')).toBe(true)
+  })
+
+  it('keeps one toggle per requirement, each its own', async () => {
+    show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+    await userEvent.click(within(row('M1')).getByRole('button', { name: 'Show full requirement' }))
+    expect(within(row('S1')).getByRole('button', { name: 'Show full requirement' }).getAttribute('aria-expanded'))
+      .toBe('false')
+  })
+})
+
 describe("the roll-up's explanation, issue 212", () => {
   /** 5.1.2 judged with these verdicts per requirement, the control's verdict rolled up from them. */
   const judgedAs = (verdicts: Record<string, RequirementVerdict['verdict']>, verdict: Assessment['verdict']): Run =>

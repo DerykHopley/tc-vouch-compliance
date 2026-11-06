@@ -7,6 +7,7 @@ server's checks already spend most of that."""
 
 import re
 
+import pytest
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -149,3 +150,67 @@ def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400
     expect(row(paper, "M1")).to_be_visible()
     expect(page.locator("body")).to_have_css("background-color", "rgb(13, 13, 14)")  # dark --paper
     assert not scrolls_sideways(page), "the working paper scrolls sideways at 400px in dark"
+
+
+def box(locator: Locator) -> dict:
+    found = locator.bounding_box()
+    assert found, locator
+    return found
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_on_a_phone_each_requirement_is_a_card_in_order(page: Page, paper_url, scheme):
+    """#211 (the owner's option A): at 400px each row is a card: id, column and verdict on one
+    line; the text; the evidence kinds and stale flag; the reason and quotes."""
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 400, "height": 900})
+    page.emulate_media(color_scheme=scheme)
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+
+    assert not scrolls_sideways(page)
+    for requirement_id in ("M1", "M2", "S1", "S2", "S3"):
+        card = row(paper, requirement_id)
+        head = box(card.locator("th[scope=row]"))
+        verdict = box(card.locator(".verdict-cell .chip"))
+        text = box(card.locator(".rq-text"))
+        evidence = box(card.locator(".evidence"))
+        reason = box(card.locator(".quotes-cell > div > .why").first)
+        # One line: the id and the chip share a band, the chip to the right.
+        assert (
+            verdict["y"] < head["y"] + head["height"]
+            and head["y"] < verdict["y"] + verdict["height"]
+        )
+        assert verdict["x"] > head["x"]
+        assert head["y"] + head["height"] <= text["y"] + 1
+        assert text["y"] + text["height"] <= evidence["y"] + 1
+        assert evidence["y"] + evidence["height"] <= reason["y"] + 1
+        assert box(card)["width"] <= 400
+
+
+def test_on_a_phone_show_full_requirement_works_from_the_keyboard(page: Page, paper_url):
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 400, "height": 900})
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+    card = row(paper, "M1")
+    toggle = card.locator(".rq-toggle")
+    expect(toggle).to_have_text("Show full requirement")
+    text = card.locator(".rq-text")
+    clamped = box(text)["height"]
+
+    toggle.focus()
+    page.keyboard.press("Enter")
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+    expect(toggle).to_have_text("Show less")
+    assert box(text)["height"] > clamped  # M1's text runs past 2 lines at this width
+    page.keyboard.press("Enter")
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    assert box(text)["height"] == clamped
+
+
+def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, paper_url):
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+
+    expect(paper.get_by_role("columnheader", name="Requirement", exact=True)).to_be_visible()
+    expect(paper.get_by_role("button", name="Show full requirement")).to_have_count(0)
