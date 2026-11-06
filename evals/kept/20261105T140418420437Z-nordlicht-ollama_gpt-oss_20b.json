@@ -1,0 +1,2232 @@
+{
+  "run_at": "2026-11-05T14:04:18.420437+00:00",
+  "profile": "nordlicht",
+  "today": "2026-11-04",
+  "model": "ollama/gpt-oss:20b",
+  "judge": "openai/gpt-6.1-terra",
+  "status": "complete",
+  "verdict_accuracy": 0.08333333333333333,
+  "control_accuracy": 0.0,
+  "citation_precision": 0.42857142857142855,
+  "requirements_right": [
+    7,
+    84
+  ],
+  "controls_right": [
+    0,
+    12
+  ],
+  "citations_right": [
+    3,
+    7
+  ],
+  "cases": [
+    {
+      "control_id": "1.1.1",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy"
+          ]
+        },
+        {
+          "requirement_id": "M4",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy",
+            "policy-publication-record"
+          ]
+        },
+        {
+          "requirement_id": "M5",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy",
+            "policy-publication-record"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "not-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "information-security-policy"
+          ]
+        },
+        {
+          "requirement_id": "S4",
+          "expected": "partly-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "encryption-standard",
+            "information-security-policy",
+            "policy-publication-record"
+          ]
+        }
+      ],
+      "expected_verdict": "evidenced",
+      "verdict": "not-evidenced",
+      "error": null,
+      "assessment": {
+        "control_id": "1.1.1",
+        "profile_id": "nordlicht",
+        "verdict": "not-evidenced",
+        "should_score": {
+          "evidenced": 0,
+          "total": 4
+        },
+        "requirements": [
+          {
+            "id": "M1",
+            "column": "must",
+            "text": "The requirements for information security have been determined, documented and adapted to the organization’s goals.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M2",
+            "column": "must",
+            "text": "A policy exists, and is approved by the organization’s management.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M3",
+            "column": "must",
+            "text": "The policy includes objectives and the significance of information security within the organization.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M4",
+            "column": "must",
+            "text": "The policies are made available to employees in a suitable form (e.g., intranet).",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M5",
+            "column": "must",
+            "text": "Employees and external business partners are informed of any changes relevant to them.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S1",
+            "column": "should",
+            "text": "The information security requirements are based on the strategy of the organization. Legislation and contracts are considered in the policy.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S2",
+            "column": "should",
+            "text": "The policy indicates consequences in case of non-conformance.",
+            "verdict": "not-evidenced",
+            "reason": "There is no evidence that the policy states consequences for non‑conformance.",
+            "citations": []
+          },
+          {
+            "id": "S3",
+            "column": "should",
+            "text": "Other relevant security policies are established.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S4",
+            "column": "should",
+            "text": "Periodic review and, if required, revision of the policies are established.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          }
+        ],
+        "answer": "The company’s information security policy fulfills the mandatory requirements (M1‑M5) documented in the evidence:\n\n- **M1** – The policy states that requirements are derived from the business plan, customer‑contract clauses and applicable German laws (doc_id \"information-security-policy\", heading \"Where our security requirements come from\").\n- **M2** – Management approval is recorded with signatures of both managing directors dated 14 July 2026 (doc_id \"information-security-policy\", heading \"Approval\").\n- **M3** – The policy explicitly sets out why information security matters and what the organization aims for (doc_id \"information-security-policy\", heading \"Purpose\").\n- **M4** – The policy is published on the intranet under \"Security\" and new employees receive a link on their first day (doc_id \"information-security-policy\", heading \"Publication\").\n- **M5** – Changes are communicated via a short change notice to all employees and to suppliers through the portal (doc_id \"information-security-policy\", heading \"Changes\").\n\nThe policy also meets several “should” requirements:\n- **S1** – The source of the requirements incorporates business plan, contracts and legislation (doc_id \"information-security-policy\", heading \"Where our security requirements come from\").\n- **S2** – The policy contains a section on the consequences of non‑conformance (doc_id \"information-security-policy\", heading \"Objectives and significance\").\n- **S3** – Several supporting standards and procedures (access control, acceptable use, authentication, etc.) are listed as part of the policy (doc_id \"information-security-policy\", heading \"Supporting standards\").\n- **S4** – The policy is reviewed annually and after serious incidents, with procedures for revision and approval (doc_id \"information-security-policy\", heading \"Review\").\n\nAll evidence indicates that the policy is formally documented, approved, disseminated, and maintained in line with the control’s requirements.",
+        "warnings": [],
+        "steps": [
+          {
+            "node": "load_control",
+            "text": "Loaded control 1.1.1: To what extent are information security policies available? 9 requirements apply under Nordlicht Komponenten GmbH's profile."
+          },
+          {
+            "node": "apply_overlays",
+            "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “information security policy approval Nordlicht Komponenten”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “information security policy approval Nordlicht Komponenten”: 10 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Drafted an answer."
+          },
+          {
+            "node": "check_answer",
+            "text": "Checked the answer: it claims no audit result."
+          },
+          {
+            "node": "judge",
+            "text": "Judged 8 of 9 requirements evidenced."
+          },
+          {
+            "node": "check_quotes",
+            "text": "Checked each quote against its document: kept 0 citations, dropped 8. Changed by the checks: M1 to not evidenced, M2 to not evidenced, M3 to not evidenced, M4 to not evidenced, M5 to not evidenced, S1 to not evidenced, S3 to not evidenced, S4 to not evidenced. Now 0 of 9 requirements evidenced."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M1 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M2 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M3 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M4 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M5 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S1 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S3 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S4 from information-security-policy: the quote isn't in that document."
+          },
+          {
+            "node": "remediate",
+            "text": "Drafted 9 remediation items."
+          },
+          {
+            "node": "review",
+            "text": "Waiting for the compliance lead's review."
+          }
+        ],
+        "token_usage": {
+          "input_tokens": 4688,
+          "output_tokens": 4076,
+          "total_tokens": 8764
+        },
+        "model": "gpt-oss:20b",
+        "prompt_version": "m4-answer-language-1",
+        "answer_language": "en",
+        "remediation": [
+          {
+            "requirement_id": "M1",
+            "missing": "No documented evidence that the organization has determined, documented, and adapted its information‑security requirements to its goals, and no record of updating those requirements.",
+            "owner_role": "Chief Information Security Officer (CISO)",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "M2",
+            "missing": "No documented evidence that an approved information‑security policy exists. There is no record of formal management approval of the policy.",
+            "owner_role": "Information Security Manager",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "M3",
+            "missing": "No evidence that the policy explicitly states objectives and the significance of information security within the organization.",
+            "owner_role": "Policy Owner",
+            "due_date": "2026-12-19"
+          },
+          {
+            "requirement_id": "M4",
+            "missing": "No records showing that the policy has been distributed to employees in a suitable format such as an intranet or shared drive.",
+            "owner_role": "IT Governance Manager",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "M5",
+            "missing": "No evidence that employees or external partners have been informed of any policy changes that are relevant to them.",
+            "owner_role": "Information Security Communications Lead",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S1",
+            "missing": "No evidence that the policy is based on the organization’s strategy and that legislation or contracts were considered when drafting it.",
+            "owner_role": "Chief Information Security Officer (CISO)",
+            "due_date": "2027-01-03"
+          },
+          {
+            "requirement_id": "S2",
+            "missing": "No evidence that the policy states the consequences for non‑conformance or non‑compliance.",
+            "owner_role": "Policy Owner",
+            "due_date": "2026-12-19"
+          },
+          {
+            "requirement_id": "S3",
+            "missing": "No evidence that other relevant security policies are established under the same governance structure.",
+            "owner_role": "Information Security Manager",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S4",
+            "missing": "No evidence of a documented process for periodic review and, if needed, revision of the policies.",
+            "owner_role": "IT Governance Manager",
+            "due_date": "2027-01-03"
+          }
+        ],
+        "thread_id": "5fe2e179cc57401b8dcc81165c934700",
+        "status": "waiting-for-review",
+        "review": null
+      },
+      "seconds": 38.99388656599331,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 4688,
+        "output_tokens": 4076,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": {
+        "score": null,
+        "reason": "The answer cites nothing, so nothing cited to check it against.",
+        "error": null
+      },
+      "judge_usage": {
+        "model": "openai/gpt-6.1-terra",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": false,
+        "cost_complete": true
+      },
+      "judge_seconds": 0.009086400998057798,
+      "metered": true,
+      "tokens": 8764,
+      "cost_usd": 0.0,
+      "judge_cost_usd": 0.0
+    },
+    {
+      "control_id": "1.6.1",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-reporting-procedure",
+            "training-attendance-record"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-register",
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-reporting-procedure",
+            "training-attendance-record"
+          ]
+        },
+        {
+          "requirement_id": "S4",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S5",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S6",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "security-event-register",
+            "security-event-reporting-procedure"
+          ]
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "CallBudgetSpent: more than 12 model calls",
+      "assessment": null,
+      "seconds": 19.042487646001973,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 33983,
+        "output_tokens": 2394,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 36377,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    },
+    {
+      "control_id": "1.6.2",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": "evidenced",
+          "cited": [
+            "security-event-reporting-procedure"
+          ],
+          "expected_cites": [
+            "security-event-register",
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": "evidenced",
+          "cited": [
+            "security-event-reporting-procedure"
+          ],
+          "expected_cites": [
+            "security-event-register"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "partly-evidenced",
+          "verdict": "evidenced",
+          "cited": [
+            "awareness-training-concept",
+            "information-security-policy",
+            "log-review-record"
+          ],
+          "expected_cites": [
+            "security-event-register",
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": "evidenced",
+          "cited": [
+            "security-event-reporting-procedure"
+          ],
+          "expected_cites": [
+            "security-event-register",
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": "evidenced",
+          "cited": [
+            "security-event-reporting-procedure"
+          ],
+          "expected_cites": [
+            "security-event-reporting-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "not-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": []
+        }
+      ],
+      "expected_verdict": "partly-evidenced",
+      "verdict": "evidenced",
+      "error": null,
+      "assessment": {
+        "control_id": "1.6.2",
+        "profile_id": "nordlicht",
+        "verdict": "evidenced",
+        "should_score": {
+          "evidenced": 2,
+          "total": 3
+        },
+        "requirements": [
+          {
+            "id": "M1",
+            "column": "must",
+            "text": "Reported events are processed without undue delay.",
+            "verdict": "evidenced",
+            "reason": "The security‑desk records every report in the security event register within one working day, meeting the requirement of processing reports without undue delay.",
+            "citations": [
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Handling a report",
+                "quote": "The security desk records every report in the security event register within one working day.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              },
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Handling a report",
+                "quote": "It sorts each report into personnel, physical or IT, decides whether it is a mere observation, a weakness or an incident, and gives it a priority of low, medium, high or critical.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              }
+            ]
+          },
+          {
+            "id": "M2",
+            "column": "must",
+            "text": "An adequate reaction to reported security events is ensured.",
+            "verdict": "evidenced",
+            "reason": "Critical events are immediately passed to the Information Security Officer and responsibilities for personnel, physical and IT events are assigned to designated owners, ensuring an adequate reaction to all reported events.",
+            "citations": [
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Handling a report",
+                "quote": "Critical reports are passed to the information security officer at once.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              },
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Who handles what",
+                "quote": "Personnel events go to HR, physical events to the facility manager, and IT events to the IT operations lead.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              }
+            ]
+          },
+          {
+            "id": "M3",
+            "column": "must",
+            "text": "Lessons learned are incorporated into continuous improvement.",
+            "verdict": "evidenced",
+            "reason": "The policy review cycle and the monthly log‑review record show that lessons learned are incorporated into policy updates, training, and other continuous‑improvement actions.",
+            "citations": [
+              {
+                "doc_id": "information-security-policy",
+                "version": "4.0",
+                "section": "Review",
+                "quote": "The information security officer reviews this policy every year and after any serious security incident, and proposes changes to management.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              },
+              {
+                "doc_id": "log-review-record",
+                "version": "2026-09",
+                "section": "Monthly reviews",
+                "quote": "| Month | Reviewed on | Findings | Passed to security desk |",
+                "kind": "implemented",
+                "stale": false,
+                "stale_because": null
+              },
+              {
+                "doc_id": "awareness-training-concept",
+                "version": "1.3",
+                "section": "When",
+                "quote": "After a serious incident or a new kind of phishing attack, the information security officer sends a short briefing to everyone affected.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              }
+            ]
+          },
+          {
+            "id": "S1",
+            "column": "should",
+            "text": "During processing, reported events are categorized (e.g. by responsibility into personnel, physical and cyber), qualified (e.g., not security relevant, observation, suggested security improvement, security vulnerability, security incident) and prioritized (e.g., low, moderate, severe, critical).",
+            "verdict": "evidenced",
+            "reason": "The procedure explicitly requires categorisation into personnel, physical or IT, qualification as observation, weakness or incident, and prioritisation (low, medium, high or critical).",
+            "citations": [
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Handling a report",
+                "quote": "It sorts each report into personnel, physical or IT, decides whether it is a mere observation, a weakness or an incident, and gives it a priority of low, medium, high or critical.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              }
+            ]
+          },
+          {
+            "id": "S2",
+            "column": "should",
+            "text": "Responsibilities for handling of events based on their category are defined and assigned. The following aspects are considered:\n  - Coordination of incidents and vulnerabilities across multiple categories,\n  - Qualification and resources,\n  - Communication methods based on type and priority (e.g., non-time-critical communication, time-critical communication, emergency communication),\n  - Absence-management.",
+            "verdict": "evidenced",
+            "reason": "Responsibilities for handling each category are defined and assigned to HR, the facility manager, or the IT operations lead, with coordination by the information security officer when multiple categories are involved.",
+            "citations": [
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Who handles what",
+                "quote": "Personnel events go to HR, physical events to the facility manager, and IT events to the IT operations lead.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              },
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Who handles what",
+                "quote": "Where an event touches more than one area, the information security officer coordinates.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              },
+              {
+                "doc_id": "security-event-reporting-procedure",
+                "version": "2.0",
+                "section": "Who handles what",
+                "quote": "Each owner names a deputy for when they are away.",
+                "kind": "documented",
+                "stale": false,
+                "stale_because": null
+              }
+            ]
+          },
+          {
+            "id": "S3",
+            "column": "should",
+            "text": "A strategy for reporting potentially criminal aspects of security incidents to relevant authorities when necessary or appropriate. (C, I, A).",
+            "verdict": "not-evidenced",
+            "reason": "No evidence of a strategy or policy for reporting potentially criminal aspects of security incidents to relevant authorities is present in the provided documents.",
+            "citations": []
+          }
+        ],
+        "answer": "The evidence shows that Nordlicht has an established security‑event reporting procedure (security‑event‑reporting‑procedure). It requires every employee to report a security event straight away, defines a single point of contact (the security desk), specifies the reporting channels (email, ticket or phone for urgent cases) and mandates recording of each report in a security‑event register within one working day.  The procedure further states that each event is sorted into personnel, physical or IT, qualified as observation, weakness or incident and assigned a priority of low, medium, high or critical, with critical events being escalated immediately to the Information Security Officer.  These text excerpts (the “Handling a report” and “Your duty to report” sections) satisfy the core requirements of M1 (timely processing), M2 (adequate reaction) and, by extension, the optional S1 and S2 clauses that call for categorisation, qualification, prioritisation and assignment of responsibilities.\n\nEvidence also shows that the security‑event register is reviewed monthly (see the log‑review‑record) and that any findings are forwarded to the security desk when necessary. The review process and the policy review procedure (information‑security‑policy, “Review” section) indicate that lessons learned from incidents are incorporated into periodic policy reviews and training updates, meeting M3.\n\nHowever, the available documentation does not contain an explicit statement or procedure for reporting potentially criminal aspects of security incidents to law enforcement or other authorities.  The security‑event‑reporting‑procedure does not refer to criminal reporting, and no separate strategy or policy is cited, leaving the fulfilment of S3 unsubstantiated.\n\nIn summary, the evidence demonstrates compliance with the mandatory clauses M1‑M3 and partial compliance with the should clauses S1 and S2, but it does not cover S3.\n",
+        "warnings": [],
+        "steps": [
+          {
+            "node": "load_control",
+            "text": "Loaded control 1.6.2: To what extent are reported security events managed? 6 requirements apply under Nordlicht Komponenten GmbH's profile."
+          },
+          {
+            "node": "apply_overlays",
+            "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “security event management Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “security event management Nordlicht”: 5 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “security event reporting procedure Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “security event reporting procedure Nordlicht”: 10 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the records for “security event register Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the records for “security event register Nordlicht”: 10 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching Patch's vulnerability status for “vulnerability”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched Patch's vulnerability status for “vulnerability”: 4 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “criminal aspects security incident Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “criminal aspects security incident Nordlicht”: 5 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Drafted an answer."
+          },
+          {
+            "node": "check_answer",
+            "text": "Checked the answer: it claims no audit result."
+          },
+          {
+            "node": "judge",
+            "text": "Judged 5 of 6 requirements evidenced."
+          },
+          {
+            "node": "check_quotes",
+            "text": "Checked each quote against its document: kept 11 citations."
+          },
+          {
+            "node": "remediate",
+            "text": "No remediation item drafted by the model. Not drafted: S3."
+          },
+          {
+            "node": "review",
+            "text": "Waiting for the compliance lead's review."
+          }
+        ],
+        "token_usage": {
+          "input_tokens": 21143,
+          "output_tokens": 3566,
+          "total_tokens": 24709
+        },
+        "model": "gpt-oss:20b",
+        "prompt_version": "m4-answer-language-1",
+        "answer_language": "en",
+        "remediation": [
+          {
+            "requirement_id": "S3",
+            "missing": "not drafted",
+            "owner_role": "no owner suggested",
+            "due_date": "2027-02-02"
+          }
+        ],
+        "thread_id": "937e7162c3184940809b1d722f91c64a",
+        "status": "waiting-for-review",
+        "review": null
+      },
+      "seconds": 28.83003480399202,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 21143,
+        "output_tokens": 3566,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": {
+        "score": 1.0,
+        "reason": "The score is 1.00 because the actual output is faithful to the retrieval context, with no contradictions.",
+        "error": null
+      },
+      "judge_usage": {
+        "model": "openai/gpt-6.1-terra",
+        "input_tokens": 2264,
+        "output_tokens": 1498,
+        "reported_cost_usd": 0.009754000000000002,
+        "estimated_cost_usd": 0.0,
+        "estimated": false,
+        "cost_complete": true
+      },
+      "judge_seconds": 21.09402579399466,
+      "metered": true,
+      "tokens": 24709,
+      "cost_usd": 0.0,
+      "judge_cost_usd": 0.009754000000000002
+    },
+    {
+      "control_id": "2.1.3",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "training-attendance-record"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "awareness-training-concept"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "awareness-training-concept",
+            "training-attendance-record"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "awareness-training-concept"
+          ]
+        },
+        {
+          "requirement_id": "S4",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "awareness-training-concept",
+            "training-attendance-record"
+          ]
+        },
+        {
+          "requirement_id": "S5",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "training-attendance-record"
+          ]
+        },
+        {
+          "requirement_id": "S6",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "awareness-training-concept"
+          ]
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "OpenAIAPIError: Error code: 500 - error parsing tool call: raw='{\"\"}', err=invalid character '}' after object key",
+      "assessment": null,
+      "seconds": 3.1627144450030755,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 4007,
+        "output_tokens": 228,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": false
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 4235,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    },
+    {
+      "control_id": "4.1.2",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "partly-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "authentication-standard"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "authentication-standard",
+            "mfa-rollout-record"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "authentication-standard",
+            "mfa-rollout-record"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "authentication-standard",
+            "mfa-rollout-record"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "authentication-standard",
+            "mfa-rollout-record"
+          ]
+        }
+      ],
+      "expected_verdict": "partly-evidenced",
+      "verdict": "not-evidenced",
+      "error": null,
+      "assessment": {
+        "control_id": "4.1.2",
+        "profile_id": "nordlicht",
+        "verdict": "not-evidenced",
+        "should_score": {
+          "evidenced": 0,
+          "total": 3
+        },
+        "requirements": [
+          {
+            "id": "M1",
+            "column": "must",
+            "text": "The procedures for user authentication are selected based on a risk assessment. Possible attack scenarios are considered (e.g., direct accessibility via the internet).",
+            "verdict": "not-evidenced",
+            "reason": "not judged",
+            "citations": []
+          },
+          {
+            "id": "M2",
+            "column": "must",
+            "text": "Authentication procedures are consistent with recognized security best practices.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S1",
+            "column": "should",
+            "text": "The user authentication procedures are defined and implemented based on the business-related and security-relevant requirements.",
+            "verdict": "not-evidenced",
+            "reason": "not judged",
+            "citations": []
+          },
+          {
+            "id": "S2",
+            "column": "should",
+            "text": "Users are authenticated at least by means of strong passwords according to proven and widely accepted practices.",
+            "verdict": "not-evidenced",
+            "reason": "not judged",
+            "citations": []
+          },
+          {
+            "id": "S3",
+            "column": "should",
+            "text": "Superior procedures are used for the authentication of privileged user accounts (e.g., privileged access management, two-factor authentication).",
+            "verdict": "not-evidenced",
+            "reason": "not judged",
+            "citations": []
+          }
+        ],
+        "answer": "Control 4.1.2 – User access (audit draft)\n\n*Evidence that the company follows strong password requirements*:\n- In the *authentication‑standard* (Doc ID: authentication‑standard) the policy reads: “Passwords have at least 12 characters. The directory blocks passwords found in known breach lists. Passwords do not expire on a timer, but must be changed at once if they may have been exposed.” This satisfies the S2 requirement that users authenticate with strong passwords.\n\n*Evidence of privileged‑user protections*:\n- The same standard specifies: “Administrators use a separate administrator account for admin work, never their everyday account. Administrator accounts always require a hardware security key.” Further, the *policy‑publication‑record* (Date 2026‑04‑10) documents a change: “Authentication standard 3.1: hardware keys for administrators.” Thus the company implements S3.\n\n*Evidence that user‑authentication procedures are derived from business requirements*:\n- The *information‑security‑policy* states: “The information security officer works out our security requirements each year from three inputs: the business plan agreed by management, the security clauses in our customer contracts, and the laws that apply to us in Germany, including data protection law.” This indicates that the authentication procedures are informed by business‑related and security‑relevant requirements, addressing S1.\n\n*Evidence for consistency with best practices (M2)*:\n- The 12‑character minimum, breach‑list checking, and the use of hardware keys for privileged accounts align with recognized industry practices. This shows compliance with M2.\n\n*Evidence relating to the risk‑assessment requirement (M1)*:\n- While the information‑security‑policy shows that security requirements are reviewed from business, contractual, and legal sources, the evidence set does not explicitly document that the *authentication procedures* themselves were selected through a formal risk assessment. Therefore, the M1 requirement cannot be fully verified with the available evidence.\n\n**Conclusion**: The company meets the mandatory requirements M2 and the optional requirements S1, S2, and S3 as documented. The evidence does not confirm that the authentication procedures were specifically chosen based on a risk assessment (M1).",
+        "warnings": [],
+        "steps": [
+          {
+            "node": "load_control",
+            "text": "Loaded control 4.1.2: To what extent is the user access to IT services and IT systems secured? 5 requirements apply under Nordlicht Komponenten GmbH's profile."
+          },
+          {
+            "node": "apply_overlays",
+            "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “authentication procedures Nordlicht Komponenten GmbH policy”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “authentication procedures Nordlicht Komponenten GmbH policy”: 10 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “authentication standard Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “authentication standard Nordlicht”: 7 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the records for “login credentials log file authentication log”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the records for “login credentials log file authentication log”: 7 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “authentication standard 3.1 hardware keys”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “authentication standard 3.1 hardware keys”: 10 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “access control policy 1.5 passwords”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “access control policy 1.5 passwords”: 10 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Drafted an answer."
+          },
+          {
+            "node": "check_answer",
+            "text": "Checked the answer: it claims no audit result."
+          },
+          {
+            "node": "judge",
+            "text": "Judged 1 of 5 requirements evidenced. Not judged: M1, S1, S2, S3."
+          },
+          {
+            "node": "check_quotes",
+            "text": "Checked each quote against its document: kept 0 citations, dropped 1. Changed by the checks: M2 to not evidenced. Now 0 of 5 requirements evidenced."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M2 from authentication-standard: the quote isn't in that document."
+          },
+          {
+            "node": "remediate",
+            "text": "Drafted 5 remediation items."
+          },
+          {
+            "node": "review",
+            "text": "Waiting for the compliance lead's review."
+          }
+        ],
+        "token_usage": {
+          "input_tokens": 22406,
+          "output_tokens": 4077,
+          "total_tokens": 26483
+        },
+        "model": "gpt-oss:20b",
+        "prompt_version": "m4-answer-language-1",
+        "answer_language": "en",
+        "remediation": [
+          {
+            "requirement_id": "M1",
+            "missing": "Documented procedures showing how user authentication methods are selected based on a formal risk assessment that includes potential internet‑direct attack scenarios.",
+            "owner_role": "IT Security Manager",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "M2",
+            "missing": "Evidence that the authentication procedures are aligned with recognized industry best practices (e.g., NIST SP 800‑63, ISO/IEC 27001).",
+            "owner_role": "Chief Information Security Officer (CISO)",
+            "due_date": "2026-12-19"
+          },
+          {
+            "requirement_id": "S1",
+            "missing": "Clear definition and documentation of user authentication procedures that are based on both business‑related and security‑relevant requirements.",
+            "owner_role": "IT Governance Lead",
+            "due_date": "2027-01-03"
+          },
+          {
+            "requirement_id": "S2",
+            "missing": "Proof of implementation of strong password policies (e.g., minimum length, complexity, rotation) that follow proven, widely accepted practices.",
+            "owner_role": "Identity & Access Management (IAM) Specialist",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S3",
+            "missing": "Superior procedures for authenticating privileged accounts, including privileged access management controls and mandatory two‑factor authentication for such accounts.",
+            "owner_role": "Privileged Access Management (PAM) Lead",
+            "due_date": "2026-12-19"
+          }
+        ],
+        "thread_id": "71a7760f9a13482ea21aa0ccc3010089",
+        "status": "waiting-for-review",
+        "review": null
+      },
+      "seconds": 32.53940744799911,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 22406,
+        "output_tokens": 4077,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": {
+        "score": null,
+        "reason": "The answer cites nothing, so nothing cited to check it against.",
+        "error": null
+      },
+      "judge_usage": {
+        "model": "openai/gpt-6.1-terra",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": false,
+        "cost_complete": true
+      },
+      "judge_seconds": 0.002819351007929072,
+      "metered": true,
+      "tokens": 26483,
+      "cost_usd": 0.0,
+      "judge_cost_usd": 0.0
+    },
+    {
+      "control_id": "4.1.3",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure",
+            "joiner-leaver-record"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "access-review-record",
+            "account-management-procedure"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure"
+          ]
+        },
+        {
+          "requirement_id": "M4",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure",
+            "joiner-leaver-record"
+          ]
+        },
+        {
+          "requirement_id": "M5",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "access-review-record",
+            "account-management-procedure"
+          ]
+        },
+        {
+          "requirement_id": "M6",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure"
+          ]
+        },
+        {
+          "requirement_id": "M7",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "acceptable-use-policy",
+            "authentication-standard",
+            "mfa-rollout-record"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure",
+            "joiner-leaver-record"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure",
+            "joiner-leaver-record"
+          ]
+        },
+        {
+          "requirement_id": "S4",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure",
+            "joiner-leaver-record"
+          ]
+        },
+        {
+          "requirement_id": "S5",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "access-review-record",
+            "account-management-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S6",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "account-management-procedure"
+          ]
+        },
+        {
+          "requirement_id": "S7",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S8",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S9",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "access-review-record"
+          ]
+        },
+        {
+          "requirement_id": "S10",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "CallBudgetSpent: more than 12 model calls",
+      "assessment": null,
+      "seconds": 19.187596639007097,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 32013,
+        "output_tokens": 2477,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 34490,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    },
+    {
+      "control_id": "4.2.1",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy",
+            "joiner-leaver-record"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "partly-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy",
+            "access-review-record"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy",
+            "access-review-record"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy"
+          ]
+        },
+        {
+          "requirement_id": "S4",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy",
+            "mfa-rollout-record"
+          ]
+        },
+        {
+          "requirement_id": "S5",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "access-control-policy",
+            "joiner-leaver-record"
+          ]
+        }
+      ],
+      "expected_verdict": "partly-evidenced",
+      "verdict": "not-evidenced",
+      "error": null,
+      "assessment": {
+        "control_id": "4.2.1",
+        "profile_id": "nordlicht",
+        "verdict": "not-evidenced",
+        "should_score": {
+          "evidenced": 0,
+          "total": 5
+        },
+        "requirements": [
+          {
+            "id": "M1",
+            "column": "must",
+            "text": "The requirements for the management of access rights (authorization) are determined and fulfilled. The following aspects are considered:\n  - Procedure for application, verification, and approval,\n  - Applying the minimum (“need-to-know”/\"least privilege\") principle,\n  - Access rights are revoked when no longer needed.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M2",
+            "column": "must",
+            "text": "The access rights granted for normal and privileged user accounts and technical accounts are reviewed at regular intervals also within IT systems of customers.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S1",
+            "column": "should",
+            "text": "Strategies for authorizing access to information are prepared.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S2",
+            "column": "should",
+            "text": "Authorization roles are used.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S3",
+            "column": "should",
+            "text": "Rights are allocated on a need-to-use basis and according to the role and/or area of responsibility.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S4",
+            "column": "should",
+            "text": "Normal user accounts are not granted privileged access rights.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S5",
+            "column": "should",
+            "text": "The user’s access rights are updated after the user’s responsibilities have changed (e.g., to another field of responsibility).",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          }
+        ],
+        "answer": "Draft assessment for Control 4.2.1:\n\nThe evidence shows that Nordlicht has documented procedures for assigning, reviewing, and revoking access rights. The \"access control policy\" defines a ticket‑based approval workflow, specifies that rights are removed within five working days, enforces least privilege (ordinary accounts never hold admin rights), and mandates semi‑annual reviews of all accounts, including technical and privileged accounts.\n\nRecord‑level data confirms that new accounts start with a standard employee role, that role changes trigger removal of obsolete rights on the same day, and that leavers’ accounts are disabled on the last working day. An access‑review record dated 2026‑06‑20 shows that 171 employee accounts were reviewed, 11 rights removed, and that both technical and administrator accounts were scrutinised every six months.\n\nOverall the evidence indicates that access rights are assigned, reviewed and revoked in accordance with company policy, and that the company implements least‑privilege and regular audits. However, the evidence does not prove that reviews include all customer IT systems or that the policy is consistently enforced in all environments.\n\nConclusion: The control is partially met. Evidence demonstrates procedural compliance for internal systems but lacks confirmation for customer systems. No formal rating or certification is assigned.",
+        "warnings": [],
+        "steps": [
+          {
+            "node": "load_control",
+            "text": "Loaded control 4.2.1: To what extent are access rights assigned and managed? 7 requirements apply under Nordlicht Komponenten GmbH's profile."
+          },
+          {
+            "node": "apply_overlays",
+            "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “access rights least privilege Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “access rights least privilege Nordlicht”: 5 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the records for “access rights revoked five working days”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the records for “access rights revoked five working days”: 5 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Drafted an answer."
+          },
+          {
+            "node": "check_answer",
+            "text": "Checked the answer: it claims no audit result."
+          },
+          {
+            "node": "judge",
+            "text": "Judged 6 of 7 requirements evidenced."
+          },
+          {
+            "node": "check_quotes",
+            "text": "Checked each quote against its document: kept 0 citations, dropped 11. Changed by the checks: M1 to not evidenced, M2 to not evidenced, S1 to not evidenced, S2 to not evidenced, S3 to not evidenced, S4 to not evidenced, S5 to not evidenced. Now 0 of 7 requirements evidenced."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M1 from access-control-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M1 from access-control-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M1 from access-control-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M2 from access-control-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M2 from access-review-record: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S1 from access-control-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S2 from account-management-procedure: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S3 from joiner-leaver-record: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S3 from access-review-record: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S4 from access-control-policy: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for S5 from joiner-leaver-record: the quote isn't in that document."
+          },
+          {
+            "node": "remediate",
+            "text": "Drafted 7 remediation items."
+          },
+          {
+            "node": "review",
+            "text": "Waiting for the compliance lead's review."
+          }
+        ],
+        "token_usage": {
+          "input_tokens": 6438,
+          "output_tokens": 4601,
+          "total_tokens": 11039
+        },
+        "model": "gpt-oss:20b",
+        "prompt_version": "m4-answer-language-1",
+        "answer_language": "en",
+        "remediation": [
+          {
+            "requirement_id": "M1",
+            "missing": "A documented procedure covering the application, verification, and approval of access rights, enforcement of the least‑privilege principle, and a defined process for revoking access when no longer needed.",
+            "owner_role": "IT Security Governance Lead",
+            "due_date": "2027-02-02"
+          },
+          {
+            "requirement_id": "M2",
+            "missing": "A scheduled process for regularly reviewing access rights granted to normal, privileged, and technical accounts, including within customer‑facing IT systems.",
+            "owner_role": "IT Security Manager",
+            "due_date": "2027-01-03"
+          },
+          {
+            "requirement_id": "S1",
+            "missing": "A formally approved strategy that defines how authorizations to information are granted across the organization.",
+            "owner_role": "Information Security Manager",
+            "due_date": "2026-12-19"
+          },
+          {
+            "requirement_id": "S2",
+            "missing": "The implementation of authorized roles that are used to assign access rights rather than individual permissions.",
+            "owner_role": "Security Architect",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S3",
+            "missing": "A mechanism that ensures rights are allocated based on need‑to‑use, and that assignments are made according to each user’s role or area of responsibility.",
+            "owner_role": "IT Asset Management Lead",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S4",
+            "missing": "A policy and enforcement process that guarantees normal user accounts are never granted privileged access rights.",
+            "owner_role": "Systems Administrator Manager",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S5",
+            "missing": "An update workflow that revises a user’s access rights whenever their responsibilities change (e.g., role change, departmental transfer).",
+            "owner_role": "HR Security Interface Coordinator",
+            "due_date": "2026-12-04"
+          }
+        ],
+        "thread_id": "86af3150a25447d6b4a1b773080db305",
+        "status": "waiting-for-review",
+        "review": null
+      },
+      "seconds": 35.54119184000592,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 6438,
+        "output_tokens": 4601,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": {
+        "score": null,
+        "reason": "The answer cites nothing, so nothing cited to check it against.",
+        "error": null
+      },
+      "judge_usage": {
+        "model": "openai/gpt-6.1-terra",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": false,
+        "cost_complete": true
+      },
+      "judge_seconds": 0.0031848360085859895,
+      "metered": true,
+      "tokens": 11039,
+      "cost_usd": 0.0,
+      "judge_cost_usd": 0.0
+    },
+    {
+      "control_id": "5.1.1",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "encryption-standard"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "encryption-standard"
+          ]
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "OpenAIAPIError: Error code: 500 - error parsing tool call: raw='{\"answer\":\"Evidence indicates that Nordlicht has defined a clear cryptographic concept consistent with the 5.1.1 requirements. The encryption standard (doc_id \\\"encryption-standard\\\") explicitly lists approved algorithms and minimal key strengths – AES‑128 for stored data, RSA‑3072 or EC‑256 for key exchange and signatures, and SHA‑256 or stronger for hashing – matching the national cyber‑security authority’s recommendations. \\n\\nThe same document documents the full key lifecycle: keys are created in the device‑management system, recovery keys are stored centrally, and “Keys are withdrawn when a device is retired and renewed when a certificate expires.” It also states that “IT checks the encryption status of every laptop each month, using the device‑management report. A laptop found unencrypted is locked until it is fixed,” demonstrating periodic verification. \\n\\nThese artefacts together satisfy the S1 (concept defined and implemented) and M1 (use of recognised industry standards to the extent legally feasible) clauses. No contradictory evidence of non‑compliance or gaps was found in the provided records. Therefore, the control appears to be implemented to the extent described, though a formal audit would still be required to confirm enforcement in all operational contexts.\",\"commentary to=functions.submit_answer <|constrain|>json<|message|>', err=unexpected end of JSON input",
+      "assessment": null,
+      "seconds": 7.456951443993603,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 2025,
+        "output_tokens": 114,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": false
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 2139,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    },
+    {
+      "control_id": "5.1.2",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "network-services-register",
+            "network-transfer-standard"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "network-services-register",
+            "network-transfer-standard"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "network-services-register",
+            "network-transfer-standard"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "network-services-register",
+            "network-transfer-standard"
+          ]
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "CallBudgetSpent: more than 12 model calls",
+      "assessment": null,
+      "seconds": 18.619275428005494,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 35288,
+        "output_tokens": 2297,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 37585,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    },
+    {
+      "control_id": "5.2.4",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "log-review-record",
+            "logging-standard"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "log-review-record",
+            "logging-standard"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "log-review-record",
+            "logging-standard"
+          ]
+        },
+        {
+          "requirement_id": "M4",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "cloud-services-register"
+          ]
+        },
+        {
+          "requirement_id": "M5",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "log-review-record",
+            "logging-standard"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "log-review-record",
+            "logging-standard"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "partly-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": [
+            "logging-standard"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "CallBudgetSpent: more than 12 model calls",
+      "assessment": null,
+      "seconds": 11.88210179998714,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 32760,
+        "output_tokens": 1447,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 34207,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    },
+    {
+      "control_id": "5.2.5",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "patch-vulnerability-status"
+          ]
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "patch-vulnerability-status"
+          ]
+        },
+        {
+          "requirement_id": "M3",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "patch-vulnerability-status"
+          ]
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "partly-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "patch-vulnerability-status"
+          ]
+        },
+        {
+          "requirement_id": "S2",
+          "expected": "evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": [
+            "patch-vulnerability-status"
+          ]
+        },
+        {
+          "requirement_id": "S3",
+          "expected": "not-evidenced",
+          "verdict": "not-evidenced",
+          "cited": [],
+          "expected_cites": []
+        }
+      ],
+      "expected_verdict": "evidenced",
+      "verdict": "not-evidenced",
+      "error": null,
+      "assessment": {
+        "control_id": "5.2.5",
+        "profile_id": "nordlicht",
+        "verdict": "not-evidenced",
+        "should_score": {
+          "evidenced": 0,
+          "total": 3
+        },
+        "requirements": [
+          {
+            "id": "M1",
+            "column": "must",
+            "text": "Information on technical vulnerabilities for the IT systems in use is gathered (e.g., information from the manufacturer, system audits, CVE database) \nand evaluated (e.g., Common Vulnerability Scoring System CVSS).",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M2",
+            "column": "must",
+            "text": "Potentially affected IT systems and software are identified and the risk caused by the vulnerability is assessed.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "M3",
+            "column": "must",
+            "text": "Risks arising from vulnerabilities are treated.",
+            "verdict": "not-evidenced",
+            "reason": "Every citation given for it was dropped by the quote check, so nothing checked shows it.",
+            "citations": []
+          },
+          {
+            "id": "S1",
+            "column": "should",
+            "text": "An adequate patch management is defined and implemented (e.g., patch testing and installation).",
+            "verdict": "not-evidenced",
+            "reason": "The evidence lists patch gathering, scoring, and completion of patch tickets but contains no description of patch testing or a defined patch‑management process, so the requirement for a defined and implemented patch‑management program cannot be confirmed.",
+            "citations": []
+          },
+          {
+            "id": "S2",
+            "column": "should",
+            "text": "Risk minimizing measures are implemented, as necessary.",
+            "verdict": "not-evidenced",
+            "reason": "While a risk‑acceptance decision is documented, there is no evidence of other risk‑minimising measures (e.g., segmentation, additional controls) being implemented as required.",
+            "citations": []
+          },
+          {
+            "id": "S3",
+            "column": "should",
+            "text": "Successful installation of patches is verified in an appropriate manner.",
+            "verdict": "not-evidenced",
+            "reason": "Closing a patch ticket is recorded, but there is no documented verification that the patch was successfully installed and functional, so the verification requirement is not demonstrated.",
+            "citations": []
+          }
+        ],
+        "answer": "Evidence shows that Nordlicht collects vulnerabilities from manufacturers and the CVE database and evaluates them with CVSS 3.1. The \"Patch vulnerability status\" record lists each CVE, its score, affected assets, priority, treatment, and due date, demonstrating that potentially affected systems are identified and the risk is assessed and treated. For example: \n\n> | CVE | CVSS | Affected assets | Priority | Treatment | Due |\n> |---|---|---|---|---|---|\n> | CVE-2026-31244 | 9.8 | Email gateway | Critical | Patch ticket PT-118 closed on 2026-10-21 | 2026-10-24 |\n> ...\n\nThis supports M1–M3. The evidence does not contain documented procedures for patch testing or verification of successful installation, so the S1 and S3 requirements cannot be confirmed from the available records. No explicit risk‑minimising measure documentation is present either. Thus, while the company addresses the core vulnerability lifecycle, it lacks documented evidence for the optional patch management controls.\n",
+        "warnings": [],
+        "steps": [
+          {
+            "node": "load_control",
+            "text": "Loaded control 5.2.5: To what extent are vulnerabilities identified and addressed? 6 requirements apply under Nordlicht Komponenten GmbH's profile."
+          },
+          {
+            "node": "apply_overlays",
+            "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the policies for “security patch CVE Nordlicht”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the policies for “security patch CVE Nordlicht”: 5 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching the records for “Vulnerability management patch”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched the records for “Vulnerability management patch”: 2 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Searching Patch's vulnerability status for “cve”."
+          },
+          {
+            "node": "tools",
+            "text": "Searched Patch's vulnerability status for “cve”: 4 passages."
+          },
+          {
+            "node": "gather",
+            "text": "Drafted an answer."
+          },
+          {
+            "node": "check_answer",
+            "text": "Checked the answer: it claims no audit result."
+          },
+          {
+            "node": "judge",
+            "text": "Judged 3 of 6 requirements evidenced."
+          },
+          {
+            "node": "check_quotes",
+            "text": "Checked each quote against its document: kept 0 citations, dropped 3. Changed by the checks: M1 to not evidenced, M2 to not evidenced, M3 to not evidenced. Now 0 of 6 requirements evidenced."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M1 from patch-vulnerability-status: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M2 from patch-vulnerability-status: the quote isn't in that document."
+          },
+          {
+            "node": "guard",
+            "text": "Dropped a citation for M3 from patch-vulnerability-status: the quote isn't in that document."
+          },
+          {
+            "node": "remediate",
+            "text": "Drafted 6 remediation items."
+          },
+          {
+            "node": "review",
+            "text": "Waiting for the compliance lead's review."
+          }
+        ],
+        "token_usage": {
+          "input_tokens": 7774,
+          "output_tokens": 2734,
+          "total_tokens": 10508
+        },
+        "model": "gpt-oss:20b",
+        "prompt_version": "m4-answer-language-1",
+        "answer_language": "en",
+        "remediation": [
+          {
+            "requirement_id": "M1",
+            "missing": "A documented process for gathering technical vulnerability information from manufacturers, system audits, and CVE databases and evaluating it with a CVSS score is not provided.",
+            "owner_role": "Vulnerability Management Lead",
+            "due_date": "2027-02-02"
+          },
+          {
+            "requirement_id": "M2",
+            "missing": "Evidence that potentially affected IT systems and software have been identified and the risks caused by each vulnerability have been formally assessed is lacking.",
+            "owner_role": "IT Security Manager",
+            "due_date": "2027-01-03"
+          },
+          {
+            "requirement_id": "M3",
+            "missing": "Documentation showing that identified vulnerabilities have been treated—through patching, mitigation, or acceptance—is absent.",
+            "owner_role": "Risk Owner – Information Security",
+            "due_date": "2026-12-19"
+          },
+          {
+            "requirement_id": "S1",
+            "missing": "No defined and implemented patch‑management process, including a description of patch testing procedures, is evident.",
+            "owner_role": "Patch Management Coordinator",
+            "due_date": "2026-12-04"
+          },
+          {
+            "requirement_id": "S2",
+            "missing": "There is no evidence of risk‑minimizing measures (e.g., network segmentation, additional controls) being implemented beyond the documented risk‑acceptance decision.",
+            "owner_role": "Network Security Architect",
+            "due_date": "2027-01-03"
+          },
+          {
+            "requirement_id": "S3",
+            "missing": "Verification that installed patches are operational and have succeeded is not documented; closing a ticket alone is insufficient.",
+            "owner_role": "System Administrator – Patch Verification",
+            "due_date": "2026-11-19"
+          }
+        ],
+        "thread_id": "be426f7c5da443669a8d4c3f474a6bd1",
+        "status": "waiting-for-review",
+        "review": null
+      },
+      "seconds": 21.30628155200975,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 7774,
+        "output_tokens": 2734,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": {
+        "score": null,
+        "reason": "The answer cites nothing, so nothing cited to check it against.",
+        "error": null
+      },
+      "judge_usage": {
+        "model": "openai/gpt-6.1-terra",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": false,
+        "cost_complete": true
+      },
+      "judge_seconds": 0.0028183190006529912,
+      "metered": true,
+      "tokens": 10508,
+      "cost_usd": 0.0,
+      "judge_cost_usd": 0.0
+    },
+    {
+      "control_id": "5.2.9",
+      "requirements": [
+        {
+          "requirement_id": "M1",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "M2",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        },
+        {
+          "requirement_id": "S1",
+          "expected": "not-evidenced",
+          "verdict": null,
+          "cited": [],
+          "expected_cites": []
+        }
+      ],
+      "expected_verdict": null,
+      "verdict": null,
+      "error": "CallBudgetSpent: more than 12 model calls",
+      "assessment": null,
+      "seconds": 13.538053070995375,
+      "usage": {
+        "model": "ollama/gpt-oss:20b",
+        "input_tokens": 25302,
+        "output_tokens": 1692,
+        "reported_cost_usd": 0.0,
+        "estimated_cost_usd": 0.0,
+        "estimated": true,
+        "cost_complete": true
+      },
+      "faithfulness": null,
+      "judge_usage": null,
+      "judge_seconds": null,
+      "metered": true,
+      "tokens": 26994,
+      "cost_usd": 0.0,
+      "judge_cost_usd": null
+    }
+  ],
+  "bad_cases": []
+}
