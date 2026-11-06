@@ -269,8 +269,8 @@ def test_a_fake_run_meters_its_gather_turns_its_judge_and_its_remediation():
     script = ScriptedChatModel.from_file(DEMO_SCRIPT).script
     seen = CallsSeen()
     real_for_assessment = app.state.models.for_assessment
-    app.state.models.for_assessment = lambda chosen, callbacks: real_for_assessment(
-        chosen, [*callbacks, seen]
+    app.state.models.for_assessment = lambda chosen, callbacks, **kw: real_for_assessment(
+        chosen, [*callbacks, seen], **kw
     )
 
     assess(TestClient(app))
@@ -285,8 +285,8 @@ def test_a_fake_run_meters_its_remediation_drafts_too(tmp_path):
     app, _ = app_at(NOV_4_AFTERNOON, Settings(fake_script=script_path))
     seen = CallsSeen()
     real_for_assessment = app.state.models.for_assessment
-    app.state.models.for_assessment = lambda chosen, callbacks: real_for_assessment(
-        chosen, [*callbacks, seen]
+    app.state.models.for_assessment = lambda chosen, callbacks, **kw: real_for_assessment(
+        chosen, [*callbacks, seen], **kw
     )
 
     result = result_of(assess(TestClient(app)))

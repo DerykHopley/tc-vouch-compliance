@@ -57,6 +57,15 @@ ENV_NAMES = frozenset(
 )
 
 DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
+DEMO_SCRIPT_DE = Path(__file__).parent / "demo" / "demo-de.json"
+DEMO_SCRIPTS = {"de": DEMO_SCRIPT_DE}
+"""The demo script by answer language (#234): a German profile's assessment answers in German
+on the fake; every other language plays DEMO_SCRIPT."""
+
+
+def demo_script(answer_language: str) -> Path:
+    """The bundled demo script for the answer language (ISO 639-1): DEMO_SCRIPT when it has none."""
+    return DEMO_SCRIPTS.get(answer_language, DEMO_SCRIPT)
 
 
 class SettingsError(RuntimeError):
