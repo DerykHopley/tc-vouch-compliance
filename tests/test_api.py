@@ -105,7 +105,9 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
         [s["node"] for s in steps],
         "gather", "tools", "gather", "check_answer", "judge", "check_quotes", "remediate", "review",
     )  # fmt: skip
-    assert all(set(s) == {"node", "text"} and s["text"] for s in steps)
+    # Only the load step quotes the edition's words (#244).
+    assert all(set(s) == {"node", "text"} and s["text"] for s in steps[1:])
+    assert set(steps[0]) == {"node", "text", "quote"}
     assert next(s["text"] for s in steps if s["node"] == "judge") == (
         "Judged 4 of 5 requirements evidenced."
     )

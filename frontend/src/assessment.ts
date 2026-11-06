@@ -41,7 +41,8 @@ export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 
 export type Control = { id: string; title: string }
 
-export type Step = { node: string; text: string }
+/** `quote`: the ISA edition's words the text quotes, marked in the profile's language (#244). */
+export type Step = { node: string; text: string; quote?: string }
 /** Documented (a policy says so) or implemented (a record shows it done): `vouch.documents.EvidenceKind`. */
 export type EvidenceKind = 'documented' | 'implemented'
 /** A quote checked word for word in this version of the document (`vouch.citations.Citation`). */

@@ -17,6 +17,10 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 - **Compute every contrast ratio** with `scripts/contrast.py <fg> <bg> [--min 4.5]`, and quote the number it prints. Never estimate one. From the M0 design calls, where an estimated "~3.9:1" was really 3.0:1.
 - **Verdict tokens are checked by `scripts/token-roles.py`** (in CI and the pre-push hook): `--evidenced` and the rest only on verdict chips (`.v-*`), card edges (`.card-head`) and the readiness bar (`.readiness*`), as `docs/design.md` says. A new role for them is a `docs/design.md` change first, then a selector in the script's `ALLOWED`. From #11 and #12, where reviews caught two decorative uses that design-lint passed.
 
+## Language
+
+- **Mark text in the profile's answer language with `lang`** (the profile's `answer_language`): model output (chat replies, draft answers, reasons, remediation drafts), the ISA edition's text (questions, requirements, the edition's words a step quotes), verdict words and the roll-up note. Leave interface words unmarked. `frontend/e2e/test_profile_language.py` walks Alpenwerk and names any German text without `lang="de"`. From #244, after #200, #207, #224 and PR #227 each fixed a place one at a time.
+
 ## Pull requests
 
 - **A Done-when criterion the PR doesn't meet is listed in its description** as `Dropped: <criterion>, because …`, and the reviewer checks that list against the ticket. From #36, where phone-number redaction was dropped without a note and later described as never asked for.

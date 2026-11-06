@@ -1291,7 +1291,7 @@ class Step:
         if self.node == "load_control":
             control: IsaControl = update["control"]
             requirements: ControlRequirements = update["control_requirements"]
-            question = textwrap.shorten(control.question, QUESTION_SHOWN, placeholder="…")
+            question = self.quote()
             applicable, excluded = len(requirements.applicable), len(requirements.not_applicable)
             text = (
                 f"Loaded control {control.id}: {question} "
@@ -1422,9 +1422,19 @@ class Step:
             return text + "."
         return f"Finished the {self.node} step."
 
+    def quote(self) -> str | None:
+        """The ISA edition's words the step's text quotes (the load step's question, shortened),
+        so the page marks them in the profile's language (#244); None for a step quoting none."""
+        if self.node != "load_control":
+            return None
+        question: str = self.update["control"].question
+        return textwrap.shorten(question, QUESTION_SHOWN, placeholder="…")
+
     def to_dict(self) -> dict[str, str]:
-        """The step as the stream and the Assessment carry it."""
-        return {"node": self.node, "text": self.describe()}
+        """The step as the stream and the Assessment carry it: its node and text, and `quote`,
+        the edition's words in the text, when it quotes some."""
+        quote = self.quote()
+        return {"node": self.node, "text": self.describe(), **({"quote": quote} if quote else {})}
 
 
 def _loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
