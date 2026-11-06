@@ -26,7 +26,7 @@ describe('proseBlocks', () => {
     ])
   })
 
-  it('reads a list written inline after a colon, as in the live example', () => {
+  it('reads a bulleted list written inline after a colon, as in the live example', () => {
     expect(proseBlocks(LIVE)).toEqual([
       { kind: 'p', lines: [[{ text: 'What exists:' }]] },
       { kind: 'ul', items: [
@@ -34,10 +34,14 @@ describe('proseBlocks', () => {
         [{ text: 'The standard covers part of the key lifecycle' }],
       ] },
     ])
-    expect(proseBlocks('Next: 1. Name an owner 2. Set a date')).toEqual([
-      { kind: 'p', lines: [[{ text: 'Next:' }]] },
-      { kind: 'ol', items: [[{ text: 'Name an owner' }], [{ text: 'Set a date' }]] },
-    ])
+  })
+
+  it('leaves numbers after a colon on the same line as written, as German dates are (ticket 218)', () => {
+    const lines = ['Stand: 1. Januar 2026, geändert am 2. Februar 2026.', 'Zeitraum: 1. Januar bis 2. März 2026',
+      'Next: 1. Name an owner 2. Set a date']
+    for (const line of lines) {
+      expect(proseBlocks(line)).toEqual([{ kind: 'p', lines: [[{ text: line }]] }])
+    }
   })
 
   it('reads an inline list after a bold lead-in, as the chat writes "**M1 (must):** - …"', () => {
