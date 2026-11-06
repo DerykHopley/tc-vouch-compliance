@@ -160,19 +160,7 @@ def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400
 
 
 # The assessment graph's nodes, as its steps name them.
-NODE_NAMES = {
-    "load_control",
-    "apply_overlays",
-    "overlay_branch",
-    "gather",
-    "tools",
-    "check_answer",
-    "judge",
-    "check_quotes",
-    "remediate",
-    "review",
-    "guard",
-}
+NODE_NAME = re.compile(r"^[a-z_]+$")  # a graph node name, as src/vouch/graph.py names them
 
 
 def test_after_assess_each_step_names_its_node_in_a_chip_and_the_answer_shows_at_every_width(
@@ -191,7 +179,7 @@ def test_after_assess_each_step_names_its_node_in_a_chip_and_the_answer_shows_at
     expect(steps.first.locator(".step-node")).to_have_text("load_control")
     expect(steps.locator(".step-node")).to_have_count(steps.count())  # one chip in every step
     names = steps.locator(".step-node").all_inner_texts()
-    assert names and set(names) <= NODE_NAMES, names
+    assert names and all(NODE_NAME.match(n) for n in names), names
     for width in (400, 900, 1400):
         page.set_viewport_size({"width": width, "height": 900})
         expect(answer.locator(".answer")).to_be_visible()

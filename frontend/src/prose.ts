@@ -79,7 +79,7 @@ function heading(line: string, asWritten: boolean): TextRun[] | null {
 export function proseBlocks(text: string): Block[] {
   const blocks: Block[] = []
   let open: Block | null = null
-  const add = (kind: 'p' | 'ul' | 'ol', content: TextRun[]) => {
+  const add = (kind: Exclude<Block['kind'], 'h'>, content: TextRun[]) => {
     if (open && open.kind === kind) {
       if (open.kind === 'p') open.lines.push(content)
       else open.items.push(content)
