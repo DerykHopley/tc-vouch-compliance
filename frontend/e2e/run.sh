@@ -17,6 +17,8 @@
 #
 #   frontend/e2e/run.sh                                  # build the front end, Chromium
 #   frontend/e2e/run.sh --browser firefox                # extra arguments go to pytest
+#   frontend/e2e/run.sh frontend/e2e/test_chat.py        # a test path from the repo's root works too
+#   E2E_WARNINGS=1 frontend/e2e/run.sh                   # pytest's warnings (off by default)
 #   VOUCH_IMAGE=vouch:dev frontend/e2e/run.sh            # the built container (CONTAINER=podman to switch)
 #
 # Needs: backend deps (uv sync), frontend deps (npm ci) unless VOUCH_IMAGE is set, and the browser:
@@ -100,6 +102,14 @@ wait_for "$PAPER_URL/api/health"
 wait_for "$CHAT_URL/api/health"
 wait_for "$FAILING_API_URL/api/health"
 
-echo "Browser check on $VOUCH_URL (${VOUCH_IMAGE:-built front end}; failing API $FAILING_API_URL): pytest $*"
+# Test paths work from the repo's root too (frontend/e2e/test_x.py), not only from here (#246).
+# Warnings are off by default, so the last line is pytest's result; E2E_WARNINGS=1 shows them.
+args=()
+for arg in "$@"; do
+  arg=${arg#./}
+  args+=("${arg#frontend/e2e/}")
+done
+[ "${E2E_WARNINGS:-0}" = 1 ] || args=(-p no:warnings "${args[@]+"${args[@]}"}")
+echo "Browser check on $VOUCH_URL (${VOUCH_IMAGE:-built front end}; failing API $FAILING_API_URL): pytest ${args[*]+"${args[*]}"}"
 cd "$HERE"
-uv run --project "$HERE" pytest -q "$@"
+uv run --project "$HERE" pytest -q "${args[@]+"${args[@]}"}"
