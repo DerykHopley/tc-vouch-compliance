@@ -115,9 +115,9 @@ def test_a_reload_or_a_pasted_link_keeps_the_chosen_profile(page: Page, profiles
         menu.select_option(label=TESTWERK)
 
     for arrive in (lambda: page.goto(f"{profiles_url}/controls/1.1.1"), page.reload):
-        with page.expect_request(lambda r: r.url.endswith("/api/overview")) as asked:
+        with page.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
             arrive()
-        assert asked.value.header_value("X-Vouch-Profile") == "testwerk"
+        assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
         expect(menu).to_have_value("testwerk")
         expect(page.get_by_role("banner").get_by_role("status")).to_have_count(0)
 

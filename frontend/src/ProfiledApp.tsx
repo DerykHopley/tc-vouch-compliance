@@ -20,10 +20,12 @@ export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
   const [chosen, setChosen] = useState<string | null>(null)
   const [fellBack, setFellBack] = useState(false)
+  // Opens the app under `id`: at start (the remembered or the default profile) and on each switch.
   const choose = (id: string) => {
     setProfile(id) // before the app opens again, so its first calls name it
     setChosen(id)
   }
+  // The user's switch in the menu: remembered for the next reload, and it ends any fallback note.
   const switchTo = (id: string) => {
     rememberProfile(id)
     setFellBack(false)
