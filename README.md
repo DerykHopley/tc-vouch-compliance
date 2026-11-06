@@ -1,152 +1,73 @@
 # Vouch
 
 Vouch is an audit-readiness agent for ISMS and TISAX. For each control it searches the company's
-policies, judges whether the evidence covers the control, and drafts an answer for the auditor,
-citing its sources.
+policies and records, judges each requirement as Evidenced, Partly evidenced or Not evidenced
+(Not applicable when the company's profile excludes it), and drafts an answer for the auditor
+that quotes its sources word for word. The compliance lead reviews every verdict; only accepted verdicts count towards
+readiness.
+
+## Who it's for
+
+- **A compliance lead** preparing a TISAX or ISO 27001 (ISMS) audit, working through the VDA ISA
+  controls one piece of evidence at a time.
+- **The readiness report's readers:** management and the auditor, who read where the company
+  stands, what is missing and who reviewed each verdict.
 
 ## Run it locally
 
-You need [uv](https://docs.astral.sh/uv/) and Python 3.12, and Node 24 for the front end.
+You need [uv](https://docs.astral.sh/uv/) with Python 3.12, Node 24 and npm, bash 4.4 or newer,
+python3 and curl.
 
 ```sh
-uv sync && (cd frontend && npm ci)
-scripts/dev.sh                                   # open the URL it prints; Ctrl-C stops both
+uv sync
+(cd frontend && npm ci)
+scripts/dev.sh                                   # open the URL it prints; Ctrl-C stops it
 scripts/dev.sh --api-port 8010 --web-port 5180   # when 8000 or 5173 is taken
 ```
 
-`scripts/dev.sh` starts the API (reloading when `src/` changes, on the scripted fake model) and
-the Vite dev server, which passes `/api` to it. A port already in use stops it before anything
-starts.
+It runs on the scripted fake model: offline, free, with no keys and no sign-in. Assess
+**4.1.2** first: it is the control the bundled demo script covers. The full setup, and what to
+do when something fails, is in [`docs/setup.md`](docs/setup.md); the four common tasks, step by
+step, are in [`docs/features.md`](docs/features.md).
 
-The agent on its own, from the command line:
+## The live app
 
-```sh
-ASSESS_FAKE_SCRIPT=tests/scripts/isa_4_1_2.json uv run assess 4.1.2 --profile nordlicht
-```
+<https://vouch-828715466396.europe-west1.run.app>: invite-only (Clerk sign-in; members of the
+course's Discord server are let in too). It runs on the real model.
 
-This assesses VDA ISA control `4.1.2` for the `nordlicht` compliance profile (the default) on
-the scripted fake model, offline and free, and prints the Assessment as JSON: a verdict per
-requirement, the control's rolled-up verdict and its should score. The profile and policies it
-reads are the demo company's, in `fixtures/nordlicht/`.
+## Course tasks
 
-To use a real model instead, leave `ASSESS_FAKE_SCRIPT` unset and set `OPENROUTER_API_KEY`
-(`ASSESS_MODEL` names the model; `anthropic/claude-sonnet-5.5` without it, the owner's choice from the eval report, #55). That is a paid call: load the key from the system keyring, never from a file in
-the repo.
+The optional tasks done; the full table, with the code and the app page for each, is in
+[`docs/course-tasks.md`](docs/course-tasks.md).
 
-### The offline eval
-
-```sh
-uv run python -m vouch.evals
-```
-
-This assesses each of Nordlicht's 12 controls on the scripted fake model (a script per control in
-`evals/scripts/nordlicht/`) and scores the verdicts and citations against
-`fixtures/nordlicht/expected-answers.yaml`, read when it runs: verdict accuracy per requirement
-and per control, and citation precision. It prints a summary and saves it, with the raw results,
-to `evals/results/` (git-ignored). On the fake model it checks the harness, not a model. The
-scripts are drafted from the expected answers: after those change, regenerate them with
-`uv run python evals/scripts/generate.py [--profile alpenwerk]` and read the diff.
-`--profile alpenwerk` runs Alpenwerk's 12 controls the same way (`evals/scripts/alpenwerk/`,
-German draft answers).
-
-On a real model (`--model <OpenRouter id>`, or `--model ollama/<name>` for a local model through
-Ollama) each case also records its tokens, cost and seconds, and with `--judge <model>` the
-faithfulness of its answer to the passages it cites (DeepEval, judged by that model). A real run
-is paid, so it runs one case first (the dry run), prints a cost and time estimate, and runs the
-rest only when you type `yes`; anything else, or Ctrl-C, stops with nothing more sent. A judge
-is never added to a fake run unless you name it. OpenRouter needs `OPENROUTER_API_KEY` from the
-keyring (`.envrc`); without it a real model is refused and the fake still runs. Ollama must be
-running (`ollama serve`) with the model pulled (`ollama pull <name>`); `--ollama-timeout` sets a
-local model's per-request limit (600 s by default). `--models` lists the runner's models and
-prices; `--profile alpenwerk` runs the second profile.
-
-Raw results go to `evals/results/` (git-ignored), saved after every case, so Ctrl-C or a crash
-keeps the cases already run; `--keep` also copies them to `evals/kept/`, to commit. The report
-renders from saved results without calling a model (the newest complete run of each model on
-each profile; a partial run or a dry run only when there is nothing else, marked):
-
-```sh
-uv run python -m vouch.evals report evals/kept --out docs/eval-report.md
-```
-
-### The API
-
-```sh
-uv run uvicorn vouch.api:app --port 8000
-curl localhost:8000/api/health
-curl -N -X POST localhost:8000/api/assessments \
-  -H 'content-type: application/json' -d '{"control_id": "4.1.2"}'
-```
-
-`POST /api/assessments` streams server-sent events: a `step` per agent step, a `requirement` per
-judged requirement, one `result`, then
-the stream closes (or one `error`). The model (`vouch.model_choice`): the script
-`ASSESS_FAKE_SCRIPT` names, when set; else OpenRouter, when `OPENROUTER_API_KEY` is set (a paid
-call; on Cloud Run only a signed-in user reaches it); else the bundled demo script. OpenRouter
-runs the model a developer chose on the developer page (`/developer`, `GET /api/developer/settings`
-and `PUT /api/developer/model`, developers only), else `ASSESS_MODEL`, else
-`anthropic/claude-sonnet-5.5`. The choice is kept in the database (its table made by
-`vouch-db-setup`), or in memory without one. One assessment makes at most 12 model calls, each
-retried at most once.
-`scripts/dev.sh` drops the key, so it always runs the fake.
-
-A proposed assessment waits for the lead's review (`POST /api/assessments/{thread_id}/review`).
-`GET /api/assessments` lists the user's assessments, newest first, and
-`GET /api/assessments/{thread_id}` opens one; another user's thread id is a 404. With
-`VOUCH_DATABASE_URL` set they're kept in Postgres (LangGraph's checkpointer and store, their
-tables made by `vouch-db-setup`), so a run waiting for review outlasts a restart; without it, in
-memory until the server restarts.
-
-### Sign-in (clerk mode)
-
-Locally there is no sign-in: one default user. With any Clerk key set (`.envrc` loads them),
-`VOUCH_AUTH_MODE` must be set too, `local` or `clerk`, or the API refuses to start, naming it;
-`scripts/dev.sh` sets `local` (#151). In `clerk` mode, as on Cloud Run, every `/api`
-route but `/api/health` needs a Clerk session token (`Authorization: Bearer ...`); without a
-valid one the API answers 401. The token is checked offline, and only from the origins in
-`CLERK_AUTHORIZED_PARTIES` (comma-separated, not a secret, so set in the shell rather than the
-keyring). The front end shows the "access is by invitation" page with Clerk's sign-in until a
-user signs in. A user is a developer when their **private** metadata in Clerk is
-`{"role": "developer"}`; anyone else is a compliance lead. Only routes that need the role ask
-Clerk's API for it, and answer 503 when Clerk can't be reached.
-
-With `DISCORD_SERVER_ID` set (#152), every route but health also needs access: a member of that
-Discord server (read with the user's Discord token, which Clerk keeps from the sign-in), a
-developer, a user with an accepted Clerk invitation, or one whose private metadata says
-`{"access": "invited"}`. The answer is cached per user for 5 minutes. Anyone else gets a 403
-with `reason: "not-a-member"`, and the page says Vouch is open to the course's server; a Discord
-token Vouch can't use gets `reason: "sign-in-again"`; Clerk or Discord failing, a 503. The page
-asks `GET /api/access` before it opens. To try it locally on the
-development instance, with the Clerk keys loaded from the keyring by `.envrc`:
-
-```sh
-npm --prefix frontend run build
-VOUCH_AUTH_MODE=clerk CLERK_AUTHORIZED_PARTIES=http://localhost:8000 \
-  VOUCH_FRONTEND=frontend/dist uv run uvicorn vouch.api:app --port 8000
-```
-
-### One container, as on Cloud Run
-
-```sh
-docker build -t vouch:dev .
-docker run --rm -p 127.0.0.1:8081:8080 -e VOUCH_AUTH_MODE=local vouch:dev   # open http://localhost:8081
-```
-
-FastAPI serves the API under `/api` and the built front end (`VOUCH_FRONTEND`, `frontend/dist`)
-on every other path, so a link such as `/controls/4.1.2` survives a refresh. It listens on
-`$PORT` (8080 by default). Without a front-end build it stops at once and says so.
-
-## Checks
-
-```sh
-uv run ruff check
-uv run pytest            # sockets are disabled; no test needs an API key
-frontend/e2e/run.sh      # the browser check, on the built front end
-VOUCH_IMAGE=vouch:dev frontend/e2e/run.sh --browser firefox   # on the container
-```
+| Level | Task | Details |
+|---|---|---|
+| Easy | Give the agent a personality | [Easy](docs/course-tasks.md#easy) |
+| Easy | An interactive help feature or chatbot guide | [Easy](docs/course-tasks.md#easy) |
+| Medium | Calculate and show token usage and cost | [Medium](docs/course-tasks.md#medium) |
+| Medium | Long- or short-term memory in LangGraph | [Medium](docs/course-tasks.md#medium) |
+| Medium | User authentication and personalisation | [Medium](docs/course-tasks.md#medium) |
+| Medium | Multi-model support | [Medium](docs/course-tasks.md#medium) |
+| Medium | A security guard; developer settings apart from the user experience | [Medium](docs/course-tasks.md#medium) |
+| Hard | Agentic RAG in the LangGraph app | [Hard](docs/course-tasks.md#hard) |
+| Hard | An AI evaluation report with DeepEval | [Hard](docs/course-tasks.md#hard) |
 
 ## Docs
 
-- [`docs/`](docs/): requirements and decisions, design, and the project brief.
-- [`GLOSSARY.md`](GLOSSARY.md): the domain words.
-- Work is tracked in this repo's GitHub issues.
+- [`docs/setup.md`](docs/setup.md): local setup, the CLI, the evals, the API, sign-in, the
+  container, the checks, keys, Cloud Run in short, and common failures.
+- [`docs/features.md`](docs/features.md): assess a control, review it, ask a question, read the
+  report.
+- [`docs/technical-decisions.md`](docs/technical-decisions.md),
+  [`docs/course-tasks.md`](docs/course-tasks.md),
+  [`docs/eval-summary.md`](docs/eval-summary.md) and [`docs/reflection.md`](docs/reflection.md).
+- [`docs/eval-report.md`](docs/eval-report.md): the full eval report.
+- [`DEPLOY.md`](DEPLOY.md): deploying to Cloud Run.
+- [`GLOSSARY.md`](GLOSSARY.md): the domain words. [`docs/requirements.md`](docs/requirements.md):
+  requirements and dated decisions.
+
+## Attribution
+
+The controls are the VDA ISA 2027.1, © ENX Association, licensed under CC BY-ND 4.0, and shipped
+unchanged (English and German editions). See
+[`src/vouch/data/vda-isa-2027.1/NOTICE.md`](src/vouch/data/vda-isa-2027.1/NOTICE.md).
