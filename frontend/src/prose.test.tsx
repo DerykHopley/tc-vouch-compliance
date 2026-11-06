@@ -66,6 +66,10 @@ describe('proseBlocks', () => {
       { kind: 'ol', items: [[{ text: 'first' }], [{ text: 'second' }]] },
       { kind: 'p', lines: [[{ text: '4. März' }]] },
     ])
+    expect(proseBlocks('1. a\n2. b\n1. c')).toEqual([
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]] },
+      { kind: 'ol', items: [[{ text: 'c' }]] },
+    ])
   })
 
   it('leaves a star inside a word as written, as German gender stars are (ticket 218)', () => {

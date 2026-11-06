@@ -61,12 +61,17 @@ function unfold(line: string): string[] {
   return [line]
 }
 
-/** A numbered line's match while it starts a list at 1 or is the next number of the list above it; null otherwise,
- * so "15. März 2026 …" stays text (#218). */
-function listNumber(match: RegExpExecArray | null, open: Block | null): RegExpExecArray | null {
+/**
+ * A numbered line's item, and whether it starts a new list: only at 1 or as the next number of the list above it.
+ * Null otherwise, so "15. März 2026 …" stays text (#218).
+ */
+function numberedItem(line: string, open: Block | null): { text: string; starts: boolean } | null {
+  const match = NUMBERED.exec(line)
   if (!match) return null
+  const number = Number(match[1])
   const next = open?.kind === 'ol' ? open.items.length + 1 : 1
-  return Number(match[1]) === next || Number(match[1]) === 1 ? match : null
+  if (number !== next && number !== 1) return null
+  return { text: match[2], starts: number === 1 }
 }
 
 /** The text as paragraphs and lists. */
@@ -88,13 +93,13 @@ export function proseBlocks(text: string): Block[] {
       continue
     }
     const bullet = BULLET.exec(line)
-    const numbered = bullet ? null : listNumber(NUMBERED.exec(line), open)
-    const item = bullet ? bullet[1] : numbered?.[2]
+    const numbered = bullet ? null : numberedItem(line, open)
+    const item = bullet ? bullet[1] : numbered?.text
     // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet.
     if (item?.trim() === '') continue
-    if (bullet) add('ul', runs(bullet[1]))
-    else if (numbered) add('ol', runs(numbered[2]))
-    else add('p', runs(line))
+    if (numbered?.starts) open = null // "1." again starts a new list
+    if (item === undefined) add('p', runs(line))
+    else add(bullet ? 'ul' : 'ol', runs(item))
   }
   return blocks
 }
