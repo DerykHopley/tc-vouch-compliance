@@ -65,10 +65,18 @@ def remediation_tile(page: Page) -> Locator:
     return tile.locator("b")
 
 
-def overview_count(page: Page) -> int:
+def open_count(request: APIRequestContext, url: str) -> int:
+    """The overview's open remediation items, from the API: the number the tile shows once read."""
+    return request.get(f"{url}/api/overview").json()["readiness"]["remediation_items"]
+
+
+def back_on_the_overview(page: Page) -> Locator:
+    """Back to the overview: its remediation tile. The response event fires on the answer's
+    headers, before the app has read the body and shown the new count, so assert on the tile
+    with expect (which waits), never a one-time read (#240)."""
     with page.expect_response("**/api/overview"):
         page.get_by_role("link", name="← Overview").click()
-    return int(remediation_tile(page).inner_text())
+    return remediation_tile(page)
 
 
 def test_approve_keeps_the_item_with_the_leads_owner_and_writes_an_audit_entry(
@@ -96,15 +104,14 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_writes_an_audit_entry(
 
 def test_discard_takes_the_item_out_of_the_open_count(page: Page, paper_url):
     accepted_with_an_item(page.request, paper_url)
-    paper = open_paper(page, paper_url)
-    before = overview_count(page)
+    before = open_count(page.request, paper_url)
     paper = open_paper(page, paper_url)
 
     with page.expect_response(re.compile(rf"/remediation/{ITEM}$")):
         item(paper).get_by_role("button", name=f"Discard {ITEM}").click()
     expect(item(paper)).to_contain_text("Discarded")
 
-    assert overview_count(page) == before - 1
+    expect(back_on_the_overview(page)).to_have_text(str(before - 1))
 
 
 def test_a_past_due_date_is_refused_with_a_hint(page: Page, paper_url):
