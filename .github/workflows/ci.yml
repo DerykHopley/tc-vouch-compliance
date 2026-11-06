@@ -128,7 +128,15 @@ jobs:
     # or comments on the one already open: main was red five hours unnoticed on 2026-11-06. Never
     # on a PR, never on a green run. GITHUB_TOKEN only: issues to write, the run's jobs to read.
     needs: [fast-lane, frontend, database, browser]
-    if: failure() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # A needed job failed, or was cancelled by its own timeout; not when someone cancelled the run.
+    if: >-
+      !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+      && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Overlapping red runs (a push during the nightly lane) take turns, so the second finds the
+    # first's issue and comments on it: one issue per red streak.
+    concurrency:
+      group: main-red
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

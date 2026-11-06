@@ -117,3 +117,18 @@ def test_with_no_failed_job_found_it_still_opens_one_naming_the_run(tmp_path):
     assert done.returncode == 0, done.stderr
     assert "--title Main is red: the run" in calls
     assert "https://github.com/o/r/actions/runs/42" in created
+
+
+LOG_VITEST = (
+    "2026-11-06T09:00:00Z  \x1b[31mFAIL\x1b[39m  src/review.test.ts > rollUpWords > explains it 12ms\n"
+    "2026-11-06T09:00:01Z  FAIL  src/review.test.ts > rollUpWords > explains it\n"
+    "2026-11-06T09:00:02Z  Tests  1 failed | 280 passed (281)\n"
+)
+
+
+def test_a_frontend_job_s_vitest_failures_are_named(tmp_path):
+    # Vitest prints "FAIL  <file> > <test>", not pytest's "FAILED <id>" (#241's verifier).
+    done, _, created, _ = run(tmp_path, failed_jobs="13\\tfrontend\\n", **{"13": LOG_VITEST})
+    assert done.returncode == 0, done.stderr
+    assert "`src/review.test.ts > rollUpWords > explains it`" in created
+    assert created.count("rollUpWords") == 1

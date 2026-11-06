@@ -12,17 +12,22 @@ PREFIX="Main is red:"
 
 # The run's failed jobs, "id<TAB>name" per line. Each one's own log is complete once it has
 # finished, while this job still runs (the whole run's log isn't until the run ends).
+# A job that ran out of time ends cancelled or timed out, not failed: red all the same.
 failed=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate \
-  --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"')
+  --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")
+    | "\(.id)\t\(.name)"')
 
 names=()
 tests=""
 while IFS=$'\t' read -r id name; do
   [ -n "$id" ] || continue
   names+=("$name")
-  # pytest's summary lines: "FAILED <test id> - <reason>", after the log's timestamp.
+  # pytest's summary lines, "FAILED <test id> - <reason>", and Vitest's, "FAIL  <file> > <test> [12ms]",
+  # after the log's timestamp, colour codes taken out.
   found=$(gh api --allow-escape-sequences "repos/$REPO/actions/jobs/$id/logs" 2>/dev/null \
-    | sed 's/\x1b\[[0-9;]*m//g' | grep -oE 'FAILED [^ ]+' | sed 's/^FAILED //' || true)
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | sed -nE 's/.*FAILED ([^ ]+).*/\1/p; s/.* FAIL  (.+[^ ])$/\1/p' \
+    | sed -E 's/ [0-9]+ms$//' || true)
   tests+="$found"$'\n'
 done <<< "$failed"
 
