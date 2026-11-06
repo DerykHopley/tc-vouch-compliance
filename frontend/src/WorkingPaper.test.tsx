@@ -210,7 +210,9 @@ describe('the working paper of a control not yet assessed', () => {
     expect(screen.getByText('Not assessed yet. 4 requirements apply in this profile.')).toBeTruthy()
     expect(screen.getAllByRole('rowheader').map((h) => h.querySelector('.mono')?.textContent)).toEqual(
       ['M1', 'S1', 'H1', 'O1', 'S3'])
-    expect(within(row('S3')).getByText('Not applicable: Nordlicht allows no remote access.')).toBeTruthy()
+    expect(row('S3').querySelector('.why')?.textContent).toBe('Not applicable: Nordlicht allows no remote access.')
+    // The reason is the profile's words, marked in its language; the label is the interface's (#244).
+    expect(within(row('S3')).getByText('Nordlicht allows no remote access.').getAttribute('lang')).toBe('en')
     expect(within(row('O1')).getByText('AT NIS2 (illustrative)')).toBeTruthy()
     expect(within(row('M1')).queryByText('Evidenced')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Assess 5.1.2' }))
@@ -545,6 +547,15 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     }))
     return sent
   }
+
+  it("marks a German profile's draft lang=\"de\", and an English profile's not (issue 244)", () => {
+    const missing = 'Ein Nachweis der Zugriffsprüfungen.'
+    review({ assessment: { ...ACCEPTED, answer_language: 'de', remediation: [{ ...DRAFT, missing }] } })
+    expect(within(item()).getByText(missing).getAttribute('lang')).toBe('de')
+    cleanup()
+    review({ assessment: { ...ACCEPTED, answer_language: 'en' } })
+    expect(within(item()).getByText('A record of access reviews.').getAttribute('lang')).not.toBe('de')
+  })
 
   it("shows the draft in its requirement's row: what's missing, the owner role and the due date", () => {
     review({ assessment: ACCEPTED })

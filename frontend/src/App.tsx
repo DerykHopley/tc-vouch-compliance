@@ -219,6 +219,7 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
       <AskVouch context={{ page: shown === null || shown === 'report' ? 'dossier' : shown,
         controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
+        language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}
         onAssessed={(controlId) => {
           void load()
           if (controlId === paperId) setPaperReloads((n) => n + 1)
