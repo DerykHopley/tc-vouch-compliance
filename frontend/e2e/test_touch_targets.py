@@ -26,6 +26,13 @@ def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url,
     assert small_targets(page) == []
 
 
+def test_the_readiness_report_s_controls_are_at_least_44px(page: Page, report_url):
+    # #56: the report page on its own server, with whatever the report's checks have reviewed.
+    at_phone_width(page, f"{report_url}/report")
+    expect(page.locator("article.report-doc")).to_be_visible()
+    assert small_targets(page) == []
+
+
 def test_the_chat_and_its_action_pills_are_at_least_44px(page: Page, chat_url):
     # #45 failed verify twice on these pills: the chat's own server, as test_guided_chat uses.
     assess_in_the_chat(page, chat_url, 400)

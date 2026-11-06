@@ -27,8 +27,13 @@ def scrolls_sideways(page: Page) -> bool:
 def test_the_tabs_mark_the_current_page(page: Page, profiles_url):
     opened(page, profiles_url)
     tabs = page.get_by_role("navigation", name="Main").get_by_role("link")
-    expect(tabs).to_have_text(["Overview", "Developer"])
+    expect(tabs).to_have_text(["Overview", "Report", "Developer"])  # Report after Overview (#56)
     expect(overview_tab(page)).to_have_attribute("aria-current", "page")
+
+    page.get_by_role("link", name="Report").click()
+    expect(page).to_have_url(re.compile(r"/report$"))
+    expect(page.get_by_role("link", name="Report")).to_have_attribute("aria-current", "page")
+    expect(overview_tab(page)).not_to_have_attribute("aria-current", "page")
 
     page.get_by_role("link", name="Developer").click()
     expect(page).to_have_url(re.compile(r"/developer$"))
@@ -98,13 +103,16 @@ def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
     bar = page.get_by_role("banner")
     toggle = bar.get_by_role("button", name="Menu", exact=True)
     expect(toggle).to_be_visible()
+    report_tab = page.get_by_role("link", name="Report", exact=True)
     expect(overview_tab(page)).to_be_hidden()
+    expect(report_tab).to_be_hidden()  # in the menu too (#56)
     expect(profile_button(page)).to_be_hidden()
     assert not scrolls_sideways(page)
 
     toggle.click()
     expect(toggle).to_have_attribute("aria-expanded", "true")
     expect(overview_tab(page)).to_be_visible()
+    expect(report_tab).to_be_visible()
     expect(profile_button(page)).to_be_visible()
     expect(bar.get_by_role("button", name="Your menu")).to_be_visible()
     assert not scrolls_sideways(page)

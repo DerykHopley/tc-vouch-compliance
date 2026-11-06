@@ -81,7 +81,7 @@ def test_a_compliance_lead_has_no_developer_link_and_gets_the_dossier_at_its_add
 
     expect(page.get_by_role("heading", level=1)).to_contain_text("Prepared for audit")
     expect(page.get_by_role("navigation", name="Main").get_by_role("link")).to_have_text(
-        ["Overview"]
+        ["Overview", "Report"]  # no Developer; the Report tab is everyone's (#56)
     )
     expect(page.get_by_role("region", name="Developer settings")).to_have_count(0)
 

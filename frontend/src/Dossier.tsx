@@ -1,6 +1,6 @@
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness }
-  from './overview.ts'
+import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness,
+  SEGMENTS } from './overview.ts'
 import VerdictChip from './VerdictChip.tsx'
 
 /** The Dossier overview (`docs/design.md`, Decisions: Screens): the headline with the next step, the readiness band,
@@ -87,8 +87,6 @@ function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props
   )
 }
 
-/** The verdicts in the readiness bar's order; the open rest stays the band's own colour. */
-const SEGMENTS: Verdict[] = ['evidenced', 'partly-evidenced', 'not-evidenced', 'not-applicable']
 
 /** A verdict as the band says it, from VERDICT_WORDS: the one place verdict words live (M4's verdictWord later). */
 const bandWord = (verdict: Verdict) => VERDICT_WORDS[verdict].toLowerCase()
