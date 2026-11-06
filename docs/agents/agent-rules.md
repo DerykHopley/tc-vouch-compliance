@@ -8,6 +8,10 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 - **A browser check that depends on an API answer waits for it** (`with page.expect_response(...)`) before asserting on the page. Asserting first races the answer and goes red only sometimes. From #122, where the compliance-lead test on the Developer page failed the merge gate of #121.
 - **A new page or control state gets a touch-target case** in `frontend/e2e/test_touch_targets.py` (`small_targets(page) == []` at 400px). design.md's 44px floor is measured, not read. From #45, whose chat links failed verify twice on that floor.
 
+## Commands
+
+- **Take an exit code before any pipe.** In `cmd | tail; echo $?`, `$?` is `tail`'s code, which is 0 even when `cmd` failed. Run the command on its own with its output in a scratch file (`cmd > "$SCRATCH/out.txt" 2>&1; echo rc=$?`), or read `${PIPESTATUS[0]}` straight after the pipe. From #213, where #53's verifier reported exit 0 for an eval run that exited 3.
+
 ## Colour and contrast
 
 - **Compute every contrast ratio** with `scripts/contrast.py <fg> <bg> [--min 4.5]`, and quote the number it prints. Never estimate one. From the M0 design calls, where an estimated "~3.9:1" was really 3.0:1.

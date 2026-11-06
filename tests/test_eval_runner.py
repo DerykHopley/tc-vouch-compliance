@@ -484,6 +484,46 @@ def test_the_command_with_ollama_not_running_gives_the_start_command(tmp_path, c
 
     assert code == 3
     assert "ollama serve" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_an_ollama_judge_with_ollama_not_running_exits_3(tmp_path, capsys, closed_port):
+    """The judge model gets the same Ollama check as the model (#213)."""
+    url = f"http://127.0.0.1:{closed_port}"
+
+    code = main(["--judge", "ollama/qwen3:14b", "--ollama-url", url, "--results", str(tmp_path)])
+
+    assert code == 3
+    assert "ollama serve" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_ollama_not_running_exits_3_before_the_paid_dry_run(
+    tmp_path, monkeypatch, capsys, closed_port
+):
+    """With a key, a local model gets the list's judge model, so the run would start with the dry run
+    and the estimate (#213): Ollama is checked first, nothing runs, nothing asks for a yes."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+
+    def no_input(prompt):
+        raise AssertionError("asked to confirm with Ollama down")
+
+    def no_deepeval():
+        raise AssertionError("got ready to judge with Ollama down")
+
+    monkeypatch.setattr("builtins.input", no_input)
+    monkeypatch.setattr(evals, "prepare_deepeval", no_deepeval)
+    url = f"http://127.0.0.1:{closed_port}"
+
+    code = main(["--model", "ollama/qwen3:14b", "--ollama-url", url, "--results", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert "Judge: " in captured.out  # the judge model was chosen: a paid run was coming
+    assert "ollama serve" in captured.err
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_a_malformed_ollama_url_is_a_clear_error(tmp_path, capsys):
