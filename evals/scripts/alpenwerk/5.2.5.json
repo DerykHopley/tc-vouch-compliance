@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "schwachstellen behandelt inwieweit erkannt"}},
+    {"tool": "search_records", "args": {"query": "schwachstellen behandelt inwieweit erkannt"}},
+    {"tool": "vulnerability_status", "args": {}},
+    {"answer": "Antwortentwurf für 5.2.5: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Patch gathers manufacturer and CVE advisories nightly and scores them with CVSS.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Patch sammelt jede Nacht die Hinweise der Hersteller und der CVE-Datenbank und bewertet jeden mit CVSS 3.1."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Each vulnerability names the affected systems and software.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Für jede Schwachstelle ermittelt Patch die betroffenen Systeme und die eingesetzte Software."}]},
+      {"requirement_id": "M3", "verdict": "partly-evidenced", "reason": "Most are treated, but a high one on the production PCs is 12 days overdue with no stopgap.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Antwort von Patch am 3."}]},
+      {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "Patching happens, as Patch's tickets and due dates show, but no document defines patch management.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Antwort von Patch am 3."}]},
+      {"requirement_id": "S2", "verdict": "partly-evidenced", "reason": "The CAD vault's accepted risk is reduced by network limits, but the overdue production PCs have no measure.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "Antwort von Patch am 3."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "A rescan confirms each closed patch ticket, as for PT-204 and PT-209.", "citations": [{"doc_id": "patch-vulnerability-status", "quote": "CVE-2026-41107 | 9.6 | VPN-Gateway | Kritisch | Patch-Ticket PT-204 am 2026-10-16 geschlossen | 2026-10-18"}]}
+    ]
+  }
+}

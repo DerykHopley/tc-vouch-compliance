@@ -26,6 +26,10 @@ _Avoid_: Out of scope, skipped, N/A (in prose)
 The published catalogue of controls a profile starts from; for v1, VDA ISA.
 _Avoid_: Standard, catalogue (alone)
 
+**ISA edition**:
+One language's version of the VDA ISA catalogue (English or German), published by the ENX Association and quoted unchanged; never a translation by Vouch. A compliance profile reads the edition in its answer language, English when there is none.
+_Avoid_: Translation, localisation, language pack
+
 **Company overlay**:
 The company's own layer on top of the base framework: its scope, its policies and its evidence.
 _Avoid_: Company config, tenant
@@ -159,3 +163,23 @@ _Avoid_: Invalid test
 **Failed case**:
 An eval case whose assessment raised an error; every requirement and its control count as wrong.
 _Avoid_: Flaky case, crash
+
+**Dry run**:
+The first eval case of a paid or local eval, run alone so the runner can print a cost and time estimate for the rest; the rest run only after the owner types yes.
+_Avoid_: Trial run, preview, test run
+
+**Judge model**:
+The model that scores an assessment's faithfulness in an eval; named apart from the model being assessed, and never the scripted fake.
+_Avoid_: Grader, evaluator, critic
+
+**Faithfulness**:
+In an eval, the share of an assessment answer's claims that the passages it cites back, scored by the judge model; an answer citing nothing or claiming nothing is not scored.
+_Avoid_: Accuracy (that is the verdicts'), groundedness, hallucination rate
+
+**Kept results**:
+The raw results of an eval run that the owner chose to keep, copied to `evals/kept/` and committed; the eval report renders from them.
+_Avoid_: Golden results, baseline, snapshot
+
+**Eval report**:
+The page of eval measures, one table per measure by model and compliance profile, rendered from saved raw results without calling a model; about the models, not a company's controls.
+_Avoid_: Readiness report (that is a company's), benchmark, scorecard

@@ -19,6 +19,7 @@ from vouch.evals import (
     BadCase,
     CasesError,
     EvalCase,
+    EvalModels,
     EvalReport,
     ExpectedRequirement,
     failed_case,
@@ -29,7 +30,9 @@ from vouch.evals import (
     spec_roll_up,
 )
 from vouch.graph import Assessment, RequirementVerdict, ShouldScore
+from vouch.language import mismatch
 from vouch.paths import FIXTURES_DIR, REPO_DIR
+from vouch.spending import FAKE
 
 NORDLICHT_ANSWERS = FIXTURES_DIR / "nordlicht" / EXPECTED_ANSWERS
 
@@ -168,13 +171,18 @@ def scripted(script: dict) -> ScriptedChatModel:
     return ScriptedChatModel(script=script)
 
 
-def backup_models(asked: list[str] | None = None):
-    def model_for(control_id: str) -> ScriptedChatModel:
+def on_fake(model_for) -> EvalModels:
+    """The scripted fake, made per case by `model_for(control_id, callbacks)`."""
+    return EvalModels(FAKE, model_for)
+
+
+def backup_models(asked: list[str] | None = None) -> EvalModels:
+    def model_for(control_id: str, callbacks: list) -> ScriptedChatModel:
         if asked is not None:
             asked.append(control_id)
         return scripted(BACKUP_SCRIPT)
 
-    return model_for
+    return on_fake(model_for)
 
 
 def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run():
@@ -195,6 +203,25 @@ def test_a_case_naming_a_requirement_that_does_not_apply_is_a_bad_case_not_run()
     assert report.verdict_accuracy == 1
 
 
+def test_a_case_is_checked_against_the_profiles_isa_edition(tmp_path, monkeypatch):
+    from vouch import isa
+
+    german_edition = tmp_path / "controls-de.yaml"  # holds 5.2.9 only, so 5.1.2 is unknown
+    german_edition.write_text(
+        "source: VDA ISA 2027.1\ncontrols:\n"
+        "- {id: 5.2.9, question: Q, iso_27001: ISO 27001, requirements: []}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(isa, "CONTROLS_DE_FILE", german_edition)
+    german = NORDLICHT.model_copy(update={"answer_language": "de"})
+    case = EvalCase("5.1.2", (expected("M1", "evidenced"),))
+
+    report = run_eval([case], german, backup_models(), today=TODAY)
+
+    assert report.scores == []
+    assert report.bad_cases == [BadCase("5.1.2", "unknown control id: 5.1.2")]
+
+
 def test_a_case_missing_an_applicable_requirement_or_naming_one_twice_is_a_bad_case():
     missing = EvalCase("5.2.9", BACKUP.requirements[:2])  # no S1
     twice = EvalCase("5.2.9", (*BACKUP.requirements, expected("M1", "evidenced")))
@@ -213,10 +240,10 @@ def test_a_run_that_errors_is_a_failed_case_with_its_message_and_the_rest_still_
     claims_a_result = {**BACKUP_SCRIPT, "gather": twice}  # the output check refuses it twice
     models = {"5.2.9": [scripted(claims_a_result), scripted(BACKUP_SCRIPT)]}
 
-    def model_for(control_id: str) -> ScriptedChatModel:
+    def model_for(control_id: str, callbacks: list) -> ScriptedChatModel:
         return models[control_id].pop(0)
 
-    report = run_eval([BACKUP, BACKUP], NORDLICHT, model_for, today=TODAY)
+    report = run_eval([BACKUP, BACKUP], NORDLICHT, on_fake(model_for), today=TODAY)
 
     failed, passed = report.scores
     assert failed.error is not None and "certified" in failed.error
@@ -226,10 +253,10 @@ def test_a_run_that_errors_is_a_failed_case_with_its_message_and_the_rest_still_
 
 
 def test_a_model_that_cannot_be_made_is_a_failed_case_too():
-    def model_for(control_id: str) -> ScriptedChatModel:
+    def model_for(control_id: str, callbacks: list) -> ScriptedChatModel:
         return ScriptedChatModel.from_file(Path("/nonexistent") / f"{control_id}.json")
 
-    report = run_eval([BACKUP], NORDLICHT, model_for, today=TODAY)
+    report = run_eval([BACKUP], NORDLICHT, on_fake(model_for), today=TODAY)
 
     assert "bad fake script" in report.scores[0].error
 
@@ -244,14 +271,15 @@ def test_a_broken_roll_up_in_the_graph_lowers_control_accuracy(monkeypatch):
     assert report.verdict_accuracy == 1  # the requirements were still judged right
 
 
-def test_the_fake_model_scores_every_nordlicht_case_right_and_prints_it(tmp_path, capsys):
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_the_fake_model_scores_every_case_right_and_prints_it(profile, tmp_path, capsys):
     """The fake scripts are drafted from the expected answers, so anything short of all right
     is a harness regression (or expected answers changed without regenerating the scripts)."""
-    cases = load_cases(NORDLICHT_ANSWERS, "nordlicht").cases
+    cases = load_cases(FIXTURES_DIR / profile / EXPECTED_ANSWERS, profile).cases
     requirements = sum(len(c.requirements) for c in cases)
     cites = sum(len(r.cites) for c in cases for r in c.requirements)
 
-    code = main(["--results", str(tmp_path)])
+    code = main(["--profile", profile, "--results", str(tmp_path)])
 
     out = capsys.readouterr().out
     assert code == 0
@@ -265,12 +293,15 @@ def test_the_fake_model_scores_every_nordlicht_case_right_and_prints_it(tmp_path
     assert [c["control_id"] for c in saved["cases"]] == [c.control_id for c in cases]
     assert saved["today"] == "2026-11-04"
     assert all(c["assessment"]["requirements"] for c in saved["cases"])
+    # Each draft answer is in the profile's language, so none was asked for again (#51).
+    language = load_named_profile(profile).answer_language
+    assert {mismatch(c["assessment"]["answer"], language) for c in saved["cases"]} == {None}
     summary = tmp_path / raw.name.replace(".json", "-summary.txt")
     assert summary.read_text(encoding="utf-8") in out
 
 
 def test_the_runner_exits_1_when_a_case_failed_or_was_bad(tmp_path, monkeypatch, capsys):
-    def no_model(control_id: str):
+    def no_model(control_id: str, callbacks: list):
         raise RuntimeError("no model")
 
     monkeypatch.setattr("vouch.evals.fake_models", lambda folder: no_model)
@@ -371,3 +402,27 @@ def test_the_script_generator_gives_the_same_scripts_whatever_the_hash_seed(tmp_
 
     assert len(first) == 12
     assert generate("2") == first
+
+
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_the_committed_scripts_are_what_the_generator_writes(profile, tmp_path):
+    """Scripts edited by hand, or left behind after the expected answers changed, show here."""
+    subprocess.run(
+        [
+            sys.executable,
+            str(REPO_DIR / "evals" / "scripts" / "generate.py"),
+            "--profile",
+            profile,
+            "--out",
+            tmp_path,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    committed = REPO_DIR / "evals" / "scripts" / profile
+
+    for script in sorted(tmp_path.glob("*.json")):
+        assert script.read_text(encoding="utf-8") == (committed / script.name).read_text(
+            encoding="utf-8"
+        ), script.name
+    assert len(list(committed.glob("*.json"))) == 12

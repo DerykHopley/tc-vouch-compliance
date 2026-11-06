@@ -70,8 +70,7 @@ def test_the_working_paper_link_in_the_chat_is_drawn_in_the_navy_token_with_a_fo
 
     assert link.evaluate("el => getComputedStyle(el).color") == page.evaluate(TOKEN, "--navy")
     field.focus()
-    page.keyboard.press("Shift")  # a keyboard user: focus is shown
-    link.focus()
+    tab_back_to(page, link)  # by keyboard, as a lead would: focus is shown (#225)
     ring = link.evaluate(
         "el => [getComputedStyle(el).outlineStyle, getComputedStyle(el).outlineColor]"
     )
@@ -113,6 +112,16 @@ PILL = """el => {
   }
 }"""
 RING = "el => [getComputedStyle(el).outlineStyle, getComputedStyle(el).outlineColor]"
+
+
+def tab_back_to(page: Page, target, presses: int = 10) -> None:
+    """Shift+Tab until `target` has focus, as a keyboard user reaches it. A script's focus() isn't
+    keyboard use in Firefox, so :focus-visible wouldn't show there (#225)."""
+    for _ in range(presses):
+        if target.evaluate("el => el === document.activeElement"):
+            return
+        page.keyboard.press("Shift+Tab")
+    expect(target).to_be_focused()
 
 
 def assess_in_the_chat(page: Page, url: str, width: int):
@@ -209,8 +218,8 @@ def test_from_the_keyboard_the_review_suggestion_shows_the_focus_ring_and_opens_
 
 def test_from_the_keyboard_open_the_working_paper_opens_its_paper(page: Page, chat_url):
     link = assess_in_the_chat(page, chat_url, 1400)
-    page.keyboard.press("Shift")  # a keyboard user (the next-step chip may follow it in the log)
-    link.focus()
+    page.get_by_role("textbox", name="Message to Vouch").focus()
+    tab_back_to(page, link)  # the next-step chip may follow it in the log
     assert link.evaluate(RING) == ["solid", page.evaluate(TOKEN, "--navy")]
 
     page.keyboard.press("Enter")

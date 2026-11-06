@@ -19,6 +19,7 @@ from langgraph.store.memory import InMemoryStore
 from profiles_dir import SECOND, make_profiles
 from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
+from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1
 from test_memory import app_on, as_user, restart
 
 from vouch import api, chat_agent
@@ -193,6 +194,7 @@ def test_assess_in_the_chat_streams_the_steps_and_ends_with_the_verdict_and_its_
     assert len(finished) == 1
     assert finished[0]["control_id"] == "5.1.1"
     assert finished[0]["status"] == "waiting-for-review"
+    assert finished[0]["answer_language"] == "en"  # its verdict chip's words (#200)
     assert names(events).index("assessment") > names(events).index("step")
     assert "waits for your review on the control's working paper" in reply(events)
     assert names(events)[-1] == "done"
@@ -515,6 +517,28 @@ def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypat
     assert note in prompts[0][-1].content  # the same path as the working paper's (#42)
 
 
+# The profile's ISA edition (#199)
+
+ALPENWERK = {PROFILE_HEADER: "alpenwerk"}
+
+
+def test_an_assessment_from_the_chat_on_a_german_profile_loads_the_german_control(app, lead):
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as client:
+        events = say(client, "Assess 1.6.2")
+
+    steps = [data for name, data in events if name == "step"]
+    assert steps[0]["text"].startswith(f"Loaded control 1.6.2: {GERMAN_1_6_2}")
+
+
+def test_explaining_a_control_on_a_german_profile_reads_the_german_control(app, lead):
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as client:
+        events = say(client, "Explain 1.6.2")
+
+    text = reply(events)
+    assert f"Control 1.6.2, “{GERMAN_1_6_2}”" in text
+    assert GERMAN_1_6_2_M1 in text
+
+
 # Questions across controls (#210): every control's newest assessment at once
 
 
@@ -600,6 +624,17 @@ def test_assessed_controls_reads_only_the_signed_in_users_own_assessments(client
 
     assert "- 5.1.1: not assessed yet." in answer
     assert "- 5.1.2: " in answer and "- 5.1.2: not assessed yet." not in answer
+
+
+def test_assessed_controls_reads_only_the_requests_profile(app, lead, client, fake):
+    """The tool reads the request's profile (spec 5): Nordlicht's assessment isn't Alpenwerk's."""
+    assess_and_review(client, "5.1.2")
+
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as alpenwerk:
+        answer = reply(say(alpenwerk, "Which controls have documented evidence only?"))
+
+    assert "- 5.1.2: not assessed yet." in answer
+    assert "Documented evidence only: none." in answer
 
 
 def test_explain_control_says_why_partly_evidenced_rows_roll_up_to_not_evidenced():

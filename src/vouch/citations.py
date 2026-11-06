@@ -97,8 +97,13 @@ def blocks(section: Section) -> list[str]:
     return [normalise(" ".join(lines)) for lines in found]
 
 
-def _occurs(quote: str, text: str) -> bool:
-    """Whether the quote is in the text, starting and ending on word boundaries."""
+def occurs(quote: str, text: str) -> bool:
+    """Whether the quote is evidence in the text: both normalised, it has at least
+    MIN_QUOTE_WORDS words and appears in the text, starting and ending on word boundaries.
+    The one quote-match rule, for citations and for quotes in an answer (vouch.language)."""
+    quote, text = normalise(quote), normalise(text)
+    if len(quote.split()) < MIN_QUOTE_WORDS:
+        return False
     start = r"(?<!\w)" if _WORD_CHAR.match(quote[0]) else ""
     end = r"(?!\w)" if _WORD_CHAR.match(quote[-1]) else ""
     return re.search(start + re.escape(quote) + end, text) is not None
@@ -163,7 +168,7 @@ class QuoteChecker:
         if len(quote.split()) < MIN_QUOTE_WORDS:
             return DropReason.TOO_SHORT
         for heading, block in document.blocks:
-            if _occurs(quote, block):
+            if occurs(quote, block):
                 return Citation(
                     document.doc_id,
                     document.version,

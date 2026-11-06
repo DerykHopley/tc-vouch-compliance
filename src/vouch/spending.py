@@ -15,6 +15,10 @@ when it gives one, else computed from PRICES and marked estimated. A call whose 
 known (no usage, no price, or a failure carrying none) leaves the assessment's cost incomplete:
 the known part stays, and nothing counts as $0. The fake model's tokens are priced as
 DEFAULT_MODEL, what the run would have cost there, and totalled apart from real spend.
+
+Each call's served model is counted too (#185): the model OpenRouter's answer names, which
+differs from the requested one only behind a router. The eval runner saves it; the app's usage
+answer leaves it out (Usage.to_dict), so the app shows what it showed before.
 """
 
 import logging
@@ -65,9 +69,26 @@ class Price:
         return spent / 1_000_000
 
 
-PRICES = {DEFAULT_MODEL: Price(0.10, 0.50)}
-"""For a cost OpenRouter doesn't report. From openrouter.ai/anthropic/claude-haiku-5.5,
-2026-11-04: $0.10/M input, $0.50/M output (EU in-region providers charge $0.11/M and $0.55/M).
+HAIKU = "anthropic/claude-haiku-5.5"
+SONNET = DEFAULT_MODEL
+GPT_TERRA = "openai/gpt-6.1-terra"
+GPT_LUNA = "openai/gpt-6-luna"
+GPT_SOL = "openai/gpt-6.1-sol"
+PRICES = {
+    HAIKU: Price(0.10, 0.50),
+    SONNET: Price(2.00, 10.00),
+    GPT_TERRA: Price(1.00, 5.00),
+    GPT_LUNA: Price(0.10, 0.50),
+    GPT_SOL: Price(2.00, 10.00),
+}
+"""For a cost OpenRouter doesn't report: each model's list price, its cheapest standard
+endpoint (not a discounted "flex" or "batch" one), from OpenRouter's model list
+(openrouter.ai/api/v1/models and each model's `/endpoints`). Haiku 5.5 read 2026-11-04, the
+others 2026-11-05 (#53; GPT-6 Luna and GPT-6.1 Sol for #55's runs). EU in-region endpoints
+charge more: 10% for Haiku ($0.11/$0.55), Sonnet ($2.20/$11), GPT-6 Luna ($0.11/$0.55) and
+GPT-6.1 Sol ($2.20/$11), 20% for GPT-6.1 Terra (Azure EU, $1.20/$6). These are the eval
+runner's fixed-price hosted models and judge (vouch.eval_models), which the developer page can
+also pick; the runner's Jev Router has no fixed price, so it isn't here (a test keeps it out).
 A model missing here has no computed cost."""
 
 
@@ -83,13 +104,19 @@ class Usage:
     estimated_cost_usd: float
     estimated: bool
     cost_complete: bool
+    served_models: dict[str, int] = field(default_factory=dict, hash=False)
+    """Calls per model, by the model OpenRouter's answer named as serving each; a call naming
+    none isn't counted."""
 
     @property
     def cost_usd(self) -> float:
         return self.reported_cost_usd + self.estimated_cost_usd
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self) | {"cost_usd": self.cost_usd}
+        """The app's usage answer, as it was before the served models were counted."""
+        kept = asdict(self)
+        del kept["served_models"]
+        return kept | {"cost_usd": self.cost_usd}
 
 
 @dataclass(frozen=True)
@@ -140,20 +167,26 @@ class UsageTotals:
 class UsageMeter(BaseCallbackHandler):
     """Adds up the tokens and cost of every model call of one assessment."""
 
-    def __init__(self, model: str | None) -> None:
-        """`model`: the OpenRouter id the assessment runs on; None for the fake."""
+    def __init__(self, model: str | None, price: Price | None = None) -> None:
+        """`model`: the OpenRouter id the assessment runs on; None for the fake. `price`: the
+        model's price when PRICES doesn't list it (the eval runner's model list)."""
         self.model = model or FAKE
-        self._price = PRICES.get(model or DEFAULT_MODEL)
+        self._price = PRICES.get(model or DEFAULT_MODEL) or price
         self._lock = threading.Lock()
         self._input = self._output = 0
         self._reported = self._computed = 0.0
         self._estimated = False
         self._complete = True
+        self._served: dict[str, int] = {}
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         tokens = _tokens(response)
         reported = ((response.llm_output or {}).get("token_usage") or {}).get("cost")
         self._add(tokens, reported)
+        served = _served_model(response)
+        if served is not None:
+            with self._lock:
+                self._served[served] = self._served.get(served, 0) + 1
 
     def on_llm_error(
         self, error: BaseException, *, response: LLMResult | None = None, **kwargs: Any
@@ -194,6 +227,7 @@ class UsageMeter(BaseCallbackHandler):
                 self._computed,
                 self._estimated,
                 self._complete,
+                dict(self._served),
             )
 
 
@@ -207,6 +241,19 @@ def _tokens(response: LLMResult) -> tuple[int, int] | None:
                 found = found or (0, 0)
                 found = (found[0] + meta["input_tokens"], found[1] + meta["output_tokens"])
     return found
+
+
+def _served_model(response: LLMResult) -> str | None:
+    """The model the call's answer names as serving it (OpenRouter's `model` field), if any.
+    langchain-openai puts it in `llm_output["model_name"]`, or on a streamed call in the
+    message's `response_metadata["model_name"]`."""
+    served = (response.llm_output or {}).get("model_name")
+    if isinstance(served, str) and served:
+        return served
+    first = next((g for generations in response.generations for g in generations), None)
+    metadata = getattr(getattr(first, "message", None), "response_metadata", None) or {}
+    served = metadata.get("model_name")
+    return served if isinstance(served, str) and served else None
 
 
 def _error_usage(response: LLMResult | None) -> dict[str, Any] | None:

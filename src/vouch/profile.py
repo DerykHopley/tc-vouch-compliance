@@ -15,7 +15,6 @@ from typing import Annotated, Any, Literal, Self
 
 import yaml
 from pydantic import (
-    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -28,12 +27,13 @@ from pydantic import (
 
 from vouch.isa import (
     SOURCE,
+    BaseFramework,
     BaseFrameworkError,
     Column,
     IsaControl,
     Requirement,
     UnknownControlError,
-    load_isa_control,
+    load_base_framework,
 )
 from vouch.paths import FIXTURES_DIR
 
@@ -115,19 +115,8 @@ class EvidenceSource(_Strict):
         return resolved
 
 
-def _known_control(control_id: str) -> str:
-    try:
-        load_isa_control(control_id)
-    except UnknownControlError as error:
-        raise ValueError(f"unknown control {control_id} in {SOURCE}") from error
-    return control_id
-
-
-ControlId = Annotated[str, AfterValidator(_known_control)]
-
-
 class CountryOverlayRequirement(_Strict):
-    control: ControlId  # the base framework control it adds to
+    control: str  # the base framework control it adds to; the profile checks it exists
     id: str = Field(pattern=r"^O[1-9][0-9]*$")
     text: NonEmpty
 
@@ -140,7 +129,7 @@ class CountryOverlay(_Strict):
 
 
 class NotApplicable(_Strict):
-    control: ControlId
+    control: str  # the profile checks it exists
     requirement: str | None = None  # None: the whole control is not applicable
     reason: NonEmpty
 
@@ -165,6 +154,25 @@ class ComplianceProfile(_Strict):
         if profile_id != folder:
             raise ValueError(f"must be the profile's folder name, {folder}")
         return profile_id
+
+    @model_validator(mode="after")
+    def _controls_exist_in_the_profiles_isa_edition(self) -> Self:
+        """Runs before the other model checks, which look the controls up (a test with an
+        unknown not-applicable control pins this order)."""
+        named = [
+            (f"overlays.{i}.requirements.{j}.control", added.control)
+            for i, overlay in enumerate(self.overlays)
+            for j, added in enumerate(overlay.requirements)
+        ] + [
+            (f"not_applicable.{i}.control", entry.control)
+            for i, entry in enumerate(self.not_applicable)
+        ]
+        for field, control_id in named:
+            try:
+                self.isa_control(control_id)
+            except UnknownControlError as error:
+                raise ValueError(f"{field}: unknown control {control_id} in {SOURCE}") from error
+        return self
 
     @model_validator(mode="after")
     def _overlay_ids_unique_per_control(self) -> Self:
@@ -193,7 +201,7 @@ class ComplianceProfile(_Strict):
                     )
             if entry.requirement is None:
                 continue
-            control = load_isa_control(entry.control)
+            control = self.isa_control(entry.control)
             every = {r.id for r in control.requirements + self._overlay_requirements(control.id)}
             if entry.requirement not in every:
                 raise ValueError(
@@ -206,6 +214,18 @@ class ComplianceProfile(_Strict):
                     f"doesn't apply at {self.protection_level} protection"
                 )
         return self
+
+    def isa_edition(self) -> BaseFramework:
+        """The base framework in the ISA edition of this profile's answer language (English
+        when the ISA isn't shipped in it), or BaseFrameworkError naming the file."""
+        return load_base_framework(language=self.answer_language)
+
+    def isa_control(self, control_id: str) -> IsaControl:
+        """The control in this profile's ISA edition (`isa_edition`), or UnknownControlError."""
+        for control in self.isa_edition().controls:
+            if control.id == control_id:
+                return control
+        raise UnknownControlError(control_id)
 
     def requirements_for(self, control: IsaControl) -> ControlRequirements:
         """The control's requirements under this profile: those its protection level and

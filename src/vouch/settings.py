@@ -204,6 +204,19 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
 
 
+def load_model_settings(env: Mapping[str, str] | None = None) -> Settings:
+    """Only what calling a model on a profile needs (the OpenRouter key and the profiles
+    folder), for a tool that signs nobody in, such as the eval runner: the app's sign-in,
+    database and frontend settings aren't read or checked, so Clerk keys without an auth mode
+    don't stop it (#173)."""
+    env = os.environ if env is None else env
+    api_key = _read(env, OPENROUTER_API_KEY_ENV)
+    return Settings(
+        openrouter_api_key=SecretStr(api_key) if api_key else None,
+        profiles_dir=_read_path(env, PROFILES_DIR_ENV) or FIXTURES_DIR,
+    )
+
+
 @overload
 def fake_model(settings: Settings, default: Path) -> "ScriptedChatModel": ...
 @overload
