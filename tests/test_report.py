@@ -12,6 +12,7 @@ The demo's 4.1.2 run (English for Nordlicht, German for Alpenwerk) judges M1 par
 the rest evidenced, and drafts one item, for M1.
 """
 
+import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -19,6 +20,7 @@ from typing import Any
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from profiles_dir import SECOND, make_profiles
 from pydantic import SecretStr
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
@@ -485,6 +487,12 @@ def test_the_head_names_the_company_framework_level_overlays_language_and_todays
 # --- Failures ----------------------------------------------------------------------------------
 
 
+def unreadable_trail(*args: Any, **kwargs: Any) -> Any:
+    """A trail read that fails: answered as an unexpected 500, not the edition's."""
+    raise RuntimeError("the trail was read before the standing")
+
+
+
 def test_an_unknown_profile_is_a_404(users):
     alice, _ = users
     with TestClient(app_on(None)) as client:
@@ -502,6 +510,8 @@ def test_a_broken_german_edition_is_a_plain_500_on_the_report(users, monkeypatch
     with TestClient(app_on(None), raise_server_exceptions=False) as client:
         report_of(client, alpenwerk)  # the profile is read while its edition is whole
         monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+        # The standing is read before the trail, so the edition's 500 is the one answered.
+        monkeypatch.setattr(audit, "read", unreadable_trail)
         response = client.get("/api/report", headers=alpenwerk)
 
     assert response.status_code == 500
@@ -540,3 +550,363 @@ def test_alpenwerk_assessed_on_the_fake_waits_for_review_with_a_german_answer(us
     assert all(r["citations"] for r in german["requirements"])  # each German quote was found
     demo = ScriptedChatModel.from_file(DEMO_SCRIPT).script
     assert english["answer"] == demo.gather[-1].answer
+
+
+# --- The Markdown export (#57, story 9) ---------------------------------------------------------
+
+
+def export_of(client: TestClient, user: dict[str, str]) -> str:
+    response = client.get("/api/report/markdown", headers=user)
+    assert response.status_code == 200, response.text
+    return response.text
+
+
+def test_the_export_is_a_markdown_attachment_named_for_the_profile_and_the_day(users, monkeypatch):
+    alice, _ = users
+    monkeypatch.setattr(report, "today", lambda: date(2026, 11, 6))
+    with TestClient(app_on(None)) as client:
+        response = client.get("/api/report/markdown", headers=under(alice, "alpenwerk"))
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "text/markdown; charset=utf-8"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="readiness-report-alpenwerk-2026-11-06.md"; '
+        "filename*=UTF-8''readiness-report-alpenwerk-2026-11-06.md"
+    )
+    assert response.text.startswith("# Bereitschaftsbericht\n")
+
+
+_CELL_EDGE = re.compile(r"(?<!\\)\|")  # a cell's edge: a `|` not escaped
+
+
+def section(md: str, heading: str) -> str:
+    """The Markdown from the `## heading` up to the next `## ` heading or the closing rule."""
+    rest = md[md.index(f"\n## {heading}\n") + 1 :]
+    ends = [i for i in (rest.find("\n## ", 1), rest.find("\n---\n")) if i > 0]
+    return rest[: min(ends)] if ends else rest
+
+
+def table_rows(text: str) -> list[list[str]]:
+    """The first table's rows in the text, its header and divider left out: each row's cells."""
+    table: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("|"):
+            table.append(line)
+        elif table:
+            break
+    assert table, text
+    return [[c.strip() for c in _CELL_EDGE.split(row)[1:-1]] for row in table[2:]]
+
+
+def flat(text: str) -> str:
+    """The text on one line, list indents and a Markdown quote's marks left out."""
+    return " ".join(re.sub(r"\n\s*(?:> ?)?", " ", text).split())
+
+
+def carried(shown: dict[str, Any]) -> list[str]:
+    """The texts the report carries from elsewhere, which stay as written."""
+    texts = [c["question"] for c in shown["controls"]]
+    texts += [q["quote"] for c in shown["controls"] for q in c["quotes"]]
+    texts += [i["missing"] for g in shown["remediation"] for i in g["items"]]
+    texts += [x for r in shown["not_applicable"] for x in (r["text"], r["reason"])]
+    texts += [e["note"] for e in shown["trail"]["entries"]]
+    return texts
+
+
+def seed_nordlicht(client: TestClient, user: dict[str, str]) -> None:
+    """4.1.2 accepted with S1 overridden (M1 approved, S1 discarded), 1.1.1 accepted."""
+    due = (date.today() + timedelta(days=30)).isoformat()
+    thread = reviewed(client, user, "4.1.2", "accept", note="Fine.", overrides=[S1_NOT_EVIDENCED])
+    decide(client, user, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
+    decide(client, user, thread, "S1", decision="discard")
+    reviewed(client, user, "1.1.1", "accept")
+
+
+def test_the_export_holds_the_same_standing_as_the_served_report(database_url, users):
+    alice, _ = users
+    app = app_on(database_url)
+    named(app, "Dana Lead")
+    with TestClient(app) as client:
+        seed_nordlicht(client, alice)
+        shown = report_of(client, alice)
+        md = export_of(client, alice)
+
+    words = shown["words"]
+    r = shown["readiness"]
+    readiness = section(md, "Readiness")
+    assert f"{r['accepted']} of {r['controls']} controls accepted" in readiness
+    for verdict, n in r["by_verdict"].items():
+        assert f"- {n} {words['verdicts'][verdict]}" in readiness
+    assert f"- {r['open']} Open" in readiness
+    assert f"- {r['remediation_items']} Remediation items" in readiness
+
+    rows = {row[0]: row for row in table_rows(section(md, "Controls"))}
+    assert list(rows) == [c["id"] for c in shown["controls"]]
+    for c in shown["controls"]:
+        row = rows[c["id"]]
+        if c["status"] == "accepted":
+            day = datetime.fromisoformat(c["reviewed_at"]).astimezone(UTC).date().isoformat()
+            assert row[2:] == ["Accepted", words["verdicts"][c["verdict"]], "Dana Lead", day]
+            assert c["quotes"]
+            for q in c["quotes"]:
+                assert flat(q["quote"]) in flat(md)
+                assert f"{q['doc_id']} v{q['version']} · {q['section']}" in md
+        else:
+            assert row[2:4] == ["Open", words["sentences"]["open_control"]]
+    assert sum(c["status"] == "accepted" for c in shown["controls"]) == 2
+
+    items = section(md, "Remediation items")
+    (group,) = shown["remediation"]
+    (item,) = group["items"]
+    assert f"### {group['control_id']} " in items
+    assert table_rows(items) == [["M1", item["missing"], "CISO", item["due_date"]]]  # not S1
+
+    (excluded,) = shown["not_applicable"]
+    assert flat(excluded["reason"]) in flat(section(md, "Not applicable"))
+
+    trail = table_rows(section(md, "Audit trail"))
+    entries = shown["trail"]["entries"]
+    assert len(trail) == len(entries) == 5
+    for row, e in zip(trail, entries, strict=True):
+        action = words["actions"][e["action"]]
+        assert row[1:5] == [e["reviewer_name"], e["control_id"], e["requirement_id"] or "", action]
+        assert row[7] == e["note"]
+    assert md.rstrip().endswith(shown["disclaimer"])
+
+
+def test_the_export_holds_every_trail_entry_newest_first_not_a_page(users):
+    alice, _ = users
+    restart()
+    audit.process_trail().keep([entry(alice["X-Test-User"], n) for n in range(101)])
+    with TestClient(app_on(None)) as client:
+        md = export_of(client, alice)
+
+    notes = [row[7] for row in table_rows(section(md, "Audit trail"))]
+    assert len(notes) == audit.DEFAULT_PAGE + 1 == 101
+    assert notes == [f"Entry {n}." for n in range(100, -1, -1)]
+
+
+def test_alpenwerks_export_after_an_accept_on_the_german_fake_is_in_german(users):
+    alpenwerk = under(users[0], "alpenwerk")
+    with TestClient(app_on(None)) as client:
+        reviewed(client, alpenwerk, "4.1.2")
+        shown = report_of(client, alpenwerk)
+        md = export_of(client, alpenwerk)
+
+    assert md.startswith("# Bereitschaftsbericht\n")
+    row = next(r for r in table_rows(section(md, "Kontrollen")) if r[0] == "4.1.2")
+    assert row[2:4] == ["Akzeptiert", "Teilweise nachgewiesen"]
+    assert md.rstrip().endswith(
+        "Erstellt von einem KI-Assistenten, geprüft von Local user; kein Auditergebnis."
+    )
+    assert shown["disclaimer"] in md
+
+
+def test_a_profile_without_a_words_table_exports_in_english(users, tmp_path):
+    alice, _ = users
+    app = app_on(None)
+    folder = make_profiles(tmp_path, broken=False, language="lt")
+    app.state.settings = replace(app.state.settings, profiles_dir=folder)
+    with TestClient(app) as client:
+        md = export_of(client, under(alice, SECOND))
+
+    assert md.startswith("# Readiness report\n")
+    assert "- **Language:** lt" in md  # no word for Lithuanian: its code
+    assert md.rstrip().endswith(report.words_for("en")["sentences"]["disclaimer_nothing_reviewed"])
+
+
+def test_with_nothing_accepted_the_export_has_the_empty_list_sentences(users):
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        md = export_of(client, alice)
+
+    sentences = report.words_for("en")["sentences"]
+    assert "0 of 12 controls accepted" in md
+    assert sentences["no_remediation"] in section(md, "Remediation items")
+    assert sentences["no_trail"] in section(md, "Audit trail")
+    assert sentences["no_overlays"] in md
+    assert md.rstrip().endswith(sentences["disclaimer_nothing_reviewed"])
+    assert "### Quotes" not in md
+
+
+def test_a_note_with_a_bar_and_a_line_break_keeps_the_trail_tables_shape():
+    profile = load_named_profile("nordlicht")
+    noted = replace(entry("u", 1), id=2, note="Checked | twice\nby phone.")
+    built = report.readiness_report(
+        profile,
+        profile.isa_edition().controls,
+        {},
+        decided={},
+        trail=audit.Page([noted, replace(entry("u", 0), id=1)], None),
+        today=date(2026, 11, 6),
+    )
+
+    md = report.markdown(built, report.words_for("en"))
+
+    trail = section(md, "Audit trail")
+    rows = table_rows(trail)
+    assert [len(row) for row in rows] == [11, 11]
+    assert rows[0][7] == "Checked \\| twice by phone."
+    header = next(line for line in trail.splitlines() if line.startswith("|"))
+    assert len(_CELL_EDGE.split(header)) - 2 == 11
+
+
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_the_generated_markdown_claims_no_audit_result(users, profile):
+    lead = under(users[0], profile)
+    with TestClient(app_on(None)) as client:
+        reviewed(client, lead, "4.1.2", note="Reviewed with the CISO.")
+        reviewed(client, lead, "1.1.1")
+        shown = report_of(client, lead)
+        md = export_of(client, lead)
+
+    assert shown["readiness"]["accepted"] == 2
+    assert audit_claim(md, carried(shown)) is None
+
+
+def test_an_unknown_profile_is_a_404_on_the_export(users):
+    with TestClient(app_on(None)) as client:
+        response = client.get("/api/report/markdown", headers=under(users[0], "nowhere"))
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == api.UNKNOWN_PROFILE
+
+
+def test_a_broken_german_edition_is_a_plain_500_with_export_failed(users, monkeypatch, tmp_path):
+    alpenwerk = under(users[0], "alpenwerk")
+    broken = tmp_path / "controls-de.yaml"
+    broken.write_text("controls: [\n", encoding="utf-8")
+    with TestClient(app_on(None), raise_server_exceptions=False) as client:
+        export_of(client, alpenwerk)  # the profile is read while its edition is whole
+        monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+        # The standing is read before the trail, so the edition's 500 is the one answered.
+        monkeypatch.setattr(audit, "read_all", unreadable_trail)
+        response = client.get("/api/report/markdown", headers=alpenwerk)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == api.EXPORT_FAILED
+    assert api.EXPORT_FAILED == (
+        "The readiness report could not be exported just now. Please try again."
+    )
+    assert str(tmp_path) not in response.text
+
+
+def test_with_the_database_down_the_export_answers_503(users):
+    app = app_on(SecretStr(UNREACHABLE_URL))
+    app.state.database = Database(SecretStr(UNREACHABLE_URL), timeout=0.3)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/report/markdown", headers=users[0])
+
+    assert response.status_code == 503
+    assert response.json()["unavailable"] == "database"
+
+
+# --- Review fixes (#57): the file's name, carried text, the whole trail's paging ---------------
+
+def test_a_name_outside_ascii_downloads_under_a_safe_name_and_its_own():
+    # vouch.profile.PROFILE_NAME keeps today's profile ids to ASCII slugs, so this is checked
+    # on the header alone: a wider id rule later can't break it.
+    header = api.attachment('readiness-report-jürgen-žal"o-2026-11-06.md')
+
+    assert header == (
+        'attachment; filename="readiness-report-jurgen-zal-o-2026-11-06.md"; '
+        "filename*=UTF-8''readiness-report-j%C3%BCrgen-%C5%BEal%22o-2026-11-06.md"
+    )
+    header.encode("latin-1")  # a header Starlette can send
+
+
+def test_an_attachments_header_holds_no_line_break_or_bare_quote():
+    header = api.attachment('a"\r\nb.md')
+
+    assert "\r" not in header and "\n" not in header
+    assert header == "attachment; filename=\"a-b.md\"; filename*=UTF-8''a%22%0D%0Ab.md"
+
+
+def built_report(**trail: Any) -> dict[str, Any]:
+    """Nordlicht's report with nothing accepted, drawn up on 2026-11-06, as served."""
+    profile = load_named_profile("nordlicht")
+    return dict(
+        report.readiness_report(
+            profile,
+            profile.isa_edition().controls,
+            {},
+            decided={},
+            trail=audit.Page(trail.get("entries", []), None),
+            today=date(2026, 11, 6),
+        )
+    )
+
+
+def test_carried_text_becomes_no_heading_and_no_live_html():
+    built = built_report(entries=[replace(entry("u", 0), id=1, note="<img src=x onerror=alert(1)>")])
+    built["head"] = built["head"] | {"company": "Evil GmbH\n# Injected heading"}
+    built["not_applicable"] = [
+        {
+            "control_id": "5.1.2",
+            "requirement_id": "S3",
+            "text": "Kept <b>bold</b>\n# Not a heading",
+            "reason": "R&D only\n\n## Nor this",
+        }
+    ]
+    first = built["controls"][0]
+    built["controls"][0] = first | {
+        "status": "accepted",
+        "verdict": "evidenced",
+        "reviewer": "Dana Lead",
+        "reviewed_at": "2026-11-05T10:00:00+00:00",
+        "quotes": [
+            {
+                "doc_id": "policy",
+                "version": "2",
+                "section": "1",
+                "quote": "<script>x()</script>\n# second line",
+                "kind": "documented",
+                "stale": False,
+            }
+        ],
+    }
+
+    md = report.markdown(built, report.words_for("en"))
+
+    headings = [line for line in md.splitlines() if line.startswith("#")]
+    assert [h for h in headings if "Injected" in h or "Not a heading" in h or "Nor this" in h] == []
+    assert "<" not in md  # every tag escaped (a `>` is a blockquote's own)
+    assert "- **Company:** Evil GmbH # Injected heading" in md
+    assert "Kept &lt;b&gt;bold&lt;/b&gt; # Not a heading" in md
+    assert "R&amp;D only  ## Nor this" in md
+    assert table_rows(section(md, "Audit trail"))[0][7] == "&lt;img src=x onerror=alert(1)&gt;"
+    # A quote stays a blockquote, line by line as written.
+    assert "> &lt;script&gt;x()&lt;/script&gt;\n> # second line\n>\n> — policy v2 · 1" in md
+
+
+def test_a_backslash_before_a_bar_survives_in_a_table_cell():
+    built = built_report(entries=[replace(entry("u", 0), id=1, note="a\\|b and c\\")])
+
+    md = report.markdown(built, report.words_for("en"))
+
+    (row,) = table_rows(section(md, "Audit trail"))
+    assert len(row) == 11
+    # Each `\` and `|` escaped: a Markdown viewer shows `a\|b and c\`, as written.
+    assert row[7] == "a\\\\\\|b and c\\\\"
+
+
+def test_the_whole_trail_is_read_page_by_page_without_a_gap_or_a_repeat(users, monkeypatch):
+    alice, _ = users
+    restart()
+    audit.process_trail().keep([entry(alice["X-Test-User"], n) for n in range(20)])
+    monkeypatch.setattr(audit, "MAX_PAGE", 7)
+    reads = []
+    entries = audit.ProcessTrail.entries
+
+    def counted(self: audit.ProcessTrail, *args: Any, **kwargs: Any) -> list[audit.AuditEntry]:
+        reads.append(kwargs)
+        return entries(self, *args, **kwargs)
+
+    monkeypatch.setattr(audit.ProcessTrail, "entries", counted)
+
+    every = audit.read_all(audit.process_trail(), alice["X-Test-User"], "nordlicht")
+
+    assert [e.note for e in every] == [f"Entry {n}." for n in range(19, -1, -1)]
+    assert len({e.id for e in every}) == 20
+    assert len(reads) == 3  # 7, 7 and 6
+    assert {r["limit"] for r in reads} == {8}  # a page of 7, and one more to see if there's next

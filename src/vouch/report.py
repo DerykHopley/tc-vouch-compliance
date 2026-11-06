@@ -14,6 +14,9 @@ Dossier already reads.
 - a page of the audit trail, newest first (vouch.audit.read);
 - the disclaimer, naming the reviewers of the accepted verdicts.
 
+`markdown` writes a served report as one Markdown file (#57): the page's parts in the page's
+order, in the report's words.
+
 The report's own words (headings, column names, verdict and action words, the sentences for an
 open control or an empty list, the disclaimer) come from one table per language, WORDS, sent with
 the data (`words_for`) so the page and the Markdown export say the same thing. A language without a table gets
@@ -409,3 +412,194 @@ def _not_applicable(
         for r in control_requirements(profile, control)
         if r["not_applicable"] is not None
     ]
+
+
+# --- The Markdown export (#57) -----------------------------------------------------------------
+#
+# Each writer is `_md_*`, apart from the data builders above. Text carried from elsewhere (the
+# company, questions, quotes, the lead's notes, reasons) stays as written, but never as Markdown
+# or HTML of its own: `&`, `<` and `>` are escaped everywhere, a value in the head, a list or a
+# table is kept to one line, and a table cell's `\` and `|` are escaped.
+
+
+def markdown(report: Mapping[str, Any], words: Mapping[str, Any]) -> str:
+    """The served report (`readiness_report`, redacted) as one Markdown file, in its `words`
+    (`words_for`): the page's parts in the page's order, an empty list's sentence in its place.
+    Carried text stays as written but can't become a heading, a table's edge or live HTML: a
+    line break in the head, a list item or a table cell becomes a space; a quote stays a
+    blockquote line by line. No model, no database."""
+    labels, sentences = words["labels"], words["sentences"]
+    parts = [
+        f"# {words['title']}",
+        _md_head(report["head"], words),
+        f"## {labels['readiness']}",
+        _md_readiness(report["readiness"], words),
+        f"## {labels['controls']}",
+        *_md_controls(report["controls"], words),
+        f"## {labels['remediation']}",
+        *(_md_remediation(report["remediation"], words) or [sentences["no_remediation"]]),
+        f"## {labels['not_applicable']}",
+        _md_not_applicable(report["not_applicable"], words) or sentences["no_not_applicable"],
+        f"## {labels['trail']}",
+        _md_trail(report["trail"]["entries"], words) or sentences["no_trail"],
+        "---",
+        _md_line(report["disclaimer"]),
+    ]
+    return "\n\n".join(parts) + "\n"
+
+
+def _md_text(text: object) -> str:
+    """Carried text with HTML's `&`, `<` and `>` escaped, so a viewer shows it, never runs it."""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _md_line(text: object) -> str:
+    """Carried text on one line (each line break a space), escaped as `_md_text`."""
+    return " ".join(_md_text(text).splitlines())
+
+
+def _md_cell(text: object) -> str:
+    """Text for one table cell: on one line, a `\\` and a `|` escaped."""
+    return _md_line(str(text).replace("\\", "\\\\").replace("|", "\\|"))
+
+
+def _md_table(columns: list[str], rows: Iterable[list[object]]) -> str:
+    lines = [f"| {' | '.join(_md_cell(c) for c in columns)} |", "|" + " --- |" * len(columns)]
+    lines += [f"| {' | '.join(_md_cell(c) for c in row)} |" for row in rows]
+    return "\n".join(lines)
+
+
+def _md_head(head: Mapping[str, Any], words: Mapping[str, Any]) -> str:
+    labels = words["labels"]
+    overlays = ", ".join(head["overlays"]) or words["sentences"]["no_overlays"]
+    rows = [
+        (labels["company"], head["company"]),
+        (labels["country"], head["country"]),
+        (labels["base_framework"], head["base_framework"]),
+        (labels["protection_level"], words["protection_levels"][head["protection_level"]]),
+        (labels["overlays"], overlays),
+        # The words name English and German only: another answer language shows as its code.
+        (
+            labels["answer_language"],
+            words["languages"].get(head["answer_language"], head["answer_language"]),
+        ),
+        (labels["date"], head["date"]),
+    ]
+    return "\n".join(f"- **{label}:** {_md_line(value)}" for label, value in rows)
+
+
+def _md_readiness(r: Mapping[str, Any], words: Mapping[str, Any]) -> str:
+    sentence = words["sentences"]["accepted_of"].format(
+        accepted=r["accepted"], controls=r["controls"]
+    )
+    counts = [f"- {n} {words['verdicts'][v]}" for v, n in r["by_verdict"].items()]
+    counts += [
+        f"- {r['open']} {words['statuses']['open']}",
+        f"- {r['remediation_items']} {words['labels']['remediation']}",
+    ]
+    return "\n".join([sentence, "", *counts])
+
+
+def _md_day(iso: str) -> str:
+    """An ISO time's day in UTC, as the page shows it; one that doesn't parse as written."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(UTC).date().isoformat()
+    except ValueError:
+        return iso
+
+
+def _md_minute(iso: str) -> str:
+    """An ISO time to the minute in UTC (`2026-11-06 14:05 UTC`), as the page shows it."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return iso
+
+
+def _md_controls(controls: list[Mapping[str, Any]], words: Mapping[str, Any]) -> list[str]:
+    """The controls table, then each accepted control's quotes under a heading of its own."""
+    labels = words["labels"]
+    columns = ["control", "question", "status", "verdict", "reviewer", "reviewed_at"]
+    rows: list[list[object]] = []
+    quoted: list[str] = []
+    for c in controls:
+        status = words["statuses"][c["status"]]
+        if c["status"] == "accepted" and c["verdict"]:
+            reviewed = _md_day(c["reviewed_at"]) if c["reviewed_at"] else ""
+            verdict = words["verdicts"][c["verdict"]]
+            rows.append([c["id"], c["question"], status, verdict, c["reviewer"] or "", reviewed])
+        else:
+            open_control = words["sentences"]["open_control"]
+            rows.append([c["id"], c["question"], status, open_control, "", ""])
+        if c["status"] == "accepted" and c["quotes"]:
+            quoted.append(f"### {labels['quotes']} {_md_line(c['id'])}")
+            quoted += [_md_quote(q, words) for q in c["quotes"]]
+    return [_md_table([labels[k] for k in columns], rows), *quoted]
+
+
+def _md_quote(q: Mapping[str, Any], words: Mapping[str, Any]) -> str:
+    """A quote as a blockquote, line by line as written, then its source."""
+    source = f"{q['doc_id']} v{q['version']} · {q['section']}"
+    if q["stale"]:
+        source += f" · {words['labels']['stale']}"
+    lines = _md_text(q["quote"]).splitlines() or [""]
+    return "\n".join([*(f"> {line}" for line in lines), ">", f"> — {_md_line(source)}"])
+
+
+def _md_remediation(groups: list[Mapping[str, Any]], words: Mapping[str, Any]) -> list[str]:
+    labels = words["labels"]
+    columns = [labels[k] for k in ("requirement", "missing", "owner_role", "due_date")]
+    parts: list[str] = []
+    for group in groups:
+        parts.append(f"### {_md_line(group['control_id'])} {_md_line(group['question'])}")
+        rows = [
+            [i["requirement_id"], i["missing"], i["owner_role"], i["due_date"]]
+            for i in group["items"]
+        ]
+        parts.append(_md_table(columns, rows))
+    return parts
+
+
+def _md_not_applicable(listed: list[Mapping[str, Any]], words: Mapping[str, Any]) -> str:
+    reason = words["labels"]["reason"]
+    return "\n".join(
+        f"- **{_md_line(r['control_id'])} {_md_line(r['requirement_id'])}** "
+        f"{_md_line(r['text'])}\n  - {reason}: {_md_line(r['reason'])}"
+        for r in listed
+    )
+
+
+def _md_trail(entries: list[Mapping[str, Any]], words: Mapping[str, Any]) -> str:
+    if not entries:
+        return ""
+    labels, verdicts = words["labels"], words["verdicts"]
+    columns = [
+        "at",
+        "who",
+        "control",
+        "requirement",
+        "action",
+        "verdict_before",
+        "verdict_after",
+        "note",
+        "evidence",
+        "model",
+        "prompt_version",
+    ]
+    rows = [
+        [
+            _md_minute(e["at"]),
+            e["reviewer_name"],
+            e["control_id"],
+            e["requirement_id"] or "",
+            words["actions"][e["action"]],
+            verdicts[e["verdict_before"]] if e["verdict_before"] else "",
+            verdicts[e["verdict_after"]] if e["verdict_after"] else "",
+            e["note"],
+            ", ".join(f"{d['doc_id']} v{d['version']}" for d in e["evidence"]),
+            e["model"],
+            e["prompt_version"],
+        ]
+        for e in entries
+    ]
+    return _md_table([labels[k] for k in columns], rows)

@@ -8,9 +8,10 @@ German demo script (demo-de.json). The page checks only read, so they run in any
 
 import json
 import re
+from pathlib import Path
 from urllib.request import urlopen
 
-from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from touch_targets import small_targets
 
 LOCAL_USER = "Local user"
@@ -189,3 +190,164 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
         )
         assert not scrolls, f"the report scrolls sideways at 400px in {scheme}"
         assert small_targets(page) == []
+
+
+# --- Export (#57, story 9) ----------------------------------------------------------------------
+
+EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
+
+
+def test_export_downloads_one_markdown_file_under_the_servers_name(page: Page, report_url):
+    report = open_report(page, report_url)
+    title = report.get_by_role("heading", level=1).text_content()
+    disclaimer = report.locator(".report-disclaimer").text_content()
+
+    with page.expect_download() as download_info:
+        page.get_by_role("button", name="Export").click()
+    download = download_info.value
+
+    name = download.suggested_filename
+    assert re.fullmatch(r"readiness-report-nordlicht-\d{4}-\d{2}-\d{2}\.md", name), name
+    text = Path(download.path()).read_text(encoding="utf-8")
+    assert text.startswith(f"# {title}\n")
+    assert text.rstrip().endswith(str(disclaimer))
+    expect(page.get_by_role("button", name="Export")).to_be_enabled()
+
+
+def test_an_export_answered_503_says_so_and_downloads_nothing(page: Page, report_url):
+    page.set_viewport_size({"width": 400, "height": 900})
+    downloads = []
+    page.on("download", lambda download: downloads.append(download))
+    page.route(
+        "**/api/report/markdown",
+        lambda route: route.fulfill(status=503, json={"detail": "The database is unavailable."}),
+    )
+    report = open_report(page, report_url)
+
+    with page.expect_response("**/api/report/markdown"):
+        page.get_by_role("button", name="Export").click()
+
+    expect(page.get_by_role("alert")).to_have_text(EXPORT_FAILED)
+    expect(report.get_by_role("heading", level=1)).to_be_visible()
+    expect(page.get_by_role("button", name="Export")).to_be_enabled()
+    assert downloads == []
+    assert small_targets(page) == []
+
+
+# --- Print (#57, story 10) ----------------------------------------------------------------------
+
+OLDER_ENTRIES = "Older entries are in the audit trail."
+LONG_NOTE = "Checked against the rollout plan and the admin register. " * 6
+PRINT_WIDTH = 794  # A4 at 96 dpi
+
+
+def with_older_entries(page: Page) -> None:
+    """The report as served, with a long trail entry added and `next` set, so the trail table and
+    the older entries sentence are there whatever the other checks have recorded."""
+
+    def patched(route: Route) -> None:
+        served = route.fetch().json()
+        added = {
+            "id": 1,
+            "at": "2026-11-06T14:05:00+00:00",
+            "reviewer_name": LOCAL_USER,
+            "control_id": "4.1.2",
+            "requirement_id": "M1",
+            "action": "accept",
+            "note": LONG_NOTE,
+            "verdict_before": "partly-evidenced",
+            "verdict_after": "partly-evidenced",
+            "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],
+            "model": "scripted-fake-model-with-a-long-name",
+            "prompt_version": "assess-2026-11-01",
+        }
+        served["trail"] = {"entries": [*served["trail"]["entries"], added], "next": 1}
+        route.fulfill(json=served)
+
+    page.route("**/api/report", patched)
+
+
+def shown(locator: Locator) -> bool:
+    return any(locator.nth(n).is_visible() for n in range(locator.count()))
+
+
+def test_printed_only_the_report_shows_and_its_tables_fit_the_page(page: Page, report_url):
+    page.set_viewport_size({"width": 1400, "height": 900})
+    with_older_entries(page)
+    report = open_report(page, report_url)
+    older = report.get_by_text(OLDER_ENTRIES)
+    expect(page.get_by_role("button", name="Show older entries")).to_be_visible()
+    expect(older).to_be_hidden()  # on screen the button stands for it (#56)
+    page.get_by_role("button", name="Ask Vouch").click()
+    page.get_by_role("button", name="Make larger").click()
+    page.get_by_role("button", name="Pin beside the page").click()
+    chat = page.locator("aside[aria-label='Chat with Vouch']")
+    expect(chat).to_have_class("bubble pinned")
+
+    page.set_viewport_size({"width": PRINT_WIDTH, "height": 1123})
+    page.emulate_media(media="print", color_scheme="dark")
+
+    # The app around the report is left out: only the article prints.
+    chrome = {
+        "top bar": page.locator("header.top"),
+        "tabs": page.get_by_role("navigation", name="Main"),
+        "chat button": page.locator(".fab"),
+        "pinned chat": chat,
+        "Export": page.get_by_role("button", name="Export"),
+        "Show older entries": page.get_by_role("button", name="Show older entries"),
+    }
+    assert [name for name, part in chrome.items() if shown(part)] == []
+    expect(report).to_be_visible()
+    expect(older).to_be_visible()
+
+    # Every table lies within the article, and no table container scrolls sideways.
+    article = report.bounding_box()
+    assert article is not None
+    tables = report.locator("table")
+    assert tables.count() >= 2
+    for n in range(tables.count()):
+        box = tables.nth(n).bounding_box()
+        assert box is not None
+        assert box["x"] + box["width"] <= article["x"] + article["width"] + 0.5, n
+    scrolling = report.locator(".table-wrap").evaluate_all(
+        "els => els.filter((el) => el.scrollWidth > el.clientWidth).length"
+    )
+    assert scrolling == 0
+
+    # Rows stay whole, headers repeat on each page, and the trail's cells stay table cells (#275).
+    styles = report.evaluate(
+        """el => ({
+          rows: [...el.querySelectorAll('tr')].map((r) => getComputedStyle(r).breakInside),
+          heads: [...el.querySelectorAll('thead')].map((h) => getComputedStyle(h).display),
+          cells: [...el.querySelectorAll('.report-trail td')].map((c) => getComputedStyle(c).display),
+        })"""
+    )
+    assert set(styles["rows"]) == {"avoid"}
+    assert set(styles["heads"]) == {"table-header-group"}
+    assert styles["cells"] and set(styles["cells"]) == {"table-cell"}
+
+    # The light theme's ink on white, though the screen is dark.
+    colours = report.evaluate(
+        """el => [getComputedStyle(document.body).backgroundColor,
+          getComputedStyle(el).backgroundColor, getComputedStyle(el).color]"""
+    )
+    assert colours == ["rgb(255, 255, 255)", "rgb(255, 255, 255)", "rgb(27, 29, 33)"]
+
+    # A link in the article prints its target after its text.
+    after = report.evaluate(
+        """el => {
+          const a = document.createElement('a')
+          a.href = 'https://example.com/policy'
+          a.textContent = 'the policy'
+          el.querySelector('.report-disclaimer').append(a)
+          return getComputedStyle(a, '::after').content
+        }"""
+    )
+    assert "https://example.com/policy" in after
+
+
+def test_the_older_entries_sentence_is_not_there_when_the_trail_has_no_more(page: Page, report_url):
+    report = open_report(page, report_url)
+    page.emulate_media(media="print")
+    expect(report.get_by_role("heading", level=1)).to_be_visible()
+    expect(report.get_by_text(OLDER_ENTRIES)).to_have_count(0)
