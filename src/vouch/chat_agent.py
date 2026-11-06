@@ -452,7 +452,7 @@ def assessed_words(control: IsaControl, assessment: Assessment) -> str:
     said = [
         f"Control {control.id}, “{control.question}”: its newest assessment is {verdict}, {status}."
     ]
-    if explained := roll_up_words(assessment.requirements):
+    if explained := roll_up_words(assessment.requirements, assessment.verdict):
         said.append(f"Why: {explained}")  # the working paper's explanation (#212)
     if missing:
         said.append(f"Not yet evidenced: {', '.join(missing)}.")

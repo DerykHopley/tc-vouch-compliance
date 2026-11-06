@@ -161,8 +161,10 @@ class Judgement(BaseModel):
 class RemediationItemReply(BaseModel):
     """The model's draft of one remediation item."""
 
-    requirement_id: str = Field(description="The not-evidenced requirement's id, such as M1.")
-    missing: str = Field(description="What evidence or practice is missing, in one sentence.")
+    requirement_id: str = Field(
+        description="The id of the requirement not or partly evidenced, such as M1."
+    )
+    missing: str = Field(description="What evidence or practice is still missing, in one sentence.")
     owner_role: str = Field(description="The role that should own the fix, not a person's name.")
     due_in_days: int = Field(
         ge=1, le=MAX_DUE_DAYS, description="Days from today until the fix is due."
@@ -170,7 +172,7 @@ class RemediationItemReply(BaseModel):
 
 
 class RemediationPlan(BaseModel):
-    """One remediation item for each not-evidenced requirement listed."""
+    """One remediation item for each requirement listed, not or partly evidenced (#212)."""
 
     items: list[RemediationItemReply] = Field(default_factory=list)
 
@@ -350,7 +352,8 @@ class ShouldScore:
 
 @dataclass(frozen=True)
 class RemediationItem:
-    """A drafted remediation item for a not-evidenced requirement, until the lead approves it."""
+    """A drafted remediation item for a requirement not or partly evidenced (#212), until the
+    lead approves it."""
 
     requirement_id: str
     missing: str
@@ -477,13 +480,16 @@ def roll_up(requirements: Iterable[RequirementVerdict]) -> Verdict:
     return "partly-evidenced"
 
 
-def roll_up_words(requirements: Iterable[RequirementVerdict]) -> str | None:
-    """Why the control has its verdict (`roll_up`), when a row's verdict differs from it, as
-    when partly evidenced musts roll up to not evidenced (#212); None when every applicable row
-    matches. English; the working paper's copy (review.ts rollUpWords) says it in the profile's
-    language too, and both are checked against tests/roll_up_words_cases.json."""
+def roll_up_words(
+    requirements: Iterable[RequirementVerdict], verdict: Verdict | None = None
+) -> str | None:
+    """Why the control has its verdict (the one shown, else `roll_up`'s), when a row's verdict
+    differs from it, as when partly evidenced musts roll up to not evidenced (#212); None when
+    every applicable row matches. English; the working paper's copy (review.ts rollUpWords) says
+    it in the profile's language too, and both are checked against
+    tests/roll_up_words_cases.json."""
     requirements = list(requirements)
-    verdict = roll_up(requirements)
+    verdict = verdict or roll_up(requirements)
     if all(r.verdict == verdict for r in requirements if r.verdict != NOT_APPLICABLE):
         return None
     counted = [r for r in requirements if counts_towards_roll_up(r)]
@@ -498,7 +504,7 @@ def roll_up_words(requirements: Iterable[RequirementVerdict]) -> str | None:
             return f"Evidenced: its one {noun} is fully evidenced; {shoulds}."
         return f"Evidenced: all {n} {noun}s are fully evidenced; {shoulds}."
     if verdict == "partly-evidenced":
-        agree = "is" if evidenced == 1 else "are"
+        agree = _verb(evidenced, "is", "are")
         return f"Partly evidenced: {evidenced} of {n} {noun}s {agree} fully evidenced."
     if verdict == "not-evidenced":
         if partly:
@@ -664,10 +670,6 @@ def _judge_prompt(state: AssessState) -> list[AnyMessage]:
     ]
 
 
-def _not_evidenced(requirements: list[RequirementVerdict]) -> list[RequirementVerdict]:
-    return [r for r in requirements if r.verdict == "not-evidenced"]
-
-
 TO_FIX: frozenset[Verdict] = frozenset({"not-evidenced", "partly-evidenced"})
 """The verdicts a remediation item is drafted for: every applicable requirement that isn't
 evidenced, partly evidenced too (#212, the owner's decision 2026-11-06)."""
@@ -704,9 +706,9 @@ def _remediation_prompt(
 
 
 def _drafts(
-    not_evidenced: list[RequirementVerdict], plan: RemediationPlan | None, today: date
+    to_fix: list[RequirementVerdict], plan: RemediationPlan | None, today: date
 ) -> tuple[list[RemediationItem], list[str]]:
-    """One remediation item per not-evidenced requirement, in the requirements' order, and the
+    """One remediation item per requirement to fix, in the requirements' order, and the
     ids the model didn't draft.
 
     A skipped requirement gets an item saying "not drafted" (RemediationItem.not_drafted).
@@ -716,7 +718,7 @@ def _drafts(
     for item in plan.items if plan else []:
         given.setdefault(item.requirement_id, item)
     drafts, not_drafted = [], []
-    for req in not_evidenced:
+    for req in to_fix:
         item = given.get(req.id)
         if item is None:
             not_drafted.append(req.id)
@@ -749,9 +751,10 @@ def _reviewed_remediation(
     today: date,
     pending_ids: Iterable[str] = (),
 ) -> list[RemediationItem]:
-    """The remediation items after overrides: one per requirement still not evidenced, except
-    those still pending. A requirement overridden away from not evidenced loses its item; one
-    overridden to it (pending or not) gets a "not drafted" item for the lead."""
+    """The remediation items after overrides: one per requirement still not or partly
+    evidenced, except those still pending. A requirement overridden to evidenced loses its item;
+    one overridden from evidenced to not or partly (pending or not) gets a "not drafted" item
+    for the lead."""
     by_id = {item.requirement_id: item for item in drafted}
     return [
         by_id.get(r.id) or RemediationItem.not_drafted(r.id, today)
@@ -780,18 +783,17 @@ def apply_overrides(
 def _noted_pending(
     requirements: list[RequirementVerdict], pending: dict[str, str]
 ) -> tuple[list[RequirementVerdict], list[str]]:
-    """With sources pending, each not-evidenced requirement's reason notes it (unless it is
-    the pending reason already), and the ids of those requirements."""
+    """With sources pending, the reason of each requirement not or partly evidenced notes it
+    (unless it is the pending reason already), and the ids of those requirements: a pending
+    source may hold what they lack, so no remediation item is drafted for them (#212)."""
     if not pending:
         return requirements, []
     note = pending_reason(pending)
     noted = [
-        replace(r, reason=f"{r.reason} ({note})")
-        if r.verdict == "not-evidenced" and r.reason != note
-        else r
+        replace(r, reason=f"{r.reason} ({note})") if r.verdict in TO_FIX and r.reason != note else r
         for r in requirements
     ]
-    return noted, [r.id for r in _not_evidenced(noted)]
+    return noted, [r.id for r in noted if r.verdict in TO_FIX]
 
 
 class JudgedRequirements(NamedTuple):
@@ -1334,7 +1336,10 @@ class Step:
             if not drafts and pending:
                 return f"No remediation item drafted: {waiting}."
             if not drafts:
-                return "Every requirement that applies is evidenced, so no remediation item was drafted."
+                return (
+                    "Every requirement that applies is evidenced, so no remediation item was "
+                    "drafted."
+                )
             not_drafted = update.get("not_drafted", [])
             made = len(drafts) - len(not_drafted)  # not the placeholders
             partly = update.get("partly_drafted", 0)

@@ -614,7 +614,5 @@ def test_explain_control_says_why_partly_evidenced_rows_roll_up_to_not_evidenced
 
     words = assessed_words(control, replace(assessment, verdict="not-evidenced"))
 
-    assert (
-        "Not evidenced: no must requirement is fully evidenced (1 of 1 partly evidenced)."
-        in (words.splitlines()[1])
-    )
+    why = "Why: Not evidenced: no must requirement is fully evidenced (1 of 1 partly evidenced)."
+    assert why in words

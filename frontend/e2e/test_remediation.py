@@ -3,9 +3,10 @@ with its audit entry; discarded and gone from the overview's open count; a past 
 a double click approving once; one profile's items not shown under another.
 
 On the working paper's server (paper_url), as #42's review checks. Each check assesses 4.1.2
-afresh (the demo script: M1 partly evidenced, the rest evidenced, so M1's item is drafted, #212)
-and accepts it through the API with M1 overridden to evidenced (its draft dropped) and S1 to not
-evidenced, which gives S1 a "not drafted" item for the lead to fill in. The per-profile check runs on profiles_url (#47)."""
+afresh (the demo script: M1 partly evidenced, the rest evidenced, so M1's item is drafted,
+#212) and accepts it through the API with M1 overridden to evidenced (its draft dropped) and S1
+to not evidenced, which gives S1 a "not drafted" item for the lead to fill in. The per-profile
+check runs on profiles_url (#47)."""
 
 import json
 import re

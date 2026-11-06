@@ -577,6 +577,14 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     expect(within(item()).queryByRole('button')).toBeNull()
   })
 
+  it('hides a partly evidenced draft once its requirement is overridden to evidenced on screen (issue 212)',
+    async () => {
+      review({ assessment: { ...PROPOSED, remediation: [{ ...DRAFT, requirement_id: 'M1' }] } })
+      expect(screen.getByRole('region', { name: 'Remediation item M1' })).toBeTruthy()
+      await saveOverrideOfM1()
+      expect(screen.queryByRole('region', { name: 'Remediation item M1' })).toBeNull()
+    })
+
   it("offers no decision on a proposed control's draft, saying when it can be made", () => {
     review({ assessment: { ...PROPOSED, remediation: [DRAFT] } })
     expect(within(item()).queryByRole('button')).toBeNull()
