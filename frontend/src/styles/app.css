@@ -32,6 +32,8 @@ button.prof-button:hover { border-color: var(--navy); }
 .prof-tag { font: 500 11px var(--f-mono); color: var(--muted); border: 1px solid var(--rule); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
 .chevron { color: var(--muted); }
 /* The user menu: the initials in a circle. */
+.user-menu { margin-left: auto; } /* at the right edge, with or without a profile switcher before it */
+.prof + .user-menu { margin-left: 0; }
 .user-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--rule); border-radius: 50%; background: var(--paper); color: var(--ink); font: 600 13px var(--f-body); }
 .user-button:hover { border-color: var(--navy); }
 /* A menu's popup (Menu.tsx): its items 44px tall; the one chosen checked. */
@@ -246,8 +248,10 @@ textarea.field { resize: vertical; font-family: inherit; }
 @media (max-width: 700px) {
   /* The top bar on a phone (#222): the tabs, the profile and the user menu behind one Menu button, stacked. */
   .bar-toggle { display: inline-flex; margin-left: auto; }
-  .bar-menu { display: none; flex-basis: 100%; flex-direction: column; align-items: stretch; gap: 8px; padding-bottom: 8px; }
-  .bar-menu.open { display: flex; }
+  .bar-menu { flex-basis: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
+  .bar-menu.open { padding-bottom: 8px; }
+  /* Closed, the panel shows nothing but #201's fallback note, which must still be seen and announced. */
+  .bar-menu:not(.open) > :not(.prof), .bar-menu:not(.open) .prof > :not(.prof-note) { display: none; }
   .bar-menu .tabs { flex-direction: column; }
   .bar-menu .prof { margin-left: 0; justify-content: flex-start; }
   .bar-menu .prof-note { text-align: left; }

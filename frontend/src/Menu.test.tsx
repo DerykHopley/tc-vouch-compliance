@@ -60,6 +60,20 @@ describe('Menu (issue 222)', () => {
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
+  it("keeps Esc to itself, so a listener on the page (the chat's) never hears it", async () => {
+    const heard = vi.fn()
+    document.addEventListener('keydown', heard)
+    try {
+      const { button } = shown()
+      await userEvent.click(button)
+      await userEvent.keyboard('{Escape}')
+      expect(screen.queryByRole('menu')).toBeNull()
+      expect(heard).not.toHaveBeenCalled()
+    } finally {
+      document.removeEventListener('keydown', heard)
+    }
+  })
+
   it('closes on a click outside it', async () => {
     const { button } = shown()
     await userEvent.click(button)

@@ -1,7 +1,14 @@
 import Menu, { MenuItem } from './Menu.tsx'
 import { profileLabel, type ProfileSummary, profileTag } from './profiles.ts'
 
-type Props = { profiles: ProfileSummary[]; selected: string; onSwitch: (id: string) => void; fellBack?: boolean }
+type Props = {
+  profiles: ProfileSummary[]
+  selected: string
+  onSwitch: (id: string) => void
+  fellBack?: boolean
+  /** The user just switched: the app opened afresh, so focus goes back to the dropdown's button. */
+  switched?: boolean
+}
 
 /** What the profile button shows: the company, its tag ("DE · EN") and, with a menu, a chevron. */
 function Shown({ profile, chevron }: { profile: ProfileSummary; chevron: boolean }) {
@@ -18,7 +25,7 @@ function Shown({ profile, chevron }: { profile: ProfileSummary; chevron: boolean
  * tag for its country and answer language, and a chevron; its menu names each profile in full, the one shown checked.
  * With one profile, its name and no menu. `fellBack`: the profile remembered from before is no longer listed, so a
  * note names the one shown instead (#201). */
-export default function ProfileSwitcher({ profiles, selected, onSwitch, fellBack = false }: Props) {
+export default function ProfileSwitcher({ profiles, selected, onSwitch, fellBack = false, switched = false }: Props) {
   const shown = profiles.find((p) => p.id === selected) ?? profiles[0]
   const note = fellBack && shown
     ? <span className="prof-note" role="status">
@@ -29,9 +36,13 @@ export default function ProfileSwitcher({ profiles, selected, onSwitch, fellBack
   return (
     <div className="prof">
       {profiles.length === 1
-        ? <span className="prof-button" aria-label={`Profile: ${profileLabel(shown)}`}><Shown profile={shown} chevron={false} /></span>
+        ? (
+          <span className="prof-button" role="group" aria-label={`Profile: ${profileLabel(shown)}`}>
+            <Shown profile={shown} chevron={false} />
+          </span>
+        )
         : (
-          <Menu label={`Profile: ${profileLabel(shown)}`} buttonClassName="prof-button"
+          <Menu label={`Profile: ${profileLabel(shown)}`} buttonClassName="prof-button" focusOnMount={switched}
             button={<Shown profile={shown} chevron />}>
             {(close) => profiles.map((p) => (
               <MenuItem key={p.id} checked={p.id === selected} onSelect={() => {

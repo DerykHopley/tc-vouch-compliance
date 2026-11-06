@@ -9,7 +9,7 @@ def profile_button(page: Page) -> Locator:
     return page.get_by_role("banner").get_by_role("button", name="Profile: ")
 
 
-def profile_choices(page: Page) -> Locator:
+def open_profile_menu(page: Page) -> Locator:
     """Opens the profile dropdown: its choices, each a profile in full."""
     profile_button(page).click()
     return page.get_by_role("banner").get_by_role("menuitemradio")
@@ -17,7 +17,7 @@ def profile_choices(page: Page) -> Locator:
 
 def switch_profile(page: Page, label: str) -> None:
     """Chooses the profile named in full (company · country · language) in the dropdown."""
-    profile_choices(page)
+    open_profile_menu(page)
     page.get_by_role("banner").get_by_role("menuitemradio", name=label, exact=True).click()
 
 

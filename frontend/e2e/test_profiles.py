@@ -10,7 +10,7 @@ import re
 
 import pytest
 from playwright.sync_api import APIRequestContext, Page, expect
-from top_bar import profile_button, profile_choices, switch_profile
+from top_bar import open_profile_menu, profile_button, switch_profile
 
 NORDLICHT = "Nordlicht Komponenten GmbH · Germany · English"
 TESTWERK = "Testwerk Prüfstand GmbH · Austria · English"
@@ -60,7 +60,7 @@ def test_switching_shows_each_profiles_own_progress(page: Page, profiles_url):
 
     opened(page, profiles_url)
     # The broken profile is left out.
-    expect(profile_choices(page)).to_have_text([NORDLICHT, TESTWERK])
+    expect(open_profile_menu(page)).to_have_text([NORDLICHT, TESTWERK])
     page.keyboard.press("Escape")
     expect(page.locator(".pill").first).to_have_text("Nordlicht Komponenten GmbH · Germany")
     expect(accepted_tile(page).locator("b")).to_have_text("1")
@@ -140,7 +140,7 @@ def test_the_bundled_profiles_are_both_in_the_menu(page: Page, dossier_url):
     name without a menu is checked below the UI (profiles.test.tsx)."""
     opened(page, dossier_url)
 
-    expect(profile_choices(page)).to_have_text(
+    expect(open_profile_menu(page)).to_have_text(
         ["Alpenwerk Präzision GmbH · Austria · German", NORDLICHT]
     )
 

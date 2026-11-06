@@ -74,7 +74,8 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
 def test_the_top_bar_menu_and_its_menus_are_at_least_44px(page: Page, profiles_url):
     # #222: on a phone the tabs, the profile dropdown and the user menu sit behind one Menu button.
     page.set_viewport_size({"width": 400, "height": 900})
-    page.goto(profiles_url)
+    with page.expect_response("**/api/overview"):
+        page.goto(profiles_url)
     bar = page.get_by_role("banner")
     bar.get_by_role("button", name="Menu", exact=True).click()
     bar.get_by_role("button", name=re.compile(r"^Profile: ")).click()

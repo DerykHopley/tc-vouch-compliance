@@ -6,6 +6,7 @@ import Invitation, { Page, SignInFailed } from './Invitation.tsx'
 import ProfiledApp from './ProfiledApp.tsx'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 import { BY_INVITATION, COURSE_MEMBERS } from './words.ts'
+import { displayName } from './user.ts'
 
 // Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
 // mode fetches nothing of Clerk's. Signed out: the invitation page with Clerk's sign-in (the instance is invitation
@@ -50,8 +51,7 @@ function SignedInApp({ gate }: { gate: Gate }) {
   const { getToken } = useAuth()
   const { signOut } = useClerk()
   const { user } = useUser()
-  // The user menu's name (#222): Clerk's full name, else the username, else the address they signed in with.
-  const name = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? undefined
+  const name = displayName(user) // the user menu's (#222)
   // A layout effect runs before the app's own effects make their first API calls.
   useLayoutEffect(() => {
     setTokenSource(() => getToken())

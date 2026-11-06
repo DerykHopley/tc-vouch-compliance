@@ -116,3 +116,43 @@ def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
 
     page.get_by_role("link", name="Developer").click()  # a tab closes the menu
     expect(toggle).to_have_attribute("aria-expanded", "false")
+
+
+def test_the_profile_menu_moves_with_the_arrows_and_tab_closes_it(page: Page, profiles_url):
+    # Keyboard and focus get a browser test (agent-rules.md): jsdom only models them.
+    opened(page, profiles_url)
+    button = profile_button(page)
+    button.focus()
+    page.keyboard.press("Enter")
+    choices = page.get_by_role("banner").get_by_role("menuitemradio")
+    expect(choices.nth(0)).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(choices.nth(1)).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(choices.nth(0)).to_be_focused()  # round again
+    page.keyboard.press("ArrowUp")
+    expect(choices.nth(1)).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("banner").get_by_role("menu")).to_have_count(0)
+
+
+def test_esc_closes_a_top_bar_menu_but_leaves_an_open_chat_open(page: Page, profiles_url):
+    opened(page, profiles_url)
+    page.get_by_role("button", name="Ask Vouch").click()
+    chat = page.locator("aside[aria-label='Chat with Vouch']")
+    expect(chat).to_be_visible()
+    page.get_by_role("banner").get_by_role("button", name="Your menu").click()
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("banner").get_by_role("menu")).to_have_count(0)
+    expect(chat).to_be_visible()
+
+
+def test_on_a_phone_the_fallback_note_shows_with_the_menu_closed(page: Page, profiles_url):
+    """#201's note that the remembered profile is gone stays in view behind the closed Menu."""
+    page.add_init_script("localStorage.setItem('vouch.profile', 'gone')")
+    opened(page, profiles_url, 400)
+    expect(page.get_by_role("banner").get_by_role("status")).to_be_visible()
+    expect(
+        page.get_by_role("banner").get_by_role("button", name="Menu", exact=True)
+    ).to_have_attribute("aria-expanded", "false")
+    assert not scrolls_sideways(page)

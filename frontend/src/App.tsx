@@ -8,10 +8,10 @@ import { controlPath, useOverview } from './overview.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import TopBar from './TopBar.tsx'
 import UserMenu from './UserMenu.tsx'
+import type { Theme } from './user.ts'
 import { type Run, useAssessment } from './useAssessment.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
-type Theme = 'light' | 'dark'
 
 /** The theme the page already shows (the app opens afresh on a profile switch), else the system setting, else light. */
 function startingTheme(): Theme {
@@ -60,6 +60,24 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
   }, [theme])
   const other: Theme = theme === 'light' ? 'dark' : 'light'
   const [barOpen, setBarOpen] = useState(false) // the phone's top bar menu
+  useEffect(() => {
+    if (!barOpen) return
+    // Like the bar's own menus: Esc (unless an inner menu took it) or a tap outside the bar closes the panel.
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setBarOpen(false)
+      document.querySelector<HTMLButtonElement>('.bar-toggle')?.focus()
+    }
+    const outside = (e: PointerEvent) => {
+      if (!(e.target as Element).closest('header.top')) setBarOpen(false)
+    }
+    document.addEventListener('keydown', key)
+    document.addEventListener('pointerdown', outside)
+    return () => {
+      document.removeEventListener('keydown', key)
+      document.removeEventListener('pointerdown', outside)
+    }
+  }, [barOpen])
   const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
   useEffect(() => {
     const onPopState = () => setView(viewAt(window.location.pathname)) // Back or Forward
