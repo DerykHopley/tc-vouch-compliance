@@ -105,6 +105,16 @@ def test_a_pem_missing_its_end_line_is_refused_without_showing_it(keyring):
     assert not (keyring.store / "clerk-vouch-jwt-key").exists()
 
 
+def test_a_pem_missing_its_begin_line_is_refused_too(keyring):
+    cut = "".join(PEM.splitlines(keepends=True)[1:])
+
+    done = keyring(cut, "clerk-vouch-jwt-key")
+
+    assert done.returncode == 1
+    assert "-----BEGIN" in done.stderr
+    assert not (keyring.store / "clerk-vouch-jwt-key").exists()
+
+
 def test_without_a_service_name_it_says_how_to_use_it(keyring):
     done = keyring(PEM)
 

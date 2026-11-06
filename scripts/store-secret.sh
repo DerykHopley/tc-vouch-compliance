@@ -32,9 +32,11 @@ if ! grep -q '[^[:space:]]' "$value"; then
   echo "store-secret: the value for $service is empty; nothing was stored. Pipe it in." >&2
   exit 1
 fi
-if grep -q -- '-----BEGIN ' "$value" && ! grep -q -- '-----END ' "$value"; then
-  echo "store-secret: the value for $service starts a PEM (-----BEGIN) but has no -----END line;" \
-    "nothing was stored. Pipe the whole file in." >&2
+# A PEM, by either of its lines, needs both, BEGIN first: a cut one is refused.
+if grep -q -- '-----\(BEGIN\|END\) ' "$value" \
+  && ! awk '/-----BEGIN /{ begun = 1 } /-----END / && begun { ended = 1 } END { exit !ended }' "$value"; then
+  echo "store-secret: the value for $service is a PEM without both its -----BEGIN and -----END" \
+    "lines, in that order; nothing was stored. Pipe the whole file in." >&2
   exit 1
 fi
 
