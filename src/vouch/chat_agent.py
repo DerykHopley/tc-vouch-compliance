@@ -546,11 +546,14 @@ class ChatTools:
 
     def assessed_controls(self, write: Write) -> str:
         """Every control's newest assessment by this lead under this profile, at once (#210): the
-        memory is the lead's and the profile's, so no other user's assessment is read."""
+        memory is the lead's and the profile's, so no other user's assessment is read. A `papers`
+        event lists the controls, so the chat links each one the answer names to its working
+        paper (#217): the links come from here, never from the model's text."""
         controls = self.profile.isa_edition().controls
         latest = newest_by_control(self.memory, self.run.saver)
         said = f"Read the newest assessments of {plural(len(latest), 'control')}."
         write(("step", {"node": ASSESSED_CONTROLS, "text": said}))
+        write(("papers", {"control_ids": [control.id for control in controls]}))
         return assessed_controls_words(controls, latest)
 
     def start_assessment(self, control_id: str, write: Write, stop: threading.Event) -> str:

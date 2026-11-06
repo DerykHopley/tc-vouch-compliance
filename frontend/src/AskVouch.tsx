@@ -1,7 +1,8 @@
-import { type FormEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type FormEvent, Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, verdictLang, verdictWord } from './assessment.ts'
 import {
-  CHAT_UNREACHABLE, GREETING_UNREACHABLE, type PageContext, pageLabel, sendChat, suggestionLabel, suggestionMessage,
+  CHAT_UNREACHABLE, GREETING_UNREACHABLE, namedControls, type PageContext, pageLabel, sendChat, suggestionLabel,
+  suggestionMessage,
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
 import { controlPath, type NextStep } from './overview.ts'
@@ -50,7 +51,9 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
 /** A line in the chat: the lead's message, Vouch's reply (or a notice that it failed), an assessment's step, or an
  * assessment's verdict with the way to its working paper. */
 type Message =
-  | { from: 'lead' | 'vouch'; text: string; failed?: boolean }
+  | { from: 'lead'; text: string }
+  /** `papers`: the controls a cross-control answer may name, linked to their working papers when named (#217). */
+  | { from: 'vouch'; text: string; failed?: boolean; papers?: string[] }
   | { from: 'step'; step: Step }
   | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus; language?: string }
 
@@ -62,13 +65,30 @@ const ACTION = 'btn btn-ghost chat-action'
 
 /** A link to a control's working paper, as a chat action: shown in the app (`onOpen`), or followed as a link without
  * it. */
-function PaperLink({ controlId, onOpen, className, children }:
-  { controlId: string; onOpen: OnOpen; className?: string; children: ReactNode }) {
+function PaperLink({ controlId, onOpen, className, label, children }:
+  { controlId: string; onOpen: OnOpen; className?: string; label?: string; children: ReactNode }) {
   return (
-    <a className={className ? `${ACTION} ${className}` : ACTION} href={controlPath(controlId)}
+    <a className={className ? `${ACTION} ${className}` : ACTION} href={controlPath(controlId)} aria-label={label}
       onClick={(e) => { if (onOpen) { e.preventDefault(); onOpen(controlId) } }}>
       {children}
     </a>
+  )
+}
+
+/** After a cross-control answer, a link to the working paper of each control it names that the `papers` event listed
+ * (#217): built from the tool's ids, never from the model's text. Nothing when it names none. */
+function PaperLinks({ reply, papers, onOpen }: { reply: string; papers: string[]; onOpen: OnOpen }) {
+  const named = namedControls(reply, papers)
+  if (named.length === 0) return null
+  return (
+    <p className="paper-links">
+      <span className="lbl">Working papers</span>
+      {named.map((id) => (
+        <PaperLink key={id} controlId={id} onOpen={onOpen} label={`Working paper ${id}`}>
+          <span className="mono">{id}</span>
+        </PaperLink>
+      ))}
+    </p>
   )
 }
 
@@ -195,10 +215,14 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     setSuggestion(null)
     if (text !== null) setMessages((all) => [...all, { from: 'lead', text }])
     const add = (m: Message) => setMessages((all) => [...all, m])
+    // The controls this turn's answer may name (a `papers` event, #217), for its working-paper links. The tool sends
+    // it as it runs, before the answer's words, so each piece of the answer written after it carries it.
+    let papers: string[] | undefined
     const write = (piece: string) => setMessages((all) => {
       const last = all[all.length - 1]
       return last?.from === 'vouch' && !last.failed
-        ? [...all.slice(0, -1), { ...last, text: last.text + piece }] : [...all, { from: 'vouch', text: piece }]
+        ? [...all.slice(0, -1), { ...last, text: last.text + piece, papers: papers ?? last.papers }]
+        : [...all, { from: 'vouch', text: piece, papers }]
     })
     const failed = (message: string) => {
       add({ from: 'vouch', text: message, failed: true })
@@ -213,6 +237,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         else if (item.event === 'thread') threadId.current = item.data.thread_id
         else if (item.event === 'step') add({ from: 'step', step: item.data })
         else if (item.event === 'suggestion') setSuggestion(item.data)
+        else if (item.event === 'papers') papers = item.data.control_ids
         else if (item.event === 'assessment') {
           verdicts.push({ from: 'verdict', controlId: item.data.control_id, verdict: item.data.verdict, status: item.data.status,
             language: item.data.answer_language })
@@ -279,7 +304,12 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
           ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} language={m.language}
             onOpen={onOpen} />
           : m.from === 'step' ? <StepLine key={i} step={m.step} />
-            : m.from === 'vouch' && !m.failed ? <ChatReply key={i} text={m.text} />
+            : m.from === 'vouch' && !m.failed ? (
+              <Fragment key={i}>
+                <ChatReply text={m.text} />
+                {m.papers && <PaperLinks reply={m.text} papers={m.papers} onOpen={onOpen} />}
+              </Fragment>
+            )
               : <p key={i} className={m.from === 'lead' ? 'msg msg-lead' : 'msg notice'}>{m.text}</p>)}
         {suggestion && !busy && (suggestion.action === 'review'
           ? <PaperLink className="suggestion" controlId={suggestion.control_id} onOpen={onOpen}>
