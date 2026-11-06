@@ -5,9 +5,9 @@
  */
 
 /** A run of text, bold or italic or neither. */
-export type Run = { text: string; bold?: true; italic?: true }
+export type TextRun = { text: string; bold?: true; italic?: true }
 /** A paragraph's lines (shown with line breaks between), or a list's items. */
-export type Block = { kind: 'p'; lines: Run[][] } | { kind: 'ul' | 'ol'; items: Run[][] }
+export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul' | 'ol'; items: TextRun[][] }
 
 // `**bold**`, then `*italic*` (no space just inside the stars, so "2 * 3 * 4" stays as written).
 const EMPHASIS = /\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*/g
@@ -18,8 +18,8 @@ const INLINE_BULLETS = /^(.*?:)\s+-\s+(.+)$/
 const INLINE_NUMBERED = /^(.*?:)\s+1\.\s+(.+)$/
 
 /** The text's runs: bold and italics marked, everything else as written. */
-export function runs(text: string): Run[] {
-  const found: Run[] = []
+function runs(text: string): TextRun[] {
+  const found: TextRun[] = []
   let at = 0
   for (const match of text.matchAll(EMPHASIS)) {
     if (match.index > at) found.push({ text: text.slice(at, match.index) })
@@ -63,7 +63,7 @@ function unfold(line: string): string[] {
 export function proseBlocks(text: string): Block[] {
   const blocks: Block[] = []
   let open: Block | null = null
-  const add = (kind: Block['kind'], content: Run[]) => {
+  const add = (kind: Block['kind'], content: TextRun[]) => {
     if (open && open.kind === kind) {
       if (open.kind === 'p') open.lines.push(content)
       else open.items.push(content)

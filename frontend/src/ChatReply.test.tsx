@@ -45,4 +45,12 @@ describe('ChatReply', () => {
     expect(container.querySelector('blockquote')?.textContent).toBe('<script>alert(1)</script> <img src=x onerror=alert(2)>')
     expect(container.textContent).toContain('<b>Bold</b>')
   })
+
+  it("shows a reply's bold and list as elements, and its cite as a quote", () => {
+    const text = '**M1 (must):** partly.\n- <cite doc="enc">TLS 1.2</cite>\n- next'
+    const { container } = render(<ChatReply text={text} />)
+    expect(container.querySelector('strong')?.textContent).toBe('M1 (must):')
+    expect(container.querySelector('figure.cite blockquote')?.textContent).toBe('TLS 1.2')
+    expect(container.textContent).not.toContain('**')
+  })
 })
