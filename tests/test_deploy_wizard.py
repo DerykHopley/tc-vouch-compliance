@@ -74,7 +74,7 @@ case "$tool $*" in
       echo "projects/vouch-demo-123/locations/europe-west1/repositories/vouch/packages/vouch/tags/$t"
     done ;;
   "docker push"*) echo "${2##*:}" >> "$STATE/tags" ;;
-  "gcloud projects describe"*"projectNumber"*) echo 123 ;;
+  "gcloud projects describe"*"projectNumber"*) echo "${PROJECT_NUMBER-123}" ;;
   "gcloud sql instances describe"*) [ -n "$SQL" ] || exit 1; echo "$SQL" ;;
   "gcloud run services describe"*"serviceAccountName"*) echo "$SERVICE_ACCOUNT" ;;
   "gcloud run services describe"*) [ -n "$EXISTING" ] || [ -e "$STATE/deployed" ] || exit 1
@@ -159,6 +159,7 @@ def run_wizard(
     fail_lookup: str = "",
     tags: str = "",
     tags_error: str = "",
+    project_number: str = "123",
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -190,6 +191,7 @@ def run_wizard(
         "FAIL_LOOKUP": fail_lookup,
         "TAGS": tags,
         "TAGS_ERROR": tags_error,
+        "PROJECT_NUMBER": project_number,
         "WIZARD_ENV": str(tmp_path / "wizard.env"),
     }
     proc = subprocess.Popen(
@@ -689,6 +691,34 @@ def test_a_discord_server_id_that_isnt_one_stops_before_anything_changes(tmp_pat
     assert result.returncode != 0
     assert "DISCORD_SERVER_ID" in result.stderr
     assert "gcloud run deploy" not in calls and "docker " not in calls
+
+
+@pytest.mark.parametrize(
+    "region",
+    ["europe-west1,https://other.example", "europe-west1.evil", "Europe-West1", "west1"],
+)
+def test_a_region_that_isnt_a_cloud_run_region_stops_before_anything_changes(tmp_path, region):
+    """#192: REGION goes into the sign-in address, so a comma would add a second origin."""
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION=region)
+    result, calls = deployed(tmp_path)
+    assert result.returncode != 0
+    assert "REGION" in result.stderr
+    assert region in result.stderr  # the value is named
+    assert "gcloud run deploy" not in calls and "docker " not in calls
+
+
+@pytest.mark.parametrize("number", ["12a3", "123,https://other.example", ""])
+def test_a_project_number_that_isnt_digits_stops_before_the_deploy(tmp_path, number):
+    result, calls = deployed(tmp_path, project_number=number)
+    assert result.returncode != 0
+    assert "project" in result.stderr and "number" in result.stderr
+    assert "gcloud run deploy" not in calls
+
+
+def test_a_dry_run_with_today_s_wizard_env_passes(tmp_path):
+    saved(tmp_path, PROJECT_ID="tc-vouch-compliance", REGION="europe-west1")
+    result, _ = run_wizard(tmp_path, "--dry-run", project_id="tc-vouch-compliance")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_without_a_discord_server_id_it_says_clerk_alone_decides_who_signs_in(tmp_path):
