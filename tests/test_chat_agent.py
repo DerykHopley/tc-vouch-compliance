@@ -654,3 +654,100 @@ def test_explain_control_says_why_partly_evidenced_rows_roll_up_to_not_evidenced
 
     why = "Why: Not evidenced: no must requirement is fully evidenced (1 of 1 partly evidenced)."
     assert why in words
+
+
+# The conversation kept (#251): one per user and profile, its lines as the chat showed them
+
+
+def current(client, **headers):
+    response = client.get("/api/chat/current", headers=headers or None)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_a_turn_is_kept_as_the_chat_showed_it_and_its_thread_becomes_current(client):
+    events = say(client, "Where do I stand?")
+
+    kept = current(client)
+    assert kept["thread_id"] == thread_of(events)
+    assert kept["lines"] == [
+        {"from": "lead", "text": "Where do I stand?"},
+        {"from": "vouch", "text": reply(events)},
+    ]
+
+
+def test_the_greeting_is_kept_without_a_lead_line_and_a_next_message_adds_to_it(client):
+    thread_id = thread_of(greet(client))
+    events = say(client, "Where do I stand?", thread_id=thread_id)
+
+    lines = current(client)["lines"]
+    assert [line["from"] for line in lines] == ["vouch", "lead", "vouch"]
+    assert lines[-1]["text"] == reply(events)
+    assert current(client)["thread_id"] == thread_id
+
+
+def test_an_assessment_s_steps_and_verdict_are_kept_in_order(client):
+    events = say(client, "Assess 5.1.1")
+
+    lines = current(client)["lines"]
+    froms = [line["from"] for line in lines]
+    assert froms[0] == "lead" and froms[-1] == "verdict"
+    assert "step" in froms and "vouch" in froms
+    assert froms.index("vouch") > froms.index("step")
+    [finished] = [data for name, data in events if name == "assessment"]
+    assert lines[-1] == {
+        "from": "verdict",
+        "control_id": "5.1.1",
+        "verdict": finished["verdict"],
+        "status": "waiting-for-review",
+        "answer_language": finished.get("answer_language"),
+    }
+
+
+def test_a_cross_control_answer_keeps_its_working_papers(client):
+    say(client, "Which controls have documented evidence only?")
+
+    [answer] = [line for line in current(client)["lines"] if line["from"] == "vouch"]
+    assert answer["papers"] == CONTROL_IDS
+
+
+def test_new_conversation_leaves_none_current_and_the_next_message_starts_one(client):
+    first = thread_of(say(client, "Where do I stand?"))
+
+    assert client.delete("/api/chat/current").status_code == 200
+    assert current(client) == {"thread_id": None, "lines": []}
+
+    second = thread_of(say(client, "What is missing for 5.1.1?"))
+    assert second != first
+    assert current(client)["thread_id"] == second
+    assert current(client)["lines"][0] == {"from": "lead", "text": "What is missing for 5.1.1?"}
+
+
+def test_another_user_sees_none_of_this_users_conversation(client, users):
+    say(client, "My secret question")
+
+    assert current(client, **users[1]) == {"thread_id": None, "lines": []}
+
+
+def test_an_unreadable_conversation_opens_empty_with_a_note(client, monkeypatch):
+    say(client, "Where do I stand?")
+
+    def unreadable(self, thread_id):
+        raise RuntimeError("the store can't be read")
+
+    monkeypatch.setattr(Memory, "chat_lines", unreadable)
+    kept = current(client)
+    assert kept["lines"] == [] and kept["thread_id"] is None
+    assert kept["note"] == api.CHAT_HISTORY_UNAVAILABLE
+
+
+def test_the_chat_still_answers_when_its_conversation_cannot_be_kept(client, monkeypatch):
+    def broken(self, *args):
+        raise RuntimeError("the database is unreachable")
+
+    monkeypatch.setattr(Memory, "add_chat_turn", broken)
+    monkeypatch.setattr(Memory, "set_current_chat", broken)
+    events = say(client, "Where do I stand?")
+
+    assert names(events)[-1] == "done"
+    assert reply(events)

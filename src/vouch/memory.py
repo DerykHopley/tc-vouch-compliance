@@ -13,6 +13,7 @@ this process's memory.
 """
 
 import json
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,6 +30,10 @@ from vouch.graph import Assessment, Status, assessment_loader, memory_checkpoint
 
 ASSESSMENTS = "assessments"
 LAST_REVIEW = "last-review"
+CHAT_LINES = "chat"
+"""The chat's kept conversations (#251): each turn's lines, as the chat showed them."""
+CURRENT_CHAT = "current-chat"
+"""The conversation the chat opens on, under this user and profile (#251)."""
 MAX_ASSESSMENTS = 1000
 """The most assessments one user lists under one profile (about 80 runs of each control): the
 newest are kept."""
@@ -100,6 +105,36 @@ class Memory:
     def forget_assessment(self, thread_id: str) -> None:
         """Remove `thread_id` from the index: its run never started."""
         self.store.delete(self._namespace(ASSESSMENTS), thread_id)
+
+    def current_chat(self) -> str | None:
+        """The chat thread the user's chat opens on under this profile (#251); None for none."""
+        item = self.store.get(self._namespace(), CURRENT_CHAT)
+        return item.value.get("thread_id") if item is not None else None
+
+    def set_current_chat(self, thread_id: str | None) -> None:
+        """Make `thread_id` the conversation the chat opens on; None: a new conversation, the
+        old one kept. Raises DatabaseUnavailable (Postgres)."""
+        if thread_id is None:
+            self.store.delete(self._namespace(), CURRENT_CHAT)
+        else:
+            self.store.put(self._namespace(), CURRENT_CHAT, {"thread_id": thread_id})
+
+    def add_chat_turn(self, thread_id: str, lines: list[dict]) -> None:
+        """Keep one chat turn's lines on `thread_id`, after the turns before it. Its key is the
+        time, so the turns read back in order. Raises DatabaseUnavailable (Postgres)."""
+        key = f"{time.time_ns():020d}"
+        self.store.put(self._namespace(CHAT_LINES, thread_id), key, {"lines": lines})
+
+    def chat_lines(self, thread_id: str) -> list[dict]:
+        """`thread_id`'s kept lines, every turn in order (#251); none for a thread of another
+        user or profile, as the namespace is this user's and profile's."""
+        namespace = self._namespace(CHAT_LINES, thread_id)
+        turns: list = []
+        while page := self.store.search(namespace, limit=PAGE_SIZE, offset=len(turns)):
+            turns += page
+            if len(page) < PAGE_SIZE:
+                break
+        return [line for turn in sorted(turns, key=lambda t: t.key) for line in turn.value["lines"]]
 
     def note_worked(self) -> None:
         """Note that the user reviewed an assessment under this profile now."""

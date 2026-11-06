@@ -64,6 +64,8 @@ def test_at_400px_tab_stays_in_the_sheet_after_a_double_click_on_ask_vouch(page:
 def test_at_400px_tab_reaches_close_inside_the_sheet(page: Page, dossier_url):
     open_sheet(page, dossier_url, 400)
     page.locator(SHEET).click(position={"x": 200, "y": 400})
+    page.keyboard.press("Tab")  # the header's first control, "New conversation" (#251), then Close
+    expect(page.get_by_role("button", name="New conversation")).to_be_focused()
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Close the chat")).to_be_focused()
 

@@ -1,7 +1,7 @@
 import { type FormEvent, Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, verdictLang, verdictWord } from './assessment.ts'
 import {
-  CHAT_UNREACHABLE, GREETING_UNREACHABLE, namedControls, type PageContext, pageLabel, sendChat, suggestionLabel,
+  type ChatMessage, CHAT_UNREACHABLE, fetchConversation, GREETING_UNREACHABLE, namedControls, newConversation, type PageContext, pageLabel, sendChat, suggestionLabel,
   suggestionMessage,
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
@@ -48,14 +48,7 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
   pinned: { className: 'bubble pinned', size: null, pin: 'enlarged' },
 }
 
-/** A line in the chat: the lead's message, Vouch's reply (or a notice that it failed), an assessment's step, or an
- * assessment's verdict with the way to its working paper. */
-type Message =
-  | { from: 'lead'; text: string }
-  /** `papers`: the controls a cross-control answer may name, linked to their working papers when named (#217). */
-  | { from: 'vouch'; text: string; failed?: boolean; papers?: string[] }
-  | { from: 'step'; step: Step }
-  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus; language?: string }
+type Message = ChatMessage
 
 type OnOpen = ((controlId: string) => void) | undefined
 
@@ -253,8 +246,9 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     }
   }
 
-  // Vouch greets the lead the first time the chat opens: where they stand, and the next step. A greeting that failed
-  // is asked for again the next time the chat opens (never over and over while it stays open).
+  // The first time the chat opens, the conversation kept on the server comes back as it was (#251); with none, Vouch
+  // greets the lead: where they stand, and the next step. A greeting that failed is asked for again the next time the
+  // chat opens (never over and over while it stays open).
   useEffect(() => {
     if (!open && greetAgain.current) {
       greetAgain.current = false
@@ -262,8 +256,27 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     }
     if (!open || greeted.current) return
     greeted.current = true
-    void converse(null)
+    void (async () => {
+      const kept = await fetchConversation()
+      if (kept.threadId && kept.messages.length > 0) {
+        threadId.current = kept.threadId
+        setMessages(kept.messages)
+        return
+      }
+      if (kept.note) setMessages([{ from: 'vouch', text: kept.note, failed: true }])
+      await converse(null)
+    })()
   })
+
+  /** A new conversation (#251): the chat empties, and the next message starts a thread; the old one is kept. */
+  async function startAfresh() {
+    if (sending.current) return
+    threadId.current = null
+    setMessages([])
+    setSuggestion(null)
+    inputRef.current?.focus()
+    await newConversation()
+  }
 
   function send(e: FormEvent) {
     e.preventDefault()
@@ -294,6 +307,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         {!sheet && size && (
           <button className="btn btn-ghost" onClick={() => setState(size.to)}>{size.label}</button>
         )}
+        <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}>New conversation</button>
         <button className="btn btn-ghost" onClick={() => setState('closed')} aria-label="Close the chat">
           Close
         </button>

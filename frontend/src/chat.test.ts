@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  CHAT_UNREACHABLE, type ChatEvent, namedControls, pageLabel, sendChat, suggestionLabel, suggestionMessage,
+  CHAT_UNREACHABLE, type ChatEvent, fetchConversation, namedControls, newConversation, restoredMessages, pageLabel, sendChat, suggestionLabel, suggestionMessage,
 } from './chat.ts'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -106,5 +106,47 @@ describe('pageLabel', () => {
     expect(pageLabel({ page: 'dossier', controlId: null })).toBe('on Dossier')
     expect(pageLabel({ page: 'developer', controlId: null })).toBe('on Developer')
     expect(pageLabel({ page: 'paper', controlId: '4.1.2' })).toBe('on 4.1.2 · Working paper')
+  })
+})
+
+
+describe('the kept conversation (issue 251)', () => {
+  it('restores each kept line as the message the chat showed', () => {
+    expect(restoredMessages([
+      { from: 'lead', text: 'Assess 5.1.1' },
+      { from: 'step', step: { node: 'judge', text: 'Judged 2 requirements.' } },
+      { from: 'vouch', text: 'Documented: **5.1.1**.', papers: ['5.1.1'] },
+      { from: 'vouch', text: 'Vouch could not answer just now.', failed: true },
+      { from: 'verdict', control_id: '5.1.1', verdict: 'partly-evidenced', status: 'waiting-for-review',
+        answer_language: 'de' },
+    ])).toEqual([
+      { from: 'lead', text: 'Assess 5.1.1' },
+      { from: 'step', step: { node: 'judge', text: 'Judged 2 requirements.' } },
+      { from: 'vouch', text: 'Documented: **5.1.1**.', papers: ['5.1.1'] },
+      { from: 'vouch', text: 'Vouch could not answer just now.', failed: true },
+      { from: 'verdict', controlId: '5.1.1', verdict: 'partly-evidenced', status: 'waiting-for-review',
+        language: 'de' },
+    ])
+  })
+
+  it('reads the current conversation, and a new one clears it', async () => {
+    const calls: [string, string][] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push([url, init?.method ?? 'GET'])
+      return Promise.resolve(url === '/api/chat/current' && (init?.method ?? 'GET') === 'GET'
+        ? Response.json({ thread_id: 'a'.repeat(32), lines: [{ from: 'lead', text: 'Hi' }] })
+        : Response.json({ thread_id: null }))
+    })
+    expect(await fetchConversation()).toEqual({ threadId: 'a'.repeat(32), messages: [{ from: 'lead', text: 'Hi' }],
+      note: null })
+    await newConversation()
+    expect(calls).toEqual([['/api/chat/current', 'GET'], ['/api/chat/current', 'DELETE']])
+  })
+
+  it("opens empty with a note where the conversation can't be read, or the service isn't reached", async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ thread_id: null, lines: [], note: 'Not now.' })))
+    expect(await fetchConversation()).toEqual({ threadId: null, messages: [], note: 'Not now.' })
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
+    expect((await fetchConversation()).messages).toEqual([])
   })
 })
