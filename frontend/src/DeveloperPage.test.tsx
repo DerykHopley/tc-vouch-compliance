@@ -187,7 +187,7 @@ describe('the Developer link', () => {
     render(<App />)
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
   })
 
   it("stays, with the page saying the settings are unavailable, on the database's 503", async () => {

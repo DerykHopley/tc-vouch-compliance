@@ -1,34 +1,46 @@
-import { useId } from 'react'
-import { type ProfileSummary, profileLabel } from './profiles.ts'
+import Menu, { MenuItem } from './Menu.tsx'
+import { profileLabel, type ProfileSummary, profileTag } from './profiles.ts'
 
 type Props = { profiles: ProfileSummary[]; selected: string; onSwitch: (id: string) => void; fellBack?: boolean }
 
-/** The top bar's profile switcher (#47; the prototype's, branch prototype/ui, variant E): a menu of the user's
- * profiles; with one, its name and no menu. `fellBack`: the profile remembered from before is no longer listed, so
- * a note names the one shown instead (#201). */
+/** What the profile button shows: the company, its tag ("DE · EN") and, with a menu, a chevron. */
+function Shown({ profile, chevron }: { profile: ProfileSummary; chevron: boolean }) {
+  return (
+    <>
+      <span className="prof-company">{profile.company}</span>
+      <span className="prof-tag">{profileTag(profile)}</span>
+      {chevron && <span className="chevron" aria-hidden="true">▾</span>}
+    </>
+  )
+}
+
+/** The top bar's profile switcher (#47), as a bordered dropdown button (#222, the owner's option D): the company, a
+ * tag for its country and answer language, and a chevron; its menu names each profile in full, the one shown checked.
+ * With one profile, its name and no menu. `fellBack`: the profile remembered from before is no longer listed, so a
+ * note names the one shown instead (#201). */
 export default function ProfileSwitcher({ profiles, selected, onSwitch, fellBack = false }: Props) {
-  const id = useId()
-  const shown = profiles.find((p) => p.id === selected)
+  const shown = profiles.find((p) => p.id === selected) ?? profiles[0]
   const note = fellBack && shown
     ? <span className="prof-note" role="status">
         Your last profile is no longer available: showing {shown.company}.
       </span>
     : null
-  if (profiles.length === 1) {
-    return (
-      <div className="prof">
-        <span className="lbl">Profile</span>
-        <span>{profileLabel(profiles[0])}</span>
-        {note}
-      </div>
-    )
-  }
+  if (!shown) return null
   return (
     <div className="prof">
-      <label className="lbl" htmlFor={id}>Profile</label>
-      <select id={id} className="field" value={selected} onChange={(e) => onSwitch(e.target.value)}>
-        {profiles.map((p) => <option key={p.id} value={p.id}>{profileLabel(p)}</option>)}
-      </select>
+      {profiles.length === 1
+        ? <span className="prof-button" aria-label={`Profile: ${profileLabel(shown)}`}><Shown profile={shown} chevron={false} /></span>
+        : (
+          <Menu label={`Profile: ${profileLabel(shown)}`} buttonClassName="prof-button"
+            button={<Shown profile={shown} chevron />}>
+            {(close) => profiles.map((p) => (
+              <MenuItem key={p.id} checked={p.id === selected} onSelect={() => {
+                close()
+                if (p.id !== selected) onSwitch(p.id)
+              }}>{profileLabel(p)}</MenuItem>
+            ))}
+          </Menu>
+        )}
       {note}
     </div>
   )

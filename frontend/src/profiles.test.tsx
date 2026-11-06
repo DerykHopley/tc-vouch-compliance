@@ -131,22 +131,28 @@ describe('ProfileSwitcher', () => {
     expect(overviewCalls(fetch)).toEqual(['nordlicht'])
   })
 
-  it('with one profile, shows its name and no menu', () => {
+  it('with one profile, shows its name and tag and no menu', () => {
     render(<ProfileSwitcher profiles={[NORDLICHT]} selected="nordlicht" onSwitch={() => {}} />)
-    expect(screen.queryByRole('combobox')).toBeNull()
-    expect(screen.getByText('Nordlicht Komponenten GmbH · Germany · English')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByLabelText('Profile: Nordlicht Komponenten GmbH · Germany · English').textContent)
+      .toBe('Nordlicht Komponenten GmbH' + 'DE · EN')
   })
 
-  it('with two, offers each in a menu and switches to the one chosen', async () => {
-    const onSwitch = vi.fn()
-    render(<ProfileSwitcher profiles={[NORDLICHT, TESTWERK]} selected="nordlicht" onSwitch={onSwitch} />)
-    const menu = screen.getByRole('combobox', { name: 'Profile' })
-    expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'Nordlicht Komponenten GmbH · Germany · English', 'Testwerk Prüfstand GmbH · Austria · German'])
-    expect((menu as HTMLSelectElement).value).toBe('nordlicht')
-    await userEvent.selectOptions(menu, 'testwerk')
-    expect(onSwitch).toHaveBeenCalledWith('testwerk')
-  })
+  it('with two, is a dropdown button naming the company and its tag, and switches to the one chosen (issue 222)',
+    async () => {
+      const onSwitch = vi.fn()
+      render(<ProfileSwitcher profiles={[NORDLICHT, TESTWERK]} selected="nordlicht" onSwitch={onSwitch} />)
+      const button = screen.getByRole('button', { name: 'Profile: Nordlicht Komponenten GmbH · Germany · English' })
+      expect(button.getAttribute('aria-haspopup')).toBe('menu')
+      expect(button.textContent).toBe('Nordlicht Komponenten GmbH' + 'DE · EN' + '▾')
+      await userEvent.click(button)
+      const choices = screen.getAllByRole('menuitemradio')
+      expect(choices.map((o) => [o.textContent, o.getAttribute('aria-checked')])).toEqual([
+        ['Nordlicht Komponenten GmbH · Germany · English', 'true'],
+        ['Testwerk Prüfstand GmbH · Austria · German', 'false']])
+      await userEvent.click(choices[1])
+      expect(onSwitch).toHaveBeenCalledWith('testwerk')
+    })
 })
 
 /** An overview with nothing assessed, for `company`. */
@@ -179,21 +185,30 @@ const overviewCalls = (fetch: ReturnType<typeof serve>) =>
   fetch.mock.calls.filter(([url]) => url === '/api/overview')
     .map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))
 
+/** Switches profile in the top bar's dropdown (#222): opens it, and chooses the profile whose id is `id`. */
+async function switchTo(id: string) {
+  await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+  const label = { nordlicht: NORDLICHT, testwerk: TESTWERK }[id as 'nordlicht' | 'testwerk']
+  await userEvent.click(screen.getByRole('menuitemradio', { name: profileLabel(label) }))
+}
+
 describe('ProfiledApp', () => {
   it('switching loads the chosen profile\'s overview, and keeps the theme', async () => {
     const fetch = serve([NORDLICHT, TESTWERK])
     render(<ProfiledApp />)
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    const menu = await screen.findByRole('combobox', { name: 'Profile' })
-    await userEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
+    await screen.findByRole('button', { name: /^Profile: / })
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Dark theme' }))
 
-    await userEvent.selectOptions(menu, 'testwerk')
+    await switchTo('testwerk')
 
     await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
     expect(overviewCalls(fetch)).toEqual(['nordlicht', 'testwerk'])
-    expect((screen.getByRole('combobox', { name: 'Profile' }) as HTMLSelectElement).value).toBe('testwerk')
+    expect(screen.getByRole('button', { name: /^Profile: Testwerk/ })).toBeTruthy()
     expect(document.documentElement.dataset.theme).toBe('dark')
-    expect(screen.getByRole('button', { name: 'Light theme' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    expect(screen.getByRole('menuitem', { name: 'Light theme' })).toBeTruthy()
   })
 
   it('opens the profile chosen before a reload, and remembers each switch, issue 201', async () => {
@@ -204,7 +219,7 @@ describe('ProfiledApp', () => {
     expect(overviewCalls(fetch)).toEqual(['testwerk'])
     expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Profile' }), 'nordlicht')
+    await switchTo('nordlicht')
 
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
     expect(rememberedProfile()).toBe('nordlicht')
@@ -220,7 +235,7 @@ describe('ProfiledApp', () => {
     expect(notice.textContent).toBe('Your last profile is no longer available: showing Nordlicht Komponenten GmbH.')
     expect(rememberedProfile()).toBeNull() // said once: the next reload opens the default quietly
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Profile' }), 'testwerk')
+    await switchTo('testwerk')
     await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
     expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
   })
@@ -228,8 +243,8 @@ describe('ProfiledApp', () => {
   it('with one profile, shows its name in the top bar and no menu', async () => {
     serve([NORDLICHT])
     render(<ProfiledApp />)
-    await screen.findByText('Nordlicht Komponenten GmbH · Germany · English')
-    expect(within(screen.getByRole('banner')).queryByRole('combobox')).toBeNull()
+    await screen.findByLabelText('Profile: Nordlicht Komponenten GmbH · Germany · English')
+    expect(within(screen.getByRole('banner')).queryByRole('button', { name: /^Profile: / })).toBeNull()
   })
 
   it('with the default profile left out, chooses the first listed', async () => {
@@ -246,7 +261,7 @@ describe('ProfiledApp', () => {
     render(<ProfiledApp />)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy()
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    expect(screen.queryByRole('combobox', { name: 'Profile' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Profile: / })).toBeNull()
   })
 })
 
@@ -285,7 +300,7 @@ describe('switching profile on a working paper', () => {
     await userEvent.click(within(editor).getByRole('button', { name: 'Save' }))
     expect(within(await row()).getByText('Overridden from Partly evidenced')).toBeTruthy()
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Profile' }), 'testwerk')
+    await switchTo('testwerk')
 
     await screen.findByText(/Working paper · Testwerk/)
     expect(within(await row()).queryByText(/Overridden from/)).toBeNull()

@@ -130,7 +130,11 @@ export default function WorkingPaper(props: PaperProps) {
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
         language={overview.answer_language} />
       <section className="paper wrap" aria-label="Working paper">
-        <div><ToOverview onOverview={onOverview} /></div>
+        <nav className="crumbs" aria-label="Breadcrumb">
+          <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>
+          <span aria-hidden="true">›</span>
+          <span className="mono" aria-current="page">{card.id}</span>
+        </nav>
         <div className="paper-head">
           <span className="lbl">Working paper · {overview.company}</span>
           <h2><span className="mono">{card.id}</span> {card.question}</h2>

@@ -16,7 +16,7 @@ type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | nu
  * default answers. The browser remembers the last switch, so a reload or a pasted link opens that profile while it is
  * still listed; otherwise the default, and the top bar says so (#201).
  */
-export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
+export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () => void; userName?: string }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
   const [chosen, setChosen] = useState<string | null>(null)
   const [fellBack, setFellBack] = useState(false)
@@ -51,5 +51,5 @@ export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
   const switcher = listing.profiles && chosen
     ? <ProfileSwitcher profiles={listing.profiles.profiles} selected={chosen} onSwitch={switchTo} fellBack={fellBack} />
     : undefined
-  return <App key={chosen ?? ''} onSignOut={onSignOut} profileSwitcher={switcher} />
+  return <App key={chosen ?? ''} onSignOut={onSignOut} profileSwitcher={switcher} userName={userName} />
 }

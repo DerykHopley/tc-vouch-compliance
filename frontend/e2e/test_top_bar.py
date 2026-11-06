@@ -1,0 +1,118 @@
+"""The top bar (#222, the owner's option D): underlined page tabs, the profile dropdown, a user
+menu for the theme (and sign out, in clerk mode), a breadcrumb on the working paper, and one Menu
+button on a phone. Local mode, on the fake model: the user menu holds the theme only."""
+
+import re
+
+import pytest
+from playwright.sync_api import Page, expect
+from top_bar import back_to_overview, overview_tab, profile_button
+from touch_targets import small_targets
+
+ASSESSED = "4.1.2"
+
+
+def opened(page: Page, url: str, width: int = 1280) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    with page.expect_response("**/api/overview"):
+        page.goto(url)
+
+
+def scrolls_sideways(page: Page) -> bool:
+    return page.evaluate(
+        "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+    )
+
+
+def test_the_tabs_mark_the_current_page(page: Page, profiles_url):
+    opened(page, profiles_url)
+    tabs = page.get_by_role("navigation", name="Main").get_by_role("link")
+    expect(tabs).to_have_text(["Overview", "Developer"])
+    expect(overview_tab(page)).to_have_attribute("aria-current", "page")
+
+    page.get_by_role("link", name="Developer").click()
+    expect(page).to_have_url(re.compile(r"/developer$"))
+    expect(page.get_by_role("link", name="Developer")).to_have_attribute("aria-current", "page")
+    expect(overview_tab(page)).not_to_have_attribute("aria-current", "page")
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_user_menu_opens_by_click_or_keyboard_closes_with_esc_and_flips_the_theme(
+    page: Page, profiles_url, scheme
+):
+    page.emulate_media(color_scheme=scheme)
+    opened(page, profiles_url)
+    user = page.get_by_role("banner").get_by_role("button", name="Your menu")
+    expect(user).to_have_text("LU")  # local mode's one user, "Local user"
+
+    user.click()
+    menu = page.get_by_role("menu", name="Your menu")
+    expect(menu.get_by_role("menuitem")).to_have_text(
+        ["Light theme" if scheme == "dark" else "Dark theme"]
+    )
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+
+    user.focus()
+    page.keyboard.press("Enter")
+    item = page.get_by_role("menuitem")
+    expect(item).to_be_focused()
+    page.keyboard.press("Enter")  # the theme flips, and the menu closes back on its button
+    flipped = "light" if scheme == "dark" else "dark"
+    expect(page.locator("html")).to_have_attribute("data-theme", flipped)
+    expect(menu).to_have_count(0)
+    expect(user).to_be_focused()
+
+
+def test_the_profile_dropdown_is_a_bordered_button_naming_the_company_and_its_tag(
+    page: Page, profiles_url
+):
+    opened(page, profiles_url)
+    button = profile_button(page)
+    expect(button).to_have_attribute("aria-haspopup", "menu")
+    expect(button).to_contain_text("Nordlicht Komponenten GmbH")
+    expect(button.locator(".prof-tag")).to_have_text("DE · EN")
+
+
+def test_the_working_paper_breadcrumb_goes_back_to_the_overview(page: Page, paper_url):
+    response = page.request.post(f"{paper_url}/api/assessments", data={"control_id": ASSESSED})
+    assert response.ok, response.status
+    page.set_viewport_size({"width": 1280, "height": 900})
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
+        page.goto(f"{paper_url}/controls/{ASSESSED}")
+    crumbs = page.get_by_role("navigation", name="Breadcrumb")
+    expect(crumbs).to_have_text(re.compile(rf"Overview\s*›\s*{re.escape(ASSESSED)}"))
+    expect(crumbs.locator("[aria-current=page]")).to_have_text(ASSESSED)
+
+    back_to_overview(page)
+    expect(page).to_have_url(re.compile(r"/$"))
+    expect(page.get_by_role("heading", level=1)).to_be_visible()
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
+    page: Page, profiles_url, scheme
+):
+    page.emulate_media(color_scheme=scheme)
+    opened(page, profiles_url, 400)
+    bar = page.get_by_role("banner")
+    toggle = bar.get_by_role("button", name="Menu", exact=True)
+    expect(toggle).to_be_visible()
+    expect(overview_tab(page)).to_be_hidden()
+    expect(profile_button(page)).to_be_hidden()
+    assert not scrolls_sideways(page)
+
+    toggle.click()
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+    expect(overview_tab(page)).to_be_visible()
+    expect(profile_button(page)).to_be_visible()
+    expect(bar.get_by_role("button", name="Your menu")).to_be_visible()
+    assert not scrolls_sideways(page)
+    assert small_targets(page) == []
+
+    bar.get_by_role("button", name="Your menu").click()
+    expect(page.get_by_role("menuitem")).to_be_visible()
+    assert small_targets(page) == []
+
+    page.get_by_role("link", name="Developer").click()  # a tab closes the menu
+    expect(toggle).to_have_attribute("aria-expanded", "false")

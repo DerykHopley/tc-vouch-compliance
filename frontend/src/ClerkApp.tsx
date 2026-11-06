@@ -1,4 +1,4 @@
-import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk } from '@clerk/react'
+import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk, useUser } from '@clerk/react'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { type Access, checkAccess } from './access.ts'
 import type { Gate } from './authConfig.ts'
@@ -49,6 +49,9 @@ function SignedInOrOut({ gate }: { gate: Gate }) {
 function SignedInApp({ gate }: { gate: Gate }) {
   const { getToken } = useAuth()
   const { signOut } = useClerk()
+  const { user } = useUser()
+  // The user menu's name (#222): Clerk's full name, else the username, else the address they signed in with.
+  const name = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? undefined
   // A layout effect runs before the app's own effects make their first API calls.
   useLayoutEffect(() => {
     setTokenSource(() => getToken())
@@ -71,7 +74,7 @@ function SignedInApp({ gate }: { gate: Gate }) {
     setAttempt((n) => n + 1)
   }
   const leave = () => void signOut()
-  if (access === 'allowed') return <ProfiledApp onSignOut={leave} />
+  if (access === 'allowed') return <ProfiledApp onSignOut={leave} userName={name} />
   const [title, text] = BEFORE_THE_APP[access]
   return (
     <Page pill={(gate === 'discord-server' ? COURSE_MEMBERS : BY_INVITATION).pill} title={title} text={text}>

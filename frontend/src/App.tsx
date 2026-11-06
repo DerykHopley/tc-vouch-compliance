@@ -7,6 +7,7 @@ import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import TopBar from './TopBar.tsx'
+import UserMenu from './UserMenu.tsx'
 import { type Run, useAssessment } from './useAssessment.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
@@ -41,14 +42,24 @@ function viewAt(path: string): View {
   }
 }
 
-/** `onSignOut`: in clerk mode, a Sign out button in the top bar; local mode has nobody to sign out.
- * `profileSwitcher`: the top bar's profile switcher (ProfiledApp.tsx, #47). */
-export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => void; profileSwitcher?: ReactNode } = {}) {
+type AppProps = {
+  /** Clerk mode's sign out, in the user menu; local mode has nobody to sign out. */
+  onSignOut?: () => void
+  /** The top bar's profile switcher (ProfiledApp.tsx, #47). */
+  profileSwitcher?: ReactNode
+  /** The signed-in user's name, for the user menu (#222); none in local mode. */
+  userName?: string
+}
+
+/** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
+ * Menu button on a phone), then the page shown, and the chat. */
+export default function App({ onSignOut, profileSwitcher, userName }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
   const other: Theme = theme === 'light' ? 'dark' : 'light'
+  const [barOpen, setBarOpen] = useState(false) // the phone's top bar menu
   const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
   useEffect(() => {
     const onPopState = () => setView(viewAt(window.location.pathname)) // Back or Forward
@@ -145,19 +156,20 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
   return (
     <>
       <TopBar>
-        <nav className="nav" aria-label="Main">
-          <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
-            onClick={(e) => { e.preventDefault(); showView({ name: 'dossier' }) }}>Dossier</a>
-          {developer && (
-            <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); showView({ name: 'developer' }) }}>Developer</a>
-          )}
-        </nav>
-        {profileSwitcher}
-        <button className="btn btn-ghost theme" onClick={() => setTheme(other)}>
-          {other === 'dark' ? 'Dark theme' : 'Light theme'}
-        </button>
-        {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
+        <button className="btn btn-ghost bar-toggle" aria-expanded={barOpen} aria-controls="top-bar-menu"
+          onClick={() => setBarOpen((now) => !now)}>Menu</button>
+        <div id="top-bar-menu" className={barOpen ? 'bar-menu open' : 'bar-menu'}>
+          <nav className="tabs" aria-label="Main">
+            <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'dossier' }) }}>Overview</a>
+            {developer && (
+              <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
+                onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'developer' }) }}>Developer</a>
+            )}
+          </nav>
+          {profileSwitcher}
+          <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut} />
+        </div>
       </TopBar>
       {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
         : control && overview.state.status === 'ready' ? (

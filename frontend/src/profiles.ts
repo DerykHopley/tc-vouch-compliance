@@ -32,6 +32,34 @@ export function startingProfile(
 // The interface is English (docs/design.md, Language), so the answer language is named in English.
 const languages = new Intl.DisplayNames(['en'], { type: 'language' })
 
+/** The ISO 3166 code of a country named in English ("Germany": "DE"), found through Intl; null when none matches. */
+const regions = new Intl.DisplayNames(['en'], { type: 'region' })
+const codes = new Map<string, string | null>()
+function countryCode(country: string): string | null {
+  if (!codes.has(country)) {
+    let found: string | null = null
+    for (let a = 65; a <= 90 && !found; a++) {
+      for (let b = 65; b <= 90 && !found; b++) {
+        const code = String.fromCharCode(a, b)
+        try {
+          // A code current today only: an old one (DD, East Germany) is canonicalised to its successor (DE).
+          const current = Intl.getCanonicalLocales(`und-${code}`)[0].split('-')[1] === code
+          if (current && regions.of(code) === country) found = code
+        } catch {
+          // not a region code
+        }
+      }
+    }
+    codes.set(country, found)
+  }
+  return codes.get(country) ?? null
+}
+
+/** The profile button's tag (#222): its country's code and its answer language's, "DE · EN"; the country's name where
+ * it has no code. */
+export const profileTag = (p: ProfileSummary) =>
+  `${countryCode(p.country) ?? p.country} · ${p.answer_language.toUpperCase()}`
+
 /** How the top bar names a profile: company, country and answer language. */
 export const profileLabel = (p: ProfileSummary) =>
   `${p.company} · ${p.country} · ${languages.of(p.answer_language) ?? p.answer_language}`
