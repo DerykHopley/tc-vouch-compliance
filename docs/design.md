@@ -64,7 +64,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 
 | Width | What changes |
 |---|---|
-| under 700px | one column; the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide |
+| under 700px | one column; the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide; the page leaves room at its foot for the Ask Vouch button (88px of padding and scroll padding), so a field scrolled to, tapped or tabbed to stops above it (#198) |
 | 700–1000px | the working paper's control index stacks above the paper; Dossier's hero, band and ask panel go to one column |
 | over 1000px | working paper: index (about 250px) beside the paper; a pinned chat takes a column of about 400px beside the page |
 

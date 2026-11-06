@@ -26,3 +26,12 @@ def test_the_chat_and_its_action_pills_are_at_least_44px(page: Page, chat_url):
     # #45 failed verify twice on these pills: the chat's own server, as test_guided_chat uses.
     assess_in_the_chat(page, chat_url, 400)
     assert small_targets(page) == []
+
+
+def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Page, profiles_url):
+    # #198 moved the page's foot clear of the Ask Vouch button at phone width.
+    page.set_viewport_size({"width": 375, "height": 812})
+    page.goto(f"{profiles_url}/developer")
+    page.get_by_role("textbox", name="Assessments per day").scroll_into_view_if_needed()
+    page.wait_for_load_state("networkidle")
+    assert small_targets(page) == []
