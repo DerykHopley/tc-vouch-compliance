@@ -61,17 +61,18 @@ function unfold(line: string): string[] {
   return [line]
 }
 
+// A lead-in line ending in a colon, also inside bold or italics ("Steps:", "**Next steps:**").
+const LEAD_IN = /:\**\s*$/
+
 /**
- * A numbered line's item, and whether it starts a new list: only at 1 or as the next number of the list above it.
- * Null otherwise, so "15. März 2026 …" stays text (#218).
+ * A numbered line's item, and whether it starts a new list. A list starts at 1 on the line after a lead-in ending in
+ * a colon, and goes on with each next number. Null otherwise: "15. März 2026 …", "1. Januar …" or "5. The policy …"
+ * on a line of its own stays text, as written (#218).
  */
-function numberedItem(line: string, open: Block | null): { text: string; starts: boolean } | null {
-  const match = NUMBERED.exec(line)
-  if (!match) return null
-  const number = Number(match[1])
-  const next = open?.kind === 'ol' ? open.items.length + 1 : 1
-  if (number !== next && number !== 1) return null
-  return { text: match[2], starts: number === 1 }
+function numberedItem(text: string, number: number, open: Block | null, afterLeadIn: boolean) {
+  if (number === 1 && afterLeadIn) return { text, starts: true }
+  if (open?.kind === 'ol' && number === open.items.length + 1) return { text, starts: false }
+  return null
 }
 
 /** The text as paragraphs and lists. */
@@ -87,19 +88,22 @@ export function proseBlocks(text: string): Block[] {
     open = kind === 'p' ? { kind, lines: [content] } : { kind, items: [content] }
     blocks.push(open)
   }
+  let previous = '' // the last line shown, across blank lines
   for (const line of text.split('\n').flatMap(unfold)) {
     if (!line.trim()) {
       open = null // a blank line ends the paragraph or list
       continue
     }
     const bullet = BULLET.exec(line)
-    const numbered = bullet ? null : numberedItem(line, open)
-    const item = bullet ? bullet[1] : numbered?.text
+    const marked = bullet ? null : NUMBERED.exec(line)
     // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet.
-    if (item?.trim() === '') continue
-    if (numbered?.starts) open = null // "1." again starts a new list
-    if (item === undefined) add('p', runs(line))
-    else add(bullet ? 'ul' : 'ol', runs(item))
+    if ((bullet?.[1] ?? marked?.[2])?.trim() === '') continue
+    const numbered = marked && numberedItem(marked[2], Number(marked[1]), open, LEAD_IN.test(previous))
+    previous = line
+    if (numbered?.starts) open = null // a list after a lead-in is a new list
+    if (bullet) add('ul', runs(bullet[1]))
+    else if (numbered) add('ol', runs(numbered.text))
+    else add('p', runs(line))
   }
   return blocks
 }
