@@ -149,6 +149,13 @@ def _rate_requests(value: str | None) -> int:
     return int(value)
 
 
+def load_database_url(env: Mapping[str, str] | None = None) -> SecretStr | None:
+    """VOUCH_DATABASE_URL in `env` (the process environment by default), None when unset. Database
+    setup reads only this, so the API's sign-in checks never stop it (#190)."""
+    url = _read(os.environ if env is None else env, DATABASE_URL_ENV)
+    return SecretStr(url) if url else None
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """The settings in `env` (the process environment by default). Raises SettingsError."""
     env = os.environ if env is None else env
@@ -183,7 +190,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             discord_server_id=_discord_server_id(read(DISCORD_SERVER_ID_ENV)),
         )
     api_key = read(OPENROUTER_API_KEY_ENV)
-    database_url = read(DATABASE_URL_ENV)
     return Settings(
         auth_mode=cast(AuthMode, auth_mode),  # checked against AuthMode above
         clerk=clerk,
@@ -191,7 +197,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         model=read(MODEL_ENV),
         fake_script=read_path(FAKE_SCRIPT_ENV),
         frontend=read_path(FRONTEND_ENV),
-        database_url=SecretStr(database_url) if database_url else None,
+        database_url=load_database_url(env),
         profiles_dir=read_path(PROFILES_DIR_ENV) or FIXTURES_DIR,
         local_user_name=read(LOCAL_USER_NAME_ENV) or DEFAULT_USER_NAME,
         rate_requests=_rate_requests(read(RATE_REQUESTS_ENV)),

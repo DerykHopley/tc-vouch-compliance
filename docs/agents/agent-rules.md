@@ -6,6 +6,7 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 
 - **Keyboard, focus and `inert` get a browser test** (`frontend/e2e/`, pytest-playwright). jsdom doesn't model focus movement or `inert`, so a unit test there passes on code that fails in a browser. A unit test may still check the attribute or the handler; the browser test proves the behaviour. From #66, whose first fix passed its unit tests and failed verify round 1.
 - **A browser check that depends on an API answer waits for it** (`with page.expect_response(...)`) before asserting on the page. Asserting first races the answer and goes red only sometimes. From #122, where the compliance-lead test on the Developer page failed the merge gate of #121.
+- **A new page or control state gets a touch-target case** in `frontend/e2e/test_touch_targets.py` (`small_targets(page) == []` at 400px). design.md's 44px floor is measured, not read. From #45, whose chat links failed verify twice on that floor.
 
 ## Colour and contrast
 

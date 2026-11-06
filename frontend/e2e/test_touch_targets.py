@@ -1,0 +1,28 @@
+"""Every page's controls meet the touch-target floor at phone width (docs/design.md, Accessibility
+floor). The pages on the profiles server, which reaches the developer page; the chat on its own."""
+
+import pytest
+from playwright.sync_api import Page, expect
+from test_guided_chat import assess_in_the_chat
+from touch_targets import small_targets
+
+PAGES = ["/", "/controls/4.1.2", "/developer"]
+
+
+def at_phone_width(page: Page, url: str) -> None:
+    page.set_viewport_size({"width": 400, "height": 900})
+    page.goto(url)
+    expect(page.get_by_role("main")).to_be_visible()
+    page.wait_for_load_state("networkidle")
+
+
+@pytest.mark.parametrize("path", PAGES)
+def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url, path):
+    at_phone_width(page, f"{profiles_url}{path}")
+    assert small_targets(page) == []
+
+
+def test_the_chat_and_its_action_pills_are_at_least_44px(page: Page, chat_url):
+    # #45 failed verify twice on these pills: the chat's own server, as test_guided_chat uses.
+    assess_in_the_chat(page, chat_url, 400)
+    assert small_targets(page) == []

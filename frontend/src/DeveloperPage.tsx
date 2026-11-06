@@ -74,7 +74,7 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
         {fake.assessments > 0 && (
           <p className="mono">Fake model: {runWords(fake)} · {dollars(fake.estimated_cost_usd)} estimated, not spent</p>
         )}
-        <a href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>
+        <a className="link-target" href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>
       </section>
       {settings.broken_profiles.length > 0 && (
         <section className="sheet notice" aria-label="Profiles left out">

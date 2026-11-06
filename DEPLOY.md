@@ -105,17 +105,23 @@ gcloud run deploy vouch --image=$IMAGE:v1 --region=$REGION --project=$PROJECT_ID
   --add-cloudsql-instances=$SQL_INSTANCE --quiet
 ```
 
-`$URL` is the service's own address (step 6), or for a first deploy the one Cloud Run will give
-it, `https://vouch-<project number>.$REGION.run.app` (*checked*, Cloud Run's "Invoke with an HTTPS
-request" page: the deterministic URL, shown first by `status.url`). Sign-in accepts session tokens
-only from there. The wizard works it out, and stops after the deploy if Cloud Run gave the service
-another address: run it again and it uses that one. `--set-secrets` and `--set-env-vars` replace
+**One address to share (#178).** `$URL` is Cloud Run's fixed address,
+`https://vouch-<project number>.$REGION.run.app`, built from the project number and region, so it
+is known before the first deploy (*checked*, Cloud Run's "Invoke with an HTTPS request" page: the
+deterministic URL; live, *checked* 2026-11-05: `https://vouch-828715466396.europe-west1.run.app`
+answers `/api/health`). Cloud Run also
+serves the service at a hashed address, `https://vouch-<hash>-ew.a.run.app`, and that is what
+`status.url` gives on the live service (*checked* 2026-11-05: `gcloud run services describe` lists
+both in its `run.googleapis.com/urls` annotation). Sign-in accepts session tokens only from
+`CLERK_AUTHORIZED_PARTIES`, the fixed address alone (the owner, 2026-11-05): signing in at the
+hashed address is refused (401 on `/api/access`), so share only the fixed one. The wizard builds
+it, health-checks it and names it ("Vouch is at"). `--set-secrets` and `--set-env-vars` replace
 the service's existing ones (*checked*, the `gcloud run deploy` reference), so a deploy always
 carries all six. Each `<n>` is a version number, pinned ("Secrets and access", below).
 
 `--max=1` is the service-level limit: without it Cloud Run leaves the service at its automatic default (3 on the live service), so a traffic split across revisions could run more than one instance. `--max-instances=1` alone caps only each revision.
 
-The image sets `VOUCH_FRONTEND`, `PORT` and `VOUCH_AUTH_MODE=clerk` (*checked* in the `Dockerfile`). In clerk mode it refuses to start without the three Clerk keys and `CLERK_AUTHORIZED_PARTIES`, naming them (*checked*, `tests/test_settings.py` and CI), so a deploy from M3 on needs the keys from Secret Manager and `CLERK_AUTHORIZED_PARTIES` set to the service's URL as a plain environment variable (not a secret).
+The image sets `VOUCH_FRONTEND`, `PORT` and `VOUCH_AUTH_MODE=clerk` (*checked* in the `Dockerfile`). In clerk mode it refuses to start without the three Clerk keys and `CLERK_AUTHORIZED_PARTIES`, naming them (*checked*, `tests/test_settings.py` and CI), so a deploy from M3 on needs the keys from Secret Manager and `CLERK_AUTHORIZED_PARTIES` set to the service's fixed address as a plain environment variable (not a secret).
 
 **Who may sign in (#152).** With `DISCORD_SERVER_ID` set (the course's Discord server id, not a secret: Discord's Developer Mode, **Copy Server ID**), a signed-in user gets in as a member of that server, or as a developer, a user with an accepted Clerk invitation, or one whose private metadata says `{"access": "invited"}`; anyone else sees the members-only page. Vouch reads the user's servers with the Discord token Clerk keeps, so Clerk's Discord connection needs custom credentials and the `guilds` scope (#153). Unset, Clerk's own restrictions decide. The wizard passes it on when `wizard.env` has a `DISCORD_SERVER_ID=` line (*checked*, `tests/test_deploy_wizard.py`); by hand, add `,DISCORD_SERVER_ID=<id>` to `--set-env-vars`.
 
@@ -133,7 +139,7 @@ value comes from one keyring entry:
 
 Two settings aren't secret, so they go in as plain env vars: `CLERK_PUBLISHABLE_KEY` (from the
 keyring's `clerk-vouch-publishable`; the browser gets it anyway) and `CLERK_AUTHORIZED_PARTIES`
-(the service's URL).
+(the service's fixed address).
 
 **What the wizard does** (its steps 2 and 6 to 9 of 11; *checked* with fakes, `tests/test_deploy_wizard.py`):
 
@@ -210,7 +216,7 @@ keeps the count down.
 ## 6 and 7. The URL, and the health check
 
 ```bash
-URL=$(gcloud run services describe vouch --region=$REGION --project=$PROJECT_ID --format='value(status.url)')
+URL=https://vouch-$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)').$REGION.run.app
 curl -fsS $URL/api/health          # {"status":"ok","version":"...","database":"reachable"}
                                    # "needs-setup": run vouch-db-setup ("The database")
 ```
