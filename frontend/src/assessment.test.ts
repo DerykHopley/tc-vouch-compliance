@@ -87,6 +87,7 @@ describe('assess, signed in', () => {
   })
 })
 
+
 describe('usageWords', () => {
   const usage = { input_tokens: 10, output_tokens: 5, cost_usd: 1.5, estimated: false, cost_complete: true }
 
@@ -128,6 +129,18 @@ describe('assess, when a limit refuses it (429)', () => {
     expect(await events('not json')).toEqual([
       { event: 'error', data: { message: 'The assessment could not be started. Please try again later.' } },
     ])
+  })
+})
+
+describe('assess, while another of the lead\'s assessments runs (409)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('says that one is running, as the chat would', async () => {
+    const detail = 'An assessment is already running for you. Please wait until it has finished before starting another.'
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ detail }, { status: 409 })))
+    const seen = []
+    for await (const item of assess('4.1.2')) seen.push(item)
+    expect(seen).toEqual([{ event: 'error', data: { message: detail } }])
   })
 })
 

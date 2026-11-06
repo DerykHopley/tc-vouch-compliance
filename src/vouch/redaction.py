@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vouch.database import _secrets_in
+from vouch.graph import GUARD
 from vouch.settings import Settings
 
 REMOVED = "[removed]"
@@ -201,3 +202,17 @@ def install_log_redaction() -> None:
     for handler in handlers:
         if not isinstance(handler.formatter, RedactingFormatter):
             handler.setFormatter(RedactingFormatter(handler.formatter))
+
+
+REMOVED_FROM = {"result": "assessment"}
+"""What a guard step calls the event something was removed from, when not the event's name."""
+
+
+def redacted_event(event: str, data: Any) -> list[tuple[str, Any]]:
+    """An event as it may leave Vouch: its data with secrets and personal data removed
+    (security layer 4), after a guard step saying what was removed, if anything was."""
+    clean, removed = redact_data(data)
+    if not removed:
+        return [(event, clean)]
+    said = removal_step(removed, REMOVED_FROM.get(event, event))
+    return [("step", {"node": GUARD, "text": said}), (event, clean)]

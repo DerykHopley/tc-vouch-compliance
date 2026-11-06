@@ -35,10 +35,13 @@ from vouch.graph import Judgement
 from vouch.model_choice import DEFAULT_MODEL, CallBudgetSpent
 from vouch.settings import DEMO_SCRIPT, Settings
 from vouch.spending import (
+    CHAT,
     DAILY_LIMIT,
     PRICES,
+    DailyLimitReached,
     DatabaseSpendingStore,
     MemorySpendingStore,
+    NoSharedCounter,
     SpendingGuard,
     Usage,
     UsageMeter,
@@ -629,3 +632,61 @@ def test_without_the_setup_a_setting_write_names_the_setup(empty_database, caplo
         empty_database.set_setting("daily_limit", "5")
 
     assert "vouch-db-setup" in caplog.text
+
+
+# The chat (#44): checked against the day's limit without being counted, its usage totalled
+
+
+def chat_and_assessment_usage(store) -> UsageTotals:
+    chat_usage = Usage("fake", 5, 4, 0.0, 0.0001, estimated=True, cost_complete=True)
+    assessed = Usage("fake", 7, 3, 0.0, 0.0001, estimated=True, cost_complete=True)
+    guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
+    guard.record("alice", CHAT, chat_usage)
+    guard.record("alice", CONTROL, assessed)
+    return store.totals()
+
+
+def test_chat_usage_counts_in_the_tokens_and_cost_but_not_as_an_assessment():
+    fake = chat_and_assessment_usage(MemorySpendingStore()).fake
+
+    assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 12, 7)
+    assert fake.estimated_cost_usd == pytest.approx(0.0002)
+
+
+def test_the_chat_is_checked_against_the_days_limit_without_taking_from_it():
+    guard = SpendingGuard(MemorySpendingStore(), clock=FixedClock(NOV_4_AFTERNOON))
+    guard.set_daily_limit(1)
+
+    guard.check("alice", paid=False)
+    guard.check("alice", paid=False)
+    guard.start("alice", paid=False)  # the one assessment is still there to take
+
+    with pytest.raises(DailyLimitReached) as refused:
+        guard.check("alice", paid=False)
+    assert refused.value.limit == 1
+    guard.check("bob", paid=False)  # another user's day is their own
+
+
+def test_a_paid_chat_needs_a_shared_counter_as_a_paid_assessment_does():
+    guard = SpendingGuard(MemorySpendingStore(), clock=FixedClock(NOV_4_AFTERNOON))
+
+    with pytest.raises(NoSharedCounter):
+        guard.check("alice", paid=True)
+
+
+@needs_postgres
+def test_in_the_database_the_chat_check_takes_nothing_and_chat_usage_isnt_an_assessment(
+    empty_database,  # noqa: F811
+):
+    empty_database.setup()
+    store = DatabaseSpendingStore(empty_database)
+    guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
+    guard.set_daily_limit(1)
+
+    guard.check("alice", paid=True)
+    guard.start("alice", paid=True)
+    with pytest.raises(DailyLimitReached):
+        guard.check("alice", paid=True)
+
+    fake = chat_and_assessment_usage(store).fake
+    assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 12, 7)

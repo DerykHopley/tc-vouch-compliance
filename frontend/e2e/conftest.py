@@ -12,6 +12,32 @@ def vouch_url() -> str:
 
 
 @pytest.fixture
+def dossier_url() -> str:
+    """A second Vouch like vouch_url, for the Dossier's checks: its own assessments and its own
+    request-rate budget (local mode has one user, and every check spends from it)."""
+    return os.environ["DOSSIER_URL"]
+
+
+@pytest.fixture
+def profiles_url() -> str:
+    """A third Vouch like vouch_url on a profiles folder of its own (#47): nordlicht, testwerk
+    and a broken profile; its own request-rate budget too."""
+    return os.environ["PROFILES_URL"]
+
+
+@pytest.fixture
+def paper_url() -> str:
+    """A fourth Vouch like vouch_url, for the working paper's checks (#41), for the same reason."""
+    return os.environ["PAPER_URL"]
+
+
+@pytest.fixture
+def chat_url() -> str:
+    """A fifth Vouch like vouch_url, for the chat's checks (#44): its own request-rate budget."""
+    return os.environ["CHAT_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

@@ -1,4 +1,6 @@
 import json
+import shutil
+from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
 
@@ -7,7 +9,9 @@ from assess_steps import in_order
 from fastapi.testclient import TestClient
 
 from vouch import ScriptedChatModel, profile
-from vouch.api import create_app, load_default_profile
+from vouch.api import PROFILE_HEADER, create_app
+from vouch.paths import FIXTURES_DIR
+from vouch.profile import read_profile_once
 from vouch.settings import Settings
 
 DEMO_CONTROL = "4.1.2"
@@ -16,9 +20,9 @@ DEMO_CONTROL = "4.1.2"
 @pytest.fixture
 def client():
     """The app in local mode on the bundled demo script, the profile read afresh."""
-    load_default_profile.cache_clear()
+    read_profile_once.cache_clear()
     yield TestClient(create_app(Settings()), raise_server_exceptions=False)
-    load_default_profile.cache_clear()
+    read_profile_once.cache_clear()
 
 
 def client_playing(script) -> TestClient:
@@ -26,12 +30,16 @@ def client_playing(script) -> TestClient:
     return TestClient(create_app(Settings(fake_script=Path(script))), raise_server_exceptions=False)
 
 
-def test_a_broken_profile_is_a_500_before_any_stream(client, monkeypatch, tmp_path):
-    (tmp_path / profile.DEFAULT_PROFILE).mkdir()
-    (tmp_path / profile.DEFAULT_PROFILE / profile.PROFILE_FILE).write_text("id: [unclosed\n")
-    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+def test_a_broken_profile_is_a_500_before_any_stream(tmp_path):
+    shutil.copytree(FIXTURES_DIR / profile.DEFAULT_PROFILE, tmp_path / profile.DEFAULT_PROFILE)
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / profile.PROFILE_FILE).write_text("id: [unclosed\n")
+    read_profile_once.cache_clear()
+    client = TestClient(create_app(Settings(profiles_dir=tmp_path)), raise_server_exceptions=False)
 
-    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
+    response = client.post(
+        "/api/assessments", json={"control_id": DEMO_CONTROL}, headers={PROFILE_HEADER: "broken"}
+    )
 
     assert response.status_code == 500
     assert not response.headers["content-type"].startswith("text/event-stream")
@@ -43,8 +51,9 @@ def test_the_profile_is_read_once_across_requests(client, monkeypatch):
     reads = []
     real = profile.load_named_profile
     monkeypatch.setattr(
-        "vouch.api.load_named_profile", lambda name: reads.append(name) or real(name)
+        profile, "load_named_profile", lambda name, folder: reads.append(name) or real(name, folder)
     )
+    read_profile_once.cache_clear()
 
     for _ in range(2):
         client.post("/api/assessments", json={"control_id": DEMO_CONTROL})
@@ -220,6 +229,62 @@ def test_assessing_again_after_reject_carries_the_note_to_the_model(client, monk
     assert events[-1][0] == "result"
     assert events[-1][1]["assessment"]["thread_id"] != thread_id
     assert note in prompts[0][-1].content
+
+
+def recorded_prompts(monkeypatch) -> list:
+    """Every list of messages the fake model is sent from now on."""
+    prompts: list = []
+    real = ScriptedChatModel._generate
+
+    def recording(self, messages, *args, **kwargs):
+        prompts.append(messages)
+        return real(self, messages, *args, **kwargs)
+
+    monkeypatch.setattr(ScriptedChatModel, "_generate", recording)
+    return prompts
+
+
+def test_assessing_a_rejected_control_again_without_a_note_carries_the_rejection_note(
+    client, monkeypatch
+):
+    # Every way to start the run (the Dossier, the paper, the chat) behaves the same: the note
+    # comes from the control's newest assessment, not from the caller (#42).
+    prompts = recorded_prompts(monkeypatch)
+    note = "The MFA rollout record is in records/, dated 2025."
+    thread_id = proposed_thread(client)
+    client.post(f"/api/assessments/{thread_id}/review", json={"decision": "reject", "note": note})
+    prompts.clear()
+
+    events = read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
+
+    assert events[-1][0] == "result"
+    assert note in prompts[0][-1].content
+
+
+def test_a_new_run_carries_no_note_when_the_newest_assessment_was_not_rejected(client, monkeypatch):
+    prompts = recorded_prompts(monkeypatch)
+    rejected = proposed_thread(client)
+    old = "An old rejection, since accepted."
+    client.post(f"/api/assessments/{rejected}/review", json={"decision": "reject", "note": old})
+    accepted = proposed_thread(client)
+    client.post(f"/api/assessments/{accepted}/review", json={"decision": "accept", "note": "Ok."})
+    prompts.clear()
+
+    read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
+
+    assert all(old not in str(m.content) for messages in prompts for m in messages)
+
+
+def test_a_stored_review_keeps_who_reviewed_it_and_when(client):
+    thread_id = proposed_thread(client)
+    reviewed = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "reject"})
+
+    stored = client.get(f"/api/assessments/{thread_id}").json()["assessment"]["review"]
+
+    assert stored["reviewer_id"] == "local-user"
+    assert stored["reviewer_name"] == "Local user"
+    assert datetime.fromisoformat(stored["reviewed_at"]).tzinfo is not None
+    assert reviewed.json()["assessment"]["review"] == stored
 
 
 @pytest.mark.parametrize(

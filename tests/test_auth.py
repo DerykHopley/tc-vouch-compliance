@@ -70,10 +70,12 @@ def bearer(value: str) -> dict[str, str]:
 
 
 class FakeClerk:
-    """Clerk's Backend API, GET /v1/users/{id} only: each user's private metadata."""
+    """Clerk's Backend API, GET /v1/users/{id} only: each user's private metadata, and their
+    name and e-mail addresses where `profiles` gives them (the User object's own fields)."""
 
     def __init__(self, metadata: dict[str, dict[str, Any]] | None = None):
         self.metadata = metadata if metadata is not None else {}
+        self.profiles: dict[str, dict[str, Any]] = {}
         self.calls: list[httpx.Request] = []
         self.fail: Callable[[httpx.Request], httpx.Response] | None = None
 
@@ -87,6 +89,12 @@ class FakeClerk:
         if request.method != "GET" or user_id not in self.metadata:
             return httpx.Response(404, json={"errors": [{"code": "resource_not_found"}]})
         # The fields the app reads, and one it must not: public metadata is the browser's.
+        no_name = {
+            "first_name": None,
+            "last_name": None,
+            "primary_email_address_id": None,
+            "email_addresses": [],
+        }
         return httpx.Response(
             200,
             json={
@@ -94,7 +102,9 @@ class FakeClerk:
                 "object": "user",
                 "public_metadata": {"role": "developer"},
                 "private_metadata": self.metadata[user_id],
-            },
+            }
+            | no_name
+            | self.profiles.get(user_id, {}),
         )
 
 
@@ -284,7 +294,7 @@ def test_the_role_is_asked_once_per_user_then_cached_until_it_expires(clerk):
     assert [call.url.path for call in clerk.calls] == ["/v1/users/user_dev", "/v1/users/user_alice"]
 
     clerk.metadata["user_dev"] = {}  # the owner takes the role away
-    now[0] += ClerkAuth.ROLE_TTL + 1
+    now[0] += ClerkAuth.USER_TTL + 1
     response = client.get("/role", headers=bearer(token("user_dev")))
 
     assert response.json()["role"] == "compliance-lead"
@@ -588,6 +598,8 @@ def test_someone_outside_the_course_server_gets_403_not_a_member_on_every_route(
         client.post(
             "/api/assessments", json={"control_id": "4.1.2"}, headers=bearer(token("user_bob"))
         ),
+        # The chat (#45), its greeting included, is behind the same gate.
+        client.post("/api/chat", json={"page": "dossier"}, headers=bearer(token("user_bob"))),
     ):
         assert response.status_code == 403
         assert response.json()["reason"] == "not-a-member"
@@ -752,3 +764,15 @@ def test_local_mode_has_no_gate():
 
     assert client.get("/api/access").json() == {"access": "allowed"}
     assert client.get("/api/health").json()["auth"]["gate"] == "none"
+
+
+def test_the_access_check_also_answers_the_role_so_clerk_is_asked_once(access):
+    """#152's access check and #154's lookup read the same Clerk user: one call serves both."""
+    client = gated_app(access, clock=lambda: 1000.0)
+
+    assert ask(client, "user_dev").status_code == 200
+    settings = client.get("/api/developer/settings", headers=bearer(token("user_dev")))
+
+    assert settings.status_code == 200  # the role came from the access check's read
+    user_reads = [c for c in access.calls if c.url.path == "/v1/users/user_dev"]
+    assert len(user_reads) == 1

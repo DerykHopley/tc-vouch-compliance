@@ -31,11 +31,18 @@ vi.mock('@clerk/react', () => ({
   useClerk: () => ({ signOut: clerk.signOut }),
 }))
 
-/** GET /api/access answers `status` with `body`; any other call never answers (only the access check matters here). */
+const ONE_PROFILE = {
+  profiles: [{ id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' }],
+  default: 'nordlicht',
+}
+
+/** GET /api/access answers `status` with `body`, and GET /api/profiles one profile (#47: the app
+ *  opens once they're read); any other call never answers (only the access check matters here). */
 function access(status: number, body: unknown = {}) {
   const asked: string[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     asked.push(url)
+    if (url === '/api/profiles') return Promise.resolve(Response.json(ONE_PROFILE))
     if (url !== '/api/access') return new Promise(() => {})
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer session-token')
     return Promise.resolve(new Response(JSON.stringify(body), { status }))
@@ -64,7 +71,7 @@ describe('signed out', () => {
     expect(screen.getByText(/available to invited users only/i)).toBeTruthy()
     expect(screen.getByText(/sign in with the Discord account that uses the e-mail address it was sent to/i)).toBeTruthy()
     expect(screen.getByRole('form', { name: 'Clerk sign-in' })).toBeTruthy()
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
   })
 
   it("draws Clerk's form in Vouch's colour tokens, so it follows light and dark", () => {
@@ -99,7 +106,7 @@ describe('signed out', () => {
     clerk.failed = true
     rerender(<ClerkApp publishableKey="pk_test_x" />)
     expect(screen.getByRole('alert').textContent).toMatch(/sign-in could not be loaded/i)
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
   })
 })
 
@@ -111,15 +118,14 @@ describe('signed in', () => {
 
   it('shows the app, and every API call carries a fresh session token', async () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
-    expect(await screen.findByRole('region', { name: 'Readiness' })).toBeTruthy()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy() // once the profiles are read
     expect(screen.queryByText('Access is by invitation')).toBeNull()
-    expect(await authHeaders()).toEqual({ Authorization: 'Bearer session-token' })
+    expect((await authHeaders()).Authorization).toBe('Bearer session-token') // beside the profile (#47)
   })
 
   it('signs out from the top bar', async () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
-    await screen.findByRole('region', { name: 'Readiness' })
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
     expect(clerk.signOut).toHaveBeenCalledOnce()
   })
 
@@ -187,10 +193,10 @@ describe('signed in, before the app: may this user use Vouch? (ticket 152)', () 
     access(503, { detail: 'Vouch cannot check your sign-in just now.' })
     render(<ClerkApp publishableKey="pk_test_x" />)
     expect((await screen.findByRole('alert')).textContent).toMatch(/cannot check your sign-in just now/i)
-    expect(screen.queryByRole('region', { name: 'Readiness' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
     access(200, { access: 'allowed' })
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByRole('region', { name: 'Readiness' })).toBeTruthy()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy() // the app, once the profiles are read
   })
 
   it('an answer it does not know, or none at all, counts as the check failing', async () => {
