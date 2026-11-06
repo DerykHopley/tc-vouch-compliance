@@ -4,8 +4,9 @@ Dossier already reads.
 
 - the head: the profile's company, country, base framework, protection level, country overlays
   and answer language, and the date it was drawn up;
-- readiness, as the Dossier overview counts it (vouch.dossier.overview), so the two never
-  disagree: accepted verdicts only (GLOSSARY: Readiness);
+- readiness, as the Dossier overview counts it (vouch.dossier.readiness), so the two never
+  disagree: accepted verdicts only (GLOSSARY: Readiness); but its `remediation_items` counts the
+  approved items the report lists, where the overview's counts every item not discarded;
 - each control in the base framework's order: an accepted one with its reviewed verdict, its
   reviewer, the review's time and its quotes; any other is open;
 - the approved remediation items of each accepted control's newest assessment, under it;
@@ -15,17 +16,18 @@ Dossier already reads.
 
 The report's own words (headings, column names, verdict and action words, the sentences for an
 open control or an empty list, the disclaimer) come from one table per language, WORDS, sent with
-the data so the page and the Markdown export say the same thing. A language without a table gets
+the data (`words_for`) so the page and the Markdown export say the same thing. A language without a table gets
 English. None of them claims an audit result (vouch.language.audit_claim); text carried from
 elsewhere (quotes, the lead's notes, the model's remediation text) stays as written.
 """
 
 from collections.abc import Iterable, Mapping
-from datetime import date
-from typing import Any, Literal, TypedDict
+from datetime import UTC, date, datetime
+from typing import Any, Literal, TypedDict, TypeGuard
 
 from vouch import audit
-from vouch.dossier import Readiness, control_requirements, overview
+from vouch.citations import EvidenceKind
+from vouch.dossier import Readiness, control_requirements, readiness
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
 from vouch.profile import ComplianceProfile, ProtectionLevel
@@ -99,6 +101,11 @@ WORDS: dict[str, dict[str, Any]] = {
             "no_not_applicable": "The profile marks no requirement as not applicable.",
             "no_trail": "The audit trail is empty: no review has been recorded yet.",
             "older_entries": "Older entries are in the audit trail.",
+            "disclaimer": "Drafted by an AI assistant, reviewed by {names}; not an audit result.",
+            "disclaimer_nothing_reviewed": (
+                "Drafted by an AI assistant; nothing has been reviewed yet; not an audit result."
+            ),
+            "and": "and",  # joins the last two names
         },
     },
     "de": {
@@ -165,20 +172,14 @@ WORDS: dict[str, dict[str, Any]] = {
             "no_not_applicable": "Das Profil markiert keine Anforderung als nicht anwendbar.",
             "no_trail": "Der Prüfpfad ist leer: noch wurde keine Prüfung erfasst.",
             "older_entries": "Ältere Einträge stehen im Prüfpfad.",
+            "disclaimer": (
+                "Erstellt von einem KI-Assistenten, geprüft von {names}; kein Auditergebnis."
+            ),
+            "disclaimer_nothing_reviewed": (
+                "Erstellt von einem KI-Assistenten; noch nichts geprüft; kein Auditergebnis."
+            ),
+            "and": "und",
         },
-    },
-}
-
-_DISCLAIMERS = {
-    "en": {
-        "reviewed": "Drafted by an AI assistant, reviewed by {names}; not an audit result.",
-        "nothing": "Drafted by an AI assistant; nothing has been reviewed yet; not an audit result.",
-        "and": "and",
-    },
-    "de": {
-        "reviewed": "Erstellt von einem KI-Assistenten, geprüft von {names}; kein Auditergebnis.",
-        "nothing": "Erstellt von einem KI-Assistenten; noch nichts geprüft; kein Auditergebnis.",
-        "and": "und",
     },
 }
 
@@ -198,6 +199,8 @@ class ReportQuote(TypedDict):
     version: str
     section: str
     quote: str
+    kind: EvidenceKind
+    stale: bool  # stale on the day it was checked: the page marks it for the reader
 
 
 class ReportControl(TypedDict):
@@ -243,7 +246,11 @@ class Report(TypedDict):
     not_applicable: list[NotApplicableEntry]
     trail: Trail
     disclaimer: str
-    words: dict[str, Any]
+
+
+def today() -> date:
+    """The day a report is drawn up: the server's date in UTC, as the trail's times are."""
+    return datetime.now(UTC).date()
 
 
 def words_for(language: str) -> dict[str, Any]:
@@ -254,13 +261,13 @@ def words_for(language: str) -> dict[str, Any]:
 def disclaimer(names: Iterable[str], language: str) -> str:
     """The AI disclaimer, naming the reviewers in the order given (each once), joined in the
     language ("A, B and C", "A, B und C"); the nothing-reviewed wording when there are none."""
-    said = _DISCLAIMERS.get(language, _DISCLAIMERS[DEFAULT_LANGUAGE])
+    sentences = words_for(language)["sentences"]
     unique = list(dict.fromkeys(names))
     if not unique:
-        return said["nothing"]
+        return sentences["disclaimer_nothing_reviewed"]
     *first, last = unique
-    joined = f"{', '.join(first)} {said['and']} {last}" if first else last
-    return said["reviewed"].format(names=joined)
+    joined = f"{', '.join(first)} {sentences['and']} {last}" if first else last
+    return sentences["disclaimer"].format(names=joined)
 
 
 def readiness_report(
@@ -274,11 +281,13 @@ def readiness_report(
 ) -> Report:
     """The report for the profile's `controls` (its ISA edition's, in order), from each
     control's newest assessment (`latest`, vouch.memory.newest_by_control), the lead's decided
-    remediation items of the accepted ones (`decided`), and a page of the trail."""
+    remediation items of the accepted ones (`decided`), and a page of the trail. Its words,
+    the same for every report in the language, are `words_for(profile.answer_language)`."""
     controls = list(controls)
-    discarded = {key for key, item in decided.items() if item.status == "discarded"}
-    shown = [_control(c, latest.get(c.id)) for c in controls]
-    reviewers = [c["reviewer"] for c in shown if c["reviewer"] is not None]
+    shown = [_control(control, latest.get(control.id)) for control in controls]
+    reviewers = [row["reviewer"] for row in shown if row["reviewer"] is not None]
+    remediation = _remediation(controls, latest, decided)
+    approved = sum(len(group["items"]) for group in remediation)
     return {
         "head": {
             "company": profile.company,
@@ -289,22 +298,22 @@ def readiness_report(
             "answer_language": profile.answer_language,
             "date": today.isoformat(),
         },
-        "readiness": overview(profile, controls, latest, discarded)["readiness"],
+        # The accepted counts as the overview's; the items as the report lists them.
+        "readiness": readiness(controls, latest) | {"remediation_items": approved},
         "controls": shown,
-        "remediation": _remediation(controls, latest, decided),
+        "remediation": remediation,
         "not_applicable": _not_applicable(profile, controls),
         "trail": {"entries": [e.to_dict() for e in trail.entries], "next": trail.next},
         "disclaimer": disclaimer(reviewers, profile.answer_language),
-        "words": words_for(profile.answer_language),
     }
 
 
-def _accepted(assessment: Assessment | None) -> bool:
+def _accepted(assessment: Assessment | None) -> TypeGuard[Assessment]:
     return assessment is not None and assessment.status == "accepted"
 
 
 def _control(control: IsaControl, assessment: Assessment | None) -> ReportControl:
-    if assessment is None or not _accepted(assessment):
+    if not _accepted(assessment):
         return {
             "id": control.id,
             "question": control.question,
@@ -331,10 +340,17 @@ def _quotes(assessment: Assessment) -> list[ReportQuote]:
     """Each quote the assessment cites, once, in its requirements' order."""
     quotes: dict[tuple[str, str, str], ReportQuote] = {}
     for requirement in assessment.requirements:
-        for c in requirement.citations:
+        for citation in requirement.citations:
             quotes.setdefault(
-                (c.doc_id, c.version, c.quote),
-                {"doc_id": c.doc_id, "version": c.version, "section": c.section, "quote": c.quote},
+                (citation.doc_id, citation.version, citation.quote),
+                {
+                    "doc_id": citation.doc_id,
+                    "version": citation.version,
+                    "section": citation.section,
+                    "quote": citation.quote,
+                    "kind": citation.kind,
+                    "stale": citation.stale,
+                },
             )
     return list(quotes.values())
 
@@ -349,7 +365,7 @@ def _remediation(
     grouped: list[ControlItems] = []
     for control in controls:
         assessment = latest.get(control.id)
-        if assessment is None or not _accepted(assessment):
+        if not _accepted(assessment):
             continue
         items: list[ReportItem] = []
         for draft in assessment.remediation:

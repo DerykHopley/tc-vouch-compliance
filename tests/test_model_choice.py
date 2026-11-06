@@ -630,10 +630,6 @@ def test_the_role_lookups_503_does_not_say_the_database_is_unavailable(clerk):
 # --- The fake's demo script follows the profile's answer language (#234) ---------------------
 
 
-def played(model: Any) -> Any:
-    return model.script
-
-
 def test_on_the_fake_a_german_profile_plays_the_german_demo_and_any_other_the_english_one():
     choice = ModelChoice(Settings(), MemoryModelStore())
 
@@ -643,9 +639,9 @@ def test_on_the_fake_a_german_profile_plays_the_german_demo_and_any_other_the_en
     unnamed = choice.for_assessment(None)
 
     demo = ScriptedChatModel.from_file(DEMO_SCRIPT).script
-    assert played(german) == ScriptedChatModel.from_file(DEMO_SCRIPT_DE).script
-    assert played(german) != demo
-    assert played(english) == played(lithuanian) == played(unnamed) == demo
+    assert german.script == ScriptedChatModel.from_file(DEMO_SCRIPT_DE).script
+    assert german.script != demo
+    assert english.script == lithuanian.script == unnamed.script == demo
 
 
 def test_a_fake_script_runs_every_assessment_whatever_the_language(tmp_path):
@@ -654,5 +650,5 @@ def test_a_fake_script_runs_every_assessment_whatever_the_language(tmp_path):
     choice = ModelChoice(Settings(fake_script=script), MemoryModelStore())
 
     own = ScriptedChatModel.from_file(script).script
-    assert played(choice.for_assessment(None, answer_language="de")) == own
-    assert played(choice.for_assessment(None, answer_language="en")) == own
+    assert choice.for_assessment(None, answer_language="de").script == own
+    assert choice.for_assessment(None, answer_language="en").script == own

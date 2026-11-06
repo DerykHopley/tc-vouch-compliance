@@ -118,7 +118,14 @@ def test_readiness_counts_accepted_verdicts_only_and_equals_the_overviews(databa
     assert shown["readiness"]["accepted"] == 1
     assert shown["readiness"]["open"] == 11
     assert shown["readiness"]["controls"] == 12
-    assert shown["readiness"] == overview["readiness"]
+    counts = ("controls", "accepted", "by_verdict", "open")
+    assert {k: shown["readiness"][k] for k in counts} == {
+        k: overview["readiness"][k] for k in counts
+    }
+    # The overview counts 4.1.2's undecided M1 draft; the report counts what it lists: none.
+    assert overview["readiness"]["remediation_items"] == 1
+    assert shown["readiness"]["remediation_items"] == 0
+    assert shown["remediation"] == []
 
 
 # --- The controls: reviewed verdict, reviewer, date and quotes; open ones carry none (1, 2) ----
@@ -146,6 +153,8 @@ def test_an_accepted_control_carries_its_reviewed_verdict_reviewer_date_and_quot
     assert ("authentication-standard", "3.1", "Passwords have at least 12 characters.") in quotes
     assert len(quotes) == len(set(quotes))  # each once
     assert all(q["section"] for q in accepted["quotes"])
+    # Each quote carries its evidence kind and whether it is stale, as the overview's do.
+    assert {(q["kind"], q["stale"]) for q in accepted["quotes"]} == {("documented", False)}
     for open_id in ("1.1.1", "1.6.1", "1.6.2"):  # proposed, rejected, not assessed
         assert control(shown, open_id) | {"question": None} == {
             "id": open_id,
@@ -217,6 +226,7 @@ def test_an_approved_item_is_listed_under_its_control_and_a_discarded_one_and_a_
             ],
         }
     ]
+    assert shown["readiness"]["remediation_items"] == 1  # the one item it lists
 
 
 # --- Not applicable: each with the profile's reason (story 5) ---------------------------------
@@ -434,15 +444,17 @@ def test_a_profile_answering_in_lithuanian_gets_the_english_words():
     )
 
     assert report.words_for("lt") == report.words_for("en")
-    assert shown["words"] == report.words_for("en")
     assert shown["disclaimer"].startswith("Drafted by an AI assistant")
 
 
 # --- The head ----------------------------------------------------------------------------------
 
 
-def test_the_head_names_the_company_framework_level_overlays_language_and_todays_date(users):
+def test_the_head_names_the_company_framework_level_overlays_language_and_todays_date(
+    users, monkeypatch
+):
     alice, _ = users
+    monkeypatch.setattr(report, "today", lambda: date(2026, 11, 6))  # the server's UTC date
     with TestClient(app_on(None)) as client:
         english = report_of(client, alice)["head"]
         german = report_of(client, under(alice, "alpenwerk"))["head"]
@@ -454,7 +466,7 @@ def test_the_head_names_the_company_framework_level_overlays_language_and_todays
         "protection_level": "normal",
         "overlays": [],
         "answer_language": "en",
-        "date": date.today().isoformat(),
+        "date": "2026-11-06",
     }
     assert german["overlays"] == ["AT NIS2 (illustrative)"]
     assert german["protection_level"] == "high"

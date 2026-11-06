@@ -1,8 +1,9 @@
 """Which model an assessment runs on, and the developer's choice of it (#34).
 
 The order, for the API and the CLI alike: ASSESS_FAKE_SCRIPT's scripted fake when set (tests,
-development); else OpenRouter when OPENROUTER_API_KEY is set; else the bundled demo script, so a
-missing key costs nothing. On Cloud Run every assessment route needs a signed-in user (clerk
+development); else OpenRouter when OPENROUTER_API_KEY is set; else the bundled demo script in the
+profile's answer language (vouch.settings.DEMO_SCRIPTS: German for a German profile, demo.json
+for every other), so a missing key costs nothing. On Cloud Run every assessment route needs a signed-in user (clerk
 mode, vouch.api), so only signed-in users reach the paid model; locally a key in the environment
 is the opt-in.
 

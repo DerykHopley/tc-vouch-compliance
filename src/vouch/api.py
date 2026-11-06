@@ -12,7 +12,6 @@ import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import date
 from importlib.metadata import version
 from typing import Annotated, Any
 
@@ -618,7 +617,7 @@ def open_assessment(
         assessment = load_assessment(thread_id, saver, scope=memory.scope)
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    decided = items.decided(memory.user_id, memory.profile_id, thread_id)
+    decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
     clean, _ = redact_data({"assessment": assessment_data(assessment, decided)})
     return clean
 
@@ -756,6 +755,21 @@ def paper_requirements(
     return kept[1]
 
 
+def _standing(
+    profile: ComplianceProfile, memory: Memory, saver: BaseCheckpointSaver, failed: str
+) -> tuple[list[IsaControl], dict[str, Assessment], list[str]]:
+    """What the overview and the report are built from: the profile's controls in its ISA
+    edition (unreadable: the plain 500 with `failed`), each control's newest assessment, and the
+    accepted ones' thread ids (whose remediation decisions count)."""
+    latest = newest_by_control(memory, saver)  # from each control's newest thread
+    accepted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    try:
+        controls = profile.isa_edition().controls
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, failed) from None
+    return list(controls), latest, accepted
+
+
 @router.get("/overview")
 def dossier_overview(
     profile: Profile, memory: UserMemory, saver: Checkpointer, items: RemediationItems
@@ -764,13 +778,8 @@ def dossier_overview(
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
     each control's requirements, for its working paper (#41); its ISA text in the profile's
     edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
-    latest = newest_by_control(memory, saver)  # from each control's newest thread
-    counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     discarded = items.discarded(memory.user_id, memory.profile_id, counted)
-    try:
-        controls = profile.isa_edition().controls
-    except BaseFrameworkError:
-        raise _unreadable_edition(profile, OVERVIEW_FAILED) from None
     clean, _ = redact_data(overview(profile, controls, latest, discarded))
     return clean | {"requirements": paper_requirements(profile, controls)}
 
@@ -784,26 +793,20 @@ def readiness_report(
     trail: AuditTrail,
 ) -> dict[str, Any]:
     """The readiness report for the user's compliance profile (vouch.report, #234), in its
-    answer language: readiness as the overview counts it, each control's reviewed verdict, the
+    answer language: readiness with the overview's accepted counts (its remediation count is of
+    the approved items the report lists), each control's reviewed verdict, the
     approved remediation items, the not-applicable list, the newest page of the audit trail
     (`trail.next` reads on at GET /api/audit-trail) and the disclaimer, with the report's words.
-    No model runs. Dated the server's date; an unreadable ISA edition is a plain 500. Redacted
-    as every answer is."""
-    latest = newest_by_control(memory, saver)
-    decided: dict[remediation.Key, remediation.DecidedItem] = {}
-    for assessment in latest.values():
-        if assessment.status == "accepted":
-            decided |= items.decided(memory.user_id, memory.profile_id, assessment.thread_id)
-    page = audit.read(trail, memory.user_id, profile.id)
-    try:
-        controls = profile.isa_edition().controls
-    except BaseFrameworkError:
-        raise _unreadable_edition(profile, REPORT_FAILED) from None
+    No model runs. Dated the server's date in UTC; an unreadable ISA edition is a plain 500.
+    The data is redacted as every answer is; the words, the same for every report, are not."""
+    controls, latest, accepted = _standing(profile, memory, saver, REPORT_FAILED)
+    decided = items.decided(memory.user_id, memory.profile_id, accepted)
+    page = audit.read(trail, memory.user_id, memory.profile_id)
     built = report.readiness_report(
-        profile, controls, latest, decided=decided, trail=page, today=date.today()
+        profile, controls, latest, decided=decided, trail=page, today=report.today()
     )
     clean, _ = redact_data(built)
-    return clean
+    return clean | {"words": report.words_for(profile.answer_language)}
 
 
 class ChatRequest(BaseModel):

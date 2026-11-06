@@ -108,6 +108,32 @@ def requirements_by_control(
     return {c.id: control_requirements(profile, c) for c in controls}
 
 
+def readiness(
+    controls: Iterable[IsaControl],
+    latest: Mapping[str, Assessment],
+    discarded: Collection[tuple[str, str]] = (),
+) -> Readiness:
+    """Readiness from the listed controls' accepted verdicts only (`latest`: each control's
+    newest assessment); `discarded` names the remediation items the lead discarded, by thread and
+    requirement id, which `remediation_items` leaves out (#43). The overview's, and the readiness
+    report's (#234), so the two never disagree."""
+    controls = list(controls)
+    listed = [latest[c.id] for c in controls if c.id in latest]
+    accepted = [a for a in listed if a.status == "accepted"]
+    verdicts = Counter(a.verdict for a in accepted)
+    return {
+        "controls": len(controls),
+        "accepted": len(accepted),
+        "by_verdict": {v: verdicts[v] for v in VERDICTS},
+        "open": len(controls) - len(accepted),
+        "remediation_items": sum(
+            (a.thread_id, i.requirement_id) not in discarded
+            for a in accepted
+            for i in a.remediation
+        ),
+    }
+
+
 def overview(
     profile: ComplianceProfile,
     controls: Iterable[IsaControl],
@@ -122,8 +148,6 @@ def overview(
     the band counts the others (#43)."""
     controls = list(controls)
     listed = {c.id: latest[c.id] for c in controls if c.id in latest}
-    accepted = [a for a in listed.values() if a.status == "accepted"]
-    verdicts = Counter(a.verdict for a in accepted)
     cards = [_card(control, listed.get(control.id)) for control in controls]
     statuses = Counter(card["status"] for card in cards)
     return {
@@ -131,17 +155,7 @@ def overview(
         "country": profile.country,
         "protection_level": profile.protection_level,
         "answer_language": profile.answer_language,
-        "readiness": {
-            "controls": len(controls),
-            "accepted": len(accepted),
-            "by_verdict": {v: verdicts[v] for v in VERDICTS},
-            "open": len(controls) - len(accepted),
-            "remediation_items": sum(
-                (a.thread_id, i.requirement_id) not in discarded
-                for a in accepted
-                for i in a.remediation
-            ),
-        },
+        "readiness": readiness(controls, listed, discarded),
         "by_status": {status: statuses[status] for status in CARD_STATUSES},
         "next_step": _next_step(cards),
         "controls": cards,
