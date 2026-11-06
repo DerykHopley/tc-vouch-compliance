@@ -19,6 +19,16 @@ export async function fetchProfiles(): Promise<Profiles | null> {
   }
 }
 
+/** The profile to open with: the remembered one while the list holds it, else the default (or the first listed), and
+ * whether it fell back from a remembered one (#201). Without a list, none: calls name no profile. */
+export function startingProfile(
+  found: Profiles | null, remembered: string | null,
+): { id: string | null; fellBack: boolean } {
+  if (!found) return { id: null, fellBack: false }
+  if (remembered && found.profiles.some((p) => p.id === remembered)) return { id: remembered, fellBack: false }
+  return { id: found.default ?? found.profiles[0]?.id ?? null, fellBack: Boolean(remembered) }
+}
+
 // The interface is English (docs/design.md, Language), so the answer language is named in English.
 const languages = new Intl.DisplayNames(['en'], { type: 'language' })
 

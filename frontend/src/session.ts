@@ -17,6 +17,29 @@ export function setProfile(next: string | null) {
   profile = next
 }
 
+// The profile last chosen in the switcher, kept in this browser so a reload or a pasted link opens it (#201).
+// Storage can be missing or refused (a private window, blocked site data): then nothing is remembered.
+const REMEMBERED = 'vouch.profile'
+
+/** The profile last chosen in this browser, or null. */
+export function rememberedProfile(): string | null {
+  try {
+    return window.localStorage.getItem(REMEMBERED)
+  } catch {
+    return null
+  }
+}
+
+/** Keeps `id` as the profile to open next time; null forgets it. */
+export function rememberProfile(id: string | null) {
+  try {
+    if (id) window.localStorage.setItem(REMEMBERED, id)
+    else window.localStorage.removeItem(REMEMBERED)
+  } catch {
+    // nothing kept: the next visit opens the default
+  }
+}
+
 /** The headers every API call carries: Authorization (none in local mode or signed out), and the chosen profile. */
 export async function authHeaders(): Promise<Record<string, string>> {
   const chosen = profile // read before the await: a switch meanwhile mustn't change where this call goes

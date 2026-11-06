@@ -107,6 +107,21 @@ def test_switching_clears_the_chat_and_the_next_message_is_under_the_new_profile
     assert second.header_value("X-Vouch-Profile") == "testwerk"
 
 
+def test_a_reload_or_a_pasted_link_keeps_the_chosen_profile(page: Page, profiles_url):
+    """#201: the browser remembers the switch, so a working paper opened afresh is the same company's."""
+    opened(page, profiles_url)
+    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
+    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
+        menu.select_option(label=TESTWERK)
+
+    for arrive in (lambda: page.goto(f"{profiles_url}/controls/1.1.1"), page.reload):
+        with page.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
+            arrive()
+        assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
+        expect(menu).to_have_value("testwerk")
+        expect(page.get_by_role("banner").get_by_role("status")).to_have_count(0)
+
+
 def test_the_switcher_fits_a_phone_in_dark(page: Page, profiles_url):
     page.set_viewport_size({"width": 400, "height": 900})
     page.emulate_media(color_scheme="dark")

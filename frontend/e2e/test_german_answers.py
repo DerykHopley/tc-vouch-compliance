@@ -82,7 +82,8 @@ def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier
     expect(result.get_by_text("Partly evidenced", exact=True)).to_have_count(0)
     # Marked as German, so a screen reader reads it as German (WCAG 3.1.2).
     expect(result.get_by_text("Teilweise nachgewiesen", exact=True)).to_have_attribute("lang", "de")
-    expect(result.get_by_text(GERMAN_ANSWER, exact=True)).to_have_attribute("lang", "de")
+    expect(result.locator(".answer")).to_have_text(GERMAN_ANSWER)  # drawn by Prose (#209)
+    expect(result.locator(".answer")).to_have_attribute("lang", "de")
     expect(result.get_by_text("Draft answer", exact=True)).not_to_have_attribute("lang", "de")
     # The interface stays English.
     expect(result.get_by_text("Draft answer", exact=True)).to_be_visible()
