@@ -27,7 +27,7 @@ def test_a_developer_opens_the_page_and_sees_the_model_the_prompt_version_and_th
 
     expect(page).to_have_url(re.compile(r"/developer$"))
     settings = page.get_by_role("region", name="Developer settings")
-    expect(settings).to_contain_text("anthropic/claude-haiku-5.5")
+    expect(settings).to_contain_text("anthropic/claude-sonnet-5.5")
     expect(settings).to_contain_text("Prompt version")
     expect(settings).to_contain_text("No OpenRouter key is set: assessments run on the fake model.")
     usage = settings.get_by_role("link", name="Usage and costs on OpenRouter")
@@ -59,7 +59,7 @@ def test_without_a_key_a_change_is_refused_with_the_apis_message(page: Page, vou
 
     expect(settings.get_by_role("alert")).to_contain_text("No OpenRouter key is set")
     expect(field).to_have_attribute("aria-invalid", "true")
-    expect(settings).to_contain_text("anthropic/claude-haiku-5.5")
+    expect(settings).to_contain_text("anthropic/claude-sonnet-5.5")
 
 
 def test_a_compliance_lead_has_no_developer_link_and_gets_the_dossier_at_its_address(

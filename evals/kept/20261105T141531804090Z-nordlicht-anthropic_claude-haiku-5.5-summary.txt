@@ -1,0 +1,21 @@
+Eval of nordlicht on anthropic/claude-haiku-5.5, staleness judged on 2026-11-04
+Verdict accuracy: 43 of 84 requirements (51%)
+Control accuracy: 5 of 12 controls (42%)
+Citation precision: 82 of 109 cited documents (75%)
+Faithfulness: 1.00 mean over 11 judged answers
+Tokens per assessment: 35614 mean
+Cost per assessment: $0.0062 mean
+Seconds per assessment: 31.4 mean
+(1 failed cases left out of these means)
+  1.1.1  7/9 right (wrong: M1, S4); control partly-evidenced, expected evidenced; citations 10/13 expected
+  1.6.1  5/9 right (wrong: M1, S3, S4, S5); control partly-evidenced, expected evidenced; citations 9/12 expected
+  1.6.2  3/6 right (wrong: M2, S1, S2); control partly-evidenced, expected partly-evidenced; citations 8/10 expected
+  2.1.3  4/7 right (wrong: S1, S2, S6); control evidenced, expected evidenced; citations 9/9 expected
+  4.1.2  1/5 right (wrong: M2, S1, S2, S3); control not-evidenced, expected partly-evidenced; citations 8/9 expected
+  4.1.3  12/17 right (wrong: M2, M4, M5, S5, S8); control partly-evidenced, expected partly-evidenced; citations 17/23 expected
+  4.2.1  2/7 right (wrong: M1, S1, S3, S4, S5); control not-evidenced, expected partly-evidenced; citations 7/14 expected
+  5.1.1  2/2 right; control not-evidenced, expected not-evidenced; citations 1/2 expected
+  5.1.2  Failed: OutputCheckError: the answer claimed an audit result (“passed”) again
+  5.2.4  2/8 right (wrong: M1, M2, M3, M4, M5, S3); control not-evidenced, expected partly-evidenced; citations 8/11 expected
+  5.2.5  3/6 right (wrong: M2, M3, S2); control partly-evidenced, expected evidenced; citations 5/5 expected
+  5.2.9  2/3 right (wrong: M2); control not-evidenced, expected not-evidenced; citations 0/1 expected

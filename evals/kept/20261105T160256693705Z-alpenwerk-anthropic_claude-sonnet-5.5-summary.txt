@@ -1,0 +1,20 @@
+Eval of alpenwerk on anthropic/claude-sonnet-5.5, staleness judged on 2026-11-04
+Verdict accuracy: 50 of 100 requirements (50%)
+Control accuracy: 6 of 12 controls (50%)
+Citation precision: 93 of 113 cited documents (82%)
+Faithfulness: 1.00 mean over 12 judged answers
+Tokens per assessment: 39432 mean
+Cost per assessment: $0.1214 mean
+Seconds per assessment: 33.8 mean
+  1.1.1  7/9 right (wrong: M1, S3); control partly-evidenced, expected partly-evidenced; citations 9/10 expected
+  1.6.1  4/9 right (wrong: M1, M2, S3, S4, S5); control partly-evidenced, expected evidenced; citations 14/20 expected
+  1.6.2  10/12 right (wrong: S2, H4); control partly-evidenced, expected partly-evidenced; citations 15/17 expected
+  2.1.3  0/7 right (wrong: M1, S1, S2, S3, S4, S5, S6); control not-evidenced, expected evidenced; citations 1/1 expected
+  4.1.2  3/6 right (wrong: M2, S2, H1); control partly-evidenced, expected evidenced; citations 8/10 expected
+  4.1.3  11/17 right (wrong: M1, M6, M7, S1, S3, S4); control partly-evidenced, expected partly-evidenced; citations 21/24 expected
+  4.2.1  0/8 right (wrong: M1, M2, S1, S2, S3, S4, S5, H1); control not-evidenced, expected partly-evidenced; citations 2/2 expected
+  5.1.1  1/3 right (wrong: M1, S1); control not-evidenced, expected partly-evidenced; citations 4/5 expected
+  5.1.2  6/7 right (wrong: S1); control evidenced, expected evidenced; citations 11/16 expected
+  5.2.4  1/10 right (wrong: M2, M3, M4, M5, S1, S2, S3, H1, H2); control not-evidenced, expected partly-evidenced; citations 1/1 expected
+  5.2.5  6/6 right; control partly-evidenced, expected partly-evidenced; citations 6/6 expected
+  5.2.9  1/6 right (wrong: M2, S1, H1, H2, H3); control partly-evidenced, expected partly-evidenced; citations 1/1 expected

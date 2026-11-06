@@ -25,9 +25,9 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import SecretStr
 
-from vouch.model_choice import DEFAULT_MODEL, OpenRouter
+from vouch.model_choice import OpenRouter
 from vouch.settings import OPENROUTER_API_KEY_ENV, Settings
-from vouch.spending import FAKE, GPT_TERRA, MISTRAL_SMALL, PRICES, SONNET, Price, Usage
+from vouch.spending import FAKE, GPT_LUNA, GPT_SOL, GPT_TERRA, HAIKU, PRICES, SONNET, Price, Usage
 
 OLLAMA_PREFIX = "ollama/"
 OLLAMA_URL = "http://localhost:11434"
@@ -47,6 +47,9 @@ def price_of(name: str) -> Price | None:
     return PRICES.get(name)
 
 
+PriceKind = Literal["listed", "variable", "local"]
+
+
 @dataclass(frozen=True)
 class EvalModel:
     """A model the eval runs: its id (OpenRouter's, or `ollama/<name>`), why it's in the set,
@@ -55,6 +58,17 @@ class EvalModel:
     id: str
     why: str
     source: str
+    router: bool = False  # picks a model per request, so its price varies (price_kind)
+
+    @property
+    def price_kind(self) -> PriceKind:
+        """What kind of price the model has: `local` (Ollama, free), `variable` (a router:
+        each request costs what the model it picks costs, so there is no price to list and only
+        OpenRouter's reported cost counts; a call without one has an unknown cost), or `listed`
+        (its price in vouch.spending.PRICES)."""
+        if self.id.startswith(OLLAMA_PREFIX):
+            return "local"
+        return "variable" if self.router else "listed"
 
     @property
     def price(self) -> Price | None:
@@ -65,16 +79,33 @@ class EvalModel:
 OPENROUTER_SOURCE = "https://openrouter.ai/api/v1/models, 2026-11-05"
 """Where the hosted models' prices were read (vouch.spending.PRICES), and when."""
 LOCAL_MODEL = "ollama/gpt-oss:20b"
+JEV_ROUTER = "typesafe/jev-router"
 
 MODELS: tuple[EvalModel, ...] = (
+    EvalModel(HAIKU, "Anthropic's small model, the app's default until #55", OPENROUTER_SOURCE),
     EvalModel(
-        DEFAULT_MODEL, "the app's default (docs/requirements.md, 2026-11-03)", OPENROUTER_SOURCE
+        SONNET,
+        "Anthropic's next size up, the app's default since #55 (DEFAULT_MODEL)",
+        OPENROUTER_SOURCE,
     ),
-    EvalModel(SONNET, "Anthropic's next size up: what more quality costs", OPENROUTER_SOURCE),
     EvalModel(
-        MISTRAL_SMALL,
-        "another provider at Haiku's price, EU-based (Mistral Small 4, tools and structured "
-        "outputs)",
+        JEV_ROUTER,
+        "TypeSafe's Jev Router, another provider: picks a model per request (does routing reach "
+        "Sonnet's quality nearer Haiku's cost?); results record only the router, and it may "
+        "route to OpenAI, the judge's provider. Nordlicht only (#54)",
+        f"{OPENROUTER_SOURCE} (its pricing -1 / -1: set per request)",
+        router=True,
+    ),
+    EvalModel(
+        GPT_LUNA,
+        "OpenAI's small model, at Haiku's price (#55); judged by default by Sonnet 5.5, so "
+        "OpenAI never judges its own answers",
+        OPENROUTER_SOURCE,
+    ),
+    EvalModel(
+        GPT_SOL,
+        "OpenAI's large model, at Sonnet's price (#55); judged by default by Sonnet 5.5, so "
+        "OpenAI never judges its own answers",
         OPENROUTER_SOURCE,
     ),
     EvalModel(
@@ -83,15 +114,33 @@ MODELS: tuple[EvalModel, ...] = (
         "https://ollama.com/library/gpt-oss, 2026-11-05",
     ),
 )
-"""The models compared: Haiku, Sonnet, one other provider, one local model (#53)."""
+"""The models compared: Haiku, Sonnet, the Jev Router (after Mistral Small 4 was blocked by the
+owner's OpenRouter guardrail), OpenAI's GPT-6 Luna and GPT-6.1 Sol, and one local model (#53,
+#54, #55). GPT-6.1 Terra, the judge, also ran as a model, judged by Sonnet."""
 JUDGE = EvalModel(
     GPT_TERRA,
-    "a mid-tier judge from a provider none of the compared models share, so it never judges "
-    "its own answers",
+    "a mid-tier judge from another provider than Anthropic's models, so it never judges their "
+    "answers (the Jev Router may route to OpenAI, so it may judge the router's). OpenAI's own "
+    "models (Luna, Sol, and Terra itself, which also ran in #55) get FALLBACK_JUDGE, Sonnet "
+    "5.5, by default",
     OPENROUTER_SOURCE,
 )
 """The faithfulness judge, on real models unless --judge names another; on the fake, only
-with --judge."""
+with --judge. A model from its own provider gets FALLBACK_JUDGE instead (default_judge)."""
+FALLBACK_JUDGE = SONNET
+"""The judge for a model from JUDGE's provider, as the owner chose for OpenAI's models (#55)."""
+
+
+def _provider(model_id: str) -> str:
+    return model_id.split("/", 1)[0]
+
+
+def default_judge(model_id: str) -> str:
+    """The judge a real model gets when --judge names none: JUDGE, unless the model comes from
+    JUDGE's provider, which would judge its own answers; then FALLBACK_JUDGE."""
+    if _provider(model_id) == _provider(JUDGE.id):
+        return FALLBACK_JUDGE
+    return JUDGE.id
 
 
 class ModelUnavailable(RuntimeError):
