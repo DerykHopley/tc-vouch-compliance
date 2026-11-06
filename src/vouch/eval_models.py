@@ -25,9 +25,9 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import SecretStr
 
-from vouch.model_choice import DEFAULT_MODEL, OpenRouter
+from vouch.model_choice import OpenRouter
 from vouch.settings import OPENROUTER_API_KEY_ENV, Settings
-from vouch.spending import FAKE, GPT_LUNA, GPT_SOL, GPT_TERRA, PRICES, SONNET, Price, Usage
+from vouch.spending import FAKE, GPT_LUNA, GPT_SOL, GPT_TERRA, HAIKU, PRICES, SONNET, Price, Usage
 
 OLLAMA_PREFIX = "ollama/"
 OLLAMA_URL = "http://localhost:11434"
@@ -82,10 +82,12 @@ LOCAL_MODEL = "ollama/gpt-oss:20b"
 JEV_ROUTER = "typesafe/jev-router"
 
 MODELS: tuple[EvalModel, ...] = (
+    EvalModel(HAIKU, "Anthropic's small model, the app's default until #55", OPENROUTER_SOURCE),
     EvalModel(
-        DEFAULT_MODEL, "the app's default (docs/requirements.md, 2026-11-03)", OPENROUTER_SOURCE
+        SONNET,
+        "Anthropic's next size up, the app's default since #55 (DEFAULT_MODEL)",
+        OPENROUTER_SOURCE,
     ),
-    EvalModel(SONNET, "Anthropic's next size up: what more quality costs", OPENROUTER_SOURCE),
     EvalModel(
         JEV_ROUTER,
         "TypeSafe's Jev Router, another provider: picks a model per request (does routing reach "

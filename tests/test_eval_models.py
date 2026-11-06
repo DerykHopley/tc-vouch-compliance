@@ -113,7 +113,15 @@ def test_a_local_model_costs_nothing_and_a_listed_one_has_its_listed_price():
 
 
 def test_the_apps_default_model_is_in_the_list_at_the_apps_price():
+    assert DEFAULT_MODEL in {m.id for m in MODELS}
     assert price_of(DEFAULT_MODEL) == PRICES[DEFAULT_MODEL]
+
+
+def test_the_default_is_the_owners_choice_from_the_report():
+    """#55: the owner chose Sonnet 5.5 from docs/eval-report.md (2026-11-06); Haiku, the old
+    default, keeps its price, as the developer page can still pick it."""
+    assert DEFAULT_MODEL == "anthropic/claude-sonnet-5.5"
+    assert "anthropic/claude-haiku-5.5" in PRICES
 
 
 def test_a_real_model_with_no_known_price_has_none_never_zero():
@@ -131,7 +139,7 @@ def test_the_list_is_what_ran():
     ids = [m.id for m in MODELS]
 
     assert ids == [
-        DEFAULT_MODEL,
+        "anthropic/claude-haiku-5.5",
         "anthropic/claude-sonnet-5.5",
         "typesafe/jev-router",
         "openai/gpt-6-luna",
@@ -160,7 +168,7 @@ def test_each_model_has_one_kind_of_price():
     kinds = {m.id: m.price_kind for m in (*MODELS, JUDGE)}
 
     assert kinds == {
-        DEFAULT_MODEL: "listed",
+        "anthropic/claude-haiku-5.5": "listed",
         "anthropic/claude-sonnet-5.5": "listed",
         "typesafe/jev-router": "variable",
         "openai/gpt-6-luna": "listed",
@@ -192,6 +200,7 @@ def test_a_model_from_the_judges_provider_is_judged_by_the_fallback_judge():
     assert default_judge("openai/gpt-6.1-terra") == FALLBACK_JUDGE == "anthropic/claude-sonnet-5.5"
     assert default_judge("openai/gpt-6-luna") == FALLBACK_JUDGE
     assert default_judge(DEFAULT_MODEL) == JUDGE.id
+    assert default_judge("anthropic/claude-haiku-5.5") == JUDGE.id
     assert default_judge("ollama/gpt-oss:20b") == JUDGE.id
 
 

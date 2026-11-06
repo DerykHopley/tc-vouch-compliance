@@ -66,12 +66,13 @@ class Price:
         return spent / 1_000_000
 
 
-SONNET = "anthropic/claude-sonnet-5.5"
+HAIKU = "anthropic/claude-haiku-5.5"
+SONNET = DEFAULT_MODEL
 GPT_TERRA = "openai/gpt-6.1-terra"
 GPT_LUNA = "openai/gpt-6-luna"
 GPT_SOL = "openai/gpt-6.1-sol"
 PRICES = {
-    DEFAULT_MODEL: Price(0.10, 0.50),
+    HAIKU: Price(0.10, 0.50),
     SONNET: Price(2.00, 10.00),
     GPT_TERRA: Price(1.00, 5.00),
     GPT_LUNA: Price(0.10, 0.50),
