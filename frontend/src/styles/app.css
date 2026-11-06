@@ -211,11 +211,12 @@ textarea.field { resize: vertical; font-family: inherit; }
 .fab { background: var(--ink); color: var(--sheet); border: 0; border-radius: 999px; padding: 12px 18px; font-weight: 600; box-shadow: 0 8px 24px var(--shadow); display: flex; gap: 10px; align-items: center; }
 .fab kbd { font: 500 11px var(--f-mono); opacity: .65; }
 .bubble { width: min(390px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 16px 48px var(--shadow); display: flex; flex-direction: column; animation: rise .18s ease-out; }
-.bubble-head { display: flex; flex-wrap: wrap; gap: 0 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.bubble-head { display: flex; gap: 0 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
 .bubble-head .btn, .page-context { white-space: nowrap; }
-.bubble-head .btn { font-size: 12px; padding-inline: 8px; }
+.bubble-head .btn { font-size: 12px; padding-inline: 8px; min-width: 44px; }
 .bubble-head b { font: 400 16px var(--f-display); letter-spacing: .04em; text-transform: uppercase; }
-.page-context { font-size: 11px; background: var(--paper); border-radius: 999px; padding: 1px 9px; color: var(--muted); margin-right: auto; }
+/* One row (#251): the page tag gives way, cut short with its full text as a tooltip, never the controls. */
+.page-context { font-size: 11px; background: var(--paper); border-radius: 999px; padding: 1px 9px; color: var(--muted); margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .bubble-log { flex: 1; overflow: auto; padding: 12px; display: grid; gap: 8px; align-content: start; }
 .msg { margin: 0; background: var(--paper); border-radius: 3px; padding: 8px 10px; max-width: 92%; overflow-wrap: anywhere; white-space: pre-wrap; }
 .msg:empty { display: none; }

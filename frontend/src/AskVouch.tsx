@@ -306,7 +306,7 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
       <div className="bubble-head">
         <b>Vouch</b>
-        <span className="page-context">{pageLabel(context)}</span>
+        <span className="page-context" title={pageLabel(context)}>{pageLabel(context)}</span>
         {!sheet && pinnable && pin && (
           <button className="btn btn-ghost" aria-pressed={state === 'pinned'} onClick={() => setState(pin)}>
             Pin beside the page
@@ -315,7 +315,9 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         {!sheet && size && (
           <button className="btn btn-ghost" onClick={() => setState(size.to)}>{size.label}</button>
         )}
-        <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}>New conversation</button>
+        {/* "New" on screen, so the 390px bubble's header keeps to one line; its name says what it starts. */}
+        <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}
+          aria-label="New conversation" title="New conversation">New</button>
         <button className="btn btn-ghost" onClick={() => setState('closed')} aria-label="Close the chat">
           Close
         </button>

@@ -86,6 +86,31 @@ def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, dossie
     assert "LU" in reached, reached  # the user menu: local mode's initials (#222)
 
 
+def test_at_1400px_the_chats_header_keeps_to_one_line(page: Page, paper_url):
+    # On a working paper, the longest page tag, with "New conversation" beside it (#251): in the
+    # bubble and pinned beside the page, no control wraps onto a second line, taking the chat's room.
+    page.set_viewport_size({"width": 1400, "height": 800})
+    page.goto(f"{paper_url}/controls/4.1.2")
+    page.get_by_role("button", name="Ask Vouch").click()
+    sheet = page.locator(SHEET)
+    expect(sheet).to_be_visible()
+
+    def middles() -> list[int]:
+        return sheet.locator(".bubble-head > *").evaluate_all(
+            "items => items.map(i => { const r = i.getBoundingClientRect(); return Math.round(r.top + r.height / 2) })"
+        )
+
+    for then in (None, "Make larger", "Pin beside the page"):
+        if then:
+            sheet.get_by_role("button", name=then).click()
+        if then != "Make larger":  # the enlarged bubble is 640px: room enough
+            row = middles()
+            assert max(row) - min(row) <= 4, (
+                then,
+                row,
+            )  # one row, centred; wrapped sits 44px lower
+
+
 def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
     open_sheet(page, dossier_url, 400)
     page.get_by_role("button", name="Close the chat").click()
