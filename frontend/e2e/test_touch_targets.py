@@ -88,3 +88,14 @@ def test_the_top_bar_menu_and_its_menus_are_at_least_44px(page: Page, profiles_u
     bar.get_by_role("button", name=re.compile(r"^Profile: ")).click()
     expect(bar.get_by_role("menuitemradio").first).to_be_visible()
     assert small_targets(page) == []
+
+
+def test_the_chat_s_new_conversation_control_is_at_least_44px(page: Page, chat_url):
+    # #251: "New conversation" in the chat's header, at 400px (a full-screen sheet there).
+    page.set_viewport_size({"width": 400, "height": 900})
+    with page.expect_response("**/api/overview"):
+        page.goto(chat_url + "/")
+    with page.expect_response("**/api/chat/current"):
+        page.get_by_role("button", name="Ask Vouch").click()
+    expect(page.get_by_role("button", name="New conversation")).to_be_visible()
+    assert small_targets(page) == []
