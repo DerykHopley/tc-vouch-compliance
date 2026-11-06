@@ -361,12 +361,16 @@ def assessed_controls_words(controls: list[IsaControl], latest: dict[str, Assess
         missing = [r.id for r in applying if r.column == "must" and r.verdict != "evidenced"]
         if missing:
             musts_missing.append(f"{control.id} ({', '.join(missing)})")
-        rest_on = " and ".join(counted) + (" only" if len(counted) == 1 else "") or "no cited"
+        rest_on = (
+            ("only on " if len(counted) == 1 else "on ") + " and ".join(counted)
+            if counted
+            else "on no cited"
+        )
         requirement_words = "; ".join(_requirement_words(r) for r in applying)
         status = dict(_STATUS_WORDS)[assessment.status]
         lines.append(
             f"- {control.id}: {verdict_words(assessment.verdict)}, {status}; its counted "
-            f"requirements rest on {rest_on} evidence. {requirement_words}."
+            f"requirements rest {rest_on} evidence. {requirement_words}."
         )
     for label, ids in (
         ("Documented evidence only", documented_only),

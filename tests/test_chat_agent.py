@@ -566,6 +566,11 @@ def test_assessed_controls_words_sort_the_controls_by_their_counted_evidence():
     assert f"Not assessed yet: {e}." in words
     assert f"- {e}: not assessed yet." in words
     assert "M1 (must) evidenced, implemented" in words
+    assert (
+        f"- {a}: partly evidenced, proposed and waiting for your review; its counted "
+        "requirements rest only on documented evidence." in words
+    )
+    assert "requirements rest on no cited evidence." in words
 
 
 def test_a_question_across_controls_calls_assessed_controls_and_names_the_controls(client, fake):
