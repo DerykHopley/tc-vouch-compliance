@@ -22,11 +22,12 @@ SCROLLS_SIDEWAYS = (
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize("width", [1400, 400])
-def test_a_cited_quote_shows_as_a_quote_with_its_document_id(
-    page: Page, chat_url, width, scheme
-):
+def test_a_cited_quote_shows_as_a_quote_with_its_document_id(page: Page, chat_url, width, scheme):
     page.emulate_media(color_scheme=scheme)
     page.set_viewport_size({"width": width, "height": 800})
+    page.request.delete(
+        f"{chat_url}/api/chat/current"
+    )  # a fresh chat: the server keeps the last (#251)
     with page.expect_response("**/api/overview"):
         page.goto(chat_url + "/")
     with page.expect_response("**/api/chat"):  # the greeting

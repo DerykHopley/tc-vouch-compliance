@@ -12,7 +12,8 @@ const req = (id: string, column: Column, verdict: Verdict): RequirementVerdict =
 afterEach(() => vi.unstubAllGlobals())
 
 /** The cases graph.roll_up is checked against too (tests/test_roll_up_parity.py): the copy can't drift.
- *  Read from the working directory (npm test runs in frontend/): under jsdom import.meta.url isn't a file URL. */
+ *  Read from the working directory (npm test runs in frontend/), not by new URL with a literal path: under jsdom Vite
+ *  makes that an http:// address (#194, testFiles.test.ts). */
 const { cases } = JSON.parse(readFileSync(resolve(process.cwd(), '../tests/roll_up_cases.json'), 'utf8')) as
   { cases: { requirements: [Column, Verdict][]; verdict: Verdict }[] }
 

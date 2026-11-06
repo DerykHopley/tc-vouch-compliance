@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { type Assessment, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, type Review, type ReviewDecision,
   submitReview } from './review.ts'
@@ -24,6 +24,9 @@ export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onC
     saved?.verdict ?? JUDGED_VERDICTS.find((v) => v !== agentVerdict) ?? 'evidenced')
   const [reason, setReason] = useState(saved?.reason ?? '')
   const id = useId()
+  // The form takes focus on its first field when it opens (#226).
+  const first = useRef<HTMLSelectElement>(null)
+  useEffect(() => first.current?.focus(), [])
   const why = verdict === agentVerdict ? "Choose a verdict other than Vouch's to override it."
     : reason.trim() === '' ? 'Give a reason to save the override.' : null
   return (
@@ -32,7 +35,7 @@ export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onC
       if (!why) onSave({ requirement_id: requirementId, verdict, reason: reason.trim() })
     }}>
       <label htmlFor={`${id}-verdict`}>Verdict</label>
-      <select id={`${id}-verdict`} className="field" value={verdict}
+      <select ref={first} id={`${id}-verdict`} className="field" value={verdict}
         onChange={(e) => setVerdict(e.target.value as JudgedVerdict)}>
         {JUDGED_VERDICTS.map((v) => <option key={v} value={v}>{VERDICT_WORDS[v]}</option>)}
       </select>

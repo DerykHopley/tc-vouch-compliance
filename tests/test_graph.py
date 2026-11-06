@@ -88,6 +88,8 @@ def test_the_first_step_says_the_control_was_loaded_and_how_many_requirements_ap
             "Loaded control 4.1.2: To what extent is the user access to IT services and IT "
             "systems secured? 5 requirements apply under Nordlicht Komponenten GmbH's profile."
         ),
+        # The edition's words it quotes, so the page can mark them in the profile's language (#244).
+        "quote": "To what extent is the user access to IT services and IT systems secured?",
     }
     assert in_order([s["node"] for s in result.steps], "load_control", "apply_overlays")
 

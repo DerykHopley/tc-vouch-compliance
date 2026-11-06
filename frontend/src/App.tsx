@@ -205,6 +205,7 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
           assessment from the chat reads the overview afresh (its card, readiness), and its paper's newest if open. */}
       <AskVouch context={{ page: shown ?? 'dossier', controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
+        language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}
         onAssessed={(controlId) => {
           void load()
           if (controlId === paperId) setPaperReloads((n) => n + 1)

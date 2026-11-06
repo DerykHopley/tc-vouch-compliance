@@ -1,4 +1,5 @@
 import { postEvents, type ReviewStatus, type Step, type Verdict } from './assessment.ts'
+import { authHeaders, sessionEnded } from './session.ts'
 import type { NextStep } from './overview.ts'
 
 /**
@@ -6,6 +7,58 @@ import type { NextStep } from './overview.ts'
  * Vouch's greeting (no message: where the lead stands, and the next step); each reply names its chat thread first (`thread`),
  * which the next message goes on with.
  */
+
+/** A line in the chat: the lead's message, Vouch's reply (or a notice that it failed), an assessment's step, or an
+ * assessment's verdict with the way to its working paper. */
+export type ChatMessage =
+  | { from: 'lead'; text: string }
+  /** `papers`: the controls a cross-control answer may name, linked to their working papers when named (#217). */
+  | { from: 'vouch'; text: string; failed?: boolean; papers?: string[] }
+  | { from: 'step'; step: Step }
+  | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus; language?: string }
+
+/** A kept line, as `GET /api/chat/current` gives it (#251): a ChatMessage, a verdict's fields as the API names them. */
+export type KeptLine =
+  | Exclude<ChatMessage, { from: 'verdict' }>
+  | { from: 'verdict'; control_id: string; verdict: Verdict; status: ReviewStatus; answer_language?: string | null }
+
+/** The kept lines as the messages the chat showed (#251): the same lines, so they render the same. */
+export function restoredMessages(lines: KeptLine[]): ChatMessage[] {
+  return lines.map((line) => line.from === 'verdict'
+    ? { from: 'verdict', controlId: line.control_id, verdict: line.verdict, status: line.status,
+      ...(line.answer_language ? { language: line.answer_language } : {}) }
+    : line)
+}
+
+/** The conversation the chat opens on (#251): its thread and its messages; none yet, none. `note`: it couldn't be read. */
+export type Conversation = { threadId: string | null; messages: ChatMessage[]; note: string | null }
+
+/** Shown where the kept conversation can't be reached at all. Must match CHAT_HISTORY_UNAVAILABLE in
+ * src/vouch/api.py, said where the server can't read it. */
+export const HISTORY_UNREACHABLE = "Your earlier conversation can't be shown just now. New messages work as usual."
+
+/** The user's current conversation under this profile (`GET /api/chat/current`), kept on the server (#251). */
+export async function fetchConversation(): Promise<Conversation> {
+  try {
+    const response = await fetch('/api/chat/current', { headers: await authHeaders() })
+    if (sessionEnded(response)) return { threadId: null, messages: [], note: null }
+    // The database down answers before the route can (a 503): the earlier conversation exists, but not now.
+    if (!response.ok) return { threadId: null, messages: [], note: HISTORY_UNREACHABLE }
+    const body = (await response.json()) as { thread_id: string | null; lines: KeptLine[]; note?: string }
+    return { threadId: body.thread_id, messages: restoredMessages(body.lines), note: body.note ?? null }
+  } catch {
+    return { threadId: null, messages: [], note: HISTORY_UNREACHABLE }
+  }
+}
+
+/** Starts a new conversation (`DELETE /api/chat/current`): the old one stays on the server (#251). */
+export async function newConversation(): Promise<void> {
+  try {
+    await fetch('/api/chat/current', { method: 'DELETE', headers: await authHeaders() })
+  } catch {
+    // The chat clears its own view all the same; the next message starts the new thread.
+  }
+}
 
 /** The page the compliance lead is on, as the chat request and the chat's header name it. */
 export type PageContext = { page: 'dossier' | 'paper' | 'developer'; controlId: string | null }
