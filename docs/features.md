@@ -92,8 +92,9 @@ Do the walk-throughs in order: each starts where the one before stopped.
 6. **Not applicable**: what the profile excludes, each with its reason; for Nordlicht, 5.1.2 S3
    (no remote access to the company network).
 7. **Audit trail**: one row per action, with when, who, the control, the requirement, the
-   verdict before and after, the note, the evidence, the model and the prompt version: here the
-   override of S2 and the acceptance of 4.1.2.
+   verdict before and after, the note, the evidence, the model and the prompt version. Newest
+   first: the approval of M1's remediation item, the acceptance of 4.1.2 and the override of S2,
+   with your reason as its note.
 8. At the foot, the disclaimer: "Drafted by an AI assistant, reviewed by Local user; not an
    audit result."
 
@@ -128,7 +129,8 @@ Locally, only 1.6.2 under Alpenwerk has a script for it.
 3. Under "How Vouch reached this":
    - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrative) adds O1.";
    - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrative))."
-4. O1 is in the requirements table with its own verdict.
+4. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrative)", with
+   its own verdict and reason.
 
 While the script runs this way, every assessment plays 1.6.2's script: restart `scripts/dev.sh`
 plainly for anything else. On the live app any control runs on the real model, and the overlay
