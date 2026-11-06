@@ -119,9 +119,23 @@ export async function olderEntries(before: number): Promise<({ ok: true } & Trai
   }
 }
 
-/** The name in a `Content-Disposition: attachment; filename="…"`, or a plain one when it names none. */
-const fileName = (disposition: string | null) =>
-  /filename="([^"]+)"/.exec(disposition ?? '')?.[1] ?? 'readiness-report.md'
+/** How long the browser keeps a saved file's object URL: a minute, as FileSaver.js does, since revoking it sooner can
+ * cancel the download in Safari and some Firefox versions. */
+const KEEP_URL_MS = 60_000
+
+/** The name a `Content-Disposition` gives (vouch.api.attachment): `filename*`'s UTF-8 name when it decodes, else the
+ * ASCII `filename`, else a plain one. */
+function fileName(disposition: string | null): string {
+  const utf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(disposition ?? '')?.[1]
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8)
+    } catch {
+      // malformed: the ASCII name stands in
+    }
+  }
+  return /filename="([^"]+)"/.exec(disposition ?? '')?.[1] ?? 'readiness-report.md'
+}
 
 /** The report as one Markdown file (`GET /api/report/markdown`, #57), saved under the server's name. The whole body
  * is read before anything is saved, so a failure saves nothing and no file is ever half-downloaded. */
@@ -144,6 +158,6 @@ export async function exportReport(): Promise<{ ok: true } | Failed> {
   document.body.append(link) // Firefox saves only from a link in the document
   link.click()
   link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0) // after the browser has taken the file
+  setTimeout(() => URL.revokeObjectURL(url), KEEP_URL_MS)
   return { ok: true }
 }

@@ -104,6 +104,34 @@ describe('exportReport', () => {
     expect(await files.all()).toEqual([{ name: 'readiness-report-nordlicht-2026-11-06.md', text: MARKDOWN }])
   })
 
+  it.each([
+    ['the UTF-8 name over the ASCII one', `attachment; filename="readiness-report-jurgen-2026-11-06.md"; filename*=UTF-8''readiness-report-j%C3%BCrgen-2026-11-06.md`,
+      'readiness-report-jürgen-2026-11-06.md'],
+    ['the ASCII name when the UTF-8 one is malformed', `attachment; filename="readiness-report-x.md"; filename*=UTF-8''%E0%A4%A.md`,
+      'readiness-report-x.md'],
+    ['a plain name when the header names none', 'attachment', 'readiness-report.md'],
+  ])('saves under %s', async (_, disposition, name) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(MARKDOWN, { headers: { 'Content-Disposition': disposition } })))
+    const files = saves()
+    expect(await exportReport()).toEqual({ ok: true })
+    expect((await files.all()).map((f) => f.name)).toEqual([name])
+  })
+
+  it('lets the browser keep the file a minute before its object URL is released', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    try {
+      vi.stubGlobal('fetch', markdown())
+      saves()
+      expect(await exportReport()).toEqual({ ok: true })
+      vi.advanceTimersByTime(59_000)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1_000)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:saved-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each([404, 429, 500, 503])('says the report could not be exported on a %i, and saves nothing', async (status) => {
     vi.stubGlobal('fetch', markdown(status))
     const files = saves()

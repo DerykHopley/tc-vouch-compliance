@@ -10,6 +10,7 @@ afterEach(() => {
   cleanup()
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   setOnSignedOut(null)
 })
 
@@ -363,7 +364,6 @@ describe('Export', () => {
 
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('alert')).toBeNull()
-    vi.restoreAllMocks()
   })
 })
 

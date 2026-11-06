@@ -14,7 +14,7 @@ function block(selector: string): Map<string, string> {
 }
 
 const light = block(':root {')
-const darkBySystem = block('@media (prefers-color-scheme: dark)')
+const darkBySystem = block('@media screen and (prefers-color-scheme: dark)')
 const darkBySwitch = block(':root[data-theme="dark"]')
 
 describe('tokens.css', () => {

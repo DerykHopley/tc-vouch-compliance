@@ -12,7 +12,8 @@
   --f-quote: "IBM Plex Serif", Georgia, serif;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+/* Dark is for the screen only: print keeps the light tokens above (#57). */
+@media screen and (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
   --navy: #A9BEE6; --sign: #E3CB9F; --brass: #E2C391; --band: #222224; --band-fg: #ECE6DC;
   --evidenced: #7DBE93; --partly-evidenced: #E0B064; --not-evidenced: #E08A80; --not-applicable: #8F8C86;
@@ -20,21 +21,13 @@
   --check-a: rgb(236 230 220 / .05); --check-b: rgb(227 203 159 / .06); --shadow: rgb(0 0 0 / .2);
   color-scheme: dark;
 } }
-:root[data-theme="dark"] {
+@media screen { :root[data-theme="dark"] {
   --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
   --navy: #A9BEE6; --sign: #E3CB9F; --brass: #E2C391; --band: #222224; --band-fg: #ECE6DC;
   --evidenced: #7DBE93; --partly-evidenced: #E0B064; --not-evidenced: #E08A80; --not-applicable: #8F8C86;
   --evidenced-bg: #18241C; --partly-evidenced-bg: #2A2216; --not-evidenced-bg: #2B1B19; --not-applicable-bg: #1E1E1F;
   --check-a: rgb(236 230 220 / .05); --check-b: rgb(227 203 159 / .06); --shadow: rgb(0 0 0 / .2);
   color-scheme: dark;
-}
-/* Print (#57): the light theme's ink on white, whichever theme is on screen. Each selector matches the specificity of
-   a dark block above (the system setting's, the switch's) and wins by coming after it. */
-@media print { :root, :root:not([data-theme="light"]), :root[data-theme] {
-  --paper: #FFFFFF; --sheet: #FFFFFF; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
-  --navy: #1F3B6E; --sign: #7A2232; --brass: #A8834A; --band: #1B1D21; --band-fg: #F2F1EE;
-  --evidenced: #3F7A55; --partly-evidenced: #A06E22; --not-evidenced: #A4433F; --not-applicable: #7A7C80;
-  --evidenced-bg: #E2EDE5; --partly-evidenced-bg: #F3EAD9; --not-evidenced-bg: #F3E2E0; --not-applicable-bg: #E4E3DF;
-  --check-a: rgb(27 29 33 / .07); --check-b: rgb(31 59 110 / .08); --shadow: rgb(0 0 0 / .2);
-  color-scheme: light;
 } }
+/* Print (#57): the light tokens, whichever theme is on screen, on white paper. */
+@media print { :root { --paper: #FFFFFF; --sheet: #FFFFFF; } }

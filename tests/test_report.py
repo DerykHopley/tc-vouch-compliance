@@ -487,6 +487,12 @@ def test_the_head_names_the_company_framework_level_overlays_language_and_todays
 # --- Failures ----------------------------------------------------------------------------------
 
 
+def unreadable_trail(*args: Any, **kwargs: Any) -> Any:
+    """A trail read that fails: answered as an unexpected 500, not the edition's."""
+    raise RuntimeError("the trail was read before the standing")
+
+
+
 def test_an_unknown_profile_is_a_404(users):
     alice, _ = users
     with TestClient(app_on(None)) as client:
@@ -504,6 +510,8 @@ def test_a_broken_german_edition_is_a_plain_500_on_the_report(users, monkeypatch
     with TestClient(app_on(None), raise_server_exceptions=False) as client:
         report_of(client, alpenwerk)  # the profile is read while its edition is whole
         monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+        # The standing is read before the trail, so the edition's 500 is the one answered.
+        monkeypatch.setattr(audit, "read", unreadable_trail)
         response = client.get("/api/report", headers=alpenwerk)
 
     assert response.status_code == 500
@@ -562,7 +570,8 @@ def test_the_export_is_a_markdown_attachment_named_for_the_profile_and_the_day(u
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert response.headers["content-disposition"] == (
-        'attachment; filename="readiness-report-alpenwerk-2026-11-06.md"'
+        'attachment; filename="readiness-report-alpenwerk-2026-11-06.md"; '
+        "filename*=UTF-8''readiness-report-alpenwerk-2026-11-06.md"
     )
     assert response.text.startswith("# Bereitschaftsbericht\n")
 
@@ -770,6 +779,8 @@ def test_a_broken_german_edition_is_a_plain_500_with_export_failed(users, monkey
     with TestClient(app_on(None), raise_server_exceptions=False) as client:
         export_of(client, alpenwerk)  # the profile is read while its edition is whole
         monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+        # The standing is read before the trail, so the edition's 500 is the one answered.
+        monkeypatch.setattr(audit, "read_all", unreadable_trail)
         response = client.get("/api/report/markdown", headers=alpenwerk)
 
     assert response.status_code == 500
@@ -788,3 +799,114 @@ def test_with_the_database_down_the_export_answers_503(users):
 
     assert response.status_code == 503
     assert response.json()["unavailable"] == "database"
+
+
+# --- Review fixes (#57): the file's name, carried text, the whole trail's paging ---------------
+
+def test_a_name_outside_ascii_downloads_under_a_safe_name_and_its_own():
+    # vouch.profile.PROFILE_NAME keeps today's profile ids to ASCII slugs, so this is checked
+    # on the header alone: a wider id rule later can't break it.
+    header = api.attachment('readiness-report-jürgen-žal"o-2026-11-06.md')
+
+    assert header == (
+        'attachment; filename="readiness-report-jurgen-zal-o-2026-11-06.md"; '
+        "filename*=UTF-8''readiness-report-j%C3%BCrgen-%C5%BEal%22o-2026-11-06.md"
+    )
+    header.encode("latin-1")  # a header Starlette can send
+
+
+def test_an_attachments_header_holds_no_line_break_or_bare_quote():
+    header = api.attachment('a"\r\nb.md')
+
+    assert "\r" not in header and "\n" not in header
+    assert header == "attachment; filename=\"a-b.md\"; filename*=UTF-8''a%22%0D%0Ab.md"
+
+
+def built_report(**trail: Any) -> dict[str, Any]:
+    """Nordlicht's report with nothing accepted, drawn up on 2026-11-06, as served."""
+    profile = load_named_profile("nordlicht")
+    return dict(
+        report.readiness_report(
+            profile,
+            profile.isa_edition().controls,
+            {},
+            decided={},
+            trail=audit.Page(trail.get("entries", []), None),
+            today=date(2026, 11, 6),
+        )
+    )
+
+
+def test_carried_text_becomes_no_heading_and_no_live_html():
+    built = built_report(entries=[replace(entry("u", 0), id=1, note="<img src=x onerror=alert(1)>")])
+    built["head"] = built["head"] | {"company": "Evil GmbH\n# Injected heading"}
+    built["not_applicable"] = [
+        {
+            "control_id": "5.1.2",
+            "requirement_id": "S3",
+            "text": "Kept <b>bold</b>\n# Not a heading",
+            "reason": "R&D only\n\n## Nor this",
+        }
+    ]
+    first = built["controls"][0]
+    built["controls"][0] = first | {
+        "status": "accepted",
+        "verdict": "evidenced",
+        "reviewer": "Dana Lead",
+        "reviewed_at": "2026-11-05T10:00:00+00:00",
+        "quotes": [
+            {
+                "doc_id": "policy",
+                "version": "2",
+                "section": "1",
+                "quote": "<script>x()</script>\n# second line",
+                "kind": "documented",
+                "stale": False,
+            }
+        ],
+    }
+
+    md = report.markdown(built, report.words_for("en"))
+
+    headings = [line for line in md.splitlines() if line.startswith("#")]
+    assert [h for h in headings if "Injected" in h or "Not a heading" in h or "Nor this" in h] == []
+    assert "<" not in md  # every tag escaped (a `>` is a blockquote's own)
+    assert "- **Company:** Evil GmbH # Injected heading" in md
+    assert "Kept &lt;b&gt;bold&lt;/b&gt; # Not a heading" in md
+    assert "R&amp;D only  ## Nor this" in md
+    assert table_rows(section(md, "Audit trail"))[0][7] == "&lt;img src=x onerror=alert(1)&gt;"
+    # A quote stays a blockquote, line by line as written.
+    assert "> &lt;script&gt;x()&lt;/script&gt;\n> # second line\n>\n> — policy v2 · 1" in md
+
+
+def test_a_backslash_before_a_bar_survives_in_a_table_cell():
+    built = built_report(entries=[replace(entry("u", 0), id=1, note="a\\|b and c\\")])
+
+    md = report.markdown(built, report.words_for("en"))
+
+    (row,) = table_rows(section(md, "Audit trail"))
+    assert len(row) == 11
+    # Each `\` and `|` escaped: a Markdown viewer shows `a\|b and c\`, as written.
+    assert row[7] == "a\\\\\\|b and c\\\\"
+
+
+def test_the_whole_trail_is_read_page_by_page_without_a_gap_or_a_repeat(users, monkeypatch):
+    alice, _ = users
+    restart()
+    audit.process_trail().keep([entry(alice["X-Test-User"], n) for n in range(20)])
+    monkeypatch.setattr(audit, "MAX_PAGE", 7)
+    reads = []
+    entries = audit.ProcessTrail.entries
+
+    def counted(self: audit.ProcessTrail, *args: Any, **kwargs: Any) -> list[audit.AuditEntry]:
+        reads.append(kwargs)
+        return entries(self, *args, **kwargs)
+
+    monkeypatch.setattr(audit.ProcessTrail, "entries", counted)
+
+    every = audit.read_all(audit.process_trail(), alice["X-Test-User"], "nordlicht")
+
+    assert [e.note for e in every] == [f"Entry {n}." for n in range(19, -1, -1)]
+    assert len({e.id for e in every}) == 20
+    assert len(reads) == 3  # 7, 7 and 6
+    assert {r["limit"] for r in reads} == {8}  # a page of 7, and one more to see if there's next
