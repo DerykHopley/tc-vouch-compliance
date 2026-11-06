@@ -383,6 +383,13 @@ textarea.field { resize: vertical; font-family: inherit; }
   .report { max-width: none; padding: 0; display: block; }
   .report.wrap { padding-inline: 0; }
   .report-doc { border: 0; border-radius: 0; padding: 0; }
+  /* The sheet and its parts flow as blocks, not grids: a grid placed the item after a table that broke across pages
+     as if the table had not grown from the break, so a heading overlapped the table's last row (#296). The gaps
+     become margins. */
+  .report-doc, .report-part, .report-group { display: block; }
+  .report-doc > * + * { margin-top: 28px; }
+  .report-part > * + * { margin-top: 10px; }
+  .report-group > * + * { margin-top: 6px; }
   .print-only { display: block; }
   /* No table scrolls or clips: each fits the page's width, its long values wrapping. */
   .table-wrap { overflow: visible; }
@@ -391,8 +398,11 @@ textarea.field { resize: vertical; font-family: inherit; }
      narrows its column's least width, so an auto-laid table fits the page. */
   .report-table th, .report-table td { overflow-wrap: break-word; }
   .report-table .mono { overflow-wrap: anywhere; }
-  .report-table .report-q, .report-trail .report-q { min-width: 0; max-width: none; }
+  /* The question and note cells too: on screen they break anywhere, which in print squeezed the trail's Note to a
+     word's width, breaking its words (#296). */
+  .report-table .report-q, .report-trail .report-q { min-width: 0; max-width: none; overflow-wrap: break-word; }
   .report-trail .mono { font-size: 9px; }
+  .report-trail .report-q { min-width: 16ch; }
   .report-line { white-space: normal; }
   .report-table tr { break-inside: avoid; }
   .report-table thead { display: table-header-group; }
