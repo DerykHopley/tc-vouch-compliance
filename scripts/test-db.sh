@@ -29,11 +29,12 @@ trap 'exit 130' INT TERM
 
 "$CONTAINER" run -d --rm --name "$name" -e POSTGRES_PASSWORD=throwaway \
   -p "127.0.0.1:$port:5432" docker.io/library/postgres:16 >/dev/null
+# Over TCP: the image first runs a socket-only server while it sets the database up, then restarts.
 for _ in $(seq 1 60); do
-  "$CONTAINER" exec "$name" pg_isready -U postgres >/dev/null 2>&1 && break
+  "$CONTAINER" exec "$name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
   sleep 1
 done
-"$CONTAINER" exec "$name" pg_isready -U postgres >/dev/null 2>&1 \
+"$CONTAINER" exec "$name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 \
   || { echo "test-db: Postgres didn't start within a minute in $name." >&2; exit 1; }
 
 if [ $# -eq 0 ]; then
