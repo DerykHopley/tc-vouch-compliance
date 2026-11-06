@@ -50,7 +50,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
 from vouch.chat import PageContext
-from vouch.chat_citations import UNCITED, checked_reply
+from vouch.chat_citations import CITE, UNCITED, checked_reply
 from vouch.citations import Citation, CitationClaim, QuoteChecker, normalise
 from vouch.documents import EvidenceKind
 from vouch.dossier import CardStatus, NextAction, NextStep, overview
@@ -58,10 +58,13 @@ from vouch.graph import (
     EVIDENCE_TOOLS,
     GUARD,
     NOT_APPLICABLE,
+    OUTPUT_RETRIES,
     SEARCH_POLICIES,
     SEARCH_RECORDS,
     Assessment,
+    OutputCheckError,
     RequirementVerdict,
+    claims_audit_result,
     counts_towards_roll_up,
     plural,
     roll_up_words,
@@ -807,6 +810,19 @@ class ChatState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
+ANSWER_REFUSED = "output-check"
+"""The name on the message that asks the model for its answer again (#249): the turn's own, not
+one of the lead's, so it starts no turn and is never taken for the lead's question."""
+ASKED_AGAIN_STEP = (
+    "Asked for the answer again: it claimed an audit result, which Vouch never claims."
+)
+
+
+def _is_lead(message: BaseMessage) -> bool:
+    """A message the compliance lead wrote (the greeting's request too), not the output check's."""
+    return isinstance(message, HumanMessage) and message.name != ANSWER_REFUSED
+
+
 REPLY_TEXT = "reply-text"
 """The agent's own event for the turn's answer, whole, its quotes checked: chat_turn redacts it
 and sends it as one `token` event. No tool writes it."""
@@ -832,9 +848,25 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     quote."""
     chat = runtime.context
     messages = state["messages"]
-    lead = max(i for i, m in enumerate(messages) if isinstance(m, HumanMessage))
+    lead = max(i for i, m in enumerate(messages) if _is_lead(m))
     replies = [m for m in messages[lead + 1 :] if isinstance(m, AIMessage)]
     text, dropped = checked_reply("".join(m.text for m in replies), chat.tools.check_quote)
+    # The banned-wording check, as an assessment's answer has it (#249): an answer claiming an
+    # audit result, quotes it cites aside, is never shown; asked again once, then an error.
+    word = claims_audit_result(text, [cite.group(2) for cite in CITE.finditer(text)])
+    if word is not None:
+        asked = sum(
+            1 for m in messages[lead + 1 :] if isinstance(m, HumanMessage) and not _is_lead(m)
+        )
+        if asked >= OUTPUT_RETRIES:
+            raise OutputCheckError(f"the chat's answer claimed an audit result (“{word}”) again")
+        runtime.stream_writer(("step", {"node": GUARD, "text": ASKED_AGAIN_STEP}))
+        refusal = HumanMessage(
+            f"Answer refused: it says “{word}”, an audit result Vouch never claims. Say what "
+            "the evidence shows instead.",
+            name=ANSWER_REFUSED,
+        )
+        return {"messages": [*(_kept(m, "") for m in replies), refusal]}
     for said in dropped:
         runtime.stream_writer(("step", {"node": GUARD, "text": said}))
     if text:
@@ -872,6 +904,12 @@ def _tools(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     return {"messages": replies}
 
 
+def _after_answer(state: ChatState) -> str:
+    """Back to the agent when the answer was refused (#249), else the turn is done."""
+    last = state["messages"][-1]
+    return "agent" if isinstance(last, HumanMessage) and last.name == ANSWER_REFUSED else END
+
+
 def _next_node(state: ChatState) -> str:
     last = state["messages"][-1]
     return "tools" if isinstance(last, AIMessage) and last.tool_calls else "answer"
@@ -886,7 +924,7 @@ def _compiled() -> CompiledStateGraph:
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", _next_node, ["tools", "answer"])
     graph.add_edge("tools", "agent")
-    graph.add_edge("answer", END)
+    graph.add_conditional_edges("answer", _after_answer, ["agent", END])
     return graph.compile()
 
 
@@ -907,7 +945,7 @@ def _window(messages: list[AnyMessage]) -> list[AnyMessage]:
         for m in messages
         if not (isinstance(m, AIMessage) and any(c["id"] not in answered for c in m.tool_calls))
     ]
-    leads = [i for i, m in enumerate(kept) if isinstance(m, HumanMessage)]
+    leads = [i for i, m in enumerate(kept) if _is_lead(m)]
     start = next((i for i in leads if i >= len(kept) - HISTORY_WINDOW), leads[-1] if leads else 0)
     return kept[start:]
 
