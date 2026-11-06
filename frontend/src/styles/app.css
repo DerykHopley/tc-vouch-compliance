@@ -26,6 +26,8 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .prof .field { flex: 0 1 auto; max-width: 100%; border-radius: 999px; }
 
 /* Buttons and chips */
+/* A link on its own line meets the 44px touch-target floor (design.md, Accessibility floor). */
+.link-target { display: inline-flex; align-items: center; min-height: 44px; }
 .btn { min-height: 44px; border: 1px solid var(--rule); background: var(--sheet); border-radius: 999px; padding: 7px 16px; font-weight: 500; }
 .btn:hover { border-color: var(--navy); }
 .btn-ghost { border-color: transparent; background: none; color: var(--navy); padding: 4px 10px; }
