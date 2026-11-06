@@ -116,7 +116,7 @@ Where it is enforced:
 - **In the prompts:** the assessment's and the chat's system prompts forbid the words.
 - **In code, on every assessment:** the graph's `check_answer` step refuses an answer that claims an audit result and asks again; `remediate` does the same for each drafted remediation item ([`vouch.graph`](../src/vouch/graph.py), `claims_audit_result`). The words are listed per language in [`vouch.language`](../src/vouch/language.py), and a negation ("not compliant") or a quote from the evidence doesn't count.
 
-In the chat the rule is the prompt's; the chat's code check is on quotes (every quote checked against its document), not on these words.
+- **In code, on every chat answer (Fix #249):** an answer that claims an audit result is asked for once more, with a guard step; a second such answer ends in the formal error, and the refused answer is removed from the thread ([`vouch.chat_agent`](../src/vouch/chat_agent.py), the same `claims_audit_result`). The chat's quotes are checked against their documents as well.
 
 **Reason:** a TISAX label or ISO certificate comes only from an accredited audit. A tool that says "compliant" overstates, and could mislead a manager reading its output.
 
