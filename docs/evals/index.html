@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vouch model evals</title>
+<meta name="description" content="How well each model assesses TISAX evidence through Vouch's agent: verdicts, controls, citations, cost.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+/* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), plus two chart
+   colours checked with the dataviz palette validator in each mode. */
+:root {
+  --paper: #E8E7E3; --sheet: #F7F7F5; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
+  --navy: #1F3B6E; --brass: #A8834A;
+  --evidenced: #3F7A55; --partly-evidenced: #A06E22; --not-evidenced: #A4433F;
+  --s1: #2F62B5; --s2: #C07A1C;
+  --f-display: "Libre Caslon Display", Georgia, serif;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  --evidenced: #7DBE93; --partly-evidenced: #E0B064; --not-evidenced: #E08A80;
+  --s1: #3987E5; --s2: #C98500;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  --evidenced: #7DBE93; --partly-evidenced: #E0B064; --not-evidenced: #E08A80;
+  --s1: #3987E5; --s2: #C98500;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 var(--f-body); }
+a { color: var(--navy); }
+main { max-width: 72rem; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 20px; }
+header { display: grid; gap: 8px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.eyebrow { font: 12px/1.4 var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+h1 { font: 400 clamp(32px, 6vw, 48px)/1.1 var(--f-display); margin: 0; text-wrap: balance; }
+.lede { max-width: 62ch; margin: 0; font-size: 17px; }
+h2 { font-size: 18px; font-weight: 600; margin: 0; }
+h3 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; }
+.muted { color: var(--muted); font-size: 13px; }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.grid2 { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); }
+.findings { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 75ch; }
+.findings b { font-weight: 600; }
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+.tile { border-left: 3px solid var(--s1); padding: 2px 0 2px 12px; }
+.tile .v { font: 400 32px/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 13px; color: var(--muted); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 14px; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: middle; white-space: nowrap; }
+td.err { white-space: normal; min-width: 18rem; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+td.err { font: 12px/1.4 var(--f-mono); color: var(--muted); }
+.barcell { display: flex; align-items: center; gap: 8px; min-width: 9rem; }
+.barcell i { display: block; height: 8px; border-radius: 4px; background: var(--rule); flex: 1; position: relative; overflow: hidden; }
+.barcell i b { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--s1); }
+.barcell span { min-width: 5.5rem; text-align: right; white-space: nowrap; }
+.barcell small { color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.seg button { font: inherit; font-size: 13px; background: none; color: var(--ink); border: 0; padding: 4px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.seg button:focus-visible, .theme:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.theme { font: inherit; font-size: 13px; background: none; color: var(--muted); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+#scatter, #paired { overflow-x: auto; }
+#scatter svg, #paired svg { min-width: 30rem; }
+svg text { font-family: var(--f-body); font-size: 12px; fill: var(--ink); }
+svg .axis text { fill: var(--muted); font-size: 11px; }
+svg .grid line { stroke: var(--rule); }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--sheet); font-size: 12px; line-height: 1.45; padding: 6px 9px; border-radius: 6px; max-width: 18rem; opacity: 0; transition: opacity .1s; z-index: 10; }
+.cm-wrap { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); }
+.cm { display: grid; grid-template-columns: auto repeat(3, 1fr); gap: 2px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cm .h { color: var(--muted); padding: 2px 4px; align-self: end; }
+.cm .c { text-align: center; padding: 8px 0; border-radius: 3px; }
+.cm .c.diag { outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
+.cm-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.ctl { display: grid; gap: 2px; font-size: 12px; font-variant-numeric: tabular-nums; min-width: 40rem; }
+.ctl .r { display: grid; gap: 2px; align-items: stretch; }
+.ctl .lab { color: var(--muted); padding: 4px 2px; }
+.ctl .cell { padding: 4px 6px; border-radius: 3px; }
+.ctl .cell.fail { color: var(--not-evidenced); border: 1px dashed var(--not-evidenced); font-size: 11px; }
+dl { margin: 0; display: grid; gap: 4px; max-width: 75ch; }
+dt { font-weight: 600; }
+dd { margin: 0 0 8px; color: var(--muted); }
+code, pre { font-family: var(--f-mono); font-size: 13px; }
+pre { margin: 0; padding: 12px; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; overflow-x: auto; }
+footer { color: var(--muted); font-size: 13px; }
+@media (max-width: 40rem) { .card { padding: 16px; } .lede { font-size: 16px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="top">
+      <p class="eyebrow">Vouch · TISAX audit-readiness agent · eval report</p>
+      <button class="theme" id="theme" type="button" aria-label="Switch light or dark">Dark</button>
+    </div>
+    <h1>Which model should assess the evidence?</h1>
+    <p class="lede">Each model assessed the same 12 VDA ISA controls for a fictional company through Vouch's agent, and each verdict was compared with an expected answer. The runs were on 5 November 2026. Every number here is built from the raw results committed in <a href="https://github.com/DerykHopley/tc-vouch-compliance/tree/main/evals">evals/</a>, without calling a model.</p>
+  </header>
+
+  <section class="card" aria-labelledby="h-find">
+    <h2 id="h-find">What the runs show</h2>
+    <div class="tiles" id="tiles"></div>
+    <ul class="findings">
+      <li><b>Sonnet 5.5 is the most accurate through Vouch's agent</b>: on Nordlicht it gets 76% of the requirement verdicts and 75% of the control verdicts right, at about $0.10 per assessment.</li>
+      <li><b>GPT-6 Luna is the best value.</b> It scores 68%, against GPT-6.1 Sol's 69%, at about one eighteenth of Sol's cost ($0.003 against $0.057 per assessment), and none of its cases failed.</li>
+      <li><b>A router came close to Sonnet.</b> Jev Router, which picks a model for each call, gets 70% of verdicts and the same 75% of controls as Sonnet, at a third of Sonnet's cost.</li>
+      <li><b>Most of the lost points come from Vouch's search loop, not from the models' judgement.</b> With all 20 evidence documents in the prompt, Sonnet reaches 90% instead of 76%, and Haiku 80% instead of 51%. That is follow-up <a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/188">#188</a>: assess a small profile with all of its evidence in one prompt.</li>
+      <li><b>The local model is not usable yet.</b> gpt-oss 20b, run on a home GPU, failed 7 of 12 cases: it ran out of its call budget or wrote tool calls Vouch couldn't read.</li>
+      <li><b>Read Alpenwerk's scores with care.</b> Its expected answers were drafted by an agent, and the owner has checked only 5 of its 100. Nordlicht's were all reviewed.</li>
+    </ul>
+  </section>
+
+  <div class="grid2">
+    <section class="card" aria-labelledby="h-cost">
+      <h2 id="h-cost">Accuracy against cost, Nordlicht</h2>
+      <p class="muted">Share of the 84 requirement verdicts right, against the mean model cost of one control assessment (log scale; the judge's cost left out). Hover a point for its numbers.</p>
+      <div id="scatter"></div>
+    </section>
+
+    <section class="card" aria-labelledby="h-ctx">
+      <h2 id="h-ctx">Through Vouch's agent, or with all the evidence in the prompt</h2>
+      <p class="muted">The same 84 Nordlicht requirements. The second setup was one pass with all 20 documents and the same rules, run on a Claude subscription. It had no search, quote check or output guard. Opus and Fable were only run that way.</p>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Through Vouch's agent</span><span><i style="background:var(--s2)"></i>All evidence in the prompt</span></div>
+      <div id="paired"></div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="h-scores">
+    <div class="row">
+      <h2 id="h-scores">Scores by run</h2>
+      <div class="seg" role="group" aria-label="Profile" id="profile-filter"></div>
+    </div>
+    <p class="muted">One run per model and profile: 12 controls, each assessed once. A failed case counts as wrong. Cost and time are means per assessment, leaving out the judge; run cost includes the judge.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Model</th><th>Profile</th><th>Verdicts right</th><th>Controls right</th><th>Citations expected</th>
+          <th class="num">Faithfulness</th><th>Judge</th><th class="num">Failed</th><th class="num">Tokens</th><th class="num">Cost</th><th class="num">Seconds</th><th class="num">Run cost</th>
+        </tr></thead>
+        <tbody id="runs-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-full">
+    <h2 id="h-full">All the evidence in the prompt: the numbers</h2>
+    <p class="muted">"Stricter" means a verdict lower than the expected one (for example, partly evidenced where evidenced was expected). "More generous" means a higher one.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Model</th><th>Verdicts right</th><th>Controls right</th><th>Citations expected</th><th class="num">Stricter</th><th class="num">More generous</th></tr></thead>
+        <tbody id="full-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-cm">
+    <h2 id="h-cm">Where the verdicts go</h2>
+    <p class="muted">Each requirement's expected verdict (rows) against the model's verdict (columns), for the cases that ran. The outlined diagonal is right. Cells left of it are stricter than the expected answer; cells right of it are more generous.</p>
+    <div class="cm-wrap" id="confusion"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-ctl">
+    <h2 id="h-ctl">Requirements right, by control</h2>
+    <p class="muted">Right out of the control's requirements; a darker cell is more right. A dashed cell is a case that failed before it gave any verdicts.</p>
+    <div class="scroll"><div class="ctl" id="controls"></div></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-fail">
+    <h2 id="h-fail">Cases that failed</h2>
+    <p class="muted">A failed case gives no verdicts. "Claimed an audit result" is Vouch's own output guard refusing an answer that said a control passed, which Vouch must never say.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Model</th><th>Profile</th><th>Control</th><th>Why</th><th>Error</th></tr></thead>
+        <tbody id="fail-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-method">
+    <h2 id="h-method">How it was measured</h2>
+    <dl>
+      <dt>The task</dt><dd>Vouch assesses one VDA ISA 2027.1 control at a time. It searches the company's evidence, quotes it, and gives each of the control's requirements a verdict: evidenced, partly evidenced or not evidenced. The profiles are two fictional companies: Nordlicht (84 requirements, 20 documents) and Alpenwerk (100 requirements).</dd>
+      <dt>Verdicts right</dt><dd>Requirements whose verdict matches the expected answer.</dd>
+      <dt>Controls right</dt><dd>Controls whose rolled-up verdict matches the expected one. The control is evidenced only when every counted requirement is evidenced.</dd>
+      <dt>Citations expected</dt><dd>Of the documents cited after Vouch's quote check, the share that the expected answer also cites.</dd>
+      <dt>Faithfulness</dt><dd>DeepEval's score of how closely each answer sticks to the passages it cites, as a mean over the answers the judge could score. GPT-6.1 Terra judged the Anthropic, local and router runs. Sonnet 5.5 judged the OpenAI runs, so no OpenAI model judged OpenAI's answers.</dd>
+      <dt>Jev Router</dt><dd>TypeSafe's router on OpenRouter: each call may go to a different model, at that model's price. These results record the router but not which models it picked; recording that is <a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/185">#185</a>.</dd>
+      <dt>Expected answers</dt><dd>Nordlicht's were reviewed by the owner (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/111">#111</a>). Alpenwerk's were drafted by an agent, and the owner has checked 5 of 100 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/50">#50</a>). A model that judges the way the drafter did scores higher there.</dd>
+      <dt>Limits</dt><dd>Each model ran once on each profile, so one or two verdicts can move a score by a few points. Mistral was left out: Small is blocked by an OpenRouter account setting, and Large's estimate was over the day's budget.</dd>
+    </dl>
+    <h3>Rebuild this page</h3>
+    <pre>python3 -I -B scripts/eval-site.py     # evals/kept + evals/full-context → docs/evals/data.js
+uv run python -m vouch.evals --profile nordlicht --model openai/gpt-6-luna --keep   # a new paid run: estimates its cost and asks first</pre>
+  </section>
+
+  <footer>Built from <span id="nfiles"></span> raw result files in <a href="https://github.com/DerykHopley/tc-vouch-compliance">DerykHopley/tc-vouch-compliance</a>.</footer>
+</main>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script src="data.js"></script>
+<script>
+(() => {
+  const D = window.EVAL;
+  const $ = (id) => document.getElementById(id);
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const money = (v) => v == null ? '' : v === 0 ? '$0' : `$${v < 0.01 ? v.toFixed(4) : v.toFixed(3)}`;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const NS = 'http://www.w3.org/2000/svg';
+  const svgEl = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+  const label = (r) => `${r.model} · ${r.profile}`;
+
+  // Theme: follows the system until the button picks one.
+  const root = document.documentElement, btn = $('theme');
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const syncBtn = () => { btn.textContent = dark() ? 'Light' : 'Dark'; };
+  try { const t = localStorage.getItem('vouch-evals-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+  btn.addEventListener('click', () => { root.dataset.theme = dark() ? 'light' : 'dark'; try { localStorage.setItem('vouch-evals-theme', root.dataset.theme); } catch (e) {} syncBtn(); });
+  syncBtn();
+
+  // Tooltip shared by the charts.
+  const tip = $('tip');
+  const showTip = (ev, lines) => {
+    tip.replaceChildren(...lines.map((l, i) => { const d = el('div', null, l); if (i === 0) d.style.fontWeight = '600'; return d; }));
+    const x = Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8), y = Math.max(8, ev.clientY - tip.offsetHeight - 12);
+    tip.style.left = `${x}px`; tip.style.top = `${y}px`; tip.style.opacity = 1;
+  };
+  const hideTip = () => { tip.style.opacity = 0; };
+
+  // Headline tiles.
+  const nord = D.runs.filter((r) => r.profile === 'Nordlicht');
+  const best = nord.slice().sort((a, b) => b.verdict_accuracy - a.verdict_accuracy)[0];
+  const spend = D.runs.reduce((s, r) => s + r.run_cost, 0);
+  const ctxBest = D.full_context.slice().sort((a, b) => b.verdicts[0] - a.verdicts[0])[0];
+  for (const [v, k] of [
+    [pct(best.verdict_accuracy), `best through Vouch's agent (${best.model}, Nordlicht)`],
+    [pct(ctxBest.verdicts[0] / ctxBest.verdicts[1]), `best with all the evidence in the prompt (${ctxBest.model})`],
+    [String(D.runs.length), `runs through the agent, ${D.runs.reduce((s, r) => s + r.cases, 0)} assessments`],
+    [`$${spend.toFixed(2)}`, 'paid model spend for these runs, judges included'],
+  ]) { const t = el('div', 'tile'); t.append(el('div', 'v', v), el('div', 'k', k)); $('tiles').append(t); }
+
+  // Scatter: accuracy against cost, log x; the free local model sits on its own "$0" tick.
+  (() => {
+    const W = 520, H = 320, m = {l: 44, r: 20, t: 12, b: 40};
+    const lo = Math.log10(0.001), hi = Math.log10(0.2), zeroX = m.l + 14;
+    const xs = (c) => c ? m.l + 44 + (Math.log10(c) - lo) / (hi - lo) * (W - m.l - m.r - 44) : zeroX;
+    const ys = (v) => m.t + (1 - v) * (H - m.t - m.b);
+    const s = svgEl('svg', {viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Verdicts right against cost per assessment, Nordlicht runs'});
+    const g = svgEl('g', {class: 'grid'}), ax = svgEl('g', {class: 'axis'});
+    for (const v of [0, .25, .5, .75, 1]) { g.append(svgEl('line', {x1: m.l, x2: W - m.r, y1: ys(v), y2: ys(v)})); ax.append(svgEl('text', {x: m.l - 8, y: ys(v) + 4, 'text-anchor': 'end'}, pct(v))); }
+    for (const c of [0.001, 0.01, 0.1]) ax.append(svgEl('text', {x: xs(c), y: H - m.b + 16, 'text-anchor': 'middle'}, `$${c}`));
+    ax.append(svgEl('text', {x: zeroX, y: H - m.b + 16, 'text-anchor': 'middle'}, '$0'));
+    ax.append(svgEl('text', {x: (W + m.l) / 2, y: H - 4, 'text-anchor': 'middle'}, 'cost per assessment (log scale)'));
+    s.append(g, ax);
+    const LEFT = new Set(['Jev Router', 'Sonnet 5.5']);
+    for (const r of nord.slice().sort((a, b) => a.cost - b.cost)) {
+      const x = xs(r.cost), y = ys(r.verdict_accuracy);
+      const dot = svgEl('circle', {cx: x, cy: y, r: 5, fill: 'var(--s1)', stroke: 'var(--sheet)', 'stroke-width': 2});
+      const hit = svgEl('circle', {cx: x, cy: y, r: 14, fill: 'transparent', tabindex: 0});
+      const lines = [r.model, `${pct(r.verdict_accuracy)} of verdicts right (${r.verdicts[0]} of ${r.verdicts[1]})`, `${pct(r.control_accuracy)} of controls right`, `${money(r.cost) || '$0'} per assessment`, `${r.failed} of ${r.cases} cases failed`];
+      hit.addEventListener('mousemove', (ev) => showTip(ev, lines)); hit.addEventListener('mouseleave', hideTip);
+      hit.addEventListener('focus', () => { const b = hit.getBoundingClientRect(); showTip({clientX: b.right, clientY: b.top}, lines); }); hit.addEventListener('blur', hideTip);
+      // Labels sit right of their point, except where a neighbour's point is in the way.
+      const anchor = LEFT.has(r.model) ? 'end' : 'start', ly = y + 4;
+      s.append(dot, svgEl('text', {x: anchor === 'end' ? x - 9 : x + 9, y: ly, 'text-anchor': anchor}, r.model), hit);
+    }
+    $('scatter').append(s);
+  })();
+
+  // Paired bars: pipeline against full context, per model.
+  (() => {
+    const models = ['Sonnet 5.5', 'Opus 5.5', 'Fable 5.1', 'Haiku 5.5'];
+    const W = 520, rowH = 54, m = {l: 84, r: 44, t: 4}, H = m.t + models.length * rowH;
+    const xs = (v) => m.l + v * (W - m.l - m.r);
+    const s = svgEl('svg', {viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Verdicts right through the agent and with all evidence in the prompt'});
+    const g = svgEl('g', {class: 'grid'});
+    for (const v of [0, .5, 1]) g.append(svgEl('line', {x1: xs(v), x2: xs(v), y1: m.t, y2: H}));
+    s.append(g);
+    models.forEach((name, i) => {
+      const y0 = m.t + i * rowH;
+      s.append(svgEl('text', {x: 0, y: y0 + 26}, name));
+      const pipe = nord.find((r) => r.model === name), full = D.full_context.find((r) => r.model === name);
+      const bars = [[pipe && pipe.verdict_accuracy, 'var(--s1)', "Through Vouch's agent", pipe], [full && full.verdicts[0] / full.verdicts[1], 'var(--s2)', 'All evidence in the prompt', full]];
+      bars.forEach(([v, col, what, row], j) => {
+        const y = y0 + 8 + j * 20;
+        if (v == null) { s.append(svgEl('text', {x: xs(0) + 4, y: y + 11, class: 'axis', fill: 'var(--muted)', 'font-size': 11}, 'not run')); return; }
+        const rect = svgEl('rect', {x: xs(0), y, width: Math.max(2, xs(v) - xs(0)), height: 14, rx: 4, fill: col});
+        const n = row.verdicts;
+        rect.addEventListener('mousemove', (ev) => showTip(ev, [name, what, `${pct(v)} of verdicts right (${n[0]} of ${n[1]})`]));
+        rect.addEventListener('mouseleave', hideTip);
+        s.append(rect, svgEl('text', {x: xs(v) + 6, y: y + 11}, pct(v)));
+      });
+    });
+    $('paired').append(s);
+  })();
+
+  // Scores table with a profile filter.
+  const bar = (td, v, n) => {
+    const w = el('div', 'barcell'), i = el('i'), b = el('b'); b.style.width = `${Math.max(0, Math.min(1, v)) * 100}%`; i.append(b);
+    const sp = el('span', null, `${pct(v)} `); if (n) sp.append(el('small', null, `${n[0]}/${n[1]}`)); w.append(i, sp); td.append(w);
+  };
+  const profiles = ['All', ...new Set(D.runs.map((r) => r.profile))];
+  let current = 'All';
+  try { const p = localStorage.getItem('vouch-evals-profile'); if (profiles.includes(p)) current = p; } catch (e) {}
+  const drawRuns = () => {
+    const tb = $('runs-body'); tb.replaceChildren();
+    for (const r of D.runs.filter((r) => current === 'All' || r.profile === current).sort((a, b) => b.verdict_accuracy - a.verdict_accuracy)) {
+      const tr = el('tr'); const td = (t, c) => { const x = el('td', c, t); tr.append(x); return x; };
+      td(r.model); td(r.profile);
+      bar(td(), r.verdict_accuracy, r.verdicts); bar(td(), r.control_accuracy, r.controls); bar(td(), r.citation_precision, r.citations);
+      td(r.faithfulness == null ? '' : r.faithfulness.toFixed(2), 'num').title = `${r.judged} answers judged`; td(r.judge);
+      td(`${r.failed} of ${r.cases}`, 'num'); td(r.tokens == null ? '' : r.tokens.toLocaleString('en'), 'num');
+      td(money(r.cost) || '$0', 'num'); td(r.seconds == null ? '' : r.seconds.toFixed(0), 'num'); td(`$${r.run_cost.toFixed(2)}`, 'num');
+      tb.append(tr);
+    }
+    for (const b of $('profile-filter').children) b.setAttribute('aria-pressed', String(b.dataset.p === current));
+  };
+  for (const p of profiles) {
+    const b = el('button', null, p); b.type = 'button'; b.dataset.p = p;
+    b.addEventListener('click', () => { current = p; try { localStorage.setItem('vouch-evals-profile', p); } catch (e) {} drawRuns(); });
+    $('profile-filter').append(b);
+  }
+  drawRuns();
+
+  // Full-context table.
+  for (const r of D.full_context.slice().sort((a, b) => b.verdicts[0] - a.verdicts[0])) {
+    const tr = el('tr'); const td = (t, c) => { const x = el('td', c, t); tr.append(x); return x; };
+    td(r.model); bar(td(), r.verdicts[0] / r.verdicts[1], r.verdicts); bar(td(), r.controls[0] / r.controls[1], r.controls); bar(td(), r.citations[0] / r.citations[1], r.citations);
+    td(String(r.stricter), 'num'); td(String(r.generous), 'num');
+    $('full-body').append(tr);
+  }
+
+  // Confusion grids, one per run.
+  const V = ['not-evidenced', 'partly-evidenced', 'evidenced'], VL = {'not-evidenced': 'Not', 'partly-evidenced': 'Partly', 'evidenced': 'Evidenced'};
+  for (const r of D.runs) {
+    const mine = D.requirements.filter((q) => q.run === r.run);
+    const count = (e, v) => mine.filter((q) => q.expected === e && q.verdict === v).length;
+    const max = Math.max(1, ...V.flatMap((e) => V.map((v) => count(e, v))));
+    const wrap = el('div'); wrap.append(el('div', 'cm-title', `${label(r)} (${mine.length})`));
+    const g = el('div', 'cm'); g.append(el('div', 'h', 'Expected ↓ / given →'));
+    for (const v of V) g.append(el('div', 'h', VL[v]));
+    for (const e of V) {
+      g.append(el('div', 'h', VL[e]));
+      for (const v of V) {
+        const n = count(e, v), c = el('div', `c${e === v ? ' diag' : ''}`, String(n));
+        c.style.background = n ? `color-mix(in srgb, var(--s1) ${Math.round(12 + 68 * n / max)}%, transparent)` : 'transparent';
+        if (n / max > 0.55) c.style.color = '#fff';
+        c.title = `${n} expected ${VL[e].toLowerCase()}, given ${VL[v].toLowerCase()}`;
+        g.append(c);
+      }
+    }
+    wrap.append(g); $('confusion').append(wrap);
+  }
+
+  // By control.
+  (() => {
+    const box = $('controls'), runs = D.runs;
+    const controls = [...new Set(D.cases.map((c) => c.control))].sort((a, b) => a.localeCompare(b, 'en', {numeric: true}));
+    const cols = `3.5rem repeat(${runs.length}, minmax(4.25rem, 1fr))`;
+    const head = el('div', 'r'); head.style.gridTemplateColumns = cols; head.append(el('div'));
+    for (const r of runs) head.append(el('div', 'lab', label(r)));
+    box.append(head);
+    for (const ctl of controls) {
+      const row = el('div', 'r'); row.style.gridTemplateColumns = cols; row.append(el('div', 'lab', ctl));
+      for (const r of runs) {
+        const c = D.cases.find((x) => x.run === r.run && x.control === ctl), d = el('div', 'cell');
+        if (!c) { /* not in this profile */ }
+        else if (c.outcome === 'failed') { d.className = 'cell fail'; d.textContent = c.failure; d.title = c.error; }
+        else {
+          const share = c.total ? c.right / c.total : 0;
+          d.textContent = `${c.right} of ${c.total}`;
+          d.style.background = `color-mix(in srgb, var(--s1) ${Math.round(6 + 70 * share)}%, transparent)`;
+          if (share > 0.6) d.style.color = '#fff';
+          d.title = `${label(r)}, ${ctl}: control verdict ${c.outcome}`;
+        }
+        row.append(d);
+      }
+      box.append(row);
+    }
+  })();
+
+  // Failures.
+  for (const c of D.cases.filter((c) => c.outcome === 'failed')) {
+    const r = D.runs.find((x) => x.run === c.run), tr = el('tr');
+    for (const [t, cls] of [[r.model], [r.profile], [c.control], [c.failure], [c.error, 'err']]) tr.append(el('td', cls, t));
+    $('fail-body').append(tr);
+  }
+  $('nfiles').textContent = String(D.runs.length + 1);
+})();
+</script>
+</body>
+</html>

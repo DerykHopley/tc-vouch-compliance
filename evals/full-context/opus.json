@@ -1,0 +1,794 @@
+[
+ {
+  "control": "1.1.1",
+  "requirement": "M1",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "information-security-policy"
+  ],
+  "why": "The policy describes how requirements are derived, but the security requirements list itself is not in the evidence."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy",
+   "policy-publication-record"
+  ],
+  "why": "Policy 4.0 approved by management on 14 July 2026 and signed by both managing directors."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "M3",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy"
+  ],
+  "why": "The policy states its objectives and why security matters to the business."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "M4",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy",
+   "policy-publication-record"
+  ],
+  "why": "Intranet export shows all policies published and viewed by 163 of 171 employees."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "M5",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy",
+   "policy-publication-record"
+  ],
+  "why": "Change notices were sent to employees and to suppliers via the supplier portal."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy"
+  ],
+  "why": "Requirements come from the business plan, customer contracts and German law."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "S2",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No document states consequences for non-conformance."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "S3",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy",
+   "policy-publication-record"
+  ],
+  "why": "Nine supporting standards and procedures exist and are published."
+ },
+ {
+  "control": "1.1.1",
+  "requirement": "S4",
+  "verdict": "evidenced",
+  "cites": [
+   "information-security-policy",
+   "policy-publication-record"
+  ],
+  "why": "Review cycles are defined, and the yearly policy review was done on 1 July 2026."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "awareness-training-concept",
+   "training-attendance-record"
+  ],
+  "why": "Reportable events cover personnel, physical, IT and supplier cases, and are taught in the training most staff completed."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "Email, ticket and hotline channels are defined and were used for 43 reports."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "M3",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "The security desk gives reporters feedback, and the register records it."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure"
+  ],
+  "why": "The security desk is the single point of contact."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "S2",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "A hotline for urgent events sits alongside email and tickets, and both were used."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "S3",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "awareness-training-concept",
+   "training-attendance-record"
+  ],
+  "why": "The duty to report is in the employment contract and is covered in the yearly training."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "S4",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "A supplier's report was handled promptly, but no channel for external parties is defined or communicated."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "S5",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "policy-publication-record"
+  ],
+  "why": "Contact details are on the intranet start page and on posters by every time clock."
+ },
+ {
+  "control": "1.6.1",
+  "requirement": "S6",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "Feedback within two working days is defined and recorded for every report."
+ },
+ {
+  "control": "1.6.2",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "Every report was recorded within one working day, with a median of 3 hours to first action."
+ },
+ {
+  "control": "1.6.2",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-register"
+  ],
+  "why": "Register entries show fitting actions taken and closed."
+ },
+ {
+  "control": "1.6.2",
+  "requirement": "M3",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "Reviews after incidents are defined, but none is recorded for incidents 2026-007 and 2026-031."
+ },
+ {
+  "control": "1.6.2",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "security-event-reporting-procedure",
+   "security-event-register"
+  ],
+  "why": "Reports are categorized, qualified and prioritized in the register."
+ },
+ {
+  "control": "1.6.2",
+  "requirement": "S2",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "security-event-reporting-procedure"
+  ],
+  "why": "Owners by category, coordination, urgent channels and deputies are defined; qualification and resources are not."
+ },
+ {
+  "control": "1.6.2",
+  "requirement": "S3",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No strategy for reporting criminal aspects to authorities."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "training-attendance-record"
+  ],
+  "why": "97 percent completed the basic course, and target-group sessions were held."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "S1",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "awareness-training-concept"
+  ],
+  "why": "The concept covers most topics, but not compliance issues of information security."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "S2",
+  "verdict": "evidenced",
+  "cites": [
+   "awareness-training-concept",
+   "training-attendance-record"
+  ],
+  "why": "Administrators, managers, customer-network and prototype staff get their own training."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "S3",
+  "verdict": "evidenced",
+  "cites": [
+   "awareness-training-concept"
+  ],
+  "why": "Management approved the concept on 16 February 2026."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "S4",
+  "verdict": "evidenced",
+  "cites": [
+   "awareness-training-concept",
+   "training-attendance-record"
+  ],
+  "why": "The course runs yearly, and a briefing went out after phishing incident 2026-007."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "S5",
+  "verdict": "evidenced",
+  "cites": [
+   "training-attendance-record"
+  ],
+  "why": "The e-learning platform records completions, and session attendance is listed."
+ },
+ {
+  "control": "2.1.3",
+  "requirement": "S6",
+  "verdict": "evidenced",
+  "cites": [
+   "awareness-training-concept",
+   "security-event-reporting-procedure"
+  ],
+  "why": "The information security officer and security desk are named in courses, on the intranet and on posters."
+ },
+ {
+  "control": "4.1.2",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "Sign-in methods are chosen by exposure, with a second factor for internet-facing systems."
+ },
+ {
+  "control": "4.1.2",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "12-character minimum, breached-password blocking and national authority guidance are applied."
+ },
+ {
+  "control": "4.1.2",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "Sign-in procedures are defined and shown configured in the rollout record."
+ },
+ {
+  "control": "4.1.2",
+  "requirement": "S2",
+  "verdict": "evidenced",
+  "cites": [
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "Directory settings enforce strong passwords."
+ },
+ {
+  "control": "4.1.2",
+  "requirement": "S3",
+  "verdict": "evidenced",
+  "cites": [
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "All 9 administrator accounts require hardware security keys."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "joiner-leaver-record"
+  ],
+  "why": "Joiner, mover and leaver tickets show accounts created, changed and deleted."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "access-review-record"
+  ],
+  "why": "Named personal accounts; the review confirmed every account belongs to a current employee."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M3",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure"
+  ],
+  "why": "Shared accounts are limited to read-only production display terminals, each registered."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M4",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "joiner-leaver-record"
+  ],
+  "why": "Every leaver account was disabled by the end of the last working day."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M5",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "access-review-record"
+  ],
+  "why": "Six-monthly reviews were done in January and in mid-2026."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M6",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "account-management-procedure"
+  ],
+  "why": "Secure handover is defined, but there is no record of it being done."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "M7",
+  "verdict": "evidenced",
+  "cites": [
+   "acceptable-use-policy",
+   "account-management-procedure",
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "All login-information aspects are defined, and password quality is enforced in the directory."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "joiner-leaver-record"
+  ],
+  "why": "A standard employee role with minimal rights is used for new accounts."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S2",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "Nothing addresses manufacturer default accounts or passwords."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S3",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "joiner-leaver-record"
+  ],
+  "why": "Accounts are requested by managers and approved by system owners."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S4",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure",
+   "joiner-leaver-record"
+  ],
+  "why": "A second person, the system owner, approved every joiner account."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S5",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "account-management-procedure",
+   "access-review-record"
+  ],
+  "why": "End dates are defined, but the review found three finished supplier accounts still active."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S6",
+  "verdict": "evidenced",
+  "cites": [
+   "account-management-procedure"
+  ],
+  "why": "Disable on the last working day, delete after 90 days."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S7",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No technical prevention of default passwords is shown."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S8",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "Authenticator apps and hardware keys are used, but no rules for securing the medium are given."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S9",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "access-review-record"
+  ],
+  "why": "Regular reviews happen, but accounts in customers' systems were excluded."
+ },
+ {
+  "control": "4.1.3",
+  "requirement": "S10",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "Nothing prevents interactive login for technical accounts."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "access-control-policy",
+   "joiner-leaver-record",
+   "access-review-record"
+  ],
+  "why": "Request, approval, least privilege and revocation are defined and shown in tickets and the review."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "M2",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "access-control-policy",
+   "access-review-record"
+  ],
+  "why": "Six-monthly reviews cover all account types, but not access in customers' systems."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "access-control-policy"
+  ],
+  "why": "The policy sets a job-based, start-from-no-access strategy."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "S2",
+  "verdict": "evidenced",
+  "cites": [
+   "access-control-policy",
+   "access-review-record"
+  ],
+  "why": "Rights are bundled into owned roles, and 14 roles were reviewed."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "S3",
+  "verdict": "evidenced",
+  "cites": [
+   "access-control-policy",
+   "joiner-leaver-record"
+  ],
+  "why": "Rights are granted by role and job need."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "S4",
+  "verdict": "evidenced",
+  "cites": [
+   "access-control-policy",
+   "authentication-standard",
+   "mfa-rollout-record"
+  ],
+  "why": "Admin rights are held only by separate administrator accounts."
+ },
+ {
+  "control": "4.2.1",
+  "requirement": "S5",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "access-control-policy",
+   "joiner-leaver-record",
+   "access-review-record"
+  ],
+  "why": "Mover tickets remove old roles, but the review found 11 rights left over from role changes."
+ },
+ {
+  "control": "5.1.1",
+  "requirement": "M1",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "encryption-standard",
+   "network-services-register"
+  ],
+  "why": "Strong algorithms are set out, but the encryption standard (approved 2022, yearly cycle) is stale."
+ },
+ {
+  "control": "5.1.1",
+  "requirement": "S1",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "encryption-standard"
+  ],
+  "why": "The concept covers methods, key strengths and key lifecycle, but the standard is past its review cycle."
+ },
+ {
+  "control": "5.1.2",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "network-transfer-standard",
+   "network-services-register",
+   "cloud-services-register"
+  ],
+  "why": "Network services and approved outside services are registered."
+ },
+ {
+  "control": "5.1.2",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "network-transfer-standard",
+   "network-services-register"
+  ],
+  "why": "Rules by classification are defined and reflected in the register."
+ },
+ {
+  "control": "5.1.2",
+  "requirement": "M3",
+  "verdict": "evidenced",
+  "cites": [
+   "network-transfer-standard",
+   "network-services-register"
+  ],
+  "why": "TLS was enforced and verified by an external scan on 8 September 2026."
+ },
+ {
+  "control": "5.1.2",
+  "requirement": "S1",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No measures for correct addressing or delivery are described."
+ },
+ {
+  "control": "5.1.2",
+  "requirement": "S2",
+  "verdict": "evidenced",
+  "cites": [
+   "network-transfer-standard",
+   "network-services-register"
+  ],
+  "why": "Transport and end-to-end encryption are applied by classification."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "logging-standard",
+   "log-review-record"
+  ],
+  "why": "Logging requirements are defined, and logs are collected and reviewed."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "logging-standard",
+   "log-review-record"
+  ],
+  "why": "Administrator and user sign-ins and changes are logged under named accounts."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "M3",
+  "verdict": "evidenced",
+  "cites": [
+   "logging-standard",
+   "log-review-record"
+  ],
+  "why": "A logging scope list assesses each system's need, checked on 9 March 2026."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "M4",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "cloud-services-register"
+  ],
+  "why": "The providers' monitoring options are known but were not considered when approving them."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "M5",
+  "verdict": "evidenced",
+  "cites": [
+   "logging-standard",
+   "log-review-record"
+  ],
+  "why": "Monthly log reviews are recorded with their findings."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "S1",
+  "verdict": "evidenced",
+  "cites": [
+   "logging-standard",
+   "log-review-record"
+  ],
+  "why": "Findings were escalated to the security desk as events."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "S2",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "logging-standard"
+  ],
+  "why": "The central log server is said to be protected, but no record shows it."
+ },
+ {
+  "control": "5.2.4",
+  "requirement": "S3",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No network-level monitoring is described."
+ },
+ {
+  "control": "5.2.5",
+  "requirement": "M1",
+  "verdict": "evidenced",
+  "cites": [
+   "patch-vulnerability-status"
+  ],
+  "why": "Advisories are gathered nightly from manufacturers and the CVE database, and scored with CVSS."
+ },
+ {
+  "control": "5.2.5",
+  "requirement": "M2",
+  "verdict": "evidenced",
+  "cites": [
+   "patch-vulnerability-status"
+  ],
+  "why": "Affected assets and priorities are recorded per CVE."
+ },
+ {
+  "control": "5.2.5",
+  "requirement": "M3",
+  "verdict": "evidenced",
+  "cites": [
+   "patch-vulnerability-status"
+  ],
+  "why": "Each vulnerability is patched, scheduled or risk-accepted."
+ },
+ {
+  "control": "5.2.5",
+  "requirement": "S1",
+  "verdict": "partly-evidenced",
+  "cites": [
+   "patch-vulnerability-status"
+  ],
+  "why": "Patching is tracked, but no defined patch process or testing is shown, and one item is overdue."
+ },
+ {
+  "control": "5.2.5",
+  "requirement": "S2",
+  "verdict": "evidenced",
+  "cites": [
+   "patch-vulnerability-status"
+  ],
+  "why": "RA-2026-03 limits the CAD vault to the design VLAN and logs downloads."
+ },
+ {
+  "control": "5.2.5",
+  "requirement": "S3",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No check that installed patches succeeded is shown."
+ },
+ {
+  "control": "5.2.9",
+  "requirement": "M1",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No backup concept in the evidence."
+ },
+ {
+  "control": "5.2.9",
+  "requirement": "M2",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No recovery concept in the evidence."
+ },
+ {
+  "control": "5.2.9",
+  "requirement": "S1",
+  "verdict": "not-evidenced",
+  "cites": [],
+  "why": "No backup and recovery concept per IT service."
+ }
+]
