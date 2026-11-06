@@ -16,10 +16,16 @@ if [ -z "$service" ] || [ $# -ne 1 ]; then
   exit 2
 fi
 
-value=$(mktemp)
+# Typed at a terminal it would show on screen, and stay in its scrollback: piped only.
+if [ -t 0 ]; then
+  echo "store-secret: pipe the value in (scripts/store-secret.sh $service < file); typed here it" \
+    "would show on screen. Nothing was stored." >&2
+  exit 2
+fi
+
+value=$(mktemp)  # mktemp makes them 0600
 back=$(mktemp)
 trap 'rm -f "$value" "$back"' EXIT
-chmod 600 "$value" "$back"
 cat > "$value"
 
 if ! grep -q '[^[:space:]]' "$value"; then
@@ -34,8 +40,9 @@ fi
 
 secret-tool store --label="$service" service "$service" < "$value"
 secret-tool lookup service "$service" > "$back" || true
-# Trailing newlines aside: whether the keyring keeps a final newline isn't the value's content.
-if [ "$(cat "$value")" != "$(cat "$back")" ]; then
+# Exactly: piped in, secret-tool stores stdin whole to EOF, newlines too, and lookup adds none
+# off a terminal (secret-tool(1), libsecret 0.21).
+if ! cmp -s "$value" "$back"; then
   echo "store-secret: $service reads back different from what was given; check the keyring." >&2
   exit 1
 fi

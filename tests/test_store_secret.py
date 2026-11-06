@@ -6,6 +6,7 @@ CLERK_JWT_KEY) was once stored as its 26-character header and Vouch didn't start
 secret-tool that keeps each entry in a folder, exactly as it was given on standard input."""
 
 import os
+import pty
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,7 +20,8 @@ BASH = shutil.which("bash") or "/bin/bash"
 FAKE_SECRET_TOOL = r"""#!/bin/sh
 echo "secret-tool $*" >> "$CALLS"
 case "$1" in
-  store) last=""; for a in "$@"; do last=$a; done; cat > "$KEYRING/$last" ;;
+  store) last=""; for a in "$@"; do last=$a; done
+    if [ -n "$FIRST_LINE_ONLY" ]; then head -n 1 > "$KEYRING/$last"; else cat > "$KEYRING/$last"; fi ;;
   lookup) [ -f "$KEYRING/$3" ] && cat "$KEYRING/$3" ;;
   *) exit 2 ;;
 esac
@@ -42,20 +44,23 @@ def keyring(tmp_path):
     (bin_dir / "secret-tool").chmod(0o755)
     calls = tmp_path / "calls.log"
 
-    def run(value: str, *args: str):
+    def run(value: str | None, *args: str, first_line_only: bool = False, stdin=None):
         env = {
             **os.environ,
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "KEYRING": str(store),
             "CALLS": str(calls),
+            "FIRST_LINE_ONLY": "yes" if first_line_only else "",
         }
         return subprocess.run(
             [BASH, str(SCRIPT), *args],
             input=value,
+            stdin=stdin,
             check=False,
             capture_output=True,
             text=True,
             env=env,
+            timeout=10,  # a script waiting on a terminal fails here, never hangs the suite
         )
 
     run.store = store
@@ -112,3 +117,25 @@ def test_deploy_md_and_the_wizard_name_the_script():
         text = doc.read_text()
         assert "scripts/store-secret.sh" in text, doc
         assert "secret-tool store --label" not in text, doc  # its prompt keeps one line only
+
+
+def test_a_keyring_that_keeps_only_the_first_line_is_caught(keyring):
+    # The bug itself: a store that kept the PEM's header only. Said, never shown.
+    done = keyring(PEM, "clerk-vouch-jwt-key", first_line_only=True)
+
+    assert done.returncode == 1
+    assert "reads back different" in done.stderr
+    assert "plantedLineOne" not in done.stdout + done.stderr
+
+
+def test_typed_at_a_terminal_it_refuses_before_reading(keyring):
+    leader, follower = pty.openpty()  # stdin a terminal, as when nothing is piped in
+    try:
+        done = keyring(None, "clerk-vouch-secret", stdin=follower)
+    finally:
+        os.close(leader)
+        os.close(follower)
+
+    assert done.returncode == 2
+    assert "pipe the value in" in done.stderr
+    assert not (keyring.store / "clerk-vouch-secret").exists()
