@@ -50,4 +50,5 @@ line-length = 100
 target-version = "py312"
 # trial/ is frozen evidence from the process trial; scripts/design-lint.py and scripts/ticket-lint.py
 # are copies of the rig's.
-extend-exclude = ["trial", "scripts/design-lint.py", "scripts/ticket-lint.py"]
+# .claude/ holds agents' worktrees, others' code in progress: never this checkout's (#96).
+extend-exclude = ["trial", "scripts/design-lint.py", "scripts/ticket-lint.py", ".claude"]
