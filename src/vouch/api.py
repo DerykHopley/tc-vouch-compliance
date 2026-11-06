@@ -57,7 +57,6 @@ from vouch.isa import (
     BaseFrameworkError,
     IsaControl,
     UnknownControlError,
-    load_base_framework,
 )
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
@@ -124,6 +123,7 @@ NOT_A_MEMBER = (
 SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Discord servers."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
+OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -332,6 +332,13 @@ def compliance_profile(
 Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
 
 
+def _unreadable_edition(profile: ComplianceProfile, detail: str) -> HTTPException:
+    """The plain 500 for a profile whose ISA edition can't be read, logged with the error
+    being handled (the response names no file); the caller raises it."""
+    log.exception("the ISA edition for %s could not be read", profile.answer_language)
+    return HTTPException(status_code=500, detail=detail)
+
+
 def requested_assessment(
     request: Annotated[AssessmentRequest, Body()], profile: Profile
 ) -> RequestedAssessment:
@@ -343,8 +350,7 @@ def requested_assessment(
     except UnknownControlError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BaseFrameworkError:
-        log.exception("the ISA edition for %s could not be read", profile.answer_language)
-        raise HTTPException(status_code=500, detail=ASSESSMENT_FAILED) from None
+        raise _unreadable_edition(profile, ASSESSMENT_FAILED) from None
 
 
 def profile_tools(profile: Profile) -> frozenset[str]:
@@ -735,12 +741,14 @@ _paper_requirements: dict[str, tuple[ComplianceProfile, Any]] = {}
 from (#47: one entry per profile, so a switch neither rebuilds nor mixes them)."""
 
 
-def paper_requirements(profile: ComplianceProfile) -> dict[str, list[PaperRequirement]]:
-    """Each control's requirements under the profile (vouch.dossier.requirements_by_control),
+def paper_requirements(
+    profile: ComplianceProfile, controls: Iterable[IsaControl]
+) -> dict[str, list[PaperRequirement]]:
+    """Each of `controls`' requirements under the profile (vouch.dossier.requirements_by_control),
     redacted as the overview is; built once per loaded profile, as they change only with it."""
     kept = _paper_requirements.get(profile.id)
     if kept is None or kept[0] is not profile:
-        built = requirements_by_control(profile, load_base_framework().controls)
+        built = requirements_by_control(profile, controls)
         clean, _ = redact_data(built)
         kept = _paper_requirements[profile.id] = (profile, clean)
     return kept[1]
@@ -752,13 +760,17 @@ def dossier_overview(
 ) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
-    each control's requirements, for its working paper (#41). Redacted as the stream's events
-    are."""
+    each control's requirements, for its working paper (#41); its ISA text in the profile's
+    edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
     latest = newest_by_control(memory, saver)  # from each control's newest thread
     counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
     discarded = items.discarded(memory.user_id, memory.profile_id, counted)
-    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest, discarded))
-    return clean | {"requirements": paper_requirements(profile)}
+    try:
+        controls = profile.isa_edition().controls
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, OVERVIEW_FAILED) from None
+    clean, _ = redact_data(overview(profile, controls, latest, discarded))
+    return clean | {"requirements": paper_requirements(profile, controls)}
 
 
 class ChatRequest(BaseModel):
@@ -781,8 +793,7 @@ def page_context(request: Annotated[ChatRequest, Body()], profile: Profile) -> P
     except UnknownControlError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BaseFrameworkError:
-        log.exception("the ISA edition for %s could not be read", profile.answer_language)
-        raise HTTPException(status_code=500, detail=CHAT_FAILED) from None
+        raise _unreadable_edition(profile, CHAT_FAILED) from None
 
 
 def chat_within_spending(
