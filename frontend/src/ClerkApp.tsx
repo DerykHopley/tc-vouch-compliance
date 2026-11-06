@@ -1,4 +1,4 @@
-import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk } from '@clerk/react'
+import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk, useUser } from '@clerk/react'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { type Access, checkAccess } from './access.ts'
 import type { Gate } from './authConfig.ts'
@@ -6,6 +6,7 @@ import Invitation, { Page, SignInFailed } from './Invitation.tsx'
 import ProfiledApp from './ProfiledApp.tsx'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 import { BY_INVITATION, COURSE_MEMBERS } from './words.ts'
+import { displayName } from './user.ts'
 
 // Clerk mode (#32): Clerk's React package around the app, loaded only when /api/health says clerk (Root.tsx), so local
 // mode fetches nothing of Clerk's. Signed out: the invitation page with Clerk's sign-in (the instance is invitation
@@ -49,6 +50,8 @@ function SignedInOrOut({ gate }: { gate: Gate }) {
 function SignedInApp({ gate }: { gate: Gate }) {
   const { getToken } = useAuth()
   const { signOut } = useClerk()
+  const { user } = useUser()
+  const name = displayName(user) // the user menu's (#222)
   // A layout effect runs before the app's own effects make their first API calls.
   useLayoutEffect(() => {
     setTokenSource(() => getToken())
@@ -71,7 +74,7 @@ function SignedInApp({ gate }: { gate: Gate }) {
     setAttempt((n) => n + 1)
   }
   const leave = () => void signOut()
-  if (access === 'allowed') return <ProfiledApp onSignOut={leave} />
+  if (access === 'allowed') return <ProfiledApp onSignOut={leave} userName={name} />
   const [title, text] = BEFORE_THE_APP[access]
   return (
     <Page pill={(gate === 'discord-server' ? COURSE_MEMBERS : BY_INVITATION).pill} title={title} text={text}>

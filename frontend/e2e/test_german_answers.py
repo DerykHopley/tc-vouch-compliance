@@ -12,6 +12,7 @@ import json
 import re
 
 from playwright.sync_api import Page, Route, expect
+from top_bar import back_to_overview, switch_profile
 
 CONTROL = "4.1.2"
 # A date at the line start and gender stars, which Markdown would turn into a list and italics (#218).
@@ -69,15 +70,15 @@ def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier
     with page.expect_response("**/api/overview"):
         page.goto(vouch_url)
     with page.expect_response("**/api/overview"):
-        page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
-            label="Alpenwerk Präzision GmbH · Austria · German"
-        )
+        switch_profile(page, "Alpenwerk Präzision GmbH · Austria · German")
     page.get_by_role("link", name=f"Open {CONTROL}").click()
     paper = page.get_by_role("region", name="Working paper")
     expect(paper).to_contain_text("Answer language: German")
 
     with page.expect_response("**/api/assessments"):
-        paper.get_by_role("button", name=re.compile(rf"^Assess (again )?{re.escape(CONTROL)}$")).click()
+        paper.get_by_role(
+            "button", name=re.compile(rf"^Assess (again )?{re.escape(CONTROL)}$")
+        ).click()
 
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Teilweise nachgewiesen", exact=True)).to_be_visible()
@@ -85,11 +86,15 @@ def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier
     expect(result.get_by_text("Partly evidenced", exact=True)).to_have_count(0)
     # Marked as German, so a screen reader reads it as German (WCAG 3.1.2).
     expect(result.get_by_text("Teilweise nachgewiesen", exact=True)).to_have_attribute("lang", "de")
-    expect(result.locator(".answer")).to_have_text(GERMAN_ANSWER)  # drawn by Prose (#209), as written
+    expect(result.locator(".answer")).to_have_text(
+        GERMAN_ANSWER
+    )  # drawn by Prose (#209), as written
     expect(result.locator(".answer ol, .answer em")).to_have_count(0)  # no list, no italics (#218)
     # The roll-up's explanation (main's #212) is German and marked so: M1 not evidenced, the control partly.
     roll_up = paper.locator(".roll-up")
-    expect(roll_up).to_have_text("Teilweise nachgewiesen: 0 von 1 Muss-Anforderungen sind vollständig nachgewiesen.")
+    expect(roll_up).to_have_text(
+        "Teilweise nachgewiesen: 0 von 1 Muss-Anforderungen sind vollständig nachgewiesen."
+    )
     expect(roll_up).to_have_attribute("lang", "de")
     expect(result.locator(".answer")).to_have_attribute("lang", "de")
     expect(result.get_by_text("Draft answer", exact=True)).not_to_have_attribute("lang", "de")
@@ -110,24 +115,20 @@ def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier
     # And its control's card in the Dossier (#200).
     page.route("**/api/overview", overview_with_the_run)
     with page.expect_response("**/api/overview"):
-        paper.get_by_role("link", name="← Overview").click()
+        back_to_overview(page)
     card = page.get_by_role("article", name=f"Control {CONTROL}")
     expect(card.locator(".chip")).to_have_text("Teilweise nachgewiesen")
     expect(card.locator(".chip")).to_have_attribute("lang", "de")
     expect(card).to_contain_text("Proposed")
 
 
-def test_an_unassessed_controls_paper_on_alpenwerk_shows_the_german_isa_text(
-    page: Page, vouch_url
-):
+def test_an_unassessed_controls_paper_on_alpenwerk_shows_the_german_isa_text(page: Page, vouch_url):
     """Before any assessment, the paper's title and requirements come from the overview, in
     Alpenwerk's edition of the ISA (#199). 1.6.2 is assessed by no browser check."""
     with page.expect_response("**/api/overview"):
         page.goto(vouch_url)
     with page.expect_response("**/api/overview"):
-        page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
-            label="Alpenwerk Präzision GmbH · Austria · German"
-        )
+        switch_profile(page, "Alpenwerk Präzision GmbH · Austria · German")
     page.get_by_role("link", name="Open 1.6.2").click()
 
     paper = page.get_by_role("region", name="Working paper")

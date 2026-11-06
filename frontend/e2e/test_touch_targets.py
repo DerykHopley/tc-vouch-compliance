@@ -1,6 +1,8 @@
 """Every page's controls meet the touch-target floor at phone width (docs/design.md, Accessibility
 floor). The pages on the profiles server, which reaches the developer page; the chat on its own."""
 
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 from test_guided_chat import assess_in_the_chat
@@ -73,4 +75,16 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
     accepted_with_an_item(page.request, paper_url)  # accepted, with S1's item to approve or discard
     paper = open_paper(page, paper_url)
     expect(row(paper, ITEM).get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_top_bar_menu_and_its_menus_are_at_least_44px(page: Page, profiles_url):
+    # #222: on a phone the tabs, the profile dropdown and the user menu sit behind one Menu button.
+    page.set_viewport_size({"width": 400, "height": 900})
+    with page.expect_response("**/api/overview"):
+        page.goto(profiles_url)
+    bar = page.get_by_role("banner")
+    bar.get_by_role("button", name="Menu", exact=True).click()
+    bar.get_by_role("button", name=re.compile(r"^Profile: ")).click()
+    expect(bar.get_by_role("menuitemradio").first).to_be_visible()
     assert small_targets(page) == []

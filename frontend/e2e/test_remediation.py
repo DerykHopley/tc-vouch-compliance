@@ -14,6 +14,7 @@ from datetime import date, timedelta
 
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 from test_review import CONTROL, assessed, open_paper, row
+from top_bar import back_to_overview, switch_profile
 
 OWNER = "IT security officer"
 ITEM = "S1"
@@ -75,7 +76,7 @@ def back_on_the_overview(page: Page) -> Locator:
     headers, before the app has read the body and shown the new count, so assert on the tile
     with expect (which waits), never a one-time read (#240)."""
     with page.expect_response("**/api/overview"):
-        page.get_by_role("link", name="← Overview").click()
+        back_to_overview(page)
     return remediation_tile(page)
 
 
@@ -178,9 +179,8 @@ def test_one_profiles_approved_items_do_not_show_under_another(page: Page, profi
         page.goto(profiles_url)
     expect(remediation_tile(page)).to_have_text("1")
 
-    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        menu.select_option(label="Testwerk Prüfstand GmbH · Austria · English")
+        switch_profile(page, "Testwerk Prüfstand GmbH · Austria · English")
     expect(remediation_tile(page)).to_have_text("0")
     elsewhere = page.request.get(
         f"{profiles_url}/api/assessments/{thread_id}", headers={"X-Vouch-Profile": "testwerk"}

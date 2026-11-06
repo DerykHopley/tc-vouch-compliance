@@ -288,14 +288,14 @@ describe('The Report tab', () => {
     const fetch = serve(REPORT)
     render(<App />)
     const nav = screen.getByRole('navigation', { name: 'Main' })
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Dossier', 'Report'])
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Overview', 'Report'])
 
     await userEvent.click(within(nav).getByRole('link', { name: 'Report' }))
 
     await shown()
     expect(window.location.pathname).toBe('/report')
     expect(within(nav).getByRole('link', { name: 'Report' }).getAttribute('aria-current')).toBe('page')
-    expect(within(nav).getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+    expect(within(nav).getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBeNull()
     expect(reportReads(fetch)).toBe(1)
   })
 
@@ -308,7 +308,7 @@ describe('The Report tab', () => {
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(within(nav).getByRole('link', { name: 'Report' }).getAttribute('aria-current')).toBe('page')
 
-    await userEvent.click(within(nav).getByRole('link', { name: 'Dossier' }))
+    await userEvent.click(within(nav).getByRole('link', { name: 'Overview' }))
     await userEvent.click(within(nav).getByRole('link', { name: 'Report' }))
     await shown()
     expect(reportReads(fetch)).toBe(2)

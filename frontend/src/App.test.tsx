@@ -95,7 +95,7 @@ describe('Dossier landing', () => {
     render(<App />)
     const top = screen.getByRole('banner')
     expect(within(top).getByText('Vouch')).toBeTruthy()
-    expect(within(top).getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
+    expect(within(top).getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
     expect((await screen.findByRole('heading', { level: 1 })).textContent).toMatch(/prepared for audit/i)
     expect(screen.getByRole('region', { name: 'Readiness' })).toBeTruthy()
     expect(screen.getAllByRole('article', { name: /^Control / })).toHaveLength(12)
@@ -139,7 +139,7 @@ describe('the working paper', () => {
     render(<App />)
     expect(await screen.findByRole('heading', { name: /4.1.2 Question 4.1.2\?/ })).toBeTruthy()
     expect(within(paper()!).getByRole('button', { name: 'Assess 4.1.2' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBeNull()
   })
 
   it('opens from its card with its address, and Back returns to the Dossier', async () => {
@@ -172,7 +172,7 @@ describe('the working paper', () => {
     window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
-    await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
     const card = await screen.findByRole('article', { name: 'Control 4.1.2' })
     expect(within(card).getByText('Assessing')).toBeTruthy()
     await userEvent.click(within(card).getByRole('link', { name: 'Open 4.1.2' }))
@@ -239,7 +239,7 @@ describe('the working paper', () => {
     window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
     await screen.findByRole('alert')
-    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
   })
 
   it("starts the assessment from the Dossier's next step", async () => {
@@ -312,7 +312,7 @@ describe('the working paper', () => {
     serve()
     window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
-    await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
     expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
   })
@@ -341,7 +341,7 @@ describe('the working paper', () => {
     const notFound = await screen.findByRole('region', { name: 'Control not found' })
     expect(within(notFound).getByRole('heading').textContent).toBe('No control 9.9.9')
     expect(paper()).toBeNull()
-    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBeNull()
     await userEvent.click(within(notFound).getByRole('link', { name: '← Overview' }))
     expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
     expect(window.location.pathname).toBe('/')
@@ -392,7 +392,7 @@ describe('the working paper', () => {
     await userEvent.click(within(index).getByRole('link', { name: /^5\.2\.4/ }))
     expect(window.location.pathname).toBe('/controls/5.2.4')
     expect(await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })).toBeTruthy()
-    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', { name: 'Overview' }))
     expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
   })
@@ -413,9 +413,11 @@ describe('theme', () => {
   it('flips with the switch', async () => {
     systemPrefers(false)
     render(<App />)
-    await userEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Dark theme' }))
     expect(document.documentElement.dataset.theme).toBe('dark')
-    await userEvent.click(screen.getByRole('button', { name: 'Light theme' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Light theme' }))
     expect(document.documentElement.dataset.theme).toBe('light')
   })
 })
@@ -477,12 +479,12 @@ describe('Ask Vouch', () => {
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
     const reached = new Set<Element | null>()
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       await userEvent.tab()
       reached.add(document.activeElement)
     }
-    expect(reached.has(screen.getByRole('link', { name: 'Dossier' }))).toBe(true)
-    expect(reached.has(screen.getByRole('button', { name: /theme/i }))).toBe(true)
+    expect(reached.has(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))).toBe(true)
+    expect(reached.has(screen.getByRole('button', { name: 'Your menu' }))).toBe(true)
   })
 
   it('opens with Ctrl+K', async () => {
@@ -963,9 +965,11 @@ describe('Ask Vouch', () => {
 })
 
 describe('local mode', () => {
-  it('has no sign-out: nobody is signed in', () => {
+  it('has no sign-out: nobody is signed in, so the user menu offers only the theme (issue 222)', async () => {
     render(<App />)
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Dark theme'])
+    expect(screen.queryByText(/Signed in as/)).toBeNull()
   })
 })
 

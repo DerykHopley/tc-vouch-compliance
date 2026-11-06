@@ -275,7 +275,7 @@ describe('the control index', () => {
     const index = screen.getByRole('navigation', { name: 'Controls' })
     await userEvent.click(within(index).getByRole('link', { name: /^4\.1\.2/ }))
     expect(onOpen).toHaveBeenCalledWith('4.1.2')
-    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', { name: 'Overview' }))
     expect(onOverview).toHaveBeenCalledOnce()
   })
 })

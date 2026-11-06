@@ -18,7 +18,9 @@ FOCUS_OUTSIDE_SHEET = f"""() => {{
   return el.closest("{SHEET}") ? null : (el.textContent || el.tagName).trim()
 }}"""
 TABS = 7  # the top bar's stops, the profile menu among them (the fixtures hold two profiles)
-REACH = 40  # Shift+Tabs from inside the bubble back to the top bar at 1400px (about 20 on the Dossier)
+REACH = (
+    40  # Shift+Tabs from inside the bubble back to the top bar at 1400px (about 20 on the Dossier)
+)
 
 
 def open_sheet(page: Page, dossier_url: str, width: int, double: bool = False) -> None:
@@ -76,18 +78,21 @@ def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, dossie
     for _ in range(REACH):
         page.keyboard.press("Shift+Tab")
         reached.add(page.evaluate(FOCUS_OUTSIDE_SHEET))
-        if "Dossier" in reached:
+        if "Overview" in reached:
             break
-    assert "Dossier" in reached, reached
-    assert any(name and name.endswith("theme") for name in reached), reached
+    assert "Overview" in reached, reached
+    assert "LU" in reached, reached  # the user menu: local mode's initials (#222)
 
 
 def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
     open_sheet(page, dossier_url, 400)
     page.get_by_role("button", name="Close the chat").click()
     expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
-    page.get_by_role("link", name="Dossier").focus()
-    expect(page.get_by_role("link", name="Dossier")).to_be_focused()
+    # The page takes focus again: on a phone the top bar's Menu button (#222).
+    page.get_by_role("banner").get_by_role("button", name="Menu", exact=True).focus()
+    expect(
+        page.get_by_role("banner").get_by_role("button", name="Menu", exact=True)
+    ).to_be_focused()
     page.get_by_role("button", name="Ask Vouch").click()
     page.keyboard.press("Escape")
     expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
