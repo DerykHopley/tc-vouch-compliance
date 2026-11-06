@@ -180,3 +180,31 @@ def test_the_review_bar_and_override_fit_at_400px_in_light_and_dark(page: Page, 
     expect(bar.get_by_role("button", name="Accept verdict")).to_have_css(
         "background-color", "rgb(227, 203, 159)"
     )
+
+
+def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(page: Page, paper_url):
+    # #226: focus used to land on the page body; a keyboard user had to Tab back from the top.
+    page.set_viewport_size({"width": 400, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    change = row(paper, "M1").get_by_role("button", name="Change M1")
+    change.focus()
+    page.keyboard.press("Enter")
+
+    form = page.get_by_role("form", name="Override M1")
+    expect(form.get_by_label("Verdict")).to_be_focused()
+
+    form.get_by_role("button", name="Cancel").focus()
+    page.keyboard.press("Enter")
+    expect(change).to_be_focused()
+
+    page.keyboard.press("Enter")  # opened again, and saved: focus comes back to Change too
+    form.get_by_label("Verdict").select_option("evidenced")
+    form.get_by_label("Reason (required)").fill(REASON)
+    form.get_by_role("button", name="Save").focus()
+    page.keyboard.press("Enter")
+    expect(change).to_be_focused()
+
+    row(paper, "M1").get_by_role("button", name="Undo the override of M1").focus()
+    page.keyboard.press("Enter")  # Undo goes once pressed: focus moves to Change, not the page
+    expect(change).to_be_focused()
