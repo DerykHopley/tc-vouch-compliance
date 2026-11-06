@@ -242,3 +242,6 @@ def test_a_question_across_controls_is_answered_from_the_reviewed_assessments(pa
     expect(answer).to_contain_text("Documented evidence only:")
     expect(answer).to_contain_text("Not assessed yet:")
     expect(answer).not_to_contain_text("5.1.1: not assessed yet")
+    # #217: after it, each control it names links to its working paper.
+    links = log.locator(".paper-links").last
+    expect(links.get_by_role("link", name="Working paper 5.1.1")).to_be_visible()
