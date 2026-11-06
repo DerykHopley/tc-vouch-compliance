@@ -223,6 +223,9 @@ fi
 [[ "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] \
   || stop "\"$PROJECT_ID\" isn't a project id (6 to 30 lower-case letters, digits and hyphens)."
 REGION=$(saved REGION); REGION="${REGION:-europe-west1}"
+# REGION goes into the sign-in address (#178), so it must be a region's name and nothing more (#192).
+[[ "$REGION" =~ ^[a-z]+-[a-z]+[0-9]+$ ]] \
+  || stop "REGION in $WIZARD_ENV is \"$REGION\", which isn't a Cloud Run region (such as europe-west1). Fix it, then run this again."
 # The course's Discord server (#152), set by hand in $WIZARD_ENV (#153): its members may sign in.
 DISCORD_SERVER_ID=$(saved DISCORD_SERVER_ID)
 [[ -z "$DISCORD_SERVER_ID" || "$DISCORD_SERVER_ID" =~ ^[0-9]{17,20}$ ]] \
@@ -336,7 +339,7 @@ done
 step  # Access
 PROJECT_NUMBER=$(query gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 [[ $DRY == yes ]] && PROJECT_NUMBER=PROJECT_NUMBER
-[[ -n "$PROJECT_NUMBER" ]] || stop "gcloud didn't give project $PROJECT_ID's number. Run this again; if it repeats, check: gcloud projects describe $PROJECT_ID"
+[[ "$PROJECT_NUMBER" =~ ^[0-9]+$ || $DRY == yes ]] || stop "gcloud didn't give project $PROJECT_ID's number (digits only), it gave \"$PROJECT_NUMBER\". Run this again; if it repeats, check: gcloud projects describe $PROJECT_ID"
 ACCOUNT_NOW=$(service_field spec.template.spec.serviceAccountName)
 # A service with no account of its own runs as Compute Engine's default one (Cloud Run's service identity page).
 RUN_AS="${ACCOUNT_NOW:-$PROJECT_NUMBER-compute@developer.gserviceaccount.com}"
