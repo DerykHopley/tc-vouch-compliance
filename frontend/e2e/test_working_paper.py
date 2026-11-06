@@ -43,6 +43,13 @@ def row(paper: Locator, requirement_id: str) -> Locator:
     )
 
 
+def box(locator: Locator) -> dict:
+    """The element's bounding box, which it must have."""
+    found = locator.bounding_box()
+    assert found, locator
+    return found
+
+
 def test_an_assessed_controls_rows_show_verdict_kind_stale_flag_and_quotes(page: Page, paper_url):
     assessed(page.request, paper_url, ASSESSED)
 
@@ -152,12 +159,6 @@ def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400
     assert not scrolls_sideways(page), "the working paper scrolls sideways at 400px in dark"
 
 
-def box(locator: Locator) -> dict:
-    found = locator.bounding_box()
-    assert found, locator
-    return found
-
-
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_on_a_phone_each_requirement_is_a_card_in_order(page: Page, paper_url, scheme):
     """#211 (the owner's option A): at 400px each row is a card: id, column and verdict on one
@@ -174,7 +175,7 @@ def test_on_a_phone_each_requirement_is_a_card_in_order(page: Page, paper_url, s
         verdict = box(card.locator(".verdict-cell .chip"))
         text = box(card.locator(".rq-text"))
         evidence = box(card.locator(".evidence"))
-        reason = box(card.locator(".quotes-cell > div > .why").first)
+        reason = box(card.locator(".reason"))
         # One line: the id and the chip share a band, the chip to the right.
         assert (
             verdict["y"] < head["y"] + head["height"]

@@ -39,7 +39,7 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
     assert small_targets(page) == []
 
 
-def test_a_requirement_card_s_override_and_remediation_controls_are_at_least_44px(
+def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_least_44px(
     page: Page, paper_url
 ):
     # #211: on a phone each requirement is a card; its controls keep the floor there too.

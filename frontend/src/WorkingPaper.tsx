@@ -325,18 +325,25 @@ type JudgedProps = {
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
  * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
  * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
- * to evidenced on screen hides its draft, which the review drops.
+ * to evidenced on screen hides its draft, which the review drops. On a phone each row is a stacked card, by CSS, its
+ * text clamped to 2 lines with a toggle (`RequirementText`, #211).
  */
+/** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
+ * "Show less" toggles it (`aria-expanded`); on a desktop the toggle is hidden and the text shown in full. */
+function RequirementText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const id = useId()
+  return (
+    <td className="rq">
+      <span id={id} className={expanded ? 'rq-text' : 'rq-text clamped'}>{text}</span>
+      <button className="btn btn-ghost rq-toggle" aria-expanded={expanded} aria-controls={id}
+        onClick={() => setExpanded((now) => !now)}>{expanded ? 'Show less' : 'Show full requirement'}</button>
+    </td>
+  )
+}
+
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
-  // On a phone each row is a card and its text is clamped to 2 lines (#211): the requirements shown in full.
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
-  const toggle = (id: string) => setExpanded((now) => {
-    const next = new Set(now)
-    if (!next.delete(id)) next.add(id)
-    return next
-  })
-  const textId = useId()
   return (
     <div className="table-wrap">
       <table className="reqs judged" aria-label="Requirements">
@@ -356,16 +363,8 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
-                <td className="rq">
-                  <span id={`${textId}-${r.id}`} className={expanded.has(r.id) ? 'rq-text' : 'rq-text clamped'}>
-                    {r.text}
-                  </span>
-                  <button className="btn btn-ghost rq-toggle" aria-expanded={expanded.has(r.id)}
-                    aria-controls={`${textId}-${r.id}`} onClick={() => toggle(r.id)}>
-                    {expanded.has(r.id) ? 'Show less' : 'Show full requirement'}
-                  </button>
-                </td>
-                <td>
+                <RequirementText text={r.text} />
+                <td className="verdict-col">
                   <div className="verdict-cell">
                     <VerdictChip verdict={r.verdict} />
                     {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
@@ -382,7 +381,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                     )}
                   </div>
                 </td>
-                <td>
+                <td className="evidence-col">
                   {applies && (kinds.length === 0 ? <span className="why">No evidence</span> : (
                     <span className="evidence">
                       {kinds.map((k) => <span key={k} className={`kind kind-${k}`}>{k}</span>)}
@@ -391,7 +390,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   ))}
                 </td>
                 <td className="quotes-cell"><div>
-                  <p className="why">{r.reason}</p>
+                  <p className="why reason">{r.reason}</p>
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
                     <CitedQuote key={i} quote={c.quote}>
