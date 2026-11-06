@@ -6,7 +6,8 @@
 #
 # Usage: scripts/merge-on-green.sh <pr-number> [--conflicts-ok <spec branch>]...
 #   A PR into main is first checked against every open spec branch (origin/spec/*): if its merge
-#   would make one conflict, the gate refuses and names the branch and files (#235). After the
+#   would make one conflict, the gate refuses and names the branch and files (#235). A conflict
+#   main alone already has with a spec is a warning, not the PR's fault (#265). After the
 #   spec's thread has been told, --conflicts-ok <spec branch> (repeatable) lets it merge anyway.
 # Env:   MERGE_TIMEOUT  how long to wait for checks (default 20m, about twice the fast lane)
 #        SIZE_TARGET    changed lines a PR aims to stay under, lockfiles left out (default 400).
@@ -58,7 +59,7 @@ check_open_specs() {
   result=$(GIT_AUTHOR_NAME=merge-on-green GIT_AUTHOR_EMAIL=gate@localhost \
     GIT_COMMITTER_NAME=merge-on-green GIT_COMMITTER_EMAIL=gate@localhost \
     git commit-tree "$tree" -p origin/main -p "$head" -m "merge-on-green: PR #$pr's merge result")
-  local conflicting=() blocked=() files=()
+  local conflicting=() blocked=() files=() before=()
   while read -r spec; do
     [ -n "$spec" ] || continue
     name=${spec#origin/}
@@ -67,6 +68,20 @@ check_open_specs() {
     [ "$status" -eq 0 ] && continue
     [ "$status" -eq 1 ] || { echo "PR #$pr: git merge-tree failed on $name; not merging." >&2; exit 1; }
     mapfile -t files < <(printf '%s\n' "$out" | sed -n '2,/^$/p' | sed '/^$/d')
+    # Only conflicts this PR adds count (#265): ones main alone already has with the spec (after
+    # an earlier --conflicts-ok, or a spec's own change) are warned about, not blamed on the PR.
+    status=0
+    out=$(git merge-tree --write-tree --name-only "$spec" origin/main) || status=$?
+    if [ "$status" -eq 1 ]; then
+      mapfile -t before < <(printf '%s\n' "$out" | sed -n '2,/^$/p' | sed '/^$/d')
+      echo "PR #$pr: warning: main already conflicts with $name in:"
+      printf '  %s\n' "${before[@]}"
+      mapfile -t files < <(printf '%s\n' "${files[@]}" | grep -vxF -f <(printf '%s\n' "${before[@]}") || true)
+      [ "${#files[@]}" -gt 0 ] || continue
+    elif [ "$status" -ne 0 ]; then
+      echo "PR #$pr: git merge-tree failed on main and $name; not merging." >&2
+      exit 1
+    fi
     conflicting+=("$name")
     allowed=no
     for ok in "${conflicts_ok[@]+"${conflicts_ok[@]}"}"; do [ "$ok" = "$name" ] && allowed=yes; done
