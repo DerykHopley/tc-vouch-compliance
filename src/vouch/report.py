@@ -59,6 +59,7 @@ WORDS: dict[str, dict[str, Any]] = {
             "document": "Document",
             "version": "Version",
             "section": "Section",
+            "stale": "Stale",  # a quote whose document changed since it was checked
             "remediation": "Remediation items",
             "requirement": "Requirement",
             "missing": "Missing",
@@ -130,6 +131,7 @@ WORDS: dict[str, dict[str, Any]] = {
             "document": "Dokument",
             "version": "Version",
             "section": "Abschnitt",
+            "stale": "Veraltet",
             "remediation": "Maßnahmen",
             "requirement": "Anforderung",
             "missing": "Fehlt",

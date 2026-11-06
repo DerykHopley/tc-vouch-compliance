@@ -412,6 +412,12 @@ def test_the_english_words_are_designs_verdict_words_and_read_as_english():
     assert len(every_word(words)) == len(every_word(report.words_for("de")))  # one table shape
 
 
+def test_a_stale_quote_has_its_flag_word_in_each_language():
+    # #56: the page's stale flag, and later the Markdown export's, in the report's language.
+    assert report.words_for("en")["labels"]["stale"] == "Stale"
+    assert report.words_for("de")["labels"]["stale"] == "Veraltet"
+
+
 @pytest.mark.parametrize("language", ["en", "de"])
 def test_no_word_of_either_table_claims_an_audit_result(language):
     claims = {w: audit_claim(w) for w in every_word(report.words_for(language))}

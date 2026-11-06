@@ -269,3 +269,50 @@ textarea.field { resize: vertical; font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* The readiness report (#56): a formal document after the prototype's report page, on one sheet: the head as a
+   definition list, the readiness bar on the sheet under a --rule ring, then ruled tables. A wide table (controls,
+   trail) scrolls inside its own container (.table-wrap), never the page (design.md, Layout). */
+.report { max-width: 1000px; margin: 0 auto; padding-block: 20px 110px; display: grid; gap: 16px; }
+.report-doc { padding: 28px 32px; gap: 28px; justify-items: stretch; min-width: 0; }
+.report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
+.report-doc h2 { font-size: 20px; margin-bottom: 8px; }
+.report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
+.report-head { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
+.report-head dt, .report-reason dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  font-weight: 600; padding-top: 2px; }
+.report-head dd, .report-reason dd { margin: 0; overflow-wrap: anywhere; }
+.report-part { display: grid; gap: 10px; min-width: 0; }
+.report-lead { margin: 0; font-weight: 600; }
+.report .report-bar { box-shadow: inset 0 0 0 1px var(--rule); background: var(--paper); }
+.report-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; color: var(--muted);
+  font-size: 13px; font-variant-numeric: tabular-nums; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-controls { min-width: 680px; }
+.report-trail { min-width: 1100px; }
+.report-table thead th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--ink); padding: 6px 8px; font-weight: 600; vertical-align: bottom; }
+.report-table th[scope="row"], .report-table td { border-bottom: 1px solid var(--rule); padding: 7px 8px; vertical-align: top;
+  text-align: left; font-weight: 400; }
+.report-table .report-q { max-width: 52ch; overflow-wrap: anywhere; }
+/* A control's quotes sit under its row, as one entry with it: no rule between them. */
+.report-controls tbody tr:has(+ .report-quote-row) > * { border-bottom-color: transparent; }
+.report-table .report-quote-row td { padding: 0 8px 12px 24px; }
+.report-quotes { display: grid; gap: 8px; max-width: 72ch; }
+.report-quotes h3 { margin: 0; }
+.report-trail .mono { font-size: 12px; }
+.report-trail .report-q { min-width: 28ch; }
+.report-nowrap { white-space: nowrap; display: block; }
+.report-muted { color: var(--muted); margin: 0; }
+.report-group { display: grid; gap: 6px; }
+.report-group-head { margin: 0; font-weight: 600; }
+.report-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.report-list li { border-bottom: 1px solid var(--rule); padding-bottom: 10px; overflow-wrap: anywhere; }
+.report-reason { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 6px 0 0; }
+.report-older { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.report-disclaimer { margin: 0; border-top: 1px solid var(--rule); padding-top: 12px; font-size: 12px; color: var(--muted); }
+@media (max-width: 700px) {
+  .report-doc { padding: 20px 16px; }
+  .report-head { grid-template-columns: minmax(0, 1fr); }
+  .report-head dd { margin-bottom: 6px; }
+}

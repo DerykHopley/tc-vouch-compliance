@@ -6,6 +6,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
+import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
 import { type Run, useAssessment } from './useAssessment.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
@@ -19,19 +20,23 @@ function startingTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-type View = { name: 'dossier' } | { name: 'developer' } | { name: 'paper'; controlId: string }
+type View = { name: 'dossier' } | { name: 'report' } | { name: 'developer' } | { name: 'paper'; controlId: string }
 
 const DEVELOPER_PATH = '/developer'
+const REPORT_PATH = '/report'
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
-/** Each view's address: a control's working paper at /controls/<id>, the developer page at /developer, the Dossier at /. */
+/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the developer
+ * page at /developer, the Dossier at /. */
 const pathOf = (view: View) =>
-  view.name === 'paper' ? controlPath(view.controlId) : view.name === 'developer' ? DEVELOPER_PATH : '/'
+  view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
+    : view.name === 'developer' ? DEVELOPER_PATH : '/'
 
 /** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
  * so its paper says not found. */
 function viewAt(path: string): View {
   if (path === DEVELOPER_PATH) return { name: 'developer' }
+  if (path === REPORT_PATH) return { name: 'report' }
   const control = CONTROL_PATH.exec(path)
   if (!control) return { name: 'dossier' }
   try {
@@ -91,7 +96,8 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
   const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
-  const shown: View['name'] | null = view.name === 'developer' && developer ? 'developer' : control ? 'paper'
+  const shown: View['name'] | null = view.name === 'report' ? 'report'
+    : view.name === 'developer' && developer ? 'developer' : control ? 'paper'
     : notFound !== null ? null : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
   // is read for a control its card says is not assessed (a run in this page puts its result on the card), nor for the
@@ -148,6 +154,8 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
         <nav className="nav" aria-label="Main">
           <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
             onClick={(e) => { e.preventDefault(); showView({ name: 'dossier' }) }}>Dossier</a>
+          <a href={REPORT_PATH} aria-current={shown === 'report' ? 'page' : undefined}
+            onClick={(e) => { e.preventDefault(); showView({ name: 'report' }) }}>Report</a>
           {developer && (
             <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
               onClick={(e) => { e.preventDefault(); showView({ name: 'developer' }) }}>Developer</a>
@@ -159,7 +167,8 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
         </button>
         {onSignOut && <button className="btn btn-ghost" onClick={onSignOut}>Sign out</button>}
       </TopBar>
-      {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
+      {shown === 'report' ? <Report />
+        : shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
         : control && overview.state.status === 'ready' ? (
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
@@ -171,9 +180,11 @@ export default function App({ onSignOut, profileSwitcher }: { onSignOut?: () => 
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
-      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads. An
-          assessment from the chat reads the overview afresh (its card, readiness), and its paper's newest if open. */}
-      <AskVouch context={{ page: shown ?? 'dossier', controlId: shown === 'paper' && control ? control.id : null }}
+      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
+          report too, which has no page context of its own (#56). An assessment from the chat reads the overview
+          afresh (its card, readiness), and its paper's newest if open. */}
+      <AskVouch context={{ page: shown === null || shown === 'report' ? 'dossier' : shown,
+        controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         onAssessed={(controlId) => {
           void load()
