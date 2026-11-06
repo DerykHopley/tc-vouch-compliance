@@ -161,9 +161,7 @@ def test_a_cross_control_answer_links_each_named_control_to_its_paper_in_that_pr
     opened(page, profiles_url)
     if profile != "nordlicht":
         with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-            page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
-                label=label
-            )
+            switch_profile(page, label)
     page.get_by_role("button", name="Ask Vouch").click()
     asked = sent(page, "Which controls have documented evidence only?")
     assert asked.header_value("X-Vouch-Profile") == profile
