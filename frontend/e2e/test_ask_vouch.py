@@ -8,8 +8,6 @@ They run on DOSSIER_URL: #47 moved them off the main server while the request ra
 60 a minute. Fix #138 lifted that cap for the suite, so they could move back.
 """
 
-import re
-
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -20,6 +18,7 @@ FOCUS_OUTSIDE_SHEET = f"""() => {{
   return el.closest("{SHEET}") ? null : (el.textContent || el.tagName).trim()
 }}"""
 TABS = 6
+REACH = 40  # Shift+Tabs from inside the bubble back to the top bar at 1400px (19 on the Dossier)
 
 
 def open_sheet(page: Page, dossier_url: str, width: int, double: bool = False) -> None:
@@ -69,22 +68,18 @@ def test_at_400px_tab_reaches_close_inside_the_sheet(page: Page, dossier_url):
 
 def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, dossier_url):
     # Backwards from inside the bubble, so it holds in every browser: the bubble is the page's last
-    # stop, and Tab past the end wraps round in Chromium but not in headless Firefox (#225).
+    # stop, and Tab past the end wraps round in Chromium but not in headless Firefox (#225). The
+    # keyboard, not a script's focus(), must reach the top bar's controls beside the open bubble.
     open_sheet(page, dossier_url, 1400)
     page.locator(SHEET).click(position={"x": 100, "y": 300})
-    escaped = None
-    for _ in range(TABS * 2):
+    reached = set()
+    for _ in range(REACH):
         page.keyboard.press("Shift+Tab")
-        if escaped := page.evaluate(FOCUS_OUTSIDE_SHEET):
+        reached.add(page.evaluate(FOCUS_OUTSIDE_SHEET))
+        if "Dossier" in reached:
             break
-    assert escaped, "Shift+Tab never left the bubble for the page"
-    # The top bar's controls take focus beside the open bubble: nothing there is inert.
-    for control in (
-        page.get_by_role("link", name="Dossier"),
-        page.get_by_role("button", name=re.compile(r"theme$")),
-    ):
-        control.focus()
-        expect(control).to_be_focused()
+    assert "Dossier" in reached, reached
+    assert any(name and name.endswith("theme") for name in reached), reached
 
 
 def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
