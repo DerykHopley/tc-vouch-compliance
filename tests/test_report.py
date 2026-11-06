@@ -415,7 +415,7 @@ def test_the_english_words_are_designs_verdict_words_and_read_as_english():
 def test_a_stale_quote_has_its_flag_word_in_each_language():
     # #56: the page's stale flag, and later the Markdown export's, in the report's language.
     assert report.words_for("en")["labels"]["stale"] == "Stale"
-    assert report.words_for("de")["labels"]["stale"] == "Veraltet"
+    assert report.words_for("de")["labels"]["stale"] == "Prüfung überfällig"
 
 
 @pytest.mark.parametrize("language", ["en", "de"])
@@ -451,6 +451,8 @@ def test_a_profile_answering_in_lithuanian_gets_the_english_words():
 
     assert report.words_for("lt") == report.words_for("en")
     assert shown["disclaimer"].startswith("Drafted by an AI assistant")
+    # The answers stay Lithuanian; the report's own words, and so its lang, are English.
+    assert (shown["head"]["answer_language"], shown["head"]["words_language"]) == ("lt", "en")
 
 
 # --- The head ----------------------------------------------------------------------------------
@@ -472,9 +474,11 @@ def test_the_head_names_the_company_framework_level_overlays_language_and_todays
         "protection_level": "normal",
         "overlays": [],
         "answer_language": "en",
+        "words_language": "en",
         "date": "2026-11-06",
     }
     assert german["overlays"] == ["AT NIS2 (illustrative)"]
+    assert german["words_language"] == "de"
     assert german["protection_level"] == "high"
 
 

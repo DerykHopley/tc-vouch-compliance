@@ -59,7 +59,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "document": "Document",
             "version": "Version",
             "section": "Section",
-            "stale": "Stale",  # a quote whose document changed since it was checked
+            # Stale evidence (GLOSSARY.md): the document was past its review cycle when checked.
+            "stale": "Stale",
             "remediation": "Remediation items",
             "requirement": "Requirement",
             "missing": "Missing",
@@ -131,7 +132,7 @@ WORDS: dict[str, dict[str, Any]] = {
             "document": "Dokument",
             "version": "Version",
             "section": "Abschnitt",
-            "stale": "Veraltet",
+            "stale": "Prüfung überfällig",
             "remediation": "Maßnahmen",
             "requirement": "Anforderung",
             "missing": "Fehlt",
@@ -193,6 +194,7 @@ class Head(TypedDict):
     protection_level: ProtectionLevel
     overlays: list[str]  # the country overlays' names
     answer_language: str  # ISO 639-1
+    words_language: str  # ISO 639-1: the language of the report's words (English without a table)
     date: str  # ISO 8601: the day the report was drawn up
 
 
@@ -255,9 +257,15 @@ def today() -> date:
     return datetime.now(UTC).date()
 
 
+def words_language(language: str) -> str:
+    """The language the report's own words are in for an answer language (ISO 639-1): itself
+    when it has a table, else English. The page marks the report's `lang` with it."""
+    return language if language in WORDS else DEFAULT_LANGUAGE
+
+
 def words_for(language: str) -> dict[str, Any]:
     """The report's own words in the language (ISO 639-1); English when it has no table."""
-    return WORDS.get(language, WORDS[DEFAULT_LANGUAGE])
+    return WORDS[words_language(language)]
 
 
 def disclaimer(names: Iterable[str], language: str) -> str:
@@ -298,6 +306,7 @@ def readiness_report(
             "protection_level": profile.protection_level,
             "overlays": [overlay.name for overlay in profile.overlays],
             "answer_language": profile.answer_language,
+            "words_language": words_language(profile.answer_language),
             "date": today.isoformat(),
         },
         # The accepted counts as the overview's; the items as the report lists them.

@@ -19,6 +19,10 @@ export type Readiness = {
   remediation_items: number
 }
 
+/** The verdicts in the readiness bar's order (the Dossier's band, the readiness report); the open rest stays the
+ * bar's own colour. */
+export const SEGMENTS: Verdict[] = ['evidenced', 'partly-evidenced', 'not-evidenced', 'not-applicable']
+
 /** One checked quote on the overview: a citation's fields, less why it is stale, and what it is for. */
 export type Quote = { control_id: string; requirement_id: string }
   & Pick<Citation, 'doc_id' | 'version' | 'section' | 'quote' | 'kind' | 'stale'>

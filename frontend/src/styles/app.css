@@ -348,7 +348,8 @@ textarea.field { resize: vertical; font-family: inherit; }
 .report-quotes h3 { margin: 0; }
 .report-trail .mono { font-size: 12px; }
 .report-trail .report-q { min-width: 28ch; }
-.report-nowrap { white-space: nowrap; display: block; }
+/* A value on a line of its own, never broken: the trail's time, and each evidence version stacked under the last. */
+.report-line { white-space: nowrap; display: block; }
 .report-muted { color: var(--muted); margin: 0; }
 .report-group { display: grid; gap: 6px; }
 .report-group-head { margin: 0; font-weight: 600; }

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import Report from './Report.tsx'
-import { OLDER_FAILED, type Report as Served, REPORT_FAILED, type ReportWords, type TrailEntry } from './report.ts'
+import { OLDER_FAILED, type ReadinessReport as Served, REPORT_FAILED, type ReportWords, type TrailEntry } from './report.ts'
 import { SESSION_ENDED, setOnSignedOut } from './session.ts'
 
 afterEach(() => {
@@ -56,7 +56,7 @@ const entry = (id: number, at: string, action: TrailEntry['action'], extra: Part
 /** Nordlicht's report with 4.1.2 accepted (one stale quote, one current) and the rest open. */
 const REPORT: Served = {
   head: { company: 'Nordlicht Komponenten GmbH', country: 'Germany', base_framework: 'VDA ISA 6 (subset)',
-    protection_level: 'high', overlays: [], answer_language: 'en', date: '2026-11-06' },
+    protection_level: 'high', overlays: [], answer_language: 'en', words_language: 'en', date: '2026-11-06' },
   readiness: { controls: 12, accepted: 1,
     by_verdict: { evidenced: 0, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 11,
     remediation_items: 1 },
@@ -111,6 +111,8 @@ function serve(report: (() => Promise<Response>) | Served, older: (before: strin
 }
 
 const reportReads = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/report').length
+const overviewReads = (fetch: ReturnType<typeof serve>) =>
+  fetch.mock.calls.filter(([url]) => url === '/api/overview').length
 
 async function shown() {
   return screen.findByRole('article', { name: ENGLISH.title })
@@ -182,12 +184,32 @@ describe('The readiness report', () => {
     }
   })
 
+  it("carries the words' language, English for an answer language without its own words", async () => {
+    serve({ ...REPORT, head: { ...REPORT.head, answer_language: 'fr', words_language: 'en' } })
+    render(<Report />)
+    const report = await shown()
+
+    expect(report.getAttribute('lang')).toBe('en')
+    expect(within(report).getByText('fr', { selector: 'dd' })).toBeTruthy() // no word for French: its code
+  })
+
+  it('shows a time that does not parse as written, rather than failing', async () => {
+    const [accepted, open] = REPORT.controls
+    serve({ ...REPORT, controls: [{ ...accepted, reviewed_at: 'not a time' }, open],
+      trail: { entries: [entry(1, 'yesterday', 'accept')], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    expect(within(report).getByText('not a time')).toBeTruthy()
+    expect(within(report).getByText('yesterday')).toBeTruthy()
+  })
+
   it('shows each heading, column name, status, action and sentence in the served words only', async () => {
     // Made-up words: each one marked, so a word of the page's own shows up unmarked.
     const mark = (words: unknown): unknown => typeof words === 'string' ? `~${words}~`
       : Object.fromEntries(Object.entries(words as object).map(([k, v]) => [k, mark(v)]))
     const words = mark(ENGLISH) as ReportWords
-    serve({ ...REPORT, head: { ...REPORT.head, answer_language: 'xx' }, words,
+    serve({ ...REPORT, head: { ...REPORT.head, answer_language: 'xx', words_language: 'xx' }, words,
       trail: { ...REPORT.trail, entries: [...REPORT.trail.entries, entry(0, '2026-11-06T14:00:00+00:00', 'reject')] } })
     render(<Report />)
     const report = await screen.findByRole('article', { name: words.title })
@@ -196,11 +218,12 @@ describe('The readiness report', () => {
     const collect = (w: unknown) => typeof w === 'string' ? served.add(w) : Object.values(w as object).forEach(collect)
     collect(words)
     served.add('~1 of 12 controls accepted~') // `accepted_of`, filled in
-    const own = [...report.querySelectorAll('h1, h2, h3, th[scope=col], dt, [data-word]')]
+    const own = [...report.querySelectorAll('h1, h2, h3, th[scope=col], dt, [data-word], .chip')]
       .map((el) => el.textContent ?? '')
     expect(own.length).toBeGreaterThan(30)
     expect(own.filter((text) => !served.has(text))).toEqual([])
     // The statuses, actions and sentences shown, each a served word.
+    expect(within(report).getByText(words.verdicts['partly-evidenced'], { selector: '.chip' })).toBeTruthy()
     for (const word of [words.statuses.accepted, words.statuses.open, words.actions.approve, words.actions.accept,
       words.actions.reject, words.sentences.open_control, '~1 of 12 controls accepted~']) {
       expect(within(report).getAllByText(word).length).toBeGreaterThan(0)
@@ -307,8 +330,10 @@ describe('The Report tab', () => {
     await shown()
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(within(nav).getByRole('link', { name: 'Report' }).getAttribute('aria-current')).toBe('page')
+    expect(overviewReads(fetch)).toBe(0) // the report shows none of it
 
     await userEvent.click(within(nav).getByRole('link', { name: 'Overview' }))
+    expect(overviewReads(fetch)).toBe(1)
     await userEvent.click(within(nav).getByRole('link', { name: 'Report' }))
     await shown()
     expect(reportReads(fetch)).toBe(2)

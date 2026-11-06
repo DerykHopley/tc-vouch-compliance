@@ -169,7 +169,7 @@ def test_alpenwerks_report_is_german_and_the_page_around_it_english(page: Page, 
     # The interface stays English.
     nav = page.get_by_role("navigation", name="Main")
     expect(nav.get_by_role("link", name="Report", exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name=re.compile(r"your menu$", re.I))).to_be_visible()
+    expect(page.get_by_role("button", name=re.compile(r"[Yy]our menu$"))).to_be_visible()
     expect(page.get_by_role("button", name="Ask Vouch")).to_be_visible()
 
 

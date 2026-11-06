@@ -1,4 +1,4 @@
-import type { EvidenceKind, Verdict } from './assessment.ts'
+import type { Citation, Verdict } from './assessment.ts'
 import type { Readiness } from './overview.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
@@ -12,13 +12,17 @@ export type ReportHead = {
   protection_level: 'normal' | 'high' | 'very high'
   /** The country overlays' names. */
   overlays: string[]
-  /** ISO 639-1: the report's language. */
+  /** ISO 639-1: the profile's answer language (the quotes and the model's text). */
   answer_language: string
+  /** ISO 639-1: the language of `words`, the report's own (English for an answer language without its own words):
+   * the report's `lang`. */
+  words_language: string
   /** ISO 8601: the day the report was drawn up, in UTC. */
   date: string
 }
 
-export type ReportQuote = { doc_id: string; version: string; section: string; quote: string; kind: EvidenceKind; stale: boolean }
+/** A quote an accepted control's verdict rests on: a citation's fields, less why it is stale. */
+export type ReportQuote = Pick<Citation, 'doc_id' | 'version' | 'section' | 'quote' | 'kind' | 'stale'>
 
 /** A control as the report shows it: accepted with its reviewed verdict, or open with nulls and no quotes. */
 export type ReportControl = {
@@ -68,14 +72,17 @@ export type ReportWords = {
   sentences: Record<string, string>
 }
 
-export type Report = {
+/** A page of the audit trail, newest first; `next` reads on at `olderEntries`, null when there are no more. */
+export type TrailPage = { entries: TrailEntry[]; next: number | null }
+
+export type ReadinessReport = {
   head: ReportHead
   readiness: Readiness
   controls: ReportControl[]
   remediation: { control_id: string; question: string; items: ReportItem[] }[]
   not_applicable: NotApplicable[]
-  /** The newest page; `next` reads on at `olderEntries`, null when there are no more. */
-  trail: { entries: TrailEntry[]; next: number | null }
+  /** The newest page. */
+  trail: TrailPage
   /** The finished sentence, the reviewers' names joined. */
   disclaimer: string
   words: ReportWords
@@ -88,10 +95,10 @@ export const OLDER_FAILED = 'The older entries could not be loaded just now. Ple
 type Failed = { ok: false; message: string }
 
 /** The report, or the sentence to show with Try again. */
-export async function fetchReport(): Promise<{ ok: true; report: Report } | Failed> {
+export async function fetchReport(): Promise<{ ok: true; report: ReadinessReport } | Failed> {
   try {
     const response = await fetch('/api/report', { headers: await authHeaders() })
-    if (response.ok) return { ok: true, report: (await response.json()) as Report }
+    if (response.ok) return { ok: true, report: (await response.json()) as ReadinessReport }
     return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : REPORT_FAILED }
   } catch {
     return { ok: false, message: REPORT_FAILED }
@@ -99,12 +106,11 @@ export async function fetchReport(): Promise<{ ok: true; report: Report } | Fail
 }
 
 /** The trail's page after the entry `before` (the report's or the last page's `next`). */
-export async function olderEntries(before: number):
-  Promise<{ ok: true; entries: TrailEntry[]; next: number | null } | Failed> {
+export async function olderEntries(before: number): Promise<({ ok: true } & TrailPage) | Failed> {
   try {
     const response = await fetch(`/api/audit-trail?before=${before}`, { headers: await authHeaders() })
     if (!response.ok) return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : OLDER_FAILED }
-    const page = (await response.json()) as { entries: TrailEntry[]; next: number | null }
+    const page = (await response.json()) as TrailPage
     return { ok: true, entries: page.entries, next: page.next }
   } catch {
     return { ok: false, message: OLDER_FAILED }

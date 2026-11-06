@@ -106,11 +106,14 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
   const { load, noteAssessed } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
+  // The report shows none of it (#56): it is read on leaving the report for a view that does.
+  const needsOverview = view.name !== 'report'
   const read = useRef(false)
   useEffect(() => {
+    if (!needsOverview) return
     if (onDossier || !read.current) void load()
     read.current = true
-  }, [load, onDossier])
+  }, [load, onDossier, needsOverview])
   // The run sits above the views, so it carries on when the lead leaves its paper. A finished run puts its verdict on
   // its card (the working paper's index), and reads the overview afresh when the Dossier is showing (readiness too).
   const finished = useCallback((assessment: Assessment) => {
