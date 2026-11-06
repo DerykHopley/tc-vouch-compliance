@@ -44,7 +44,7 @@ pytestmark = pytest.mark.filterwarnings("ignore:A test tried to use socket.socke
 
 KEY = "sk-or-v1-test-key-34"
 CONTROL = "4.1.2"
-OTHER_MODEL = "anthropic/claude-sonnet-5.5"
+OTHER_MODEL = "anthropic/claude-haiku-5.5"
 UNREACHABLE_DB = "postgresql://vouch:pw@/vouch?host=/nonexistent-34"
 
 

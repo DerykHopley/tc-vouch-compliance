@@ -1,0 +1,29 @@
+# Compliance profile for the fictional Alpenwerk Präzision GmbH (invented; not a real company).
+# Validated on load by vouch.profile; folders are relative to this file.
+# The country overlay is illustrative, not legal research: it stands in for an Austrian
+# NIS2 law so the overlay branch has a real case (docs/requirements.md, 2026-11-03).
+id: alpenwerk
+company: Alpenwerk Präzision GmbH
+country: Austria
+answer_language: de  # reads the German ISA edition
+protection_level: high  # normal, high or very high
+base_framework: VDA ISA 2027.1
+overlays:
+  - name: AT NIS2 (illustrative)
+    requirements:
+      - control: 1.6.2
+        id: O1
+        text: >-
+          Ein erheblicher Sicherheitsvorfall wird dem nationalen CSIRT innerhalb von
+          24 Stunden als Frühwarnung gemeldet.
+not_applicable: []
+evidence_sources:
+  policies:
+    folder: policies
+  records:
+    folder: records
+  patch:
+    folder: patch
+# Room for risk management later (docs/requirements.md, 2026-11-03); unused for now.
+asset_register: []
+risks: []

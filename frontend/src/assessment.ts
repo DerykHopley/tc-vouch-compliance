@@ -7,12 +7,34 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** A requirement's or a control's verdict, as the API sends it (`vouch.graph.Verdict`). */
 export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced' | 'not-applicable'
 
+/** The verdicts in the interface's words (English); an assessment's own verdict is in its language (`verdictWord`). */
 export const VERDICT_WORDS: Record<Verdict, string> = {
   evidenced: 'Evidenced',
   'partly-evidenced': 'Partly evidenced',
   'not-evidenced': 'Not evidenced',
   'not-applicable': 'Not applicable',
 }
+
+/** The verdict words in each answer language besides English (docs/design.md, Verdict wording). */
+const VERDICT_WORDS_IN: Record<string, Record<Verdict, string>> = {
+  de: {
+    evidenced: 'Nachgewiesen',
+    'partly-evidenced': 'Teilweise nachgewiesen',
+    'not-evidenced': 'Nicht nachgewiesen',
+    'not-applicable': 'Nicht anwendbar',
+  },
+}
+
+/** The verdict words in the language (ISO 639-1), if it has its own: one decision for the words and their `lang`. */
+const wordsIn = (language?: string): Record<Verdict, string> | undefined =>
+  language ? VERDICT_WORDS_IN[language] : undefined
+
+/** A verdict in words, in the profile's answer language (ISO 639-1); English when there are none in it. */
+export const verdictWord = (verdict: Verdict, language?: string): string =>
+  (wordsIn(language) ?? VERDICT_WORDS)[verdict]
+
+/** The `lang` of `verdictWord`'s words: the answer language when it has its own, none for the interface's English. */
+export const verdictLang = (language?: string): string | undefined => wordsIn(language) ? language : undefined
 
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
@@ -55,6 +77,8 @@ export type Assessment = {
   control_id: string
   verdict: Verdict
   answer: string
+  /** The profile's (ISO 639-1): the answer and its verdict words are in it; the interface stays English. */
+  answer_language?: string
   status?: ReviewStatus
   requirements?: RequirementVerdict[]
   /** The thread to review it by (#38, #39). */

@@ -1,6 +1,7 @@
 import { type AnchorHTMLAttributes, type ReactNode, useState } from 'react'
-import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS }
-  from './assessment.ts'
+import {
+  type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
+} from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
@@ -21,9 +22,13 @@ const ACTION: Record<Run['status'], string> = {
   unreachable: 'Retry',
 }
 
-/** The run's verdict chip: Assessing, the verdict, or Not assessed. */
+/** The run's answer language, once it is done: its verdicts are in it (#48, #200). */
+const answerLanguage = (run: Run) => run.status === 'done' ? run.assessment.answer_language : undefined
+
+/** The run's verdict chip: Assessing, the verdict (in the answer's language, #48), or Not assessed. */
 const RunChip = ({ run }: { run: Run }) =>
-  <VerdictChip verdict={run.status === 'done' ? run.assessment.verdict : null} assessing={run.status === 'running'} />
+  <VerdictChip verdict={run.status === 'done' ? run.assessment.verdict : null} assessing={run.status === 'running'}
+    language={answerLanguage(run)} />
 
 /** The assess button: busy while running, Retry when the service could not be reached; `held` while another runs. */
 function AssessButton({ id, run, held, onAssess }: { id: string; run: Run; held: boolean; onAssess: () => void }) {
@@ -122,7 +127,8 @@ export default function WorkingPaper(props: PaperProps) {
   const assessingElsewhere = elsewhere !== null && <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
   return (
     <div className="wp">
-      <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen} />
+      <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
+        language={overview.answer_language} />
       <section className="paper wrap" aria-label="Working paper">
         <div><ToOverview onOverview={onOverview} /></div>
         <div className="paper-head">
@@ -139,7 +145,9 @@ export default function WorkingPaper(props: PaperProps) {
               {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
             </div>
           )}
-          {!checking && explained && <p className="field-note roll-up">{explained}</p>}
+          {!checking && explained && (
+            <p className="field-note roll-up" lang={verdictLang(overview.answer_language)}>{explained}</p>
+          )}
         </div>
         {checking ? <p className="field-note" role="status">Reading the working paper…</p> : (
           <>
@@ -155,7 +163,7 @@ export default function WorkingPaper(props: PaperProps) {
               <section className="sheet" aria-label="Verdict and draft answer">
                 <span className="lbl">Draft answer</span>
                 <RunChip run={run} />
-                <div className="answer"><Prose text={run.assessment.answer} /></div>
+                <div className="answer" lang={run.assessment.answer_language}><Prose text={run.assessment.answer} /></div>
                 {run.usage && (
                   <section aria-label="Usage"><p className="field-note mono">{usageWords(run.usage)}</p></section>
                 )}
@@ -176,6 +184,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
+                language={answerLanguage(run)}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
                   decidable: review === 'accepted',
@@ -204,6 +213,8 @@ type IndexProps = {
   /** The open control's run: it may be newer than its card. */
   run: Run
   onOpen: (controlId: string) => void
+  /** The profile's answer language: the verdicts' (#200). */
+  language: string
 }
 
 /** The run with the lead's overrides in place in its assessment, and the control's verdict recalculated from them. */
@@ -224,7 +235,7 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 }
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. */
-function ControlIndex({ controls, openId, running, run, onOpen }: IndexProps) {
+function ControlIndex({ controls, openId, running, run, onOpen, language }: IndexProps) {
   return (
     <nav className="wp-index" aria-label="Controls">
       {areas(controls).map(([area, cards]) => (
@@ -241,7 +252,7 @@ function ControlIndex({ controls, openId, running, run, onOpen }: IndexProps) {
                 aria-current={open ? 'page' : undefined}>
                 <span className="mono">{card.id}</span>
                 <span className="wp-state">
-                  <VerdictChip verdict={verdict} assessing={assessing} />
+                  <VerdictChip verdict={verdict} assessing={assessing} language={language} />
                   {!assessing && status && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
                 </span>
                 <span className="wp-q">{card.question}</span>
@@ -318,6 +329,8 @@ type JudgedProps = {
   onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
   items: RemediationItems
+  /** The assessment's answer language: its requirements' verdicts are in it (#200). */
+  language?: string
 }
 
 /**
@@ -327,7 +340,8 @@ type JudgedProps = {
  * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
  * to evidenced on screen hides its draft, which the review drops.
  */
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items }: JudgedProps) {
+function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language }:
+  JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   return (
     <div className="table-wrap">
@@ -351,7 +365,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                 <td className="rq">{r.text}</td>
                 <td>
                   <div className="verdict-cell">
-                    <VerdictChip verdict={r.verdict} />
+                    <VerdictChip verdict={r.verdict} language={language} />
                     {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
                     {overrides.editable && applies && editing !== r.id && (
                       <span>

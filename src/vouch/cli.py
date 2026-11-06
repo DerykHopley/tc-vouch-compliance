@@ -91,9 +91,12 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
 
 def list_requirements(control_id: str, profile_name: str | None = None) -> int:
     try:
-        control = load_isa_control(control_id)
         folder = load_settings().profiles_dir
         profile = None if profile_name is None else load_named_profile(profile_name, folder)
+        # in the profile's ISA edition when there is one
+        control = (
+            load_isa_control(control_id) if profile is None else profile.isa_control(control_id)
+        )
     except (
         UnknownControlError,
         BaseFrameworkError,

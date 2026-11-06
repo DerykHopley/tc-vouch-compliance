@@ -173,7 +173,7 @@ def test_one_profiles_approved_items_do_not_show_under_another(page: Page, profi
 
     menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        menu.select_option(label="Testwerk Prüfstand GmbH · Austria · German")
+        menu.select_option(label="Testwerk Prüfstand GmbH · Austria · English")
     expect(remediation_tile(page)).to_have_text("0")
     elsewhere = page.request.get(
         f"{profiles_url}/api/assessments/{thread_id}", headers={"X-Vouch-Profile": "testwerk"}

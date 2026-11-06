@@ -742,6 +742,36 @@ describe('Ask Vouch', () => {
     expect(bubble()).toBeTruthy() // the chat stays open beside the paper
   })
 
+  it("shows a German profile's chat verdict in German words, marked as German (ticket 200)", async () => {
+    serveChat(() => Promise.resolve(sse([
+      'event: assessment\ndata: {"control_id":"4.1.2","verdict":"partly-evidenced","status":"waiting-for-review","thread_id":"a1","answer_language":"de"}\n\n',
+      'event: token\ndata: {"text":"Die Bewertung ist abgeschlossen."}\n\n',
+      'event: done\ndata: {}\n\n'])))
+    render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+    const log = within(bubble()!).getByRole('log')
+
+    const chip = await within(log).findByText('Teilweise nachgewiesen')
+    expect(chip.className).toBe('chip v-partly-evidenced')
+    expect(chip.getAttribute('lang')).toBe('de')
+    expect(within(log).getByText('Proposed').getAttribute('lang')).toBeNull() // the interface stays English
+  })
+
+  it("shows an English profile's chat verdict with no lang mark (ticket 200)", async () => {
+    serveChat(() => Promise.resolve(sse([
+      'event: assessment\ndata: {"control_id":"4.1.2","verdict":"evidenced","status":"waiting-for-review","thread_id":"a1","answer_language":"en"}\n\n',
+      'event: done\ndata: {}\n\n'])))
+    render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+
+    const chip = await within(within(bubble()!).getByRole('log')).findByText('Evidenced')
+    expect(chip.getAttribute('lang')).toBeNull()
+  })
+
   it('goes on with the thread a failed first turn named, and asks for a failed greeting again on the next opening',
     async () => {
       const greetings: ChatBody[] = []

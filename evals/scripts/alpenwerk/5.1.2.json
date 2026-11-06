@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "informationen übertragung geschützt inwieweit"}},
+    {"tool": "search_records", "args": {"query": "informationen übertragung geschützt inwieweit"}},
+    {"answer": "Antwortentwurf für 5.1.2: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The register lists the five network services used to transfer information.", "citations": [{"doc_id": "netzwerkdienste-verzeichnis", "quote": "September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "A table sets which services each classification may use.", "citations": [{"doc_id": "netzwerk-uebertragungsrichtlinie", "quote": "Unverschlüsselte Protokolle wie FTP oder Telnet sind an der Firewall gesperrt."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "All transfers are encrypted and unencrypted protocols are blocked, confirmed from the firewall in September 2026.", "citations": [{"doc_id": "netzwerk-uebertragungsrichtlinie", "quote": "Unverschlüsselte Protokolle wie FTP oder Telnet sind an der Firewall gesperrt."}, {"doc_id": "netzwerkdienste-verzeichnis", "quote": "September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Mail warns before sending outside, and drawings go only to recipients enabled for the project.", "citations": [{"doc_id": "netzwerk-uebertragungsrichtlinie", "quote": "Alle Netzwerkdienste, über die Informationen übertragen werden, stehen im Verzeichnis der Netzwerkdienste."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Confidential content is also content-encrypted, with S/MIME or on the CAD exchange platform.", "citations": [{"doc_id": "netzwerk-uebertragungsrichtlinie", "quote": "Vertraulich | nur der CAD-Datenaustausch oder E-Mail mit S/MIME"}, {"doc_id": "netzwerkdienste-verzeichnis", "quote": "Internetzugang | Web und Cloud-Dienste | Intern | TLS 1.2 oder höher, unverschlüsselte Protokolle gesperrt | 2024-03-04"}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Remote access is VPN only, with TLS 1.3 and multi-factor sign-in, granted and ended through the account procedure.", "citations": [{"doc_id": "netzwerk-uebertragungsrichtlinie", "quote": "Alle Netzwerkdienste, über die Informationen übertragen werden, stehen im Verzeichnis der Netzwerkdienste."}, {"doc_id": "netzwerkdienste-verzeichnis", "quote": "September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "At least transport encryption everywhere, and the register shows it for every service.", "citations": [{"doc_id": "netzwerk-uebertragungsrichtlinie", "quote": "Alle Informationen werden mindestens transportverschlüsselt übertragen (TLS 1.2 oder höher)."}, {"doc_id": "netzwerkdienste-verzeichnis", "quote": "Internetzugang | Web und Cloud-Dienste | Intern | TLS 1.2 oder höher, unverschlüsselte Protokolle gesperrt | 2024-03-04"}]}
+    ]
+  }
+}

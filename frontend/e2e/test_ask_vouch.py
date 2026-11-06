@@ -17,8 +17,8 @@ FOCUS_OUTSIDE_SHEET = f"""() => {{
   if (!el || el === document.body) return null
   return el.closest("{SHEET}") ? null : (el.textContent || el.tagName).trim()
 }}"""
-TABS = 6
-REACH = 40  # Shift+Tabs from inside the bubble back to the top bar at 1400px (19 on the Dossier)
+TABS = 7  # the top bar's stops, the profile menu among them (the fixtures hold two profiles)
+REACH = 40  # Shift+Tabs from inside the bubble back to the top bar at 1400px (about 20 on the Dossier)
 
 
 def open_sheet(page: Page, dossier_url: str, width: int, double: bool = False) -> None:

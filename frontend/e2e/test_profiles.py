@@ -10,7 +10,7 @@ import json
 from playwright.sync_api import APIRequestContext, Page, expect
 
 NORDLICHT = "Nordlicht Komponenten GmbH · Germany · English"
-TESTWERK = "Testwerk Prüfstand GmbH · Austria · German"
+TESTWERK = "Testwerk Prüfstand GmbH · Austria · English"
 
 
 def assessed(request: APIRequestContext, url: str, profile: str, control_id: str) -> str:
@@ -134,9 +134,12 @@ def test_the_switcher_fits_a_phone_in_dark(page: Page, profiles_url):
     )
 
 
-def test_with_one_profile_the_top_bar_names_it_without_a_menu(page: Page, dossier_url):
+def test_the_bundled_profiles_are_both_in_the_menu(page: Page, dossier_url):
+    """The fixtures hold Nordlicht and Alpenwerk (#49), so the menu lists both; one profile's
+    name without a menu is checked below the UI (profiles.test.tsx)."""
     opened(page, dossier_url)
 
-    bar = page.get_by_role("banner")
-    expect(bar.get_by_text(NORDLICHT)).to_be_visible()
-    expect(bar.get_by_role("combobox")).to_have_count(0)
+    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
+    expect(menu.get_by_role("option")).to_have_text(
+        ["Alpenwerk Präzision GmbH · Austria · German", NORDLICHT]
+    )

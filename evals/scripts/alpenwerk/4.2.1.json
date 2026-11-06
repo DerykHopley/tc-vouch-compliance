@@ -1,0 +1,19 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "zugriffsrechte inwieweit verwaltet vergeben"}},
+    {"tool": "search_records", "args": {"query": "zugriffsrechte inwieweit verwaltet vergeben"}},
+    {"answer": "Antwortentwurf für 4.2.1: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Rights are requested, checked and approved, granted by least privilege and withdrawn, as the leaver and role-change entries show.", "citations": [{"doc_id": "benutzerkonten-protokoll", "quote": "Auszug aus dem IT-Serviceportal, Stand 30."}, {"doc_id": "berechtigungskonzept", "quote": "Jede Rolle hat genau die Rechte, die für ihre Aufgaben nötig sind (Need-to-know und Least-Privilege)."}]},
+      {"requirement_id": "M2", "verdict": "partly-evidenced", "reason": "Normal and privileged rights are reviewed every six months, but technical accounts and customers' systems are left out.", "citations": [{"doc_id": "berechtigungskonzept", "quote": "Technische Konten und Konten in IT-Systemen von Kunden sind von der Überprüfung ausgenommen."}, {"doc_id": "zugriffsrechte-ueberpruefung", "quote": "Technische Konten und die Benutzerkonten von Alpenwerk in den Portalen von drei Kunden wurden nicht geprüft."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "The concept sets out how access to information is granted.", "citations": [{"doc_id": "berechtigungskonzept", "quote": "Jede Rolle hat genau die Rechte, die für ihre Aufgaben nötig sind (Need-to-know und Least-Privilege)."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Rights are granted through roles such as design, purchasing and accounting.", "citations": [{"doc_id": "berechtigungskonzept", "quote": "Zugriffsrechte werden über Rollen vergeben, zum Beispiel „Konstruktion“, „Arbeitsvorbereitung“, „Einkauf“ oder „Buchhaltung“."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Each role holds only what its tasks need.", "citations": [{"doc_id": "berechtigungskonzept", "quote": "Jede Rolle hat genau die Rechte, die für ihre Aufgaben nötig sind (Need-to-know und Least-Privilege)."}]},
+      {"requirement_id": "S4", "verdict": "evidenced", "reason": "Administrators use separate accounts, and the review found no normal account with privileged rights.", "citations": [{"doc_id": "berechtigungskonzept", "quote": "Normale Benutzerkonten erhalten keine privilegierten Rechte."}, {"doc_id": "zugriffsrechte-ueberpruefung", "quote": "Keines der normalen Benutzerkonten hatte privilegierte Rechte."}]},
+      {"requirement_id": "S5", "verdict": "evidenced", "reason": "Roles change on the day of a move; four moves are recorded with old rights withdrawn.", "citations": [{"doc_id": "benutzerkonten-protokoll", "quote": "Auszug aus dem IT-Serviceportal, Stand 30."}, {"doc_id": "berechtigungskonzept", "quote": "Zugriffsrechte werden über Rollen vergeben, zum Beispiel „Konstruktion“, „Arbeitsvorbereitung“, „Einkauf“ oder „Buchhaltung“."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Each system's information owner releases rights before IT sets them up, and confirmed each role in the review.", "citations": [{"doc_id": "berechtigungskonzept", "quote": "Zugriffsrechte werden über Rollen vergeben, zum Beispiel „Konstruktion“, „Arbeitsvorbereitung“, „Einkauf“ oder „Buchhaltung“."}, {"doc_id": "zugriffsrechte-ueberpruefung", "quote": "Juli 2026 haben die Informationseigentümer mit den Führungskräften alle Benutzerkonten und die vergebenen Rechte ihrer Systeme geprüft und jede Rolle freigegeben oder angepasst."}]}
+    ]
+  }
+}

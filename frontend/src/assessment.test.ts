@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assess, count, plural, readEvents, usageWords } from './assessment.ts'
+import { assess, count, plural, readEvents, usageWords, verdictWord } from './assessment.ts'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
 function streamOf(...chunks: string[]): ReadableStream<Uint8Array> {
@@ -175,5 +175,19 @@ describe('assess, when the API says signed out (401)', () => {
     expect(await events()).toEqual([
       { event: 'error', data: { message: 'Your sign-in has ended. Please sign in again.' } },
     ])
+  })
+})
+
+describe('verdictWord', () => {
+  it('words a verdict in the answer language: German for de (#51)', () => {
+    expect(verdictWord('evidenced', 'de')).toBe('Nachgewiesen')
+    expect(verdictWord('partly-evidenced', 'de')).toBe('Teilweise nachgewiesen')
+    expect(verdictWord('not-evidenced', 'de')).toBe('Nicht nachgewiesen')
+    expect(verdictWord('not-applicable', 'de')).toBe('Nicht anwendbar')
+  })
+
+  it('words it in English for en, and for a language it has no words in', () => {
+    expect(verdictWord('partly-evidenced', 'en')).toBe('Partly evidenced')
+    expect(verdictWord('not-evidenced', 'lt')).toBe('Not evidenced')
   })
 })
