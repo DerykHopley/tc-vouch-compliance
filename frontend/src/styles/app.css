@@ -323,7 +323,8 @@ textarea.field { resize: vertical; font-family: inherit; }
    definition list, the readiness bar on the sheet under a --rule ring, then ruled tables. A wide table (controls,
    trail) scrolls inside its own container (.table-wrap), never the page (design.md, Layout). */
 .report { max-width: 1000px; margin: 0 auto; padding-block: 20px 110px; display: grid; gap: 16px; }
-.report-doc { padding: 28px 32px; gap: 28px; justify-items: stretch; min-width: 0; }
+/* Each part's gap is a property, so print's margins (below) use the same value. */
+.report-doc { --report-doc-gap: 28px; padding: 28px 32px; gap: var(--report-doc-gap); justify-items: stretch; min-width: 0; }
 .report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
 .report-doc h2 { font-size: 20px; margin-bottom: 8px; }
 .report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
@@ -331,7 +332,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 .report-head dt, .report-reason dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
   font-weight: 600; padding-top: 2px; }
 .report-head dd, .report-reason dd { margin: 0; overflow-wrap: anywhere; }
-.report-part { display: grid; gap: 10px; min-width: 0; }
+.report-part { --report-part-gap: 10px; display: grid; gap: var(--report-part-gap); min-width: 0; }
 .report-lead { margin: 0; font-weight: 600; }
 .report .report-bar { box-shadow: inset 0 0 0 1px var(--rule); background: var(--paper); }
 .report-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; color: var(--muted);
@@ -354,7 +355,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 /* A value on a line of its own, never broken: the trail's time, and each evidence version stacked under the last. */
 .report-line { white-space: nowrap; display: block; }
 .report-muted { color: var(--muted); margin: 0; }
-.report-group { display: grid; gap: 6px; }
+.report-group { --report-group-gap: 6px; display: grid; gap: var(--report-group-gap); }
 .report-group-head { margin: 0; font-weight: 600; }
 .report-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
 .report-list li { border-bottom: 1px solid var(--rule); padding-bottom: 10px; overflow-wrap: anywhere; }
@@ -383,6 +384,13 @@ textarea.field { resize: vertical; font-family: inherit; }
   .report { max-width: none; padding: 0; display: block; }
   .report.wrap { padding-inline: 0; }
   .report-doc { border: 0; border-radius: 0; padding: 0; }
+  /* The sheet and its parts flow as blocks, not grids: a grid placed the item after a table that broke across pages
+     as if the table had not grown from the break, so a heading overlapped the table's last row (#296). The gaps
+     become margins. */
+  .report-doc, .report-part, .report-group { display: block; }
+  .report-doc > * + * { margin-top: var(--report-doc-gap); }
+  .report-part > * + * { margin-top: var(--report-part-gap); }
+  .report-group > * + * { margin-top: var(--report-group-gap); }
   .print-only { display: block; }
   /* No table scrolls or clips: each fits the page's width, its long values wrapping. */
   .table-wrap { overflow: visible; }
@@ -391,8 +399,12 @@ textarea.field { resize: vertical; font-family: inherit; }
      narrows its column's least width, so an auto-laid table fits the page. */
   .report-table th, .report-table td { overflow-wrap: break-word; }
   .report-table .mono { overflow-wrap: anywhere; }
-  .report-table .report-q, .report-trail .report-q { min-width: 0; max-width: none; }
+  /* The question and note cells too: on screen they break anywhere, which in print squeezed the trail's Note to a
+     word's width, breaking its words (#296). */
+  .report-table .report-q { max-width: none; overflow-wrap: break-word; }
+  .report-table:not(.report-trail) .report-q { min-width: 0; }
   .report-trail .mono { font-size: 9px; }
+  .report-table.report-trail .report-q { min-width: 16ch; }
   .report-line { white-space: normal; }
   .report-table tr { break-inside: avoid; }
   .report-table thead { display: table-header-group; }

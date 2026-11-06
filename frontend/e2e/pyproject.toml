@@ -7,6 +7,7 @@ dependencies = [
     "pytest>=8",
     "pytest-playwright>=0.7",
     "playwright==1.64.1",
+    "pdfminer-six>=20250506",
 ]
 
 [tool.uv]
