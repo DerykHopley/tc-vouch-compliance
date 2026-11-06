@@ -203,3 +203,25 @@ def test_a_head_that_cannot_be_fetched_is_refused(remote, tmp_path):
     assert result.returncode != 0
     assert "could not fetch" in result.stderr
     assert "pr merge" not in calls
+
+
+def test_a_conflict_main_already_has_with_a_spec_is_not_blamed_on_the_pr(remote, tmp_path):
+    push_branch(remote, "spec/x", "notes.txt", "one\nSPEC\nthree\n")
+    commit_file(remote, "notes.txt", "one\nMAIN\nthree\n", "merged earlier with --conflicts-ok")
+    git(remote, "push", "-q", "origin", "main")
+    sha = push_branch(remote, "fix/a", "other.txt", "y\n")
+
+    result, calls = run_gate(remote, tmp_path, "fix/a", sha)
+
+    assert result.returncode == 0, result.stderr
+    assert "pr merge 7" in calls
+
+
+def test_conflicts_ok_takes_the_branch_with_or_without_origin(remote, tmp_path):
+    push_branch(remote, "spec/x", "notes.txt", "one\nSPEC\nthree\n")
+    sha = push_branch(remote, "fix/a", "notes.txt", "one\nFIX\nthree\n")
+
+    result, calls = run_gate(remote, tmp_path, "fix/a", sha, "--conflicts-ok", "origin/spec/x")
+
+    assert result.returncode == 0, result.stderr
+    assert "pr merge 7" in calls

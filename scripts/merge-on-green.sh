@@ -6,7 +6,8 @@
 #
 # Usage: scripts/merge-on-green.sh <pr-number> [--conflicts-ok <spec-branch>]...
 #        For a PR into main, the gate refuses when the PR's merge result would conflict with an
-#        open spec branch (origin/spec/* not yet in main). --conflicts-ok spec/<name> lets one
+#        open spec branch (origin/spec/* not yet in main), in a file main alone doesn't already
+#        conflict in. --conflicts-ok spec/<name> lets one
 #        named spec conflict; give it only after that spec's thread has been told.
 # Env:   MERGE_TIMEOUT  how long to wait for checks (default 20m, about twice the fast lane)
 #        SIZE_TARGET    changed lines a PR aims to stay under, lockfiles left out (default 400).
@@ -19,7 +20,9 @@ shift
 conflicts_ok=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --conflicts-ok) conflicts_ok+=("${2:?$usage}"); shift 2 ;;
+    --conflicts-ok)
+      [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }
+      conflicts_ok+=("$2"); shift 2 ;;
     *) echo "$usage" >&2; exit 2 ;;
   esac
 done
@@ -63,7 +66,7 @@ check_open_specs() {
   merged=$(git -c user.name=merge-gate -c user.email=merge-gate@localhost \
     commit-tree "${out%%$'\n'*}" -p origin/main -p "$head" -m "merge-gate: PR #$pr into main")
 
-  local name allowed spec_ok refused=()
+  local name allowed spec_ok before refused=()
   for spec in "${specs[@]}"; do
     rc=0
     out=$(git merge-tree --write-tree --name-only "$merged" "$spec") || rc=$?
@@ -73,10 +76,22 @@ check_open_specs() {
       echo "PR #$pr: git merge-tree against $name failed (exit $rc); not merging." >&2
       return 1
     fi
-    allowed=0
-    for spec_ok in "${conflicts_ok[@]}"; do [ "$spec_ok" = "$name" ] && allowed=1; done
     # The output is the tree, the conflicting files, a blank line, then messages.
-    out=$(printf '%s\n' "$out" | sed -n '2,/^$/{/^$/!s/^/    /p}')
+    out=$(printf '%s\n' "$out" | sed -n '2,/^$/{/^$/!p}')
+    # Only conflicts this PR adds count: one main already has with the spec isn't the PR's.
+    rc=0
+    before=$(git merge-tree --write-tree --name-only origin/main "$spec") || rc=$?
+    if [ $rc -eq 1 ]; then
+      before=$(printf '%s\n' "$before" | sed -n '2,/^$/{/^$/!p}')
+      out=$(grep -vxF -f <(printf '%s\n' "$before") <<<"$out" || true)
+      [ -n "$out" ] || continue
+    elif [ $rc -ne 0 ]; then
+      echo "PR #$pr: git merge-tree of main against $name failed (exit $rc); not merging." >&2
+      return 1
+    fi
+    out=$(sed 's/^/    /' <<<"$out")
+    allowed=0
+    for spec_ok in "${conflicts_ok[@]}"; do [ "${spec_ok#origin/}" = "$name" ] && allowed=1; done
     if [ $allowed = 1 ]; then
       echo "PR #$pr: conflicts with $name, allowed by --conflicts-ok:"
       echo "$out"
