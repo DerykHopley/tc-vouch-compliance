@@ -304,6 +304,20 @@ def test_a_click_on_the_handle_in_a_narrow_window_keeps_the_remembered_width(pag
     assert page.evaluate("() => localStorage.getItem('vouch.chatWidth')") == "720"
 
 
+def test_new_conversation_stays_reachable_at_the_narrowest_and_widest_pinned_chat(
+    page: Page, chat_url
+):
+    open_page(page, chat_url, 1400)
+    pin(page)
+    for dx, width in ((240, 360), (-360, 720)):  # 480 -> 360, then -> 720
+        drag_handle(page, dx)
+        assert chat_width(page) == width
+        new = chat(page).get_by_role("button", name="New conversation")
+        expect(new).to_be_in_viewport(ratio=1)
+        new.click()  # reachable: a real click lands on it
+        expect(new).to_be_visible()
+
+
 def test_only_the_primary_button_drags_the_handle(page: Page, chat_url):
     open_page(page, chat_url, 1400)
     pin(page)
