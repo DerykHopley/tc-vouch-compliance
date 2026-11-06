@@ -137,6 +137,10 @@ value comes from one keyring entry:
 | `OPENROUTER_API_KEY` | `openrouter` |
 | `VOUCH_DATABASE_URL` | `cloudsql-vouch-run-url` |
 
+Put each value in its entry with `scripts/store-secret.sh <entry> < <file>` (or pipe it in): it
+stores the value whole, a PEM's lines too, and says only its size. `secret-tool store` typed at its
+prompt keeps the first line only (#130).
+
 Two settings aren't secret, so they go in as plain env vars: `CLERK_PUBLISHABLE_KEY` (from the
 keyring's `clerk-vouch-publishable`; the browser gets it anyway) and `CLERK_AUTHORIZED_PARTIES`
 (the service's fixed address).
@@ -199,7 +203,8 @@ gcloud secrets add-iam-policy-binding CLERK_SECRET_KEY --member=serviceAccount:$
 ```
 
 **Rotate a secret:** put the new value in the keyring
-(`secret-tool store --label=clerk-vouch-secret service clerk-vouch-secret`, which reads it), then
+(`scripts/store-secret.sh clerk-vouch-secret < new-value`, which stores it whole, multi-line too,
+and says only its size: `secret-tool store` typed at its prompt keeps one line only, #130), then
 run `scripts/deploy-wizard.sh --db-ready`. It adds a version only to the secret that changed and
 deploys a new revision pinned to it; the old revision keeps the old version until then. Once the
 new revision is healthy, revoke the old key where it was issued (Clerk, OpenRouter, Cloud SQL's
