@@ -685,10 +685,18 @@ describe('Ask Vouch', () => {
   const QUIET = () => Promise.resolve(sse(['event: thread\ndata: {"thread_id":"t0"}\n\nevent: done\ndata: {}\n\n']))
 
   /** The API as `serve` has it, and `/api/chat` answering a message with `chat`, the greeting with `greeting`. */
+  /** The kept conversation the chat opens on (#251): none, unless a test sets one. */
+  let kept: { thread_id: string | null; lines: unknown[] } = { thread_id: null, lines: [] }
+  const cleared: string[] = []
+
   function serveChat(chat: (body: ChatBody) => Promise<Response>, greeting: (body: ChatBody) => Promise<Response> = QUIET) {
     serve()
     const others = fetch
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url === '/api/chat/current') {
+        if (init?.method === 'DELETE') cleared.push(url)
+        return Promise.resolve(Response.json(init?.method === 'DELETE' ? { thread_id: null } : kept))
+      }
       if (url !== '/api/chat') return others(url, init)
       const body = JSON.parse(init!.body as string) as ChatBody
       return body.message === undefined ? greeting(body) : chat(body)
@@ -811,6 +819,54 @@ describe('Ask Vouch', () => {
     await press('Close the chat')
     await open()
     expect(greetings).toHaveLength(1)
+  })
+
+  it('opens on the conversation kept on the server, as it was, without a greeting (issue 251)', async () => {
+    kept = { thread_id: 'k'.repeat(32), lines: [
+      { from: 'lead', text: 'Where do I stand?' },
+      { from: 'vouch', text: 'You have **12** controls to go.' },
+    ] }
+    const asked: ChatBody[] = []
+    try {
+      serveChat((body) => { asked.push(body); return QUIET() }, (body) => { asked.push(body); return QUIET() })
+      render(<App />)
+      await screen.findByRole('heading', { level: 1 })
+      await open()
+      const log = within(bubble()!).getByRole('log')
+      await within(log).findByText('Where do I stand?')
+      expect(within(log).getByText('12').tagName).toBe('STRONG') // through Prose, as when it was live
+      expect(asked).toEqual([]) // no greeting over a kept conversation
+
+      await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'And now?{Enter}')
+      await waitFor(() => expect(asked).toHaveLength(1))
+      expect(asked[0].thread_id).toBe('k'.repeat(32)) // it goes on with the kept thread
+    } finally {
+      kept = { thread_id: null, lines: [] }
+    }
+  })
+
+  it('"New conversation" empties the chat, and the next message starts a new thread (issue 251)', async () => {
+    kept = { thread_id: 'k'.repeat(32), lines: [{ from: 'lead', text: 'An old question' }] }
+    const asked: ChatBody[] = []
+    try {
+      serveChat((body) => { asked.push(body); return QUIET() })
+      render(<App />)
+      await screen.findByRole('heading', { level: 1 })
+      await open()
+      const log = within(bubble()!).getByRole('log')
+      await within(log).findByText('An old question')
+
+      await userEvent.click(within(bubble()!).getByRole('button', { name: 'New conversation' }))
+      expect(within(log).queryByText('An old question')).toBeNull()
+      await waitFor(() => expect(cleared).toHaveLength(1))
+
+      await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Fresh{Enter}')
+      await waitFor(() => expect(asked).toHaveLength(1))
+      expect(asked[0].thread_id).toBeNull()
+    } finally {
+      kept = { thread_id: null, lines: [] }
+      cleared.length = 0
+    }
   })
 
   it('offers a waiting review as a link to its working paper', async () => {

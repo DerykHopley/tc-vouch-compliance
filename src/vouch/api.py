@@ -9,6 +9,7 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
@@ -80,7 +81,13 @@ from vouch.profile import (
     ProfileScan,
     scan_profiles,
 )
-from vouch.redaction import install_log_redaction, redact_data, redacted_event, remember_secrets
+from vouch.redaction import (
+    install_log_redaction,
+    redact,
+    redact_data,
+    redacted_event,
+    remember_secrets,
+)
 from vouch.runs import (
     ASSESSMENT_FAILED,
     RUNNING_ALREADY,
@@ -848,6 +855,83 @@ def chat_within_spending(
         raise HTTPException(status_code=503, detail=str(error)) from None
 
 
+CHAT_HISTORY_UNAVAILABLE = (
+    "Your earlier conversation can't be shown just now. New messages work as usual."
+)
+"""Said where the kept conversation can't be read (#251): the chat opens empty, never an error. Must
+match HISTORY_UNREACHABLE in frontend/src/chat.ts, said where it can't be reached at all."""
+
+
+class ShownTurn:
+    """One chat turn's lines as the chat shows them (#251), built from the events it is sent: the
+    lead's message, Vouch's words (with a cross-control answer's working papers, #217), each
+    step, and each finished assessment's verdict last, as the chat adds it after the words. Must
+    match how the chat builds its lines from the same events (AskVouch.tsx `converse`): a new
+    event the chat shows needs a line here too, or a restored conversation reads differently."""
+
+    def __init__(self, message: str | None) -> None:
+        self.started = time.time_ns()  # its place in the conversation: when the turn began
+        self.lines: list[dict[str, Any]] = []
+        self.verdicts: list[dict[str, Any]] = []
+        self.papers: list[str] | None = None
+        if message is not None:
+            self.lines.append({"from": "lead", "text": redact(message)[0]})
+
+    def note(self, event: str, data: dict[str, Any]) -> None:
+        if event == "token":
+            last = self.lines[-1] if self.lines else None
+            if last is not None and last["from"] == "vouch" and not last.get("failed"):
+                last["text"] += data["text"]
+            else:
+                self.lines.append({"from": "vouch", "text": data["text"]})
+            if self.papers is not None:
+                self.lines[-1]["papers"] = self.papers
+        elif event == "step":
+            self.lines.append({"from": "step", "step": data})
+        elif event == "papers":
+            self.papers = data["control_ids"]
+        elif event == "assessment":
+            self.verdicts.append(
+                {
+                    "from": "verdict",
+                    "control_id": data["control_id"],
+                    "verdict": data["verdict"],
+                    "status": data["status"],
+                    "answer_language": data.get("answer_language"),
+                }
+            )
+        elif event == "error":
+            self.lines.append({"from": "vouch", "text": data["message"], "failed": True})
+
+    def shown(self) -> list[dict[str, Any]]:
+        return self.lines + self.verdicts
+
+
+@router.get("/chat/current")
+def current_conversation(memory: UserMemory) -> dict[str, Any]:
+    """The conversation the chat opens on under this user and profile (#251): its thread and its
+    lines as they were shown; none yet, no thread. Kept on the server, so on any device. Only
+    the user's own: there is no reading another thread by its id. Unreadable, it opens empty
+    with a note, never an error."""
+    try:
+        thread_id = memory.current_chat()
+        return {"thread_id": thread_id, "lines": memory.chat_lines(thread_id) if thread_id else []}
+    except Exception:  # the chat must open whatever the store says
+        log.exception("the kept conversation could not be read")
+        return {"thread_id": None, "lines": [], "note": CHAT_HISTORY_UNAVAILABLE}
+
+
+@router.delete("/chat/current")
+def new_conversation(memory: UserMemory) -> dict[str, Any]:
+    """A new conversation (#251): the chat opens on none until the next message starts one. The
+    old one is kept on the server."""
+    try:
+        memory.set_current_chat(None)
+    except Exception:  # the chat clears its own view all the same
+        log.exception("the new conversation could not be noted")
+    return {"thread_id": None}
+
+
 @router.post(
     "/chat", response_class=EventSourceResponse, dependencies=[Depends(chat_within_spending)]
 )
@@ -876,6 +960,14 @@ def chat(
     metered as one from the working paper is."""
     meter = UsageMeter(chosen)
     thread_id = request.thread_id or new_thread_id()
+    turn = ShownTurn(request.message)
+    # The lead's own message makes this the conversation the chat opens on next time (#251); a
+    # greeting alone never does, so a stale or failed greeting isn't what comes back.
+    if request.message is not None:
+        try:
+            memory.set_current_chat(thread_id)
+        except Exception:  # the chat answers whether or not it can be kept
+            log.exception("the conversation could not be noted as current")
 
     def record(control_id: str, usage: Usage) -> None:
         record_off_the_event_loop(spending, user.id, control_id, usage)
@@ -888,12 +980,19 @@ def chat(
         )
         message = request.message or GREETING_REQUEST
         for event, data in chat_turn(chat_graph(run.saver), chat, message, thread_id, memory.scope):
+            turn.note(event, data)
             yield ServerSentEvent(event=event, data=data)
         yield ServerSentEvent(event="done", data={})
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("the chat could not answer")
+        turn.note("error", {"message": CHAT_FAILED})
         yield ServerSentEvent(event="error", data={"message": CHAT_FAILED})
     finally:
+        try:
+            # As shown, so it comes back the same; keyed by when the turn began.
+            memory.add_chat_turn(thread_id, turn.shown(), turn.started)
+        except Exception:  # never at the cost of the answer
+            log.exception("the chat turn could not be kept")
         usage = meter.usage()
         log.info(
             "a chat message on %s (%s): %d tokens in, %d tokens out",
