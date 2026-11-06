@@ -112,7 +112,19 @@ jobs:
             echo "$out" | grep -F "$key"
           done
       - run: uv sync --locked
-      - run: uv run --locked --project frontend/e2e playwright install --with-deps ${{ matrix.browser }}
+      # The browser from cache (#270): a download that stalled cancelled the Firefox job three times.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ matrix.browser }}-${{ hashFiles('frontend/e2e/uv.lock') }}
+      - name: install the browser and its system packages, bounded and tried twice
+        timeout-minutes: 7
+        run: |
+          for attempt in 1 2; do
+            timeout 180 uv run --locked --project frontend/e2e playwright install --with-deps ${{ matrix.browser }} && exit 0
+            echo "::warning::playwright install attempt $attempt failed or timed out"
+          done
+          exit 1
       - run: frontend/e2e/run.sh --browser ${{ matrix.browser }}
         env:
           VOUCH_IMAGE: vouch:ci
