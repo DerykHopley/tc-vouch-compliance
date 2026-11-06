@@ -62,6 +62,7 @@ from vouch.graph import (
     SEARCH_RECORDS,
     Assessment,
     RequirementVerdict,
+    counts_towards_roll_up,
     plural,
     thread_key,
     verdict_words,
@@ -77,7 +78,7 @@ from vouch.guards import (
     tagged,
 )
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
-from vouch.memory import Memory, newest_assessment, progress
+from vouch.memory import Memory, newest_assessment, newest_by_control, progress
 from vouch.profile import ComplianceProfile
 from vouch.redaction import redact, redact_data, redacted_event, removal_step
 from vouch.runs import (
@@ -188,7 +189,29 @@ SEARCH_EVIDENCE_TOOL = {
         },
     },
 }
-CHAT_TOOLS = [PROGRESS_TOOL, START_ASSESSMENT_TOOL, EXPLAIN_CONTROL_TOOL, SEARCH_EVIDENCE_TOOL]
+ASSESSED_CONTROLS = "assessed_controls"
+ASSESSED_CONTROLS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": ASSESSED_CONTROLS,
+        "description": (
+            "Every VDA ISA control's newest assessment by the compliance lead, at once: its "
+            "verdict and review state, and per requirement its verdict, evidence kind "
+            "(documented or implemented) and whether that evidence is stale; controls not yet "
+            "assessed are named. For questions across controls, such as which controls have "
+            "documented evidence only, which have stale evidence, or which musts are not "
+            "evidenced."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+CHAT_TOOLS = [
+    PROGRESS_TOOL,
+    START_ASSESSMENT_TOOL,
+    EXPLAIN_CONTROL_TOOL,
+    SEARCH_EVIDENCE_TOOL,
+    ASSESSED_CONTROLS_TOOL,
+]
 SEARCHED = (SEARCH_POLICIES, SEARCH_RECORDS)
 """The evidence tools `search_evidence` runs, each only where the profile allows its source."""
 NO_EVIDENCE = "I found no evidence for that in your documents."
@@ -223,7 +246,10 @@ def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessa
         "full, every control id it lists included, and give its message as it is when it "
         f"declines. Use the `{EXPLAIN_CONTROL}` tool for questions about a control, such as "
         f"what is missing for it, and the `{SEARCH_EVIDENCE}` tool for questions about the "
-        "company's evidence. Answer only from what these tools return; when they find nothing, "
+        f"company's evidence. Use the `{ASSESSED_CONTROLS}` tool for questions across controls, "
+        "such as which controls have documented evidence only, stale evidence, or musts not "
+        "evidenced: name each control by its id, and the controls not assessed yet as such, "
+        "never guessing their evidence. Answer only from what these tools return; when they find nothing, "
         f"say “{NO_EVIDENCE}” and nothing more, never an answer of your own. Cite evidence only "
         'as an exact quote inside a cite tag naming its document id, <cite doc="DOC_ID">exact '
         'words</cite>, such as <cite doc="encryption-standard">Every company laptop uses '
@@ -287,6 +313,59 @@ def _next_words(next_step: NextStep | None) -> str:
         "assess-again": f"The next step is to assess control {control_id} again.",
         "assess": f"The next step is to assess control {control_id}.",
     }[next_step["action"]]
+
+
+def _kinds(requirements: list[RequirementVerdict]) -> str:
+    """The evidence kinds the requirements' citations rest on, in words."""
+    kinds = sorted({c.kind for r in requirements for c in r.citations})
+    return " and ".join(kinds) + (" only" if len(kinds) == 1 else "") if kinds else "none cited"
+
+
+def assessed_controls_words(controls: list[IsaControl], latest: dict[str, Assessment]) -> str:
+    """Every control's newest assessment at once (#210): one line per control (its verdict, review
+    state, the evidence its counted requirements rest on, and per requirement its verdict,
+    evidence kind and staleness), then the controls sorted by evidence: documented only, stale,
+    musts not evidenced, not assessed yet. Counted requirements are those the control's verdict
+    rolls up (vouch.graph.counts_towards_roll_up). No reason or quote: only verdicts and facts."""
+    lines = ["Each control's newest assessment under this profile:"]
+    documented_only: list[str] = []
+    stale: list[str] = []
+    musts_missing: list[str] = []
+    not_assessed: list[str] = []
+    for control in controls:
+        assessment = latest.get(control.id)
+        if assessment is None:
+            not_assessed.append(control.id)
+            lines.append(f"- {control.id}: not assessed yet.")
+            continue
+        applying = judged(assessment)
+        counted = [r for r in applying if counts_towards_roll_up(r)]
+        if {c.kind for r in counted for c in r.citations} == {"documented"}:
+            documented_only.append(control.id)
+        if any(c.stale for r in applying for c in r.citations):
+            stale.append(control.id)
+        missing = [r.id for r in applying if r.column == "must" and r.verdict != "evidenced"]
+        if missing:
+            musts_missing.append(f"{control.id} ({', '.join(missing)})")
+        found = "; ".join(
+            f"{r.id} ({r.column}) {verdict_words(r.verdict)}"
+            + (f", {_kinds([r]).removesuffix(' only')}" if r.citations else "")
+            + (", stale" if any(c.stale for c in r.citations) else "")
+            for r in applying
+        )
+        status = dict(_STATUS_WORDS)[assessment.status]
+        lines.append(
+            f"- {control.id}: {verdict_words(assessment.verdict)}, {status}; its counted "
+            f"requirements rest on {_kinds(counted)} evidence. {found}."
+        )
+    for label, ids in (
+        ("Documented evidence only", documented_only),
+        ("Stale evidence", stale),
+        ("Musts not evidenced", musts_missing),
+        ("Not assessed yet", not_assessed),
+    ):
+        lines.append(f"{label}: {', '.join(ids) if ids else 'none'}.")
+    return "\n".join(lines)
 
 
 def unknown_control(control_id: str) -> str:
@@ -421,6 +500,8 @@ class ChatTools:
         step. `stop` is set once the chat stream has been left."""
         if name == PROGRESS:
             return self.progress(write)
+        if name == ASSESSED_CONTROLS:
+            return self.assessed_controls(write)
         given = args.get("control_id")
         control_id = given.strip() if isinstance(given, str) else None
         sign_off = args.get("sign_off")
@@ -445,6 +526,15 @@ class ChatTools:
         if (next_step := view["next_step"]) is not None:
             write(_suggest(next_step["control_id"], next_step["action"]))
         return progress_words(view["by_status"], lead_progress.last_worked, view["next_step"])
+
+    def assessed_controls(self, write: Write) -> str:
+        """Every control's newest assessment by this lead under this profile, at once (#210): the
+        memory is the lead's and the profile's, so no other user's assessment is read."""
+        controls = load_base_framework().controls
+        latest = newest_by_control(self.memory, self.run.saver)
+        said = f"Read the newest assessments of {plural(len(latest), 'control')}."
+        write(("step", {"node": ASSESSED_CONTROLS, "text": said}))
+        return assessed_controls_words(controls, latest)
 
     def start_assessment(self, control_id: str, write: Write, stop: threading.Event) -> str:
         """Assess the control as the assessment stream would (vouch.runs.begin_run), its steps

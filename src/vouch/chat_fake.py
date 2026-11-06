@@ -4,7 +4,8 @@ Offline, and in tests, the chat runs on it (vouch.model_choice.ModelChoice.for_c
 chat agent's tools (#45, #46), it calls one as a model would: `start_assessment` for "Assess
 <id>", `progress` for the greeting or "where do I stand", `explain_control` for "What's missing
 for <id>?" (the page's control when none is named) or with `sign_off` for "Accept <id>", and
-`search_evidence` for "Is there evidence of <words>?". Then it passes the tool's words on as its
+`search_evidence` for "Is there evidence of <words>?", and `assessed_controls` for a question
+across controls ("Which controls have documented evidence only?", #210). Then it passes the tool's words on as its
 answer, each passage of evidence cited as the chat prompt asks:
 <cite doc="doc_id">its first line</cite>.
 """
@@ -28,6 +29,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import ConfigDict, Field
 
 from vouch.chat_agent import (
+    ASSESSED_CONTROLS,
     EXPLAIN_CONTROL,
     GREETING_REQUEST,
     PROGRESS,
@@ -47,6 +49,7 @@ WHERE = re.compile(r"where do I stand|my progress", re.IGNORECASE)
 SIGN_OFF = re.compile(rf"\b(accept|reject|override|approve|sign off)\b\D*{_ID}", re.IGNORECASE)
 MISSING = re.compile(rf"\b(?:missing|explain)\b(?:\D*{_ID})?", re.IGNORECASE)
 EVIDENCE = re.compile(r"\bevidence (?:of|for|about|on) (.+?)[?.!]*$", re.IGNORECASE)
+ACROSS = re.compile(r"\bwhich (?:controls|musts|requirements)\b", re.IGNORECASE)
 PAGE_CONTROL = re.compile(rf"VDA ISA control {_ID}:")
 _EVIDENCE_DATA = re.compile(r"<evidence>\n(.*?)\n</evidence>", re.DOTALL)
 _FINDINGS_DATA = re.compile(r"<findings>\n(.*?)\n</findings>", re.DOTALL)
@@ -149,6 +152,8 @@ class CannedChatModel(BaseChatModel):
             return call(EXPLAIN_CONTROL, control_id=asked.group(2), sign_off=sign_off)
         if asked := ASSESS.search(text):
             return call(START_ASSESSMENT, control_id=asked.group(1).rstrip(".?!,;:"))
+        if ACROSS.search(text):
+            return call(ASSESSED_CONTROLS)
         if text == GREETING_REQUEST or WHERE.search(text):
             return call(PROGRESS)
         if (asked := MISSING.search(text)) and (control_id := asked.group(1) or _page(messages)):
