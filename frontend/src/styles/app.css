@@ -111,15 +111,26 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .mono { font-family: var(--f-mono); text-transform: none; }
 .sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 16px; display: grid; gap: 8px; justify-items: start; margin: 0; }
-.trace { font: 12px/1.5 var(--f-mono); list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
-.trace li { animation: rise .18s ease-out; }
-.trace b { font-weight: 500; color: var(--navy); margin-right: 6px; }
-.answer { margin: 0; max-width: 72ch; }
+/* How Vouch reached this (#232): each step's node name a chip in a column of its own, so every step's text starts at
+   the same edge; under 700px the chip sits above its text. A guard step's chip is ink, an overlay branch's brass-edged. */
+.trace { font: 12px/1.5 var(--f-mono); list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; overflow-wrap: anywhere; }
+.trace li { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; animation: rise .18s ease-out; }
+.step-node { justify-self: start; max-width: 100%; padding: 0 8px; border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet); color: var(--navy); }
+.trace li.guard .step-node { color: var(--ink); border-color: var(--ink); }
+.trace li.branch .step-node { border-color: var(--brass); }
+/* The draft answer (#232): blocks 12px apart at line height 1.6, a heading 16px below the block before it. */
+.answer { margin: 0; max-width: 72ch; line-height: 1.6; }
+.answer .prose-p, .answer .prose-list { margin-bottom: 12px; }
+.answer .prose-h { margin: 16px 0 4px; }
+.answer .prose-h:first-child { margin-top: 0; }
 /* The model's Markdown, shown (#209): paragraphs and lists in the chat and the draft answer, spaced to read as
    separate points; the draft answer keeps its 72ch measure. */
 .prose-p { margin: 0 0 8px; }
 .prose-list { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .prose-p:last-child, .prose-list:last-child { margin-bottom: 0; }
+/* A heading the model wrote (#232): Manrope, not the display face, which stays for page and section headings. */
+.prose-h { font: 700 14px/1.5 var(--f-body); color: var(--ink); text-transform: none; letter-spacing: normal; margin: 0 0 8px; }
+.prose-h:last-child { margin-bottom: 0; }
 .notice { border-left: 3px solid var(--ink); }
 .crumb { margin-left: -10px; display: inline-flex; align-items: center; text-decoration: none; }
 .assess { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
@@ -225,6 +236,8 @@ textarea.field { resize: vertical; font-family: inherit; }
 @media (max-width: 700px) {
   .bubble, .bubble.enlarged, .bubble.pinned { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
   .shortcut-hint { display: none; }
+  .trace { grid-template-columns: minmax(0, 1fr); } /* each step's chip above its text (#232) */
+  .trace li { row-gap: 2px; }
   /* The page leaves room for the floating Ask Vouch button (#198): its foot scrolls clear of it, and a field brought
      into view (scrolled to, tapped, tabbed to) stops above it. 88px: the button's 45px, its 20px inset, a gap. */
   main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }

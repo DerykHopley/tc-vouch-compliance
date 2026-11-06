@@ -72,7 +72,7 @@ describe('proseBlocks', () => {
       { kind: 'p', lines: [[{ text: '4. März' }]] },
     ])
     expect(proseBlocks('**Next steps:**\n\n1. a\n2. b\nThen:\n1. c')).toEqual([
-      { kind: 'p', lines: [[{ text: 'Next steps:', bold: true }]] },
+      { kind: 'h', runs: [{ text: 'Next steps:', bold: true }] },
       { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]] },
       { kind: 'p', lines: [[{ text: 'Then:' }]] },
       { kind: 'ol', items: [[{ text: 'c' }]] },
@@ -104,6 +104,45 @@ describe('proseBlocks', () => {
     ])
   })
 
+  it('reads a line starting #, ## or ### and a space as a heading, every depth the same (ticket 232)', () => {
+    for (const line of ['# Gaps', '## Gaps', '### Gaps']) {
+      expect(proseBlocks(line)).toEqual([{ kind: 'h', runs: [{ text: 'Gaps' }] }])
+    }
+    expect(proseBlocks('Found:\n## Gaps\n- no record')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Found:' }]] },
+      { kind: 'h', runs: [{ text: 'Gaps' }] },
+      { kind: 'ul', items: [[{ text: 'no record' }]] },
+    ])
+  })
+
+  it('reads a line that is wholly one bold run as a heading (ticket 232)', () => {
+    expect(proseBlocks('**Next steps:**')).toEqual([{ kind: 'h', runs: [{ text: 'Next steps:', bold: true }] }])
+    expect(proseBlocks('**What exists**\nA policy.')).toEqual([
+      { kind: 'h', runs: [{ text: 'What exists', bold: true }] },
+      { kind: 'p', lines: [[{ text: 'A policy.' }]] },
+    ])
+  })
+
+  it('leaves #hashtag, #1 priority, ## alone, #### x and a part-bold line as written (ticket 232)', () => {
+    for (const line of ['#hashtag', '#1 priority', '##', '## ', '#### x']) {
+      expect(proseBlocks(line)).toEqual([{ kind: 'p', lines: [[{ text: line }]] }])
+    }
+    expect(proseBlocks('**Must:** keys rotate yearly')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Must:', bold: true }, { text: ' keys rotate yearly' }]] },
+    ])
+  })
+
+  it('reads a numbered list after a heading line as a heading then the list (ticket 232)', () => {
+    expect(proseBlocks('**Next steps:**\n1. a\n2. b')).toEqual([
+      { kind: 'h', runs: [{ text: 'Next steps:', bold: true }] },
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]] },
+    ])
+    expect(proseBlocks('## Steps:\n1. a\n2. b')).toEqual([
+      { kind: 'h', runs: [{ text: 'Steps:' }] },
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]] },
+    ])
+  })
+
   it('leaves a dash or a number in running text alone', () => {
     expect(proseBlocks('Keys rotate yearly - not monthly - per 2. rule')).toEqual([
       { kind: 'p', lines: [[{ text: 'Keys rotate yearly - not monthly - per 2. rule' }]] },
@@ -122,6 +161,18 @@ describe('Prose', () => {
   it('shows the live example as a list, not running text', () => {
     const { container } = render(<Prose text={LIVE} />)
     expect(container.querySelectorAll('ul > li')).toHaveLength(2)
+  })
+
+  it('shows a heading as an h3 with class prose-h (ticket 232)', () => {
+    const { container } = render(<Prose text={'## Gaps\n- no record\n\n**Next steps:**\n1. a'} />)
+    expect([...container.querySelectorAll('h3.prose-h')].map((h) => h.textContent)).toEqual(['Gaps', 'Next steps:'])
+    expect(container.querySelectorAll('ul > li, ol > li')).toHaveLength(2)
+  })
+
+  it('shows HTML in a heading line as text (ticket 232)', () => {
+    const { container } = render(<Prose text={'## <b>x</b>'} />)
+    expect(container.querySelector('b')).toBeNull()
+    expect(container.querySelector('h3.prose-h')?.textContent).toBe('<b>x</b>')
   })
 
   it('shows HTML, a script, an image and a link from model text as plain text', () => {

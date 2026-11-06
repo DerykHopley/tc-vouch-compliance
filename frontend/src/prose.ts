@@ -1,13 +1,15 @@
 /**
- * The small Markdown subset the models write (#209): bold, italics, bulleted and numbered lists, and paragraphs.
+ * The small Markdown subset the models write (#209): bold, italics, bulleted and numbered lists, headings (#232) and
+ * paragraphs.
  * It returns plain-text runs for React to show as elements, never HTML: a tag, an image or a link in the model's text
  * stays text, as written.
  */
 
 /** A run of text, bold or italic or neither. */
 export type TextRun = { text: string; bold?: true; italic?: true }
-/** A paragraph's lines (shown with line breaks between), or a list's items. */
+/** A paragraph's lines (shown with line breaks between), a list's items, or a heading's runs (#232). */
 export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul' | 'ol'; items: TextRun[][] }
+  | { kind: 'h'; runs: TextRun[] }
 
 // `**bold**`, then `*italic*` (no space just inside the stars, so "2 * 3 * 4" stays as written), only at a word's
 // edges: a star inside a word is text, as German gender stars are ("Mitarbeiter*innen", #218).
@@ -18,6 +20,9 @@ const NUMBERED = /^\s*(\d+)[.)]\s+(.*)$/
 // or italic lead-in ("**M1 (must):** - one - two"). Numbers on such a line stay text: "Stand: 1. Januar 2026, geändert
 // am 2. Februar 2026." is a sentence, not a list (#218).
 const INLINE_BULLETS = /^(.*?:\**)\s+-\s+(.+)$/
+// A heading (#232): one to three #s, a space, then text ("## Gaps"); every depth reads the same. "#hashtag", "#1 …",
+// "##" alone and "#### x" stay text, as written.
+const HASH_HEADING = /^\s*#{1,3}\s+(.*\S)\s*$/
 
 /** The text's runs: bold and italics marked, everything else as written. */
 function runs(text: string): TextRun[] {
@@ -57,11 +62,24 @@ function numberedItem(text: string, number: number, open: Block | null, afterLea
   return null
 }
 
-/** The text as paragraphs and lists. */
+/**
+ * The line's heading runs, or null (#232): a `#` heading, or a line as written that is wholly one bold run
+ * ("**Next steps:**"). A bold lead-in split from an inline list ("**What exists:** - one - two") stays a paragraph,
+ * as before.
+ */
+function heading(line: string, asWritten: boolean): TextRun[] | null {
+  const hashed = HASH_HEADING.exec(line)
+  if (hashed) return runs(hashed[1])
+  if (!asWritten) return null
+  const found = runs(line.trim())
+  return found.length === 1 && found[0].bold ? found : null
+}
+
+/** The text as paragraphs, lists and headings. */
 export function proseBlocks(text: string): Block[] {
   const blocks: Block[] = []
   let open: Block | null = null
-  const add = (kind: Block['kind'], content: TextRun[]) => {
+  const add = (kind: Exclude<Block['kind'], 'h'>, content: TextRun[]) => {
     if (open && open.kind === kind) {
       if (open.kind === 'p') open.lines.push(content)
       else open.items.push(content)
@@ -71,9 +89,16 @@ export function proseBlocks(text: string): Block[] {
     blocks.push(open)
   }
   let previous = '' // the last line shown, across blank lines
-  for (const line of text.split('\n').flatMap(unfold)) {
+  for (const written of text.split('\n')) for (const line of unfold(written)) {
     if (!line.trim()) {
       open = null // a blank line ends the paragraph or list
+      continue
+    }
+    const headed = heading(line, line === written)
+    if (headed) {
+      blocks.push({ kind: 'h', runs: headed })
+      open = null // a heading ends the paragraph or list before it
+      previous = line // and is a lead-in for a numbered list after it
       continue
     }
     const bullet = BULLET.exec(line)
