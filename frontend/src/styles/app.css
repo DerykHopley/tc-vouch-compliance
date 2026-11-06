@@ -76,9 +76,15 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .head h2 { font-size: 30px; }
 .head p { margin: 0; color: var(--muted); max-width: 60ch; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
-.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; display: grid; gap: 8px; align-content: start; }
+.card { position: relative; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; display: grid; gap: 8px; align-content: start; }
+/* The whole card opens its working paper (#231): its one link, "Open <id>", stretched over the card by ::after. Hover
+   shows on the whole card; keyboard focus rings the whole card. */
+.card-head::after { content: ""; position: absolute; inset: 0; border-radius: 4px; }
+.card:hover { border-color: var(--muted); }
+.card-head:focus-visible { outline: none; }
+.card-head:focus-visible::after { outline: 2px solid var(--navy); outline-offset: 2px; }
 .card-head { background: var(--paper); border-radius: 2px 2px 0 0; height: 74px; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 8px 10px; border-bottom: 4px solid var(--not-applicable); color: var(--ink); text-decoration: none; }
-.card-head:hover b { text-decoration: underline; text-decoration-color: var(--navy); }
+.card:hover .card-head b { text-decoration: underline; text-decoration-color: var(--navy); }
 .card-head b { font: 400 24px/1 var(--f-display); }
 /* The verdict as the card's coloured bottom edge; not assessed is a dashed --rule edge (design.md, 2026-11-04). */
 .card-head.edge-evidenced { border-bottom-color: var(--evidenced); }
@@ -221,13 +227,20 @@ textarea.field { resize: vertical; font-family: inherit; }
 .paper-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; }
 .bubble-foot { display: flex; gap: 6px; border-top: 1px solid var(--rule); padding: 10px 12px; }
 .bubble-foot .field { flex: 1 1 auto; }
-/* Enlarged: wider and taller, still floating. Pinned: a column of 400px beside the page, which makes room for it
+/* Enlarged: wider and taller, still floating. Pinned: a column beside the page, which makes room for exactly its width:
+   --chat-width, set by AskVouch (480px by default, dragged from 360px to 720px; #231)
    (design.md, Layout: only over 1000px; AskVouch offers no pin at 1000px or less). */
 .bubble.enlarged { width: min(640px, calc(100vw - 32px)); height: calc(100vh - 120px); }
 @media (min-width: 1001px) {
-  :root[data-chat="pinned"] body { padding-right: 400px; }
-  .bubble.pinned { top: 0; right: 0; bottom: 0; width: 400px; height: auto; border-width: 0 0 0 1px; border-radius: 0; box-shadow: none; animation: none; }
+  :root[data-chat="pinned"] body { padding-right: var(--chat-width, 480px); }
+  .bubble.pinned { top: 0; right: 0; bottom: 0; width: var(--chat-width, 480px); height: auto; border-width: 0 0 0 1px; border-radius: 0; box-shadow: none; animation: none; }
 }
+/* The pinned chat's resize handle (#231): a full-height strip over its left edge, 12px wide; a 2px line shows on hover
+   (--muted) and focus (--navy, with the focus ring). */
+.chat-resize { position: absolute; top: 0; bottom: 0; left: -6px; width: 12px; z-index: 1; cursor: col-resize; touch-action: none; }
+.chat-resize::before { content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: transparent; }
+.chat-resize:hover::before { background: var(--muted); }
+.chat-resize:focus-visible::before { background: var(--navy); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
 @media (max-width: 1000px) {

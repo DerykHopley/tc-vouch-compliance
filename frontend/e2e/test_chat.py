@@ -5,8 +5,10 @@ On their own server (chat_url), so their requests don't spend another suite's ra
 
 import pytest
 from playwright.sync_api import Page, expect
+from touch_targets import small_targets
 
 CHAT = "aside[aria-label='Chat with Vouch']"
+HANDLE = "[role=separator][aria-label='Chat width']"
 SCROLLS_SIDEWAYS = (
     "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
 )
@@ -24,6 +26,13 @@ def open_page(page: Page, url: str, width: int, path: str = "/") -> None:
     page.set_viewport_size({"width": width, "height": 800})
     with page.expect_response("**/api/overview"):
         page.goto(url + path)
+
+
+def click_question(page: Page, control_id: str) -> None:
+    """A click on a Dossier card's question (#231). force: the card's link lies over its text by
+    design; the mouse still clicks at the text's centre, where the link takes the click."""
+    card = page.get_by_role("article", name=f"Control {control_id}", exact=True)
+    card.locator(".control-title").click(force=True)
 
 
 def chat(page: Page):
@@ -65,14 +74,14 @@ def test_each_state_is_reachable_and_drawn_in_the_theme(page: Page, chat_url, sc
     enlarged = box(page, CHAT)
     assert enlarged["width"] > bubble["width"] + 200 and enlarged["height"] > bubble["height"]
 
-    # Pinned: a column of about 400px at the right edge, full height, flat.
+    # Pinned: a column of 480px (#231) at the right edge, full height, flat.
     pin = page.get_by_role("button", name="Pin beside the page")
     expect(pin).to_have_attribute("aria-pressed", "false")
     pin.click()
     expect(pin).to_have_attribute("aria-pressed", "true")
     pinned = box(page, CHAT)
     assert (
-        pinned["x"] + pinned["width"] == 1400 and pinned["width"] == 400 and pinned["height"] == 800
+        pinned["x"] + pinned["width"] == 1400 and pinned["width"] == 480 and pinned["height"] == 800
     )
     assert chat(page).evaluate("el => getComputedStyle(el).boxShadow") == "none"
     assert chat(page).evaluate("el => getComputedStyle(el).backgroundColor") == sheet
@@ -116,8 +125,8 @@ def test_pinned_the_page_and_chat_sit_side_by_side_with_no_sideways_scroll_at_14
         side = box(page, part)
         assert side["x"] + side["width"] <= pinned["x"], part
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
-    # The page under it still works: a control's card can be opened beside the chat.
-    page.get_by_role("article", name="Control 4.1.2", exact=True).get_by_role("link").first.click()
+    # The page under it still works: a click on a card's question opens its paper beside the chat (#231).
+    click_question(page, "4.1.2")
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
     expect(chat(page)).to_contain_text("on 4.1.2 · Working paper")
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
@@ -127,11 +136,13 @@ def test_pin_isnt_offered_at_900px_only_bubble_and_enlarged(page: Page, chat_url
     open_page(page, chat_url, 900)
     page.get_by_role("button", name="Ask Vouch").click()
     expect(page.get_by_role("button", name="Pin beside the page")).to_have_count(0)
+    expect(page.locator(HANDLE)).to_have_count(0)  # no resize handle on the bubble (#231)
 
     page.get_by_role("button", name="Make larger").click()
 
     expect(chat(page)).to_have_class("bubble enlarged")
     expect(page.get_by_role("button", name="Pin beside the page")).to_have_count(0)
+    expect(page.locator(HANDLE)).to_have_count(0)
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
 
 
@@ -139,13 +150,13 @@ def test_a_chat_pinned_at_1400px_falls_back_to_enlarged_at_900px_and_the_page_ta
     page: Page, chat_url
 ):
     open_page(page, chat_url, 1400)
-    page.get_by_role("button", name="Ask Vouch").click()
-    page.get_by_role("button", name="Make larger").click()
-    page.get_by_role("button", name="Pin beside the page").click()
+    pin(page)
+    drag_handle(page, -100)  # pinned at a dragged width (#231)
 
     page.set_viewport_size({"width": 900, "height": 800})
 
     expect(chat(page)).to_have_class("bubble enlarged")
+    expect(page.locator(HANDLE)).to_have_count(0)
     assert box(page, "main")["width"] == 900  # no room kept for a column that is gone
     page.keyboard.press("Escape")  # enlarged now: Esc closes it
     expect(chat(page)).to_have_count(0)
@@ -169,9 +180,105 @@ def test_at_400px_the_chat_is_a_full_screen_sheet_without_pin_or_enlarge(page: P
     page.get_by_role("button", name="Ask Vouch").click()
 
     assert box(page, CHAT) == {"x": 0, "y": 0, "width": 400, "height": 800}
+    expect(page.locator(HANDLE)).to_have_count(0)
     expect(page.get_by_role("button", name="Make larger")).to_have_count(0)
     expect(page.get_by_role("button", name="Pin beside the page")).to_have_count(0)
     expect(page.get_by_role("button", name="Send")).to_be_visible()
+    assert page.evaluate(SCROLLS_SIDEWAYS) is False
+
+
+def pin(page: Page) -> None:
+    page.get_by_role("button", name="Ask Vouch").click()
+    page.get_by_role("button", name="Make larger").click()
+    page.get_by_role("button", name="Pin beside the page").click()
+    expect(chat(page)).to_have_class("bubble pinned")
+
+
+def drag_handle(page: Page, dx: float) -> None:
+    """Drags the pinned chat's resize handle `dx` px with the mouse (negative: to the left)."""
+    handle = box(page, HANDLE)
+    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + dx, y, steps=8)
+    page.mouse.up()
+
+
+def chat_width(page: Page) -> float:
+    return box(page, CHAT)["width"]
+
+
+def test_dragging_the_handle_200px_left_makes_the_pinned_chat_680px_and_the_page_gives_way(
+    page: Page, chat_url
+):
+    """#231: the pinned chat's width follows a drag on its left edge, and the page makes room."""
+    open_page(page, chat_url, 1400)
+    pin(page)
+    assert chat_width(page) == 480
+
+    drag_handle(page, -200)
+
+    assert chat_width(page) == 680
+    expect(page.locator(HANDLE)).to_have_attribute("aria-valuenow", "680")
+    pinned = box(page, CHAT)
+    for part in ["header.top", "main"]:
+        side = box(page, part)
+        assert side["x"] + side["width"] <= pinned["x"], part
+    assert page.evaluate(SCROLLS_SIDEWAYS) is False
+
+
+def test_a_drag_past_either_end_stops_at_720px_and_360px_at_1400px(page: Page, chat_url):
+    open_page(page, chat_url, 1400)
+    pin(page)
+
+    drag_handle(page, -600)
+    assert chat_width(page) == 720
+    main = box(page, "main")
+    assert main["x"] + main["width"] <= 1400 - 720
+    assert page.evaluate(SCROLLS_SIDEWAYS) is False
+
+    drag_handle(page, 600)
+    assert chat_width(page) == 360
+
+
+def test_the_handle_takes_keyboard_focus_with_a_visible_ring_and_a_tall_hit_area(
+    page: Page, chat_url
+):
+    open_page(page, chat_url, 1400)
+    pin(page)  # focus is on the pin button; the handle is the chat's first stop, just before it
+    page.keyboard.press("Shift+Tab")
+    handle = page.get_by_role("separator", name="Chat width")
+    expect(handle).to_be_focused()
+    assert handle.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+    assert box(page, HANDLE)["height"] >= 44
+    page.keyboard.press("ArrowLeft")
+    assert chat_width(page) == 512
+    # Pinned, every control in the chat and on the page keeps the touch-target floor.
+    assert small_targets(page) == []
+
+
+def test_a_chosen_width_survives_unpin_and_pin_a_working_paper_and_a_reload(
+    page: Page, chat_url
+):
+    open_page(page, chat_url, 1400)
+    pin(page)
+    drag_handle(page, -120)
+    assert chat_width(page) == 600
+
+    pin_button = page.get_by_role("button", name="Pin beside the page")
+    pin_button.click()  # unpinned: enlarged
+    expect(chat(page)).to_have_class("bubble enlarged")
+    pin_button.click()
+    assert chat_width(page) == 600
+
+    click_question(page, "4.1.2")
+    expect(page.get_by_role("region", name="Working paper")).to_be_visible()
+    assert chat_width(page) == 600
+
+    page.reload()
+    expect(page.get_by_role("region", name="Working paper")).to_be_visible()
+    pin(page)
+    assert chat_width(page) == 600
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
 
 

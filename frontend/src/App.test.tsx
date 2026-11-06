@@ -10,9 +10,13 @@ let resizeTo: (width: number) => void = () => {}
 function systemPrefers(dark: boolean | null, width = 1400) {
   let now = width
   const listeners = new Set<() => void>()
+  const setInnerWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { configurable: true, value: w })
+  setInnerWidth(width)
   resizeTo = (next) => act(() => {
     now = next
+    setInnerWidth(next)
     for (const listener of listeners) listener()
+    window.dispatchEvent(new Event('resize'))
   })
   window.matchMedia = (query: string) => {
     const maxWidth = /^\(max-width: (\d+)px\)$/.exec(query)
@@ -96,6 +100,23 @@ describe('Dossier landing', () => {
     expect((await screen.findByRole('heading', { level: 1 })).textContent).toMatch(/prepared for audit/i)
     expect(screen.getByRole('region', { name: 'Readiness' })).toBeTruthy()
     expect(screen.getAllByRole('article', { name: /^Control / })).toHaveLength(12)
+  })
+
+  it('gives each card one link, "Open <id>", and one Tab stop (ticket 231: the link covers the whole card)', async () => {
+    serve()
+    render(<App />)
+    const cards = await screen.findAllByRole('article', { name: /^Control / })
+    const links = cards.map((card) => {
+      const inCard = within(card).getAllByRole('link')
+      expect(inCard).toHaveLength(1)
+      return inCard[0]
+    })
+    links.forEach((link, i) => expect(link.getAttribute('aria-label')).toBe(`Open ${IDS[i]}`))
+    links[0].focus()
+    for (const next of links.slice(1, 4)) {
+      await userEvent.tab()
+      expect(document.activeElement).toBe(next)
+    }
   })
 
   it('says so with Retry when the overview cannot be read, and shows it once it can', async () => {
@@ -548,6 +569,86 @@ describe('Ask Vouch', () => {
     await press('Close the chat')
     expect(bubble()).toBeNull()
     expect(document.documentElement.dataset.chat).toBeUndefined()
+  })
+
+  describe('the pinned chat\'s width (ticket 231)', () => {
+    const handle = () => screen.queryByRole('separator', { name: 'Chat width' })
+    const pinned = async () => {
+      await open()
+      await press('Make larger')
+      await press('Pin beside the page')
+    }
+    const width = () => document.documentElement.style.getPropertyValue('--chat-width')
+    afterEach(() => {
+      window.localStorage.clear()
+      document.documentElement.style.removeProperty('--chat-width')
+    })
+
+    it('has a handle only when pinned: none on the bubble, the enlarged chat or the sheet', async () => {
+      render(<App />)
+      await open()
+      expect(handle()).toBeNull()
+      await press('Make larger')
+      expect(handle()).toBeNull()
+      await press('Pin beside the page')
+      const found = handle()!
+      expect(found.getAttribute('aria-orientation')).toBe('vertical')
+      expect(found.tabIndex).toBe(0)
+      resizeTo(400)
+      expect(handle()).toBeNull()
+    })
+
+    it('opens 480px wide, and the arrows, Home and End move it with aria-valuenow following', async () => {
+      render(<App />)
+      await pinned()
+      const found = handle()!
+      expect(found.getAttribute('aria-valuenow')).toBe('480')
+      expect(found.getAttribute('aria-valuemin')).toBe('360')
+      expect(found.getAttribute('aria-valuemax')).toBe('720')
+      expect(width()).toBe('480px')
+      found.focus()
+      await userEvent.keyboard('{ArrowLeft}')
+      expect(found.getAttribute('aria-valuenow')).toBe('512')
+      expect(width()).toBe('512px')
+      await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+      expect(found.getAttribute('aria-valuenow')).toBe('448')
+      await userEvent.keyboard('{End}')
+      expect(found.getAttribute('aria-valuenow')).toBe('720')
+      await userEvent.keyboard('{ArrowLeft}')
+      expect(found.getAttribute('aria-valuenow')).toBe('720')
+      await userEvent.keyboard('{Home}')
+      expect(found.getAttribute('aria-valuenow')).toBe('360')
+      expect(width()).toBe('360px')
+    })
+
+    it('opens at 480px when the stored width is not a number', async () => {
+      window.localStorage.setItem('vouch.chatWidth', 'abc')
+      render(<App />)
+      await pinned()
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('480')
+    })
+
+    it('opens at the widest the window allows when the stored width is 5000', async () => {
+      window.localStorage.setItem('vouch.chatWidth', '5000')
+      render(<App />)
+      await pinned()
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('720')
+      resizeTo(1100)
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('540')
+      expect(width()).toBe('540px')
+    })
+
+    it('remembers a chosen width across unpin and pin again', async () => {
+      render(<App />)
+      await pinned()
+      handle()!.focus()
+      await userEvent.keyboard('{ArrowLeft}')
+      await press('Pin beside the page') // unpin
+      expect(width()).toBe('')
+      await press('Pin beside the page')
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('512')
+      expect(window.localStorage.getItem('vouch.chatWidth')).toBe('512')
+    })
   })
 
   it('names the page it is on in its header', async () => {

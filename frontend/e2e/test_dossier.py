@@ -77,6 +77,17 @@ def test_a_card_opens_its_working_paper(page: Page, dossier_url):
     expect(paper.get_by_role("button", name="Assess 5.2.4")).to_be_visible()
 
 
+def test_a_click_anywhere_on_a_card_opens_its_working_paper(page: Page, dossier_url):
+    """#231: the card's one link covers the whole card: its question, ISO label and verdict chip."""
+    for control_id, part in (("5.2.4", ".control-title"), ("4.1.3", ".card-meta .mono"), ("2.1.3", ".chip")):
+        open_dossier(page, dossier_url)
+        # force: the card's link lies over its text by design, so Playwright calls the text covered; the
+        # mouse still clicks at the text's centre, and what is on top there (the link) takes the click.
+        card(page, control_id).locator(part).click(force=True)
+        expect(page).to_have_url(f"{dossier_url}/controls/{control_id}")
+        expect(page.get_by_role("region", name="Working paper")).to_be_visible()
+
+
 def test_with_nothing_assessed_the_empty_state_names_the_first_step(
     page: Page, dossier_url, failing_api_url
 ):
