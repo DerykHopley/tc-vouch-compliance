@@ -51,7 +51,9 @@ const STATES: Record<ChatState, { className: string; size: { label: string; to: 
 /** A line in the chat: the lead's message, Vouch's reply (or a notice that it failed), an assessment's step, or an
  * assessment's verdict with the way to its working paper. */
 type Message =
-  | { from: 'lead' | 'vouch'; text: string; failed?: boolean; papers?: string[] }
+  | { from: 'lead'; text: string }
+  /** `papers`: the controls a cross-control answer may name, linked to their working papers when named (#217). */
+  | { from: 'vouch'; text: string; failed?: boolean; papers?: string[] }
   | { from: 'step'; step: Step }
   | { from: 'verdict'; controlId: string; verdict: Verdict; status: ReviewStatus; language?: string }
 
@@ -79,8 +81,8 @@ function PaperLinks({ reply, papers, onOpen }: { reply: string; papers: string[]
   const named = namedControls(reply, papers)
   if (named.length === 0) return null
   return (
-    <p className="msg paper-links">
-      <span className="why">Working papers:</span>
+    <p className="paper-links">
+      <span className="lbl">Working papers</span>
       {named.map((id) => (
         <PaperLink key={id} controlId={id} onOpen={onOpen} label={`Working paper ${id}`}>
           <span className="mono">{id}</span>
@@ -213,7 +215,8 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
     setSuggestion(null)
     if (text !== null) setMessages((all) => [...all, { from: 'lead', text }])
     const add = (m: Message) => setMessages((all) => [...all, m])
-    // The controls this turn's answer may name (a `papers` event, #217), for its working-paper links.
+    // The controls this turn's answer may name (a `papers` event, #217), for its working-paper links. The tool sends
+    // it as it runs, before the answer's words, so each piece of the answer written after it carries it.
     let papers: string[] | undefined
     const write = (piece: string) => setMessages((all) => {
       const last = all[all.length - 1]

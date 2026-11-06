@@ -40,7 +40,7 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
 def test_the_working_paper_links_after_a_cross_control_answer_are_at_least_44px(
     page: Page, chat_url
 ):
-    # #217: a pill per control the answer names, at phone width.
+    # #217: a pill per control the answer names, at 400px.
     assess_in_the_chat(page, chat_url, 400)
     page.get_by_role("textbox", name="Message to Vouch").fill(
         "Which controls have documented evidence only?"

@@ -238,7 +238,7 @@ def test_a_question_across_controls_is_answered_from_the_reviewed_assessments(pa
     page.get_by_role("button", name="Send").click()
 
     expect(log.locator(".msg-step").last).to_contain_text("Read the newest assessments of")
-    answer = log.locator(".msg:not(.paper-links)").last
+    answer = log.locator(".msg").last
     expect(answer).to_contain_text("Documented evidence only:")
     expect(answer).to_contain_text("Not assessed yet:")
     expect(answer).not_to_contain_text("5.1.1: not assessed yet")
