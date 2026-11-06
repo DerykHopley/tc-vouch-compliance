@@ -638,7 +638,7 @@ def test_the_export_holds_the_same_standing_as_the_served_report(database_url, u
     for verdict, n in r["by_verdict"].items():
         assert f"- {n} {words['verdicts'][verdict]}" in readiness
     assert f"- {r['open']} Open" in readiness
-    assert f"- {r['remediation_items']} Remediation items" in readiness
+    assert f"- {report.remediation_count(r['remediation_items'], words)}" in readiness
 
     rows = {row[0]: row for row in table_rows(section(md, "Controls"))}
     assert list(rows) == [c["id"] for c in shown["controls"]]
@@ -910,3 +910,15 @@ def test_the_whole_trail_is_read_page_by_page_without_a_gap_or_a_repeat(users, m
     assert len({e.id for e in every}) == 20
     assert len(reads) == 3  # 7, 7 and 6
     assert {r["limit"] for r in reads} == {8}  # a page of 7, and one more to see if there's next
+
+
+@pytest.mark.parametrize(
+    ("lang", "one", "many"),
+    [("en", "1 Remediation item", "2 Remediation items"), ("de", "1 Maßnahme", "2 Maßnahmen")],
+)
+def test_the_export_counts_one_remediation_item_in_the_singular(lang, one, many):
+    words = report.words_for(lang)
+    readiness = {"accepted": 1, "controls": 12, "open": 11, "by_verdict": {}, "remediation_items": 1}
+    assert report.remediation_count(1, words) == one
+    assert report.remediation_count(2, words) == many
+    assert f"- {one}\n" in report._md_readiness(readiness, words) + "\n"

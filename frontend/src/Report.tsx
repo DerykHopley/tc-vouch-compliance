@@ -120,7 +120,7 @@ function Readiness({ report: { readiness: r, words } }: { report: ReadinessRepor
   const counts: [string, string][] = [
     ...SEGMENTS.map((v): [string, string] => [v, `${r.by_verdict[v]} ${words.verdicts[v]}`]),
     ['open', `${r.open} ${words.statuses.open}`],
-    ['remediation', `${r.remediation_items} ${words.labels.remediation}`],
+    ['remediation', `${r.remediation_items} ${r.remediation_items === 1 ? words.labels.remediation_one : words.labels.remediation}`],
   ]
   return (
     <section className="report-part" aria-labelledby="report-readiness">

@@ -65,6 +65,7 @@ WORDS: dict[str, dict[str, Any]] = {
             # Stale evidence (GLOSSARY.md): the document was past its review cycle when checked.
             "stale": "Stale",
             "remediation": "Remediation items",
+            "remediation_one": "Remediation item",
             "requirement": "Requirement",
             "missing": "Missing",
             "owner_role": "Owner role",
@@ -137,6 +138,7 @@ WORDS: dict[str, dict[str, Any]] = {
             "section": "Abschnitt",
             "stale": "Prüfung überfällig",
             "remediation": "Maßnahmen",
+            "remediation_one": "Maßnahme",
             "requirement": "Anforderung",
             "missing": "Fehlt",
             "owner_role": "Verantwortliche Rolle",
@@ -488,6 +490,12 @@ def _md_head(head: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     return "\n".join(f"- **{label}:** {_md_line(value)}" for label, value in rows)
 
 
+def remediation_count(n: int, words: Mapping[str, Any]) -> str:
+    """'1 Remediation item', '2 Remediation items': the count with its label, singular for one."""
+    labels = words["labels"]
+    return f"{n} {labels['remediation_one'] if n == 1 else labels['remediation']}"
+
+
 def _md_readiness(r: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     sentence = words["sentences"]["accepted_of"].format(
         accepted=r["accepted"], controls=r["controls"]
@@ -495,7 +503,7 @@ def _md_readiness(r: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     counts = [f"- {n} {words['verdicts'][v]}" for v, n in r["by_verdict"].items()]
     counts += [
         f"- {r['open']} {words['statuses']['open']}",
-        f"- {r['remediation_items']} {words['labels']['remediation']}",
+        f"- {remediation_count(r['remediation_items'], words)}",
     ]
     return "\n".join([sentence, "", *counts])
 

@@ -22,7 +22,7 @@ const ENGLISH: ReportWords = {
     overlays: 'Country overlays', answer_language: 'Language', date: 'Drawn up on', readiness: 'Readiness',
     controls: 'Controls', control: 'Control', question: 'Question', status: 'Status', verdict: 'Verdict',
     reviewer: 'Reviewed by', reviewed_at: 'Reviewed on', quotes: 'Quotes', document: 'Document', version: 'Version',
-    section: 'Section', stale: 'Stale', remediation: 'Remediation items', requirement: 'Requirement',
+    section: 'Section', stale: 'Stale', remediation: 'Remediation items', remediation_one: 'Remediation item', requirement: 'Requirement',
     missing: 'Missing', owner_role: 'Owner role', due_date: 'Due date', not_applicable: 'Not applicable',
     reason: 'Reason', trail: 'Audit trail', at: 'When', who: 'Who', action: 'Action', note: 'Note',
     verdict_before: 'Verdict before', verdict_after: 'Verdict after', evidence: 'Evidence', model: 'Model',
@@ -147,6 +147,7 @@ describe('The readiness report', () => {
     expect(within(report).getByText('2026-11-06', { selector: 'dd' })).toBeTruthy()
     expect(within(report).getAllByText('1 of 12 controls accepted').length).toBeGreaterThan(0)
     expect(within(report).getByText('11 Open')).toBeTruthy()
+    expect(within(report).getByText('1 Remediation item')).toBeTruthy() // the singular for one
 
     const controls = within(report).getByRole('table', { name: 'Controls' })
     const accepted = within(controls).getByRole('row', { name: /^4\.1\.2/ })
