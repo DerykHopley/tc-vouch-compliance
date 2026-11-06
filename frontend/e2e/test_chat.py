@@ -291,6 +291,19 @@ def test_a_drag_shows_as_it_moves_and_is_kept_only_on_release(page: Page, chat_u
     expect(page.locator(HANDLE)).to_have_attribute("aria-valuenow", "580")
 
 
+def test_a_click_on_the_handle_in_a_narrow_window_keeps_the_remembered_width(page: Page, chat_url):
+    open_page(page, chat_url, 1400)
+    pin(page)
+    drag_handle(page, -240)
+    assert chat_width(page) == 720
+    page.set_viewport_size({"width": 1100, "height": 900})
+    expect(page.locator(HANDLE)).to_have_attribute("aria-valuenow", "540")
+    drag_handle(page, 0)  # a plain click: down and up without moving
+    page.set_viewport_size({"width": 1400, "height": 900})
+    expect(page.locator(HANDLE)).to_have_attribute("aria-valuenow", "720")
+    assert page.evaluate("() => localStorage.getItem('vouch.chatWidth')") == "720"
+
+
 def test_only_the_primary_button_drags_the_handle(page: Page, chat_url):
     open_page(page, chat_url, 1400)
     pin(page)

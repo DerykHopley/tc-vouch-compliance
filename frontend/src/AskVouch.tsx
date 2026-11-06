@@ -158,7 +158,8 @@ function WidthHandle({ width, range, onChange }:
         showWidth(e.currentTarget, drag.current.now)
       }}
       onPointerUp={() => {
-        if (drag.current) onChange(drag.current.now)
+        // A click without a move keeps the remembered width: `now` is only the clamped width shown.
+        if (drag.current && drag.current.now !== drag.current.from) onChange(drag.current.now)
         drag.current = null
       }}
       onPointerCancel={(e) => {
