@@ -217,7 +217,8 @@ def test_1_6_2_for_alpenwerk_answers_in_german_judges_o1_and_quotes_german_passa
     quotes = {c.quote for r in result.requirements for c in r.citations}
     assert quotes == {RECORDED, DUTIES}
     assert step_texts(result, "check_answer") == ["Checked the answer: it claims no audit result."]
-    assert [i.requirement_id for i in result.remediation] == ["O1"]
+    # H3 is partly evidenced, so it gets a drafted item too (main's #212).
+    assert [i.requirement_id for i in result.remediation] == ["H3", "O1"]
 
 
 # A quote from a gathered passage may hold an audit word (#140).

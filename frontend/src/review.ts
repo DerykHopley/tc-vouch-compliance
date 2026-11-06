@@ -45,6 +45,83 @@ export function rollUp(requirements: Pick<RequirementVerdict, 'column' | 'verdic
   return 'partly-evidenced'
 }
 
+/** The roll-up explanation's words in one answer language; `rollUpWords` puts them together. */
+type RollUpPhrases = {
+  verdicts: Record<Verdict, string>
+  /** The counted requirements' noun, singular and plural: musts only, or musts with protection-level or overlay. */
+  noun: (mustsOnly: boolean, plural: boolean) => string
+  shoulds: string
+  is: (count: number) => string
+  allFully: (count: number, nouns: string) => string
+  oneFully: (noun: string) => string
+  partlyOf: (evidenced: number, count: number, nouns: string, is: string) => string
+  noneFully: (noun: string, partly: number, count: number) => string
+  noneAtAll: (noun: string) => string
+  noneApply: (noun: string) => string
+}
+
+/** Per answer language; English is also `vouch.graph.roll_up_words`'s (#212). */
+const ROLL_UP_PHRASES: Record<string, RollUpPhrases> = {
+  en: {
+    verdicts: { evidenced: 'Evidenced', 'partly-evidenced': 'Partly evidenced', 'not-evidenced': 'Not evidenced',
+      'not-applicable': 'Not applicable' },
+    noun: (mustsOnly, plural) => (mustsOnly ? 'must requirement' : 'must, protection-level or overlay requirement')
+      + (plural ? 's' : ''),
+    shoulds: 'should requirements count towards the should score only',
+    is: (count) => (count === 1 ? 'is' : 'are'),
+    allFully: (count, nouns) => `all ${count} ${nouns} are fully evidenced`,
+    oneFully: (noun) => `its one ${noun} is fully evidenced`,
+    partlyOf: (evidenced, count, nouns, is) => `${evidenced} of ${count} ${nouns} ${is} fully evidenced`,
+    noneFully: (noun, partly, count) => `no ${noun} is fully evidenced (${partly} of ${count} partly evidenced)`,
+    noneAtAll: (noun) => `no ${noun} is evidenced`,
+    noneApply: (noun) => `no ${noun} applies`,
+  },
+  de: {
+    verdicts: { evidenced: 'Nachgewiesen', 'partly-evidenced': 'Teilweise nachgewiesen',
+      'not-evidenced': 'Nicht nachgewiesen', 'not-applicable': 'Nicht anwendbar' },
+    noun: (mustsOnly, plural) => (mustsOnly ? 'Muss-Anforderung' : 'Muss-, Schutzbedarfs- oder Overlay-Anforderung')
+      + (plural ? 'en' : ''),
+    shoulds: 'Soll-Anforderungen zählen nur zur Soll-Quote',
+    is: (count) => (count === 1 ? 'ist' : 'sind'),
+    allFully: (count, nouns) => `alle ${count} ${nouns} sind vollständig nachgewiesen`,
+    oneFully: (noun) => `die eine ${noun} ist vollständig nachgewiesen`,
+    partlyOf: (evidenced, count, nouns, is) => `${evidenced} von ${count} ${nouns} ${is} vollständig nachgewiesen`,
+    noneFully: (noun, partly, count) =>
+      `keine ${noun} ist vollständig nachgewiesen (${partly} von ${count} teilweise nachgewiesen)`,
+    noneAtAll: (noun) => `keine ${noun} ist nachgewiesen`,
+    noneApply: (noun) => `keine ${noun} ist anwendbar`,
+  },
+}
+
+/**
+ * Why the control has its `verdict` (the one shown; `rollUp`'s by default), in the profile's `language` (English for
+ * one without phrases of its own), when a row's verdict differs from it, as when partly evidenced musts roll up to
+ * not evidenced (#212); null when every applicable row matches. The English matches `vouch.graph.roll_up_words`
+ * (`tests/roll_up_words_cases.json`).
+ */
+export function rollUpWords(
+  requirements: Pick<RequirementVerdict, 'column' | 'verdict'>[], language: string,
+  verdict: Verdict = rollUp(requirements),
+): string | null {
+  const applying = requirements.filter((r) => r.verdict !== 'not-applicable')
+  if (applying.every((r) => r.verdict === verdict)) return null
+  const counted = requirements.filter(countsTowardsRollUp)
+  const count = counted.length
+  const evidenced = counted.filter((r) => r.verdict === 'evidenced').length
+  const partly = counted.filter((r) => r.verdict === 'partly-evidenced').length
+  const mustsOnly = count > 0 && counted.every((r) => r.column === 'must')
+  const say = ROLL_UP_PHRASES[language] ?? ROLL_UP_PHRASES.en
+  const noun = say.noun(mustsOnly, false)
+  const nouns = say.noun(mustsOnly, true)
+  const why = verdict === 'evidenced'
+    ? `${count === 1 ? say.oneFully(noun) : say.allFully(count, nouns)}; ${say.shoulds}`
+    : verdict === 'partly-evidenced' ? say.partlyOf(evidenced, count, nouns, say.is(evidenced))
+      : verdict === 'not-evidenced'
+        ? (partly > 0 ? say.noneFully(noun, partly, count) : `${say.noneAtAll(noun)}; ${say.shoulds}`)
+        : `${say.noneApply(noun)}; ${say.shoulds}`
+  return `${say.verdicts[verdict]}: ${why}.`
+}
+
 /** The requirements with the lead's overrides in place (`vouch.graph.apply_overrides`). */
 export function withOverrides(requirements: RequirementVerdict[], overrides: Override[]): RequirementVerdict[] {
   return requirements.map((r) => {

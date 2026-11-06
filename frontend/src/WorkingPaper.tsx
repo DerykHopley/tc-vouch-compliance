@@ -8,7 +8,7 @@ import CitedQuote from './CitedQuote.tsx'
 import Prose from './Prose.tsx'
 import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
-import { type Override, rollUp, withOverrides } from './review.ts'
+import { type Override, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -103,6 +103,9 @@ export default function WorkingPaper(props: PaperProps) {
   const run = overridden(props.run, overrides)
   // Before an assessment the paper lists the profile's requirements; after one, the assessment's own.
   const judged = run.status === 'done' ? run.assessment.requirements : undefined
+  // Why the control has its verdict when a row's differs from it (#212), as the lead's overrides change it.
+  const explained = run.status === 'done' && judged
+    ? rollUpWords(judged, overview.answer_language, run.assessment.verdict) : null
   const requirements = overview.requirements[card.id] ?? []
   const applying = requirements.filter((r) => r.not_applicable === null).length
   const review = run.status === 'done' ? run.assessment.status : undefined
@@ -141,6 +144,7 @@ export default function WorkingPaper(props: PaperProps) {
               {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
             </div>
           )}
+          {!checking && explained && <p className="field-note roll-up">{explained}</p>}
         </div>
         {checking ? <p className="field-note" role="status">Reading the working paper…</p> : (
           <>
@@ -303,7 +307,8 @@ type Overrides = {
   agentVerdicts: Record<string, Verdict>
 }
 
-/** The assessment's remediation items, one per not-evidenced requirement (#43): `decidable` once it is accepted. */
+/** The assessment's remediation items, one per requirement not or partly evidenced (#43, #212): `decidable` once it
+ * is accepted. */
 type RemediationItems = {
   shown: RemediationItem[]
   threadId: string
@@ -329,7 +334,8 @@ type JudgedProps = {
  * The assessment's requirements: verdict, evidence kind and stale flag, then the reason and the exact quotes. An
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
  * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
- * it. A not-evidenced requirement shows its remediation item under its reason (#43).
+ * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
+ * to evidenced on screen hides its draft, which the review drops.
  */
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language }:
   JudgedProps) {
@@ -348,7 +354,8 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             const { kinds, stale } = evidenceOf(r)
             const applies = r.verdict !== 'not-applicable'
             const replaced = overrides.replaced[r.id]
-            const item = items.shown.find((i) => i.requirement_id === r.id)
+            const toFix = r.verdict === 'not-evidenced' || r.verdict === 'partly-evidenced'
+            const item = toFix ? items.shown.find((i) => i.requirement_id === r.id) : undefined
             return [
               <tr key={r.id}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />

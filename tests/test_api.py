@@ -143,7 +143,8 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
     assert "sources" not in assessment  # citations sit on each requirement (#21)
     assert assessment["status"] == "waiting-for-review"
     assert assessment["thread_id"]
-    assert assessment["remediation"] == []  # nothing in the demo is not evidenced
+    # M1 is partly evidenced, so it gets a draft (#212); the evidenced ones get none.
+    assert [item["requirement_id"] for item in assessment["remediation"]] == ["M1"]
     assert assessment["review"] is None
 
 
