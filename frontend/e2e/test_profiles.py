@@ -6,7 +6,9 @@ broken one; the one-profile check on DOSSIER_URL (the fixtures' one profile). Ev
 with the suite's raised request rate (Fix #138)."""
 
 import json
+import re
 
+import pytest
 from playwright.sync_api import APIRequestContext, Page, expect
 
 NORDLICHT = "Nordlicht Komponenten GmbH · Germany · English"
@@ -143,3 +145,38 @@ def test_the_bundled_profiles_are_both_in_the_menu(page: Page, dossier_url):
     expect(menu.get_by_role("option")).to_have_text(
         ["Alpenwerk Präzision GmbH · Austria · German", NORDLICHT]
     )
+
+
+@pytest.mark.parametrize(
+    ("profile", "label", "company"),
+    [
+        ("nordlicht", NORDLICHT, "Nordlicht Komponenten GmbH"),
+        ("testwerk", TESTWERK, "Testwerk Prüfstand GmbH"),
+    ],
+)
+def test_a_cross_control_answer_links_each_named_control_to_its_paper_in_that_profile(
+    page: Page, profiles_url, profile, label, company
+):
+    """#217: the chat's answer across controls links each control it names to its working paper,
+    opened in the profile the chat answered for."""
+    assessed(page.request, profiles_url, profile, "1.1.1")
+    opened(page, profiles_url)
+    if profile != "nordlicht":
+        with page.expect_response(lambda r: r.url.endswith("/api/overview")):
+            page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
+                label=label
+            )
+    page.get_by_role("button", name="Ask Vouch").click()
+    asked = sent(page, "Which controls have documented evidence only?")
+    assert asked.header_value("X-Vouch-Profile") == profile
+    log = page.locator("aside[aria-label='Chat with Vouch']").get_by_role("log")
+    link = log.get_by_role("link", name="Working paper 1.1.1")
+    expect(link).to_be_visible()
+
+    # The paper opens in the app, reading the control's stored assessment under the chat's profile.
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")) as read:
+        link.click()
+    expect(page).to_have_url(re.compile(r"/controls/1\.1\.1$"))
+    assert read.value.request.header_value("X-Vouch-Profile") == profile
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_text(f"Working paper · {company}")).to_be_visible()

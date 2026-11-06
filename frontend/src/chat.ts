@@ -26,8 +26,16 @@ export type ChatEvent =
   | { event: 'suggestion'; data: NonNullable<NextStep> }
   | { event: 'assessment'; data: ChatAssessment }
   | { event: 'thread'; data: { thread_id: string } }
+  /** The controls a cross-control answer may name (#217): the chat links those it names to their working papers. */
+  | { event: 'papers'; data: { control_ids: string[] } }
   | { event: 'done'; data: Record<string, never> }
   | { event: 'error'; data: { message: string } }
+
+/** The controls among `ids` (from a `papers` event, never the model) that `reply` names, whole ids only, in `ids`'
+ * order: what the chat links to their working papers (#217). */
+export function namedControls(reply: string, ids: string[]): string[] {
+  return ids.filter((id) => new RegExp(`(?<![\\w.])${id.replaceAll('.', '\\.')}(?![\\w]|\\.\\w)`).test(reply))
+}
 
 /** Shown in the chat for any throw from `sendChat`; the typed message stays in the field. */
 export const CHAT_UNREACHABLE = 'Vouch could not be reached just now. Your message is kept: please try again shortly.'
