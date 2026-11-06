@@ -197,3 +197,10 @@ def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(pag
     form.get_by_role("button", name="Cancel").focus()
     page.keyboard.press("Enter")
     expect(change).to_be_focused()
+
+    page.keyboard.press("Enter")  # opened again, and saved: focus comes back to Change too
+    form.get_by_label("Verdict").select_option("evidenced")
+    form.get_by_label("Reason (required)").fill(REASON)
+    form.get_by_role("button", name="Save").focus()
+    page.keyboard.press("Enter")
+    expect(change).to_be_focused()

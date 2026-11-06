@@ -24,7 +24,7 @@ export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onC
     saved?.verdict ?? JUDGED_VERDICTS.find((v) => v !== agentVerdict) ?? 'evidenced')
   const [reason, setReason] = useState(saved?.reason ?? '')
   const id = useId()
-  // Opened from "Change", the form takes focus on its first field (#226).
+  // The form takes focus on its first field when it opens (#226).
   const first = useRef<HTMLSelectElement>(null)
   useEffect(() => first.current?.focus(), [])
   const why = verdict === agentVerdict ? "Choose a verdict other than Vouch's to override it."

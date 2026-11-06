@@ -378,11 +378,13 @@ function RequirementText({ text, language }: { text: string; language?: string }
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language }:
   JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
-  // Closing a requirement's override (Save or Cancel) gives focus back to its "Change" (#226).
+  // Closing a requirement's override (Save or Cancel) gives focus back to its "Change" (#226): only when focus fell
+  // to the page with the form, never taken from where the lead has moved it meanwhile.
   const changeButtons = useRef<Record<string, HTMLButtonElement | null>>({})
   const wasEditing = useRef<string | null>(null)
   useEffect(() => {
-    if (wasEditing.current && editing === null) changeButtons.current[wasEditing.current]?.focus()
+    const fell = !document.activeElement || document.activeElement === document.body
+    if (wasEditing.current && editing === null && fell) changeButtons.current[wasEditing.current]?.focus()
     wasEditing.current = editing
   }, [editing])
   return (
