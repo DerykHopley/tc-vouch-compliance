@@ -216,6 +216,10 @@ textarea.field { resize: vertical; font-family: inherit; }
 @media (max-width: 700px) {
   .bubble, .bubble.enlarged, .bubble.pinned { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
   .shortcut-hint { display: none; }
+  /* The page leaves room for the floating Ask Vouch button (#198): its foot scrolls clear of it, and a field brought
+     into view (scrolled to, tapped, tabbed to) stops above it. 88px: the button's 45px, its 20px inset, a gap. */
+  main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

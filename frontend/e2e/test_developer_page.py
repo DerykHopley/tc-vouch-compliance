@@ -10,6 +10,7 @@ They run on PROFILES_URL: #47 moved them off the main server while the request r
 
 import re
 
+import pytest
 from playwright.sync_api import Page, Route, expect
 
 DEVELOPERS_ONLY = '{"detail": "This is available to developers only."}'
@@ -47,7 +48,9 @@ def test_a_developer_sees_the_daily_limit_and_every_assessments_usage_totalled(
     settings = page.get_by_role("region", name="Developer settings")
     expect(settings).to_contain_text("30 assessments per user per day (UTC)")
     expect(settings.get_by_role("region", name="Usage")).to_contain_text(
-        re.compile(r"Fake model: [\d,]+ assessments? · [\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ estimated, not spent")
+        re.compile(
+            r"Fake model: [\d,]+ assessments? · [\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ estimated, not spent"
+        )
     )
     expect(settings).to_contain_text("kept until the server restarts")
 
@@ -77,5 +80,36 @@ def test_a_compliance_lead_has_no_developer_link_and_gets_the_dossier_at_its_add
     assert answer.value.status == 403
 
     expect(page.get_by_role("heading", level=1)).to_contain_text("Prepared for audit")
-    expect(page.get_by_role("navigation", name="Main").get_by_role("link")).to_have_text(["Dossier"])
+    expect(page.get_by_role("navigation", name="Main").get_by_role("link")).to_have_text(
+        ["Dossier"]
+    )
     expect(page.get_by_role("region", name="Developer settings")).to_have_count(0)
+
+
+def overlaps(a: dict, b: dict) -> bool:
+    """Whether two bounding boxes share any area."""
+    return (
+        a["x"] < b["x"] + b["width"]
+        and b["x"] < a["x"] + a["width"]
+        and a["y"] < b["y"] + b["height"]
+        and b["y"] < a["y"] + a["height"]
+    )
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_at_phone_width_the_daily_limit_field_is_never_under_the_ask_vouch_button(
+    page: Page, profiles_url, scheme
+):
+    """#198: the page leaves room for the floating button, so the field brought into view, by
+    scrolling to it or by focusing it (a tap, Tab), stops above the button."""
+    page.set_viewport_size({"width": 375, "height": 812})
+    page.emulate_media(color_scheme=scheme)
+    page.goto(f"{profiles_url}/developer")
+    field = page.get_by_role("textbox", name="Assessments per day")
+    button = page.get_by_role("button", name="Ask Vouch")
+    expect(field).to_be_visible()
+
+    for bring in (field.scroll_into_view_if_needed, field.focus):
+        page.evaluate("window.scrollTo(0, 0)")
+        bring()
+        assert not overlaps(field.bounding_box(), button.bounding_box()), bring
