@@ -468,6 +468,7 @@ def test_the_overview_route_builds_the_requirements_once_per_profile(
 # --- The profile's ISA edition (#199) ----------------------------------------------------------
 
 GERMAN_1_6_2 = "Inwieweit werden gemeldete Sicherheitsereignisse verwaltet?"
+GERMAN_1_6_2_M1 = "Gemeldete Ereignisse werden unverzüglich bearbeitet."
 ENGLISH_1_6_2 = "To what extent are reported security events managed?"
 
 
@@ -480,9 +481,7 @@ def test_a_german_profiles_overview_reads_the_german_isa_and_an_english_ones_sta
         english = overview_of(client, alice | {api.PROFILE_HEADER: "nordlicht"})
 
     assert card(german, "1.6.2")["question"] == GERMAN_1_6_2
-    assert german["requirements"]["1.6.2"][0]["text"] == (
-        "Gemeldete Ereignisse werden unverzüglich bearbeitet."
-    )
+    assert german["requirements"]["1.6.2"][0]["text"] == GERMAN_1_6_2_M1
     assert card(english, "1.6.2")["question"] == ENGLISH_1_6_2
     assert english["requirements"]["1.6.2"][0]["text"] == (
         "Reported events are processed without undue delay."

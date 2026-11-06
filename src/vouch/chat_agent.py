@@ -441,8 +441,7 @@ class ChatTools:
     def progress(self, write: Write) -> str:
         """Where the lead stands, and the next step as a suggestion."""
         lead_progress = progress(self.memory, self.run.saver)
-        edition = load_base_framework(language=self.profile.answer_language)
-        view = overview(self.profile, edition.controls, lead_progress.controls)
+        view = overview(self.profile, self.profile.isa_edition().controls, lead_progress.controls)
         if (next_step := view["next_step"]) is not None:
             write(_suggest(next_step["control_id"], next_step["action"]))
         return progress_words(view["by_status"], lead_progress.last_worked, view["next_step"])

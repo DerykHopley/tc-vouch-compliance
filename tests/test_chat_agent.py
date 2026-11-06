@@ -18,6 +18,7 @@ from langgraph.store.memory import InMemoryStore
 from profiles_dir import SECOND, make_profiles
 from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
+from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1
 from test_memory import app_on, as_user, restart
 
 from vouch import api, chat_agent
@@ -504,7 +505,6 @@ def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypat
 
 # The profile's ISA edition (#199)
 
-GERMAN_1_6_2 = "Inwieweit werden gemeldete Sicherheitsereignisse verwaltet?"
 ALPENWERK = {PROFILE_HEADER: "alpenwerk"}
 
 
@@ -522,4 +522,4 @@ def test_explaining_a_control_on_a_german_profile_reads_the_german_control(app, 
 
     text = reply(events)
     assert f"Control 1.6.2, “{GERMAN_1_6_2}”" in text
-    assert "Gemeldete Ereignisse werden unverzüglich bearbeitet." in text
+    assert GERMAN_1_6_2_M1 in text

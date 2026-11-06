@@ -27,12 +27,13 @@ from pydantic import (
 
 from vouch.isa import (
     SOURCE,
+    BaseFramework,
     BaseFrameworkError,
     Column,
     IsaControl,
     Requirement,
     UnknownControlError,
-    load_isa_control,
+    load_base_framework,
 )
 from vouch.paths import FIXTURES_DIR
 
@@ -214,10 +215,17 @@ class ComplianceProfile(_Strict):
                 )
         return self
 
+    def isa_edition(self) -> BaseFramework:
+        """The base framework in the ISA edition of this profile's answer language (English
+        when the ISA isn't shipped in it), or BaseFrameworkError naming the file."""
+        return load_base_framework(language=self.answer_language)
+
     def isa_control(self, control_id: str) -> IsaControl:
-        """The control in the ISA edition of this profile's answer language (English when
-        the ISA isn't shipped in it), or UnknownControlError."""
-        return load_isa_control(control_id, self.answer_language)
+        """The control in this profile's ISA edition (`isa_edition`), or UnknownControlError."""
+        for control in self.isa_edition().controls:
+            if control.id == control_id:
+                return control
+        raise UnknownControlError(control_id)
 
     def requirements_for(self, control: IsaControl) -> ControlRequirements:
         """The control's requirements under this profile: those its protection level and
