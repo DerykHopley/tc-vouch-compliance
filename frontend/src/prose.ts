@@ -13,9 +13,10 @@ export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul' | 'ol'; ite
 const EMPHASIS = /\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*/g
 const BULLET = /^\s*[-*•]\s+(.*)$/
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/
-// A list written on one line after a colon, as the models do: "What exists: - one - two", "Next: 1. one 2. two".
-const INLINE_BULLETS = /^(.*?:)\s+-\s+(.+)$/
-const INLINE_NUMBERED = /^(.*?:)\s+1\.\s+(.+)$/
+// A list written on one line after a colon, as the models do: "What exists: - one - two", "Next: 1. one 2. two",
+// also after a bold or italic lead-in ("**M1 (must):** - one - two").
+const INLINE_BULLETS = /^(.*?:\**)\s+-\s+(.+)$/
+const INLINE_NUMBERED = /^(.*?:\**)\s+1\.\s+(.+)$/
 
 /** The text's runs: bold and italics marked, everything else as written. */
 function runs(text: string): TextRun[] {
@@ -79,6 +80,8 @@ export function proseBlocks(text: string): Block[] {
     }
     const bullet = BULLET.exec(line)
     const numbered = bullet ? null : NUMBERED.exec(line)
+    // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet.
+    if ((bullet ?? numbered)?.[1].trim() === '') continue
     if (bullet) add('ul', runs(bullet[1]))
     else if (numbered) add('ol', runs(numbered[1]))
     else add('p', runs(line))

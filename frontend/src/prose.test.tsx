@@ -40,6 +40,18 @@ describe('proseBlocks', () => {
     ])
   })
 
+  it('reads an inline list after a bold lead-in, as the chat writes "**M1 (must):** - …"', () => {
+    expect(proseBlocks('**What exists:** - Encryption standard 1.2 - Key lifecycle')).toEqual([
+      { kind: 'p', lines: [[{ text: 'What exists:', bold: true }]] },
+      { kind: 'ul', items: [[{ text: 'Encryption standard 1.2' }], [{ text: 'Key lifecycle' }]] },
+    ])
+  })
+
+  it('drops a bullet with nothing after it, as a cite split out of a list item leaves', () => {
+    expect(proseBlocks('- ')).toEqual([])
+    expect(proseBlocks('Found:\n- \n1. ')).toEqual([{ kind: 'p', lines: [[{ text: 'Found:' }]] }])
+  })
+
   it('leaves a dash or a number in running text alone', () => {
     expect(proseBlocks('Keys rotate yearly - not monthly - per 2. rule')).toEqual([
       { kind: 'p', lines: [[{ text: 'Keys rotate yearly - not monthly - per 2. rule' }]] },
