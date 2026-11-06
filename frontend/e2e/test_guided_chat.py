@@ -14,6 +14,9 @@ CHAT = "aside[aria-label='Chat with Vouch']"
 
 
 def open_chat(page: Page, url: str, width: int):
+    """The chat opened afresh: a new conversation first (#251), since the server keeps the last one
+    (local mode's one user is every test's), then its greeting."""
+    page.request.delete(f"{url}/api/chat/current")
     page.set_viewport_size({"width": width, "height": 800})
     with page.expect_response("**/api/overview"):
         page.goto(url + "/")

@@ -29,6 +29,10 @@ from vouch.graph import Assessment, Status, assessment_loader, memory_checkpoint
 
 ASSESSMENTS = "assessments"
 LAST_REVIEW = "last-review"
+CHAT_LINES = "chat"
+"""The chat's kept conversations (#251): each turn's lines, as the chat showed them."""
+CURRENT_CHAT = "current-chat"
+"""The conversation the chat opens on, under this user and profile (#251)."""
 MAX_ASSESSMENTS = 1000
 """The most assessments one user lists under one profile (about 80 runs of each control): the
 newest are kept."""
@@ -101,6 +105,43 @@ class Memory:
         """Remove `thread_id` from the index: its run never started."""
         self.store.delete(self._namespace(ASSESSMENTS), thread_id)
 
+    def current_chat(self) -> str | None:
+        """The chat thread the user's chat opens on under this profile (#251); None for none.
+        Raises DatabaseUnavailable (Postgres)."""
+        item = self.store.get(self._namespace(), CURRENT_CHAT)
+        return item.value.get("thread_id") if item is not None else None
+
+    def set_current_chat(self, thread_id: str | None) -> None:
+        """Make `thread_id` the conversation the chat opens on; None: a new conversation, the
+        old one kept. Raises DatabaseUnavailable (Postgres)."""
+        if thread_id is None:
+            self.store.delete(self._namespace(), CURRENT_CHAT)
+        else:
+            self.store.put(self._namespace(), CURRENT_CHAT, {"thread_id": thread_id})
+
+    def add_chat_turn(self, thread_id: str, lines: list[dict], started_ns: int) -> None:
+        """Keep one chat turn's lines on `thread_id`. Its key is when the turn began, so turns
+        read back in the order they were asked, even when one ends before another that began
+        first. Raises DatabaseUnavailable (Postgres)."""
+        key = f"{started_ns:020d}"
+        self.store.put(self._namespace(CHAT_LINES, thread_id), key, {"lines": lines})
+
+    def chat_lines(self, thread_id: str) -> list[dict]:
+        """`thread_id`'s kept lines, every turn in order (#251); none for a thread of another
+        user or profile, as the namespace is this user's and profile's. Raises
+        DatabaseUnavailable (Postgres)."""
+        turns = sorted(self._all(self._namespace(CHAT_LINES, thread_id)), key=lambda t: t.key)
+        return [line for turn in turns for line in turn.value["lines"]]
+
+    def _all(self, namespace: tuple[str, ...]) -> list:
+        """Every item under `namespace`, read PAGE_SIZE at a time."""
+        items: list = []
+        while page := self.store.search(namespace, limit=PAGE_SIZE, offset=len(items)):
+            items += page
+            if len(page) < PAGE_SIZE:
+                break
+        return items
+
     def note_worked(self) -> None:
         """Note that the user reviewed an assessment under this profile now."""
         self.store.put(self._namespace(), LAST_REVIEW, {"at": self._clock().isoformat()})
@@ -118,12 +159,7 @@ class Memory:
     def entries(self) -> list[Entry]:
         """The index, newest first, at most MAX_ASSESSMENTS. Every page is read first: the
         stores return entries in different orders (Postgres's by last write, memory's by first)."""
-        namespace = self._namespace(ASSESSMENTS)
-        items = []
-        while page := self.store.search(namespace, limit=PAGE_SIZE, offset=len(items)):
-            items.extend(page)
-            if len(page) < PAGE_SIZE:
-                break
+        items = self._all(self._namespace(ASSESSMENTS))
         entries = [
             Entry(
                 item.key,
