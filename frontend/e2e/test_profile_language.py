@@ -22,7 +22,7 @@ GERMAN_REPLY = "Für 4.1.2 fehlt die Risikobewertung der Anmeldeverfahren."
 
 # Each visible text node that reads as German with no lang="de" around it: its text.
 UNMARKED_GERMAN = r"""(names) => {
-  const german = /[äöüÄÖÜß]|\b(und|der|die|das|werden|wird|nicht|sind|ist|Inwieweit|Anforderungen?|nachgewiesen|fehlt)\b/
+  const german = /[äöüÄÖÜß]|\b([Uu]nd|[Dd]er|[Dd]as|[Ww]erden|[Ww]ird|[Nn]icht|[Ss]ind|ist|die|Die|Inwieweit|Anforderungen?|nachgewiesen|fehlt)\b/
   const found = []
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   for (let node = walk.nextNode(); node; node = walk.nextNode()) {
