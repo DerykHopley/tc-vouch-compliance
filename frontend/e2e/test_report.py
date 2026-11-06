@@ -359,13 +359,21 @@ def test_the_older_entries_sentence_is_not_there_when_the_trail_has_no_more(page
 # A real A4 print (#296): page breaks move things that print emulation can't show. Chromium only,
 # as only it prints to PDF; the report is the seeded Nordlicht one, as recorded (two controls
 # accepted), so its page breaks fall where the bug was found.
-NORDLICHT_REPORT = json.loads((Path(__file__).parent / "nordlicht_report.json").read_text())
-PAGE_MARGIN = 14 * 72 / 25.4  # app.css's @page margin, in points
+NORDLICHT_REPORT = Path(__file__).parent / "nordlicht_report.json"
+MM = 72 / 25.4  # points
 
 
-def printed_nordlicht(page: Page, report_url: str) -> tuple[bytes, dict[str, str]]:
-    """The recorded report printed to an A4 PDF, and its section headings as printed, by id."""
-    page.route("**/api/report", lambda route: route.fulfill(json=NORDLICHT_REPORT))
+@pytest.fixture
+def nordlicht_report() -> dict:
+    return json.loads(NORDLICHT_REPORT.read_text())
+
+
+def printed_nordlicht(
+    page: Page, report_url: str, served: dict
+) -> tuple[pdf_words.Printed, dict[str, str], float]:
+    """The recorded report printed to an A4 PDF, its section headings as printed (by id), and the
+    stylesheet's @page margin in points."""
+    page.route("**/api/report", lambda route: route.fulfill(json=served))
     report = open_report(page, report_url)
     expect(report.get_by_role("table", name="Audit trail")).to_be_visible()
     page.emulate_media(media="print")
@@ -373,51 +381,69 @@ def printed_nordlicht(page: Page, report_url: str) -> tuple[bytes, dict[str, str
         """hs => hs.map((h) => [h.id, getComputedStyle(h).textTransform === 'uppercase'
           ? h.textContent.toUpperCase() : h.textContent])"""
     )
-    return page.pdf(format="A4"), dict(headings)
+    margin = page.evaluate(
+        """[...document.styleSheets].flatMap((s) => {
+          try { return [...s.cssRules] } catch { return [] }  // a font sheet from another origin
+        }).find((r) => r instanceof CSSPageRule).style.margin"""
+    )
+    assert margin.endswith("mm"), margin
+    return pdf_words.read(page.pdf(format="A4")), dict(headings), float(margin[:-2]) * MM
+
+
+def same_line(a: pdf_words.Box, b: pdf_words.Box, tolerance: float = 1.0) -> bool:
+    return a.page == b.page and abs(a.top - b.top) <= tolerance
 
 
 def heading_words(
     found: list[pdf_words.Box], heading: str
 ) -> tuple[pdf_words.Box, list[pdf_words.Box]]:
-    """The heading's line in the PDF (its words, alone on their line) and the box around it."""
+    """The heading's words in the PDF and the box around them: the run of its words in one size on
+    one line, with no other word of that size beside them (as in a longer heading)."""
     tokens = heading.split()
-
-    def line(w: pdf_words.Box) -> tuple[int, int]:
-        return w.page, round(w.top)
-
     for n in range(len(found) - len(tokens) + 1):
         run = found[n : n + len(tokens)]
-        if [w.text for w in run] != tokens or len({line(w) for w in run}) != 1:
+        size = run[0].size
+        if [w.text for w in run] != tokens or not all(
+            same_line(run[0], w) and abs(w.size - size) < 0.1 for w in run
+        ):
             continue
-        if any(line(w) == line(run[0]) for w in found if w not in run):
-            continue  # the same words in a longer line
+        if any(same_line(w, run[0]) and abs(w.size - size) < 0.1 for w in found if w not in run):
+            continue
         top, bottom = min(w.top for w in run), max(w.bottom for w in run)
         return pdf_words.Box(run[0].page, heading, run[0].left, top, run[-1].right, bottom), run
-    raise AssertionError(f"{heading!r} is not in the PDF on a line of its own")
+    raise AssertionError(f"{heading!r} is not in the PDF")
+
+
+def at_hyphens(word: str) -> list[str]:
+    return [part for part in re.split(r"(?<=-)", word) if part]
 
 
 def test_a_printed_a4_report_keeps_headings_clear_of_tables_and_notes_whole(
-    page: Page, report_url, browser_name
+    page: Page, report_url, browser_name, nordlicht_report
 ):
     if browser_name != "chromium":
         pytest.skip("only Chromium prints to PDF")
-    pdf, headings = printed_nordlicht(page, report_url)
-    found = pdf_words.words(pdf)
-    width = pdf_words.page_width(pdf)
+    printed, headings, margin = printed_nordlicht(page, report_url, nordlicht_report)
+    found = printed.words
+
+    # The controls table breaks across a page before the next heading, as where the bug was
+    # found; without that break the check below would prove nothing.
+    controls, _ = heading_words(found, headings["report-controls"])
+    remediation, _ = heading_words(found, headings["report-remediation"])
+    assert controls.page < remediation.page, "the controls table no longer spans a page break"
 
     # No section heading shares its height with a table row's text or rule.
-    rules = pdf_words.rules(pdf)
     clashes = []
     for heading in headings.values():
         box, own = heading_words(found, heading)
         clashes += [(heading, w.text) for w in found if w not in own and w.overlaps_vertically(box)]
-        clashes += [(heading, "a rule") for r in rules if r.overlaps_vertically(box)]
+        clashes += [(heading, "a rule") for r in printed.rules if r.overlaps_vertically(box)]
     assert clashes == [], clashes
 
     # Every word of the trail's notes prints whole (a line may still end after a hyphen, as anywhere in
     # prose), and nothing runs past the page's margin.
     trail, _ = heading_words(found, headings["report-trail"])
-    printed = Counter(
+    printed_parts = Counter(
         part
         for w in found
         if w.page > trail.page or (w.page == trail.page and w.top > trail.top)
@@ -425,13 +451,9 @@ def test_a_printed_a4_report_keeps_headings_clear_of_tables_and_notes_whole(
     )
     noted = Counter(
         part
-        for e in NORDLICHT_REPORT["trail"]["entries"]
+        for e in nordlicht_report["trail"]["entries"]
         for word in e["note"].split()
         for part in at_hyphens(word)
     )
-    assert noted - printed == Counter()
-    assert [w.text for w in found if w.right > width - PAGE_MARGIN + 0.5] == []
-
-
-def at_hyphens(word: str) -> list[str]:
-    return [part for part in re.split(r"(?<=-)", word) if part]
+    assert noted - printed_parts == Counter()
+    assert [w.text for w in found if w.right > printed.page_width - margin + 0.5] == []
