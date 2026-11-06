@@ -1,0 +1,29 @@
+name: Ticket lint
+
+# A ready-for-agent issue is checked against the ticket standard when it's opened, edited or
+# labelled (#242): one comment names what's missing, updated on later edits. Nothing is blocked
+# or relabelled; removing ready-for-agent leaves its last comment as it was. The linter is vendored in
+# scripts/ticket-lint.py: the rig lives outside this repo. Spec issues are skipped, as the CLI does.
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+concurrency:
+  group: ticket-lint-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    if: contains(github.event.issue.labels.*.name, 'ready-for-agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read  # checkout
+      issues: write  # the comment
+    steps:
+      - uses: actions/checkout@v4
+      - name: check the ticket and keep its comment
+        run: python3 -I scripts/ticket-lint-comment.py
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
