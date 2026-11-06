@@ -116,6 +116,7 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 ### Review mode: Throughput
 
 - **Merge gate (no branch protection: GitHub's free plan on a private repo):** merge only with `scripts/merge-on-green.sh <pr>`, run as a background task. It prints the PR's changed lines, lockfiles left out, and notes one over the 400 target without refusing it, then waits for every check on the PR's current commit (limit 20 minutes, about twice the fast lane), merges with a merge commit only if all pass, and refuses a PR with no checks. Never merge a PR any other way, unless the owner says so for that PR.
+  - For a PR into main it also refuses when the PR's merge result would conflict with an open `origin/spec/*` branch (`git merge-tree`), naming each spec and file; `--conflicts-ok <spec branch>` overrides it, only after that spec's thread has been told.
 - A ticket or a Fix: when the local checks pass, push, open the PR, start the merge gate, then start the next ticket. Report a red or timed-out result, not a green one.
 - A spec: its one PR into main merges after the owner has tested a running copy and their blocking points are built (`/rig:spec-close`'s Ready part), with a merge commit through the merge gate. The owner can also merge it themselves, or say "merge it".
 - After merges, refresh the owner's running app when it won't break what they're doing; say what changed.
