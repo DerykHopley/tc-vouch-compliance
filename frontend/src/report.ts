@@ -91,6 +91,8 @@ export type ReadinessReport = {
 /** The API's own wording (vouch.api.REPORT_FAILED). */
 export const REPORT_FAILED = 'The readiness report could not be loaded just now. Please try again.'
 export const OLDER_FAILED = 'The older entries could not be loaded just now. Please try again.'
+/** The API's own wording (vouch.api.EXPORT_FAILED). */
+export const EXPORT_FAILED = 'The readiness report could not be exported just now. Please try again.'
 
 type Failed = { ok: false; message: string }
 
@@ -115,4 +117,33 @@ export async function olderEntries(before: number): Promise<({ ok: true } & Trai
   } catch {
     return { ok: false, message: OLDER_FAILED }
   }
+}
+
+/** The name in a `Content-Disposition: attachment; filename="…"`, or a plain one when it names none. */
+const fileName = (disposition: string | null) =>
+  /filename="([^"]+)"/.exec(disposition ?? '')?.[1] ?? 'readiness-report.md'
+
+/** The report as one Markdown file (`GET /api/report/markdown`, #57), saved under the server's name. The whole body
+ * is read before anything is saved, so a failure saves nothing and no file is ever half-downloaded. */
+export async function exportReport(): Promise<{ ok: true } | Failed> {
+  let file: Blob
+  let name: string
+  try {
+    const response = await fetch('/api/report/markdown', { headers: await authHeaders() })
+    if (!response.ok) return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : EXPORT_FAILED }
+    file = await response.blob()
+    name = fileName(response.headers.get('Content-Disposition'))
+  } catch {
+    return { ok: false, message: EXPORT_FAILED }
+  }
+  const url = URL.createObjectURL(file)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.hidden = true
+  document.body.append(link) // Firefox saves only from a link in the document
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0) // after the browser has taken the file
+  return { ok: true }
 }

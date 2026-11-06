@@ -284,6 +284,19 @@ def read(
     return Page(entries, entries[-1].id if more else None)
 
 
+def read_all(trail: AuditTrail, user_id: str, profile_id: str) -> list[AuditEntry]:
+    """Every one of the user's entries under the profile, newest first: `read`'s pages, each
+    as large as one may be, until there are no more (#57's export holds the whole trail)."""
+    entries: list[AuditEntry] = []
+    before: int | None = None
+    while True:
+        page = read(trail, user_id, profile_id, limit=MAX_PAGE, before=before)
+        entries += page.entries
+        if page.next is None:
+            return entries
+        before = page.next
+
+
 def review(
     trail: AuditTrail,
     thread_id: str,

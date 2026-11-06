@@ -16,7 +16,7 @@ from importlib.metadata import version
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
@@ -125,6 +125,7 @@ DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again s
 UNKNOWN_PROFILE = "There is no such compliance profile."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
+EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -784,6 +785,25 @@ def dossier_overview(
     return clean | {"requirements": paper_requirements(profile, controls)}
 
 
+def _report(
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    trail: audit.Page,
+    failed: str,
+) -> dict[str, Any]:
+    """The readiness report for the profile with the given trail, redacted (vouch.report): an
+    unreadable ISA edition is the plain 500 with `failed`."""
+    controls, latest, accepted = _standing(profile, memory, saver, failed)
+    decided = items.decided(memory.user_id, memory.profile_id, accepted)
+    built = report.readiness_report(
+        profile, controls, latest, decided=decided, trail=trail, today=report.today()
+    )
+    clean, _ = redact_data(built)
+    return clean
+
+
 @router.get("/report")
 def readiness_report(
     profile: Profile,
@@ -799,14 +819,31 @@ def readiness_report(
     (`trail.next` reads on at GET /api/audit-trail) and the disclaimer, with the report's words.
     No model runs. Dated the server's date in UTC; an unreadable ISA edition is a plain 500.
     The data is redacted as every answer is; the words, the same for every report, are not."""
-    controls, latest, accepted = _standing(profile, memory, saver, REPORT_FAILED)
-    decided = items.decided(memory.user_id, memory.profile_id, accepted)
     page = audit.read(trail, memory.user_id, memory.profile_id)
-    built = report.readiness_report(
-        profile, controls, latest, decided=decided, trail=page, today=report.today()
+    built = _report(profile, memory, saver, items, page, REPORT_FAILED)
+    return built | {"words": report.words_for(profile.answer_language)}
+
+
+@router.get("/report/markdown")
+def readiness_report_markdown(
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    trail: AuditTrail,
+) -> Response:
+    """The readiness report as one Markdown file (vouch.report.markdown, #57): the same redacted
+    report and words as GET /api/report, but with the whole audit trail, newest first, not a
+    page. An attachment named for the profile and the day; an unreadable ISA edition is a plain
+    500 with EXPORT_FAILED."""
+    everything = audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
+    built = _report(profile, memory, saver, items, everything, EXPORT_FAILED)
+    name = f"readiness-report-{profile.id}-{built['head']['date']}.md"
+    return Response(
+        report.markdown(built, report.words_for(profile.answer_language)),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
-    clean, _ = redact_data(built)
-    return clean | {"words": report.words_for(profile.answer_language)}
 
 
 class ChatRequest(BaseModel):

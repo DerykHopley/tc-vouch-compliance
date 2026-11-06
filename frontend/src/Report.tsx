@@ -3,7 +3,7 @@ import type { Verdict } from './assessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
 import Prose from './Prose.tsx'
-import { fetchReport, olderEntries, type ReadinessReport, type ReportControl, type ReportWords, type TrailEntry }
+import { exportReport, fetchReport, olderEntries, type ReadinessReport, type ReportControl, type ReportWords, type TrailEntry }
   from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -41,7 +41,30 @@ export default function Report() {
       </main>
     )
   }
-  return <main className="report wrap"><Document report={state.report} /></main>
+  return <main className="report wrap"><Export /><Document report={state.report} /></main>
+}
+
+type Exporting = { status: 'idle' } | { status: 'exporting' } | { status: 'failed'; message: string }
+
+/** Export (#57): the report as one Markdown file, saved only once the whole of it has been read. English, as the
+ * page around the report is; app.css leaves it out of print. */
+function Export() {
+  const [state, setState] = useState<Exporting>({ status: 'idle' })
+  const busy = state.status === 'exporting'
+  const run = async () => {
+    if (busy) return
+    setState({ status: 'exporting' })
+    const done = await exportReport()
+    setState(done.ok ? { status: 'idle' } : { status: 'failed', message: done.message })
+  }
+  return (
+    <div className="report-actions">
+      <button className="btn" onClick={() => void run()} disabled={busy} aria-busy={busy ? true : undefined}>
+        Export
+      </button>
+      {state.status === 'failed' && <p role="alert" className="field-note notice">{state.message}</p>}
+    </div>
+  )
 }
 
 /** An ISO time's instant, in UTC, as an ISO string; null for one that doesn't parse. */
@@ -290,6 +313,8 @@ function Trail({ report: { trail, words } }: { report: ReadinessReport }) {
           </table>
         </div>
       )}
+      {/* Print shows this in place of the button below, which it hides (#57); the screen hides it (#56). */}
+      {next !== null && <p className="report-muted print-only" data-word>{words.sentences.older_entries}</p>}
       {next !== null && (
         <div className="report-older" lang="en">
           <button className="btn" onClick={() => void readOlder()} disabled={older.status === 'reading'}

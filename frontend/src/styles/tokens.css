@@ -28,3 +28,13 @@
   --check-a: rgb(236 230 220 / .05); --check-b: rgb(227 203 159 / .06); --shadow: rgb(0 0 0 / .2);
   color-scheme: dark;
 }
+/* Print (#57): the light theme's ink on white, whichever theme is on screen. Each selector matches the specificity of
+   a dark block above (the system setting's, the switch's) and wins by coming after it. */
+@media print { :root, :root:not([data-theme="light"]), :root[data-theme] {
+  --paper: #FFFFFF; --sheet: #FFFFFF; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
+  --navy: #1F3B6E; --sign: #7A2232; --brass: #A8834A; --band: #1B1D21; --band-fg: #F2F1EE;
+  --evidenced: #3F7A55; --partly-evidenced: #A06E22; --not-evidenced: #A4433F; --not-applicable: #7A7C80;
+  --evidenced-bg: #E2EDE5; --partly-evidenced-bg: #F3EAD9; --not-evidenced-bg: #F3E2E0; --not-applicable-bg: #E4E3DF;
+  --check-a: rgb(27 29 33 / .07); --check-b: rgb(31 59 110 / .08); --shadow: rgb(0 0 0 / .2);
+  color-scheme: light;
+} }

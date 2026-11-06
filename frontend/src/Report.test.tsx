@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import Report from './Report.tsx'
-import { OLDER_FAILED, type ReadinessReport as Served, REPORT_FAILED, type ReportWords, type TrailEntry } from './report.ts'
+import { EXPORT_FAILED, OLDER_FAILED, type ReadinessReport as Served, REPORT_FAILED, type ReportWords, type TrailEntry } from './report.ts'
 import { SESSION_ENDED, setOnSignedOut } from './session.ts'
 
 afterEach(() => {
@@ -97,11 +97,13 @@ const NOTHING_ACCEPTED: Served = {
 
 const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }))
 
-/** The API: the report (`report`, each read in turn when a list), the trail's older pages, and nothing else. */
+/** The API: the report (`report`, each read in turn when a list), the trail's older pages, the export, and nothing
+ * else. */
 function serve(report: (() => Promise<Response>) | Served, older: (before: string) => Promise<Response> = () =>
-  new Promise(() => {})) {
+  new Promise(() => {}), exported: () => Promise<Response> = () => new Promise(() => {})) {
   const fetch = vi.fn((url: string) => {
     if (url === '/api/report') return typeof report === 'function' ? report() : json(report)
+    if (url === '/api/report/markdown') return exported()
     const before = /^\/api\/audit-trail\?before=(\d+)$/.exec(url)
     if (before) return older(before[1])
     return new Promise<Response>(() => {})
@@ -272,6 +274,96 @@ describe('Older trail entries', () => {
 
     expect(button.getAttribute('aria-busy')).toBe('true')
     expect((button as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('The older entries sentence, for print', () => {
+  it('is rendered, hidden on screen, when the trail has more entries', async () => {
+    serve({ ...REPORT, trail: { ...REPORT.trail, next: 1 } })
+    render(<Report />)
+    const report = await shown()
+
+    const sentence = within(report).getByText(ENGLISH.sentences.older_entries)
+    expect(sentence.classList.contains('print-only')).toBe(true) // app.css: display none but in print
+    expect(sentence.closest('[lang]')?.getAttribute('lang')).toBe('en') // the report's words, not the page's
+  })
+
+  it('is not rendered when there are no more entries', async () => {
+    serve(REPORT)
+    render(<Report />)
+    const report = await shown()
+
+    expect(within(report).queryByText(ENGLISH.sentences.older_entries)).toBeNull()
+  })
+})
+
+describe('Export', () => {
+  const exportButton = () => screen.getByRole('button', { name: 'Export' })
+
+  it('sits above the report, outside its language, and is busy while the export runs', async () => {
+    serve({ ...REPORT, head: { ...REPORT.head, words_language: 'de' } }) // the export never answers
+    render(<Report />)
+    const report = await shown()
+
+    expect(report.contains(exportButton())).toBe(false)
+    expect(exportButton().closest('[lang]')).toBeNull()
+    expect(exportButton().compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(exportButton().getAttribute('aria-busy')).toBeNull()
+
+    await userEvent.click(exportButton())
+
+    expect(exportButton().getAttribute('aria-busy')).toBe('true')
+    expect((exportButton() as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('on a failure says so under the button, keeps the report, and can be pressed again', async () => {
+    let tries = 0
+    const fetch = serve(REPORT, undefined, () => { tries++; return json({ detail: 'down' }, 503) })
+    render(<Report />)
+    await shown()
+
+    await userEvent.click(exportButton())
+
+    expect((await screen.findByRole('alert')).textContent).toBe(EXPORT_FAILED)
+    expect(screen.getByRole('article', { name: ENGLISH.title })).toBeTruthy()
+    expect((exportButton() as HTMLButtonElement).disabled).toBe(false)
+    expect(exportButton().getAttribute('aria-busy')).toBeNull()
+
+    await userEvent.click(exportButton())
+    await waitFor(() => expect(tries).toBe(2))
+    expect(reportReads(fetch)).toBe(1) // the report is not read again
+  })
+
+  it('on a 401 says the sign-in has ended', async () => {
+    const ended = vi.fn()
+    setOnSignedOut(ended)
+    serve(REPORT, undefined, () => json({}, 401))
+    render(<Report />)
+    await shown()
+
+    await userEvent.click(exportButton())
+
+    expect((await screen.findByRole('alert')).textContent).toBe(SESSION_ENDED)
+    expect(ended).toHaveBeenCalled()
+  })
+
+  it('clears an earlier failure once an export succeeds', async () => {
+    let tries = 0
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:report')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    serve(REPORT, undefined, () => ++tries === 1 ? json({}, 503)
+      : Promise.resolve(new Response('# Readiness report\n', { status: 200 })))
+    render(<Report />)
+    await shown()
+
+    await userEvent.click(exportButton())
+    await screen.findByRole('alert')
+    await userEvent.click(exportButton())
+
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alert')).toBeNull()
+    vi.restoreAllMocks()
   })
 })
 

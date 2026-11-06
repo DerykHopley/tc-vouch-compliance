@@ -363,3 +363,34 @@ textarea.field { resize: vertical; font-family: inherit; }
   .report-head { grid-template-columns: minmax(0, 1fr); }
   .report-head dd { margin-bottom: 6px; }
 }
+/* Export (#57): its button and any failure message above the report, outside the report's language. */
+.report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.report-actions .field-note { margin: 0; }
+
+/* Shown only in print: the older entries sentence stands in for Show older entries (#57). */
+.print-only { display: none; }
+
+/* Print (#57): the browser's own print (Ctrl P) gives the report article alone, its tables whole (the colours are
+   tokens.css's print block: the light theme's ink on white). */
+@page { margin: 14mm; }
+@media print {
+  .top, .fab, .bubble, .report-actions, .report-older { display: none !important; }
+  :root[data-chat="pinned"] body { padding-right: 0; }
+  body { background: var(--sheet); }
+  .report { max-width: none; padding: 0; display: block; }
+  .report.wrap { padding-inline: 0; }
+  .report-doc { border: 0; border-radius: 0; padding: 0; }
+  .print-only { display: block; }
+  /* No table scrolls or clips: each fits the page's width, its long values wrapping. */
+  .table-wrap { overflow: visible; }
+  .report-table { min-width: 0; font-size: 10px; }
+  /* `anywhere` (not `break-word`) also narrows each column's least width, so an auto-laid table fits the page. */
+  .report-table th, .report-table td { overflow-wrap: anywhere; }
+  .report-table .report-q, .report-trail .report-q { min-width: 0; max-width: none; }
+  .report-trail .mono { font-size: 9px; }
+  .report-line { white-space: normal; }
+  .report-table tr { break-inside: avoid; }
+  .report-table thead { display: table-header-group; }
+  .report-doc h2, .report-quotes h3 { break-after: avoid; }
+  .report-doc a[href]::after { content: " (" attr(href) ")"; overflow-wrap: anywhere; }
+}
