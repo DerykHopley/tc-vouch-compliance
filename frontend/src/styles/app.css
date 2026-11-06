@@ -115,6 +115,11 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 .trace li { animation: rise .18s ease-out; }
 .trace b { font-weight: 500; color: var(--navy); margin-right: 6px; }
 .answer { margin: 0; max-width: 72ch; }
+/* The model's Markdown, shown (#209): paragraphs and lists in the chat and the draft answer, spaced to read as
+   separate points; the draft answer keeps its 72ch measure. */
+.prose-p { margin: 0 0 8px; }
+.prose-list { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
+.prose-p:last-child, .prose-list:last-child { margin-bottom: 0; }
 .notice { border-left: 3px solid var(--ink); }
 .crumb { margin-left: -10px; display: inline-flex; align-items: center; text-decoration: none; }
 .assess { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }

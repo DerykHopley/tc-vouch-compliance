@@ -5,6 +5,7 @@ import { type ControlCard, controlPath, isoLabel, type Overview } from './overvi
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
+import Prose from './Prose.tsx'
 import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
 import { type Override, rollUp, withOverrides } from './review.ts'
@@ -150,7 +151,7 @@ export default function WorkingPaper(props: PaperProps) {
               <section className="sheet" aria-label="Verdict and draft answer">
                 <span className="lbl">Draft answer</span>
                 <RunChip run={run} />
-                <p className="answer">{run.assessment.answer}</p>
+                <div className="answer"><Prose text={run.assessment.answer} /></div>
                 {run.usage && (
                   <section aria-label="Usage"><p className="field-note mono">{usageWords(run.usage)}</p></section>
                 )}
