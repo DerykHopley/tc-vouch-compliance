@@ -29,6 +29,10 @@ const VERDICT_WORDS_IN: Record<string, Record<Verdict, string>> = {
 export const verdictWord = (verdict: Verdict, language?: string): string =>
   ((language && VERDICT_WORDS_IN[language]) || VERDICT_WORDS)[verdict]
 
+/** The `lang` of `verdictWord`'s words: the answer language when it has its own, none for the interface's English. */
+export const verdictLang = (language?: string): string | undefined =>
+  language && VERDICT_WORDS_IN[language] ? language : undefined
+
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 

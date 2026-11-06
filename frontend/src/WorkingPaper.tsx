@@ -119,7 +119,8 @@ export default function WorkingPaper(props: PaperProps) {
   const assessingElsewhere = elsewhere !== null && <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
   return (
     <div className="wp">
-      <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen} />
+      <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
+        language={overview.answer_language} />
       <section className="paper wrap" aria-label="Working paper">
         <div><ToOverview onOverview={onOverview} /></div>
         <div className="paper-head">
@@ -172,6 +173,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
+                language={run.status === 'done' ? run.assessment.answer_language : undefined}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
                   decidable: review === 'accepted',
@@ -200,6 +202,8 @@ type IndexProps = {
   /** The open control's run: it may be newer than its card. */
   run: Run
   onOpen: (controlId: string) => void
+  /** The profile's answer language: the verdicts' (#200). */
+  language: string
 }
 
 /** The run with the lead's overrides in place in its assessment, and the control's verdict recalculated from them. */
@@ -220,7 +224,7 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 }
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. */
-function ControlIndex({ controls, openId, running, run, onOpen }: IndexProps) {
+function ControlIndex({ controls, openId, running, run, onOpen, language }: IndexProps) {
   return (
     <nav className="wp-index" aria-label="Controls">
       {areas(controls).map(([area, cards]) => (
@@ -237,7 +241,7 @@ function ControlIndex({ controls, openId, running, run, onOpen }: IndexProps) {
                 aria-current={open ? 'page' : undefined}>
                 <span className="mono">{card.id}</span>
                 <span className="wp-state">
-                  <VerdictChip verdict={verdict} assessing={assessing} />
+                  <VerdictChip verdict={verdict} assessing={assessing} language={language} />
                   {!assessing && status && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
                 </span>
                 <span className="wp-q">{card.question}</span>
@@ -313,6 +317,8 @@ type JudgedProps = {
   onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
   items: RemediationItems
+  /** The assessment's answer language: its requirements' verdicts are in it (#200). */
+  language?: string
 }
 
 /**
@@ -321,7 +327,8 @@ type JudgedProps = {
  * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
  * it. A not-evidenced requirement shows its remediation item under its reason (#43).
  */
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items }: JudgedProps) {
+function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language }:
+  JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   return (
     <div className="table-wrap">
@@ -344,7 +351,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                 <td className="rq">{r.text}</td>
                 <td>
                   <div className="verdict-cell">
-                    <VerdictChip verdict={r.verdict} />
+                    <VerdictChip verdict={r.verdict} language={language} />
                     {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
                     {overrides.editable && applies && editing !== r.id && (
                       <span>
