@@ -26,7 +26,7 @@ export function startingProfile(
 ): { id: string | null; fellBack: boolean } {
   if (!found) return { id: null, fellBack: false }
   if (remembered && found.profiles.some((p) => p.id === remembered)) return { id: remembered, fellBack: false }
-  return { id: found.default ?? found.profiles[0]?.id ?? null, fellBack: remembered !== null }
+  return { id: found.default ?? found.profiles[0]?.id ?? null, fellBack: Boolean(remembered) }
 }
 
 // The interface is English (docs/design.md, Language), so the answer language is named in English.

@@ -83,6 +83,7 @@ describe('startingProfile', () => {
 
   it('is the default, or the first listed, with none remembered', () => {
     expect(startingProfile(both, null)).toEqual({ id: 'nordlicht', fellBack: false })
+    expect(startingProfile(both, '')).toEqual({ id: 'nordlicht', fellBack: false })
     expect(startingProfile({ profiles: [TESTWERK], default: null }, null)).toEqual({ id: 'testwerk', fellBack: false })
   })
 
