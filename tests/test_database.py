@@ -30,7 +30,7 @@ from vouch import database
 from vouch.api import create_app, database_connection
 from vouch.database import Database, DatabaseMisconfigured, DatabaseUnavailable
 from vouch.exit_codes import EXIT_BAD_INPUT, EXIT_UNAVAILABLE
-from vouch.settings import DATABASE_URL_ENV, Settings, load_settings
+from vouch.settings import DATABASE_URL_ENV, Settings, SettingsError, load_settings
 
 PASSWORD = "pw-marker-33"
 URL = f"postgresql://vouch:{PASSWORD}@127.0.0.1:5432/vouch"
@@ -386,6 +386,38 @@ def test_the_app_closes_its_database_at_shutdown():
 def test_the_setup_command_without_a_url_refuses_naming_the_setting(capsys):
     assert database.main([], env={}) == EXIT_BAD_INPUT
     assert DATABASE_URL_ENV in capsys.readouterr().err
+
+
+SIGN_IN_ENVS = {  # #190: sign-in settings the API would refuse, which database setup doesn't use
+    "keys-without-mode": {"CLERK_SECRET_KEY": "sk_test_x", "CLERK_PUBLISHABLE_KEY": "pk_test_x"},
+    "clerk-without-parties": {"VOUCH_AUTH_MODE": "clerk", "CLERK_SECRET_KEY": "sk_test_x"},
+}
+
+
+@pytest.mark.parametrize("sign_in", SIGN_IN_ENVS.values(), ids=SIGN_IN_ENVS.keys())
+def test_the_setup_command_reaches_the_database_whatever_the_sign_in_settings(monkeypatch, sign_in):
+    reached: list[str] = []
+
+    class FakeDatabase:
+        def __init__(self, url: SecretStr):
+            reached.append(url.get_secret_value())
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+        def setup(self) -> None:
+            reached.append("setup")
+
+    monkeypatch.setattr(database, "Database", FakeDatabase)
+    url = "postgresql://vouch@localhost:5432/vouch"
+
+    assert database.main([], env={**sign_in, DATABASE_URL_ENV: url}) == 0
+    assert reached == [url, "setup"]
+    with pytest.raises(SettingsError):  # the API still refuses them (#151)
+        load_settings({**sign_in, DATABASE_URL_ENV: url})
 
 
 def test_the_setup_command_on_a_malformed_url_refuses_without_the_password(capsys):

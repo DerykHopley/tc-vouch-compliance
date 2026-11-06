@@ -48,7 +48,7 @@ from psycopg_pool import ConnectionPool, PoolClosed, PoolTimeout
 from pydantic import SecretStr
 
 from vouch.exit_codes import EXIT_BAD_INPUT, EXIT_UNAVAILABLE
-from vouch.settings import DATABASE_URL_ENV, SettingsError, load_settings
+from vouch.settings import DATABASE_URL_ENV, load_database_url
 
 log = logging.getLogger(__name__)
 
@@ -803,11 +803,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     if args:
         print(f"usage: vouch-db-setup  (reads {DATABASE_URL_ENV})", file=sys.stderr)
         return EXIT_BAD_INPUT
-    try:
-        url = load_settings(env).database_url
-    except SettingsError as error:
-        print(f"vouch-db-setup: {error}", file=sys.stderr)
-        return EXIT_BAD_INPUT
+    url = load_database_url(env)  # only the database: sign-in settings aren't its business (#190)
     if url is None:
         print(f"vouch-db-setup: set {DATABASE_URL_ENV}", file=sys.stderr)
         return EXIT_BAD_INPUT
