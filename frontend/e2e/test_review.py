@@ -10,6 +10,7 @@ import json
 import re
 
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from top_bar import back_to_overview
 
 CONTROL = "4.1.2"
 REASON = "The 2025 MFA rollout record shows the risk-based decision."
@@ -103,7 +104,7 @@ def test_accept_records_the_decision_and_the_overviews_counts_change(page: Page,
     assert (trail[0]["action"], trail[0]["note"]) == ("accept", "Checked against the records.")
 
     with page.expect_response("**/api/overview"):
-        page.get_by_role("link", name="← Overview").click()
+        back_to_overview(page)
     expect(accepted_tile(page)).to_have_text(str(before + 1))
 
 

@@ -16,10 +16,11 @@ type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | nu
  * default answers. The browser remembers the last switch, so a reload or a pasted link opens that profile while it is
  * still listed; otherwise the default, and the top bar says so (#201).
  */
-export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
+export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () => void; userName?: string }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
   const [chosen, setChosen] = useState<string | null>(null)
   const [fellBack, setFellBack] = useState(false)
+  const [switched, setSwitched] = useState(false) // the user switched: the dropdown takes focus again
   // Opens the app under `id`: at start (the remembered or the default profile) and on each switch.
   const choose = (id: string) => {
     setProfile(id) // before the app opens again, so its first calls name it
@@ -29,6 +30,7 @@ export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
   const switchTo = (id: string) => {
     rememberProfile(id)
     setFellBack(false)
+    setSwitched(true)
     choose(id)
   }
   useEffect(() => {
@@ -49,7 +51,8 @@ export default function ProfiledApp({ onSignOut }: { onSignOut?: () => void }) {
 
   if (listing.status === 'reading') return <TopBar />
   const switcher = listing.profiles && chosen
-    ? <ProfileSwitcher profiles={listing.profiles.profiles} selected={chosen} onSwitch={switchTo} fellBack={fellBack} />
+    ? <ProfileSwitcher profiles={listing.profiles.profiles} selected={chosen} onSwitch={switchTo} fellBack={fellBack}
+      switched={switched} />
     : undefined
-  return <App key={chosen ?? ''} onSignOut={onSignOut} profileSwitcher={switcher} />
+  return <App key={chosen ?? ''} onSignOut={onSignOut} profileSwitcher={switcher} userName={userName} />
 }

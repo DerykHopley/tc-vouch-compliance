@@ -10,6 +10,7 @@ import re
 
 import pytest
 from playwright.sync_api import APIRequestContext, Page, expect
+from top_bar import open_profile_menu, profile_button, switch_profile
 
 NORDLICHT = "Nordlicht Komponenten GmbH · Germany · English"
 TESTWERK = "Testwerk Prüfstand GmbH · Austria · English"
@@ -58,16 +59,16 @@ def test_switching_shows_each_profiles_own_progress(page: Page, profiles_url):
     assessed(page.request, profiles_url, "testwerk", "1.1.1")
 
     opened(page, profiles_url)
-    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
     # The broken profile is left out.
-    expect(menu.get_by_role("option")).to_have_text([NORDLICHT, TESTWERK])
+    expect(open_profile_menu(page)).to_have_text([NORDLICHT, TESTWERK])
+    page.keyboard.press("Escape")
     expect(page.locator(".pill").first).to_have_text("Nordlicht Komponenten GmbH · Germany")
     expect(accepted_tile(page).locator("b")).to_have_text("1")
     expect(card(page, "4.1.2")).to_contain_text("Accepted")
     expect(card(page, "1.1.1")).to_contain_text("Not assessed")
 
     with page.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
-        menu.select_option(label=TESTWERK)
+        switch_profile(page, TESTWERK)
     assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
 
     expect(page.locator(".pill").first).to_have_text("Testwerk Prüfstand GmbH · Austria")
@@ -76,7 +77,7 @@ def test_switching_shows_each_profiles_own_progress(page: Page, profiles_url):
     expect(card(page, "1.1.1")).to_contain_text("Proposed")
 
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        menu.select_option(label=NORDLICHT)
+        switch_profile(page, NORDLICHT)
     expect(accepted_tile(page).locator("b")).to_have_text("1")
     expect(card(page, "1.1.1")).to_contain_text("Not assessed")
 
@@ -100,9 +101,7 @@ def test_switching_clears_the_chat_and_the_next_message_is_under_the_new_profile
     assert first.header_value("X-Vouch-Profile") == "nordlicht"
 
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
-            label=TESTWERK
-        )
+        switch_profile(page, TESTWERK)
     page.get_by_role("button", name="Ask Vouch").click()
     expect(log).not_to_contain_text("Where do I stand?")
     second = sent(page, "What is missing?")
@@ -112,15 +111,14 @@ def test_switching_clears_the_chat_and_the_next_message_is_under_the_new_profile
 def test_a_reload_or_a_pasted_link_keeps_the_chosen_profile(page: Page, profiles_url):
     """#201: the browser remembers the switch, so a working paper opened afresh is the same company's."""
     opened(page, profiles_url)
-    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        menu.select_option(label=TESTWERK)
+        switch_profile(page, TESTWERK)
 
     for arrive in (lambda: page.goto(f"{profiles_url}/controls/1.1.1"), page.reload):
         with page.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
             arrive()
         assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
-        expect(menu).to_have_value("testwerk")
+        expect(profile_button(page)).to_have_accessible_name(f"Profile: {TESTWERK}")
         expect(page.get_by_role("banner").get_by_role("status")).to_have_count(0)
 
 
@@ -129,8 +127,9 @@ def test_the_switcher_fits_a_phone_in_dark(page: Page, profiles_url):
     page.emulate_media(color_scheme="dark")
     opened(page, profiles_url)
 
-    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
-    expect(menu).to_be_visible()
+    # On a phone the profile sits behind the top bar's Menu button (#222).
+    page.get_by_role("banner").get_by_role("button", name="Menu", exact=True).click()
+    expect(profile_button(page)).to_be_visible()
     assert not page.evaluate(
         "document.documentElement.scrollWidth > document.documentElement.clientWidth"
     )
@@ -141,8 +140,7 @@ def test_the_bundled_profiles_are_both_in_the_menu(page: Page, dossier_url):
     name without a menu is checked below the UI (profiles.test.tsx)."""
     opened(page, dossier_url)
 
-    menu = page.get_by_role("banner").get_by_role("combobox", name="Profile")
-    expect(menu.get_by_role("option")).to_have_text(
+    expect(open_profile_menu(page)).to_have_text(
         ["Alpenwerk Präzision GmbH · Austria · German", NORDLICHT]
     )
 
@@ -163,9 +161,7 @@ def test_a_cross_control_answer_links_each_named_control_to_its_paper_in_that_pr
     opened(page, profiles_url)
     if profile != "nordlicht":
         with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-            page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
-                label=label
-            )
+            switch_profile(page, label)
     page.get_by_role("button", name="Ask Vouch").click()
     asked = sent(page, "Which controls have documented evidence only?")
     assert asked.header_value("X-Vouch-Profile") == profile

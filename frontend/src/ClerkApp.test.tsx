@@ -29,6 +29,7 @@ vi.mock('@clerk/react', () => ({
   },
   useAuth: () => clerk.auth,
   useClerk: () => ({ signOut: clerk.signOut }),
+  useUser: () => ({ user: { fullName: 'Anna Berg', username: null, primaryEmailAddress: null } }),
 }))
 
 const ONE_PROFILE = {
@@ -123,9 +124,14 @@ describe('signed in', () => {
     expect((await authHeaders()).Authorization).toBe('Bearer session-token') // beside the profile (#47)
   })
 
-  it('signs out from the top bar', async () => {
+  it("signs out from the top bar's user menu, which names the user (issue 222)", async () => {
     render(<ClerkApp publishableKey="pk_test_x" />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    const user = await screen.findByRole('button', { name: 'Anna Berg: your menu' })
+    expect(user.textContent).toBe('AB')
+    await userEvent.click(user)
+    expect(screen.getByText('Signed in as Anna Berg')).toBeTruthy()
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Dark theme', 'Sign out'])
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }))
     expect(clerk.signOut).toHaveBeenCalledOnce()
   })
 
