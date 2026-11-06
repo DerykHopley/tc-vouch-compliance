@@ -74,7 +74,7 @@ case "$tool $*" in
       echo "projects/vouch-demo-123/locations/europe-west1/repositories/vouch/packages/vouch/tags/$t"
     done ;;
   "docker push"*) echo "${2##*:}" >> "$STATE/tags" ;;
-  "gcloud projects describe"*"projectNumber"*) echo "${PROJECT_NUMBER-123}" ;;
+  "gcloud projects describe"*"projectNumber"*) echo "$PROJECT_NUMBER" ;;
   "gcloud sql instances describe"*) [ -n "$SQL" ] || exit 1; echo "$SQL" ;;
   "gcloud run services describe"*"serviceAccountName"*) echo "$SERVICE_ACCOUNT" ;;
   "gcloud run services describe"*) [ -n "$EXISTING" ] || [ -e "$STATE/deployed" ] || exit 1
@@ -709,6 +709,7 @@ def test_a_region_that_isnt_a_cloud_run_region_stops_before_anything_changes(tmp
 
 @pytest.mark.parametrize("number", ["12a3", "123,https://other.example", ""])
 def test_a_project_number_that_isnt_digits_stops_before_the_deploy(tmp_path, number):
+    """#192: the project number goes into the sign-in address too."""
     result, calls = deployed(tmp_path, project_number=number)
     assert result.returncode != 0
     assert "project" in result.stderr and "number" in result.stderr
@@ -716,6 +717,7 @@ def test_a_project_number_that_isnt_digits_stops_before_the_deploy(tmp_path, num
 
 
 def test_a_dry_run_with_today_s_wizard_env_passes(tmp_path):
+    """#192: the live service's project and region pass the new checks."""
     saved(tmp_path, PROJECT_ID="tc-vouch-compliance", REGION="europe-west1")
     result, _ = run_wizard(tmp_path, "--dry-run", project_id="tc-vouch-compliance")
     assert result.returncode == 0, result.stdout + result.stderr
