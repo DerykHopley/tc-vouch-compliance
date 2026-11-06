@@ -87,6 +87,10 @@ def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier
     expect(result.get_by_text("Teilweise nachgewiesen", exact=True)).to_have_attribute("lang", "de")
     expect(result.locator(".answer")).to_have_text(GERMAN_ANSWER)  # drawn by Prose (#209), as written
     expect(result.locator(".answer ol, .answer em")).to_have_count(0)  # no list, no italics (#218)
+    # The roll-up's explanation (main's #212) is German and marked so: M1 not evidenced, the control partly.
+    roll_up = paper.locator(".roll-up")
+    expect(roll_up).to_have_text("Teilweise nachgewiesen: 0 von 1 Muss-Anforderungen sind vollständig nachgewiesen.")
+    expect(roll_up).to_have_attribute("lang", "de")
     expect(result.locator(".answer")).to_have_attribute("lang", "de")
     expect(result.get_by_text("Draft answer", exact=True)).not_to_have_attribute("lang", "de")
     # The interface stays English.

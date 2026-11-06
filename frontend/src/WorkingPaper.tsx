@@ -1,6 +1,7 @@
 import { type AnchorHTMLAttributes, type ReactNode, useState } from 'react'
-import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS }
-  from './assessment.ts'
+import {
+  type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
+} from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
@@ -144,7 +145,9 @@ export default function WorkingPaper(props: PaperProps) {
               {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
             </div>
           )}
-          {!checking && explained && <p className="field-note roll-up">{explained}</p>}
+          {!checking && explained && (
+            <p className="field-note roll-up" lang={verdictLang(overview.answer_language)}>{explained}</p>
+          )}
         </div>
         {checking ? <p className="field-note" role="status">Reading the working paper…</p> : (
           <>
