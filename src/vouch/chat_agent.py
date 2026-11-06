@@ -38,6 +38,7 @@ from langchain_core.messages import (
     AnyMessage,
     BaseMessage,
     HumanMessage,
+    RemoveMessage,
     SystemMessage,
     ToolMessage,
     message_chunk_to_message,
@@ -50,7 +51,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
 from vouch.chat import PageContext
-from vouch.chat_citations import UNCITED, checked_reply
+from vouch.chat_citations import CITE, UNCITED, checked_reply
 from vouch.citations import Citation, CitationClaim, QuoteChecker, normalise
 from vouch.documents import EvidenceKind
 from vouch.dossier import CardStatus, NextAction, NextStep, overview
@@ -58,10 +59,13 @@ from vouch.graph import (
     EVIDENCE_TOOLS,
     GUARD,
     NOT_APPLICABLE,
+    OUTPUT_RETRIES,
     SEARCH_POLICIES,
     SEARCH_RECORDS,
     Assessment,
+    OutputCheckError,
     RequirementVerdict,
+    claims_audit_result,
     counts_towards_roll_up,
     plural,
     roll_up_words,
@@ -102,9 +106,9 @@ from vouch.spending import (
 
 log = logging.getLogger(__name__)
 
-RECURSION_LIMIT = 13
-"""At most this many agent and tool steps in one turn, the answer's check one more; the chat
-model's own call budget
+RECURSION_LIMIT = 15
+"""At most this many agent and tool steps in one turn, the answer's check one more, and two more
+for an answer asked for again (#249); the chat model's own call budget
 (vouch.model_choice.CALL_BUDGET) stops it sooner on OpenRouter."""
 HISTORY_WINDOW = 20
 """How many of the thread's latest messages the model is sent with each call, beside the
@@ -807,6 +811,29 @@ class ChatState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
+ANSWER_REFUSED = "output-check"
+"""The name on the message that asks the model for its answer again (#249): the turn's own, not
+one of the lead's, so it starts no turn and is never taken for the lead's question."""
+ASKED_AGAIN_STEP = (
+    "Asked for the answer again: it claimed an audit result, which Vouch never claims."
+)
+
+
+ANSWER_FAILED = "answer-failed"
+"""The answer node's own event for an answer refused twice (#249): chat_turn raises
+OutputCheckError for it, once the node has taken the answer out of the thread."""
+
+
+def _is_refusal(message: BaseMessage) -> bool:
+    """The output check's message asking for the answer again (#249)."""
+    return isinstance(message, HumanMessage) and message.name == ANSWER_REFUSED
+
+
+def _is_lead(message: BaseMessage) -> bool:
+    """A message the compliance lead wrote (the greeting's request too), not the output check's."""
+    return isinstance(message, HumanMessage) and not _is_refusal(message)
+
+
 REPLY_TEXT = "reply-text"
 """The agent's own event for the turn's answer, whole, its quotes checked: chat_turn redacts it
 and sends it as one `token` event. No tool writes it."""
@@ -832,15 +859,34 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     quote."""
     chat = runtime.context
     messages = state["messages"]
-    lead = max(i for i, m in enumerate(messages) if isinstance(m, HumanMessage))
+    lead = max(i for i, m in enumerate(messages) if _is_lead(m))
     replies = [m for m in messages[lead + 1 :] if isinstance(m, AIMessage)]
+    refusals = [m for m in messages[lead + 1 :] if _is_refusal(m)]
     text, dropped = checked_reply("".join(m.text for m in replies), chat.tools.check_quote)
+    *earlier, last = replies
+    # The banned-wording check, as an assessment's answer has it (#249): an answer claiming an
+    # audit result, quotes it cites aside, is never shown. It is taken out of the thread, so no
+    # later turn reads it, and asked for again once with a refusal (taken out too once answered);
+    # claimed again, the turn ends in the chat's formal error (chat_turn, ANSWER_FAILED).
+    word = claims_audit_result(text, [cite.group(2) for cite in CITE.finditer(text)])
+    if word is not None:
+        taken_out = [*(_kept(m, "") for m in earlier), RemoveMessage(id=last.id)]
+        if len(refusals) >= OUTPUT_RETRIES:
+            runtime.stream_writer((ANSWER_FAILED, {"word": word}))
+            return {"messages": [*taken_out, *(RemoveMessage(id=r.id) for r in refusals)]}
+        runtime.stream_writer(("step", {"node": GUARD, "text": ASKED_AGAIN_STEP}))
+        refusal = HumanMessage(
+            f"Your last answer was refused: it said “{word}”, an audit result Vouch never "
+            "claims. Answer again, saying what the evidence shows instead.",
+            name=ANSWER_REFUSED,
+        )
+        return {"messages": [*taken_out, refusal]}
     for said in dropped:
         runtime.stream_writer(("step", {"node": GUARD, "text": said}))
     if text:
         runtime.stream_writer((REPLY_TEXT, {"text": text}))
-    *earlier, last = replies
-    return {"messages": [*(_kept(m, "") for m in earlier), _kept(last, text)]}
+    done = [*(RemoveMessage(id=r.id) for r in refusals)]  # the thread keeps the answer, not why
+    return {"messages": [*(_kept(m, "") for m in earlier), _kept(last, text), *done]}
 
 
 def _kept(reply: BaseMessage, checked: str) -> BaseMessage:
@@ -872,6 +918,11 @@ def _tools(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     return {"messages": replies}
 
 
+def _after_answer(state: ChatState) -> str:
+    """Back to the agent when the answer was refused (#249), else the turn is done."""
+    return "agent" if _is_refusal(state["messages"][-1]) else END
+
+
 def _next_node(state: ChatState) -> str:
     last = state["messages"][-1]
     return "tools" if isinstance(last, AIMessage) and last.tool_calls else "answer"
@@ -886,7 +937,7 @@ def _compiled() -> CompiledStateGraph:
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", _next_node, ["tools", "answer"])
     graph.add_edge("tools", "agent")
-    graph.add_edge("answer", END)
+    graph.add_conditional_edges("answer", _after_answer, ["agent", END])
     return graph.compile()
 
 
@@ -907,7 +958,7 @@ def _window(messages: list[AnyMessage]) -> list[AnyMessage]:
         for m in messages
         if not (isinstance(m, AIMessage) and any(c["id"] not in answered for c in m.tool_calls))
     ]
-    leads = [i for i, m in enumerate(kept) if isinstance(m, HumanMessage)]
+    leads = [i for i, m in enumerate(kept) if _is_lead(m)]
     start = next((i for i in leads if i >= len(kept) - HISTORY_WINDOW), leads[-1] if leads else 0)
     return kept[start:]
 
@@ -936,8 +987,12 @@ def chat_turn(
             stream_mode=["custom"],
             version="v2",
         )
+        failed = None
         for part in parts:
             event, data = part["data"]
+            if event == ANSWER_FAILED:  # raised once the stream ends: its node's update saved
+                failed = data["word"]
+                continue
             if event == REPLY_TEXT:
                 text, removed = redact(data["text"])
                 if removed:
@@ -945,5 +1000,7 @@ def chat_turn(
                 yield "token", {"text": text}
             else:
                 yield from redacted_event(event, data)
+        if failed is not None:
+            raise OutputCheckError(f"the chat's answer claimed an audit result (“{failed}”) again")
     finally:
         chat.stop.set()
