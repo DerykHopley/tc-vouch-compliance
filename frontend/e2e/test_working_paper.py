@@ -134,6 +134,18 @@ def scrolls_sideways(page: Page) -> bool:
     )
 
 
+def test_a_click_on_an_index_rows_question_opens_that_control(page: Page, paper_url):
+    """#231: the control index keeps opening a control from anywhere in its row."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    with page.expect_response("**/api/overview"):
+        page.goto(f"{paper_url}/controls/1.1.1")
+    index = page.get_by_role("navigation", name="Controls")
+    index.get_by_role("link").filter(has_text="5.2.4").locator(".wp-q").click()
+    expect(page).to_have_url(f"{paper_url}/controls/5.2.4")
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("heading", level=2)).to_contain_text("5.2.4")
+
+
 def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400px_fits(
     page: Page, paper_url
 ):
