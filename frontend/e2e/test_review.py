@@ -204,3 +204,7 @@ def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(pag
     form.get_by_role("button", name="Save").focus()
     page.keyboard.press("Enter")
     expect(change).to_be_focused()
+
+    row(paper, "M1").get_by_role("button", name="Undo the override of M1").focus()
+    page.keyboard.press("Enter")  # Undo goes once pressed: focus moves to Change, not the page
+    expect(change).to_be_focused()

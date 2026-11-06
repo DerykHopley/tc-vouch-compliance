@@ -446,6 +446,13 @@ describe("the override form's keyboard focus (issue 226)", () => {
     await saveOverrideOfM1()
     expect(document.activeElement).toBe(change())
   })
+
+  it('Undo, which goes once pressed, puts focus on "Change M1"', async () => {
+    review()
+    await saveOverrideOfM1()
+    await userEvent.click(within(row('M1')).getByRole('button', { name: 'Undo the override of M1' }))
+    expect(document.activeElement).toBe(change())
+  })
 })
 
 describe('overrides belong to the assessment shown', () => {

@@ -419,7 +419,10 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                         </button>
                         {replaced && (
                           <button className="btn btn-ghost" aria-label={`Undo the override of ${r.id}`}
-                            onClick={() => onUndo(r.id)}>Undo</button>
+                            onClick={() => {
+                              onUndo(r.id)
+                              changeButtons.current[r.id]?.focus() // Undo goes; its Change stays (#226)
+                            }}>Undo</button>
                         )}
                       </span>
                     )}
