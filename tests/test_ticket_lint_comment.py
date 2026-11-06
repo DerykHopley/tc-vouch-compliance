@@ -107,6 +107,7 @@ def test_a_ticket_missing_check_lines_gets_one_comment_naming_them(action):
     [comment] = action(NO_CHECKS)
 
     assert "lack a Check:" in comment["body"]
+    assert "- [ ] It works." in comment["body"]  # the criterion itself, named
 
 
 def test_editing_it_updates_the_same_comment(action):
@@ -131,8 +132,10 @@ def test_a_clean_ticket_gets_no_comment(action):
     assert action(GOOD) == []
 
 
-def test_an_issue_without_ready_for_agent_is_skipped(action):
-    assert action(NO_CHECKS, labels=("needs-triage", "bug")) == []
+def test_an_issue_without_ready_for_agent_is_skipped(action, tmp_path):
+    # No labels: the linter alone would comment on this one, so only the skip keeps it quiet.
+    assert action(NO_CHECKS, labels=()) == []
+    assert (tmp_path / "calls.log").read_text() == ""  # gh was never called
 
 
 def test_a_spec_issue_is_skipped(action):

@@ -9,6 +9,7 @@ Standard library only; gh does the API calls."""
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -43,8 +44,19 @@ def findings(issue: dict, comments: list[dict]) -> list[str]:
         "updatedAt": issue["updated_at"],
         "comments": [{"body": c["body"]} for c in comments],
     }
-    found = linter().check(checked, datetime.now(UTC), closed=set(), merged_prs=[])
-    return [text for kind, text in found if kind in SHOWN]
+    lint = linter()
+    found = [
+        text for kind, text in lint.check(checked, datetime.now(UTC), set(), []) if kind in SHOWN
+    ]
+    # Name each criterion that lacks its Check line, not only how many do.
+    done = lint.sections(lint.contract(checked)).get("done", [])
+    unchecked = [
+        line.strip()
+        for line in done
+        if re.match(r"\s*[-*]\s+\[[ xX]\]", line)
+        and not re.search(r"\bcheck:", line, re.IGNORECASE)
+    ]
+    return found + [f"no **Check:** in: {line}" for line in unchecked]
 
 
 def main() -> int:
