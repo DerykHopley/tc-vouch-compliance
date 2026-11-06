@@ -16,7 +16,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Working state
 
-Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-06 @3582a30); rerun it to change either, or to bring in the rig's newer rules.
+Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-06 @ce63a03); rerun it to change either, or to bring in the rig's newer rules.
 
 - Work lives in GitHub issues; one ticket is one PR into main.
 - Build in the main session, where every step's results stay in view. Spawn a subagent only for an independent check (the `code-review` skill, the `rig:verifier` agent) or for work that would flood the context (screenshots, a long log): it returns a verdict, not a summary to act on.
@@ -95,12 +95,20 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 | Lane | What | Goes |
 |---|---|---|
 | **Current spec** | meets the "joins an open spec" rule above (Spec level) | a ticket on the integration branch |
-| **Fixes** | a bug already on main, a process fix (tooling, CI, hooks, agent docs), or a small change: one PR, no design questions | built one at a time, its own PR straight into main |
+| **Fixes** | a bug already on main, a process fix (tooling, CI, hooks, agent docs), or a small change: one PR, no design question (no `docs/design.md` decision, no change to a user-facing layout) | its own PR straight into main, through the Fixes lane below |
 | **Idea pool** | a feature or a bigger change; tag ideas that improve the open spec "follow-up to <spec>" | the `Next` milestone |
 | **Architecture** | a change to the code's structure | grouped into its own small spec, after the open one |
 
-- When the idea pool holds five related items, or a spec closes, suggest the owner run `/grill-with-docs` over them to make the next spec, follow-ups first.
-- For a backlog that needs a proper sort, suggest `/triage`.
+- **Who files what (on trial):** a bug on main with a way to reproduce it may be filed straight in as a Fix (`ready-for-agent`, with a `Touches` section). Anything else an agent or a retro files lands as `needs-triage`, and the triage pass sorts it. Vouch, 2026-11-06: 18 issues filed in one day went straight to `ready-for-agent`, and a top-bar redesign ran as a Fix beside the spec redesigning the same screens.
+- **Triage when a spec lands (on trial):** `/rig:spec-close`'s Landed part sorts `needs-triage` into lanes, marks duplicates, closes stale or superseded issues with the reason (reopening is the overrule), and groups the idea pool into candidate specs. Each move is flagged; making a new spec from a group is the owner's, with `/grill-with-docs`.
+- For a backlog that needs a proper sort between specs, suggest `/triage`.
+
+### The Fixes lane (on trial)
+
+- **One Fixes thread** works the lane (under `/rig:spec-run`, the coordinator starts it and keeps its queue), up to 2 Fixes at once when their `Touches` lines share no file or area.
+- **Order, by what waiting costs:** a bug users hit on main; then anything blocking a spec; then tooling and process fixes; then small enhancements, oldest first.
+- **Checked against open specs before it starts:** compare its `Touches` with each open spec's changed files (`git diff --name-only origin/main...origin/spec/<n>-<slug>`) and its running tickets' `Touches`. A bug users hit goes ahead, and the spec's thread is told while the Fix's PR is still open, so the spec can add its cases to that PR. Anything else waits until that spec lands.
+- **A Fix keeps its PR** (CI and a one-merge revert), and its loop scales with its size: **under about 100 changed lines with no UI change**, the implementer's test seen red then green plus CI are the check, with no Standards review and no verifier; anything bigger, or any UI change, takes the full ticket loop.
 
 
 ### CI

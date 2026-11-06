@@ -271,7 +271,7 @@ function Trail({ report: { trail, words } }: { report: ReadinessReport }) {
               {entries.map((e, i) => (
                 // By position: an entry's id may be missing, and the pages are appended in order.
                 <tr key={i}>
-                  <td className="mono report-line">{timeOf(e.at)}</td>
+                  <td className="mono"><span className="report-line">{timeOf(e.at)}</span></td>
                   <td>{e.reviewer_name}</td>
                   <td className="mono">{e.control_id}</td>
                   <td className="mono">{e.requirement_id ?? ''}</td>
