@@ -445,6 +445,39 @@ describe('the review of a proposed control', () => {
   })
 })
 
+describe("the override form's keyboard focus (issue 226)", () => {
+  const change = () => within(row('M1')).getByRole('button', { name: 'Change M1' })
+
+  it('Enter on "Change M1" puts focus on the form\'s Verdict field', async () => {
+    review()
+    change().focus()
+    await userEvent.keyboard('{Enter}')
+    const editor = screen.getByRole('form', { name: 'Override M1' })
+    expect(document.activeElement).toBe(within(editor).getByLabelText('Verdict'))
+  })
+
+  it('Cancel puts focus back on "Change M1"', async () => {
+    review()
+    change().focus()
+    await userEvent.keyboard('{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(change())
+  })
+
+  it('Save puts focus back on "Change M1"', async () => {
+    review()
+    await saveOverrideOfM1()
+    expect(document.activeElement).toBe(change())
+  })
+
+  it('Undo, which goes once pressed, puts focus on "Change M1"', async () => {
+    review()
+    await saveOverrideOfM1()
+    await userEvent.click(within(row('M1')).getByRole('button', { name: 'Undo the override of M1' }))
+    expect(document.activeElement).toBe(change())
+  })
+})
+
 describe('overrides belong to the assessment shown', () => {
   afterEach(() => vi.unstubAllGlobals())
 
