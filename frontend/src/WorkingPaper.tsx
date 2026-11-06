@@ -1,4 +1,4 @@
-import { type AnchorHTMLAttributes, type ReactNode, useId, useState } from 'react'
+import { type AnchorHTMLAttributes, type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
 import { type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS }
   from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
@@ -329,15 +329,30 @@ type JudgedProps = {
  * text clamped to 2 lines with a toggle (`RequirementText`, #211).
  */
 /** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
- * "Show less" toggles it (`aria-expanded`); on a desktop the toggle is hidden and the text shown in full. */
+ * "Show less" toggles it (`aria-expanded`), offered only when the clamp hides some of it (measured again as the width
+ * changes; where nothing can be measured, it is offered). On a desktop the toggle is hidden and the text shown whole. */
 function RequirementText({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false)
+  const [cut, setCut] = useState(true)
+  const shown = useRef<HTMLSpanElement>(null)
   const id = useId()
+  useLayoutEffect(() => {
+    const el = shown.current
+    if (!el || expanded) return
+    const measure = () => setCut(el.clientHeight === 0 || el.scrollHeight > el.clientHeight + 1)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [expanded, text])
   return (
     <td className="rq">
-      <span id={id} className={expanded ? 'rq-text' : 'rq-text clamped'}>{text}</span>
-      <button className="btn btn-ghost rq-toggle" aria-expanded={expanded} aria-controls={id}
-        onClick={() => setExpanded((now) => !now)}>{expanded ? 'Show less' : 'Show full requirement'}</button>
+      <span ref={shown} id={id} className={expanded ? 'rq-text' : 'rq-text clamped'}>{text}</span>
+      {(cut || expanded) && (
+        <button className="btn btn-ghost rq-toggle" aria-expanded={expanded} aria-controls={id}
+          onClick={() => setExpanded((now) => !now)}>{expanded ? 'Show less' : 'Show full requirement'}</button>
+      )}
     </td>
   )
 }

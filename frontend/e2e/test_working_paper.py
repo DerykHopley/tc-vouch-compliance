@@ -208,6 +208,18 @@ def test_on_a_phone_show_full_requirement_works_from_the_keyboard(page: Page, pa
     assert box(text)["height"] == clamped
 
 
+def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(page: Page, paper_url):
+    # #211's verifier: a toggle that expands nothing is noise. A long text gets one, a short none.
+    assessed(page.request, paper_url, ASSESSED)
+    page.set_viewport_size({"width": 400, "height": 900})
+    paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+    for requirement_id in ("M1", "M2", "S1", "S2", "S3"):
+        text = row(paper, requirement_id).locator(".rq-text")
+        cut = text.evaluate("el => el.scrollHeight > el.clientHeight + 1")
+        expect(row(paper, requirement_id).locator(".rq-toggle")).to_have_count(1 if cut else 0)
+    expect(row(paper, "M1").locator(".rq-toggle")).to_have_count(1)
+
+
 def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, paper_url):
     assessed(page.request, paper_url, ASSESSED)
     page.set_viewport_size({"width": 1280, "height": 900})
