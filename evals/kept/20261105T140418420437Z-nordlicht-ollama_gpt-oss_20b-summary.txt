@@ -1,0 +1,21 @@
+Eval of nordlicht on ollama/gpt-oss:20b, staleness judged on 2026-11-04
+Verdict accuracy: 7 of 84 requirements (8%)
+Control accuracy: 0 of 12 controls (0%)
+Citation precision: 3 of 7 cited documents (43%)
+Faithfulness: 1.00 mean over 1 judged answers
+Tokens per assessment: 16301 mean
+Cost per assessment: $0.0000 mean
+Seconds per assessment: 31.4 mean
+(7 failed cases left out of these means)
+  1.1.1  1/9 right (wrong: M1, M2, M3, M4, M5, S1, S3, S4); control not-evidenced, expected evidenced; citations 0/0 expected
+  1.6.1  Failed: CallBudgetSpent: more than 12 model calls
+  1.6.2  5/6 right (wrong: M3); control evidenced, expected partly-evidenced; citations 3/7 expected
+  2.1.3  Failed: OpenAIAPIError: Error code: 500 - error parsing tool call: raw='{""}', err=invalid character '}' after object key
+  4.1.2  0/5 right (wrong: M1, M2, S1, S2, S3); control not-evidenced, expected partly-evidenced; citations 0/0 expected
+  4.1.3  Failed: CallBudgetSpent: more than 12 model calls
+  4.2.1  0/7 right (wrong: M1, M2, S1, S2, S3, S4, S5); control not-evidenced, expected partly-evidenced; citations 0/0 expected
+  5.1.1  Failed: OpenAIAPIError: Error code: 500 - error parsing tool call: raw='{"answer":"Evidence indicates that Nordlicht has defined a clear cryptographic concept consistent with the 5.1.1 requirements. The encryption standard (doc_id \"encryption-standard\") explicitly lists approved algorithms and minimal key strengths – AES‑128 for stored data, RSA‑3072 or EC‑256 for key exchange and signatures, and SHA‑256 or stronger for hashing – matching the national cyber‑security authority’s recommendations. \n\nThe same document documents the full key lifecycle: keys are created in the device‑management system, recovery keys are stored centrally, and “Keys are withdrawn when a device is retired and renewed when a certificate expires.” It also states that “IT checks the encryption status of every laptop each month, using the device‑management report. A laptop found unencrypted is locked until it is fixed,” demonstrating periodic verification. \n\nThese artefacts together satisfy the S1 (concept defined and implemented) and M1 (use of recognised industry standards to the extent legally feasible) clauses. No contradictory evidence of non‑compliance or gaps was found in the provided records. Therefore, the control appears to be implemented to the extent described, though a formal audit would still be required to confirm enforcement in all operational contexts.","commentary to=functions.submit_answer <|constrain|>json<|message|>', err=unexpected end of JSON input
+  5.1.2  Failed: CallBudgetSpent: more than 12 model calls
+  5.2.4  Failed: CallBudgetSpent: more than 12 model calls
+  5.2.5  1/6 right (wrong: M1, M2, M3, S1, S2); control not-evidenced, expected evidenced; citations 0/0 expected
+  5.2.9  Failed: CallBudgetSpent: more than 12 model calls

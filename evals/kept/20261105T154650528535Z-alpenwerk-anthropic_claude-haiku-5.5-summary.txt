@@ -1,0 +1,20 @@
+Eval of alpenwerk on anthropic/claude-haiku-5.5, staleness judged on 2026-11-04
+Verdict accuracy: 58 of 100 requirements (58%)
+Control accuracy: 7 of 12 controls (58%)
+Citation precision: 109 of 144 cited documents (76%)
+Faithfulness: 1.00 mean over 12 judged answers
+Tokens per assessment: 43217 mean
+Cost per assessment: $0.0083 mean
+Seconds per assessment: 40.8 mean
+  1.1.1  6/9 right (wrong: M1, S3, S4); control partly-evidenced, expected partly-evidenced; citations 8/11 expected
+  1.6.1  4/9 right (wrong: M1, M2, S3, S4, S5); control partly-evidenced, expected evidenced; citations 13/19 expected
+  1.6.2  4/12 right (wrong: M1, M2, M3, S1, S2, S3, H1, H4); control partly-evidenced, expected partly-evidenced; citations 13/13 expected
+  2.1.3  4/7 right (wrong: M1, S1, S6); control not-evidenced, expected evidenced; citations 8/10 expected
+  4.1.2  2/6 right (wrong: M1, M2, S1, S2); control partly-evidenced, expected evidenced; citations 6/10 expected
+  4.1.3  10/17 right (wrong: M1, M5, M6, M7, S1, S2, S7); control partly-evidenced, expected partly-evidenced; citations 19/23 expected
+  4.2.1  6/8 right (wrong: S3, H1); control partly-evidenced, expected partly-evidenced; citations 10/13 expected
+  5.1.1  1/3 right (wrong: M1, S1); control not-evidenced, expected partly-evidenced; citations 4/5 expected
+  5.1.2  2/7 right (wrong: M2, M3, S1, S2, H1); control partly-evidenced, expected evidenced; citations 9/15 expected
+  5.2.4  9/10 right (wrong: M3); control partly-evidenced, expected partly-evidenced; citations 7/11 expected
+  5.2.5  5/6 right (wrong: S3); control partly-evidenced, expected partly-evidenced; citations 6/6 expected
+  5.2.9  5/6 right (wrong: H1); control partly-evidenced, expected partly-evidenced; citations 6/8 expected
