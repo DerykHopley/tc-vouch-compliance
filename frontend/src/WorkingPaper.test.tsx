@@ -555,3 +555,46 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     expect(within(item()).getByText('Approve or discard it once the verdict is accepted.')).toBeTruthy()
   })
 })
+
+describe("a German profile's verdicts (ticket 200)", () => {
+  const GERMAN = { ...OVERVIEW, company: 'Alpenwerk Präzision GmbH', answer_language: 'de',
+    controls: CONTROLS.map((c) => c.id === '4.1.2' ? { ...c, status: 'waiting-for-review' as const,
+      verdict: 'not-evidenced' as const } : c) }
+  const chip = (scope: HTMLElement) => within(scope).getByText(/./, { selector: '.chip' })
+  const rowChips = () => ['M1', 'S1', 'H1', 'S3'].map((id) => chip(row(id)))
+  const indexChip = (id: string) =>
+    chip(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: new RegExp(`^${id}`) }))
+  function showWith(overview: typeof OVERVIEW | typeof GERMAN, answer_language: string) {
+    const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION }
+    render(<WorkingPaper overview={overview} card={card} running={null}
+      run={{ status: 'done', steps: [], assessment: { ...ASSESSED, answer_language } }} onAssess={() => {}}
+      onOpen={() => {}} onOverview={() => {}} onReviewed={() => {}} onRefresh={() => Promise.resolve(true)}
+      onItemDecided={() => {}} />)
+  }
+
+  it('shows each requirement row\'s verdict in German, marked lang="de"', () => {
+    showWith(GERMAN, 'de')
+    expect(rowChips().map((c) => [c.textContent, c.lang])).toEqual([
+      ['Nachgewiesen', 'de'], ['Teilweise nachgewiesen', 'de'], ['Nicht nachgewiesen', 'de'], ['Nicht anwendbar', 'de']])
+  })
+
+  it('shows the control index\'s verdicts in German; Not assessed and the column names stay English', () => {
+    showWith(GERMAN, 'de')
+    expect(['1.1.1', '4.1.2', '5.1.2'].map(indexChip).map((c) => [c.textContent, c.lang])).toEqual([
+      ['Nachgewiesen', 'de'], ['Nicht nachgewiesen', 'de'], ['Teilweise nachgewiesen', 'de']])
+    expect(indexChip('2.1.3').textContent).toBe('Not assessed')
+    expect(indexChip('2.1.3').hasAttribute('lang')).toBe(false)
+    expect(within(screen.getByRole('table', { name: 'Requirements' })).getByRole('columnheader', { name: 'Verdict' }))
+      .toBeTruthy()
+  })
+
+  it('shows an English profile\'s verdicts in English, with no lang', () => {
+    showWith(OVERVIEW, 'en')
+    expect(rowChips().map((c) => [c.textContent, c.hasAttribute('lang')])).toEqual([
+      ['Evidenced', false], ['Partly evidenced', false], ['Not evidenced', false], ['Not applicable', false]])
+    expect(['1.1.1', '5.1.2'].map(indexChip).map((c) => [c.textContent, c.hasAttribute('lang')])).toEqual([
+      ['Evidenced', false], ['Partly evidenced', false]])
+    // The head's run chip too: an English assessment's verdict is in the interface's own words.
+    expect(chip(headVerdict()).hasAttribute('lang')).toBe(false)
+  })
+})

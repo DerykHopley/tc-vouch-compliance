@@ -41,7 +41,9 @@ export default function Dossier({ state, onRetry, onOpen, running }: Props) {
           <p>Open a control to work through its working paper.</p>
         </div>
         <div className="cards">
-          {overview.controls.map((c) => <Card key={c.id} card={c} onOpen={onOpen} assessing={c.id === running} />)}
+          {overview.controls.map((c) => (
+            <Card key={c.id} card={c} onOpen={onOpen} assessing={c.id === running} language={overview.answer_language} />
+          ))}
         </div>
       </section>
       <Quotes overview={overview} />
@@ -117,7 +119,9 @@ function Band({ readiness: r }: { readiness: Readiness }) {
   )
 }
 
-function Card({ card, onOpen, assessing }: { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean }) {
+/** A control's card; `language`, the profile's answer language, is its verdict's (#200). */
+function Card({ card, onOpen, assessing, language }:
+  { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean; language: string }) {
   const edge = card.verdict ?? 'none'
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
@@ -129,7 +133,7 @@ function Card({ card, onOpen, assessing }: { card: ControlCard; onOpen: Props['o
       <div className="control-title">{card.question}</div>
       <div className="card-meta">
         <span className="mono">{isoLabel(card.iso_27001)}</span>
-        <VerdictChip verdict={card.verdict} assessing={assessing} />
+        <VerdictChip verdict={card.verdict} assessing={assessing} language={language} />
       </div>
     </article>
   )
