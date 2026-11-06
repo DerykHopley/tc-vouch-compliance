@@ -58,6 +58,8 @@ The optional tasks done; the full table, with the code and the app page for each
   container, the checks, keys, Cloud Run in short, and common failures.
 - [`docs/features.md`](docs/features.md): assess a control, review it, ask a question, read the
   report.
+- [`docs/demo.md`](docs/demo.md): the demo, Vouch in seven minutes, with the local run as a
+  fallback.
 - [`docs/technical-decisions.md`](docs/technical-decisions.md),
   [`docs/course-tasks.md`](docs/course-tasks.md),
   [`docs/eval-summary.md`](docs/eval-summary.md) and [`docs/reflection.md`](docs/reflection.md).
