@@ -14,10 +14,10 @@ export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul' | 'ol'; ite
 const EMPHASIS = /(?<![\p{L}\p{N}])(?:\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*)(?![\p{L}\p{N}])/gu
 const BULLET = /^\s*[-*•]\s+(.*)$/
 const NUMBERED = /^\s*(\d+)[.)]\s+(.*)$/
-// A list written on one line after a colon, as the models do: "What exists: - one - two", "Next: 1. one 2. two",
-// also after a bold or italic lead-in ("**M1 (must):** - one - two").
+// A bulleted list written on one line after a colon, as the models do: "What exists: - one - two", also after a bold
+// or italic lead-in ("**M1 (must):** - one - two"). Numbers on such a line stay text: "Stand: 1. Januar 2026, geändert
+// am 2. Februar 2026." is a sentence, not a list (#218).
 const INLINE_BULLETS = /^(.*?:\**)\s+-\s+(.+)$/
-const INLINE_NUMBERED = /^(.*?:\**)\s+1\.\s+(.+)$/
 
 /** The text's runs: bold and italics marked, everything else as written. */
 function runs(text: string): TextRun[] {
@@ -32,32 +32,14 @@ function runs(text: string): TextRun[] {
   return found
 }
 
-/** "1. a 2. b 3. c" as its items, while the numbers count up from 1; null when they don't. */
-function numberedItems(rest: string): string[] | null {
-  const items: string[] = []
-  let next = 2
-  let text = rest
-  for (;;) {
-    const marker = new RegExp(`\\s+${next}\\.\\s+`).exec(text)
-    if (!marker) break
-    items.push(text.slice(0, marker.index))
-    text = text.slice(marker.index + marker[0].length)
-    next += 1
-  }
-  items.push(text)
-  return items.length > 1 ? items : null
-}
-
-/** A line as the lines the models meant: an inline list after a colon becomes its lead-in and one line per item. */
+/** A line as the lines the models meant: an inline bulleted list after a colon becomes its lead-in and one line per
+ * item. */
 function unfold(line: string): string[] {
   const bullets = INLINE_BULLETS.exec(line)
   if (bullets) {
     const items = bullets[2].split(/\s+-\s+/)
     if (items.length > 1) return [bullets[1], ...items.map((item) => `- ${item}`)]
   }
-  const numbered = INLINE_NUMBERED.exec(line)
-  const items = numbered && numberedItems(numbered[2])
-  if (numbered && items) return [numbered[1], ...items.map((item, i) => `${i + 1}. ${item}`)]
   return [line]
 }
 

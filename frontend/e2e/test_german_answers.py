@@ -18,7 +18,8 @@ CONTROL = "4.1.2"
 GERMAN_ANSWER = (
     "15. März 2026: Die Authentifizierungsrichtlinie legt die Anmeldeverfahren der "
     "Mitarbeiter*innen und Lieferant*innen nach dem Schutzbedarf fest; "
-    "die Risikobewertung der Anmeldeverfahren ist nicht vollständig."
+    "die Risikobewertung der Anmeldeverfahren ist nicht vollständig. "
+    "Stand: 1. Januar 2026, geändert am 2. Februar 2026."
 )
 ALPENWERK_ASSESSMENT = {
     "control_id": CONTROL,
