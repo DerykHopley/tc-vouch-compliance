@@ -5,8 +5,8 @@ import {
   suggestionMessage,
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
-import StepText from './StepText.tsx'
 import { controlPath, type NextStep } from './overview.ts'
+import StepText from './StepText.tsx'
 
 // Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
 const SHEET_QUERY = '(max-width: 700px)'
