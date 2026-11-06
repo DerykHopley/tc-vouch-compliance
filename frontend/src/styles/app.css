@@ -206,6 +206,8 @@ textarea.field { resize: vertical; font-family: inherit; }
 .bubble-log .suggestion { justify-self: start; }
 /* The chat's actions (#176): a link or a button, one ghost pill, 44px tall and on one line (Accessibility floor). */
 .chat-action { display: inline-flex; align-items: center; vertical-align: middle; white-space: nowrap; text-decoration: none; }
+/* After a cross-control answer: a pill per control it names, to its working paper (#217). */
+.paper-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; }
 .bubble-foot { display: flex; gap: 6px; border-top: 1px solid var(--rule); padding: 10px 12px; }
 .bubble-foot .field { flex: 1 1 auto; }
 /* Enlarged: wider and taller, still floating. Pinned: a column of 400px beside the page, which makes room for it

@@ -613,6 +613,9 @@ def test_a_question_across_controls_calls_assessed_controls_and_names_the_contro
     not_assessed = [i for i in CONTROL_IDS if i not in ("5.1.1", "5.1.2")]
     assert f"Not assessed yet: {', '.join(not_assessed)}." in answer
     assert names(events)[-1] == "done"
+    # #217: the controls the answer may name, as data for the chat to link: never from the model.
+    [papers] = [data for name, data in events if name == "papers"]
+    assert papers == {"control_ids": CONTROL_IDS}
 
 
 def test_assessed_controls_reads_only_the_signed_in_users_own_assessments(client, users, fake):

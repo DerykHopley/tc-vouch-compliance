@@ -713,6 +713,33 @@ describe('Ask Vouch', () => {
     await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
   })
 
+  it("links each control a cross-control answer names to its working paper, from the tool's list only (issue 217)",
+    async () => {
+      serveChat(() => Promise.resolve(sse([
+        'event: step\ndata: {"node":"assessed_controls","text":"Read the newest assessments of 1 control."}\n\n',
+        'event: papers\ndata: {"control_ids":["1.1.1","4.1.2"]}\n\n',
+        'event: token\ndata: {"text":"Documented evidence only: **4.1.2**. Not assessed yet: 1.1.1. '
+          + 'See [9.9.9](javascript:alert(1)) and <a href=\\"/x\\">5.1.1</a>."}\n\n',
+        'event: done\ndata: {}\n\n'])))
+      render(<App />)
+      await screen.findByRole('heading', { level: 1 })
+      await open()
+      await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }),
+        'Which controls have documented evidence only?{Enter}')
+      const log = within(bubble()!).getByRole('log')
+      await within(log).findByText(/Not assessed yet/)
+
+      const links = within(log).getAllByRole('link')
+      expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual(
+        [['1.1.1', '/controls/1.1.1'], ['4.1.2', '/controls/4.1.2']])
+      expect(within(log).getByRole('link', { name: 'Working paper 4.1.2' })).toBeTruthy()
+      expect(log.querySelector('a[href^="javascript"], a[href="/x"]')).toBeNull() // model text stays text
+
+      await userEvent.click(within(log).getByRole('link', { name: 'Working paper 4.1.2' }))
+      expect(window.location.pathname).toBe('/controls/4.1.2')
+      await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    })
+
   it("shows an assessment's steps, then its verdict with a link that opens its working paper", async () => {
     serveChat(() => Promise.resolve(sse([
       'event: step\ndata: {"node":"load_control","text":"Loaded control 4.1.2."}\n\n',
