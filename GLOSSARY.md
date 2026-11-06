@@ -144,6 +144,10 @@ _Avoid_: Status, history
 What Vouch keeps for a user under a compliance profile from one visit to the next (which assessments they started, when they last worked), in LangGraph's store. The assessments themselves wait in the checkpointer, keyed by the same user and profile.
 _Avoid_: Session, cache, history
 
+**Dossier**:
+The overview of one compliance profile: its readiness, next steps and the controls as cards; the app's landing page, reached by the top bar's **Overview** tab and the working paper's "Overview" breadcrumb (#222).
+_Avoid_: Dashboard, home page
+
 **Readiness report**:
 The summary of a compliance profile's reviewed verdicts, citations and remediation items, written in the profile's language.
 _Avoid_: Audit report, self-assessment, export
