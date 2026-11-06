@@ -803,7 +803,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     if args:
         print(f"usage: vouch-db-setup  (reads {DATABASE_URL_ENV})", file=sys.stderr)
         return EXIT_BAD_INPUT
-    url = load_database_url(env)  # only the database: sign-in settings aren't its business (#190)
+    url = load_database_url(env)
     if url is None:
         print(f"vouch-db-setup: set {DATABASE_URL_ENV}", file=sys.stderr)
         return EXIT_BAD_INPUT

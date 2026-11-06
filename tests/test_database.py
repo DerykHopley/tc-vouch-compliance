@@ -412,12 +412,12 @@ def test_the_setup_command_reaches_the_database_whatever_the_sign_in_settings(mo
             reached.append("setup")
 
     monkeypatch.setattr(database, "Database", FakeDatabase)
-    url = "postgresql://vouch@localhost:5432/vouch"
+    env = {**sign_in, DATABASE_URL_ENV: "postgresql://vouch@localhost:5432/vouch"}
+    with pytest.raises(SettingsError):  # precondition: the API refuses these settings (#151)
+        load_settings(env)
 
-    assert database.main([], env={**sign_in, DATABASE_URL_ENV: url}) == 0
-    assert reached == [url, "setup"]
-    with pytest.raises(SettingsError):  # the API still refuses them (#151)
-        load_settings({**sign_in, DATABASE_URL_ENV: url})
+    assert database.main([], env=env) == 0
+    assert reached == [env[DATABASE_URL_ENV], "setup"]
 
 
 def test_the_setup_command_on_a_malformed_url_refuses_without_the_password(capsys):
