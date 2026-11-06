@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
 
-from vouch import api, memory
+from vouch import api, isa, memory
 from vouch.citations import Citation
 from vouch.dossier import QUOTES_SHOWN, overview, requirements_by_control
 from vouch.graph import (
@@ -463,3 +463,44 @@ def test_the_overview_route_builds_the_requirements_once_per_profile(
 
     assert len(built) == 1
     assert first["requirements"] == second["requirements"]
+
+
+# --- The profile's ISA edition (#199) ----------------------------------------------------------
+
+GERMAN_1_6_2 = "Inwieweit werden gemeldete Sicherheitsereignisse verwaltet?"
+ENGLISH_1_6_2 = "To what extent are reported security events managed?"
+
+
+def test_a_german_profiles_overview_reads_the_german_isa_and_an_english_ones_stays_english(
+    database_url, users
+):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        german = overview_of(client, alice | {api.PROFILE_HEADER: "alpenwerk"})
+        english = overview_of(client, alice | {api.PROFILE_HEADER: "nordlicht"})
+
+    assert card(german, "1.6.2")["question"] == GERMAN_1_6_2
+    assert german["requirements"]["1.6.2"][0]["text"] == (
+        "Gemeldete Ereignisse werden unverzüglich bearbeitet."
+    )
+    assert card(english, "1.6.2")["question"] == ENGLISH_1_6_2
+    assert english["requirements"]["1.6.2"][0]["text"] == (
+        "Reported events are processed without undue delay."
+    )
+
+
+def test_a_broken_german_edition_is_a_plain_500_on_the_overview(users, monkeypatch, tmp_path):
+    # The edition breaks after the profile was read (a profile read with it broken is left out,
+    # a 500 of its own): the overview says so plainly, without the path.
+    alice, _ = users
+    alpenwerk = alice | {api.PROFILE_HEADER: "alpenwerk"}
+    broken = tmp_path / "controls-de.yaml"
+    broken.write_text("controls: [\n", encoding="utf-8")
+    with TestClient(app_on(None), raise_server_exceptions=False) as client:
+        overview_of(client, alpenwerk)
+        monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+        response = client.get("/api/overview", headers=alpenwerk)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == api.OVERVIEW_FAILED
+    assert str(tmp_path) not in response.text

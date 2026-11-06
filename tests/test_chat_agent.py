@@ -500,3 +500,26 @@ def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypat
 
     assert "assessment" in names(events)
     assert note in prompts[0][-1].content  # the same path as the working paper's (#42)
+
+
+# The profile's ISA edition (#199)
+
+GERMAN_1_6_2 = "Inwieweit werden gemeldete Sicherheitsereignisse verwaltet?"
+ALPENWERK = {PROFILE_HEADER: "alpenwerk"}
+
+
+def test_an_assessment_from_the_chat_on_a_german_profile_loads_the_german_control(app, lead):
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as client:
+        events = say(client, "Assess 1.6.2")
+
+    steps = [data for name, data in events if name == "step"]
+    assert steps[0]["text"].startswith(f"Loaded control 1.6.2: {GERMAN_1_6_2}")
+
+
+def test_explaining_a_control_on_a_german_profile_reads_the_german_control(app, lead):
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as client:
+        events = say(client, "Explain 1.6.2")
+
+    text = reply(events)
+    assert f"Control 1.6.2, “{GERMAN_1_6_2}”" in text
+    assert "Gemeldete Ereignisse werden unverzüglich bearbeitet." in text

@@ -76,7 +76,7 @@ from vouch.guards import (
     refusal_step,
     tagged,
 )
-from vouch.isa import IsaControl, UnknownControlError, load_base_framework, load_isa_control
+from vouch.isa import IsaControl, UnknownControlError, load_base_framework
 from vouch.memory import Memory, newest_assessment, progress
 from vouch.profile import ComplianceProfile
 from vouch.redaction import redact, redact_data, redacted_event, removal_step
@@ -441,7 +441,8 @@ class ChatTools:
     def progress(self, write: Write) -> str:
         """Where the lead stands, and the next step as a suggestion."""
         lead_progress = progress(self.memory, self.run.saver)
-        view = overview(self.profile, load_base_framework().controls, lead_progress.controls)
+        edition = load_base_framework(language=self.profile.answer_language)
+        view = overview(self.profile, edition.controls, lead_progress.controls)
         if (next_step := view["next_step"]) is not None:
             write(_suggest(next_step["control_id"], next_step["action"]))
         return progress_words(view["by_status"], lead_progress.last_worked, view["next_step"])
@@ -451,7 +452,7 @@ class ChatTools:
         written into the chat; declined for an unknown control, while another of the lead's runs
         is going, or at the daily limit."""
         try:
-            control = load_isa_control(control_id)
+            control = self.profile.isa_control(control_id)
         except UnknownControlError:
             return unknown_control(control_id)
         run = self.run.metered_afresh()
@@ -491,7 +492,7 @@ class ChatTools:
         paper as a suggestion; asked to sign off (`sign_off`), only why that is the lead's, and
         where. Nothing is written: no review, no override."""
         try:
-            control = load_isa_control(control_id)
+            control = self.profile.isa_control(control_id)
         except UnknownControlError:
             return unknown_control(control_id)
         assessment = newest_assessment(self.memory, self.run.saver, control.id)

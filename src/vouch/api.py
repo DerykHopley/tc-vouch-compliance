@@ -124,6 +124,7 @@ NOT_A_MEMBER = (
 SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Discord servers."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
+OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -740,7 +741,8 @@ def paper_requirements(profile: ComplianceProfile) -> dict[str, list[PaperRequir
     redacted as the overview is; built once per loaded profile, as they change only with it."""
     kept = _paper_requirements.get(profile.id)
     if kept is None or kept[0] is not profile:
-        built = requirements_by_control(profile, load_base_framework().controls)
+        edition = load_base_framework(language=profile.answer_language)
+        built = requirements_by_control(profile, edition.controls)
         clean, _ = redact_data(built)
         kept = _paper_requirements[profile.id] = (profile, clean)
     return kept[1]
@@ -752,13 +754,19 @@ def dossier_overview(
 ) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
-    each control's requirements, for its working paper (#41). Redacted as the stream's events
-    are."""
+    each control's requirements, for its working paper (#41); its ISA text in the profile's
+    edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
     latest = newest_by_control(memory, saver)  # from each control's newest thread
     counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
     discarded = items.discarded(memory.user_id, memory.profile_id, counted)
-    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest, discarded))
-    return clean | {"requirements": paper_requirements(profile)}
+    try:
+        controls = load_base_framework(language=profile.answer_language).controls
+        requirements = paper_requirements(profile)
+    except BaseFrameworkError:
+        log.exception("the ISA edition for %s could not be read", profile.answer_language)
+        raise HTTPException(status_code=500, detail=OVERVIEW_FAILED) from None
+    clean, _ = redact_data(overview(profile, controls, latest, discarded))
+    return clean | {"requirements": requirements}
 
 
 class ChatRequest(BaseModel):

@@ -68,3 +68,27 @@ def test_the_working_paper_shows_german_verdict_words_for_alpenwerk_in_an_englis
     expect(paper.get_by_role("list", name="Agent steps")).to_contain_text(
         "Checked the answer: it claims no audit result."
     )
+
+
+def test_an_unassessed_controls_paper_on_alpenwerk_shows_the_german_isa_text(
+    page: Page, vouch_url
+):
+    """Before any assessment, the paper's title and requirements come from the overview, in
+    Alpenwerk's edition of the ISA (#199). 1.6.2 is assessed by no browser check."""
+    with page.expect_response("**/api/overview"):
+        page.goto(vouch_url)
+    with page.expect_response("**/api/overview"):
+        page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
+            label="Alpenwerk Präzision GmbH · Austria · German"
+        )
+    page.get_by_role("link", name="Open 1.6.2").click()
+
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("heading", level=2)).to_have_text(
+        "1.6.2 Inwieweit werden gemeldete Sicherheitsereignisse verwaltet?"
+    )
+    expect(paper.get_by_role("table", name="Requirements")).to_contain_text(
+        "Gemeldete Ereignisse werden unverzüglich bearbeitet."
+    )
+    english = "To what extent are reported security events managed?"
+    expect(paper.get_by_text(english)).to_have_count(0)
