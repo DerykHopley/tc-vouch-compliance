@@ -29,6 +29,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import ConfigDict, Field
 
 from vouch.chat_agent import (
+    ANSWER_REFUSED,
     ASSESSED_CONTROLS,
     EXPLAIN_CONTROL,
     GREETING_REQUEST,
@@ -98,7 +99,8 @@ class CannedChatModel(BaseChatModel):
     as a model that can't be reached would. With tools bound, it calls the one the lead's
     message asks for (or `call`, whatever is asked), writing `before_tool` with the call, and
     answers a tool's result with the result's words (or `after_tool`). With `blocks`, it writes
-    its answer in content blocks, as some providers do."""
+    its answer in content blocks, as some providers do. Asked again by the output check, it gives
+    `retry_reply` (or `reply` again)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -111,6 +113,7 @@ class CannedChatModel(BaseChatModel):
     before_tool: str = ""
     after_tool: str | None = None
     blocks: bool = False
+    retry_reply: str | None = None  # its answer when asked again by the output check (#249)
 
     @property
     def _llm_type(self) -> str:
@@ -130,6 +133,8 @@ class CannedChatModel(BaseChatModel):
         if self.fail_with is not None:
             raise self.fail_with
         last = messages[-1] if messages else None
+        if isinstance(last, HumanMessage) and last.name == ANSWER_REFUSED:
+            return _words(self.retry_reply if self.retry_reply is not None else self.reply), []
         if isinstance(last, ToolMessage):
             return _words(self.after_tool or _cited(str(last.content))), []
         call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
