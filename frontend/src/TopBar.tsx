@@ -9,12 +9,12 @@ export default function TopBar({ children }: { children?: ReactNode }) {
     const el = bar.current
     if (!el) return
     const root = document.documentElement
-    const note = () => root.style.setProperty('--top-bar', `${el.getBoundingClientRect().height}px`)
-    note()
-    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(note)
-    watch?.observe(el)
+    const measure = () => root.style.setProperty('--top-bar', `${el.getBoundingClientRect().height}px`)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(el)
     return () => {
-      watch?.disconnect()
+      observer?.disconnect()
       root.style.removeProperty('--top-bar')
     }
   }, [])

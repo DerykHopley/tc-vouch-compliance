@@ -8,11 +8,11 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
 
 /* Top bar, with the glen-check strip under it */
 .top { position: sticky; top: 0; z-index: 20; background: var(--sheet); border-bottom: 1px solid var(--rule); }
-/* A field brought into view stops below the sticky bar; TopBar keeps --top-bar its height (#205). */
-html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .top::after { content: ""; display: block; height: 6px; background:
   repeating-linear-gradient(90deg, var(--check-a) 0 2px, transparent 2px 4px, var(--check-b) 4px 5px, transparent 5px 12px),
   repeating-linear-gradient(0deg, var(--check-a) 0 2px, transparent 2px 4px, var(--check-b) 4px 5px, transparent 5px 12px); }
+/* A field brought into view stops below the sticky bar; TopBar keeps --top-bar its height (#205). */
+html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .top-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-block: 6px; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand b { font: 400 20px var(--f-display); text-transform: uppercase; letter-spacing: .08em; }

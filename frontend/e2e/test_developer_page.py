@@ -121,14 +121,18 @@ def test_the_daily_limit_field_focused_from_the_bottom_stops_below_the_sticky_to
 ):
     """#205: the page's scroll padding follows the sticky top bar's height (taller at phone
     width), so a field brought into view by focus stops below the bar, not under it."""
-    page.set_viewport_size({"width": width, "height": 812})
+    page.set_viewport_size(
+        {"width": width, "height": 500}
+    )  # short, so the page scrolls at any width
     page.emulate_media(color_scheme=scheme)
     page.goto(f"{profiles_url}/developer")
     field = page.get_by_role("textbox", name="Assessments per day")
     expect(field).to_be_visible()
     bar = page.locator("header.top")
 
-    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    # The field scrolled to the window's top edge: under the bar, yet "in view" without padding.
+    field.evaluate("el => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY)")
+    assert overlaps(field.bounding_box(), bar.bounding_box())  # the case the fix is for
     field.focus()
 
     assert not overlaps(field.bounding_box(), bar.bounding_box())

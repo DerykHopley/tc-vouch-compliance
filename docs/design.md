@@ -69,6 +69,8 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 | 700–1000px | the working paper's control index stacks above the paper; Dossier's hero, band and ask panel go to one column |
 | over 1000px | working paper: index (about 250px) beside the paper; a pinned chat takes a column of about 400px beside the page |
 
+At every width, the page's top scroll padding follows the sticky top bar's height (`--top-bar`, which TopBar measures; it grows at phone width), so a field scrolled to, tapped or tabbed to stops below the bar (#205).
+
 **Checklist:** each changed screen checked at 400px, 900px and 1400px; nothing scrolls sideways (wide tables scroll inside their own container).
 
 ## Motion
