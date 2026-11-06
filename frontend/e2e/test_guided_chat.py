@@ -152,7 +152,10 @@ def greet_with(page: Page, url: str, action: str, sent: list[dict]):
         events = (
             [("token", {"text": "On it."})]
             if "message" in body
-            else [("token", {"text": "Hello."}), ("suggestion", {"control_id": "1.1.1", "action": action})]
+            else [
+                ("token", {"text": "Hello."}),
+                ("suggestion", {"control_id": "1.1.1", "action": action}),
+            ]
         )
         route.fulfill(status=200, content_type="text/event-stream", body=reply(*events))
 
@@ -212,3 +215,21 @@ def test_from_the_keyboard_open_the_working_paper_opens_its_paper(page: Page, ch
 
     page.keyboard.press("Enter")
     expect(page).to_have_url(re.compile(r"/controls/5\.1\.1$"))
+
+
+def test_a_question_across_controls_is_answered_from_the_reviewed_assessments(page: Page, chat_url):
+    """Story 18 (#210): "which controls have documented evidence only?" reads every control's
+    newest assessment at once, on the canned chat model's script for it."""
+    assess_in_the_chat(page, chat_url, 1400)
+    log = page.locator(CHAT).get_by_role("log")
+
+    page.get_by_role("textbox", name="Message to Vouch").fill(
+        "Which controls have documented evidence only?"
+    )
+    page.get_by_role("button", name="Send").click()
+
+    expect(log.locator(".msg-step").last).to_contain_text("Read the newest assessments of")
+    answer = log.locator(".msg").last
+    expect(answer).to_contain_text("Documented evidence only:")
+    expect(answer).to_contain_text("Not assessed yet:")
+    expect(answer).not_to_contain_text("5.1.1: not assessed yet")

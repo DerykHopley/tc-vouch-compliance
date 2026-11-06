@@ -23,18 +23,29 @@ from test_memory import app_on, as_user, restart
 from vouch import api, chat_agent
 from vouch.api import PROFILE_HEADER, create_app, current_user
 from vouch.chat_agent import (
+    ASSESSED_CONTROLS,
     GREETING_REQUEST,
     HISTORY_WINDOW,
     START_ASSESSMENT,
     ChatTools,
+    assessed_controls_words,
     chat_config,
     chat_context,
     chat_graph,
     chat_turn,
 )
 from vouch.chat_fake import CannedChatModel
+from vouch.citations import Citation
 from vouch.database import Database
-from vouch.graph import memory_checkpointer, new_thread_id, state_serializer
+from vouch.documents import EvidenceKind
+from vouch.graph import (
+    Assessment,
+    RequirementVerdict,
+    ShouldScore,
+    memory_checkpointer,
+    new_thread_id,
+    state_serializer,
+)
 from vouch.isa import load_base_framework
 from vouch.memory import Memory, process_checkpointer
 from vouch.model_choice import MemoryModelStore, ModelChoice
@@ -500,3 +511,90 @@ def test_assess_again_from_the_chat_carries_the_rejection_note(client, monkeypat
 
     assert "assessment" in names(events)
     assert note in prompts[0][-1].content  # the same path as the working paper's (#42)
+
+
+# Questions across controls (#210): every control's newest assessment at once
+
+
+def _cite(kind: EvidenceKind, *, stale: bool = False) -> Citation:
+    return Citation("doc", "1.0", "Scope", "Quoted words here.", kind, stale, None)
+
+
+def _assessed(control_id: str, *requirements: RequirementVerdict) -> Assessment:
+    return Assessment(
+        control_id=control_id,
+        profile_id=DEFAULT_PROFILE,
+        verdict="partly-evidenced",
+        should_score=ShouldScore(0, 0),
+        requirements=list(requirements),
+        answer="Answer.",
+    )
+
+
+def test_assessed_controls_words_sort_the_controls_by_their_counted_evidence():
+    controls = load_base_framework().controls[:5]
+    a, b, c, d, e = (control.id for control in controls)
+    latest = {
+        # documented only: a should's implemented evidence doesn't count towards the verdict
+        a: _assessed(
+            a,
+            RequirementVerdict("M1", "must", "T.", "evidenced", "R.", (_cite("documented"),)),
+            RequirementVerdict("S1", "should", "T.", "evidenced", "R.", (_cite("implemented"),)),
+        ),
+        # implemented evidence on a must, and a must not evidenced
+        b: _assessed(
+            b,
+            RequirementVerdict("M1", "must", "T.", "evidenced", "R.", (_cite("implemented"),)),
+            RequirementVerdict("M2", "must", "T.", "not-evidenced", "R."),
+        ),
+        # documented only, stale
+        c: _assessed(
+            c,
+            RequirementVerdict(
+                "M1", "must", "T.", "partly-evidenced", "R.", (_cite("documented", stale=True),)
+            ),
+        ),
+        # nothing cited
+        d: _assessed(d, RequirementVerdict("M1", "must", "T.", "not-evidenced", "R.")),
+    }
+
+    words = assessed_controls_words(controls, latest)
+
+    assert f"Documented evidence only: {a}, {c}." in words
+    assert f"Stale evidence: {c}." in words
+    assert f"Musts not evidenced: {b} (M2), {c} (M1), {d} (M1)." in words  # partly is not evidenced
+    assert f"Not assessed yet: {e}." in words
+    assert f"- {e}: not assessed yet." in words
+    assert "M1 (must) evidenced, implemented" in words
+    assert (
+        f"- {a}: partly evidenced, proposed and waiting for your review; its counted "
+        "requirements rest only on documented evidence." in words
+    )
+    assert "requirements rest on no cited evidence." in words
+
+
+def test_a_question_across_controls_calls_assessed_controls_and_names_the_controls(client, fake):
+    assess_and_review(client, "5.1.1")
+    assess_and_review(client, "5.1.2")
+
+    events = say(client, "Which controls have documented evidence only?")
+
+    called = [m for m in fake.prompts[-1] if getattr(m, "tool_calls", None)]
+    assert [call["name"] for call in called[-1].tool_calls] == [ASSESSED_CONTROLS]
+    answer = reply(events)
+    assert "Documented evidence only:" in answer
+    assert "5.1.1:" in answer and "5.1.2:" in answer
+    not_assessed = [i for i in CONTROL_IDS if i not in ("5.1.1", "5.1.2")]
+    assert f"Not assessed yet: {', '.join(not_assessed)}." in answer
+    assert names(events)[-1] == "done"
+
+
+def test_assessed_controls_reads_only_the_signed_in_users_own_assessments(client, users, fake):
+    # The other user assesses 5.1.1 on the same app; the lead assesses 5.1.2.
+    read_events(client.post("/api/assessments", json={"control_id": "5.1.1"}, headers=users[1]))
+    assess_and_review(client, "5.1.2")
+
+    answer = reply(say(client, "Which controls have documented evidence only?"))
+
+    assert "- 5.1.1: not assessed yet." in answer
+    assert "- 5.1.2: " in answer and "- 5.1.2: not assessed yet." not in answer
