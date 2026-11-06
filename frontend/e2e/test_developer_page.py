@@ -113,3 +113,26 @@ def test_at_phone_width_the_daily_limit_field_is_never_under_the_ask_vouch_butto
         page.evaluate("window.scrollTo(0, 0)")
         bring()
         assert not overlaps(field.bounding_box(), button.bounding_box()), bring
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(375, "light"), (375, "dark"), (1280, "light")])
+def test_the_daily_limit_field_focused_from_the_bottom_stops_below_the_sticky_top_bar(
+    page: Page, profiles_url, width, scheme
+):
+    """#205: the page's scroll padding follows the sticky top bar's height (taller at phone
+    width), so a field brought into view by focus stops below the bar, not under it."""
+    page.set_viewport_size(
+        {"width": width, "height": 500}
+    )  # short, so the page scrolls at any width
+    page.emulate_media(color_scheme=scheme)
+    page.goto(f"{profiles_url}/developer")
+    field = page.get_by_role("textbox", name="Assessments per day")
+    expect(field).to_be_visible()
+    bar = page.locator("header.top")
+
+    # The field scrolled to the window's top edge: under the bar, yet "in view" without padding.
+    field.evaluate("el => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY)")
+    assert overlaps(field.bounding_box(), bar.bounding_box())  # the case the fix is for
+    field.focus()
+
+    assert not overlaps(field.bounding_box(), bar.bounding_box())
