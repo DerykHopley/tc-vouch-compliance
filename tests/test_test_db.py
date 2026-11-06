@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "test-db.sh"
@@ -27,11 +28,14 @@ esac
 """
 FAKE_UV = r"""#!/bin/sh
 echo "uv $* DB=$VOUCH_TEST_DATABASE_URL" >> "$CALLS"
+[ -z "$UV_OUTPUT" ] || printf '%s\n' "$UV_OUTPUT"
 exit "${UV_EXIT:-0}"
 """
 
 
-def run(tmp_path: Path, *args: str, container: str = "fakert", uv_exit: str = "0"):
+def run(
+    tmp_path: Path, *args: str, container: str = "fakert", uv_exit: str = "0", uv_output: str = ""
+):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name, text in (("fakert", FAKE_RUNTIME), ("uv", FAKE_UV)):
@@ -44,6 +48,7 @@ def run(tmp_path: Path, *args: str, container: str = "fakert", uv_exit: str = "0
         "CALLS": str(calls),
         "CONTAINER": container,
         "UV_EXIT": uv_exit,
+        "UV_OUTPUT": uv_output,
     }
     done = subprocess.run(
         [BASH, str(SCRIPT), *args], check=False, capture_output=True, text=True, env=env, cwd=ROOT
@@ -52,8 +57,11 @@ def run(tmp_path: Path, *args: str, container: str = "fakert", uv_exit: str = "0
 
 
 def ci_files() -> list[str]:
-    command = next(line for line in CI.read_text().splitlines() if "uv run pytest tests/" in line)
-    return re.findall(r"tests/\S+\.py", command)
+    """Every test file the database job's Postgres steps run, read as YAML (the script reads
+    the job's text): each step that sets VOUCH_TEST_DATABASE_URL, in order."""
+    steps = yaml.safe_load(CI.read_text())["jobs"]["database"]["steps"]
+    runs = [s["run"] for s in steps if "VOUCH_TEST_DATABASE_URL" in s.get("env", {})]
+    return [f for run in runs for f in re.findall(r"tests/\S+\.py", run)]
 
 
 def published_port(calls: str) -> int:
@@ -70,7 +78,8 @@ def test_with_no_arguments_it_runs_ci_s_database_files_on_a_free_port_and_remove
     port = published_port(calls)
     assert port != 5432
     [pytest] = [line for line in calls.splitlines() if line.startswith("uv ")]
-    assert pytest.split(" DB=")[0].split()[3:] == ci_files()
+    assert "tests/test_database.py" in ci_files()  # the database job's own files, not another job's
+    assert [a for a in pytest.split(" DB=")[0].split()[3:] if a.endswith(".py")] == ci_files()
     assert f"DB=postgresql://postgres:throwaway@127.0.0.1:{port}/postgres" in pytest
     assert re.search(r"runtime rm -f vouch-test-db-\d+", calls)  # removed afterwards
 
@@ -103,3 +112,10 @@ def test_without_a_container_runtime_it_stops_with_a_clear_message(tmp_path):
     assert done.returncode != 0
     assert "no-such-runtime" in done.stderr and "docker or podman" in done.stderr
     assert "uv " not in calls
+
+
+def test_with_no_arguments_a_skipped_test_fails_the_run_as_in_ci(tmp_path):
+    done, calls = run(tmp_path, uv_output="SKIPPED [1] tests/test_database.py:12: no database")
+    assert done.returncode != 0
+    assert "skipped" in done.stderr.lower()
+    assert re.search(r"runtime rm -f vouch-test-db-\d+", calls)
