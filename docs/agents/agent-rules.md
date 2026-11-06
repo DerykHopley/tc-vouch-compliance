@@ -10,7 +10,7 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 
 ## Commands
 
-- **Take an exit code before any pipe.** In `cmd | tail; echo $?`, `$?` is `tail`'s code, which is 0 even when `cmd` failed. Run the command on its own (`cmd > out.txt 2>&1; echo rc=$?`), or read `${PIPESTATUS[0]}` straight after the pipe. From #213, where #53's verifier reported exit 0 for an eval run that exited 3.
+- **Take an exit code before any pipe.** In `cmd | tail; echo $?`, `$?` is `tail`'s code, which is 0 even when `cmd` failed. Run the command on its own with its output in a scratch file (`cmd > "$SCRATCH/out.txt" 2>&1; echo rc=$?`), or read `${PIPESTATUS[0]}` straight after the pipe. From #213, where #53's verifier reported exit 0 for an eval run that exited 3.
 
 ## Colour and contrast
 
