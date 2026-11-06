@@ -53,7 +53,9 @@ Do the walk-throughs in order: each starts where the one before stopped.
 4. Select **Accept verdict**. The verdict is marked "Accepted", and the foot of the page reads
    "Accepted by Local user on" the date and time.
 5. M1's remediation item now offers **Approve** and **Discard**, with its owner role and due
-   date. Select **Approve**: it reads "Approved".
+   date. Select **Approve**: it reads "Approved". The override also drafts an item for S2, which
+   reads "not drafted" and needs an owner role before it can be approved: leave it. The Overview
+   counts both items, the report only the approved one.
 6. Back on the Overview: 4.1.2's card is "Accepted", Partly evidenced, and "Where you stand"
    reads "1 accepted of 12", with 1 partly evidenced.
 
@@ -97,6 +99,11 @@ Do the walk-throughs in order: each starts where the one before stopped.
    with your reason as its note.
 8. At the foot, the disclaimer: "Drafted by an AI assistant, reviewed by Local user; not an
    audit result."
+9. Select **Export**: a Markdown file named `readiness-report-nordlicht-<date>.md` downloads, with
+   the report's parts in the page's order and the whole audit trail.
+10. Print with the browser's own print (Ctrl P, Cmd P on a Mac): only the report prints, without
+    the top bar, the tabs, the chat or the page's buttons; tables print whole, and a row doesn't
+    break across pages. Save as PDF from the print dialog for a file to attach.
 
 ## Examples
 
