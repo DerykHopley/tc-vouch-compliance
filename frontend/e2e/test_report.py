@@ -139,6 +139,9 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     )
     for kept in (trail.nth(0), trail.nth(1), trail.filter(has_text="Accepted").last):
         expect(kept.locator("td").nth(8)).to_have_text(re.compile(r"\S+ v\S+"))
+    # Every trail cell stays a table cell, so a row's rule lines up across it.
+    displays = trail.locator("td").evaluate_all("cells => cells.map(c => getComputedStyle(c).display)")
+    assert set(displays) == {"table-cell"}, displays
 
     # The disclaimer, as served (story 7).
     expect(report.locator(".report-disclaimer")).to_have_text(
