@@ -16,6 +16,7 @@ const SETTINGS: DeveloperSettings = {
   kept_in: 'database',
   daily_limit: 30,
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
+  broken_profiles: [],
 }
 
 /** The API as a developer (or, given 403, a compliance lead) sees it; assessments never answer. */
@@ -109,6 +110,17 @@ describe('the developer page', () => {
     expect(screen.getByText(/until the server restarts/i)).toBeTruthy()
   })
 
+  it('names each compliance profile left out because it could not be loaded, with its problem (#47)', () => {
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    expect(screen.queryByRole('region', { name: 'Profiles left out' })).toBeNull()
+    cleanup()
+    const broken_profiles = [{ id: 'broken', problem: 'not valid YAML (ParserError)' }]
+    render(<DeveloperPage settings={{ ...SETTINGS, broken_profiles }} onChange={() => {}} />)
+    const note = screen.getByRole('region', { name: 'Profiles left out' })
+    expect(within(note).getByText('broken')).toBeTruthy()
+    expect(within(note).getByText('not valid YAML (ParserError)')).toBeTruthy()
+  })
+
   it('says a fake script, not a missing key, makes assessments run on the fake model', () => {
     render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', fake_reason: 'fake_script' }} onChange={() => {}} />)
     expect(screen.getByText('ASSESS_FAKE_SCRIPT is set: assessments run on the scripted fake model.')).toBeTruthy()
@@ -175,7 +187,7 @@ describe('the Developer link', () => {
     render(<App />)
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/prepared for audit/i)
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
   })
 
   it("stays, with the page saying the settings are unavailable, on the database's 503", async () => {

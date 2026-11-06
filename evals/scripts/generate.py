@@ -25,8 +25,8 @@ from vouch.evals import EXPECTED_ANSWERS, FAKE_SCRIPTS_DIR, load_cases
 from vouch.front_matter import split_front_matter
 from vouch.graph import SEARCH_POLICIES, SEARCH_RECORDS, VULNERABILITY_STATUS
 from vouch.patch import RESPONSE_ID as PATCH_RESPONSE  # cited: the script asks Patch
-from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile
+from vouch.settings import load_settings
 
 DRAFT_ANSWERS = {  # in the profile's answer language, so the language check passes (#51)
     "en": "Draft answer for {}, from the evidence found.",
@@ -94,9 +94,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--profile", default="nordlicht")
     parser.add_argument("--out", type=Path, help="default: evals/scripts/<profile>/")
     args = parser.parse_args(argv)
-    profile = load_named_profile(args.profile)
+    profiles_dir = load_settings().profiles_dir  # the API's profiles folder (#47)
+    profile = load_named_profile(args.profile, profiles_dir)
     folders = [source.folder for source in profile.evidence_sources.values()]
-    cases = load_cases(FIXTURES_DIR / profile.id / EXPECTED_ANSWERS, profile.id).cases
+    cases = load_cases(profiles_dir / profile.id / EXPECTED_ANSWERS, profile.id).cases
     out = args.out or FAKE_SCRIPTS_DIR / profile.id
     out.mkdir(parents=True, exist_ok=True)
 

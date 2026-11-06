@@ -86,7 +86,7 @@ def flagged_steps(passages: Iterable[Passage]) -> list[str]:
     ]
 
 
-def _tagged(tag: str, value: object) -> str:
+def tagged(tag: str, value: object) -> str:
     """The value as JSON inside the tag, `<` and `>` escaped so nothing can close it early."""
     body = json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
     return f"<{tag}>\n{body}\n</{tag}>"
@@ -95,7 +95,7 @@ def _tagged(tag: str, value: object) -> str:
 def as_data(passages: Iterable[Passage], pending: Iterable[str] = ()) -> str:
     """Passages as data inside `<evidence>` tags, the instruction-like ones marked, then a
     `{"pending": note}` entry for each note about a source whose evidence is pending."""
-    return _tagged(
+    return tagged(
         "evidence",
         [
             {**p, "instruction_like": True} if _passage_instruction_like(p) else dict(p)
@@ -107,4 +107,4 @@ def as_data(passages: Iterable[Passage], pending: Iterable[str] = ()) -> str:
 
 def draft_as_data(answer: str) -> str:
     """The earlier model's draft answer as data inside `<draft>` tags, labelled as such."""
-    return _tagged("draft", {"draft_answer": answer, "instruction_like": instruction_like(answer)})
+    return tagged("draft", {"draft_answer": answer, "instruction_like": instruction_like(answer)})

@@ -12,8 +12,12 @@ expires, is refused. Only `sub` is used.
 The role is asked for only where a route needs it (`user_role`, `require_developer` in
 vouch.api), so a Clerk outage never stops a request that doesn't. It lives in the user's private
 metadata (`{"role": "developer"}`, docs/requirements.md, 2026-11-04), which only the backend can
-read: from Clerk's Backend API with the secret key, cached per user for ROLE_TTL seconds (a
-development instance allows 100 requests per 10 s). Anyone else is a compliance lead.
+read: from Clerk's Backend API with the secret key. Anyone else is a compliance lead.
+
+The same lookup gives the user's display name, kept on their audit entries (#154): first and
+last name, else the primary e-mail's local part, else the user id. The role and the name are
+cached together per user for USER_TTL seconds (a development instance allows 100 requests per
+10 s), so a review right after a role check (or another review) asks Clerk nothing.
 
 With DISCORD_SERVER_ID set (#152), every route but health also needs access (`access`, the
 `require_access` dependency in vouch.api): a member of that Discord server, a developer, a user
@@ -86,9 +90,31 @@ class _Headers:
     headers: dict[str, str]
 
 
-class _CachedRole(NamedTuple):
-    expires: float
+class ClerkUser(NamedTuple):
+    """What Vouch reads of Clerk's user: their role, and their display name."""
+
     role: Role
+    name: str
+
+
+class _Cached(NamedTuple):
+    expires: float
+    user: ClerkUser
+
+
+def _display_name(user_id: str, found: dict[str, Any]) -> str:
+    """First and last name; else the primary e-mail's local part; else the user id."""
+    parts = (found.get("first_name"), found.get("last_name"))
+    name = " ".join(p.strip() for p in parts if isinstance(p, str) and p.strip())
+    if name:
+        return name
+    primary = found.get("primary_email_address_id")
+    for email in found.get("email_addresses") or []:
+        if primary and isinstance(email, dict) and email.get("id") == primary:
+            local = str(email.get("email_address") or "").partition("@")[0].strip()
+            if local:
+                return local
+    return user_id
 
 
 class _CachedAccess(NamedTuple):
@@ -109,10 +135,11 @@ def _checked_jwt_key(keys: ClerkKeys) -> str:
 
 
 class ClerkAuth:
-    """Checks one request's session token, and finds a user's role. Built once per app."""
+    """Checks one request's session token, and looks up a user's role and display name. Built
+    once per app."""
 
-    ROLE_TTL = 300.0
-    """Seconds a user's role is kept before Clerk is asked again."""
+    USER_TTL = 300.0
+    """Seconds a user's role and display name are kept before Clerk is asked again."""
     ACCESS_TTL = 300.0
     """Seconds a user's access is kept before Clerk and Discord are asked again."""
     REFUSAL_TTL = 30.0
@@ -135,7 +162,7 @@ class ClerkAuth:
         self._server_id = keys.discord_server_id
         self._client = client or httpx.Client(timeout=5.0)
         self._clock = clock
-        self._roles: dict[str, _CachedRole] = {}
+        self._users: dict[str, _Cached] = {}
         self._access: dict[str, _CachedAccess] = {}
 
     def close(self) -> None:
@@ -171,37 +198,25 @@ class ClerkAuth:
             raise SignedOut()
         return User(id=user_id)
 
-    def role(self, user: User) -> Role:
-        """The user's role, cached. Raises ClerkUnavailable, or SignedOut for a deleted user."""
+    def lookup(self, user: User) -> ClerkUser:
+        """The user's role and display name, cached for USER_TTL. Raises ClerkUnavailable, or
+        SignedOut for a deleted user; neither is cached."""
         now = self._clock()
-        cached = self._roles.get(user.id)
+        cached = self._users.get(user.id)
         if cached is not None and now < cached.expires:
-            return cached.role
-        role = self._fetch_role(user.id)
-        self._roles[user.id] = _CachedRole(expires=now + self.ROLE_TTL, role=role)
-        return role
+            return cached.user
+        found = self._fetch_user(user.id)
+        self._users[user.id] = _Cached(expires=now + self.USER_TTL, user=found)
+        return found
 
-    def _fetch_role(self, user_id: str) -> Role:
-        """Developer when the user's private metadata says so exactly; else compliance lead."""
-        try:
-            response = self._client.get(
-                f"{CLERK_API}/users/{user_id}",
-                headers={"Authorization": f"Bearer {self._secret_key.get_secret_value()}"},
-            )
-            if response.status_code == 404:  # deleted since the token was issued
-                log.info("signed out: Clerk does not know the token's user")
-                raise SignedOut()
-            response.raise_for_status()
-            metadata = response.json()["private_metadata"]
-        except SignedOut:
-            raise
-        # Unreachable or refused (HTTPError), or not the answer expected (the rest).
-        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as error:
-            status = getattr(getattr(error, "response", None), "status_code", None)
-            log.error("Clerk's user lookup failed: %s %s", type(error).__name__, status or "")
-            raise ClerkUnavailable() from None
-        developer = isinstance(metadata, dict) and metadata.get("role") == "developer"
-        return "developer" if developer else "compliance-lead"
+    def _fetch_user(self, user_id: str) -> ClerkUser:
+        """The user's role and display name, from Clerk's Backend API: _role_of's role and
+        _display_name's name. Raises SignedOut for a deleted user, ClerkUnavailable otherwise."""
+        return _clerk_user(user_id, self._user_json(user_id))
+
+    def _remember(self, user_id: str, found: dict[str, Any], now: float) -> None:
+        """Keeps the role and name read for another purpose (access), so lookup needn't ask."""
+        self._users[user_id] = _Cached(expires=now + self.USER_TTL, user=_clerk_user(user_id, found))
 
     def access(self, user: User) -> None:
         """Returns when the user may use Vouch; always, with no Discord server set. Cached.
@@ -212,7 +227,7 @@ class ClerkAuth:
         now = self._clock()
         cached = self._access.get(user.id)
         if cached is None or now >= cached.expires:
-            found = self._fetch_access(user.id)
+            found = self._fetch_access(user.id, now)
             ttl = self.ACCESS_TTL if found == "allowed" else self.REFUSAL_TTL
             cached = _CachedAccess(expires=now + ttl, access=found)
             self._access[user.id] = cached
@@ -222,9 +237,11 @@ class ClerkAuth:
         if cached.access == "sign-in-again":
             raise SignInAgain()
 
-    def _fetch_access(self, user_id: str) -> Access:
-        """The developer, then the invited, then the Discord server's members are allowed."""
-        found = self._user_for_access(user_id)
+    def _fetch_access(self, user_id: str, now: float) -> Access:
+        """The developer, then the invited, then the Discord server's members are allowed. The
+        user read here also fills lookup's cache: one Clerk call serves both."""
+        found = self._user_json(user_id)
+        self._remember(user_id, found, now)
         if _role_of(found) == "developer" or _flagged_invited(found):
             return "allowed"
         if any(self._was_invited(address) for address in _verified_addresses(found)):
@@ -251,7 +268,7 @@ class ClerkAuth:
             log.error("Clerk's API failed: %s %s", type(error).__name__, status or "")
             raise ClerkUnavailable() from None
 
-    def _user_for_access(self, user_id: str) -> dict[str, Any]:
+    def _user_json(self, user_id: str) -> dict[str, Any]:
         """The user as Clerk's Backend API has it. Raises SignedOut when Clerk doesn't know them
         (deleted since the token was issued), ClerkUnavailable when Clerk can't answer."""
         response = self._clerk(f"/users/{user_id}")
@@ -343,6 +360,11 @@ def _json(response: httpx.Response, what: str) -> Any:
     except ValueError:
         log.error("%s failed: not JSON", what)
         raise ClerkUnavailable() from None
+
+
+def _clerk_user(user_id: str, found: dict[str, Any]) -> ClerkUser:
+    """What Vouch keeps of Clerk's user: _role_of's role and _display_name's name."""
+    return ClerkUser(role=_role_of(found), name=_display_name(user_id, found))
 
 
 def _role_of(found: dict[str, Any]) -> Role:

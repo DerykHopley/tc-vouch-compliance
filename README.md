@@ -90,6 +90,13 @@ and `PUT /api/developer/model`, developers only), else `ASSESS_MODEL`, else
 retried at most once.
 `scripts/dev.sh` drops the key, so it always runs the fake.
 
+A proposed assessment waits for the lead's review (`POST /api/assessments/{thread_id}/review`).
+`GET /api/assessments` lists the user's assessments, newest first, and
+`GET /api/assessments/{thread_id}` opens one; another user's thread id is a 404. With
+`VOUCH_DATABASE_URL` set they're kept in Postgres (LangGraph's checkpointer and store, their
+tables made by `vouch-db-setup`), so a run waiting for review outlasts a restart; without it, in
+memory until the server restarts.
+
 ### Sign-in (clerk mode)
 
 Locally there is no sign-in: one default user. With any Clerk key set (`.envrc` loads them),

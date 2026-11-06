@@ -2,7 +2,7 @@
    docs/design.md names and explains each one; only this file holds the values. */
 :root {
   --paper: #E8E7E3; --sheet: #F7F7F5; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
-  --navy: #1F3B6E; --sign: #1B1D21; --brass: #A8834A; --band: #1B1D21; --band-fg: #F2F1EE;
+  --navy: #1F3B6E; --sign: #7A2232; --brass: #A8834A; --band: #1B1D21; --band-fg: #F2F1EE;
   --evidenced: #3F7A55; --partly-evidenced: #A06E22; --not-evidenced: #A4433F; --not-applicable: #7A7C80;
   --evidenced-bg: #E2EDE5; --partly-evidenced-bg: #F3EAD9; --not-evidenced-bg: #F3E2E0; --not-applicable-bg: #E4E3DF;
   --check-a: rgb(27 29 33 / .07); --check-b: rgb(31 59 110 / .08); --shadow: rgb(0 0 0 / .2);

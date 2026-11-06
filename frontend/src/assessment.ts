@@ -1,3 +1,5 @@
+import type { RemediationItem } from './remediation.ts'
+import type { Review } from './review.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
@@ -5,7 +7,8 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** A requirement's or a control's verdict, as the API sends it (`vouch.graph.Verdict`). */
 export type Verdict = 'evidenced' | 'partly-evidenced' | 'not-evidenced' | 'not-applicable'
 
-const VERDICT_WORDS: Record<Verdict, string> = {
+/** The verdicts in the interface's words (English); an assessment's own verdict is in its language (`verdictWord`). */
+export const VERDICT_WORDS: Record<Verdict, string> = {
   evidenced: 'Evidenced',
   'partly-evidenced': 'Partly evidenced',
   'not-evidenced': 'Not evidenced',
@@ -23,20 +26,60 @@ const VERDICT_WORDS_IN: Record<string, Record<Verdict, string>> = {
 }
 
 /** A verdict in words, in the profile's answer language (ISO 639-1); English when there are none in it. */
-export const verdictWord = (verdict: Verdict, language: string): string =>
-  (VERDICT_WORDS_IN[language] ?? VERDICT_WORDS)[verdict]
+export const verdictWord = (verdict: Verdict, language?: string): string =>
+  ((language && VERDICT_WORDS_IN[language]) || VERDICT_WORDS)[verdict]
 
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 
-export type Control = { id: string; title: string; owner: string }
+export type Control = { id: string; title: string }
 
 export type Step = { node: string; text: string }
+/** Documented (a policy says so) or implemented (a record shows it done): `vouch.documents.EvidenceKind`. */
+export type EvidenceKind = 'documented' | 'implemented'
+/** A quote checked word for word in this version of the document (`vouch.citations.Citation`). */
+export type Citation = {
+  doc_id: string
+  version: string
+  section: string
+  quote: string
+  kind: EvidenceKind
+  stale: boolean
+  stale_because: string | null
+}
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
-export type RequirementVerdict = { id: string; column: Column; text: string; verdict: Verdict; reason: string }
-// The page reads only these of the Assessment's fields so far.
-// `answer_language` is the profile's: the answer and the verdict words are in it, the interface stays English.
-export type Assessment = { control_id: string; verdict: Verdict; answer: string; answer_language: string }
+export type RequirementVerdict = {
+  id: string
+  column: Column
+  text: string
+  verdict: Verdict
+  reason: string
+  citations: Citation[]
+}
+/** An assessment's review state (`vouch.graph.Status`); the screen says Proposed for waiting-for-review. */
+export type ReviewStatus = 'waiting-for-review' | 'accepted' | 'rejected'
+
+export const REVIEW_WORDS: Record<ReviewStatus, string> = {
+  'waiting-for-review': 'Proposed',
+  accepted: 'Accepted',
+  rejected: 'Rejected',
+}
+
+// The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
+export type Assessment = {
+  control_id: string
+  verdict: Verdict
+  answer: string
+  /** The profile's (ISO 639-1): the answer and its verdict words are in it; the interface stays English. */
+  answer_language?: string
+  status?: ReviewStatus
+  requirements?: RequirementVerdict[]
+  /** The thread to review it by (#38, #39). */
+  thread_id?: string
+  review?: Review | null
+  /** One per not-evidenced requirement, each with the lead's decision (#43). */
+  remediation?: RemediationItem[]
+}
 
 /**
  * One assessment's tokens and cost (#35): `cost_usd` is OpenRouter's reported part plus the part computed from a
@@ -73,6 +116,32 @@ export type AssessmentEvent =
   | { event: 'result'; data: { assessment: Assessment; usage?: Usage } }
   | { event: 'error'; data: { message: string } }
 
+/**
+ * The control's newest stored assessment, from #38's `GET /api/assessments` (newest first) and
+ * `GET /api/assessments/{thread_id}`; null when it has none, or it can't be read just now.
+ */
+export async function newestAssessment(controlId: string): Promise<Assessment | null> {
+  try {
+    const list = await fetch('/api/assessments', { headers: await authHeaders() })
+    if (sessionEnded(list) || !list.ok) return null
+    const { assessments } = (await list.json()) as { assessments: { thread_id: string; control_id: string }[] }
+    const newest = assessments.find((a) => a.control_id === controlId)
+    return newest ? await storedAssessment(newest.thread_id) : null
+  } catch {
+    return null
+  }
+}
+
+/** One stored assessment, by its thread (`GET /api/assessments/{thread_id}`); null when it can't be read just now. */
+export async function storedAssessment(threadId: string): Promise<Assessment | null> {
+  try {
+    const one = await fetch(`/api/assessments/${encodeURIComponent(threadId)}`, { headers: await authHeaders() })
+    return one.ok ? ((await one.json()) as { assessment: Assessment }).assessment : null
+  } catch {
+    return null
+  }
+}
+
 /** Shown, with Retry, for any throw from `assess`. */
 export const UNREACHABLE = 'Vouch could not reach its service. Try again shortly.'
 const NOT_STARTED = 'The assessment could not be started. Please try again later.'
@@ -105,14 +174,17 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
 }
 
 /**
- * Starts the assessment and yields its events until the `result` or `error`.
- * Throws when the service can't be reached, or the stream breaks off before either.
+ * POSTs `body` as JSON to a server-sent event stream and yields its events until one named in `last` (the `error`
+ * event always ends it). A refusal is one `error`: the session ended, a limit's 429 with its own detail, or
+ * `refused` for any other. Throws when the service can't be reached, or the stream breaks off before its last event.
  */
-export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent> {
-  const response = await fetch('/api/assessments', {
+export async function* postEvents<E extends { event: string; data: unknown }>(
+  url: string, body: unknown, last: E['event'][], refused: string,
+): AsyncGenerator<E | { event: 'error'; data: { message: string } }> {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(await authHeaders()) },
-    body: JSON.stringify({ control_id: controlId }),
+    body: JSON.stringify(body),
   })
   if (response.status >= 500 || !response.body) throw new Error(`service answered ${response.status}`)
   if (sessionEnded(response)) {
@@ -121,16 +193,26 @@ export async function* assess(controlId: string): AsyncGenerator<AssessmentEvent
     return
   }
   if (!response.ok) {
-    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why; any other refusal doesn't.
-    const detail = response.status === 429
-      ? await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
+    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why, as does a 409 (another of the
+    // lead's assessments is running); any other refusal doesn't.
+    const detail = response.status === 429 || response.status === 409
+      ? await response.json().then((answer: { detail?: unknown }) => answer.detail, () => undefined)
       : undefined
-    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : NOT_STARTED } }
+    yield { event: 'error', data: { message: typeof detail === 'string' ? detail : refused } }
     return
   }
   for await (const item of readEvents(response.body)) {
-    yield item as AssessmentEvent
-    if (item.event === 'result' || item.event === 'error') return
+    yield item as E
+    if (item.event === 'error' || last.includes(item.event)) return
   }
-  throw new Error('the stream ended before the assessment')
+  throw new Error(`the stream from ${url} ended before its last event`)
+}
+
+/**
+ * Starts the assessment and yields its events until the `result` or `error`. A rejected control's new run carries
+ * the rejection note on the server's side (#42), however it was started.
+ * Throws when the service can't be reached, or the stream breaks off before either.
+ */
+export function assess(controlId: string): AsyncGenerator<AssessmentEvent> {
+  return postEvents<AssessmentEvent>('/api/assessments', { control_id: controlId }, ['result'], NOT_STARTED)
 }

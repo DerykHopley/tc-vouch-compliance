@@ -220,6 +220,13 @@ def test_the_tests_start_from_no_vouch_settings():
     assert not ENV_NAMES & set(os.environ)
 
 
+def test_local_mode_names_its_user_local_user_unless_a_setting_names_another():
+    assert load_settings({}).local_user_name == "Local user"
+    assert load_settings({"VOUCH_LOCAL_USER_NAME": "  "}).local_user_name == "Local user"
+    named = load_settings({"VOUCH_LOCAL_USER_NAME": " Dana Lead "})
+    assert named.local_user_name == "Dana Lead"
+
+
 def test_with_no_rate_setting_the_rate_is_60_requests_a_minute():
     assert load_settings({}).rate_requests == 60
 

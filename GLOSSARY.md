@@ -117,7 +117,7 @@ A verdict the compliance lead has accepted or rejected, with an optional note; o
 _Avoid_: Approval, sign-off, final verdict
 
 **Audit trail**:
-The append-only record of every reviewed verdict and approved remediation item: who, when, the note, and the evidence versions behind it.
+The append-only record of every action of the compliance lead, one entry each: a control accepted or rejected, a requirement overridden, a remediation item approved or discarded. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
 _Avoid_: History, log, changelog
 
 **Override**:
@@ -135,6 +135,14 @@ _Avoid_: Gap, fail, non-compliance, finding
 **Readiness**:
 How much of a compliance profile's controls are backed by accepted verdicts, shown as controls by verdict.
 _Avoid_: Compliance score, maturity
+
+**Progress**:
+Where a user stands under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with. On screen, an assessment waiting for review is **Proposed** (its review state tag, `docs/design.md`); `waiting-for-review` is the same state in code and the API.
+_Avoid_: Status, history
+
+**Long-term memory**:
+What Vouch keeps for a user under a compliance profile from one visit to the next (which assessments they started, when they last worked), in LangGraph's store. The assessments themselves wait in the checkpointer, keyed by the same user and profile.
+_Avoid_: Session, cache, history
 
 **Readiness report**:
 The summary of a compliance profile's reviewed verdicts, citations and remediation items, written in the profile's language.

@@ -16,8 +16,8 @@ stitched together across rows or paragraphs. It needs at least MIN_QUOTE_WORDS w
 import datetime
 import re
 import unicodedata
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -131,17 +131,30 @@ def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Docum
 
 class QuoteChecker:
     """Checks citations against the documents in these sources' folders (source name to
-    folder), reading each document once; staleness is judged on `today`."""
+    folder), reading each document once; staleness is judged on `today`. With `seen_as`, each
+    block of a document is checked as the quote's writer saw it (the chat's model sees
+    documents with secrets and personal data removed: vouch.redaction)."""
 
-    def __init__(self, sources: Mapping[str, str | Path], *, today: datetime.date):
+    def __init__(
+        self,
+        sources: Mapping[str, str | Path],
+        *,
+        today: datetime.date,
+        seen_as: Callable[[str], str] | None = None,
+    ):
         self._sources = {name: Path(folder) for name, folder in sources.items()}
         self._today = today
+        self._seen_as = seen_as
         self._documents: dict[str, _Document | DropReason] = {}
 
     def _document(self, doc_id: str) -> _Document | DropReason:
         key = doc_id.removesuffix(".md")
         if key not in self._documents:
-            self._documents[key] = _load(key, self._sources, self._today)
+            document = _load(key, self._sources, self._today)
+            if self._seen_as is not None and isinstance(document, _Document):
+                seen = tuple((h, normalise(self._seen_as(b))) for h, b in document.blocks)
+                document = replace(document, blocks=seen)
+            self._documents[key] = document
         return self._documents[key]
 
     def check(self, claim: CitationClaim) -> Citation | DropReason:

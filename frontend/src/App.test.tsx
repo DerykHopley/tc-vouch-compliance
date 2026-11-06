@@ -1,13 +1,29 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
+import { type Overview, OVERVIEW_FAILED } from './overview.ts'
+
+/** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
+let resizeTo: (width: number) => void = () => {}
 
 function systemPrefers(dark: boolean | null, width = 1400) {
+  let now = width
+  const listeners = new Set<() => void>()
+  resizeTo = (next) => act(() => {
+    now = next
+    for (const listener of listeners) listener()
+  })
   window.matchMedia = (query: string) => {
     const maxWidth = /^\(max-width: (\d+)px\)$/.exec(query)
-    const matches = maxWidth ? width <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
-    return { matches, media: query } as MediaQueryList
+    return {
+      get matches() {
+        return maxWidth ? now <= Number(maxWidth[1]) : dark === true && query === '(prefers-color-scheme: dark)'
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    } as unknown as MediaQueryList
   }
 }
 
@@ -16,46 +32,204 @@ beforeEach(() => systemPrefers(null))
 afterEach(() => {
   cleanup()
   delete document.documentElement.dataset.theme
+  delete document.documentElement.dataset.chat
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
 })
 
+const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
+
+/** The overview with nothing assessed, as `GET /api/overview` sends it. */
+const OVERVIEW: Overview = {
+  company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
+  requirements: {},
+  readiness: { controls: 12, accepted: 0,
+    by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
+    remediation_items: 0 },
+  by_status: { 'not-assessed': 12, 'waiting-for-review': 0, accepted: 0, rejected: 0 },
+  next_step: { control_id: '1.1.1', action: 'assess' },
+  controls: IDS.map((id) => ({ id, question: `Question ${id}?`, iso_27001: 'ISO 27001:2022: A.5.1', status: 'not-assessed',
+    verdict: null })),
+  quotes: [],
+}
+
+/** A stored assessment as `GET /api/assessments/{thread_id}` sends it (#38). */
+const STORED = { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys for administrators.',
+  status: 'waiting-for-review', thread_id: 't1' }
+
+/** The overview with each stored assessment's control on its card, as the API would send it. */
+const overviewWith = (stored: (typeof STORED)[]): Overview => ({
+  ...OVERVIEW,
+  controls: OVERVIEW.controls.map((c) => {
+    const a = stored.find((s) => s.control_id === c.id)
+    return a ? { ...c, status: 'waiting-for-review', verdict: 'partly-evidenced' } : c
+  }),
+})
+
+/**
+ * The API: the overview (each stored assessment on its card), the assessment's stream when given (POST), the stored
+ * assessments (GET: none unless given), and nothing else ever answers. Returns the fetch, to count its calls.
+ */
+function serve(assessment?: () => Promise<Response>, stored: (typeof STORED)[] = []) {
+  const fetch = vi.fn((url: string, init?: RequestInit) =>
+    url === '/api/overview' ? Promise.resolve(Response.json(overviewWith(stored)))
+      : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise<Response>(() => {}))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: stored }))
+          : url.startsWith('/api/assessments/') && stored.length
+            ? Promise.resolve(Response.json({ assessment: stored.find((a) => url.endsWith(a.thread_id)) }))
+            : new Promise<Response>(() => {}))
+  vi.stubGlobal('fetch', fetch)
+  return fetch
+}
+
+/** How many times the page asked for the stored assessments. */
+const storedReads = (fetch: ReturnType<typeof serve>) =>
+  fetch.mock.calls.filter(([url, init]) => url === '/api/assessments' && init?.method !== 'POST').length
+
 describe('Dossier landing', () => {
-  it('shows the top bar, headline, readiness band and one control card', () => {
+  it('shows the top bar, headline, readiness band and the 12 controls from the API', async () => {
+    serve()
     render(<App />)
     const top = screen.getByRole('banner')
     expect(within(top).getByText('Vouch')).toBeTruthy()
     expect(within(top).getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/prepared for audit/i)
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toMatch(/prepared for audit/i)
     expect(screen.getByRole('region', { name: 'Readiness' })).toBeTruthy()
-    const cards = screen.getAllByRole('article')
-    expect(cards).toHaveLength(1)
-    expect(within(cards[0]).getByText('4.1.2')).toBeTruthy()
-    expect(within(cards[0]).getByText('Not assessed')).toBeTruthy()
+    expect(screen.getAllByRole('article', { name: /^Control / })).toHaveLength(12)
+  })
+
+  it('says so with Retry when the overview cannot be read, and shows it once it can', async () => {
+    let answers = 0
+    vi.stubGlobal('fetch', (url: string) => url !== '/api/overview' ? new Promise(() => {})
+      : ++answers === 1 ? Promise.resolve(new Response(null, { status: 503 })) : Promise.resolve(Response.json(OVERVIEW)))
+    render(<App />)
+    expect((await screen.findByRole('alert')).textContent).toBe(OVERVIEW_FAILED)
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 
 describe('the working paper', () => {
   const paper = () => screen.queryByRole('region', { name: 'Working paper' })
 
-  it('opens straight at its address, as after a refresh', () => {
+  it('opens straight at its address, as after a refresh', async () => {
+    serve()
     window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
-    expect(within(paper()!).getByRole('heading', { name: /4.1.2/ })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: /4.1.2 Question 4.1.2\?/ })).toBeTruthy()
     expect(within(paper()!).getByRole('button', { name: 'Assess 4.1.2' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
   })
 
-  it('gets its address when assessed from the card, and Back returns to the Dossier', async () => {
-    vi.stubGlobal('fetch', () => new Promise(() => {})) // never answers: only the address matters here
+  it('opens from its card with its address, and Back returns to the Dossier', async () => {
+    serve()
     render(<App />)
-    await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
+    await userEvent.click(await screen.findByRole('link', { name: 'Open 4.1.2' }))
     expect(window.location.pathname).toBe('/controls/4.1.2')
     expect(paper()).toBeTruthy()
 
     window.history.back()
     await waitFor(() => expect(paper()).toBeNull())
     expect(window.location.pathname).toBe('/')
+  })
+
+  it("starts no second run when Back and Forward return to a paper opened by the hero's Assess", async () => {
+    const assessed = vi.fn(() => new Promise<Response>(() => {}))
+    serve(assessed)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 1.1.1' }))
+    act(() => window.history.back())
+    await waitFor(() => expect(paper()).toBeNull())
+    act(() => window.history.forward())
+    await waitFor(() => expect(paper()).toBeTruthy())
+    expect(assessed).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a run going while the lead leaves its paper, and starts no second one on return', async () => {
+    const assessed = vi.fn(() => new Promise<Response>(() => {}))
+    serve(assessed)
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
+    const card = await screen.findByRole('article', { name: 'Control 4.1.2' })
+    expect(within(card).getByText('Assessing')).toBeTruthy()
+    await userEvent.click(within(card).getByRole('link', { name: 'Open 4.1.2' }))
+    const busy = await within(paper()!).findByRole('button', { name: 'Assessing 4.1.2' })
+    expect((busy as HTMLButtonElement).disabled).toBe(true)
+    expect(assessed).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a control's newest stored assessment, proposed, when its paper opens", async () => {
+    serve(undefined, [STORED])
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const result = await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    expect(within(result).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(result).getByText('Keys for administrators.')).toBeTruthy()
+    expect(within(paper()!).getByText('Proposed')).toBeTruthy()
+  })
+
+  describe('reviewing a stored proposed assessment (#42; from #40\'s verify)', () => {
+    const WAITING = { ...STORED, requirements: [{ id: 'M1', column: 'must', text: 'Keys.', verdict: 'partly-evidenced',
+      reason: 'Policy only.', citations: [] }], review: null }
+    const ACCEPTED = { ...WAITING, status: 'accepted', review: { decision: 'accept', note: '', overrides: [] } }
+
+    /** The API with WAITING stored; the review route answers `review`; GET of the thread answers `reread`. */
+    function serveReview(review: Response, reread = ACCEPTED) {
+      const fetch = vi.fn((url: string, init?: RequestInit) =>
+        url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
+          : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [STORED] }))
+            : url === '/api/assessments/t1/review' && init?.method === 'POST' ? Promise.resolve(review)
+              : url === '/api/assessments/t1'
+                ? Promise.resolve(Response.json({ assessment: fetch.mock.calls.some(([u]) => u.endsWith('/review'))
+                  ? reread : WAITING }))
+                : url.startsWith('/api/audit-trail') ? Promise.resolve(Response.json({ entries: [] }))
+                  : new Promise<Response>(() => {}))
+      vi.stubGlobal('fetch', fetch)
+      return fetch
+    }
+
+    it('accepts it from its paper: the paper and the control index show it accepted', async () => {
+      serveReview(Response.json({ assessment: ACCEPTED }))
+      window.history.replaceState(null, '', '/controls/4.1.2')
+      render(<App />)
+      const bar = await screen.findByRole('region', { name: 'Review' })
+      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
+      const index = screen.getByRole('navigation', { name: 'Controls' })
+      expect(within(within(index).getByRole('link', { name: /^4\.1\.2/ })).getByText('Accepted')).toBeTruthy()
+    })
+
+    it('after "already reviewed", Refresh reads the assessment again and shows the decision made elsewhere', async () => {
+      serveReview(Response.json({ detail: 'not waiting' }, { status: 409 }))
+      window.history.replaceState(null, '', '/controls/4.1.2')
+      render(<App />)
+      const bar = await screen.findByRole('region', { name: 'Review' })
+      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      await userEvent.click(await within(bar).findByRole('button', { name: 'Refresh' }))
+      expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
+    })
+  })
+
+  it('marks the Dossier current when the overview fails at a paper address, as the Dossier is what shows', async () => {
+    vi.stubGlobal('fetch', (url: string) =>
+      url === '/api/overview' ? Promise.resolve(new Response(null, { status: 503 })) : new Promise(() => {}))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await screen.findByRole('alert')
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it("starts the assessment from the Dossier's next step", async () => {
+    const assessed = vi.fn(() => new Promise<Response>(() => {}))
+    serve(assessed)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 1.1.1' }))
+    expect(window.location.pathname).toBe('/controls/1.1.1')
+    expect(within(paper()!).getByRole('button', { name: 'Assessing 1.1.1' })).toBeTruthy()
+    expect(assessed).toHaveBeenCalledTimes(1)
   })
 
   /** A stream handing out one event per read; `askedForMore` settles when the reader asks past
@@ -81,13 +255,11 @@ describe('the working paper', () => {
   const sse = (event: string, data: object) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
   async function assessWith(stream: ReturnType<typeof heldStream>) {
-    // Only the assessment gets the stream; the page's other requests (the developer API's) wait.
-    vi.stubGlobal('fetch', (url: string) =>
-      url === '/api/assessments'
-        ? Promise.resolve(new Response(stream.body, { headers: { 'Content-Type': 'text/event-stream' } }))
-        : new Promise(() => {}))
+    // The assessment gets the stream; the page's other requests (the developer API's) wait.
+    serve(() => Promise.resolve(new Response(stream.body, { headers: { 'Content-Type': 'text/event-stream' } })))
+    window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
-    await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
   }
 
   it('keeps running through requirement events, then shows the verdict and the answer', async () => {
@@ -117,6 +289,7 @@ describe('the working paper', () => {
   })
 
   it('leaves for the Dossier at /', async () => {
+    serve()
     window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
     await userEvent.click(screen.getByRole('link', { name: 'Dossier' }))
@@ -131,22 +304,77 @@ describe('the working paper', () => {
         cost_usd: 0.000202, estimated: true, cost_complete: true },
     }
     const stream = `event: result\ndata: ${JSON.stringify(result)}\n\n`
-    vi.stubGlobal('fetch', (url: string) =>
-      url === '/api/assessments' ? Promise.resolve(new Response(stream, { status: 200 })) : new Promise(() => {}))
+    serve(() => Promise.resolve(new Response(stream, { status: 200 })))
     window.history.replaceState(null, '', '/controls/4.1.2')
     render(<App />)
-    await userEvent.click(screen.getByRole('button', { name: 'Assess 4.1.2' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
     const answer = await screen.findByRole('region', { name: 'Verdict and draft answer' })
     expect(within(answer).getByRole('region', { name: 'Usage' }).textContent).toBe(
       '1,530 tokens in · 98 tokens out · $0.0002 (estimated)',
     )
   })
 
-  it('shows the Dossier for an address it does not know', () => {
+  it('says a control the overview does not list is not found, and "Overview" returns to the Dossier', async () => {
+    serve()
     window.history.replaceState(null, '', '/controls/9.9.9')
     render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control 9.9.9')
     expect(paper()).toBeNull()
-    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(screen.getByRole('link', { name: 'Dossier' }).getAttribute('aria-current')).toBeNull()
+    await userEvent.click(within(notFound).getByRole('link', { name: '← Overview' }))
+    expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('says an address with a broken escape is not found, rather than failing blank', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/%E0')
+    render(<App />)
+    const notFound = await screen.findByRole('region', { name: 'Control not found' })
+    expect(within(notFound).getByRole('heading').textContent).toBe('No control %E0')
+  })
+
+  it('reads no stored assessment for a control its card says is not assessed, and one for a control it says is', async () => {
+    const fetch = serve(undefined, [STORED])
+    window.history.replaceState(null, '', '/controls/5.2.4')
+    render(<App />)
+    expect(await within(await screen.findByRole('region', { name: 'Working paper' })).findByRole('button',
+      { name: 'Assess 5.2.4' })).toBeTruthy()
+    expect(storedReads(fetch)).toBe(0)
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^4\.1\.2/ }))
+    expect(await screen.findByRole('region', { name: 'Verdict and draft answer' })).toBeTruthy()
+    expect(storedReads(fetch)).toBe(1)
+  })
+
+  it("keeps a finished run's control current in the index after the lead opens another paper", async () => {
+    const result = { assessment: { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys.',
+      status: 'waiting-for-review' } }
+    const fetch = serve(() => Promise.resolve(new Response(`event: result\ndata: ${JSON.stringify(result)}\n\n`)))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 4.1.2' }))
+    await screen.findByRole('region', { name: 'Verdict and draft answer' })
+    const overviewReads = fetch.mock.calls.filter(([url]) => url === '/api/overview').length
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^5\.2\.4/ }))
+    await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })
+    const entry = within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: /^4\.1\.2/ })
+    expect(within(entry).getByText('Partly evidenced')).toBeTruthy()
+    expect(within(entry).getByText('Proposed')).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/overview').length).toBe(overviewReads) // no read for it
+  })
+
+  it('opens another control from the index, and "Overview" returns to the Dossier', async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const index = await screen.findByRole('navigation', { name: 'Controls' })
+    await userEvent.click(within(index).getByRole('link', { name: /^5\.2\.4/ }))
+    expect(window.location.pathname).toBe('/controls/5.2.4')
+    expect(await screen.findByRole('heading', { name: /5.2.4 Question 5.2.4\?/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: '← Overview' }))
+    expect(window.location.pathname).toBe('/')
+    expect(paper()).toBeNull()
   })
 })
 
@@ -242,11 +470,367 @@ describe('Ask Vouch', () => {
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(bubble()).toBeTruthy()
   })
+
+  it('opens with Cmd+K, ready to type', async () => {
+    render(<App />)
+    await userEvent.keyboard('{Meta>}k{/Meta}')
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message to Vouch' }))
+  })
+
+  const open = () => userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+  const press = (name: string | RegExp) => userEvent.click(screen.getByRole('button', { name }))
+
+  it('enlarges, pins, and goes back the same way', async () => {
+    render(<App />)
+    await open()
+    expect(bubble()!.className).toBe('bubble')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    const pin = screen.getByRole('button', { name: 'Pin beside the page' })
+    expect(pin.getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(pin)
+    expect(bubble()!.className).toBe('bubble pinned')
+    expect(document.documentElement.dataset.chat).toBe('pinned')
+    expect(screen.queryByRole('button', { name: 'Make smaller' })).toBeNull()
+    // One label, its state in aria-pressed: pressed again, it unpins.
+    expect(screen.getByRole('button', { name: 'Pin beside the page' }).getAttribute('aria-pressed')).toBe('true')
+    await press('Pin beside the page')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    await press('Make smaller')
+    expect(bubble()!.className).toBe('bubble')
+  })
+
+  it('offers no pin at 1000px or less: bubble and enlarged only', async () => {
+    systemPrefers(null, 900)
+    render(<App />)
+    await open()
+    await press('Make larger')
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+  })
+
+  it('falls back from pinned to enlarged at 1000px or less, and to the sheet at 700px', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(900)
+    expect(bubble()!.className).toBe('bubble enlarged')
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
+    await userEvent.keyboard('{Escape}') // enlarged now: Esc closes it
+    expect(bubble()).toBeNull()
+  })
+
+  it('as a full-screen sheet, closes on Esc even when it was pinned', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    resizeTo(400)
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+  })
+
+  it('closes an enlarged chat on Esc, but never a pinned one', async () => {
+    render(<App />)
+    await open()
+    await press('Make larger')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeNull()
+    await open()
+    await press('Make larger')
+    await press('Pin beside the page')
+    await userEvent.keyboard('{Escape}')
+    expect(bubble()).toBeTruthy()
+    await press('Close the chat')
+    expect(bubble()).toBeNull()
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+  })
+
+  it('names the page it is on in its header', async () => {
+    serve()
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Dossier')).toBeTruthy()
+  })
+
+  it("names the control on its working paper", async () => {
+    serve()
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    await open()
+    expect(within(bubble()!).getByText('on 4.1.2 · Working paper')).toBeTruthy()
+  })
+
+  type ChatBody = { message?: string; page: string; control_id: string | null; thread_id: string | null }
+  const sse = (blocks: string[]) => new Response(blocks.join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+  /** A greeting with nothing to say, on chat thread t0. */
+  const QUIET = () => Promise.resolve(sse(['event: thread\ndata: {"thread_id":"t0"}\n\nevent: done\ndata: {}\n\n']))
+
+  /** The API as `serve` has it, and `/api/chat` answering a message with `chat`, the greeting with `greeting`. */
+  function serveChat(chat: (body: ChatBody) => Promise<Response>, greeting: (body: ChatBody) => Promise<Response> = QUIET) {
+    serve()
+    const others = fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url !== '/api/chat') return others(url, init)
+      const body = JSON.parse(init!.body as string) as ChatBody
+      return body.message === undefined ? greeting(body) : chat(body)
+    })
+  }
+
+  it('keeps the log on the newest message at its bottom, and leaves a lead who scrolled up to read where they are',
+    async () => {
+      let write: (block: string) => void = () => {}
+      serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder()
+          write = (block) => controller.enqueue(encoder.encode(block))
+        },
+      }), { headers: { 'Content-Type': 'text/event-stream' } })))
+      render(<App />)
+      await open()
+      await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+      const log = within(bubble()!).getByRole('log')
+      // jsdom lays nothing out: the log is 1000px of content in a 400px box.
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 })
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 400 })
+      const step = (n: number) => act(async () =>
+        write(`event: step\ndata: {"node":"gather","text":"Step ${n}."}\n\n`))
+
+      await step(1)
+      await within(log).findByText('Step 1.')
+      expect(log.scrollTop).toBe(1000) // followed to the newest
+
+      log.scrollTop = 100 // the lead scrolls up to read
+      fireEvent.scroll(log)
+      await step(2)
+      await within(log).findByText('Step 2.')
+      expect(log.scrollTop).toBe(100) // left where they are
+
+      log.scrollTop = 580 // back near the bottom
+      fireEvent.scroll(log)
+      await step(3)
+      await within(log).findByText('Step 3.')
+      expect(log.scrollTop).toBe(1000)
+    })
+
+  it('marks the log busy while the reply streams, so a screen reader announces the finished message', async () => {
+    let write: (block: string) => void = () => {}
+    let end: () => void = () => {}
+    serveChat(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder()
+        write = (block) => controller.enqueue(encoder.encode(block))
+        end = () => controller.close()
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } })))
+    render(<App />)
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await act(async () => write('event: token\ndata: {"text":"Thank"}\n\n'))
+    await within(log).findByText('Thank')
+    expect(log.getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      write('event: token\ndata: {"text":" you."}\n\nevent: done\ndata: {}\n\n')
+      end()
+    })
+    await within(log).findByText('Thank you.')
+    await waitFor(() => expect(log.getAttribute('aria-busy')).toBe('false'))
+  })
+
+  it('keeps Send disabled while the message is empty', async () => {
+    render(<App />)
+    await open()
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), '   ')
+    expect(send.disabled).toBe(true)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Hello')
+    expect(send.disabled).toBe(false)
+  })
+
+  it("sends the message with the page, and shows Vouch's reply as it streams", async () => {
+    const asked: unknown[] = []
+    serveChat((body) => {
+      asked.push(body)
+      return Promise.resolve(sse(['event: token\ndata: {"text":"Thank"}\n\n', 'event: token\ndata: {"text":" you."}\n\n',
+        'event: done\ndata: {}\n\n']))
+    })
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' })
+    await userEvent.type(field, 'Where do I stand?{Enter}')
+    const log = within(bubble()!).getByRole('log')
+    await within(log).findByText('Thank you.')
+    expect(within(log).getByText('Where do I stand?')).toBeTruthy()
+    expect((field as HTMLInputElement).value).toBe('')
+    expect(asked).toEqual([{ message: 'Where do I stand?', page: 'dossier', control_id: null, thread_id: 't0' }])
+  })
+
+  it('greets the lead once, on first opening, with where they stand and the next step as a chip', async () => {
+    const greetings: ChatBody[] = []
+    const asked: ChatBody[] = []
+    serveChat((body) => {
+      asked.push(body)
+      return Promise.resolve(sse(['event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n']))
+    }, (body) => {
+      greetings.push(body)
+      return Promise.resolve(sse(['event: suggestion\ndata: {"control_id":"1.1.1","action":"assess"}\n\n',
+        'event: token\ndata: {"text":"You have not assessed any of the 12 controls yet."}\n\n',
+        'event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n']))
+    })
+    render(<App />)
+    await open()
+    const log = within(bubble()!).getByRole('log')
+    await within(log).findByText('You have not assessed any of the 12 controls yet.')
+    expect(greetings).toEqual([{ page: 'dossier', control_id: null, thread_id: null }])
+
+    await userEvent.click(within(log).getByRole('button', { name: 'Assess 1.1.1' }))
+
+    await waitFor(() => expect(asked).toEqual([{ message: 'Assess 1.1.1', page: 'dossier', control_id: null, thread_id: 't1' }]))
+    expect(within(log).getByText('Assess 1.1.1')).toBeTruthy() // the chip's message, as the lead's
+    expect(within(log).queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
+    await press('Close the chat')
+    await open()
+    expect(greetings).toHaveLength(1)
+  })
+
+  it('offers a waiting review as a link to its working paper', async () => {
+    serveChat(QUIET, () => Promise.resolve(sse(['event: suggestion\ndata: {"control_id":"4.1.2","action":"review"}\n\n',
+      'event: thread\ndata: {"thread_id":"t1"}\n\nevent: done\ndata: {}\n\n'])))
+    render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    await open()
+
+    await userEvent.click(await within(bubble()!).findByRole('link', { name: 'Review 4.1.2' }))
+
+    expect(window.location.pathname).toBe('/controls/4.1.2')
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+  })
+
+  it("shows an assessment's steps, then its verdict with a link that opens its working paper", async () => {
+    serveChat(() => Promise.resolve(sse([
+      'event: step\ndata: {"node":"load_control","text":"Loaded control 4.1.2."}\n\n',
+      'event: step\ndata: {"node":"guard","text":"Removed an email address from the step."}\n\n',
+      'event: step\ndata: {"node":"judge","text":"Judged 1 of 2 requirements evidenced."}\n\n',
+      'event: assessment\ndata: {"control_id":"4.1.2","verdict":"partly-evidenced","status":"waiting-for-review","thread_id":"a1"}\n\n',
+      'event: token\ndata: {"text":"The assessment of control 4.1.2 has finished."}\n\n',
+      'event: done\ndata: {}\n\n'])))
+    render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+    const log = within(bubble()!).getByRole('log')
+
+    await within(log).findByText('The assessment of control 4.1.2 has finished.')
+    // Each step as the trace shows it: its node, then what it did; a guard step marked apart.
+    const steps = [...log.querySelectorAll('.msg-step')]
+    expect(steps.map((step) => step.textContent)).toEqual(['load_control Loaded control 4.1.2.',
+      'guard Removed an email address from the step.', 'judge Judged 1 of 2 requirements evidenced.'])
+    expect(steps.map((step) => step.classList.contains('guard'))).toEqual([false, true, false])
+    expect(within(log).getByText('Partly evidenced').className).toBe('chip v-partly-evidenced')
+    expect(within(log).getByText('Proposed').className).toBe('tag tag-waiting-for-review') // its review state tag
+    await userEvent.click(within(log).getByRole('link', { name: 'Open the working paper' }))
+
+    expect(window.location.pathname).toBe('/controls/4.1.2')
+    await screen.findByRole('heading', { name: /Question 4\.1\.2/ })
+    expect(bubble()).toBeTruthy() // the chat stays open beside the paper
+  })
+
+  it('goes on with the thread a failed first turn named, and asks for a failed greeting again on the next opening',
+    async () => {
+      const greetings: ChatBody[] = []
+      const asked: ChatBody[] = []
+      serveChat((body) => {
+        asked.push(body)
+        return Promise.resolve(sse(asked.length === 1
+          ? ['event: thread\ndata: {"thread_id":"t9"}\n\n', 'event: error\ndata: {"message":"Vouch could not answer."}\n\n']
+          : ['event: done\ndata: {}\n\n']))
+      }, (body) => {
+        greetings.push(body)
+        return Promise.reject(new TypeError('Failed to fetch'))
+      })
+      render(<App />)
+      await open()
+      await within(bubble()!).findByText('Vouch could not be reached just now. Please try again shortly.')
+      expect(greetings).toHaveLength(1) // not asked for over and over while open
+      const field = screen.getByRole('textbox', { name: 'Message to Vouch' })
+      await userEvent.type(field, 'Hello{Enter}')
+      await within(bubble()!).findByText('Vouch could not answer.')
+      await userEvent.clear(field)
+      await userEvent.type(field, 'Again{Enter}')
+      await waitFor(() => expect(asked).toHaveLength(2))
+      expect(asked[1].thread_id).toBe('t9')
+
+      await press('Close the chat')
+      await open()
+      await waitFor(() => expect(greetings).toHaveLength(2))
+    })
+
+  it("at the daily limit, the greeting shows the limit's message", async () => {
+    const limit = "You have reached today's limit of 0 assessments. It resets at 00:00 UTC on 6 November 2026."
+    serveChat(QUIET, () => Promise.resolve(Response.json({ detail: limit, limit: 'daily' }, { status: 429 })))
+    render(<App />)
+    await open()
+
+    expect(await within(bubble()!).findByText(limit)).toBeTruthy()
+    expect((screen.getByRole('textbox', { name: 'Message to Vouch' }) as HTMLInputElement).value).toBe('')
+  })
+
+  it('with the chat endpoint down, says so and keeps the typed message', async () => {
+    serveChat(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<App />)
+    await open()
+    const field = screen.getByRole('textbox', { name: 'Message to Vouch' }) as HTMLInputElement
+    await userEvent.type(field, 'Where do I stand?')
+    await press('Send')
+    await within(bubble()!).findByText(/Vouch could not be reached/)
+    expect(field.value).toBe('Where do I stand?')
+  })
 })
 
 describe('local mode', () => {
   it('has no sign-out: nobody is signed in', () => {
     render(<App />)
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+  })
+})
+
+describe('remediation items', () => {
+  const draft = (id: string) => ({ requirement_id: id, missing: `What ${id} lacks.`, owner_role: 'CISO',
+    due_date: '2027-02-01', status: 'draft' })
+  const ACCEPTED = { ...STORED, status: 'accepted', verdict: 'not-evidenced',
+    requirements: ['M1', 'M2'].map((id) => ({ id, column: 'must', text: `${id}.`, verdict: 'not-evidenced',
+      reason: 'Nothing on file.', citations: [] })),
+    remediation: [draft('M1'), draft('M2')] }
+
+  it('keeps both of two decisions in flight, whichever lands first', async () => {
+    const answers: Record<string, (r: Response) => void> = {}
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const decided = /\/remediation\/(M\d)$/.exec(url)
+      if (decided) return new Promise<Response>((resolve) => { answers[decided[1]] = resolve })
+      return url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [ACCEPTED] }))
+          : url.startsWith('/api/assessments/') ? Promise.resolve(Response.json({ assessment: ACCEPTED }))
+            : new Promise<Response>(() => {})
+    }))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const item = (id: string) => screen.getByRole('region', { name: `Remediation item ${id}` })
+    await screen.findByRole('region', { name: 'Remediation item M1' })
+
+    await userEvent.click(within(item('M1')).getByRole('button', { name: 'Approve M1' }))
+    await userEvent.click(within(item('M2')).getByRole('button', { name: 'Discard M2' }))
+    await act(async () => answers.M1(Response.json({ item: { ...draft('M1'), status: 'approved' } })))
+    await act(async () => answers.M2(Response.json({ item: { ...draft('M2'), status: 'discarded' } })))
+
+    expect(within(item('M1')).getByText('Approved')).toBeTruthy()
+    expect(within(item('M2')).getByText('Discarded')).toBeTruthy()
+    expect(within(item('M1')).queryByRole('button')).toBeNull()
   })
 })

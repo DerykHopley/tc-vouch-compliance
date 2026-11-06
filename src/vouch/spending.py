@@ -44,6 +44,9 @@ MAX_DAILY_LIMIT = 10_000
 DAILY_LIMIT_SETTING = "daily_limit"
 FAKE = "fake"
 """The model a usage names when the scripted fake ran."""
+CHAT = "chat"
+"""The control a usage record names for a chat message (#44): no control was assessed, so the
+totals count its tokens and cost, but not as an assessment."""
 NO_SHARED_COUNTER = (
     "Assessments on OpenRouter need a database to hold each user's daily limit. "
     f"Set {DATABASE_URL_ENV}."
@@ -123,7 +126,8 @@ class UsageRecord:
 
 @dataclass(frozen=True)
 class RunTotals:
-    """Some assessments' usage added up; `incomplete` of them have a cost not wholly known."""
+    """Some assessments' and chat messages' usage added up: `assessments` counts the
+    assessments alone; `incomplete` is how many of the two have a cost not wholly known."""
 
     assessments: int = 0
     input_tokens: int = 0
@@ -132,9 +136,9 @@ class RunTotals:
     estimated_cost_usd: float = 0.0
     incomplete: int = 0
 
-    def add(self, usage: Usage) -> "RunTotals":
+    def add(self, usage: Usage, assessment: bool = True) -> "RunTotals":
         return RunTotals(
-            self.assessments + 1,
+            self.assessments + assessment,
             self.input_tokens + usage.input_tokens,
             self.output_tokens + usage.output_tokens,
             self.reported_cost_usd + usage.reported_cost_usd,
@@ -275,6 +279,11 @@ class SpendingStore(Protocol):
         read in the same step: (counted, the limit)."""
         ...
 
+    def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
+        """Whether the user started fewer assessments that day than the daily limit, counting
+        nothing: (under it, the limit)."""
+        ...
+
     def record(self, record: UsageRecord) -> None: ...
 
     def totals(self) -> UsageTotals: ...
@@ -308,6 +317,11 @@ class MemorySpendingStore:
             self._counts[user_id] = count + 1
             return True, self._limit
 
+    def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
+        with self._lock:
+            count = self._counts.get(user_id, 0) if day == self._day else 0
+            return count < self._limit, self._limit
+
     def record(self, record: UsageRecord) -> None:
         with self._lock:
             self._records.append(record)
@@ -319,10 +333,11 @@ class MemorySpendingStore:
     def totals(self) -> UsageTotals:
         openrouter, fake = RunTotals(), RunTotals()
         for record in self.records():
+            assessment = record.control_id != CHAT
             if record.usage.model == FAKE:
-                fake = fake.add(record.usage)
+                fake = fake.add(record.usage, assessment)
             else:
-                openrouter = openrouter.add(record.usage)
+                openrouter = openrouter.add(record.usage, assessment)
         return UsageTotals(openrouter, fake)
 
 
@@ -344,6 +359,9 @@ class DatabaseSpendingStore:
     def take(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.take_assessment(user_id, day, DAILY_LIMIT_SETTING, DAILY_LIMIT)
 
+    def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
+        return self.db.under_assessment_limit(user_id, day, DAILY_LIMIT_SETTING, DAILY_LIMIT)
+
     def record(self, record: UsageRecord) -> None:
         usage = record.usage
         self.db.record_usage(
@@ -360,7 +378,7 @@ class DatabaseSpendingStore:
         )
 
     def totals(self) -> UsageTotals:
-        rows = self.db.usage_totals(fake_model=FAKE)
+        rows = self.db.usage_totals(fake_model=FAKE, not_assessments=CHAT)
         return UsageTotals(
             openrouter=RunTotals(**rows["openrouter"]) if "openrouter" in rows else RunTotals(),
             fake=RunTotals(**rows["fake"]) if "fake" in rows else RunTotals(),
@@ -390,6 +408,12 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _reached(limit: int, now: datetime) -> DailyLimitReached:
+    """The limit reached at `now`; it resets at the next UTC midnight."""
+    resets_at = datetime.combine(now.date() + timedelta(days=1), time(), tzinfo=UTC)
+    return DailyLimitReached(limit, resets_at, now)
+
+
 class SpendingGuard:
     """The daily limit and usage, for the API; one per app. `clock` is the seam tests fix."""
 
@@ -406,9 +430,20 @@ class SpendingGuard:
         now = self.clock().astimezone(UTC)
         taken, limit = self.store.take(user_id, now.date())
         if not taken:
-            resets_at = datetime.combine(now.date() + timedelta(days=1), time(), tzinfo=UTC)
             log.info("a user reached the daily limit of %d assessments", limit)
-            raise DailyLimitReached(limit, resets_at, now)
+            raise _reached(limit, now)
+
+    def check(self, user_id: str, paid: bool) -> None:
+        """Before a chat message (#44), whose model calls go through the spending guard too:
+        refused as an assessment would be, but nothing counted, as chat isn't an assessment.
+        Raises NoSharedCounter, DailyLimitReached, or DatabaseUnavailable."""
+        if paid and self.store.kept_in == "memory":
+            raise NoSharedCounter(NO_SHARED_COUNTER)
+        now = self.clock().astimezone(UTC)
+        under, limit = self.store.under_limit(user_id, now.date())
+        if not under:
+            log.info("a user at the daily limit of %d assessments was refused a chat", limit)
+            raise _reached(limit, now)
 
     def set_daily_limit(self, limit: int) -> None:
         """Raises DatabaseUnavailable."""
@@ -416,8 +451,8 @@ class SpendingGuard:
         log.info("the daily limit is now %d assessments", limit)
 
     def record(self, user_id: str, control_id: str, usage: Usage) -> None:
-        """Keep the assessment's usage; when the database can't take it, the log says so and
-        the assessment's answer still stands."""
+        """Keep the assessment's usage, or a chat message's (`control_id` CHAT); when the
+        database can't take it, the log says so and the answer still stands."""
         try:
             self.store.record(UsageRecord(user_id, control_id, usage, self.clock()))
         except DatabaseUnavailable:
@@ -426,3 +461,15 @@ class SpendingGuard:
     def settings(self) -> dict[str, Any]:
         """What the developer page shows. Raises DatabaseUnavailable."""
         return {"daily_limit": self.store.daily_limit(), "usage": self.store.totals().to_dict()}
+
+
+def count_assessment(spending: SpendingGuard, user_id: str, paid: bool) -> None:
+    """Count one assessment against the user's daily limit, wherever it was started (the
+    working paper, the chat); `paid`: it runs on OpenRouter. Raises DailyLimitReached,
+    NoSharedCounter (logged: a paid model needs the database's counter) or DatabaseUnavailable:
+    then no assessment starts."""
+    try:
+        spending.start(user_id, paid=paid)
+    except NoSharedCounter:
+        log.error("assessments on OpenRouter need %s for the daily limit", DATABASE_URL_ENV)
+        raise

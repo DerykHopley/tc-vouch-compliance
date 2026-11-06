@@ -1,5 +1,6 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, and the developer page's settings.
+compliance lead's review, the review that resumes it, the lead's remediation decisions, the
+user's assessments, the Dossier overview, and the developer page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -11,33 +12,60 @@ import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from functools import cache
 from importlib.metadata import version
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch.allow_list import GUARD, ToolAllowList, allowed_tools
-from vouch.auth import ClerkAuth, ClerkUnavailable, NotAMember, Role, SignedOut, SignInAgain
+from vouch import audit, remediation
+from vouch.allow_list import allowed_tools
+from vouch.auth import (
+    ClerkAuth,
+    ClerkUnavailable,
+    ClerkUser,
+    NotAMember,
+    Role,
+    SignedOut,
+    SignInAgain,
+)
+from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, Page, PageContext
+from vouch.chat_agent import (
+    GREETING_REQUEST,
+    ChatTools,
+    chat_context,
+    chat_graph,
+    chat_prompt,
+    chat_turn,
+)
 from vouch.database import Connection, Database, DatabaseUnavailable
+from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
     InvalidReviewError,
     NotWaitingForReviewError,
-    RequirementVerdict,
     ReviewDecision,
     UnknownAssessmentError,
-    assess_steps,
-    memory_checkpointer,
-    resume,
+    load_assessment,
+    new_thread_id,
+    state_serializer,
 )
-from vouch.isa import BaseFrameworkError, IsaControl, UnknownControlError
+from vouch.isa import (
+    BaseFrameworkError,
+    IsaControl,
+    UnknownControlError,
+    load_base_framework,
+)
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
+from vouch.memory import (
+    Memory,
+    newest_by_control,
+    process_checkpointer,
+    process_store,
+)
 from vouch.model_choice import (
     MODEL_ID,
     CatalogueUnavailable,
@@ -48,34 +76,45 @@ from vouch.model_choice import (
 )
 from vouch.profile import (
     DEFAULT_PROFILE,
+    BrokenProfile,
     ComplianceProfile,
-    ProfileError,
-    UnknownProfileError,
-    load_named_profile,
+    ProfileScan,
+    scan_profiles,
 )
-from vouch.redaction import install_log_redaction, redact_data, remember_secrets, removal_step
+from vouch.redaction import install_log_redaction, redact_data, redacted_event, remember_secrets
+from vouch.runs import (
+    ASSESSMENT_FAILED,
+    RUNNING_ALREADY,
+    AlreadyRunning,
+    AssessmentRun,
+    RunningAssessments,
+    assessment_events,
+    begin_run,
+)
 from vouch.settings import (
     DATABASE_URL_ENV,
     DEFAULT_USER,
     FRONTEND_ENV,
+    PROFILES_DIR_ENV,
     Settings,
     SettingsError,
     User,
     load_settings,
 )
 from vouch.spending import (
+    CHAT,
     MAX_DAILY_LIMIT,
     DailyLimitReached,
     NoSharedCounter,
     SpendingGuard,
     Usage,
     UsageMeter,
+    count_assessment,
     spending_store,
 )
 
 log = logging.getLogger(__name__)
 
-FAILED = "The assessment could not be completed. Please try again later."
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
@@ -84,6 +123,7 @@ NOT_A_MEMBER = (
 )
 SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Discord servers."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
+UNKNOWN_PROFILE = "There is no such compliance profile."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -105,53 +145,9 @@ class RequestedAssessment:
     note: str
 
 
-@cache
-def load_default_profile() -> ComplianceProfile:
-    """The default compliance profile, read once; a failed read isn't kept, so it's tried again."""
-    return load_named_profile(DEFAULT_PROFILE)
-
-
-def compliance_profile() -> ComplianceProfile:
-    """Loaded before the stream starts, so a broken profile is a plain 500, not an event."""
-    try:
-        return load_default_profile()
-    except (ProfileError, UnknownProfileError):
-        log.exception("the compliance profile %s could not be loaded", DEFAULT_PROFILE)
-        raise HTTPException(status_code=500, detail=FAILED) from None
-
-
-def requested_assessment(
-    request: Annotated[AssessmentRequest, Body()],
-    profile: Annotated[ComplianceProfile, Depends(compliance_profile)],
-) -> RequestedAssessment:
-    """The control is looked up, in the profile's ISA edition, before the stream starts, so
-    an unknown one is a plain 404 and an unreadable edition a plain 500, not an event."""
-    try:
-        return RequestedAssessment(profile.isa_control(request.control_id), request.note)
-    except UnknownControlError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    except BaseFrameworkError:
-        log.exception("the ISA edition for %s could not be read", profile.answer_language)
-        raise HTTPException(status_code=500, detail=FAILED) from None
-
-
-Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
-
-
-def profile_tools(profile: Profile) -> frozenset[str]:
-    """The tools the API lets the model call: the compliance profile's allow-list (security
-    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
-    return allowed_tools(profile)
-
-
-@cache
-def checkpointer() -> BaseCheckpointSaver:
-    """Where paused assessments wait for review: in memory, one per process, until M2 brings
-    Postgres. A restart forgets them."""
-    return memory_checkpointer()
-
-
-Checkpointer = Annotated[BaseCheckpointSaver, Depends(checkpointer)]
+PROFILE_HEADER = "X-Vouch-Profile"
+"""Names the compliance profile a request is for (#47): the top bar's profile switcher sets it on
+every call. Without it, the default profile."""
 
 
 def app_settings(request: Request) -> Settings:
@@ -191,6 +187,19 @@ def app_database(request: Request) -> Database | None:
 AppDatabase = Annotated[Database | None, Depends(app_database)]
 
 
+def checkpointer(db: AppDatabase) -> Iterator[BaseCheckpointSaver]:
+    """Where assessments wait for review (#38): Postgres with a database URL, so they outlast a
+    restart; else this process's memory. A failure of the database is a 503."""
+    if db is None:
+        yield process_checkpointer()
+        return
+    with db.checkpointer(state_serializer()) as saver:
+        yield saver
+
+
+Checkpointer = Annotated[BaseCheckpointSaver, Depends(checkpointer)]
+
+
 def database_connection(db: AppDatabase) -> Iterator[Connection]:
     """A connection for a route that needs the database. A 503 (database_unavailable) when
     there's none to be had, or when it drops while the route uses it."""
@@ -210,19 +219,43 @@ def database_unavailable(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content=content)
 
 
-def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
-    """The user's role, for a route that needs it. Local mode's one user is a developer: local
-    mode is for a developer's machine. In clerk mode Clerk's API is asked (cached, auth.py);
-    when it can't answer, a 503, never access."""
+def _clerk_user(request: Request, user: User, settings: Settings) -> ClerkUser | None:
+    """Clerk's lookup of the user (role and display name, cached, auth.py); None in local mode,
+    where Clerk isn't asked. A user Clerk doesn't know is a 401. ClerkUnavailable is raised for
+    the caller to answer."""
     if settings.auth_mode == "local":
-        return "developer"
+        return None
     auth: ClerkAuth = request.app.state.auth
     try:
-        return auth.role(user)
+        return auth.lookup(user)
     except SignedOut:
         raise _signed_out() from None
+
+
+def user_role(request: Request, user: CurrentUser, settings: AppSettings) -> Role:
+    """The user's role, for a route that needs it. Local mode's one user is a developer: local
+    mode is for a developer's machine. In clerk mode Clerk's API is asked; when it can't
+    answer, a 503, never access."""
+    try:
+        found = _clerk_user(request, user, settings)
     except ClerkUnavailable:
         raise HTTPException(status_code=503, detail=CLERK_UNAVAILABLE) from None
+    return "developer" if found is None else found.role
+
+
+def reviewer_name(request: Request, user: CurrentUser, settings: AppSettings) -> str:
+    """The user's display name as it is now, for their audit entries (#154): local mode's
+    setting; in clerk mode Clerk's, from the role's lookup. When Clerk can't be asked, the user
+    id, so the review still goes on."""
+    try:
+        found = _clerk_user(request, user, settings)
+    except ClerkUnavailable:
+        log.warning("the reviewer's name lookup failed: the entry keeps the user id as the name")
+        return user.id
+    return settings.local_user_name if found is None else found.name
+
+
+ReviewerName = Annotated[str, Depends(reviewer_name)]
 
 
 def require_developer(role: Annotated[Role, Depends(user_role)]) -> None:
@@ -270,6 +303,95 @@ def rate_limit(request: Request, user: CurrentUser) -> None:
     if wait is not None:
         headers = {"Retry-After": str(wait)}
         raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS, headers=headers)
+
+
+def user_profiles(settings: Settings, user: User) -> ProfileScan:
+    """The one place that decides which compliance profiles a user may see and use (#47): for
+    now every profile in the profiles folder, for every user, each read once. A broken one is
+    left out (and listed for the developer page), never a failure."""
+    return scan_profiles(settings.profiles_dir)
+
+
+def compliance_profile(
+    settings: AppSettings,
+    user: CurrentUser,
+    chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
+) -> ComplianceProfile:
+    """The profile the request names, else the default, from the user's profiles. Settled
+    before the stream starts: one the user doesn't have is a 404; a broken one a plain 500."""
+    name = chosen or DEFAULT_PROFILE
+    found = user_profiles(settings, user).find(name)
+    if found is None:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    if isinstance(found, BrokenProfile):
+        log.error("the compliance profile %s can't be used: %s", name, found.problem)
+        raise HTTPException(status_code=500, detail=ASSESSMENT_FAILED)
+    return found
+
+
+Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
+
+
+def requested_assessment(
+    request: Annotated[AssessmentRequest, Body()], profile: Profile
+) -> RequestedAssessment:
+    """The control is looked up, in the request's profile's ISA edition (#48), before the
+    stream starts, so an unknown one is a plain 404 and an unreadable edition a plain 500, not
+    an event."""
+    try:
+        return RequestedAssessment(profile.isa_control(request.control_id), request.note)
+    except UnknownControlError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except BaseFrameworkError:
+        log.exception("the ISA edition for %s could not be read", profile.answer_language)
+        raise HTTPException(status_code=500, detail=ASSESSMENT_FAILED) from None
+
+
+def profile_tools(profile: Profile) -> frozenset[str]:
+    """The tools the API lets the model call: the compliance profile's allow-list (security
+    layer 2, vouch.allow_list), the one the graph's own guard checks too."""
+    return allowed_tools(profile)
+
+
+def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterator[Memory]:
+    """The user's long-term memory under the compliance profile (#38): Postgres's store with a
+    database URL, else this process's. A failure of the database is a 503."""
+    if db is None:
+        yield Memory(process_store(), user.id, profile.id)
+        return
+    with db.store() as store:
+        yield Memory(store, user.id, profile.id)
+
+
+UserMemory = Annotated[Memory, Depends(user_memory)]
+
+
+def audit_trail(db: AppDatabase) -> audit.AuditTrail:
+    """Where reviewed verdicts and overrides are recorded (#39): Postgres with a database URL,
+    else this process."""
+    return audit.process_trail() if db is None else audit.PostgresTrail(db)
+
+
+AuditTrail = Annotated[audit.AuditTrail, Depends(audit_trail)]
+
+
+def remediation_items(db: AppDatabase) -> remediation.RemediationItems:
+    """Where the lead's remediation decisions are kept, with their audit entries (#43): Postgres
+    with a database URL, else this process."""
+    return remediation.process_items() if db is None else remediation.PostgresItems(db)
+
+
+RemediationItems = Annotated[remediation.RemediationItems, Depends(remediation_items)]
+
+
+def assessment_data(
+    assessment: Assessment, decided: dict[remediation.Key, remediation.DecidedItem] | None = None
+) -> dict[str, Any]:
+    """The assessment as the API sends it, each remediation item with its status (#43): a draft,
+    or as the lead decided it (`decided`, none for a run just made or just reviewed)."""
+    return assessment.to_dict() | {
+        "remediation": remediation.shown_items(assessment, decided or {})
+    }
 
 
 public = APIRouter(prefix="/api")
@@ -323,24 +445,66 @@ def app_spending(request: Request) -> SpendingGuard:
 AppSpending = Annotated[SpendingGuard, Depends(app_spending)]
 
 
-def within_daily_limit(
-    user: CurrentUser,
-    spending: AppSpending,
+def running_assessments(request: Request) -> RunningAssessments:
+    """Whose assessments are running in this process (vouch.runs)."""
+    return request.app.state.running
+
+
+Running = Annotated[RunningAssessments, Depends(running_assessments)]
+
+
+def within_daily_limit(user: User, spending: SpendingGuard, chosen: str | None) -> None:
+    """Counts the assessment against the user's daily limit before the stream starts
+    (vouch.spending.count_assessment). Over the limit, a 429 saying when it resets
+    (daily_limit_reached); the counter unavailable, or only in memory for a paid model, a
+    503."""
+    try:
+        count_assessment(spending, user.id, paid=chosen is not None)
+    except NoSharedCounter as error:
+        raise HTTPException(status_code=503, detail=str(error)) from None
+
+
+def new_assessment(
     requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
     profile: Profile,
     chosen: Annotated[str | None, Depends(chosen_model)],
-) -> None:
-    """Counts the assessment against the user's daily limit before the stream starts, and only
-    once the control, the compliance profile and the model are known: FastAPI skips a
-    dependency whose own dependencies failed, so a 422, a 404, a broken profile's 500 or the
-    model choice's 503 takes no count. Over the limit, a 429
-    saying when it resets (daily_limit_reached); the counter unavailable, or only in memory for
-    a paid model, a 503."""
+    user: CurrentUser,
+    spending: AppSpending,
+    memory: UserMemory,
+    running: Running,
+) -> Iterator[str]:
+    """A new thread for the assessment, before the stream starts, only once the control, the
+    compliance profile and the model are known (FastAPI skips a dependency whose own
+    dependencies failed, so a 422, a 404, a broken profile's 500 or the model choice's 503
+    takes no count): the lead's one run (vouch.runs.begin_run, as the chat starts them),
+    remembered (#38), then counted (within_daily_limit). Another of the lead's runs going is a
+    409; a write that fails is a 503 with nothing counted; a count refused removes what was
+    remembered. No model runs either way. The lead's hold is released once the response has
+    ended."""
     try:
-        spending.start(user.id, paid=chosen is not None)
-    except NoSharedCounter as error:
-        log.error("assessments on OpenRouter need %s for the daily limit", DATABASE_URL_ENV)
-        raise HTTPException(status_code=503, detail=str(error)) from None
+        thread_id = begin_run(
+            running,
+            memory,
+            requested.control.id,
+            count=lambda: within_daily_limit(user, spending, chosen),
+        )
+    except AlreadyRunning:
+        raise HTTPException(status_code=409, detail=RUNNING_ALREADY) from None
+    try:
+        yield thread_id
+    finally:
+        running.release(memory.scope)
+
+
+def assessment_run(
+    models: AppModels,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+    tools: Annotated[frozenset[str], Depends(profile_tools)],
+    saver: Checkpointer,
+    memory: UserMemory,
+) -> AssessmentRun:
+    """What the request's assessment runs on (vouch.runs.AssessmentRun), metered afresh."""
+    return AssessmentRun(models, chosen, tools, saver, UsageMeter(chosen), memory.scope)
 
 
 def record_off_the_event_loop(
@@ -377,13 +541,11 @@ def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
 def create_assessment(
     requested: Annotated[RequestedAssessment, Depends(requested_assessment)],
     profile: Profile,
-    tools: Annotated[frozenset[str], Depends(profile_tools)],
-    saver: Checkpointer,
-    models: AppModels,
-    chosen: Annotated[str | None, Depends(chosen_model)],
-    # Counted only once the control, the profile and the model passed (within_daily_limit
-    # depends on each).
-    _daily_limit_taken: Annotated[None, Depends(within_daily_limit)],
+    run: Annotated[AssessmentRun, Depends(assessment_run)],
+    # Held, remembered and counted only once the control, the profile and the model passed
+    # (new_assessment depends on each).
+    thread_id: Annotated[str, Depends(new_assessment)],
+    memory: UserMemory,
     user: CurrentUser,
     spending: AppSpending,
 ) -> Iterable[ServerSentEvent]:
@@ -406,65 +568,294 @@ def create_assessment(
     is redacted (security layer 4).
     """
     control = requested.control
-    meter = UsageMeter(chosen)
     try:
-        assessed = models.for_assessment(chosen, callbacks=[meter])
-        model = ToolAllowList(assessed, tools)
-        # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
-        steps = assess_steps(
-            control, profile, cast(BaseChatModel, model), saver, note=requested.note
+        events = assessment_events(
+            control, profile, run, memory, thread_id=thread_id, note=requested.note
         )
-        for item in steps:
-            if isinstance(item, Assessment):
-                result = {"assessment": item.to_dict(), "usage": meter.usage().to_dict()}
-                yield from _redacted("result", result)
-            elif isinstance(item, RequirementVerdict):
-                yield from _redacted("requirement", {"requirement": asdict(item)})
-            else:
-                yield from _redacted("step", item.to_dict())
-            for refusal in model.take_refusals():
-                yield from _redacted("step", {"node": GUARD, "text": refusal})
+        for event, data in events:
+            if isinstance(data, Assessment):
+                data = {"assessment": assessment_data(data), "usage": run.meter.usage().to_dict()}
+            for name, clean in redacted_event(event, data):
+                yield ServerSentEvent(event=name, data=clean)
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
-        yield ServerSentEvent(event="error", data={"message": FAILED})
+        yield ServerSentEvent(event="error", data={"message": ASSESSMENT_FAILED})
     finally:
-        record_off_the_event_loop(spending, user.id, control.id, meter.usage())
+        record_off_the_event_loop(spending, user.id, control.id, run.meter.usage())
 
 
-_REMOVED_FROM = {"result": "assessment", "requirement": "requirement", "step": "step"}
-"""What a guard step calls the event something was removed from."""
+@router.get("/assessments")
+def list_assessments(memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
+    """The user's assessments under the compliance profile, newest first: each one's thread id,
+    control, status and verdict. Another user's are never listed."""
+    summaries = [
+        {
+            "thread_id": a.thread_id,
+            "control_id": a.control_id,
+            "status": a.status,
+            "verdict": a.verdict,
+        }
+        for a in memory.assessments(saver)
+    ]
+    return {"assessments": summaries}
 
 
-def _redacted(event: str, data: dict[str, Any]) -> Iterator[ServerSentEvent]:
-    """The event with secrets and personal data removed (security layer 4); a guard step before
-    it says what was removed."""
-    clean, removed = redact_data(data)
-    if removed:
-        text = removal_step(removed, _REMOVED_FROM[event])
-        yield ServerSentEvent(event="step", data={"node": GUARD, "text": text})
-    yield ServerSentEvent(event=event, data=clean)
+@router.get("/assessments/{thread_id}")
+def open_assessment(
+    thread_id: str, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+) -> dict[str, Any]:
+    """One of the user's assessments, proposed or reviewed, redacted as the stream's events are.
+    404 for an unknown thread, another user's included."""
+    try:
+        assessment = load_assessment(thread_id, saver, scope=memory.scope)
+    except UnknownAssessmentError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    decided = items.decided(memory.user_id, memory.profile_id, thread_id)
+    clean, _ = redact_data({"assessment": assessment_data(assessment, decided)})
+    return clean
 
 
 @router.post("/assessments/{thread_id}/review")
 def review_assessment(
-    thread_id: str, decision: Annotated[ReviewDecision, Body()], saver: Checkpointer
+    thread_id: str,
+    decision: Annotated[ReviewDecision, Body()],
+    trail: AuditTrail,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
 ) -> dict[str, Any]:
     """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
     as the stream's events are (its state holds the model's words as written). No model runs.
+    The decision and its audit entries are written together (vouch.audit): when the entries
+    can't be, nothing is, and it's a 503.
 
-    404 for an unknown thread; 409 for one not waiting (reviewed already); 422 for an override
-    naming a requirement the assessment didn't judge, or naming one twice (the decision's shape
-    is checked before, also 422)."""
+    404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
+    already); 422 for an override naming a requirement the assessment didn't judge, or naming
+    one twice (the decision's shape is checked before, also 422)."""
     try:
-        reviewed = resume(thread_id, decision, saver)
+        reviewed = audit.review(
+            trail, thread_id, decision, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
+        )
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except InvalidReviewError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    clean, _ = redact_data({"assessment": reviewed.to_dict()})
+    try:  # the review stands whatever happens here: noting when is a convenience
+        memory.note_worked()
+    except Exception:
+        log.exception("a review's time wasn't kept")
+    clean, _ = redact_data({"assessment": assessment_data(reviewed)})
     return clean
+
+
+@router.post("/assessments/{thread_id}/remediation/{requirement_id}")
+def decide_remediation(
+    thread_id: str,
+    requirement_id: str,
+    request: Annotated[remediation.DecisionRequest, Body()],
+    items: RemediationItems,
+    memory: UserMemory,
+    saver: Checkpointer,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead approves or discards one of an accepted assessment's remediation items (#43),
+    an approval maybe with another owner role or due date: the item as kept, redacted. The
+    decision and its audit entry are kept together, under the user and the compliance profile;
+    when the entry can't be written, neither is (a 503). The same decision again changes
+    nothing and writes no entry.
+
+    404 for an unknown thread (another user's or profile's too) or a requirement with no item;
+    409 for an assessment not accepted, an item decided the other way, or approved with other
+    values (`detail` names the kept ones); 422 for an approval due on a date past everywhere or
+    beyond the horizon, or naming no owner where Vouch suggested none, with the hint in `detail`
+    (the request's shape is checked before, also 422)."""
+    try:
+        kept = remediation.decide(
+            items,
+            saver,
+            thread_id,
+            requirement_id,
+            request,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=memory.profile_id,
+            scope=memory.scope,
+        )
+    except (UnknownAssessmentError, remediation.UnknownItemError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (remediation.NotAcceptedError, remediation.DecidedAlreadyError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (remediation.DueDateError, remediation.OwnerNeededError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    clean, _ = redact_data({"item": kept.shown()})
+    return clean
+
+
+@router.get("/audit-trail")
+def read_audit_trail(
+    trail: AuditTrail,
+    user: CurrentUser,
+    profile: Profile,
+    limit: Annotated[int, Query(ge=1, le=audit.MAX_PAGE)] = audit.DEFAULT_PAGE,
+    before: Annotated[int | None, Query(ge=1)] = None,
+) -> dict[str, Any]:
+    """A page of the user's audit entries under the compliance profile, newest first, redacted
+    as every answer is: at most `limit`, after the entry with id `before`; `next` is the
+    `before` for the page after (null: no more). The trail is append-only: no route changes or
+    removes an entry."""
+    page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
+    clean, _ = redact_data({"entries": [entry.to_dict() for entry in page.entries]})
+    return clean | {"next": page.next}
+
+
+@router.get("/profiles")
+def list_profiles(settings: AppSettings, user: CurrentUser) -> dict[str, Any]:
+    """The compliance profiles the user may switch between (#47): each one's id, company,
+    country and answer language. A profile that can't be loaded is left out (the developer page
+    names it). `default` is the profile a request without X-Vouch-Profile is under; null when
+    that one is left out."""
+    scan = user_profiles(settings, user)
+    listed = [
+        {
+            "id": p.id,
+            "company": p.company,
+            "country": p.country,
+            "answer_language": p.answer_language,
+        }
+        for p in scan.loaded
+    ]
+    default = scan.find(DEFAULT_PROFILE)
+    return {"profiles": listed, "default": default.id if default in scan.loaded else None}
+
+
+_paper_requirements: dict[str, tuple[ComplianceProfile, Any]] = {}
+"""Each profile's requirements, redacted, by profile id, with the profile object they were built
+from (#47: one entry per profile, so a switch neither rebuilds nor mixes them)."""
+
+
+def paper_requirements(profile: ComplianceProfile) -> dict[str, list[PaperRequirement]]:
+    """Each control's requirements under the profile (vouch.dossier.requirements_by_control),
+    redacted as the overview is; built once per loaded profile, as they change only with it."""
+    kept = _paper_requirements.get(profile.id)
+    if kept is None or kept[0] is not profile:
+        built = requirements_by_control(profile, load_base_framework().controls)
+        clean, _ = redact_data(built)
+        kept = _paper_requirements[profile.id] = (profile, clean)
+    return kept[1]
+
+
+@router.get("/overview")
+def dossier_overview(
+    profile: Profile, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+) -> dict[str, Any]:
+    """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
+    from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
+    each control's requirements, for its working paper (#41). Redacted as the stream's events
+    are."""
+    latest = newest_by_control(memory, saver)  # from each control's newest thread
+    counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    discarded = items.discarded(memory.user_id, memory.profile_id, counted)
+    clean, _ = redact_data(overview(profile, load_base_framework().controls, latest, discarded))
+    return clean | {"requirements": paper_requirements(profile)}
+
+
+class ChatRequest(BaseModel):
+    # None: a new chat's greeting (#45), the lead asking where they stand (GREETING_REQUEST).
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
+    page: Page
+    control_id: str | None = None  # the control whose working paper is open
+    # The chat thread to go on with, from an earlier reply's `thread`; None starts a new one.
+    thread_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")] | None = None
+
+
+def page_context(request: Annotated[ChatRequest, Body()], profile: Profile) -> PageContext:
+    """The page the compliance lead is on, its control in the profile's ISA edition (#48); an
+    unknown control is a plain 404 and an unreadable edition a plain 500, before the stream
+    starts."""
+    if request.control_id is None:
+        return PageContext(request.page)
+    try:
+        return PageContext(request.page, profile.isa_control(request.control_id))
+    except UnknownControlError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except BaseFrameworkError:
+        log.exception("the ISA edition for %s could not be read", profile.answer_language)
+        raise HTTPException(status_code=500, detail=CHAT_FAILED) from None
+
+
+def chat_within_spending(
+    context: Annotated[PageContext, Depends(page_context)],
+    user: CurrentUser,
+    spending: AppSpending,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+) -> None:
+    """The spending guard before a chat message, once the page and the model are known (M3,
+    docs/requirements.md 2026-11-03): at the day's limit, the daily limit's 429; a paid model
+    with only memory to count in, a 503. A chat message is not counted as an assessment."""
+    try:
+        spending.check(user.id, paid=chosen is not None)
+    except NoSharedCounter as error:
+        log.error("chat on OpenRouter needs %s for the daily limit", DATABASE_URL_ENV)
+        raise HTTPException(status_code=503, detail=str(error)) from None
+
+
+@router.post(
+    "/chat", response_class=EventSourceResponse, dependencies=[Depends(chat_within_spending)]
+)
+def chat(
+    request: Annotated[ChatRequest, Body()],
+    context: Annotated[PageContext, Depends(page_context)],
+    profile: Profile,
+    models: AppModels,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+    user: CurrentUser,
+    spending: AppSpending,
+    memory: UserMemory,
+    run: Annotated[AssessmentRun, Depends(assessment_run)],
+    running: Running,
+) -> Iterable[ServerSentEvent]:
+    """The chat agent's reply to the compliance lead's message (vouch.chat_agent), knowing the
+    page and control they are on: first a `thread` event, the chat thread's `thread_id` to send
+    with the next message; a `token` event per piece of the reply as it is written, a `step`
+    per step of an assessment it starts, a `suggestion` (the next step) and an `assessment`
+    (one finished) as its tools give them, then `done`; or one `error`, then close. Without a message,
+    the greeting: where the lead stands and the next step. Secrets and personal data are
+    removed, a guard `step` saying what (security layer 4). The model is the assessments'
+    (vouch.model_choice): OpenRouter when a key is set, else the chat's canned fake. Its tokens
+    and cost are metered and kept with the assessments' (vouch.spending), whether the reply
+    ends in `done` or an `error`: the calls were made. An assessment it starts is counted and
+    metered as one from the working paper is."""
+    meter = UsageMeter(chosen)
+    thread_id = request.thread_id or new_thread_id()
+
+    def record(control_id: str, usage: Usage) -> None:
+        record_off_the_event_loop(spending, user.id, control_id, usage)
+
+    yield ServerSentEvent(event="thread", data={"thread_id": thread_id})
+    try:
+        tools = ChatTools(profile, memory, run, spending, running, record)
+        chat = chat_context(
+            models.for_chat(chosen, callbacks=[meter]), tools, chat_prompt(profile, context)
+        )
+        message = request.message or GREETING_REQUEST
+        for event, data in chat_turn(chat_graph(run.saver), chat, message, thread_id, memory.scope):
+            yield ServerSentEvent(event=event, data=data)
+        yield ServerSentEvent(event="done", data={})
+    except Exception:  # any failure reaches the browser as one formal sentence
+        log.exception("the chat could not answer")
+        yield ServerSentEvent(event="error", data={"message": CHAT_FAILED})
+    finally:
+        usage = meter.usage()
+        log.info(
+            "a chat message on %s (%s): %d tokens in, %d tokens out",
+            usage.model,
+            CHAT_PROMPT_VERSION,
+            usage.input_tokens,
+            usage.output_tokens,
+        )
+        record_off_the_event_loop(spending, user.id, CHAT, usage)
 
 
 DEVELOPERS = [Depends(require_developer)]
@@ -486,10 +877,14 @@ def _developer_page(
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
-def developer_settings(models: AppModels, spending: AppSpending) -> dict[str, Any]:
+def developer_settings(
+    models: AppModels, spending: AppSpending, settings: AppSettings, user: CurrentUser
+) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
-    limit, and every assessment's usage totalled."""
-    return _developer_page(models, spending)
+    limit, every assessment's usage totalled, and the compliance profiles left out of the
+    profile switcher because they can't be loaded (#47), each with its problem."""
+    broken = user_profiles(settings, user).broken
+    return _developer_page(models, spending) | {"broken_profiles": [asdict(b) for b in broken]}
 
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)
@@ -529,6 +924,24 @@ def unknown_api_path(path: str) -> None:
     raise HTTPException(status_code=404)
 
 
+def _check_profiles(settings: Settings) -> None:
+    """Stops the app, naming the setting, when the profiles folder can't serve: it isn't a
+    folder, or the default profile in it doesn't load."""
+    folder = settings.profiles_dir
+    if not folder.is_dir():
+        raise SystemExit(
+            f"Vouch cannot start: {PROFILES_DIR_ENV} names no folder ({folder}). Point it at a "
+            "folder of compliance profiles, or unset it for the repository's fixtures/."
+        )
+    default = scan_profiles(folder).find(DEFAULT_PROFILE)
+    if not isinstance(default, ComplianceProfile):
+        problem = default.problem if default else "it isn't there"
+        raise SystemExit(
+            f"Vouch cannot start: the default compliance profile {DEFAULT_PROFILE} in "
+            f"{PROFILES_DIR_ENV} ({folder}) can't be loaded: {problem}."
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """The API under /api; given the built front end (`settings.frontend`), that on every other path.
 
@@ -543,6 +956,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings = load_settings()
         except SettingsError as error:
             raise SystemExit(f"Vouch cannot start: {error}.") from None
+    _check_profiles(settings)
     clerk_mode = settings.auth_mode == "clerk"
     auth = None
     if clerk_mode:
@@ -576,6 +990,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
     app.state.spending = SpendingGuard(spending_store(app.state.database))
+    app.state.running = RunningAssessments()
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

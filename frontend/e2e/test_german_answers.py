@@ -1,9 +1,11 @@
-"""Alpenwerk's working paper shows German verdict words and answer, the interface English (#51).
+"""Alpenwerk's working paper shows German verdict words and answer, the interface English (#48).
 
-The app serves one profile (Nordlicht) until profiles can be switched, so the assessment's
-stream is seeded: an Alpenwerk assessment of 4.1.2, as the API sends it."""
+Alpenwerk is chosen in the top bar's profile menu (#47). The assessment's stream is seeded, an
+Alpenwerk assessment of 4.1.2 as the API sends it, since the server's fake model answers in
+English, which the output check refuses for a German profile (#51)."""
 
 import json
+import re
 
 from playwright.sync_api import Page, Route, expect
 
@@ -38,13 +40,19 @@ def test_the_working_paper_shows_german_verdict_words_for_alpenwerk_in_an_englis
     page: Page, vouch_url
 ):
     page.route("**/api/assessments", seeded_stream)
-    page.goto(vouch_url)
-    card = page.get_by_role("article").filter(has_text=CONTROL)
+    with page.expect_response("**/api/overview"):
+        page.goto(vouch_url)
+    with page.expect_response("**/api/overview"):
+        page.get_by_role("banner").get_by_role("combobox", name="Profile").select_option(
+            label="Alpenwerk Präzision GmbH · Austria · German"
+        )
+    page.get_by_role("link", name=f"Open {CONTROL}").click()
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper).to_contain_text("Answer language: German")
 
     with page.expect_response("**/api/assessments"):
-        card.get_by_role("button", name=f"Assess {CONTROL}").click()
+        paper.get_by_role("button", name=re.compile(rf"^Assess (again )?{re.escape(CONTROL)}$")).click()
 
-    paper = page.get_by_role("region", name="Working paper")
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Teilweise nachgewiesen", exact=True)).to_be_visible()
     expect(result).to_contain_text(GERMAN_ANSWER)

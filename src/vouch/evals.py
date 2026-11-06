@@ -70,7 +70,7 @@ from vouch.faithfulness import (
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import JUDGED_VERDICTS, Assessment, Verdict, assess
 from vouch.isa import Column, UnknownControlError
-from vouch.paths import FIXTURES_DIR, REPO_DIR
+from vouch.paths import REPO_DIR
 from vouch.profile import (
     DEFAULT_PROFILE,
     ComplianceProfile,
@@ -802,9 +802,12 @@ def main(argv: list[str] | None = None) -> int:
     judge_name = _judge_name(args)
     ollama = {"ollama_url": args.ollama_url, "ollama_timeout": args.ollama_timeout}
     try:
-        profile = load_named_profile(args.profile)
-        cases = load_cases(FIXTURES_DIR / profile.id / EXPECTED_ANSWERS, profile.id)
-        settings = load_model_settings() if args.model != FAKE or judge_name else Settings()
+        settings = load_model_settings()  # the key and the API's profiles folder (#47), only
+        folder = settings.profiles_dir
+        profile = load_named_profile(args.profile, folder)
+        cases = load_cases(folder / profile.id / EXPECTED_ANSWERS, profile.id)
+        if args.model == FAKE and not judge_name:
+            settings = Settings(profiles_dir=folder)  # no key for the fake: nothing paid
         if args.model == FAKE:
             models = EvalModels(FAKE, fake_models(FAKE_SCRIPTS_DIR / profile.id))
         else:

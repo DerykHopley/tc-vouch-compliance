@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from vouch import ScriptedChatModel, assess, load_named_profile
+from vouch import ScriptedChatModel, assess, audit, load_named_profile
 from vouch.graph import (
     NO_OWNER,
     NOT_DRAFTED,
@@ -18,10 +18,13 @@ from vouch.graph import (
     RemediationPlan,
     ReviewDecision,
     UnknownAssessmentError,
+    assess_steps,
     build_graph,
+    load_assessment,
     memory_checkpointer,
     resume,
 )
+from vouch.isa import load_isa_control
 
 NORDLICHT = load_named_profile("nordlicht")
 TODAY = date(2026, 11, 4)
@@ -307,6 +310,24 @@ def test_resuming_an_unknown_thread_is_refused():
         )
 
 
+def test_a_run_that_failed_before_the_review_is_unknown_to_open_and_to_review():
+    """#38: it has state in the checkpointer, but no assessment: 404 either way, never 409."""
+    class Unreachable(ScriptedChatModel):
+        def _generate(self, *args, **kwargs):
+            raise RuntimeError("the model is unreachable")
+
+    saver = memory_checkpointer()
+    model = Unreachable(script=script_5_2_9())
+    with pytest.raises(RuntimeError, match="unreachable"):
+        list(assess_steps(load_isa_control("5.2.9"), NORDLICHT, model, saver, thread_id="failed"))
+    assert saver.get_tuple({"configurable": {"thread_id": "failed"}}) is not None
+
+    with pytest.raises(UnknownAssessmentError):
+        load_assessment("failed", saver)
+    with pytest.raises(UnknownAssessmentError):
+        resume("failed", ReviewDecision(decision="accept"), saver)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -458,14 +479,21 @@ class BarrierSaver(InMemorySaver):
 
 
 def test_two_reviews_at_once_resume_once_and_the_other_is_refused():
+    """Through the audit trail, which keeps two reviews of one thread apart (resume doesn't)."""
     saver = BarrierSaver(memory_checkpointer())
     result, _, _ = proposed("4.1.2", mixed_4_1_2(), saver)
+    trail = audit.ProcessTrail(lambda: saver)
     outcomes: dict[str, str] = {}
 
     def review(decision: str) -> None:
         saver.local.armed = True
         try:
-            reviewed = resume(result.thread_id, ReviewDecision(decision=decision), saver)
+            reviewed = audit.review(
+                trail,
+                result.thread_id,
+                ReviewDecision(decision=decision),
+                reviewer=audit.Reviewer("lead", "Lead"),
+            )
             outcomes[decision] = reviewed.review.decision
         except NotWaitingForReviewError:
             outcomes[decision] = "refused"

@@ -226,7 +226,7 @@ def test_an_overlay_requirement_shows_its_source_and_the_isa_credit_covers_isa_t
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+    monkeypatch.setenv("VOUCH_PROFILES_DIR", str(tmp_path))  # the API's setting (#47)
 
     assert cli.main(["--requirements", "1.6.2", "--profile", "alpen"]) == 0
     out = capsys.readouterr().out
@@ -308,7 +308,7 @@ def test_requirements_with_a_german_profile_list_the_german_isa_text(tmp_path, m
         .replace("answer_language: en", "answer_language: de"),
         encoding="utf-8",
     )
-    monkeypatch.setattr(profile, "FIXTURES_DIR", tmp_path)
+    monkeypatch.setenv("VOUCH_PROFILES_DIR", str(tmp_path))  # the CLI's profiles folder (#47)
 
     assert cli.main(["--requirements", "5.1.1", "--profile", "alpen"]) == 0
     out = capsys.readouterr().out

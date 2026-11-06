@@ -76,6 +76,17 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
         )}
         <a href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>
       </section>
+      {settings.broken_profiles.length > 0 && (
+        <section className="sheet notice" aria-label="Profiles left out">
+          <span className="lbl">Profiles left out</span>
+          <p>These compliance profiles could not be loaded, so the profile switcher leaves them out:</p>
+          <ul>
+            {settings.broken_profiles.map((b) => (
+              <li key={b.id}><span className="mono">{b.id}</span>: <span>{b.problem}</span></li>
+            ))}
+          </ul>
+        </section>
+      )}
       {settings.kept_in === 'memory' && (
         <p className="field-note">
           No database is set, so the model choice, the daily limit and counts, and the usage are kept until the server
