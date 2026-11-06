@@ -68,4 +68,16 @@ def test_the_next_turn_goes_on_after_a_refused_answer(client, fake):
 
     assert reply(events) == "And 4.1.2 is next."
     sent = [str(m.content) for m in fake.prompts[-1][1:]]
-    assert not any("Certified, all of it." in m for m in sent)  # the refused answer isn't kept
+    assert sent == ["Where are we?", "Two controls are evidenced so far.", "And next?"]
+
+
+def test_the_turn_after_an_answer_refused_twice_never_reads_it(client, fake):
+    fake.reply = "You passed the audit."
+    thread_id = say(client, "Did we pass?")[0][1]["thread_id"]
+    fake.reply = "4.1.2 is next."
+
+    events = say(client, "And next?", thread_id=thread_id)
+
+    assert reply(events) == "4.1.2 is next."
+    sent = [str(m.content) for m in fake.prompts[-1][1:]]
+    assert sent == ["Did we pass?", "And next?"]  # no refused answer, no refusal, no empty turn
