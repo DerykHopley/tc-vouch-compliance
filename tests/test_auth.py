@@ -23,7 +23,7 @@ from pydantic import SecretStr
 from vouch import api
 from vouch.api import create_app, current_user, require_developer, user_role
 from vouch.auth import ClerkAuth, Role
-from vouch.settings import ClerkKeys, Settings, User
+from vouch.settings import ClerkKeys, Settings, User, load_settings
 
 SECRET = "sk_test_fake-secret"
 ORIGIN = "http://localhost:5173"
@@ -117,12 +117,14 @@ def clerk() -> FakeClerk:
     return FakeClerk({"user_alice": {}, "user_bob": {}, "user_dev": {"role": "developer"}})
 
 
-def clerk_app(clerk: FakeClerk, clock: Callable[[], float] = time.monotonic):
+def clerk_app(
+    clerk: FakeClerk, clock: Callable[[], float] = time.monotonic, keys: ClerkKeys = KEYS
+):
     """The app in clerk mode, its Clerk Backend API the fake, plus routes that show the user,
     their role, and one only a developer may use (as #34's developer page will)."""
-    app = create_app(Settings(auth_mode="clerk", clerk=KEYS))
+    app = create_app(Settings(auth_mode="clerk", clerk=keys))
     http = httpx.Client(transport=httpx.MockTransport(clerk))
-    app.state.auth = ClerkAuth(KEYS, client=http, clock=clock)
+    app.state.auth = ClerkAuth(keys, client=http, clock=clock)
 
     @app.get("/whoami")
     def whoami(user: Annotated[User, Depends(current_user)]) -> dict[str, str]:
@@ -198,6 +200,32 @@ def test_every_route_except_health_refuses_a_request_without_a_valid_token(clerk
 def test_a_token_from_each_authorised_origin_is_accepted(client):
     for origin in KEYS.authorized_parties:
         assert client.get("/whoami", headers=bearer(token(azp=origin))).status_code == 200
+
+
+def test_only_a_token_from_cloud_run_s_fixed_address_is_accepted(clerk):
+    # Cloud Run serves the service at two addresses; the deploy wizard authorizes the fixed one
+    # alone (#178, the owner), so a token from the hashed one is refused like any other origin.
+    fixed = "https://vouch-828715466396.europe-west1.run.app"
+    hashed = "https://vouch-dl425sjspq-ew.a.run.app"
+    settings = load_settings(
+        {
+            "VOUCH_AUTH_MODE": "clerk",
+            "CLERK_SECRET_KEY": SECRET,
+            "CLERK_PUBLISHABLE_KEY": KEYS.publishable_key,
+            "CLERK_JWT_KEY": PUBLIC,
+            "CLERK_AUTHORIZED_PARTIES": fixed,
+        }
+    )
+    assert settings.clerk
+    client = TestClient(clerk_app(clerk, keys=settings.clerk), raise_server_exceptions=False)
+
+    def access(azp: str) -> int:
+        return client.get("/api/access", headers=bearer(token(azp=azp))).status_code
+
+    assert access(fixed) == 200
+    assert access(hashed) == 401
+    assert access("https://vouch-other-ew.a.run.app") == 401
+    assert access(ORIGIN) == 401
 
 
 def test_a_refusal_says_to_sign_in_and_names_bearer(client):
