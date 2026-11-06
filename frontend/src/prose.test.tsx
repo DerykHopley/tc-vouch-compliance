@@ -52,6 +52,54 @@ describe('proseBlocks', () => {
     expect(proseBlocks('Found:\n- \n1. ')).toEqual([{ kind: 'p', lines: [[{ text: 'Found:' }]] }])
   })
 
+  it('leaves a German date at a line start as written, not a list item (ticket 218)', () => {
+    expect(proseBlocks('15. März 2026 wurde der Vorfall nicht gemeldet.')).toEqual([
+      { kind: 'p', lines: [[{ text: '15. März 2026 wurde der Vorfall nicht gemeldet.' }]] },
+    ])
+    expect(proseBlocks('Antwort:\n15. März 2026 wurde der Vorfall gemeldet.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Antwort:' }], [{ text: '15. März 2026 wurde der Vorfall gemeldet.' }]] },
+    ])
+  })
+
+  it('reads a numbered list only after a lead-in ending in a colon, then each next number (ticket 218)', () => {
+    expect(proseBlocks('Schritte:\n1. erstens\n2. zweitens\n4. März')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Schritte:' }]] },
+      { kind: 'ol', items: [[{ text: 'erstens' }], [{ text: 'zweitens' }]] },
+      { kind: 'p', lines: [[{ text: '4. März' }]] },
+    ])
+    expect(proseBlocks('**Next steps:**\n\n1. a\n2. b\nThen:\n1. c')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Next steps:', bold: true }]] },
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]] },
+      { kind: 'p', lines: [[{ text: 'Then:' }]] },
+      { kind: 'ol', items: [[{ text: 'c' }]] },
+    ])
+  })
+
+  it('leaves a numbered line with no lead-in as written, in German and English (ticket 218)', () => {
+    const lines = ['1. Januar 2026 trat die Richtlinie in Kraft.', 'Siehe Nr. 3. Die Frist gilt.',
+      '5. The policy covers suppliers.', 'See Section 5. The policy covers suppliers.']
+    for (const line of lines) {
+      expect(proseBlocks(line)).toEqual([{ kind: 'p', lines: [[{ text: line }]] }])
+    }
+    expect(proseBlocks('The answer.\n1. Januar 2026 trat sie in Kraft.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'The answer.' }], [{ text: '1. Januar 2026 trat sie in Kraft.' }]] },
+    ])
+  })
+
+  it('leaves a star inside a word as written, as German gender stars are (ticket 218)', () => {
+    expect(proseBlocks('Alle Mitarbeiter*innen und Lieferant*innen werden geschult.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Alle Mitarbeiter*innen und Lieferant*innen werden geschult.' }]] },
+    ])
+    for (const line of ['Mitarbeiter *innen und Lieferant*innen', 'Mitarbeiter:innen und Kolleg:innen',
+      'Kolleg*innen sind *wichtig']) {
+      expect(proseBlocks(line)).toEqual([{ kind: 'p', lines: [[{ text: line }]] }])
+    }
+    expect(proseBlocks('Mitarbeiter*innen sind *verpflichtet*, **sofort** zu melden.')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Mitarbeiter*innen sind ' }, { text: 'verpflichtet', italic: true },
+        { text: ', ' }, { text: 'sofort', bold: true }, { text: ' zu melden.' }]] },
+    ])
+  })
+
   it('leaves a dash or a number in running text alone', () => {
     expect(proseBlocks('Keys rotate yearly - not monthly - per 2. rule')).toEqual([
       { kind: 'p', lines: [[{ text: 'Keys rotate yearly - not monthly - per 2. rule' }]] },
