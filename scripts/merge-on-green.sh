@@ -6,7 +6,8 @@
 #
 # Usage: scripts/merge-on-green.sh <pr-number> [--conflicts-ok <spec branch>]...
 #   A PR into main is first checked against every open spec branch (origin/spec/*): if its merge
-#   would make one conflict, the gate refuses and names the branch and files (#235). After the
+#   would make one conflict, the gate refuses and names the branch and files (#235). A conflict
+#   main alone already has with a spec is a warning, not the PR's fault (#265). After the
 #   spec's thread has been told, --conflicts-ok <spec branch> (repeatable) lets it merge anyway.
 # Env:   MERGE_TIMEOUT  how long to wait for checks (default 20m, about twice the fast lane)
 #        SIZE_TARGET    changed lines a PR aims to stay under, lockfiles left out (default 400).
@@ -50,7 +51,7 @@ check_open_specs() {
   [ "$base" = main ] || return 0
   git fetch -q --prune origin  # --prune: a spec branch deleted on GitHub is no longer open
   git cat-file -e "$head^{commit}" 2>/dev/null || git fetch -q origin "pull/$pr/head"
-  local tree result spec name status out allowed ok
+  local tree result spec name allowed ok
   if ! tree=$(git merge-tree --write-tree origin/main "$head"); then
     echo "PR #$pr: it conflicts with main itself; not merging." >&2
     exit 1
@@ -58,23 +59,39 @@ check_open_specs() {
   result=$(GIT_AUTHOR_NAME=merge-on-green GIT_AUTHOR_EMAIL=gate@localhost \
     GIT_COMMITTER_NAME=merge-on-green GIT_COMMITTER_EMAIL=gate@localhost \
     git commit-tree "$tree" -p origin/main -p "$head" -m "merge-on-green: PR #$pr's merge result")
-  local conflicting=() blocked=() files=()
+  local conflicting=() blocked=() warned=() files=() before=() added=() f g after_tree before_tree known
   while read -r spec; do
     [ -n "$spec" ] || continue
     name=${spec#origin/}
-    status=0
-    out=$(git merge-tree --write-tree --name-only "$spec" "$result") || status=$?
-    [ "$status" -eq 0 ] && continue
-    [ "$status" -eq 1 ] || { echo "PR #$pr: git merge-tree failed on $name; not merging." >&2; exit 1; }
-    mapfile -t files < <(printf '%s\n' "$out" | sed -n '2,/^$/p' | sed '/^$/d')
+    merge_conflicts "$spec" "$result" && continue
+    after_tree=$conflict_tree files=("${conflict_files[@]}")
+    added=("${files[@]}")
+    # Only conflicts this PR adds count (#265): ones main alone already has with the spec (after
+    # an earlier --conflicts-ok, or a spec's own change) are warned about, not blamed on the PR.
+    # In a file conflicting both ways, the PR adds a conflict when it has more conflict hunks.
+    if ! merge_conflicts "$spec" origin/main; then
+      before_tree=$conflict_tree before=("${conflict_files[@]}")
+      echo "PR #$pr: warning: main already conflicts with $name in:"
+      printf '  %s\n' "${before[@]}"
+      warned+=("$name")
+      added=()
+      for f in "${files[@]}"; do
+        known=no
+        for g in "${before[@]}"; do [ "$f" = "$g" ] && known=yes; done
+        if [ "$known" = no ] || [ "$(hunks "$after_tree" "$f")" -gt "$(hunks "$before_tree" "$f")" ]; then
+          added+=("$f")
+        fi
+      done
+      [ "${#added[@]}" -gt 0 ] || continue
+    fi
     conflicting+=("$name")
     allowed=no
     for ok in "${conflicts_ok[@]+"${conflicts_ok[@]}"}"; do [ "$ok" = "$name" ] && allowed=yes; done
     if [ "$allowed" = yes ]; then
       echo "PR #$pr: would make $name conflict (allowed by --conflicts-ok) in:"
-      printf '  %s\n' "${files[@]}"
+      printf '  %s\n' "${added[@]}"
     else
-      { echo "PR #$pr: merging it into main would make $name conflict in:"; printf '  %s\n' "${files[@]}"; } >&2
+      { echo "PR #$pr: merging it into main would make $name conflict in:"; printf '  %s\n' "${added[@]}"; } >&2
       blocked+=("$name")
     fi
   done < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/spec/')
@@ -84,9 +101,31 @@ check_open_specs() {
       "scripts/merge-on-green.sh $pr$(printf ' --conflicts-ok %s' "${conflicting[@]}")" >&2
     exit 1
   fi
-  if [ "${#conflicting[@]}" -eq 0 ]; then
+  if [ "${#conflicting[@]}" -eq 0 ] && [ "${#warned[@]}" -gt 0 ]; then
+    echo "PR #$pr: no new conflict with open specs (main's own are warned about above)"
+  elif [ "${#conflicting[@]}" -eq 0 ]; then
     echo "PR #$pr: no conflict with open specs"
   fi
+}
+
+# Test-merge two commits with merge-tree (nothing checked out or written to a branch). Returns 0
+# when clean, 1 on a conflict with conflict_tree (the result, conflict markers in its files) and
+# conflict_files set; any other merge-tree exit stops the gate.
+merge_conflicts() {
+  local out status=0
+  out=$(git merge-tree --write-tree --name-only "$1" "$2") || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "PR #$pr: git merge-tree failed on ${1#origin/} and ${2#origin/}; not merging." >&2
+    exit 1
+  fi
+  conflict_tree=${out%%$'\n'*}
+  mapfile -t conflict_files < <(printf '%s\n' "$out" | sed -n '2,/^$/{/^$/!p}')
+  return "$status"
+}
+
+# The number of conflict hunks in a file of a merge-tree result (0 for a file it holds none in).
+hunks() {
+  { git cat-file -p "$1:$2" 2>/dev/null || true; } | grep -c '^<<<<<<< ' || true
 }
 check_open_specs
 
