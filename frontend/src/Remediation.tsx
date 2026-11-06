@@ -8,6 +8,8 @@ type Props = {
   decidable: boolean
   /** The decision is recorded: the item as kept. */
   onDecided: (item: RemediationItem) => void
+  /** The profile's answer language, the draft's: its text is marked with it (#244). */
+  language?: string
 }
 
 /**
@@ -17,7 +19,7 @@ type Props = {
  * sent at a time, so a double click approves once. Where Vouch suggested no owner, the field starts empty and Approve
  * waits for one. Its fields start from the item: the paper gives it a new key whenever the item changes.
  */
-export default function Remediation({ item, threadId, decidable, onDecided }: Props) {
+export default function Remediation({ item, threadId, decidable, onDecided, language }: Props) {
   const [owner, setOwner] = useState(item.owner_role === NO_OWNER ? '' : item.owner_role)
   const [due, setDue] = useState(item.due_date)
   const [sending, setSending] = useState<ItemDecision['decision'] | null>(null)
@@ -51,7 +53,7 @@ export default function Remediation({ item, threadId, decidable, onDecided }: Pr
         <span className="lbl">Remediation item</span>
         <span className={`tag${item.status === 'approved' ? ' tag-accepted' : ''}`}>{ITEM_WORDS[item.status]}</span>
       </p>
-      <p className="remediation-missing">{item.missing}</p>
+      <p className="remediation-missing" lang={language}>{item.missing}</p>
       {open ? (
         <form className="override" aria-label={`Decide the remediation item of ${req}`}
           onSubmit={(e) => { e.preventDefault(); void decide('approve') }}>

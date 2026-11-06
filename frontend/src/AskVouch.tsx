@@ -6,6 +6,7 @@ import {
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
 import { controlPath, type NextStep } from './overview.ts'
+import StepText from './StepText.tsx'
 
 // Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
 const SHEET_QUERY = '(max-width: 700px)'
@@ -94,8 +95,12 @@ function PaperLinks({ reply, papers, onOpen }: { reply: string; papers: string[]
 
 /** An assessment's step, as the working paper's trace shows it: its node, then what it did; a guard step marked
  * apart (design.md, Agent steps). */
-function StepLine({ step }: { step: Step }) {
-  return <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}><b>{step.node}</b> {step.text}</p>
+function StepLine({ step, language }: { step: Step; language?: string }) {
+  return (
+    <p className={step.node === 'guard' ? 'msg msg-step guard' : 'msg msg-step'}>
+      <b>{step.node}</b> <StepText step={step} language={language} />
+    </p>
+  )
 }
 
 /** The verdict an assessment from the chat ended with (in the profile's words, #200), its review state tag, and
@@ -119,11 +124,13 @@ type Props = {
   onOpen?: (controlId: string) => void
   /** An assessment the chat started has its verdict. */
   onAssessed?: (controlId: string) => void
+  /** The profile's answer language (ISO 639-1), once the overview is read: Vouch's replies are marked with it (#244). */
+  language?: string
 }
 
 /** The "Ask Vouch" button, bottom right, and the chat it opens: on first opening, Vouch's greeting (where the lead
  * stands, and the next step as a chip). */
-export default function AskVouch({ context, onOpen, onAssessed }: Props) {
+export default function AskVouch({ context, onOpen, onAssessed, language }: Props) {
   const [state, setState] = useState<ChatState>('closed')
   const open = state !== 'closed'
   const fabRef = useRef<HTMLButtonElement>(null)
@@ -303,10 +310,10 @@ export default function AskVouch({ context, onOpen, onAssessed }: Props) {
         {messages.map((m, i) => m.from === 'verdict'
           ? <VerdictLine key={i} controlId={m.controlId} verdict={m.verdict} status={m.status} language={m.language}
             onOpen={onOpen} />
-          : m.from === 'step' ? <StepLine key={i} step={m.step} />
+          : m.from === 'step' ? <StepLine key={i} step={m.step} language={language} />
             : m.from === 'vouch' && !m.failed ? (
               <Fragment key={i}>
-                <ChatReply text={m.text} />
+                <ChatReply text={m.text} language={language} />
                 {m.papers && <PaperLinks reply={m.text} papers={m.papers} onOpen={onOpen} />}
               </Fragment>
             )

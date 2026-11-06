@@ -41,7 +41,11 @@ ALPENWERK_ASSESSMENT = {
     "steps": [],
 }
 STEPS = [
-    {"node": "load_control", "text": f"Loaded control {CONTROL}: Inwieweit wird der Zugang …"},
+    {
+        "node": "load_control",
+        "text": f"Loaded control {CONTROL}: Inwieweit wird der Zugang …",
+        "quote": "Inwieweit wird der Zugang …",  # the edition's words, marked German (#244)
+    },
     {"node": "check_answer", "text": "Checked the answer: it claims no audit result."},
 ]
 

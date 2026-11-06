@@ -130,7 +130,7 @@ function Card({ card, onOpen, assessing, language }:
         <b>{card.id}</b>
         {card.status !== 'not-assessed' && <span className={`tag tag-${card.status}`}>{REVIEW_WORDS[card.status]}</span>}
       </a>
-      <div className="control-title">{card.question}</div>
+      <div className="control-title" lang={language}>{card.question}</div>
       <div className="card-meta">
         <span className="mono">{isoLabel(card.iso_27001)}</span>
         <VerdictChip verdict={card.verdict} assessing={assessing} language={language} />
