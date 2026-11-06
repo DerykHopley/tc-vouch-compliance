@@ -3,6 +3,7 @@ cards with their state, the empty state, the API failing, and the page at 400px 
 
 import json
 
+from dossier_cards import card, click_on_card
 from playwright.sync_api import APIRequestContext, Page, expect
 
 CONTROLS = 12
@@ -33,10 +34,6 @@ def tile(page: Page, label: str):
     """The figure on the readiness band's tile with this label."""
     band = page.get_by_role("region", name="Readiness")
     return band.locator(".tile").filter(has=page.get_by_text(label, exact=True)).locator("b")
-
-
-def card(page: Page, control_id: str):
-    return page.get_by_role("article", name=f"Control {control_id}", exact=True)
 
 
 def test_the_band_counts_accepted_verdicts_only_and_each_card_shows_its_state(
@@ -81,11 +78,22 @@ def test_a_click_anywhere_on_a_card_opens_its_working_paper(page: Page, dossier_
     """#231: the card's one link covers the whole card: its question, ISO label and verdict chip."""
     for control_id, part in (("5.2.4", ".control-title"), ("4.1.3", ".card-meta .mono"), ("2.1.3", ".chip")):
         open_dossier(page, dossier_url)
-        # force: the card's link lies over its text by design, so Playwright calls the text covered; the
-        # mouse still clicks at the text's centre, and what is on top there (the link) takes the click.
-        card(page, control_id).locator(part).click(force=True)
+        click_on_card(page, control_id, part)
         expect(page).to_have_url(f"{dossier_url}/controls/{control_id}")
         expect(page.get_by_role("region", name="Working paper")).to_be_visible()
+
+
+def test_a_ctrl_click_on_a_card_opens_its_paper_in_a_new_tab_and_the_dossier_stays(
+    page: Page, dossier_url
+):
+    """#231: the stretched link leaves a modified click to the browser."""
+    open_dossier(page, dossier_url)
+    with page.context.expect_page() as opened:  # the browser's new tab
+        click_on_card(page, "5.2.4", modifiers=["Control"])
+    expect(opened.value).to_have_url(f"{dossier_url}/controls/5.2.4")
+    expect(page).to_have_url(f"{dossier_url}/")
+    expect(page.get_by_role("region", name="Working paper")).to_have_count(0)
+    opened.value.close()
 
 
 def test_with_nothing_assessed_the_empty_state_names_the_first_step(

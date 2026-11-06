@@ -10,11 +10,10 @@ let resizeTo: (width: number) => void = () => {}
 function systemPrefers(dark: boolean | null, width = 1400) {
   let now = width
   const listeners = new Set<() => void>()
-  const setInnerWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { configurable: true, value: w })
-  setInnerWidth(width)
+  // The page's width as layout sees it (no scrollbar in jsdom): what the pinned chat's width is checked against.
+  Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, get: () => now })
   resizeTo = (next) => act(() => {
     now = next
-    setInnerWidth(next)
     for (const listener of listeners) listener()
     window.dispatchEvent(new Event('resize'))
   })
@@ -626,6 +625,17 @@ describe('Ask Vouch', () => {
       render(<App />)
       await pinned()
       expect(handle()!.getAttribute('aria-valuenow')).toBe('480')
+    })
+
+    it('keeps a remembered 640px through a narrow window: shown at 540px at 1100px, 640px again at 1400px', async () => {
+      window.localStorage.setItem('vouch.chatWidth', '640')
+      systemPrefers(null, 1100)
+      render(<App />)
+      await pinned()
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('540')
+      resizeTo(1400)
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('640')
+      expect(width()).toBe('640px')
     })
 
     it('opens at the widest the window allows when the stored width is 5000', async () => {

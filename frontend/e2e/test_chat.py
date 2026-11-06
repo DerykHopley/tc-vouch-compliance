@@ -4,6 +4,7 @@ page, the page it's on, a reply from the fake, and the chat endpoint down.
 On their own server (chat_url), so their requests don't spend another suite's rate budget."""
 
 import pytest
+from dossier_cards import click_on_card
 from playwright.sync_api import Page, expect
 from touch_targets import small_targets
 
@@ -28,13 +29,6 @@ def open_page(page: Page, url: str, width: int, path: str = "/") -> None:
         page.goto(url + path)
 
 
-def click_question(page: Page, control_id: str) -> None:
-    """A click on a Dossier card's question (#231). force: the card's link lies over its text by
-    design; the mouse still clicks at the text's centre, where the link takes the click."""
-    card = page.get_by_role("article", name=f"Control {control_id}", exact=True)
-    card.locator(".control-title").click(force=True)
-
-
 def chat(page: Page):
     return page.locator(CHAT)
 
@@ -46,6 +40,27 @@ def box(page: Page, selector: str) -> dict:
     found = element.bounding_box()
     assert found is not None, selector
     return found
+
+
+def pin(page: Page) -> None:
+    page.get_by_role("button", name="Ask Vouch").click()
+    page.get_by_role("button", name="Make larger").click()
+    page.get_by_role("button", name="Pin beside the page").click()
+    expect(chat(page)).to_have_class("bubble pinned")
+
+
+def drag_handle(page: Page, dx: float) -> None:
+    """Drags the pinned chat's resize handle `dx` px with the mouse (negative: to the left)."""
+    handle = box(page, HANDLE)
+    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + dx, y, steps=8)
+    page.mouse.up()
+
+
+def chat_width(page: Page) -> float:
+    return box(page, CHAT)["width"]
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
@@ -126,7 +141,7 @@ def test_pinned_the_page_and_chat_sit_side_by_side_with_no_sideways_scroll_at_14
         assert side["x"] + side["width"] <= pinned["x"], part
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
     # The page under it still works: a click on a card's question opens its paper beside the chat (#231).
-    click_question(page, "4.1.2")
+    click_on_card(page, "4.1.2")
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
     expect(chat(page)).to_contain_text("on 4.1.2 · Working paper")
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
@@ -185,27 +200,6 @@ def test_at_400px_the_chat_is_a_full_screen_sheet_without_pin_or_enlarge(page: P
     expect(page.get_by_role("button", name="Pin beside the page")).to_have_count(0)
     expect(page.get_by_role("button", name="Send")).to_be_visible()
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
-
-
-def pin(page: Page) -> None:
-    page.get_by_role("button", name="Ask Vouch").click()
-    page.get_by_role("button", name="Make larger").click()
-    page.get_by_role("button", name="Pin beside the page").click()
-    expect(chat(page)).to_have_class("bubble pinned")
-
-
-def drag_handle(page: Page, dx: float) -> None:
-    """Drags the pinned chat's resize handle `dx` px with the mouse (negative: to the left)."""
-    handle = box(page, HANDLE)
-    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
-    page.mouse.move(x, y)
-    page.mouse.down()
-    page.mouse.move(x + dx, y, steps=8)
-    page.mouse.up()
-
-
-def chat_width(page: Page) -> float:
-    return box(page, CHAT)["width"]
 
 
 def test_dragging_the_handle_200px_left_makes_the_pinned_chat_680px_and_the_page_gives_way(
@@ -271,7 +265,7 @@ def test_a_chosen_width_survives_unpin_and_pin_a_working_paper_and_a_reload(
     pin_button.click()
     assert chat_width(page) == 600
 
-    click_question(page, "4.1.2")
+    click_on_card(page, "4.1.2")
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
     assert chat_width(page) == 600
 
@@ -280,6 +274,47 @@ def test_a_chosen_width_survives_unpin_and_pin_a_working_paper_and_a_reload(
     pin(page)
     assert chat_width(page) == 600
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
+
+
+def test_a_drag_shows_as_it_moves_and_is_kept_only_on_release(page: Page, chat_url):
+    open_page(page, chat_url, 1400)
+    pin(page)
+    handle = box(page, HANDLE)
+    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x - 100, y, steps=4)
+    assert chat_width(page) == 580  # shown while dragging
+    assert page.evaluate("() => localStorage.getItem('vouch.chatWidth')") is None
+    page.mouse.up()
+    assert page.evaluate("() => localStorage.getItem('vouch.chatWidth')") == "580"
+    expect(page.locator(HANDLE)).to_have_attribute("aria-valuenow", "580")
+
+
+def test_only_the_primary_button_drags_the_handle(page: Page, chat_url):
+    open_page(page, chat_url, 1400)
+    pin(page)
+    handle = box(page, HANDLE)
+    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down(button="right")
+    page.mouse.move(x - 100, y, steps=4)
+    page.mouse.up(button="right")
+    assert chat_width(page) == 480
+
+
+def test_the_page_beside_the_pinned_chat_keeps_its_pointer_up_to_the_chats_edge(
+    page: Page, chat_url
+):
+    open_page(page, chat_url, 1400)
+    pin(page)
+    edge = box(page, CHAT)["x"]
+    at = page.evaluate(
+        """(x) => { const el = document.elementFromPoint(x, 400)
+          return [el.closest('aside') !== null, getComputedStyle(el).cursor] }""",
+        edge - 2,
+    )
+    assert at[0] is False and at[1] != "col-resize"
 
 
 def test_the_header_names_the_page_and_the_control_on_the_working_paper(page: Page, chat_url):
