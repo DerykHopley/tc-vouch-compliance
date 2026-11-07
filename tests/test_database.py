@@ -163,8 +163,6 @@ def test_the_checkout_check_waits_no_longer_than_its_bound(make_db):
     seen: list[float] = []
 
     class Checked(FakeConnection):
-        wait_timeout = database.WAIT_TIMEOUT_SECONDS
-
         def execute(self, query: str, *args: Any) -> FakeConnection:
             seen.append(self.wait_timeout)
             return self
@@ -304,8 +302,6 @@ def test_health_s_setup_check_waits_no_longer_than_health_s_bound(make_db):
     seen: list[float] = []
 
     class Timed(FakeConnection):
-        wait_timeout = database.WAIT_TIMEOUT_SECONDS
-
         def execute(self, query: str, *args: Any) -> FakeConnection:
             if "to_regclass" in query:
                 seen.append(self.wait_timeout)

@@ -17,9 +17,9 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from starlette.routing import Route
 
 from vouch import api
 from vouch.api import create_app, current_user, require_developer, user_role
@@ -171,10 +171,14 @@ def api_routes(app) -> set[tuple[str, str]]:
     """Every method and path the app serves under /api, a path parameter filled in: those in its
     OpenAPI map, and the API routers' own, which include those left out of the map."""
     mapped = {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
+    routes = [*api.public.routes, *api.router.routes]
+    # Every one is a Route (APIRoute among them); anything else, a Mount, has no methods to
+    # count, so it fails here rather than slip past the check.
+    assert all(isinstance(route, Route) for route in routes), routes
     routed = {
         (method, route.path)
-        for route in [*api.public.routes, *api.router.routes]
-        if isinstance(route, APIRoute)  # every one is: a Mount here would have no methods
+        for route in routes
+        if isinstance(route, Route)
         for method in (route.methods or set()) - {"HEAD"}
     }
     return {(m, path.replace("{path:path}", "anything")) for m, path in mapped | routed}
@@ -606,7 +610,7 @@ def gated_app(
     return TestClient(app, raise_server_exceptions=False)
 
 
-def ask(client: TestClient, user: str) -> Any:  # the test client's own response type
+def ask(client: TestClient, user: str) -> Any:  # the test client's httpx2, not httpx: two types
     return client.get("/api/access", headers=bearer(token(user)))
 
 
