@@ -21,12 +21,15 @@ READY = "ready-for-agent"
 SHOWN = {"fail", "labels"}  # what the standard requires; notes and staleness aren't for this
 
 
-def linter():
-    path = Path(__file__).with_name("ticket-lint.py")
-    spec = importlib.util.spec_from_file_location("ticket_lint", path)
+def _load(file: str, name: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(file))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def linter():
+    return _load("ticket-lint.py", "ticket_lint")
 
 
 def gh(*args: str) -> str:
@@ -56,7 +59,13 @@ def findings(issue: dict, comments: list[dict]) -> list[str]:
         if re.match(r"\s*[-*]\s+\[[ xX]\]", line)
         and not re.search(r"\bcheck:", line, re.IGNORECASE)
     ]
-    return found + [f"no **Check:** in: {line}" for line in unchecked]
+    # A machine-local path reveals a username and no reader can open it (#340).
+    local = _load("local-paths.py", "local_paths").local_paths_in(lint.contract(checked))
+    return (
+        found
+        + [f"no **Check:** in: {line}" for line in unchecked]
+        + [f"a machine-local path: `{path}`; name the file by its file name" for path in local]
+    )
 
 
 def main() -> int:
