@@ -546,7 +546,7 @@ def test_explaining_a_control_on_a_german_profile_reads_the_german_control(app, 
         events = say(client, "Explain 1.6.2")
 
     text = reply(events)
-    assert f"Control 1.6.2, “{GERMAN_1_6_2}”" in text
+    assert f"Kontrolle 1.6.2, “{GERMAN_1_6_2}”" in text  # the fake answers in German (#330)
     assert GERMAN_1_6_2_M1 in text
 
 
@@ -647,8 +647,9 @@ def test_assessed_controls_reads_only_the_requests_profile(app, lead, client, fa
     with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as alpenwerk:
         answer = reply(say(alpenwerk, "Which controls have documented evidence only?"))
 
-    assert "- 5.1.2: not assessed yet." in answer
-    assert "Documented evidence only: none." in answer
+    # The fake answers Alpenwerk in German (#330).
+    assert "- 5.1.2: noch nicht bewertet." in answer
+    assert "Nur dokumentierte Nachweise: keine." in answer
 
 
 def test_explain_control_says_why_partly_evidenced_rows_roll_up_to_not_evidenced():
