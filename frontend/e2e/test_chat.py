@@ -1,7 +1,9 @@
 """Vouch's floating chat (#44): its four states and the sheet, the keyboard, pinned beside the
-page, the page it's on, a reply from the fake, and the chat endpoint down.
+page, the page it's on, a reply from the fake, a reply's numbered lists, and the chat endpoint down.
 
 On their own server (chat_url), so their requests don't spend another suite's rate budget."""
+
+import json
 
 import pytest
 from dossier_cards import click_on_card
@@ -371,6 +373,44 @@ def test_a_message_gets_vouchs_formal_reply(page: Page, chat_url):
     expect(log).to_contain_text("What does TISAX ask of us?")
     expect(log).to_contain_text("Thank you for your question.")
     expect(field).to_have_value("")
+
+
+# Two list shapes a model writes (#223): numbers across blank lines, and an item's indented sub-bullets.
+LISTS = {
+    "blank lines": "Schritte:\n1. a\n\n2. b\n\n3. c",
+    "sub-bullets": "Schritte:\n1. Erfassen\n   - Datum\n2. Bewerten",
+}
+
+
+def test_a_numbered_list_stays_one_list_across_blank_lines_and_sub_bullets(page: Page, chat_url):
+    """Each message is answered with the list shape it names, as a routed reply: no model call."""
+
+    def answer(route):
+        body = route.request.post_data_json
+        text = LISTS.get(body.get("message", ""), "Hello.")
+        events = [("thread", {"thread_id": "t-223"}), ("token", {"text": text}), ("done", {})]
+        sse = "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
+        route.fulfill(status=200, content_type="text/event-stream", body=sse)
+
+    page.route("**/api/chat", answer)
+    open_page(page, chat_url, 1400)
+    page.get_by_role("button", name="Ask Vouch").click()
+    field = page.get_by_role("textbox", name="Message to Vouch")
+    replies = chat(page).get_by_role("log").locator(".msg")
+
+    for message in LISTS:
+        field.fill(message)
+        with page.expect_response("**/api/chat"):
+            page.get_by_role("button", name="Send").click()
+        reply = replies.filter(has_text="Schritte:").last
+        expect(reply.locator("ol")).to_have_count(1)
+        if message == "blank lines":
+            expect(reply.locator("ol > li")).to_have_text(["a", "b", "c"])
+        else:
+            items = reply.locator("ol > li")
+            expect(items).to_have_count(2)
+            expect(items.first.locator("ul.prose-list > li")).to_have_text(["Datum"])
+            expect(items.last).to_have_text("Bewerten")
 
 
 def test_with_the_chat_endpoint_down_a_message_shows_and_the_typed_text_stays(page: Page, chat_url):
