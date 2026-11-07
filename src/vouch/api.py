@@ -136,6 +136,7 @@ UNKNOWN_PROFILE = "There is no such compliance profile."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
 EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
+RUNNING_NO_FRESH_START = "An assessment is running: start afresh once it has finished."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -989,6 +990,23 @@ def new_conversation(memory: UserMemory) -> dict[str, Any]:
     except Exception:  # the chat clears its own view all the same
         log.exception("the new conversation could not be noted")
     return {"thread_id": None}
+
+
+@router.post("/progress/fresh-start")
+def fresh_start(memory: UserMemory, running: Running) -> dict[str, Any]:
+    """Start the lead's progress under the profile afresh (#285, vouch.memory's
+    `Memory.start_afresh`): only what they start from now on is listed and counted, and the chat
+    opens a new conversation. Nothing is deleted, and the audit trail keeps every entry. No model
+    runs and nothing counts against the daily limit. While one of the lead's assessments runs
+    under the profile, a 409 with nothing written; the lead's scope is held meanwhile, so none
+    starts mid-way. A store that can't be written is a 503 (DatabaseUnavailable)."""
+    if not running.try_hold(memory.scope):
+        raise HTTPException(status_code=409, detail=RUNNING_NO_FRESH_START)
+    try:
+        at = memory.start_afresh()
+    finally:
+        running.release(memory.scope)
+    return {"fresh_start": at.isoformat()}
 
 
 @router.post(

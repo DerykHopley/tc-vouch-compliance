@@ -29,6 +29,9 @@ from vouch.graph import Assessment, Status, assessment_loader, memory_checkpoint
 
 ASSESSMENTS = "assessments"
 LAST_REVIEW = "last-review"
+FRESH_START = "fresh-start"
+"""When the lead last started this profile afresh (#285): entries started before it aren't listed,
+and nothing is deleted, so removing the note brings the old progress back."""
 CHAT_LINES = "chat"
 """The chat's kept conversations (#251): each turn's lines, as the chat showed them."""
 CURRENT_CHAT = "current-chat"
@@ -142,23 +145,43 @@ class Memory:
                 break
         return items
 
+    def start_afresh(self) -> datetime:
+        """Start this profile's progress afresh (#285): note the time, so only entries started from
+        it on are listed, and open a new conversation, the old one kept. Nothing is deleted. A
+        second fresh start replaces the time. The time noted. Raises DatabaseUnavailable
+        (Postgres)."""
+        at = self._clock()
+        self.store.put(self._namespace(), FRESH_START, {"at": at.isoformat()})
+        self.set_current_chat(None)
+        return at
+
+    def fresh_start(self) -> datetime | None:
+        """When the lead last started this profile afresh; None if never."""
+        item = self.store.get(self._namespace(), FRESH_START)
+        return datetime.fromisoformat(item.value["at"]) if item is not None else None
+
     def note_worked(self) -> None:
         """Note that the user reviewed an assessment under this profile now."""
         self.store.put(self._namespace(), LAST_REVIEW, {"at": self._clock().isoformat()})
 
     def last_worked(self) -> datetime | None:
         """When the user last started or reviewed an assessment under this profile; None if
-        never."""
+        never, or not since a fresh start."""
+        fresh = self.fresh_start()
         entries = self.entries()
         review = self.store.get(self._namespace(), LAST_REVIEW)
         times = [entries[0].started_at] if entries else []
         if review is not None:
-            times.append(datetime.fromisoformat(review.value["at"]))
+            reviewed = datetime.fromisoformat(review.value["at"])
+            if fresh is None or reviewed >= fresh:
+                times.append(reviewed)
         return max(times, default=None)
 
     def entries(self) -> list[Entry]:
-        """The index, newest first, at most MAX_ASSESSMENTS. Every page is read first: the
-        stores return entries in different orders (Postgres's by last write, memory's by first)."""
+        """The index, newest first, at most MAX_ASSESSMENTS, leaving out every entry started
+        before the fresh start (#285). Every page is read first: the stores return entries in
+        different orders (Postgres's by last write, memory's by first)."""
+        since = self.fresh_start()
         items = self._all(self._namespace(ASSESSMENTS))
         entries = [
             Entry(
@@ -168,6 +191,8 @@ class Memory:
             )
             for item in items
         ]
+        if since is not None:
+            entries = [entry for entry in entries if entry.started_at >= since]
         entries.sort(key=lambda entry: entry.started_at, reverse=True)
         return entries[:MAX_ASSESSMENTS]
 
