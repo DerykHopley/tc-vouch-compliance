@@ -6,6 +6,7 @@ import { type ControlCard, controlPath, isoLabel, type Overview } from './overvi
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
+import { setUnsaved } from './leaving.ts'
 import Prose from './Prose.tsx'
 import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
@@ -106,6 +107,9 @@ export default function WorkingPaper(props: PaperProps) {
     setEditing(null)
     setReads((n) => n + 1)
   }
+  // Leaving asks first while overrides are saved and not recorded (#182); none once the paper is gone.
+  useEffect(() => setUnsaved(overrides.length), [overrides.length])
+  useEffect(() => () => setUnsaved(0), [])
   const run = overridden(props.run, overrides)
   // Before an assessment the paper lists the profile's requirements; after one, the assessment's own.
   const judged = run.status === 'done' ? run.assessment.requirements : undefined
