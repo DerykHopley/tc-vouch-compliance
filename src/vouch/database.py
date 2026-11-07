@@ -628,19 +628,6 @@ class Database:
             {"user_id": user_id, "profile_id": profile_id, "thread_ids": thread_ids},
         )
 
-    def discarded_remediation(
-        self, user_id: str, profile_id: str, thread_ids: list[str]
-    ) -> list[dict[str, Any]]:
-        """The thread and requirement ids of the user's discarded remediation items of those
-        threads under the profile; none before vouch-db-setup made the table. Raises
-        DatabaseUnavailable."""
-        return self._read_remediation(
-            f"SELECT thread_id, requirement_id FROM {REMEDIATION_TABLE} "
-            "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
-            "AND status = 'discarded' AND thread_id = ANY(%(thread_ids)s)",
-            {"user_id": user_id, "profile_id": profile_id, "thread_ids": thread_ids},
-        )
-
     def _read_remediation(self, query: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:
         """Rows of REMEDIATION_TABLE; none when it isn't there yet (logged: run vouch-db-setup)."""
         with self.connection() as conn:

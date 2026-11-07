@@ -86,6 +86,7 @@ def test_with_nothing_assessed_every_control_is_open_and_the_first_is_the_next_s
         },
         "open": 12,
         "remediation_items": 0,
+        "remediation_approved": 0,
     }
     assert shown["by_status"] == {
         "not-assessed": 12,
@@ -126,6 +127,7 @@ def test_readiness_counts_accepted_verdicts_only():
         },
         "open": 7,
         "remediation_items": 5,  # the accepted controls' items; proposed and rejected ones wait
+        "remediation_approved": 0,
     }
 
 
@@ -145,6 +147,23 @@ def test_a_discarded_remediation_item_is_not_open():
     ]
 
     assert readiness["remediation_items"] == 2
+
+
+def test_the_approved_items_are_counted_beside_all_the_open_ones():
+    """#310: the band says how many of its items are approved, as the report counts only those."""
+    latest = {
+        "1.6.2": replace(
+            seeded("1.6.2", "partly-evidenced", "accepted", remediation=2), thread_id="t"
+        ),
+        "4.1.3": replace(
+            seeded("4.1.3", "not-evidenced", "rejected", remediation=1), thread_id="u"
+        ),
+    }
+    approved = {("t", "M0"), ("u", "M0")}  # u's control isn't accepted: its item doesn't count
+
+    readiness = overview(NORDLICHT, CONTROLS, latest, approved=approved)["readiness"]
+
+    assert (readiness["remediation_items"], readiness["remediation_approved"]) == (2, 1)
 
 
 def test_the_status_counts_cover_every_listed_control():

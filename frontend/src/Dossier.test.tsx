@@ -19,7 +19,7 @@ function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verd
     requirements: {},
     readiness: { controls: 12, accepted: 2,
       by_verdict: { evidenced: 1, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 10,
-      remediation_items: 3 },
+      remediation_items: 3, remediation_approved: 0 },
     by_status: { 'not-assessed': 12 - Object.keys(cards).length, 'waiting-for-review': 1, accepted: 2, rejected: 0 },
     next_step: { control_id: assessed ? '4.1.2' : '1.1.1', action: assessed ? 'review' : 'assess' },
     controls,
@@ -56,6 +56,17 @@ describe('the Dossier overview', () => {
     expect(tile('remediation items')).toBe('3')
     expect(screen.getByRole('heading', { level: 1 }).parentElement!.textContent).toContain('2 of 12 controls accepted.')
     expect(screen.getByRole('heading', { level: 1 }).parentElement!.textContent).toContain('1 verdict waiting for your review')
+  })
+
+  it.each([
+    [1, 'remediation items (1 approved)'], // some approved: said, as the report counts only those (#310)
+    [0, 'remediation items'], // none: no "(0 approved)"
+    [3, 'remediation items'], // all: no "(3 approved)" either
+  ])('labels the remediation count with %i approved as "%s"', (approved, label) => {
+    const overview = seeded()
+    overview.readiness = { ...overview.readiness, remediation_items: 3, remediation_approved: approved }
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    expect(tile(label)).toBe('3')
   })
 
   it('names the controls by their count, from the data', () => {

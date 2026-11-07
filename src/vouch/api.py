@@ -790,8 +790,10 @@ def dossier_overview(
     each control's requirements, for its working paper (#41); its ISA text in the profile's
     edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
     controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
-    discarded = items.discarded(memory.user_id, memory.profile_id, counted)
-    clean, _ = redact_data(overview(profile, controls, latest, discarded))
+    decided = items.decided(memory.user_id, memory.profile_id, counted)
+    discarded = {key for key, item in decided.items() if item.status == "discarded"}
+    approved = {key for key, item in decided.items() if item.status == "approved"}
+    clean, _ = redact_data(overview(profile, controls, latest, discarded, approved))
     return clean | {"requirements": paper_requirements(profile, controls)}
 
 
