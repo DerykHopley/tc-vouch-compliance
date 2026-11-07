@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The Postgres tests locally (#245), against a throwaway postgres:16 container on a free port,
 # removed on exit (also on Ctrl-C or a failure). Never port 5432: the owner's Cloud SQL proxy
-# uses it. Without arguments, the files CI's database job runs, read from .github/workflows/ci.yml
+# uses it. Without arguments, the tests CI's database job runs (the postgres marker, #259),
 # so the two can't drift; with arguments, those go to pytest instead.
 #
-#   scripts/test-db.sh                          # CI's database files
+#   scripts/test-db.sh                          # CI's database tests: -m postgres
 #   scripts/test-db.sh tests/test_database.py   # these, with any pytest options
 #   CONTAINER=podman scripts/test-db.sh         # the container runtime (default: docker, else podman)
 set -euo pipefail
@@ -41,13 +41,9 @@ done
 
 strict=no
 if [ $# -eq 0 ]; then
-  # Every tests/*.py the database job's pytest lines run (its block in ci.yml, up to the next
-  # job), and as in CI a skipped test fails the run: without the database a test skips, which
-  # proves nothing.
-  mapfile -t files < <(awk '/^  database:/ { in_job = 1; next } /^  [a-z]/ { in_job = 0 }
-    in_job && /uv run pytest/' "$ROOT/.github/workflows/ci.yml" | grep -oE 'tests/[^ ]+\.py')
-  [ "${#files[@]}" -gt 0 ] || { echo "test-db: no database test files found in ci.yml's database job." >&2; exit 1; }
-  set -- "${files[@]}" -rs
+  # The tests CI's database job runs: every one carrying the postgres marker (#259), and as in
+  # CI a skipped test fails the run: without the database a test skips, which proves nothing.
+  set -- -m postgres -rs
   strict=yes
 fi
 

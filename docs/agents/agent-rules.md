@@ -10,7 +10,7 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 
 ## Commands
 
-- **Run the Postgres tests with `scripts/test-db.sh`** (CI's database files, or the ones you name): a throwaway postgres:16 container on a free port, never 5432 (the owner's Cloud SQL proxy), removed afterwards. Without it they skip, and a skip proves nothing. From #245.
+- **Run the Postgres tests with `scripts/test-db.sh`** (CI's Postgres-backed tests, the `postgres` marker, or the ones you name): a throwaway postgres:16 container on a free port, never 5432 (the owner's Cloud SQL proxy), removed afterwards. Without it they skip, and a skip proves nothing. From #245.
 
 - **Take an exit code before any pipe.** In `cmd | tail; echo $?`, `$?` is `tail`'s code, which is 0 even when `cmd` failed. Run the command on its own with its output in a scratch file (`cmd > "$SCRATCH/out.txt" 2>&1; echo rc=$?`), or read `${PIPESTATUS[0]}` straight after the pipe. From #213, where #53's verifier reported exit 0 for an eval run that exited 3.
 

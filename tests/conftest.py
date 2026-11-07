@@ -29,3 +29,27 @@ def _deepeval_switches_stay_in_their_test(monkeypatch):
     it; each test starts without them and ends with them gone again."""
     for name in DEEPEVAL_SWITCHES:
         monkeypatch.delenv(name, raising=False)
+
+
+POSTGRES_FIXTURES = {"empty_database", "postgres"}
+"""The fixtures that give a test a Postgres database (test_database, test_memory)."""
+
+
+def _uses_postgres(item: pytest.Item) -> bool:
+    """Whether the test runs against Postgres: it asks for a Postgres fixture, or it is a
+    parameter marked needs_postgres (database_url's and any_store's "postgres", which reach the
+    fixture only when they run)."""
+    if POSTGRES_FIXTURES & set(getattr(item, "fixturenames", ())):
+        return True
+    return any(
+        "VOUCH_TEST_DATABASE_URL" in str(mark.kwargs.get("reason", ""))
+        for mark in item.iter_markers("skipif")
+    )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Every Postgres-backed test carries the `postgres` marker (#259): CI's database job runs
+    `pytest -m postgres`, so a new one is picked up with no list to keep."""
+    for item in items:
+        if _uses_postgres(item):
+            item.add_marker(pytest.mark.postgres)
