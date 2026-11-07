@@ -9,6 +9,7 @@ import asyncio
 import json
 import threading
 import time
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -302,7 +303,9 @@ class CostingChat(FakeChat):
     """OpenRouter reporting each call's cost in its usage, as its usage accounting does; the
     `unreported` calls (by number, from 1) come without it, the `bare` ones without any usage."""
 
-    def __init__(self, unreported: set[int] = frozenset(), bare: set[int] = frozenset()) -> None:
+    def __init__(
+        self, unreported: Collection[int] = frozenset(), bare: Collection[int] = frozenset()
+    ) -> None:
         super().__init__()
         self.unreported = unreported
         self.bare = bare
@@ -375,7 +378,7 @@ def llm_result(input_tokens: int, output_tokens: int, cost: float | None = None)
     meta = {"input_tokens": input_tokens, "output_tokens": output_tokens}
     meta["total_tokens"] = input_tokens + output_tokens
     message = AIMessage("", usage_metadata=meta)
-    usage = {"prompt_tokens": input_tokens, "completion_tokens": output_tokens}
+    usage: dict[str, float] = {"prompt_tokens": input_tokens, "completion_tokens": output_tokens}
     if cost is not None:
         usage["cost"] = cost
     return LLMResult(

@@ -41,7 +41,10 @@ MALFORMED_URL = "postgresql://vouch:s3cr%zzet@/vouch?host=/nonexistent-33"
 
 
 class FakeConnection:
-    """What the pool touches on a connection: enough to pool it without a server."""
+    """What the pool touches on a connection: enough to pool it without a server. It has the
+    wait bound BoundedConnection has (database.WaitBounded): mypy says so if it goes (#129)."""
+
+    wait_timeout: float = database.WAIT_TIMEOUT_SECONDS
 
     def __init__(self, missing: int = 0) -> None:
         self.autocommit = True
@@ -79,7 +82,7 @@ class FlakyConnect:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.made: list[FakeConnection] = []
 
-    def __call__(self, url: str, **kwargs: Any) -> Any:
+    def __call__(self, url: str, **kwargs: Any) -> database.WaitBounded:
         self.calls.append((url, kwargs))
         if len(self.calls) <= self.failures:
             raise psycopg.OperationalError(self.message)
@@ -162,8 +165,9 @@ def test_the_checkout_check_waits_no_longer_than_its_bound(make_db):
     class Checked(FakeConnection):
         wait_timeout = database.WAIT_TIMEOUT_SECONDS
 
-        def execute(self, query: str, *args: Any) -> None:
+        def execute(self, query: str, *args: Any) -> FakeConnection:
             seen.append(self.wait_timeout)
+            return self
 
     db = make_db(connect=lambda url, **kwargs: Checked())
 

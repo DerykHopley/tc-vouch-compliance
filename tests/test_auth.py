@@ -17,6 +17,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -89,7 +90,7 @@ class FakeClerk:
         if request.method != "GET" or user_id not in self.metadata:
             return httpx.Response(404, json={"errors": [{"code": "resource_not_found"}]})
         # The fields the app reads, and one it must not: public metadata is the browser's.
-        no_name = {
+        no_name: dict[str, Any] = {
             "first_name": None,
             "last_name": None,
             "primary_email_address_id": None,
@@ -158,7 +159,7 @@ BAD_TOKENS = {
     "not-a-user-id": lambda: token(sub="../etc"),
     "no-subject": lambda: token(sub=""),
     "machine-token": lambda: "ak_" + token(),  # an API key: never a user's session
-    "unsigned": lambda: jwt.encode({"sub": "user_alice", "exp": time.time() + 60}, None, "none"),
+    "unsigned": lambda: jwt.encode({"sub": "user_alice", "exp": time.time() + 60}, "", "none"),
     "other-origin": lambda: token(azp="https://evil.example"),
     "no-origin": lambda: token(azp=None),
     "jwt-template-no-sid": lambda: token(sid=None),
@@ -173,7 +174,8 @@ def api_routes(app) -> set[tuple[str, str]]:
     routed = {
         (method, route.path)
         for route in [*api.public.routes, *api.router.routes]
-        for method in route.methods - {"HEAD"}
+        if isinstance(route, APIRoute)  # every one is: a Mount here would have no methods
+        for method in (route.methods or set()) - {"HEAD"}
     }
     return {(m, path.replace("{path:path}", "anything")) for m, path in mapped | routed}
 
@@ -604,7 +606,7 @@ def gated_app(
     return TestClient(app, raise_server_exceptions=False)
 
 
-def ask(client: TestClient, user: str) -> httpx.Response:
+def ask(client: TestClient, user: str) -> Any:  # the test client's own response type
     return client.get("/api/access", headers=bearer(token(user)))
 
 

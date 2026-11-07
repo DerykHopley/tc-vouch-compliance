@@ -1,7 +1,7 @@
 """Compliance profiles: YAML files validated on load, deciding which requirements apply."""
 
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 import yaml
@@ -133,8 +133,9 @@ def test_an_overlay_adds_its_requirement_to_the_named_control(tmp_path):
     assert "O1" not in ids(other)
 
 
-def with_overlay_requirement(**changes) -> list[dict]:
-    return [{**OVERLAY, "requirements": [{**OVERLAY["requirements"][0], **changes}]}]
+def with_overlay_requirement(**changes: Any) -> list[dict[str, Any]]:
+    requirements: Any = OVERLAY["requirements"]
+    return [{**OVERLAY, "requirements": [{**requirements[0], **changes}]}]
 
 
 NA_M4 = {"control": "5.2.4", "requirement": "M4", "reason": "x"}

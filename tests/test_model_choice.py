@@ -79,7 +79,10 @@ class FakeChat:
         body = json.loads(request.content)
         answered = any(m.get("role") == "tool" for m in body["messages"])
         if self.text_only:
-            message = {"role": "assistant", "content": "Let me think about that some more."}
+            message: dict[str, Any] = {
+                "role": "assistant",
+                "content": "Let me think about that some more.",
+            }
         elif self.first_tool and "response_format" not in body and not answered:
             args = json.dumps({"path": "/etc/passwd"})
             call = {
@@ -89,14 +92,14 @@ class FakeChat:
             }
             message = {"role": "assistant", "content": None, "tool_calls": [call]}
         elif "response_format" in body:
-            judged = {"requirements": []}  # nothing judged, as a judge that skips them all
+            judged: dict[str, Any] = {"requirements": []}  # nothing judged, a judge skipping all
             message = {"role": "assistant", "content": json.dumps(judged)}
         else:
-            args = {"answer": "Laptops use full-disk encryption.", "cited": []}
+            answer = {"answer": "Laptops use full-disk encryption.", "cited": []}
             call = {
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "submit_answer", "arguments": json.dumps(args)},
+                "function": {"name": "submit_answer", "arguments": json.dumps(answer)},
             }
             message = {"role": "assistant", "content": None, "tool_calls": [call]}
         return httpx2.Response(200, json=completion(body["model"], message))

@@ -72,7 +72,7 @@ def tool_replies(model: RecordingModel) -> list[str]:
     for messages in model.received:
         for m in messages:
             if isinstance(m, ToolMessage):
-                replies[m.tool_call_id] = m.content
+                replies[m.tool_call_id] = str(m.content)
     return list(replies.values())
 
 

@@ -193,7 +193,7 @@ class ClerkAuth:
             # A pending session (`sts`, with Organizations required) hasn't finished signing in.
             and claims.get("sts") != "pending"
         )
-        if not usable:
+        if not usable or not isinstance(user_id, str):  # the second, for the type checker
             log.info("signed out: not a usable session token")
             raise SignedOut()
         return User(id=user_id)
