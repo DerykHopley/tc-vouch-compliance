@@ -22,4 +22,6 @@ if [ -d frontend/src ]; then
   python3 -I -B scripts/token-roles.py frontend/src
 else echo "pre-push: no frontend/src yet, design-lint skipped"; fi
 # No machine-local path (a home folder, Claude's /tmp scratch) in the commits being pushed (#340).
-printf '%s\n' "$refs" | python3 -I -B scripts/local-paths.py --pre-push
+if [ -f scripts/local-paths.py ]; then
+  printf '%s\n' "$refs" | python3 -I -B scripts/local-paths.py --pre-push
+fi
