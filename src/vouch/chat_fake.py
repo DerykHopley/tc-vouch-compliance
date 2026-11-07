@@ -31,6 +31,7 @@ from pydantic import ConfigDict, Field
 from vouch.chat_agent import (
     ANSWER_REFUSED,
     ASSESSED_CONTROLS,
+    CITE_THEM,
     EXPLAIN_CONTROL,
     GREETING_REQUEST,
     PROGRESS,
@@ -82,7 +83,10 @@ def _cited(tool_words: str) -> str:
             for f in json.loads(found.group(1))
         )
 
-    return _FINDINGS_DATA.sub(findings, _EVIDENCE_DATA.sub(cite, tool_words))
+    words = tool_words.replace(
+        f" {CITE_THEM}", ""
+    )  # the model's instruction, not the lead's (#292)
+    return _FINDINGS_DATA.sub(findings, _EVIDENCE_DATA.sub(cite, words))
 
 
 def _page(messages: list[BaseMessage]) -> str | None:
