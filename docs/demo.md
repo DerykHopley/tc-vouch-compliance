@@ -22,9 +22,13 @@ what to fix. Vouch drafts; the lead decides.
 - Sign in to the live app, <https://vouch-828715466396.europe-west1.run.app>, and open it once a
   minute before you start, so Cloud Run is awake.
 - Choose **Nordlicht Komponenten GmbH** in the profile switcher in the top bar.
-- Earlier rehearsals' decisions stay: there is no reset. The script works from whatever standing
-  you have. A new assessment of a control makes it "Proposed" again, so it no longer counts until
-  you review it.
+- Start Nordlicht afresh before each run: in the user menu (your initials, top right), choose
+  **Start Nordlicht Komponenten GmbH afresh…** and OK the question. Every control is "Not
+  assessed" again and the chat opens a new conversation, so each run starts from the same place.
+  Nothing is deleted: the report's audit trail still lists every earlier rehearsal's entries. Wait
+  until no assessment is running, or Vouch asks you to.
+- A fresh start doesn't give back assessments: the earlier rehearsals still count towards
+  today's limit.
 - Each assessment counts towards your daily limit. One run of the script makes two (5.1.1 and
   1.6.2) and two or three chat messages.
 

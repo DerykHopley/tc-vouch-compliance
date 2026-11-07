@@ -14,13 +14,15 @@ type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | nu
  * Switching names the new profile on every API call and opens the app afresh, so nothing the page holds (overview,
  * working paper, run, chat) carries over from the profile before. Without a list, calls name none and the API's
  * default answers. The browser remembers the last switch, so a reload or a pasted link opens that profile while it is
- * still listed; otherwise the default, and the top bar says so (#201).
+ * still listed; otherwise the default, and the top bar says so (#201). A fresh start from the user menu (#285) opens
+ * the app afresh the same way, on the Overview.
  */
 export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () => void; userName?: string }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
   const [chosen, setChosen] = useState<string | null>(null)
   const [fellBack, setFellBack] = useState(false)
   const [switched, setSwitched] = useState(false) // the user switched: the dropdown takes focus again
+  const [freshStarts, setFreshStarts] = useState(0) // each fresh start opens the app afresh
   // Opens the app under `id`: at start (the remembered or the default profile) and on each switch.
   const choose = (id: string) => {
     setProfile(id) // before the app opens again, so its first calls name it
@@ -32,6 +34,11 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     setFellBack(false)
     setSwitched(true)
     choose(id)
+  }
+  // The lead started the profile afresh (#285): the app opens again on the Overview, as after a switch.
+  const startedAfresh = () => {
+    if (window.location.pathname !== '/') window.history.pushState(null, '', '/')
+    setFreshStarts((n) => n + 1)
   }
   useEffect(() => {
     let current = true
@@ -54,5 +61,7 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     ? <ProfileSwitcher profiles={listing.profiles.profiles} selected={chosen} onSwitch={switchTo} fellBack={fellBack}
       switched={switched} />
     : undefined
-  return <App key={chosen ?? ''} onSignOut={onSignOut} profileSwitcher={switcher} userName={userName} />
+  const company = listing.profiles?.profiles.find((p) => p.id === chosen)?.company
+  return <App key={`${chosen ?? ''}:${freshStarts}`} onSignOut={onSignOut} profileSwitcher={switcher}
+    userName={userName} company={company} onStartedAfresh={startedAfresh} />
 }

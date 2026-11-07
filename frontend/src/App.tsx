@@ -54,11 +54,15 @@ type AppProps = {
   profileSwitcher?: ReactNode
   /** The signed-in user's name, for the user menu (#222); none in local mode. */
   userName?: string
+  /** The company of the profile shown, for the user menu's fresh start (#285); none without a profile list. */
+  company?: string
+  /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
+  onStartedAfresh?: () => void
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
-export default function App({ onSignOut, profileSwitcher, userName }: AppProps = {}) {
+export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -197,7 +201,8 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
             )}
           </nav>
           {profileSwitcher}
-          <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut} />
+          <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut}
+            company={company} onStartedAfresh={onStartedAfresh} />
         </div>
       </TopBar>
       {shown === 'report' ? <Report />

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
-import { fetchProfiles, type ProfileSummary, profileLabel, startingProfile } from './profiles.ts'
+import { fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import {
   authHeaders, rememberedProfile, rememberProfile, setOnSignedOut, setProfile, setTokenSource,
@@ -107,6 +107,27 @@ describe('fetchProfiles', () => {
     setOnSignedOut(signOut)
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
     expect(await fetchProfiles()).toBeNull()
+    expect(signOut).toHaveBeenCalledOnce()
+  })
+})
+
+describe('startAfresh, issue 285', () => {
+  it('says how the fresh start went: started, running (409), or failed', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ fresh_start: '2026-11-07T10:00:00+00:00' })))
+    expect(await startAfresh()).toBe('started')
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 409 })))
+    expect(await startAfresh()).toBe('running')
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 503 })))
+    expect(await startAfresh()).toBe('failed')
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
+    expect(await startAfresh()).toBe('failed')
+  })
+
+  it('signs out on a 401 and says so, not that it failed', async () => {
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
+    expect(await startAfresh()).toBe('signed-out')
     expect(signOut).toHaveBeenCalledOnce()
   })
 })
@@ -252,6 +273,29 @@ describe('ProfiledApp', () => {
     render(<ProfiledApp />)
     await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
     expect(overviewCalls(fetch)).toEqual(['testwerk'])
+  })
+
+  it('starting afresh from the user menu opens the Overview afresh, at its address, issue 285', async () => {
+    window.history.replaceState(null, '', '/report')
+    const fetch = serve([NORDLICHT, TESTWERK])
+    const answered = fetch.getMockImplementation()!
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/progress/fresh-start'
+      ? Promise.resolve(Response.json({ fresh_start: '2026-11-07T10:00:00+00:00' }))
+      : answered(url, init))
+    vi.stubGlobal('confirm', () => true)
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: /^Profile: / })
+    expect(overviewCalls(fetch)).toEqual([]) // the report reads no overview
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${NORDLICHT.company} afresh…` }))
+
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(overviewCalls(fetch)).toEqual(['nordlicht'])
+    const freshStart = fetch.mock.calls.filter(([url]) => url === '/api/progress/fresh-start')
+    expect(freshStart.map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))).toEqual(['nordlicht'])
+    expect(screen.getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
   })
 
   it('without the list, shows no switcher and the app as before', async () => {
