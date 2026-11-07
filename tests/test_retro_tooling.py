@@ -11,17 +11,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(script, *args, cwd=ROOT, env=None):
-    return subprocess.run([sys.executable, "-I", "-B", str(ROOT / "scripts" / script), *args],
-                          check=False, capture_output=True, text=True, cwd=cwd, env=env)
+    return subprocess.run(
+        [sys.executable, "-I", "-B", str(ROOT / "scripts" / script), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=env,
+    )
 
 
 # token-roles.py ---------------------------------------------------------------------------------
+
 
 def test_verdict_tokens_on_verdict_chips_and_card_edges_pass(tmp_path):
     (tmp_path / "ok.css").write_text(
         ".v-evidenced { color: var(--evidenced); background: var(--evidenced-bg); }\n"
         ".card-head.ev { border-bottom: 4px solid var(--evidenced); }\n"
-        ".readiness-bar .seg { background: var(--partly-evidenced); }\n")
+        ".readiness-bar .seg { background: var(--partly-evidenced); }\n"
+    )
     out = run("token-roles.py", str(tmp_path))
     assert out.returncode == 0, out.stdout + out.stderr
 
@@ -29,7 +37,8 @@ def test_verdict_tokens_on_verdict_chips_and_card_edges_pass(tmp_path):
 def test_a_verdict_token_used_as_decoration_is_flagged_with_its_selector(tmp_path):
     (tmp_path / "bad.css").write_text(
         ".pill { background: var(--not-applicable-bg); }\n"
-        ".notice {\n  border-left: 3px solid var(--not-evidenced);\n}\n")
+        ".notice {\n  border-left: 3px solid var(--not-evidenced);\n}\n"
+    )
     out = run("token-roles.py", str(tmp_path))
     assert out.returncode == 1
     assert "bad.css:1 .pill uses --not-applicable-bg" in out.stdout
@@ -37,14 +46,18 @@ def test_a_verdict_token_used_as_decoration_is_flagged_with_its_selector(tmp_pat
 
 
 def test_a_verdict_token_in_an_inline_style_is_flagged(tmp_path):
-    (tmp_path / "Card.tsx").write_text("export const C = () => <i style={{ color: 'var(--evidenced)' }} />\n")
+    (tmp_path / "Card.tsx").write_text(
+        "export const C = () => <i style={{ color: 'var(--evidenced)' }} />\n"
+    )
     out = run("token-roles.py", str(tmp_path))
     assert out.returncode == 1
     assert "Card.tsx:1" in out.stdout
 
 
 def test_the_token_declarations_themselves_pass(tmp_path):
-    (tmp_path / "tokens.css").write_text(":root { --evidenced: #3F7A55; --evidenced-bg: #E2EDE5; }\n")
+    (tmp_path / "tokens.css").write_text(
+        ":root { --evidenced: #3F7A55; --evidenced-bg: #E2EDE5; }\n"
+    )
     assert run("token-roles.py", str(tmp_path)).returncode == 0
 
 
@@ -54,6 +67,7 @@ def test_the_real_front_end_passes():
 
 
 # contrast.py ------------------------------------------------------------------------------------
+
 
 def test_contrast_prints_the_wcag_ratio():
     out = run("contrast.py", "#1B1D21", "#1B1D21")
@@ -74,6 +88,7 @@ def test_contrast_refuses_a_value_that_is_not_hex():
 
 
 # pre-push hook ----------------------------------------------------------------------------------
+
 
 def _repo_copy(tmp_path, with_node_modules):
     repo = tmp_path / "repo"
@@ -105,8 +120,14 @@ case " $* " in *" ci "*) [ {ci_exit} -eq 0 ] || exit {ci_exit}; mkdir -p fronten
 
 def test_the_hook_installs_a_missing_front_end_then_checks(tmp_path):
     repo = _repo_copy(tmp_path, with_node_modules=False)
-    out = subprocess.run(["bash", ".githooks/pre-push"], check=False, capture_output=True, text=True, cwd=repo,
-                         env=_fake_npm(tmp_path))
+    out = subprocess.run(
+        ["bash", ".githooks/pre-push"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo,
+        env=_fake_npm(tmp_path),
+    )
     assert out.returncode == 0, out.stdout + out.stderr
     calls = (tmp_path / "npm.log").read_text().splitlines()
     assert calls[0].startswith("--prefix frontend ci")
@@ -116,15 +137,29 @@ def test_the_hook_installs_a_missing_front_end_then_checks(tmp_path):
 
 def test_the_hook_stops_when_the_install_fails(tmp_path):
     repo = _repo_copy(tmp_path, with_node_modules=False)
-    out = subprocess.run(["bash", ".githooks/pre-push"], check=False, capture_output=True, text=True, cwd=repo,
-                         env=_fake_npm(tmp_path, ci_exit=3))
+    out = subprocess.run(
+        ["bash", ".githooks/pre-push"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo,
+        env=_fake_npm(tmp_path, ci_exit=3),
+    )
     assert out.returncode != 0
-    assert (tmp_path / "npm.log").read_text().splitlines() == ["--prefix frontend ci --no-audit --no-fund --loglevel=error"]
+    assert (tmp_path / "npm.log").read_text().splitlines() == [
+        "--prefix frontend ci --no-audit --no-fund --loglevel=error"
+    ]
 
 
 def test_the_hook_skips_the_install_when_node_modules_exists(tmp_path):
     repo = _repo_copy(tmp_path, with_node_modules=True)
-    out = subprocess.run(["bash", ".githooks/pre-push"], check=False, capture_output=True, text=True, cwd=repo,
-                         env=_fake_npm(tmp_path))
+    out = subprocess.run(
+        ["bash", ".githooks/pre-push"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo,
+        env=_fake_npm(tmp_path),
+    )
     assert out.returncode == 0, out.stdout + out.stderr
     assert (tmp_path / "npm.log").read_text().splitlines() == ["--prefix frontend run lint"]

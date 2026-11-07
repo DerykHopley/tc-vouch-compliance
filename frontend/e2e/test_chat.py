@@ -253,9 +253,7 @@ def test_the_handle_takes_keyboard_focus_with_a_visible_ring_and_a_tall_hit_area
     assert small_targets(page) == []
 
 
-def test_a_chosen_width_survives_unpin_and_pin_a_working_paper_and_a_reload(
-    page: Page, chat_url
-):
+def test_a_chosen_width_survives_unpin_and_pin_a_working_paper_and_a_reload(page: Page, chat_url):
     open_page(page, chat_url, 1400)
     pin(page)
     drag_handle(page, -120)

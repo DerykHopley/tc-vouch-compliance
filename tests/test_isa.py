@@ -127,7 +127,9 @@ def test_a_bullet_that_wraps_onto_a_second_line_keeps_both_lines():
 def test_the_iso_reference_is_the_27001_entry_as_written():
     from vouch.isa_extract import iso_27001_reference
 
-    cell = "ISO/IEC 27002:2022: 5.1\n------\nISO\xa027001:2022 A.5.18\n------\nNIST CSF 2.0: PR.AA-05"
+    cell = (
+        "ISO/IEC 27002:2022: 5.1\n------\nISO\xa027001:2022 A.5.18\n------\nNIST CSF 2.0: PR.AA-05"
+    )
     assert iso_27001_reference(cell) == "ISO\xa027001:2022 A.5.18"
 
 
@@ -217,14 +219,22 @@ def test_a_data_file_that_fails_to_parse_is_a_base_framework_error_naming_it(cas
 
 def framework_file(tmp_path, requirements: str) -> Path:
     path = tmp_path / "controls.yaml"
-    path.write_text(f"source: VDA ISA 2027.1\ncontrols:\n{GOOD_CONTROL}  requirements:\n{requirements}")
+    path.write_text(
+        f"source: VDA ISA 2027.1\ncontrols:\n{GOOD_CONTROL}  requirements:\n{requirements}"
+    )
     return path
 
 
 BAD_IDS = {
-    "duplicate id": ("  - {id: M1, column: must, text: A}\n  - {id: M1, column: must, text: B}\n", "M1"),
+    "duplicate id": (
+        "  - {id: M1, column: must, text: A}\n  - {id: M1, column: must, text: B}\n",
+        "M1",
+    ),
     "letter not the column's": ("  - {id: S1, column: must, text: A}\n", "S1"),
-    "numbers skip": ("  - {id: M1, column: must, text: A}\n  - {id: M3, column: must, text: B}\n", "M3"),
+    "numbers skip": (
+        "  - {id: M1, column: must, text: A}\n  - {id: M3, column: must, text: B}\n",
+        "M3",
+    ),
     "not from 1": ("  - {id: H2, column: high, text: A}\n", "H2"),
 }
 
@@ -353,7 +363,9 @@ def test_a_failing_edition_leaves_every_controls_file_unwritten(tmp_path, monkey
     workbook["Informationssicherheit"].insert_cols(9)
     moved = tmp_path / "moved.xlsx"
     workbook.save(moved)
-    monkeypatch.setitem(isa_extract.EDITIONS, "de", replace(isa_extract.EDITIONS["de"], excel=moved))
+    monkeypatch.setitem(
+        isa_extract.EDITIONS, "de", replace(isa_extract.EDITIONS["de"], excel=moved)
+    )
 
     with pytest.raises(ValueError, match="header"):
         isa_extract.main()

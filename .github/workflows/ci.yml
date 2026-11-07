@@ -19,6 +19,8 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - run: uv run ruff check
+      - name: ruff format, checked (#243)
+        run: uv run ruff format --check
       - name: mypy over src/ and tests/ (#129)
         run: uv run mypy
       - name: pytest, no API key, sockets disabled

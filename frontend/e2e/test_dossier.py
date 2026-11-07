@@ -47,7 +47,9 @@ def test_the_band_counts_accepted_verdicts_only_and_each_card_shows_its_state(
     open_dossier(page, dossier_url)
 
     expect(tile(page, f"accepted of {CONTROLS}")).to_have_text("1")
-    expect(tile(page, "partly evidenced")).to_have_text("1")  # the proposed and rejected aren't counted
+    expect(tile(page, "partly evidenced")).to_have_text(
+        "1"
+    )  # the proposed and rejected aren't counted
     expect(tile(page, "evidenced")).to_have_text("0")
     expect(tile(page, "not evidenced")).to_have_text("0")
     expect(tile(page, "open")).to_have_text(str(CONTROLS - 1))
@@ -76,7 +78,11 @@ def test_a_card_opens_its_working_paper(page: Page, dossier_url):
 
 def test_a_click_anywhere_on_a_card_opens_its_working_paper(page: Page, dossier_url):
     """#231: the card's one link covers the whole card: its question, ISO label and verdict chip."""
-    for control_id, part in (("5.2.4", ".control-title"), ("4.1.3", ".card-meta .mono"), ("2.1.3", ".chip")):
+    for control_id, part in (
+        ("5.2.4", ".control-title"),
+        ("4.1.3", ".card-meta .mono"),
+        ("2.1.3", ".chip"),
+    ):
         open_dossier(page, dossier_url)
         click_on_card(page, control_id, part)
         expect(page).to_have_url(f"{dossier_url}/controls/{control_id}")

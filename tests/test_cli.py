@@ -92,13 +92,20 @@ def test_requirements_lists_each_requirement_of_a_control_with_its_text():
         "algorithms, protocols) provide the security required by the respective application "
         "field according to the recognized industry standard to the extent legally feasible.\n"
     ) in out
-    assert "S1 (should): A concept for the application of cryptography is defined and implemented." in out
+    assert (
+        "S1 (should): A concept for the application of cryptography is defined and implemented."
+        in out
+    )
     assert "    - Key strengths,\n" in out  # a sub-item stays under its requirement
     assert (
         "H1 (high): Key sovereignty requirements (particularly in case of external processing) "
         "are determined and fulfilled. (C, I)\n"
     ) in out
-    assert [line.split(" ", 1)[0] for line in out.splitlines() if "): " in line] == ["M1", "S1", "H1"]
+    assert [line.split(" ", 1)[0] for line in out.splitlines() if "): " in line] == [
+        "M1",
+        "S1",
+        "H1",
+    ]
     assert "VDA ISA 2027.1" in out and "CC BY-ND 4.0" in out  # the credit travels with the text
 
 
@@ -249,9 +256,15 @@ def test_an_overlay_requirement_shows_its_source_and_the_isa_credit_covers_isa_t
         ["--req", "5.1.1"],
     ],
     ids=[
-        "no-id", "extra-arg", "profile-without-name", "extra-after-profile",
-        "profile-alone", "control-and-requirements", "control-profile-without-name",
-        "nothing", "abbreviated-flag",
+        "no-id",
+        "extra-arg",
+        "profile-without-name",
+        "extra-after-profile",
+        "profile-alone",
+        "control-and-requirements",
+        "control-profile-without-name",
+        "nothing",
+        "abbreviated-flag",
     ],
 )
 def test_requirements_misused_exits_2_with_the_usage_line(args, capsys):
@@ -312,5 +325,7 @@ def test_requirements_with_a_german_profile_list_the_german_isa_text(tmp_path, m
 
     assert cli.main(["--requirements", "5.1.1", "--profile", "alpen"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("5.1.1 Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?\n")
+    assert out.startswith(
+        "5.1.1 Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?\n"
+    )
     assert "M1 (must): Alle angewendeten kryptografischen Verfahren" in out

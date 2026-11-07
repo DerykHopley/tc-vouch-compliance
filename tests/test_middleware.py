@@ -249,7 +249,10 @@ def test_a_planted_key_and_email_in_a_tool_result_never_reach_the_answer_or_the_
                     "verdict": "partly-evidenced",
                     "reason": f"Questions go to {PLANTED_EMAIL}.",
                     "citations": [
-                        {"doc_id": "encryption-policy", "quote": "Laptops are encrypted. The recovery"}
+                        {
+                            "doc_id": "encryption-policy",
+                            "quote": "Laptops are encrypted. The recovery",
+                        }
                     ],
                 }
             ]
