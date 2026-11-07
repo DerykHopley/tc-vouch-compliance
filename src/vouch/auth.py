@@ -216,7 +216,9 @@ class ClerkAuth:
 
     def _remember(self, user_id: str, found: dict[str, Any], now: float) -> None:
         """Keeps the role and name read for another purpose (access), so lookup needn't ask."""
-        self._users[user_id] = _Cached(expires=now + self.USER_TTL, user=_clerk_user(user_id, found))
+        self._users[user_id] = _Cached(
+            expires=now + self.USER_TTL, user=_clerk_user(user_id, found)
+        )
 
     def access(self, user: User) -> None:
         """Returns when the user may use Vouch; always, with no Discord server set. Cached.

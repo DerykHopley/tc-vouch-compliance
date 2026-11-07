@@ -492,7 +492,6 @@ def unreadable_trail(*args: Any, **kwargs: Any) -> Any:
     raise RuntimeError("the trail was read before the standing")
 
 
-
 def test_an_unknown_profile_is_a_404(users):
     alice, _ = users
     with TestClient(app_on(None)) as client:
@@ -803,6 +802,7 @@ def test_with_the_database_down_the_export_answers_503(users):
 
 # --- Review fixes (#57): the file's name, carried text, the whole trail's paging ---------------
 
+
 def test_a_name_outside_ascii_downloads_under_a_safe_name_and_its_own():
     # vouch.profile.PROFILE_NAME keeps today's profile ids to ASCII slugs, so this is checked
     # on the header alone: a wider id rule later can't break it.
@@ -838,7 +838,9 @@ def built_report(**trail: Any) -> dict[str, Any]:
 
 
 def test_carried_text_becomes_no_heading_and_no_live_html():
-    built = built_report(entries=[replace(entry("u", 0), id=1, note="<img src=x onerror=alert(1)>")])
+    built = built_report(
+        entries=[replace(entry("u", 0), id=1, note="<img src=x onerror=alert(1)>")]
+    )
     built["head"] = built["head"] | {"company": "Evil GmbH\n# Injected heading"}
     built["not_applicable"] = [
         {
@@ -918,7 +920,13 @@ def test_the_whole_trail_is_read_page_by_page_without_a_gap_or_a_repeat(users, m
 )
 def test_the_export_counts_one_remediation_item_in_the_singular(lang, one, many):
     words = report.words_for(lang)
-    readiness = {"accepted": 1, "controls": 12, "open": 11, "by_verdict": {}, "remediation_items": 1}
+    readiness = {
+        "accepted": 1,
+        "controls": 12,
+        "open": 11,
+        "by_verdict": {},
+        "remediation_items": 1,
+    }
     assert report.remediation_count(1, words) == one
     assert report.remediation_count(2, words) == many
     assert f"- {one}\n" in report._md_readiness(readiness, words) + "\n"

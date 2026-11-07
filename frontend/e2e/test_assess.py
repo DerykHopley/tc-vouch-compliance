@@ -34,7 +34,9 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Partly evidenced", exact=True)).to_be_visible()
     expect(result).to_contain_text("hardware security keys")
-    expect(result.get_by_role("region", name="Usage")).to_have_text(  # #35: the fake's tokens, priced
+    expect(
+        result.get_by_role("region", name="Usage")
+    ).to_have_text(  # #35: the fake's tokens, priced
         re.compile(r"^[\d,]+ tokens in · [\d,]+ tokens out · \$[\d.]+ \(estimated\)$")
     )
     for text in (
@@ -63,7 +65,11 @@ def test_api_down_shows_the_message_and_retry_works_once_it_is_back(page: Page, 
     )
     page.unroute("**/api/assessments")
     paper.get_by_role("button", name=f"Retry {CONTROL}", exact=True).click()
-    expect(paper.get_by_role("region", name="Verdict and draft answer").get_by_text("Partly evidenced", exact=True)).to_be_visible()
+    expect(
+        paper.get_by_role("region", name="Verdict and draft answer").get_by_text(
+            "Partly evidenced", exact=True
+        )
+    ).to_be_visible()
     expect(paper.get_by_role("alert")).to_have_count(0)
 
 
@@ -94,9 +100,9 @@ def test_the_button_is_busy_while_running_and_a_second_click_starts_nothing(page
     posts = []
     page.on(
         "request",
-        lambda r: posts.append(r)
-        if r.method == "POST" and r.url.endswith("/api/assessments")
-        else None,
+        lambda r: (
+            posts.append(r) if r.method == "POST" and r.url.endswith("/api/assessments") else None
+        ),
     )
     page.goto(f"{vouch_url}/controls/{CONTROL}")
     button = page.get_by_role("button", name=ASSESS)
