@@ -23,10 +23,14 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 
 - **Mark text in the profile's answer language with `lang`** (the profile's `answer_language`): model output (chat replies, draft answers, reasons, remediation drafts), the ISA edition's text (questions, requirements, the edition's words a step quotes), verdict words and the roll-up note. Leave interface words unmarked. `frontend/e2e/test_profile_language.py` walks Alpenwerk and names any German text without `lang="de"`. From #244, after #200, #207, #224 and PR #227 each fixed a place one at a time.
 
+## Local paths
+
+- **Name a local file by its file name, never its full path,** in issues, PRs and commits: `A-480-handle-focused-dark.png`, not the folder it sits in. A full path reveals the username and folder layout, and no reader can open it. The ticket-lint Action flags one in an issue, and the pre-push hook refuses a commit that adds one (`scripts/local-paths.py`; `trial/` exempt). From #340, after nine issue and PR bodies carried screenshot paths.
+
 ## Pull requests
 
 - **A Done-when criterion the PR doesn't meet is listed in its description** as `Dropped: <criterion>, because …`, and the reviewer checks that list against the ticket. From #36, where phone-number redaction was dropped without a note and later described as never asked for.
-- **A PR or comment asking the owner to approve screenshots lists each one by its full absolute path, one per line** (never a shortened `…/scratchpad/` path), so the owner's client and the coordinator open them directly. From #228, whose shortened paths sent the coordinator searching (#238).
+- **Screenshots for the owner's approval: file names on GitHub, full paths in the thread.** A PR, issue or comment names each screenshot by its file name only, one per line; the full path, which the owner's client and the coordinator open directly, goes to the owner in the thread message (chat), never on GitHub. From #238, whose full-path rule put local paths on GitHub; replaced by #340.
 
 ## Filing tickets
 
