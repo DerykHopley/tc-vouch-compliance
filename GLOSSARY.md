@@ -109,7 +109,7 @@ The agent's proposed judgement of a requirement's or control's evidence: evidenc
 _Avoid_: Status, result, score, found / partial / gap
 
 **Guard step**:
-A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, or a secret or personal data removed from what is shown.
+A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, an answer asked for again (it claimed an audit result, or was written in another language than the profile's) or kept in another language after its one retry, or a secret or personal data removed from what is shown.
 _Avoid_: Alert, block, filter step (a warning is something else: a source that could not be read)
 
 **Reviewed verdict**:

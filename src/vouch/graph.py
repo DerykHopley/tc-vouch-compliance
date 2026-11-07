@@ -49,7 +49,15 @@ from vouch.guards import (
     refusal_step,
 )
 from vouch.isa import Column, IsaControl, Requirement
-from vouch.language import audit_claim, audit_words_in, language_name, mismatch
+from vouch.language import (
+    audit_claim,
+    audit_words_in,
+    kept_in_other_language,
+    language_name,
+    language_refusal,
+    mismatch,
+    written_in_not,
+)
 from vouch.patch import EVIDENCE_PENDING, TIMED_OUT, vulnerability_status
 from vouch.profile import (
     ComplianceProfile,
@@ -1068,9 +1076,8 @@ def build_graph(
             return {**clean, "kept_language": found}
         expected = language_name(profile.answer_language)
         refusal = (
-            f"Answer refused: it is written in {language_name(found)}, but the answer must be "
-            f"in {expected}. Write it in {expected}, quoting documents unchanged in their own "
-            f"language, and call {SUBMIT_ANSWER} again."
+            f"Answer refused: {language_refusal(language_name(found), expected)}, and call "
+            f"{SUBMIT_ANSWER} again."
         )
         update = {**clean, "language_retries": language_retries + 1, "wrong_language": found}
         return _refused(state, refusal, update)
@@ -1338,16 +1345,11 @@ class Step:
                 else "the profile's language"
             )
             if wrong := update.get("wrong_language"):
-                return (
-                    f"The answer was written in {language_name(wrong)}, not {expected}, so it "
-                    f"was asked for again in {expected}."
-                )
+                written = written_in_not(language_name(wrong), expected)
+                return f"The answer was {written}, so it was asked for again in {expected}."
             text = "Checked the answer: it claims no audit result."
             if kept := update.get("kept_language"):
-                text += (
-                    f" It is still written in {language_name(kept)}, not {expected}; it was "
-                    "kept as it is."
-                )
+                text += f" It is {kept_in_other_language(language_name(kept), expected)}."
             return text
         if self.node == "check_quotes":
             kept = sum(len(r.citations) for r in update["requirements"])

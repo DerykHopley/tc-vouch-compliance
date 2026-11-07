@@ -99,6 +99,26 @@ def language_name(code: str) -> str:
     return known.name if known else f"the language with ISO 639-1 code '{code}'"
 
 
+def written_in_not(found: str, expected: str) -> str:
+    """An answer's language beside the one asked for, by name: "written in English, not
+    German". The assessment's and the chat's steps say it alike (#51, #208)."""
+    return f"written in {found}, not {expected}"
+
+
+def kept_in_other_language(found: str, expected: str) -> str:
+    """An answer kept in another language after its one retry, by name (#51, #208)."""
+    return f"still {written_in_not(found, expected)}; it was kept as it is"
+
+
+def language_refusal(found: str, expected: str) -> str:
+    """Why an answer in another language is refused, and what to write instead, by name: the
+    assessment's refusal and the chat's say it alike (#51, #208)."""
+    return (
+        f"it is written in {found}, but the answer must be in {expected}. Write it in "
+        f"{expected}, quoting documents unchanged in their own language"
+    )
+
+
 def audit_words_in(code: str) -> str:
     """The language's audit-result words as a prompt lists them: "konform, zertifiziert or
     bestanden"; empty for a language Vouch has none for."""

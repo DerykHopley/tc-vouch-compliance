@@ -65,6 +65,7 @@ from vouch.graph import (
     Assessment,
     OutputCheckError,
     RequirementVerdict,
+    Verdict,
     claims_audit_result,
     counts_towards_roll_up,
     plural,
@@ -83,9 +84,17 @@ from vouch.guards import (
     tagged,
 )
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework
+from vouch.language import (
+    kept_in_other_language,
+    language_name,
+    language_refusal,
+    mismatch,
+    written_in_not,
+)
 from vouch.memory import Memory, newest_assessment, newest_by_control, progress
 from vouch.profile import ComplianceProfile
 from vouch.redaction import redact, redact_data, redacted_event, removal_step
+from vouch.report import DEFAULT_LANGUAGE, words_for, words_language
 from vouch.runs import (
     ASSESSMENT_FAILED,
     RUNNING_ALREADY,
@@ -106,9 +115,10 @@ from vouch.spending import (
 
 log = logging.getLogger(__name__)
 
-RECURSION_LIMIT = 15
+RECURSION_LIMIT = 17
 """At most this many agent and tool steps in one turn, the answer's check one more, and two more
-for an answer asked for again (#249); the chat model's own call budget
+for each time an answer is asked for again: once for an audit result (#249), once for its
+language (#208); the chat model's own call budget
 (vouch.model_choice.CALL_BUDGET) stops it sooner on OpenRouter."""
 HISTORY_WINDOW = 20
 """How many of the thread's latest messages the model is sent with each call, beside the
@@ -236,6 +246,25 @@ GREETING_REQUEST = "I have just opened the chat. Please tell me where I stand an
 from its `progress` tool. It is kept in the chat thread; the chat doesn't show it."""
 
 
+def verdict_words_for(verdict: Verdict, language: str) -> str:
+    """A verdict as the chat's tools write it in the profile's answer language (#208): design.md's
+    word where the readiness report has words for the language (vouch.report.WORDS, so the two
+    never differ), else as words in an English sentence ("partly evidenced")."""
+    if words_language(language) == DEFAULT_LANGUAGE:
+        return verdict_words(verdict)
+    return str(words_for(language)["verdicts"][verdict])
+
+
+def _verdict_sentence(language: str) -> str:
+    """The prompt's sentence naming the verdict words in the profile's language, where the tools
+    give them in it (#208); empty for English and for a language the report has no words for."""
+    if words_language(language) == DEFAULT_LANGUAGE:
+        return ""
+    words = list(words_for(language)["verdicts"].values())
+    listed = ", ".join(f"“{w}”" for w in words[:-1]) + f" and “{words[-1]}”"
+    return f"Name each verdict in the words the tools give it: {listed}. "
+
+
 def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessage:
     """The chat agent's system prompt (vouch.chat.CHAT_PROMPT_VERSION): its voice, its tools,
     and where the lead is."""
@@ -244,8 +273,9 @@ def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessa
         "for a TISAX assessment against VDA ISA. Write in a formal register, as an experienced "
         "auditor would: complete sentences, no slang, no emoji, no exclamation marks. Answer in "
         f"the language with ISO 639-1 code '{profile.answer_language}', whatever language the "
-        "compliance lead writes in. Never say that the company is compliant, certified, or has "
-        "passed an audit: you prepare for the audit, you do not decide it. Use the "
+        f"compliance lead writes in. {_verdict_sentence(profile.answer_language)}"
+        "Never say that the company is compliant, certified, or has passed an audit: you prepare "
+        "for the audit, you do not decide it. Use the "
         f"`{PROGRESS}` tool when asked where the compliance lead stands, and the "
         f"`{START_ASSESSMENT}` tool when asked to assess a control; pass on what a tool says in "
         "full, every control id it lists included, and give its message as it is when it "
@@ -330,22 +360,26 @@ def _is_stale(requirement: RequirementVerdict) -> bool:
     return any(c.stale for c in requirement.citations)
 
 
-def _requirement_words(requirement: RequirementVerdict) -> str:
+def _requirement_words(requirement: RequirementVerdict, language: str) -> str:
     """A requirement in brief: its id, column, verdict, evidence kinds and staleness."""
     kinds = _kinds([requirement])
     return (
-        f"{requirement.id} ({requirement.column}) {verdict_words(requirement.verdict)}"
+        f"{requirement.id} ({requirement.column}) "
+        f"{verdict_words_for(requirement.verdict, language)}"
         + (f", {' and '.join(kinds)}" if kinds else "")
         + (", stale" if _is_stale(requirement) else "")
     )
 
 
-def assessed_controls_words(controls: Sequence[IsaControl], latest: dict[str, Assessment]) -> str:
+def assessed_controls_words(
+    controls: Sequence[IsaControl], latest: dict[str, Assessment], language: str
+) -> str:
     """Every control's newest assessment at once (#210): one line per control (its verdict, review
     state, the evidence its counted requirements rest on, and per requirement its verdict,
     evidence kind and staleness), then the controls sorted by evidence: documented only, stale,
     musts not evidenced, not assessed yet. Counted requirements are those the control's verdict
-    rolls up (vouch.graph.counts_towards_roll_up). No reason or quote: only verdicts and facts."""
+    rolls up (vouch.graph.counts_towards_roll_up). No reason or quote: only verdicts and facts. The
+    verdicts are in the profile's `language` where it has words for them (#208)."""
     lines = ["Each control's newest assessment under this profile:"]
     documented_only: list[str] = []
     stale: list[str] = []
@@ -371,10 +405,11 @@ def assessed_controls_words(controls: Sequence[IsaControl], latest: dict[str, As
             if counted
             else "on no cited"
         )
-        requirement_words = "; ".join(_requirement_words(r) for r in applying)
+        requirement_words = "; ".join(_requirement_words(r, language) for r in applying)
         status = dict(_STATUS_WORDS)[assessment.status]
+        verdict = verdict_words_for(assessment.verdict, language)
         lines.append(
-            f"- {control.id}: {verdict_words(assessment.verdict)}, {status}; its counted "
+            f"- {control.id}: {verdict}, {status}; its counted "
             f"requirements rest {rest_on} evidence. {requirement_words}."
         )
     for label, ids in (
@@ -444,15 +479,17 @@ def judged(assessment: Assessment) -> list[RequirementVerdict]:
     return sorted(applying, key=lambda r: r.verdict == "evidenced")
 
 
-def assessed_words(control: IsaControl, assessment: Assessment) -> str:
+def assessed_words(control: IsaControl, assessment: Assessment, language: str) -> str:
     """What the control's newest assessment found: which requirements are missing and which
     evidenced, then the findings (each requirement's verdict and the reason given) and the
-    quotes it kept, both as data: a reason is model or lead text, a quote document text."""
+    quotes it kept, both as data: a reason is model or lead text, a quote document text. The
+    verdicts are in the profile's `language` where it has words for them (#208); the "Why:" line
+    stays English."""
     status = dict(_STATUS_WORDS)[assessment.status]
     requirements = judged(assessment)
     missing = [r.id for r in requirements if r.verdict != "evidenced"]
     evidenced = [r.id for r in requirements if r.verdict == "evidenced"]
-    verdict = verdict_words(assessment.verdict)
+    verdict = verdict_words_for(assessment.verdict, language)
     said = [
         f"Control {control.id}, “{control.question}”: its newest assessment is {verdict}, {status}."
     ]
@@ -464,7 +501,7 @@ def assessed_words(control: IsaControl, assessment: Assessment) -> str:
         said.append("Every requirement that applies is evidenced.")
     if evidenced:
         said.append(f"Evidenced: {', '.join(evidenced)}.")
-    said.append(tagged("findings", [_finding(r) for r in requirements]))
+    said.append(tagged("findings", [_finding(r, language) for r in requirements]))
     quotes = [_quote_passage(r, c) for r in requirements for c in r.citations]
     if quotes:
         said.append("The quotes these verdicts rest on, checked against each document:")
@@ -472,12 +509,12 @@ def assessed_words(control: IsaControl, assessment: Assessment) -> str:
     return "\n".join(said)
 
 
-def _finding(requirement: RequirementVerdict) -> dict[str, Any]:
+def _finding(requirement: RequirementVerdict, language: str) -> dict[str, Any]:
     finding = {
         "requirement": requirement.id,
         "column": requirement.column,
         "text": requirement.text,
-        "verdict": verdict_words(requirement.verdict),
+        "verdict": verdict_words_for(requirement.verdict, language),
         "reason": requirement.reason,
     }
     return finding | ({"instruction_like": True} if instruction_like(requirement.reason) else {})
@@ -558,7 +595,7 @@ class ChatTools:
         said = f"Read the newest assessments of {plural(len(latest), 'control')}."
         write(("step", {"node": ASSESSED_CONTROLS, "text": said}))
         write(("papers", {"control_ids": [control.id for control in controls]}))
-        return assessed_controls_words(controls, latest)
+        return assessed_controls_words(controls, latest, self.profile.answer_language)
 
     def start_assessment(self, control_id: str, write: Write, stop: threading.Event) -> str:
         """Assess the control as the assessment stream would (vouch.runs.begin_run), its steps
@@ -594,7 +631,7 @@ class ChatTools:
                 },
             )
         )
-        verdict = verdict_words(assessment.verdict)
+        verdict = verdict_words_for(assessment.verdict, self.profile.answer_language)
         return (
             f"The assessment of control {assessment.control_id} has finished: {verdict}. The "
             "verdict is proposed and waits for your review on the control's working paper."
@@ -631,7 +668,7 @@ class ChatTools:
         write(_suggest(control.id, "review"))
         self.note_returned(control.question, *(r.text for r in verdicts))
         self.note_returned(*(r.reason for r in verdicts), *(q["text"] for q in quotes))
-        return assessed_words(control, assessment)
+        return assessed_words(control, assessment, self.profile.answer_language)
 
     def search_evidence(self, query: str, write: Write) -> str:
         """The passages matching the query in the policies and records the profile allows,
@@ -826,20 +863,42 @@ ASKED_AGAIN_STEP = (
     "Asked for the answer again: it claimed an audit result, which Vouch never claims."
 )
 
+OUTPUT_CHECK = "output_check"
+"""The key in a refusal's additional_kwargs naming the check that refused the answer:
+LANGUAGE_CHECK for its language (#208); none for an audit result (#249, and threads kept before
+#208). Each check has its own OUTPUT_RETRIES."""
+LANGUAGE_CHECK = "language"
+
+
+def asked_again_in(found: str, expected: str) -> str:
+    """The guard step for an answer asked for again in the profile's language (#208)."""
+    written = written_in_not(language_name(found), language_name(expected))
+    return f"Asked for the answer again: it was {written}."
+
+
+def kept_in(found: str, expected: str) -> str:
+    """The guard step for an answer still in another language after its retry, kept (#208)."""
+    return f"The answer is {kept_in_other_language(language_name(found), language_name(expected))}."
+
 
 ANSWER_FAILED = "answer-failed"
 """The answer node's own event for an answer refused twice (#249): chat_turn raises
 OutputCheckError for it, once the node has taken the answer out of the thread."""
 
 
-def _is_refusal(message: BaseMessage) -> bool:
+def is_refusal(message: BaseMessage) -> bool:
     """The output check's message asking for the answer again (#249)."""
     return isinstance(message, HumanMessage) and message.name == ANSWER_REFUSED
 
 
-def _is_lead(message: BaseMessage) -> bool:
+def is_lead(message: BaseMessage) -> bool:
     """A message the compliance lead wrote (the greeting's request too), not the output check's."""
-    return isinstance(message, HumanMessage) and not _is_refusal(message)
+    return isinstance(message, HumanMessage) and not is_refusal(message)
+
+
+def _is_language_refusal(message: BaseMessage) -> bool:
+    """The output check's refusal of an answer for its language (#208)."""
+    return is_refusal(message) and message.additional_kwargs.get(OUTPUT_CHECK) == LANGUAGE_CHECK
 
 
 CITE_THEM = "Cite them as the chat prompt says."
@@ -868,22 +927,25 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     (one after another), checked whole (vouch.chat_citations): a guard step per quote dropped,
     then the checked text. The thread keeps the same checked text, in the turn's last reply (the
     earlier ones keep only their tool calls), so the next turn's model never reads a dropped
-    quote."""
+    quote. An answer claiming an audit result (#249), or written in another language than the
+    profile's (#208), is asked for again first."""
     chat = runtime.context
     messages = state["messages"]
-    lead = max(i for i, m in enumerate(messages) if _is_lead(m))
+    lead = max(i for i, m in enumerate(messages) if is_lead(m))
     replies = [m for m in messages[lead + 1 :] if isinstance(m, AIMessage)]
-    refusals = [m for m in messages[lead + 1 :] if _is_refusal(m)]
+    refusals = [m for m in messages[lead + 1 :] if is_refusal(m)]
+    language_refusals = [r for r in refusals if _is_language_refusal(r)]
+    audit_refusals = [r for r in refusals if r not in language_refusals]
     text, dropped = checked_reply("".join(m.text for m in replies), chat.tools.check_quote)
     *earlier, last = replies
     # The banned-wording check, as an assessment's answer has it (#249): an answer claiming an
     # audit result, quotes it cites aside, is never shown. It is taken out of the thread, so no
     # later turn reads it, and asked for again once with a refusal (taken out too once answered);
     # claimed again, the turn ends in the chat's formal error (chat_turn, ANSWER_FAILED).
+    taken_out = [*(_kept(m, "") for m in earlier), RemoveMessage(id=_id(last))]
     word = claims_audit_result(text, [cite.group(2) for cite in CITE.finditer(text)])
     if word is not None:
-        taken_out = [*(_kept(m, "") for m in earlier), RemoveMessage(id=_id(last))]
-        if len(refusals) >= OUTPUT_RETRIES:
+        if len(audit_refusals) >= OUTPUT_RETRIES:
             runtime.stream_writer((ANSWER_FAILED, {"word": word}))
             return {"messages": [*taken_out, *(RemoveMessage(id=_id(r)) for r in refusals)]}
         runtime.stream_writer(("step", {"node": GUARD, "text": ASKED_AGAIN_STEP}))
@@ -893,12 +955,36 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
             name=ANSWER_REFUSED,
         )
         return {"messages": [*taken_out, refusal]}
+    # The language check, as an assessment's answer has it (#51, #208): an answer written in
+    # another language than the profile's, its cited quotes aside, is taken out and asked for
+    # again once in the profile's language; still in another language, it is kept as it is.
+    expected = chat.tools.profile.answer_language
+    if (found := wrong_language(text, expected)) is not None:
+        if len(language_refusals) < OUTPUT_RETRIES:
+            runtime.stream_writer(
+                ("step", {"node": GUARD, "text": asked_again_in(found, expected)})
+            )
+            why = language_refusal(language_name(found), language_name(expected))
+            refusal = HumanMessage(
+                f"Your last answer was refused: {why}.",
+                name=ANSWER_REFUSED,
+                additional_kwargs={OUTPUT_CHECK: LANGUAGE_CHECK},
+            )
+            return {"messages": [*taken_out, refusal]}
+        runtime.stream_writer(("step", {"node": GUARD, "text": kept_in(found, expected)}))
     for said in dropped:
         runtime.stream_writer(("step", {"node": GUARD, "text": said}))
     if text:
         runtime.stream_writer((REPLY_TEXT, {"text": text}))
     done = [*(RemoveMessage(id=_id(r)) for r in refusals)]  # the thread keeps the answer, not why
     return {"messages": [*(_kept(m, "") for m in earlier), _kept(last, text), *done]}
+
+
+def wrong_language(answer: str, language: str) -> str | None:
+    """The language a chat answer is written in, when Vouch can tell and it isn't the profile's
+    (`language`): every cited quote left out, as a document may be in another language than the
+    answer (#208). Other quoted spans are left out by vouch.language.written_in."""
+    return mismatch(CITE.sub(" ", answer), language)
 
 
 def _kept(reply: BaseMessage, checked: str) -> BaseMessage:
@@ -932,7 +1018,7 @@ def _tools(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
 
 def _after_answer(state: ChatState) -> str:
     """Back to the agent when the answer was refused (#249), else the turn is done."""
-    return "agent" if _is_refusal(state["messages"][-1]) else END
+    return "agent" if is_refusal(state["messages"][-1]) else END
 
 
 def _next_node(state: ChatState) -> str:
@@ -974,7 +1060,7 @@ def _window(messages: list[AnyMessage]) -> list[AnyMessage]:
         for m in messages
         if not (isinstance(m, AIMessage) and any(c["id"] not in answered for c in m.tool_calls))
     ]
-    leads = [i for i, m in enumerate(kept) if _is_lead(m)]
+    leads = [i for i, m in enumerate(kept) if is_lead(m)]
     start = next((i for i in leads if i >= len(kept) - HISTORY_WINDOW), leads[-1] if leads else 0)
     return kept[start:]
 
