@@ -24,13 +24,13 @@ message, the replies, the tools' words.
 import logging
 import queue
 import threading
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from functools import cache, cached_property, reduce
 from operator import add
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict, get_args
+from typing import Annotated, Any, Literal, TypedDict, cast, get_args
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -43,7 +43,7 @@ from langchain_core.messages import (
     ToolMessage,
     message_chunk_to_message,
 )
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -340,7 +340,7 @@ def _requirement_words(requirement: RequirementVerdict) -> str:
     )
 
 
-def assessed_controls_words(controls: list[IsaControl], latest: dict[str, Assessment]) -> str:
+def assessed_controls_words(controls: Sequence[IsaControl], latest: dict[str, Assessment]) -> str:
     """Every control's newest assessment at once (#210): one line per control (its verdict, review
     state, the evidence its counted requirements rest on, and per requirement its verdict,
     evidence kind and staleness), then the controls sorted by evidence: documented only, stale,
@@ -618,19 +618,19 @@ class ChatTools:
             requirements = self.profile.requirements_for(control).applicable
             self.note_returned(control.question, *(r.text for r in requirements))
             return not_assessed_words(control, self.profile)
-        requirements = judged(assessment)
-        quotes = [_quote_passage(r, c) for r in requirements for c in r.citations]
+        verdicts = judged(assessment)
+        quotes = [_quote_passage(r, c) for r in verdicts for c in r.citations]
         flagged = [
             f"Flagged instruction-like text in the reason for {r.id}; it is treated as data "
             "and ignored."
-            for r in requirements
+            for r in verdicts
             if instruction_like(r.reason)
         ]
         for said in flagged + flagged_steps(quotes):
             write(("step", {"node": GUARD, "text": said}))
         write(_suggest(control.id, "review"))
-        self.note_returned(control.question, *(r.text for r in requirements))
-        self.note_returned(*(r.reason for r in requirements), *(q["text"] for q in quotes))
+        self.note_returned(control.question, *(r.text for r in verdicts))
+        self.note_returned(*(r.reason for r in verdicts), *(q["text"] for q in quotes))
         return assessed_words(control, assessment)
 
     def search_evidence(self, query: str, write: Write) -> str:
@@ -684,7 +684,9 @@ class ChatTools:
     @cached_property
     def _quotes(self) -> QuoteChecker:
         """The documents of every source the profile allows, as the model saw them: redacted."""
-        folders = {name: source.folder for name, source in self.profile.evidence_sources.items()}
+        folders: dict[str, str | Path] = {
+            name: source.folder for name, source in self.profile.evidence_sources.items()
+        }
         return QuoteChecker(folders, today=self.today, seen_as=lambda text: redact(text)[0])
 
     def check_quote(self, quote: str, doc_id: str | None) -> str | None:
@@ -811,6 +813,12 @@ class ChatState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
+def _id(message: BaseMessage) -> str:
+    """A message's id in the thread: add_messages gives every message one as it's kept."""
+    assert message.id is not None, message
+    return message.id
+
+
 ANSWER_REFUSED = "output-check"
 """The name on the message that asks the model for its answer again (#249): the turn's own, not
 one of the lead's, so it starts no turn and is never taken for the lead's question."""
@@ -874,10 +882,10 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     # claimed again, the turn ends in the chat's formal error (chat_turn, ANSWER_FAILED).
     word = claims_audit_result(text, [cite.group(2) for cite in CITE.finditer(text)])
     if word is not None:
-        taken_out = [*(_kept(m, "") for m in earlier), RemoveMessage(id=last.id)]
+        taken_out = [*(_kept(m, "") for m in earlier), RemoveMessage(id=_id(last))]
         if len(refusals) >= OUTPUT_RETRIES:
             runtime.stream_writer((ANSWER_FAILED, {"word": word}))
-            return {"messages": [*taken_out, *(RemoveMessage(id=r.id) for r in refusals)]}
+            return {"messages": [*taken_out, *(RemoveMessage(id=_id(r)) for r in refusals)]}
         runtime.stream_writer(("step", {"node": GUARD, "text": ASKED_AGAIN_STEP}))
         refusal = HumanMessage(
             f"Your last answer was refused: it said “{word}”, an audit result Vouch never "
@@ -889,14 +897,14 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
         runtime.stream_writer(("step", {"node": GUARD, "text": said}))
     if text:
         runtime.stream_writer((REPLY_TEXT, {"text": text}))
-    done = [*(RemoveMessage(id=r.id) for r in refusals)]  # the thread keeps the answer, not why
+    done = [*(RemoveMessage(id=_id(r)) for r in refusals)]  # the thread keeps the answer, not why
     return {"messages": [*(_kept(m, "") for m in earlier), _kept(last, text), *done]}
 
 
 def _kept(reply: BaseMessage, checked: str) -> BaseMessage:
     """The reply as the thread keeps it: its text the checked text, redacted. A reply in content
     blocks keeps its other blocks (redacted), its text in one block where its first was."""
-    text = redact(checked)[0]
+    text: str | None = redact(checked)[0]
     if isinstance(reply.content, str):
         return reply.model_copy(update={"content": text})
     blocks: list[Any] = []
@@ -932,8 +940,12 @@ def _next_node(state: ChatState) -> str:
     return "tools" if isinstance(last, AIMessage) and last.tool_calls else "answer"
 
 
+ChatGraph = CompiledStateGraph[ChatState, ChatContext, ChatState, ChatState]
+"""The chat's compiled graph, typed (#129)."""
+
+
 @cache
-def _compiled() -> CompiledStateGraph:
+def _compiled() -> ChatGraph:
     graph = StateGraph(ChatState, context_schema=ChatContext)
     graph.add_node("agent", _agent)
     graph.add_node("tools", _tools)
@@ -945,7 +957,7 @@ def _compiled() -> CompiledStateGraph:
     return graph.compile()
 
 
-def chat_graph(checkpointer: BaseCheckpointSaver) -> CompiledStateGraph:
+def chat_graph(checkpointer: BaseCheckpointSaver) -> ChatGraph:
     """The ReAct loop, compiled once: the agent answers or calls tools, the tools run, the agent
     again, then the turn's answer is checked and sent; the thread kept in `checkpointer`. The
     request's model, tools and prompt come in its ChatContext (chat_turn)."""
@@ -967,7 +979,7 @@ def _window(messages: list[AnyMessage]) -> list[AnyMessage]:
     return kept[start:]
 
 
-def chat_config(thread_id: str, scope: str) -> dict[str, Any]:
+def chat_config(thread_id: str, scope: str) -> RunnableConfig:
     """The checkpointer's config for the lead's chat thread."""
     return {
         "configurable": {"thread_id": thread_key(CHAT_THREAD + thread_id, scope)},
@@ -976,7 +988,7 @@ def chat_config(thread_id: str, scope: str) -> dict[str, Any]:
 
 
 def chat_turn(
-    graph: CompiledStateGraph, chat: ChatContext, message: str, thread_id: str, scope: str
+    graph: ChatGraph, chat: ChatContext, message: str, thread_id: str, scope: str
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """One turn on the lead's chat thread: the tools' events as they happen, then the answer,
     whole and with its quotes checked (_answer), all redacted. When the turn is left (the stream
@@ -993,7 +1005,8 @@ def chat_turn(
         )
         failed = None
         for part in parts:
-            event, data = part["data"]
+            # custom mode: what a node's stream_writer wrote, an (event, data) pair (#129)
+            event, data = cast(tuple[str, Any], part["data"])
             if event == ANSWER_FAILED:  # raised once the stream ends: its node's update saved
                 failed = data["word"]
                 continue

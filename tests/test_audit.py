@@ -32,7 +32,15 @@ from vouch.database import (
     CREATE_AUDIT_TRIGGERS,
     lock_id,
 )
-from vouch.graph import Assessment, RequirementVerdict, ReviewDecision, ShouldScore, thread_key
+from vouch.graph import (
+    Assessment,
+    RequirementVerdict,
+    ReviewDecision,
+    ShouldScore,
+    Verdict,
+    thread_key,
+)
+from vouch.isa import Column
 from vouch.memory import Memory
 from vouch.profile import DEFAULT_PROFILE
 
@@ -416,7 +424,7 @@ def test_the_decisions_evidence_is_what_the_control_verdict_rests_on():
     """Only must, high, very high and overlay requirements that apply count towards the control
     verdict (graph.roll_up): a should requirement's or a not-applicable one's documents don't."""
 
-    def requirement(id_: str, column: str, verdict: str, doc: str) -> RequirementVerdict:
+    def requirement(id_: str, column: Column, verdict: Verdict, doc: str) -> RequirementVerdict:
         return RequirementVerdict(id_, column, "Text.", verdict, "Why.", (citation(doc, "1"),))
 
     waiting = Assessment(

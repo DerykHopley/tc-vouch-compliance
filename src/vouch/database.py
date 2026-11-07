@@ -276,10 +276,17 @@ class BoundedConnection(psycopg.Connection[DictRow]):
             raise psycopg.OperationalError(NO_ANSWER.format(bound=bound)) from None
 
 
+class WaitBounded(Protocol):
+    """A connection with a bound on its wait for any one answer: BoundedConnection, and the
+    tests' stand-ins for it, typed against this (#129)."""
+
+    wait_timeout: float
+
+
 @contextmanager
-def waiting_at_most(conn: Any, seconds: float) -> Iterator[None]:
+def waiting_at_most(conn: WaitBounded, seconds: float) -> Iterator[None]:
     """`conn` waits at most `seconds` for any one answer inside the block, then as before."""
-    before = getattr(conn, "wait_timeout", WAIT_TIMEOUT_SECONDS)  # a test's fake may not have one
+    before = conn.wait_timeout
     conn.wait_timeout = seconds
     try:
         yield
@@ -355,7 +362,7 @@ class Database:
                 self._pool.close()
 
     @contextmanager
-    def connection(self, timeout: float | None = None) -> Iterator[Connection]:
+    def connection(self, timeout: float | None = None) -> Iterator[BoundedConnection]:
         """A pooled connection, within `timeout` seconds. Raises DatabaseUnavailable, also when
         the connection drops while in use."""
         pool = self._open_pool()
@@ -752,7 +759,7 @@ def _insert_audit(conn: Connection, entries: list[Mapping[str, Any]]) -> None:
     with conn.cursor() as cur:
         cur.executemany(
             f"INSERT INTO {AUDIT_TABLE} ({columns}) VALUES ({values})",
-            [entry | {"evidence": Jsonb(entry["evidence"])} for entry in entries],
+            [{**entry, "evidence": Jsonb(entry["evidence"])} for entry in entries],
         )
 
 
@@ -774,7 +781,7 @@ def _secrets_in(url: str) -> tuple[str, ...]:
     """The URL, and its password as written and decoded, longest first."""
     found = {url}
     try:
-        found.add(conninfo.conninfo_to_dict(url).get("password") or "")
+        found.add(str(conninfo.conninfo_to_dict(url).get("password") or ""))
     except psycopg.Error:
         pass
     try:

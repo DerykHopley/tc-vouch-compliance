@@ -175,13 +175,20 @@ def kill_session(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
+class PtyPopen(subprocess.Popen[str]):
+    """A started dev.sh; with tty, `pty` is the other end of its terminal."""
+
+    pty: int
+
+
 def start_fake(
     tmp_path: Path,
     crash_after: dict[str, int | str],
     cwd: Path | None = None,
+    *,
     tty: bool = False,
-    **env: str,
-) -> subprocess.Popen[str]:
+    env: dict[str, str] | None = None,
+) -> PtyPopen:
     """dev.sh copied into a tree with frontend/node_modules, with fake servers for uv and npm.
 
     The run gets past its deps check without a real npm ci, so these tests run in the fast lane.
@@ -209,20 +216,20 @@ def start_fake(
         )
         (bin_dir / tool).chmod(0o755)
     api_port, web_port = free_ports(2)
-    proc = subprocess.Popen(
+    proc = PtyPopen(
         [BASH, str(tmp_path / "scripts" / "dev.sh"), "--api-port", str(api_port)]
         + ["--web-port", str(web_port)],
         cwd=cwd or tmp_path,
         env=dev_env()
         | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_ENV_LOG": str(tmp_path)}
-        | env,
+        | (env or {}),
         text=True,
         start_new_session=True,
         **streams,
     )
     if tty:
         os.close(slave)
-        proc.pty = master  # type: ignore[attr-defined]
+        proc.pty = master
     return proc
 
 
@@ -230,7 +237,7 @@ def run_fake(
     tmp_path: Path, crash_after: dict[str, int | str], cwd: Path | None = None, **env: str
 ) -> tuple[int, str, str]:
     """Run the copied dev.sh to its end: its exit code, its output, and what it left running."""
-    proc = start_fake(tmp_path, crash_after, cwd, **env)
+    proc = start_fake(tmp_path, crash_after, cwd, env=env)
     try:
         out, _ = proc.communicate(timeout=60)
         return proc.returncode, out, session_left(proc.pid)
@@ -276,7 +283,8 @@ def test_the_api_gets_no_key_and_an_absolute_fake_script(tmp_path: Path) -> None
     api = seen_env(tmp_path, "uv")
     assert api["ASSESS_FAKE_SCRIPT"] == str(elsewhere / "scripts" / "demo.json")
     assert api["OPENROUTER_API_KEY"] is None
-    assert seen_env(tmp_path, "npm")["VOUCH_API"].startswith("http://127.0.0.1:")
+    vouch_api = seen_env(tmp_path, "npm")["VOUCH_API"]
+    assert vouch_api is not None and vouch_api.startswith("http://127.0.0.1:")
 
 
 def test_with_the_clerk_keys_loaded_and_no_auth_mode_the_api_runs_in_local_mode(

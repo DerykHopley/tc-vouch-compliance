@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from starlette.routing import Route
 
 from vouch import api
 from vouch.api import create_app, current_user, require_developer, user_role
@@ -89,7 +90,7 @@ class FakeClerk:
         if request.method != "GET" or user_id not in self.metadata:
             return httpx.Response(404, json={"errors": [{"code": "resource_not_found"}]})
         # The fields the app reads, and one it must not: public metadata is the browser's.
-        no_name = {
+        no_name: dict[str, Any] = {
             "first_name": None,
             "last_name": None,
             "primary_email_address_id": None,
@@ -158,7 +159,7 @@ BAD_TOKENS = {
     "not-a-user-id": lambda: token(sub="../etc"),
     "no-subject": lambda: token(sub=""),
     "machine-token": lambda: "ak_" + token(),  # an API key: never a user's session
-    "unsigned": lambda: jwt.encode({"sub": "user_alice", "exp": time.time() + 60}, None, "none"),
+    "unsigned": lambda: jwt.encode({"sub": "user_alice", "exp": time.time() + 60}, "", "none"),
     "other-origin": lambda: token(azp="https://evil.example"),
     "no-origin": lambda: token(azp=None),
     "jwt-template-no-sid": lambda: token(sid=None),
@@ -170,10 +171,15 @@ def api_routes(app) -> set[tuple[str, str]]:
     """Every method and path the app serves under /api, a path parameter filled in: those in its
     OpenAPI map, and the API routers' own, which include those left out of the map."""
     mapped = {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
+    routes = [*api.public.routes, *api.router.routes]
+    # Every one is a Route (APIRoute among them); anything else, a Mount, has no methods to
+    # count, so it fails here rather than slip past the check.
+    assert all(isinstance(route, Route) for route in routes), routes
     routed = {
         (method, route.path)
-        for route in [*api.public.routes, *api.router.routes]
-        for method in route.methods - {"HEAD"}
+        for route in routes
+        if isinstance(route, Route)
+        for method in (route.methods or set()) - {"HEAD"}
     }
     return {(m, path.replace("{path:path}", "anything")) for m, path in mapped | routed}
 
@@ -604,7 +610,7 @@ def gated_app(
     return TestClient(app, raise_server_exceptions=False)
 
 
-def ask(client: TestClient, user: str) -> httpx.Response:
+def ask(client: TestClient, user: str) -> Any:  # the test client's httpx2, not httpx: two types
     return client.get("/api/access", headers=bearer(token(user)))
 
 

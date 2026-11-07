@@ -68,7 +68,8 @@ def database_url(request) -> SecretStr | None:
 @pytest.fixture
 def users() -> tuple[dict[str, str], dict[str, str]]:
     """Two users, new to this test (the in-memory backend is one per process)."""
-    return tuple({"X-Test-User": f"user_{who}_{uuid.uuid4().hex[:8]}"} for who in ("a", "b"))
+    a, b = ({"X-Test-User": f"user_{who}_{uuid.uuid4().hex[:8]}"} for who in ("a", "b"))
+    return a, b
 
 
 @contextmanager

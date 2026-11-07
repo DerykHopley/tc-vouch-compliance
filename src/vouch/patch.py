@@ -90,12 +90,12 @@ def vulnerability_status(
         done.set()
     if not done.wait(limit):
         return ErrorResult(error=TIMED_OUT, detail=f"Patch didn't answer within {limit:g} seconds")
-    error = outcome.get("error")
-    if error is None:
+    failure = outcome.get("error")
+    if failure is None:
         return outcome["passages"]
-    if isinstance(error, ResponseError):
-        return ErrorResult(error=EVIDENCE_PENDING, detail=f"{UNREADABLE} ({error})")
-    log.warning("reading Patch's vulnerability status failed", exc_info=error)
+    if isinstance(failure, ResponseError):
+        return ErrorResult(error=EVIDENCE_PENDING, detail=f"{UNREADABLE} ({failure})")
+    log.warning("reading Patch's vulnerability status failed", exc_info=failure)
     return ErrorResult(
         error=EVIDENCE_PENDING, detail=f"{UNREADABLE} (the read failed unexpectedly)"
     )

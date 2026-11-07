@@ -65,9 +65,9 @@ def _chat_judge() -> type:
         def __init__(self, chat: BaseChatModel, name: str) -> None:
             self.chat = chat
             self.name = name
-            self.model = chat
+            self.model = chat  # type: ignore[assignment]  # deepeval types it its own (#129)
 
-        def load_model(self) -> BaseChatModel:
+        def load_model(self) -> BaseChatModel:  # type: ignore[override]  # as deepeval's own models
             return self.chat
 
         def generate(self, prompt: str, schema: Any = None) -> str:
@@ -77,7 +77,7 @@ def _chat_judge() -> type:
             return self.generate(prompt, schema)
 
         def get_model_name(self) -> str:
-            return self.name
+            return self.name or ""
 
     return ChatJudge
 
