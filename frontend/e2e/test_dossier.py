@@ -3,7 +3,7 @@ cards with their state, the empty state, the API failing, and the page at 400px 
 
 import json
 
-from dossier_cards import card, click_on_card, first_quote
+from dossier_cards import card, click_on_card, click_on_quote, first_quote
 from playwright.sync_api import APIRequestContext, Page, expect
 
 CONTROLS = 12
@@ -103,7 +103,7 @@ def test_a_click_on_a_quote_opens_its_controls_working_paper(page: Page, dossier
     open_dossier(page, dossier_url)
     quote, control_id = first_quote(page)
 
-    quote.locator("blockquote").click(force=True)  # covered by the link by design, as click_on_card
+    click_on_quote(quote)
 
     expect(page).to_have_url(f"{dossier_url}/controls/{control_id}")
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
@@ -117,7 +117,7 @@ def test_a_ctrl_click_on_a_quote_opens_its_paper_in_a_new_tab_and_the_dossier_st
     open_dossier(page, dossier_url)
     quote, control_id = first_quote(page)
     with page.context.expect_page() as opened:  # the browser's new tab
-        quote.locator("blockquote").click(force=True, modifiers=["Control"])
+        click_on_quote(quote, modifiers=["Control"])
     expect(opened.value).to_have_url(f"{dossier_url}/controls/{control_id}")
     expect(page).to_have_url(f"{dossier_url}/")
     expect(page.get_by_role("region", name="Working paper")).to_have_count(0)

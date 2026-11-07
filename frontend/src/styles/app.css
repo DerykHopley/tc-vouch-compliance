@@ -102,10 +102,10 @@ button.prof-button:hover { border-color: var(--navy); }
 .card { position: relative; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; display: grid; gap: 8px; align-content: start; }
 /* The whole card opens its working paper (#231): its one link, "Open <id>", stretched over the card by ::after. Hover
    shows on the whole card; keyboard focus rings the whole card. */
-.card-head::after { content: ""; position: absolute; inset: 0; border-radius: 4px; }
+.card-head::after, .quote-link::after { content: ""; position: absolute; inset: 0; border-radius: 4px; }
 .card:hover { border-color: var(--muted); }
-.card-head:focus-visible { outline: none; }
-.card-head:focus-visible::after { outline: 2px solid var(--navy); outline-offset: 2px; }
+.card-head:focus-visible, .quote-link:focus-visible { outline: none; }
+.card-head:focus-visible::after, .quote-link:focus-visible::after { outline: 2px solid var(--navy); outline-offset: 2px; }
 .card-head { background: var(--paper); border-radius: 2px 2px 0 0; height: 74px; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 8px 10px; border-bottom: 4px solid var(--not-applicable); color: var(--ink); text-decoration: none; }
 .card:hover .card-head b { text-decoration: underline; text-decoration-color: var(--navy); }
 .card-head b { font: 400 24px/1 var(--f-display); }
@@ -123,18 +123,15 @@ button.prof-button:hover { border-color: var(--navy); }
 
 /* Evidence quote cards: quoted evidence in serif italic under a brass rule (design.md, Type and Citation) */
 .quotes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.quote { background: var(--sheet); border: 1px solid var(--rule); border-top: 2px solid var(--brass); border-radius: 4px; padding: 16px; display: grid; gap: 10px; align-content: space-between; min-width: 0; }
+.quote { position: relative; background: var(--sheet); border: 1px solid var(--rule); border-top: 2px solid var(--brass); border-radius: 4px; padding: 16px; display: grid; gap: 10px; align-content: space-between; min-width: 0; }
 .quote blockquote { margin: 0; font: italic 14px/1.5 var(--f-quote); overflow-wrap: anywhere; }
 .quote footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; overflow-wrap: anywhere; }
 /* A quote card opens its control's working paper (#311), as a control card does (#231): its one link, "for <control>
-   <requirement>", stretched over the card; the link's own box keeps the 44px floor (the touch-target check measures it). */
-.quote { position: relative; }
+   <requirement>", stretched over the card (its ::after and focus ring share the .card-head rules above); the link's own
+   box keeps the 44px floor (the touch-target check measures it). */
 .quote-link { display: inline-flex; align-items: center; gap: 0.3em; min-height: 44px; color: inherit; text-decoration: none; }
-.quote-link::after { content: ""; position: absolute; inset: 0; border-radius: 4px; }
 .quote:hover { border-color: var(--muted); border-top-color: var(--brass); }
 .quote:hover .quote-link .mono { text-decoration: underline; text-decoration-color: var(--navy); }
-.quote-link:focus-visible { outline: none; }
-.quote-link:focus-visible::after { outline: 2px solid var(--navy); outline-offset: 2px; }
 .kind { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 2px; margin-right: 6px; }
 .kind-documented { border: 1px dashed var(--muted); }
 .kind-implemented { border: 1px solid var(--navy); color: var(--navy); }
