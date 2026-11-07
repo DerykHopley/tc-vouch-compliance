@@ -1,0 +1,19 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "Kryptografie Verfahren Schlüsselstärken Schlüssel Lebenszyklus Schlüsselhoheit"}},
+    {"tool": "search_records", "args": {"query": "Cloud-Dienste Schlüsselverwaltung kundenverwalteter Schlüssel Ausnahme"}},
+    {"answer": "Das Kryptografiekonzept legt Verfahren und Mindeststärken nach der Technischen Richtlinie TR-02102 des BSI fest, und der IT-Leiter prüft sie jedes Jahr. Es regelt den Lebenszyklus der Schlüssel von der Erzeugung auf dem Hardware-Sicherheitsmodul bis zur Löschung. Vertrauliche Daten bei Anbietern sind mit Schlüsseln zu verschlüsseln, die nur Alpenwerk besitzt; die Lohnverrechnung tut das, der CAD-Datenaustausch aber lässt die Schlüssel beim Anbieter."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Die Verfahren und Mindeststärken folgen der Technischen Richtlinie des BSI und werden jedes Jahr geprüft.", "citations": [{"doc_id": "kryptografiekonzept", "quote": "Die Verfahren richten sich nach der aktuellen Technischen Richtlinie TR-02102 des BSI. Der IT-Leiter prüft die Tabelle jedes Jahr."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Das Konzept regelt Verfahren, Schlüsselstärken und den Lebenszyklus der Schlüssel von der Erzeugung bis zur Löschung.", "citations": [{"doc_id": "kryptografiekonzept", "quote": "Das Konzept regelt für jeden Schlüssel Archivierung, Abruf, Verteilung, Deaktivierung, Erneuerung spätestens nach drei Jahren und Löschung."}]},
+      {"requirement_id": "H1", "verdict": "partly-evidenced", "reason": "Vertrauliche Daten bei Anbietern müssen mit Schlüsseln verschlüsselt werden, die nur Alpenwerk besitzt; die Lohnverrechnung erfüllt das, der CAD-Datenaustausch lässt die Schlüssel aber beim Anbieter.", "citations": [{"doc_id": "kryptografiekonzept", "quote": "Vertrauliche Daten, die ein Anbieter außerhalb von Alpenwerk verarbeitet, werden mit Schlüsseln verschlüsselt, die nur Alpenwerk besitzt"}, {"doc_id": "cloud-dienste-register", "quote": "Für den CAD-Datenaustausch hat der IT-Leiter am 12. August 2026 eine Ausnahme vom Kryptografiekonzept beantragt, weil der Anbieter keine kundenverwalteten Schlüssel anbietet."}]}
+    ]
+  },
+  "remediate": {
+    "items": [
+      {"requirement_id": "H1", "missing": "Kundenverwaltete Schlüssel für den CAD-Datenaustausch, oder eine entschiedene und befristete Ausnahme mit zusätzlichen Schutzmaßnahmen.", "owner_role": "IT-Leiter", "due_in_days": 60}
+    ]
+  }
+}

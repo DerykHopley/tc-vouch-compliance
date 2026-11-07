@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "encryption methods key length keys certificates"}},
+    {"answer": "The encryption standard allows only methods the national cyber security authority recommends: AES with at least 128-bit keys for stored data, RSA with at least 3072 bits or elliptic curves with at least 256 bits, and SHA-256 or stronger. Laptops use full-disk encryption and connections use TLS 1.2 or newer. It covers how keys are created, stored, withdrawn and renewed. It was approved in March 2022 with a yearly review and has not been reviewed since."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The approved methods follow the national authority's recommendations, but the standard was approved in March 2022 with a yearly review, so it is out of date.", "citations": [{"doc_id": "encryption-standard", "quote": "We use only encryption methods that the national cyber security authority recommends: AES with keys of at least 128 bits for stored data, RSA with at least 3072 bits or elliptic curves with at least 256 bits for key exchange and signatures, and SHA-256 or stronger for hashing."}]},
+      {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "The standard covers methods, key strengths and how keys are handled from creation to withdrawal, but it is out of date.", "citations": [{"doc_id": "encryption-standard", "quote": "Keys are withdrawn when a device is retired and renewed when a certificate expires."}]}
+    ]
+  },
+  "remediate": {
+    "items": [
+      {"requirement_id": "M1", "missing": "A review of the encryption standard against the national authority's current recommendations, approved again with the date.", "owner_role": "Information security officer", "due_in_days": 30},
+      {"requirement_id": "S1", "missing": "The reviewed encryption standard, approved again, with the key life cycle checked against current practice.", "owner_role": "Information security officer", "due_in_days": 30}
+    ]
+  }
+}

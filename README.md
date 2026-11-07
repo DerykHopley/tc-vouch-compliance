@@ -25,8 +25,9 @@ scripts/dev.sh                                   # open the URL it prints; Ctrl-
 scripts/dev.sh --api-port 8010 --web-port 5180   # when 8000 or 5173 is taken
 ```
 
-It runs on the scripted fake model: offline, free, with no keys and no sign-in. Assess
-**4.1.2** first: it is the control the bundled demo script covers. The full setup, and what to
+It runs on the scripted fake model: offline, free, with no keys and no sign-in. The fake covers
+four controls, **1.1.1**, **1.6.2**, **4.1.2** and **5.1.1**, under both bundled profiles; any
+other control plays 4.1.2's script. The full setup, and what to
 do when something fails, is in [`docs/setup.md`](docs/setup.md); the four common tasks, step by
 step, are in [`docs/features.md`](docs/features.md).
 
