@@ -62,10 +62,10 @@ const LEAD_IN = /:\**\s*$/
  * a colon, and goes on with each next number. Null otherwise: "15. März 2026 …", "1. Januar …" or "5. The policy …"
  * on a line of its own stays text, as written (#218).
  */
-function numberedItem(text: string, number: number, open: Block | null, afterLeadIn: boolean) {
-  // `open` is the list before a blank line too: the next number after a blank goes on with it (#223).
+function numberedItem(text: string, number: number, current: Block | null, afterLeadIn: boolean) {
+  // `current`: the open block, or the numbered list a blank line paused (#223), which the next number goes on with.
   if (number === 1 && afterLeadIn) return { text, starts: true }
-  if (open?.kind === 'ol' && number === open.items.length + 1) return { text, starts: false }
+  if (current?.kind === 'ol' && number === current.items.length + 1) return { text, starts: false }
   return null
 }
 
@@ -118,21 +118,23 @@ export function proseBlocks(text: string): Block[] {
     }
     const bullet = BULLET.exec(line)
     const marked = bullet ? null : NUMBERED.exec(line)
-    // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet.
+    // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet. It comes before
+    // `paused = null` on purpose, so a bare marker keeps a paused numbered list going (#223).
     if ((bullet?.[1] ?? marked?.[2])?.trim() === '') continue
-    const list: NumberedList | null = open?.kind === 'ol' ? open : paused
+    // The numbered list this line may go on with: the open one, or the one a blank line paused.
+    const numberedList: NumberedList | null = open?.kind === 'ol' ? open : paused
     paused = null
-    if (bullet && list && INDENTED.test(line)) {
+    if (bullet && numberedList && INDENTED.test(line)) {
       // A sub-bullet of the list's last item (#223): the list stays open for the next number.
-      list.subs ??= list.items.map(() => [])
-      list.subs[list.subs.length - 1].push(runs(bullet[1]))
-      open = list
+      numberedList.subs ??= numberedList.items.map(() => [])
+      numberedList.subs[numberedList.subs.length - 1].push(runs(bullet[1]))
+      open = numberedList
       previous = line
       continue
     }
-    const numbered = marked && numberedItem(marked[2], Number(marked[1]), open ?? list, LEAD_IN.test(previous))
+    const numbered = marked && numberedItem(marked[2], Number(marked[1]), open ?? numberedList, LEAD_IN.test(previous))
     previous = line
-    if (numbered && !numbered.starts && !open) open = list // the next number after a blank line goes on (#223)
+    if (numbered && !numbered.starts && !open) open = numberedList // the next number after a blank line goes on (#223)
     if (numbered?.starts) open = null // a list after a lead-in is a new list
     if (bullet) add('ul', runs(bullet[1]))
     else if (numbered) add('ol', runs(numbered.text))
