@@ -42,6 +42,7 @@ from vouch.chat_agent import (
     is_lead,
     is_refusal,
 )
+from vouch.chat_citations import CITE
 from vouch.fake_model import _usage
 
 CHAT_REPLY = (
@@ -156,9 +157,16 @@ def _line(shape: str) -> re.Pattern[str]:
     return re.compile(f"^{shape}$", re.MULTILINE)
 
 
+_COUNT = rf"\d+ (?:is|are) {_STATUS}"
+_COUNTS = re.compile(rf"{_COUNT}(?:,(?: and)? {_COUNT})*")
+
+
 def _counts(found: re.Match[str]) -> str:
-    """progress_words' count of controls in each review state."""
-    parts = []
+    """progress_words' count of controls in each review state; any other sentence of that
+    shape (a document's, say) as it is."""
+    if not _COUNTS.fullmatch(found.group(2)):
+        return found.group(0)
+    parts: list[str] = []
     for n, status in re.findall(rf"(\d+) (?:is|are) {_STATUS}", found.group(2)):
         verb = "ist" if n == "1" else "sind"
         words = _STATUSES[status][n != "1"]
@@ -406,10 +414,24 @@ def german_answer(words: str) -> str:
     profile that answers in German (#330): the tools write English for the model, as a real model
     answers in the profile's language. Cites, document ids, control and requirement ids and
     columns, the document's own texts, reasons, numbers and the quoted query stay as they are; a
-    sentence the table doesn't know passes through unchanged."""
+    sentence the table doesn't know passes through unchanged. Document text is set aside first,
+    so no rule reads it: each cite, and each line giving a requirement's text (a finding, with
+    its reason, or a requirement not yet assessed)."""
+    kept: list[str] = []
+
+    def set_aside(found: re.Match[str]) -> str:
+        kept.append(found.group(0))
+        return f"\0{len(kept) - 1}\0"
+
+    words = _DOCUMENT_TEXT.sub(set_aside, words)
     for shape, german in _GERMAN:
         words = shape.sub(german, words)
-    return words
+    return _SET_ASIDE.sub(lambda found: kept[int(found.group(1))], words)
+
+
+_DOCUMENT_TEXT = re.compile(rf"{CITE.pattern}|^- [\w.]+ \(\w+\): [^\n]*$", re.MULTILINE | re.DOTALL)
+"""What german_answer leaves as it is: a cite, or a line with a requirement's text."""
+_SET_ASIDE = re.compile(r"\0(\d+)\0")
 
 
 def _page(messages: list[BaseMessage]) -> str | None:
