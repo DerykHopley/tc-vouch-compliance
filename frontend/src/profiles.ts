@@ -19,6 +19,22 @@ export async function fetchProfiles(): Promise<Profiles | null> {
   }
 }
 
+/** How a fresh start went: started, refused while an assessment runs (the 409), or failed any other way. */
+export type FreshStart = 'started' | 'running' | 'failed'
+
+/** Starts the lead's progress under the chosen profile afresh (#285): from now on, only what they start is listed. Nothing
+ * is deleted, and the audit trail keeps every entry. */
+export async function startAfresh(): Promise<FreshStart> {
+  try {
+    const response = await fetch('/api/progress/fresh-start', { method: 'POST', headers: await authHeaders() })
+    if (response.ok) return 'started'
+    sessionEnded(response) // a 401 signs out, as every API call's does
+    return response.status === 409 ? 'running' : 'failed'
+  } catch {
+    return 'failed'
+  }
+}
+
 /** The profile to open with: the remembered one while the list holds it, else the default (or the first listed), and
  * whether it fell back from a remembered one (#201). Without a list, none: calls name no profile. */
 export function startingProfile(

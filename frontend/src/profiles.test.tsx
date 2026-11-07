@@ -254,6 +254,29 @@ describe('ProfiledApp', () => {
     expect(overviewCalls(fetch)).toEqual(['testwerk'])
   })
 
+  it('starting afresh from the user menu opens the Overview afresh, at its address, issue 285', async () => {
+    window.history.replaceState(null, '', '/report')
+    const fetch = serve([NORDLICHT, TESTWERK])
+    const answered = fetch.getMockImplementation()!
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/progress/fresh-start'
+      ? Promise.resolve(Response.json({ fresh_start: '2026-11-07T10:00:00+00:00' }))
+      : answered(url, init))
+    vi.stubGlobal('confirm', () => true)
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: /^Profile: / })
+    expect(overviewCalls(fetch)).toEqual([]) // the report reads no overview
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${NORDLICHT.company} afresh…` }))
+
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(overviewCalls(fetch)).toEqual(['nordlicht'])
+    const freshStart = fetch.mock.calls.filter(([url]) => url === '/api/progress/fresh-start')
+    expect(freshStart.map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))).toEqual(['nordlicht'])
+    expect(screen.getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
+  })
+
   it('without the list, shows no switcher and the app as before', async () => {
     vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
       ? Promise.resolve(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
