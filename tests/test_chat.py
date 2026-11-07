@@ -76,6 +76,21 @@ def test_the_model_sees_the_page_and_control_the_compliance_lead_is_on(client, m
     assert human.content == "What's missing here?"
 
 
+def test_on_the_readiness_report_the_model_is_told_so_and_not_the_dossier_overview(
+    client, monkeypatch
+):
+    fake = CannedChatModel()
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
+
+    response = chat(client, message="What does the report say?", page="report")
+
+    assert response.status_code == 200
+    assert [name for name, _ in read_events(response)][-1] == "done"
+    system, _ = fake.prompts[0]
+    assert "readiness report" in system.content
+    assert "Dossier overview" not in system.content
+
+
 def test_a_model_failure_ends_the_stream_with_one_formal_error_event(client, monkeypatch):
     fake = CannedChatModel(fail_with=RuntimeError("socket on fire"))
     monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
@@ -137,6 +152,13 @@ def test_the_prompt_names_the_control_on_its_working_paper():
     system = chat_prompt(nordlicht(), PageContext("paper", control))
 
     assert f"{control.id}" in system.content and control.question in system.content
+
+
+def test_the_prompt_names_the_readiness_report():
+    system = chat_prompt(nordlicht(), PageContext("report"))
+
+    assert "readiness report" in system.content
+    assert "Dossier overview" not in system.content
 
 
 def said_in_chunks(client, monkeypatch, chunks: list[str]) -> tuple[str, list[str]]:

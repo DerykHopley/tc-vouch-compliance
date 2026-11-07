@@ -356,6 +356,14 @@ def test_the_header_names_the_page_and_the_control_on_the_working_paper(page: Pa
     expect(chat(page).locator(".page-context")).to_have_text("on 4.1.2 · Working paper")
 
 
+def test_on_the_readiness_report_the_header_names_the_report(page: Page, chat_url):
+    page.set_viewport_size({"width": 1400, "height": 800})
+    with page.expect_response("**/api/report"):
+        page.goto(chat_url + "/report")
+    page.get_by_role("button", name="Ask Vouch").click()
+    expect(chat(page).locator(".page-context")).to_have_text("on Report")
+
+
 def test_a_message_gets_vouchs_formal_reply(page: Page, chat_url):
     open_page(page, chat_url, 1400)
     page.get_by_role("button", name="Ask Vouch").click()
