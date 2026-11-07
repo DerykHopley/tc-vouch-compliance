@@ -25,8 +25,9 @@ CLERK_KEYS = {
 }
 
 
-class Reached(Exception):
-    """The tool reached its first real action, past settings."""
+class Reached(BaseException):
+    """The tool reached its first real action, past settings. A BaseException, so a tool's
+    catch-all `except Exception` (assess has one) doesn't swallow it."""
 
 
 def reached(*args, **kwargs):
@@ -73,7 +74,7 @@ def test_every_console_script_has_a_row():
     assert not missing, f"no row in TOOLS for: {', '.join(sorted(missing))}"
 
 
-KNOWN_TRAPS = {"assess": "#278: assess loads the API's full settings, sign-in included"}
+KNOWN_TRAPS: dict[str, str] = {}
 """Tools that still fall into the trap, each with its Fix: strict, so the row fails once fixed."""
 
 

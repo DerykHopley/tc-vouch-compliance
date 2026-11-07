@@ -12,7 +12,7 @@ origins Vouch's pages are served from; not secret, so not in `.envrc`) are requi
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, get_args, overload
 
@@ -223,6 +223,18 @@ def load_model_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         openrouter_api_key=SecretStr(api_key) if api_key else None,
         profiles_dir=_read_path(env, PROFILES_DIR_ENV) or FIXTURES_DIR,
+    )
+
+
+def load_assess_settings(env: Mapping[str, str] | None = None) -> Settings:
+    """What the `assess` CLI documents and reads, and nothing else (#278): load_model_settings'
+    OpenRouter key and profiles folder, plus the model (ASSESS_MODEL) and the fake's script
+    (ASSESS_FAKE_SCRIPT). It signs nobody in, so Clerk keys without an auth mode don't stop it."""
+    env = os.environ if env is None else env
+    return replace(
+        load_model_settings(env),
+        model=_read(env, MODEL_ENV),
+        fake_script=_read_path(env, FAKE_SCRIPT_ENV),
     )
 
 
