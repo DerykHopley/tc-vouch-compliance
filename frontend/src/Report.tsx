@@ -3,7 +3,7 @@ import type { Verdict } from './assessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
 import Prose from './Prose.tsx'
-import { exportReport, fetchReport, olderEntries, type ReadinessReport, type ReportControl, type ReportWords, type TrailEntry }
+import { exportReport, fetchReport, olderEntries, type ReadinessReport, type ReportFormat, type ReportControl, type ReportWords, type TrailEntry }
   from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -44,24 +44,33 @@ export default function Report() {
   return <main className="report wrap"><Export /><Document report={state.report} /></main>
 }
 
-type Exporting = { status: 'idle' } | { status: 'exporting' } | { status: 'failed'; message: string }
+type Exporting = { status: 'idle' } | { status: 'exporting'; format: ReportFormat } | { status: 'failed'; message: string }
 
-/** Export (#57): the report as one Markdown file, saved only once the whole of it has been read. English, as the
- * page around the report is; app.css leaves it out of print. */
+const FORMATS: { format: ReportFormat; label: string }[] = [
+  { format: 'markdown', label: 'Export Markdown' },
+  { format: 'pdf', label: 'Export PDF' },
+]
+
+/** Export (#57, #308): the report as one Markdown or PDF file, saved only once the whole of it has been read. While
+ * one runs, its button is busy and both are disabled. English, as the page around the report is; app.css leaves it
+ * out of print. */
 function Export() {
   const [state, setState] = useState<Exporting>({ status: 'idle' })
   const busy = state.status === 'exporting'
-  const run = async () => {
+  const run = async (format: ReportFormat) => {
     if (busy) return
-    setState({ status: 'exporting' })
-    const done = await exportReport()
+    setState({ status: 'exporting', format })
+    const done = await exportReport(format)
     setState(done.ok ? { status: 'idle' } : { status: 'failed', message: done.message })
   }
   return (
     <div className="report-actions">
-      <button className="btn" onClick={() => void run()} disabled={busy} aria-busy={busy ? true : undefined}>
-        Export
-      </button>
+      {FORMATS.map(({ format, label }) => (
+        <button key={format} className="btn" onClick={() => void run(format)} disabled={busy}
+          aria-busy={busy && state.format === format ? true : undefined}>
+          {label}
+        </button>
+      ))}
       {state.status === 'failed' && <p role="alert" className="field-note notice">{state.message}</p>}
     </div>
   )

@@ -15,6 +15,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.2.0",
     "psycopg[binary]>=3.3.8,<3.4",  # vouch.database.BoundedConnection reads a private name (#119)
     "pydantic>=2.14.2",
+    "fpdf2>=2.9.0",
 ]
 
 [project.scripts]
@@ -27,6 +28,7 @@ dev = [
     "mypy>=2.4.1",
     "openpyxl>=3.1.5",
     "pyjwt[crypto]>=2.9",
+    "pypdf>=7.0.0",
     "pytest",
     "pytest-socket>=0.8.1",
     "ruff",

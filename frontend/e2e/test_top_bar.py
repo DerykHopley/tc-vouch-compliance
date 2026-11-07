@@ -52,16 +52,18 @@ def test_the_user_menu_opens_by_click_or_keyboard_closes_with_esc_and_flips_the_
 
     user.click()
     menu = page.get_by_role("menu", name="Your menu")
-    expect(menu.get_by_role("menuitem")).to_have_text(
-        ["Light theme" if scheme == "dark" else "Dark theme"]
-    )
+    theme = "Light theme" if scheme == "dark" else "Dark theme"
+    fresh_start = "Start Nordlicht Komponenten GmbH afresh…"  # #285
+    expect(menu.get_by_role("menuitem")).to_have_text([fresh_start, theme])
     page.keyboard.press("Escape")
     expect(menu).to_have_count(0)
 
     user.focus()
     page.keyboard.press("Enter")
-    item = page.get_by_role("menuitem")
-    expect(item).to_be_focused()
+    items = page.get_by_role("menuitem")
+    expect(items.nth(0)).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(items.nth(1)).to_be_focused()
     page.keyboard.press("Enter")  # the theme flips, and the menu closes back on its button
     flipped = "light" if scheme == "dark" else "dark"
     expect(page.locator("html")).to_have_attribute("data-theme", flipped)
@@ -119,7 +121,7 @@ def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
     assert small_targets(page) == []
 
     bar.get_by_role("button", name="Your menu").click()
-    expect(page.get_by_role("menuitem")).to_be_visible()
+    expect(page.get_by_role("menuitem")).to_have_count(2)  # the fresh start (#285) and the theme
     assert small_targets(page) == []
 
     page.get_by_role("link", name="Developer").click()  # a tab closes the menu

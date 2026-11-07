@@ -75,7 +75,10 @@ def assessment_events(
     from the control's last rejection is carried in (#42), wherever the run was started."""
     note = note or rejection_note(memory, run.saver, control.id)
     chosen = run.models.for_assessment(
-        run.chosen, callbacks=[run.meter], answer_language=profile.answer_language
+        run.chosen,
+        callbacks=[run.meter],
+        answer_language=profile.answer_language,
+        control_id=control.id,
     )
     model = ToolAllowList(chosen, run.tools)
     # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.

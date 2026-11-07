@@ -4,6 +4,7 @@ import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
+import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, useOverview } from './overview.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import Report from './Report.tsx'
@@ -54,11 +55,15 @@ type AppProps = {
   profileSwitcher?: ReactNode
   /** The signed-in user's name, for the user menu (#222); none in local mode. */
   userName?: string
+  /** The company of the profile shown, for the user menu's fresh start (#285); none without a profile list. */
+  company?: string
+  /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
+  onStartedAfresh?: () => void
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
-export default function App({ onSignOut, profileSwitcher, userName }: AppProps = {}) {
+export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -84,15 +89,38 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
     }
   }, [barOpen])
   const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
-    const onPopState = () => setView(viewAt(window.location.pathname)) // Back or Forward
+    shownPath.current = pathOf(view)
+  }, [view])
+  useEffect(() => {
+    // Back or Forward: the address has already changed, so staying on a paper with unsaved overrides puts it back.
+    const onPopState = () => {
+      if (window.location.pathname !== shownPath.current && !mayLeave()) {
+        window.history.pushState(null, '', shownPath.current)
+        return
+      }
+      setView(viewAt(window.location.pathname))
+    }
+    // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (unsavedCount() > 0) e.preventDefault()
+    }
     window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      window.removeEventListener('popstate', onPopState)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
   }, [])
-  /** Shows a view and gives it its address, so a refresh or a shared link opens it again. */
+  /** Shows a view and gives it its address, so a refresh or a shared link opens it again. Leaving a paper with
+   * overrides not yet recorded asks first (#182); false when the lead stays. */
   const showView = (next: View) => {
-    if (window.location.pathname !== pathOf(next)) window.history.pushState(null, '', pathOf(next))
+    const path = pathOf(next)
+    if (path !== shownPath.current && !mayLeave()) return false // the view shown again asks nothing
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
     setView(next)
+    return true
   }
   // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
   // shows the Dossier.
@@ -176,8 +204,7 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
     return again !== null
   }
   const open = (controlId: string, assess: boolean) => {
-    showView({ name: 'paper', controlId })
-    if (assess) void start(controlId)
+    if (showView({ name: 'paper', controlId }) && assess) void start(controlId)
   }
 
   return (
@@ -197,7 +224,8 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
             )}
           </nav>
           {profileSwitcher}
-          <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut} />
+          <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut}
+            company={company} onStartedAfresh={onStartedAfresh} />
         </div>
       </TopBar>
       {shown === 'report' ? <Report />
@@ -214,9 +242,9 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
       {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
-          report too, which has no page context of its own (#56). An assessment from the chat reads the overview
-          afresh (its card, readiness), and its paper's newest if open. */}
-      <AskVouch context={{ page: shown === null || shown === 'report' ? 'dossier' : shown,
+          readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
+          readiness), and its paper's newest if open. */}
+      <AskVouch context={{ page: shown ?? 'dossier',
         controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}

@@ -450,3 +450,94 @@ def test_before_the_setup_has_run_the_list_answers_503_naming_it(request, users,
 
     assert listed.status_code == 503
     assert "vouch-db-setup" in caplog.text
+
+
+# --- A fresh start (#285): listed from a time on, nothing deleted -----------------------------
+
+
+def clock_at(*days: int) -> Any:
+    """A clock that returns the given days of November 2026 in turn, one per call."""
+    times = iter(datetime(2026, 11, day, tzinfo=UTC) for day in days)
+    return lambda: next(times)
+
+
+def test_a_fresh_start_lists_only_the_entries_started_after_it_on_every_store(any_store):
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2, 3, 4))
+    mine.remember_assessment("old", DEMO_CONTROL)
+    mine.remember_assessment("older-control", "1.1.1")
+    mine.start_afresh()
+    mine.remember_assessment("new", DEMO_CONTROL)
+
+    assert mine.fresh_start() == datetime(2026, 11, 3, tzinfo=UTC)
+    assert mine.thread_ids() == ["new"]
+
+
+def test_an_entry_started_at_the_instant_of_the_fresh_start_is_listed(any_store):
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2, 2))
+    mine.remember_assessment("before", DEMO_CONTROL)
+    mine.start_afresh()
+    mine.remember_assessment("same-instant", DEMO_CONTROL)
+
+    assert mine.thread_ids() == ["same-instant"]
+
+
+def test_after_a_fresh_start_the_last_work_is_none_until_the_lead_works_again(any_store):
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2, 3, 4))
+    mine.remember_assessment("old", DEMO_CONTROL)
+    mine.note_worked()
+    mine.start_afresh()
+
+    assert mine.last_worked() is None
+    mine.note_worked()
+    assert mine.last_worked() == datetime(2026, 11, 4, tzinfo=UTC)
+
+
+def test_a_second_fresh_start_replaces_the_first_ones_time(any_store):
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2, 3, 4))
+    mine.start_afresh()
+    mine.remember_assessment("between", DEMO_CONTROL)
+    mine.start_afresh()
+    mine.remember_assessment("after", DEMO_CONTROL)
+
+    assert mine.fresh_start() == datetime(2026, 11, 3, tzinfo=UTC)
+    assert mine.thread_ids() == ["after"]
+
+
+def test_removing_the_fresh_start_note_lists_the_old_entries_again(any_store):
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2, 3))
+    mine.remember_assessment("old", DEMO_CONTROL)
+    mine.note_worked()
+    mine.start_afresh()
+
+    any_store.delete(("vouch", "user_a", DEFAULT_PROFILE), memory.FRESH_START)
+
+    assert mine.fresh_start() is None
+    assert mine.thread_ids() == ["old"]
+    assert mine.last_worked() == datetime(2026, 11, 2, tzinfo=UTC)
+
+
+def test_a_fresh_start_that_cannot_open_a_new_conversation_hides_nothing(monkeypatch):
+    """The note is written last: when an earlier write fails, the progress is still listed."""
+    store = InMemoryStore()
+    mine = memory.Memory(store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2))
+    mine.remember_assessment("old", DEMO_CONTROL)
+    mine.set_current_chat("chat-1")
+    monkeypatch.setattr(InMemoryStore, "delete", failing_write)
+
+    with pytest.raises(DatabaseUnavailable):
+        mine.start_afresh()
+
+    assert mine.fresh_start() is None
+    assert mine.thread_ids() == ["old"]
+
+
+def test_a_fresh_start_opens_a_new_conversation_and_keeps_the_old_ones_lines(any_store):
+    mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE)
+    line = {"from": "lead", "text": "Where do I stand?"}
+    mine.add_chat_turn("chat-1", [line], started_ns=1)
+    mine.set_current_chat("chat-1")
+
+    mine.start_afresh()
+
+    assert mine.current_chat() is None
+    assert mine.chat_lines("chat-1") == [line]

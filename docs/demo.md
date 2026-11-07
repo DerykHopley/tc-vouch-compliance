@@ -22,9 +22,15 @@ what to fix. Vouch drafts; the lead decides.
 - Sign in to the live app, <https://vouch-828715466396.europe-west1.run.app>, and open it once a
   minute before you start, so Cloud Run is awake.
 - Choose **Nordlicht Komponenten GmbH** in the profile switcher in the top bar.
-- Earlier rehearsals' decisions stay: there is no reset. The script works from whatever standing
-  you have. A new assessment of a control makes it "Proposed" again, so it no longer counts until
-  you review it.
+- Start Nordlicht afresh before each run: in the user menu (your initials, top right), choose
+  **Start Nordlicht Komponenten GmbH afresh…** and OK the question. Do the same under Alpenwerk
+  (switch to it, **Start Alpenwerk Präzision GmbH afresh…**, then switch back), so step 5's 1.6.2
+  shows **Assess**, not **Assess again**. Every control is "Not
+  assessed" again and the chat opens a new conversation, so each run starts from the same place.
+  Nothing is deleted: the report's audit trail still lists every earlier rehearsal's entries. Wait
+  until no assessment is running, or Vouch asks you to.
+- A fresh start doesn't give back assessments: the earlier rehearsals still count towards
+  today's limit.
 - Each assessment counts towards your daily limit. One run of the script makes two (5.1.1 and
   1.6.2) and two or three chat messages.
 
@@ -47,10 +53,11 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 1. Open **5.1.1** ("To what extent is the use of cryptographic procedures managed?") and select
    **Assess**.
 2. Point at the steps as they appear under "How Vouch reached this": the control loaded, the
-   policies searched, the quotes checked, the remediation item drafted.
-3. Point at the verdict: Partly evidenced at best. The evidence is the encryption standard
-   (`encryption-standard`, approved 2022-03-14, reviewed yearly), which is past its review, so the
-   requirements it backs are capped at **Partly evidenced**. Its quotes carry the flag "Stale:
+   policies searched, the quotes checked, the remediation items drafted.
+3. Point at the verdict: **Not evidenced**, because its one must requirement is only partly
+   evidenced. The evidence is the encryption standard (`encryption-standard`, approved 2022-03-14,
+   reviewed yearly), which is past its review, so the requirements it backs are capped at
+   **Partly evidenced**. Its quotes carry the flag "Stale:
    approved 2022-03-14 with a yearly review, due 2023-03-14", and the requirement's reason says
    why it is capped.
 4. Point at the exact quotes, each with its document, version and section, and "Quote verified".
@@ -83,7 +90,8 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 ### 5. Switch to Alpenwerk and assess 1.6.2 (1:00)
 
 1. In the profile switcher, choose **Alpenwerk Präzision GmbH · Austria · German**.
-2. Open **1.6.2** and select **Assess**.
+2. Open **1.6.2** from the control index (the switch keeps you on 5.1.1's address) and select
+   **Assess**.
 3. Point at the steps: `apply_overlays` names the country overlay "AT NIS2 (illustrative)", which
    adds O1, and `overlay_branch` gathers evidence for it. O1 is in the requirements table, marked
    "Country overlay".
@@ -101,32 +109,24 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 4. Point at "Remediation items" (the approved items), "Not applicable" (what the profile excludes,
    each with its reason), the "Audit trail" (your override, with its reason as the note) and the
    disclaimer at the foot.
-5. Select **Export**: a Markdown file downloads.
-6. Print with the browser (Ctrl P): only the report is on the page, without the top bar, the chat
-   or the buttons.
+5. Select **Export PDF**: `readiness-report-nordlicht-<date>.pdf` downloads, plain A4 with the
+   report's parts in the page's order. **Export Markdown** downloads the same report as Markdown.
 
 > This is what management and the auditor read: only reviewed verdicts, who reviewed each, what is
-> missing and who owns it, and every decision in the audit trail. It exports as Markdown or
-> prints to PDF. Alpenwerk's report reads in German.
+> missing and who owns it, and every decision in the audit trail. It downloads as a PDF to
+> attach, or as Markdown. Alpenwerk's report reads in German.
 
 ## If the live app is slow or down: the local run
 
 Start the app on your own machine as [setup](setup.md#run-the-app) says (`scripts/dev.sh`, then
 open the URL it prints). It runs on the scripted fake model, offline and free, with no sign-in:
-you are "Local user". Follow the same steps, with these substitutions:
+you are "Local user". The fake covers 1.1.1, 1.6.2, 4.1.2 and 5.1.1, so the steps run as on the
+live app, with one difference:
 
-- **Step 2:** assess **4.1.2** in place of 5.1.1: it is the only control the fake covers. It shows
-  **Partly evidenced** and a remediation item for M1, but no stale evidence: skip the stale flag.
-- **Step 3:** override **S2** to **Partly evidenced**, as
-  [features](features.md#2-review-it-with-an-override) does. The override drafts a second
-  remediation item, for S2, which reads "not drafted" and needs an owner role before it can be
-  approved: approve M1's only. The Overview then counts 2 remediation items, and the report 1,
-  since the report counts only approved items.
 - **Step 4:** the fake recognises only some phrasings
-  ([features](features.md#3-ask-a-question)): ask "What's missing for 4.1.2?" or "Is there
-  evidence of hardware security keys?", then type "Accept 4.1.2".
-- **Step 5:** under Alpenwerk, assess **4.1.2** for the German answer. The overlay on 1.6.2 needs
-  a restart with `ASSESS_FAKE_SCRIPT=evals/scripts/alpenwerk/1.6.2.json` (see
-  [features](features.md#the-overlay-branch)), so show it last, after the report, or skip it.
-- **Step 6:** the report shows 4.1.2, reviewed by "Local user". Export downloads
-  `readiness-report-nordlicht-<date>.md`.
+  ([features](features.md#3-ask-a-question)): ask "What's missing for 5.1.1?" or "Is there
+  evidence of key management?", then type "Accept 5.1.1".
+
+Step 2 shows 5.1.1's stale encryption standard as on the live app, and step 5 runs 1.6.2 under
+Alpenwerk, overlay branch and all, without a restart. Export PDF downloads
+`readiness-report-nordlicht-<date>.pdf`, and Export Markdown the `.md`.

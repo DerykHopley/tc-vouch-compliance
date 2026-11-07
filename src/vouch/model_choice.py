@@ -1,9 +1,10 @@
 """Which model an assessment runs on, and the developer's choice of it (#34).
 
 The order, for the API and the CLI alike: ASSESS_FAKE_SCRIPT's scripted fake when set (tests,
-development); else OpenRouter when OPENROUTER_API_KEY is set; else the bundled demo script in the
-profile's answer language (vouch.settings.DEMO_SCRIPTS: German for a German profile, demo.json
-for every other), so a missing key costs nothing. On Cloud Run every assessment route needs a signed-in user (clerk
+development); else OpenRouter when OPENROUTER_API_KEY is set; else the bundled demo script for the
+control in the profile's answer language (vouch.settings.demo_script: 1.1.1, 1.6.2, 4.1.2 and
+5.1.1 have their own, in English and German; any other control plays 4.1.2's), so a missing key
+costs nothing. On Cloud Run every assessment route needs a signed-in user (clerk
 mode, vouch.api), so only signed-in users reach the paid model; locally a key in the environment
 is the opt-in.
 
@@ -323,13 +324,14 @@ class ModelChoice:
         callbacks: list[BaseCallbackHandler] | None = None,
         *,
         answer_language: str = "en",
+        control_id: str | None = None,
     ) -> BaseChatModel:
         """A fresh model for one assessment, on `chosen` (from `chosen()`): its own call budget,
         or the fake at the start of its script. `callbacks` see every call (the usage meter).
-        On the fake: ASSESS_FAKE_SCRIPT when set, else the demo script in the profile's
-        `answer_language` (vouch.settings.demo_script, #234)."""
+        On the fake: ASSESS_FAKE_SCRIPT when set, else the demo script for the control in the
+        profile's `answer_language` (vouch.settings.demo_script, #234, #272)."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
-            fake = fake_model(self._settings, demo_script(answer_language))
+            fake = fake_model(self._settings, demo_script(answer_language, control_id))
             fake.callbacks = callbacks
             return fake
         return self.openrouter.chat_model(chosen, callbacks)

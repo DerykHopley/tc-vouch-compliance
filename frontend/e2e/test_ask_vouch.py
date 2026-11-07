@@ -111,6 +111,34 @@ def test_at_1400px_the_chats_header_keeps_to_one_line(page: Page, paper_url):
             )  # one row, centred; wrapped sits 44px lower
 
 
+def test_the_close_glyph_keeps_a_44px_box_in_every_chat_state(page: Page, dossier_url):
+    # Close is a × glyph (#72): the button around it stays at least 44 by 44px in the 400px sheet
+    # and in the 1400px bubble, enlarged and pinned.
+    def box(state: str) -> tuple[str, float, float]:
+        # Measured once the sheet's rise has finished: a resize to 400px starts it again, and a
+        # box read mid-move is a fraction short (43.99…).
+        page.locator(SHEET).evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")
+        b = page.get_by_role("button", name="Close the chat").bounding_box()
+        assert b is not None, state
+        return (state, b["width"], b["height"])
+
+    open_sheet(page, dossier_url, 1400)
+    sheet = page.locator(SHEET)
+    boxes = [box("bubble")]
+    sheet.get_by_role("button", name="Make larger").click()
+    boxes.append(box("enlarged"))
+    sheet.get_by_role("button", name="Pin beside the page").click()
+    expect(sheet.get_by_role("button", name="Pin beside the page")).to_have_attribute(
+        "aria-pressed", "true"
+    )
+    boxes.append(box("pinned"))
+    page.set_viewport_size({"width": 400, "height": 800})  # every state is the full-screen sheet
+    expect(sheet.get_by_role("button", name="Pin beside the page")).to_be_hidden()
+    boxes.append(box("sheet"))
+    small = [b for b in boxes if b[1] < 44 or b[2] < 44]
+    assert small == [], boxes
+
+
 def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
     open_sheet(page, dossier_url, 400)
     page.get_by_role("button", name="Close the chat").click()

@@ -411,8 +411,10 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
         {/* "New" on screen, so the 390px bubble's header keeps to one line; its name says what it starts. */}
         <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}
           aria-label="New conversation" title="New conversation">New</button>
-        <button className="btn btn-ghost" onClick={() => setState('closed')} aria-label="Close the chat">
-          Close
+        {/* An icon button (design.md, Components): the glyph is hidden; the name and tooltip say the action (#72). */}
+        <button className="btn btn-ghost btn-icon" onClick={() => setState('closed')}
+          aria-label="Close the chat" title="Close the chat">
+          <span aria-hidden="true">×</span>
         </button>
       </div>
       {/* Busy while a reply streams, so assistive tech announces the finished message, not each piece. */}

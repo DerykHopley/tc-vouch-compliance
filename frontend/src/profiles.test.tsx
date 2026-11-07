@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
-import { fetchProfiles, type ProfileSummary, profileLabel, startingProfile } from './profiles.ts'
+import { fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import {
   authHeaders, rememberedProfile, rememberProfile, setOnSignedOut, setProfile, setTokenSource,
@@ -107,6 +107,27 @@ describe('fetchProfiles', () => {
     setOnSignedOut(signOut)
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
     expect(await fetchProfiles()).toBeNull()
+    expect(signOut).toHaveBeenCalledOnce()
+  })
+})
+
+describe('startAfresh, issue 285', () => {
+  it('says how the fresh start went: started, running (409), or failed', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ fresh_start: '2026-11-07T10:00:00+00:00' })))
+    expect(await startAfresh()).toBe('started')
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 409 })))
+    expect(await startAfresh()).toBe('running')
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 503 })))
+    expect(await startAfresh()).toBe('failed')
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
+    expect(await startAfresh()).toBe('failed')
+  })
+
+  it('signs out on a 401 and says so, not that it failed', async () => {
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
+    expect(await startAfresh()).toBe('signed-out')
     expect(signOut).toHaveBeenCalledOnce()
   })
 })
@@ -254,6 +275,29 @@ describe('ProfiledApp', () => {
     expect(overviewCalls(fetch)).toEqual(['testwerk'])
   })
 
+  it('starting afresh from the user menu opens the Overview afresh, at its address, issue 285', async () => {
+    window.history.replaceState(null, '', '/report')
+    const fetch = serve([NORDLICHT, TESTWERK])
+    const answered = fetch.getMockImplementation()!
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/progress/fresh-start'
+      ? Promise.resolve(Response.json({ fresh_start: '2026-11-07T10:00:00+00:00' }))
+      : answered(url, init))
+    vi.stubGlobal('confirm', () => true)
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: /^Profile: / })
+    expect(overviewCalls(fetch)).toEqual([]) // the report reads no overview
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${NORDLICHT.company} afresh…` }))
+
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(overviewCalls(fetch)).toEqual(['nordlicht'])
+    const freshStart = fetch.mock.calls.filter(([url]) => url === '/api/progress/fresh-start')
+    expect(freshStart.map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))).toEqual(['nordlicht'])
+    expect(screen.getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
+  })
+
   it('without the list, shows no switcher and the app as before', async () => {
     vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
       ? Promise.resolve(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
@@ -278,8 +322,7 @@ describe('switching profile on a working paper', () => {
       not_applicable: null }] },
   })
 
-  it("drops the paper's unsaved overrides, which belonged to the other profile's assessment", async () => {
-    window.history.replaceState(null, '', '/controls/5.1.2')
+  function serveTwo() {
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
       const named = new Headers(init?.headers).get('X-Vouch-Profile')
       const company = named === 'testwerk' ? TESTWERK.company : NORDLICHT.company
@@ -291,14 +334,37 @@ describe('switching profile on a working paper', () => {
       if (url === '/api/assessments/t1') return Promise.resolve(Response.json({ assessment: proposed }))
       return new Promise<Response>(() => {})
     })
+  }
+  const row = async () => (await screen.findByText('M1', { selector: 'th .mono' })).closest('tr')!
+  /** Nordlicht's 5.1.2 paper, with M1 overridden and saved, not yet recorded. */
+  async function overriddenPaper() {
+    window.history.replaceState(null, '', '/controls/5.1.2')
+    serveTwo()
     render(<ProfiledApp />)
-    const row = async () => (await screen.findByText('M1', { selector: 'th .mono' })).closest('tr')!
     await userEvent.click(within(await row()).getByRole('button', { name: 'Change M1' }))
     const editor = screen.getByRole('form', { name: 'Override M1' })
     await userEvent.selectOptions(within(editor).getByLabelText('Verdict'), 'evidenced')
     await userEvent.type(within(editor).getByLabelText('Reason (required)'), 'The rollout record shows it.')
     await userEvent.click(within(editor).getByRole('button', { name: 'Save' }))
     expect(within(await row()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+  }
+
+  it('asks first, and Cancel keeps the profile and the override (issue 182)', async () => {
+    await overriddenPaper()
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+
+    await switchTo('testwerk')
+
+    expect(confirm).toHaveBeenCalledWith('You have 1 override not yet recorded. Leave and drop it?')
+    expect(screen.getByRole('button', { name: /^Profile: Nordlicht/ })).toBeTruthy()
+    expect(within(await row()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+    expect(rememberedProfile()).toBeNull()
+  })
+
+  it("drops the paper's unsaved overrides, which belonged to the other profile's assessment", async () => {
+    await overriddenPaper()
+    vi.stubGlobal('confirm', () => true) // the lead leaves (#182)
 
     await switchTo('testwerk')
 
