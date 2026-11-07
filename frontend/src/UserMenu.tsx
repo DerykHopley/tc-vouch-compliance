@@ -18,14 +18,18 @@ type Props = {
 const RUNNING = 'An assessment is running: start afresh once it has finished.'
 const FAILED = 'Vouch could not start afresh just now. Try again.'
 
+/** "Start <company> afresh", or "Start afresh" without a profile list: the menu item's words and the confirm's. */
+const startWords = (company: string | undefined) => company ? `Start ${company} afresh` : 'Start afresh'
+
 /** Asks with the browser's own confirm, then starts the profile's progress afresh (#285); a refusal says why in an
- * alert, and the page stays as it was. */
+ * alert, and the page stays as it was. A 401 has signed out already: no alert. */
 async function confirmFreshStart(company: string | undefined, onStarted: () => void) {
-  const named = company ? `Start ${company} afresh?` : 'Start afresh?'
-  if (!window.confirm(`${named} Your progress here starts from nothing; the audit trail keeps every entry.`)) return
+  const question = `${startWords(company)}? Your progress here starts from nothing; the audit trail keeps every entry.`
+  if (!window.confirm(question)) return
   const result = await startAfresh()
   if (result === 'started') onStarted()
-  else window.alert(result === 'running' ? RUNNING : FAILED)
+  else if (result === 'running') window.alert(RUNNING)
+  else if (result === 'failed') window.alert(FAILED)
 }
 
 /** The user menu behind the user's initials (#222, the owner's option D): "Signed in as <name>", the fresh start
@@ -42,7 +46,7 @@ export default function UserMenu({ name, theme, onTheme, onSignOut, company, onS
           {signedIn && <p className="menu-note" role="none">Signed in as {name}</p>}
           {onStartedAfresh && (
             <MenuItem onSelect={() => { close(); void confirmFreshStart(company, onStartedAfresh) }}>
-              {company ? `Start ${company} afresh…` : 'Start afresh…'}
+              {`${startWords(company)}…`}
             </MenuItem>
           )}
           <MenuItem onSelect={() => { onTheme(); close() }}>{theme === 'light' ? 'Dark theme' : 'Light theme'}</MenuItem>

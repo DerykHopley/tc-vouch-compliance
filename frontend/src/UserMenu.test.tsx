@@ -82,4 +82,16 @@ describe('starting afresh (issue 285)', () => {
     await waitFor(() => expect(alert).toHaveBeenCalledWith(words))
     expect(started).not.toHaveBeenCalled()
   })
+
+  it('on a 401, signs out with no alert', async () => {
+    vi.stubGlobal('confirm', () => true)
+    const alert = vi.fn()
+    vi.stubGlobal('alert', alert)
+    const { fetch, started } = await opened(() => Promise.resolve(new Response(null, { status: 401 })))
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` }))
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0)) // the answer is handled
+    expect(alert).not.toHaveBeenCalled()
+    expect(started).not.toHaveBeenCalled()
+  })
 })

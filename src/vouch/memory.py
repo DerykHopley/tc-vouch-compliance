@@ -148,11 +148,11 @@ class Memory:
     def start_afresh(self) -> datetime:
         """Start this profile's progress afresh (#285): note the time, so only entries started from
         it on are listed, and open a new conversation, the old one kept. Nothing is deleted. A
-        second fresh start replaces the time. The time noted. Raises DatabaseUnavailable
-        (Postgres)."""
+        second fresh start replaces the time. The note is written last, so a write that fails
+        hides nothing. Returns the time noted. Raises DatabaseUnavailable (Postgres)."""
         at = self._clock()
-        self.store.put(self._namespace(), FRESH_START, {"at": at.isoformat()})
         self.set_current_chat(None)
+        self.store.put(self._namespace(), FRESH_START, {"at": at.isoformat()})
         return at
 
     def fresh_start(self) -> datetime | None:
@@ -168,7 +168,7 @@ class Memory:
         """When the user last started or reviewed an assessment under this profile; None if
         never, or not since a fresh start."""
         fresh = self.fresh_start()
-        entries = self.entries()
+        entries = self._entries_since(fresh)
         review = self.store.get(self._namespace(), LAST_REVIEW)
         times = [entries[0].started_at] if entries else []
         if review is not None:
@@ -181,7 +181,10 @@ class Memory:
         """The index, newest first, at most MAX_ASSESSMENTS, leaving out every entry started
         before the fresh start (#285). Every page is read first: the stores return entries in
         different orders (Postgres's by last write, memory's by first)."""
-        since = self.fresh_start()
+        return self._entries_since(self.fresh_start())
+
+    def _entries_since(self, since: datetime | None) -> list[Entry]:
+        """`entries`, from the fresh start `since` the caller has already read (None: none)."""
         items = self._all(self._namespace(ASSESSMENTS))
         entries = [
             Entry(

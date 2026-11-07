@@ -516,6 +516,21 @@ def test_removing_the_fresh_start_note_lists_the_old_entries_again(any_store):
     assert mine.last_worked() == datetime(2026, 11, 2, tzinfo=UTC)
 
 
+def test_a_fresh_start_that_cannot_open_a_new_conversation_hides_nothing(monkeypatch):
+    """The note is written last: when an earlier write fails, the progress is still listed."""
+    store = InMemoryStore()
+    mine = memory.Memory(store, "user_a", DEFAULT_PROFILE, clock=clock_at(1, 2))
+    mine.remember_assessment("old", DEMO_CONTROL)
+    mine.set_current_chat("chat-1")
+    monkeypatch.setattr(InMemoryStore, "delete", failing_write)
+
+    with pytest.raises(DatabaseUnavailable):
+        mine.start_afresh()
+
+    assert mine.fresh_start() is None
+    assert mine.thread_ids() == ["old"]
+
+
 def test_a_fresh_start_opens_a_new_conversation_and_keeps_the_old_ones_lines(any_store):
     mine = memory.Memory(any_store, "user_a", DEFAULT_PROFILE)
     line = {"from": "lead", "text": "Where do I stand?"}
