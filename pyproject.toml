@@ -57,15 +57,7 @@ plugins = ["pydantic.mypy"]  # pydantic models take what they convert (a script 
 
 [[tool.mypy.overrides]]
 # #129: their errors come from LangChain's message and model unions; each is a later Fix to clear.
-module = [
-    "vouch.graph",
-    "vouch.chat_agent",
-    "vouch.chat_fake",
-    "vouch.fake_model",
-    "vouch.evals",
-    "vouch.faithfulness",
-    "vouch.model_choice",
-]
+module = ["vouch.graph", "vouch.fake_model"]
 ignore_errors = true
 
 [tool.ruff]
