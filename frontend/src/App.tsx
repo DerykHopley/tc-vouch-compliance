@@ -242,7 +242,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
       {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
-          report as on the report (#268). An assessment from the chat reads the overview afresh (its card,
+          readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
           readiness), and its paper's newest if open. */}
       <AskVouch context={{ page: shown ?? 'dossier',
         controlId: shown === 'paper' && control ? control.id : null }}
