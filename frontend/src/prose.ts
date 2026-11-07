@@ -7,14 +7,20 @@
 
 /** A run of text, bold or italic or neither. */
 export type TextRun = { text: string; bold?: true; italic?: true }
-/** A paragraph's lines (shown with line breaks between), a list's items, or a heading's runs (#232). */
-export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul' | 'ol'; items: TextRun[][] }
-  | { kind: 'h'; runs: TextRun[] }
+/**
+ * A paragraph's lines (shown with line breaks between), a list's items, or a heading's runs (#232). A numbered list's
+ * `subs` (#223) holds each item's sub-bullets, one entry per item; a list with no sub-bullets has none.
+ */
+export type Block = { kind: 'p'; lines: TextRun[][] } | { kind: 'ul'; items: TextRun[][] }
+  | { kind: 'ol'; items: TextRun[][]; subs?: TextRun[][][] } | { kind: 'h'; runs: TextRun[] }
+type NumberedList = Extract<Block, { kind: 'ol' }>
 
 // `**bold**`, then `*italic*` (no space just inside the stars, so "2 * 3 * 4" stays as written), only at a word's
 // edges: a star inside a word is text, as German gender stars are ("Mitarbeiter*innen", #218).
 const EMPHASIS = /(?<![\p{L}\p{N}])(?:\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*)(?![\p{L}\p{N}])/gu
 const BULLET = /^\s*[-*•]\s+(.*)$/
+// A bullet indented by a space or a tab: under an open numbered list, a sub-bullet of its last item (#223).
+const INDENTED = /^[ \t]/
 const NUMBERED = /^\s*(\d+)[.)]\s+(.*)$/
 // A bulleted list written on one line after a colon, as the models do: "What exists: - one - two", also after a bold
 // or italic lead-in ("**M1 (must):** - one - two"). Numbers on such a line stay text: "Stand: 1. Januar 2026, geändert
@@ -56,9 +62,10 @@ const LEAD_IN = /:\**\s*$/
  * a colon, and goes on with each next number. Null otherwise: "15. März 2026 …", "1. Januar …" or "5. The policy …"
  * on a line of its own stays text, as written (#218).
  */
-function numberedItem(text: string, number: number, open: Block | null, afterLeadIn: boolean) {
+function numberedItem(text: string, number: number, current: Block | null, afterLeadIn: boolean) {
+  // `current`: the open block, or the numbered list a blank line paused (#223), which the next number goes on with.
   if (number === 1 && afterLeadIn) return { text, starts: true }
-  if (open?.kind === 'ol' && number === open.items.length + 1) return { text, starts: false }
+  if (current?.kind === 'ol' && number === current.items.length + 1) return { text, starts: false }
   return null
 }
 
@@ -78,35 +85,56 @@ function heading(line: string, asWritten: boolean): TextRun[] | null {
 /** The text as paragraphs, lists and headings. */
 export function proseBlocks(text: string): Block[] {
   const blocks: Block[] = []
-  let open: Block | null = null
-  const add = (kind: Exclude<Block['kind'], 'h'>, content: TextRun[]) => {
+  let open = null as Block | null // `as`: set in `add` too, so not narrowed to null
+  // A numbered list a blank line paused (#223): the next number or a sub-bullet goes on with it, any other line ends it.
+  let paused = null as NumberedList | null
+  const add = (kind: 'p' | 'ul' | 'ol', content: TextRun[]) => {
     if (open && open.kind === kind) {
       if (open.kind === 'p') open.lines.push(content)
-      else open.items.push(content)
+      else {
+        open.items.push(content)
+        if (open.kind === 'ol') open.subs?.push([])
+      }
       return
     }
-    open = kind === 'p' ? { kind, lines: [content] } : { kind, items: [content] }
-    blocks.push(open)
+    const started: Block = kind === 'p' ? { kind, lines: [content] } : { kind, items: [content] }
+    open = started
+    blocks.push(started)
   }
   let previous = '' // the last line shown, across blank lines
   for (const written of text.split('\n')) for (const line of unfold(written)) {
     if (!line.trim()) {
-      open = null // a blank line ends the paragraph or list
+      if (open?.kind === 'ol') paused = open
+      open = null // a blank line ends the paragraph or list, a numbered list only if no next number follows (#223)
       continue
     }
     const headed = heading(line, line === written)
     if (headed) {
       blocks.push({ kind: 'h', runs: headed })
       open = null // a heading ends the paragraph or list before it
+      paused = null
       previous = line // and is a lead-in for a numbered list after it
       continue
     }
     const bullet = BULLET.exec(line)
     const marked = bullet ? null : NUMBERED.exec(line)
-    // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet.
+    // A bare marker ("- " before a cite the chat splits out) has no item to show: no empty bullet. It comes before
+    // `paused = null` on purpose, so a bare marker keeps a paused numbered list going (#223).
     if ((bullet?.[1] ?? marked?.[2])?.trim() === '') continue
-    const numbered = marked && numberedItem(marked[2], Number(marked[1]), open, LEAD_IN.test(previous))
+    // The numbered list this line may go on with: the open one, or the one a blank line paused.
+    const numberedList: NumberedList | null = open?.kind === 'ol' ? open : paused
+    paused = null
+    if (bullet && numberedList && INDENTED.test(line)) {
+      // A sub-bullet of the list's last item (#223): the list stays open for the next number.
+      numberedList.subs ??= numberedList.items.map(() => [])
+      numberedList.subs[numberedList.subs.length - 1].push(runs(bullet[1]))
+      open = numberedList
+      previous = line
+      continue
+    }
+    const numbered = marked && numberedItem(marked[2], Number(marked[1]), open ?? numberedList, LEAD_IN.test(previous))
     previous = line
+    if (numbered && !numbered.starts && !open) open = numberedList // the next number after a blank line goes on (#223)
     if (numbered?.starts) open = null // a list after a lead-in is a new list
     if (bullet) add('ul', runs(bullet[1]))
     else if (numbered) add('ol', runs(numbered.text))

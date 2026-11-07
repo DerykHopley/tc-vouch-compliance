@@ -19,6 +19,16 @@ export default function Prose({ text }: { text: string }) {
       )
     }
     const List = block.kind // ul or ol
-    return <List key={i} className="prose-list">{block.items.map((item, j) => <li key={j}><Runs runs={item} /></li>)}</List>
+    const subs = block.kind === 'ol' ? block.subs : undefined // a numbered item's sub-bullets, nested in it (#223)
+    return (
+      <List key={i} className="prose-list">
+        {block.items.map((item, j) => (
+          <li key={j}>
+            <Runs runs={item} />
+            {subs?.[j].length ? <ul className="prose-list">{subs[j].map((sub, k) => <li key={k}><Runs runs={sub} /></li>)}</ul> : null}
+          </li>
+        ))}
+      </List>
+    )
   })
 }
