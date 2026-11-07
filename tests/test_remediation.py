@@ -574,8 +574,8 @@ def test_the_items_table_refuses_an_update_a_delete_and_a_truncate(postgres, use
     assert kept == [{"status": "discarded"}]
 
 
-def test_the_overview_asks_only_for_the_counted_threads_discarded_items(database_url, users):
-    """#9: the store answers for the threads named, discarded items only."""
+def test_the_overview_asks_only_for_the_counted_threads_decided_items(database_url, users):
+    """#9: the store answers for the threads named only (#310: one read, every decision)."""
     alice, _ = users
     app = app_on(database_url)
     with TestClient(app) as client:
@@ -588,5 +588,9 @@ def test_the_overview_asks_only_for_the_counted_threads_discarded_items(database
         store = api.remediation_items(app.state.database)
         user, profile = alice["X-Test-User"], DEFAULT_PROFILE
 
-        assert store.discarded(user, profile, [counted, approved]) == {(counted, ITEM)}
-        assert store.discarded(user, profile, []) == set()
+        decided = store.decided(user, profile, [counted, approved])
+        assert {key: item.status for key, item in decided.items()} == {
+            (counted, ITEM): "discarded",
+            (approved, ITEM): "approved",
+        }  # `other`'s, not named, isn't read
+        assert store.decided(user, profile, []) == {}

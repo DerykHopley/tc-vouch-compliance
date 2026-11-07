@@ -172,10 +172,6 @@ class RemediationItems(Protocol):
         """The user's decided items of those threads under the profile (one read)."""
         ...
 
-    def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
-        """Which of the user's items of those threads under the profile were discarded."""
-        ...
-
 
 class ProcessItems:
     """Decisions without a database: in this process, their entries in its audit trail
@@ -214,10 +210,6 @@ class ProcessItems:
         mine = self._mine(user_id, profile_id, thread_ids)
         return {(i.thread_id, i.requirement_id): i for i in mine}
 
-    def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
-        mine = self._mine(user_id, profile_id, thread_ids)
-        return {(i.thread_id, i.requirement_id) for i in mine if i.status == "discarded"}
-
 
 def _from_row(row: Mapping[str, Any]) -> DecidedItem:
     return DecidedItem(
@@ -253,12 +245,6 @@ class PostgresItems:
         rows = self.db.remediation_items(user_id, profile_id, list(thread_ids))
         items = [_from_row(row) for row in rows]
         return {(i.thread_id, i.requirement_id): i for i in items}
-
-    def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
-        if not thread_ids:
-            return set()
-        rows = self.db.discarded_remediation(user_id, profile_id, list(thread_ids))
-        return {(row["thread_id"], row["requirement_id"]) for row in rows}
 
 
 @cache
