@@ -113,12 +113,12 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 
 ### CI
 
-- **Fast lane, on every PR, under 10 minutes:** `uv run ruff check`, `uv run pytest` with no API key and sockets disabled, and in `frontend/` `npm run typecheck`, `npm run lint` and `npm test`, then `python3 -I -B scripts/design-lint.py frontend/src`, plus the browser tests for the pages the PR touches, in one browser.
+- **Fast lane, on every PR, under 10 minutes:** `uv run ruff check`, `uv run ruff format --check`, `uv run mypy`, `uv run pytest` with no API key and sockets disabled, and in `frontend/` `npm run typecheck`, `npm run lint` and `npm test`, then `python3 -I -B scripts/design-lint.py frontend/src`, plus the browser tests for the pages the PR touches, in one browser.
 - **Full lane, on main, nightly and before a deploy:** every test in every browser.
 - Split a browser suite across parallel runners once it passes 10 minutes.
 - Rerun a CI job only for a fault in the infrastructure (a runner that died), and say so; a red test gets a diagnosis, not a rerun.
 - **A full-lane red on main (on trial):** file it as a Fix straight away, with the failing test id and the run link, and build it after the current ticket rather than stopping it. When the red breaks what users can do on the deployed app, revert first (the revert rule), then the Fix. A test that passed on rerun is still unexplained: the Fix says so.
-- The pre-push hook runs the fast lane's quickest checks: `uv run ruff check && npm --prefix frontend run lint && python3 -I -B scripts/design-lint.py frontend/src`.
+- The pre-push hook runs the fast lane's quickest checks: `uv run ruff check && uv run ruff format --check && uv run mypy && npm --prefix frontend run lint && python3 -I -B scripts/design-lint.py frontend/src`.
 
 
 ### Review mode: Throughput

@@ -707,6 +707,8 @@ def test_the_apps_usage_answer_is_unchanged_by_the_served_model(chat, catalogue)
     usage = result_of(assess(TestClient(app_with_key(chat, catalogue))))["usage"]
 
     assert "served_models" not in usage
+
+
 # The chat (#44): checked against the day's limit without being counted, its usage totalled
 
 
