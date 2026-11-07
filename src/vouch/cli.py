@@ -31,7 +31,7 @@ from vouch.profile import (
     UnknownProfileError,
     load_named_profile,
 )
-from vouch.settings import Settings, SettingsError, load_settings
+from vouch.settings import Settings, SettingsError, load_assess_settings
 
 EXIT_FAILED = 1
 USAGE = (
@@ -91,7 +91,7 @@ def format_requirements(control: IsaControl, profile: ComplianceProfile | None =
 
 def list_requirements(control_id: str, profile_name: str | None = None) -> int:
     try:
-        folder = load_settings().profiles_dir
+        folder = load_assess_settings().profiles_dir
         profile = None if profile_name is None else load_named_profile(profile_name, folder)
         # in the profile's ISA edition when there is one
         control = (
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.requirements is not None:
         return list_requirements(args.requirements, args.profile)
     try:
-        settings = load_settings()
+        settings = load_assess_settings()  # only its own settings, never sign-in's (#278)
         profile = load_named_profile(args.profile or DEFAULT_PROFILE, settings.profiles_dir)
         model = build_model(settings)
         assessment = assess(args.control_id, profile, model)
