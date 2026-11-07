@@ -3,6 +3,8 @@
 # until M0 carries the code over, the missing ones are skipped with a note.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# git's ref lines, read first so no check below swallows them (#340); none when run by hand.
+if [ -t 0 ]; then refs=""; else refs=$(cat); fi
 if [ -f pyproject.toml ]; then
   # One check a line: under set -e a failure before the last command of an && chain doesn't
   # stop the script (#243 found `ruff check && mypy` passing a ruff failure).
@@ -20,3 +22,7 @@ if [ -d frontend/src ]; then
   python3 -I -B scripts/design-lint.py frontend/src
   python3 -I -B scripts/token-roles.py frontend/src
 else echo "pre-push: no frontend/src yet, design-lint skipped"; fi
+# No machine-local path (a home folder, Claude's /tmp scratch) in the commits being pushed (#340).
+if [ -f scripts/local-paths.py ]; then
+  printf '%s\n' "$refs" | python3 -I -B scripts/local-paths.py --pre-push
+fi
