@@ -101,10 +101,10 @@ const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.
 /** The API: the report (`report`, each read in turn when a list), the trail's older pages, the export, and nothing
  * else. */
 function serve(report: (() => Promise<Response>) | Served, older: (before: string) => Promise<Response> = () =>
-  new Promise(() => {}), exported: () => Promise<Response> = () => new Promise(() => {})) {
+  new Promise(() => {}), exported: (url: string) => Promise<Response> = () => new Promise(() => {})) {
   const fetch = vi.fn((url: string) => {
     if (url === '/api/report') return typeof report === 'function' ? report() : json(report)
-    if (url === '/api/report/markdown') return exported()
+    if (url === '/api/report/markdown' || url === '/api/report/pdf') return exported(url)
     const before = /^\/api\/audit-trail\?before=(\d+)$/.exec(url)
     if (before) return older(before[1])
     return new Promise<Response>(() => {})
@@ -300,39 +300,62 @@ describe('The older entries sentence, for print', () => {
 })
 
 describe('Export', () => {
-  const exportButton = () => screen.getByRole('button', { name: 'Export' })
+  const markdownButton = () => screen.getByRole('button', { name: 'Export Markdown' })
+  const pdfButton = () => screen.getByRole('button', { name: 'Export PDF' })
+  const disabled = (button: HTMLElement) => (button as HTMLButtonElement).disabled
 
-  it('sits above the report, outside its language, and is busy while the export runs', async () => {
-    serve({ ...REPORT, head: { ...REPORT.head, words_language: 'de' } }) // the export never answers
+  it('sits above the report as two buttons, outside its language', async () => {
+    serve({ ...REPORT, head: { ...REPORT.head, words_language: 'de' } })
     render(<Report />)
     const report = await shown()
 
-    expect(report.contains(exportButton())).toBe(false)
-    expect(exportButton().closest('[lang]')).toBeNull()
-    expect(exportButton().compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(exportButton().getAttribute('aria-busy')).toBeNull()
-
-    await userEvent.click(exportButton())
-
-    expect(exportButton().getAttribute('aria-busy')).toBe('true')
-    expect((exportButton() as HTMLButtonElement).disabled).toBe(true)
+    for (const button of [markdownButton(), pdfButton()]) {
+      expect(report.contains(button)).toBe(false)
+      expect(button.closest('[lang]')).toBeNull()
+      expect(button.closest('.report-actions')).toBeTruthy()
+      expect(button.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(button.getAttribute('aria-busy')).toBeNull()
+      expect(disabled(button)).toBe(false)
+    }
   })
 
-  it('on a failure says so under the button, keeps the report, and can be pressed again', async () => {
-    let tries = 0
-    const fetch = serve(REPORT, undefined, () => { tries++; return json({ detail: 'down' }, 503) })
+  it.each([
+    ['Export PDF', '/api/report/pdf'],
+    ['Export Markdown', '/api/report/markdown'],
+  ])('while %s runs, it is busy and both buttons are disabled', async (name, url) => {
+    const fetch = serve(REPORT) // the export never answers
     render(<Report />)
     await shown()
 
-    await userEvent.click(exportButton())
+    await userEvent.click(screen.getByRole('button', { name }))
+
+    const pressed = screen.getByRole('button', { name })
+    const other = name === 'Export PDF' ? markdownButton() : pdfButton()
+    expect(pressed.getAttribute('aria-busy')).toBe('true')
+    expect(other.getAttribute('aria-busy')).toBeNull()
+    expect(disabled(pressed)).toBe(true)
+    expect(disabled(other)).toBe(true)
+    expect(fetch.mock.calls.filter(([u]) => u === url)).toHaveLength(1)
+  })
+
+  it('on a failure says so under the buttons, keeps the report, and either can be pressed again', async () => {
+    const tries: string[] = []
+    const fetch = serve(REPORT, undefined, (url) => { tries.push(url); return json({ detail: 'down' }, 503) })
+    render(<Report />)
+    await shown()
+
+    await userEvent.click(pdfButton())
 
     expect((await screen.findByRole('alert')).textContent).toBe(EXPORT_FAILED)
+    expect(screen.getByRole('alert').closest('.report-actions')).toBeTruthy()
     expect(screen.getByRole('article', { name: ENGLISH.title })).toBeTruthy()
-    expect((exportButton() as HTMLButtonElement).disabled).toBe(false)
-    expect(exportButton().getAttribute('aria-busy')).toBeNull()
+    for (const button of [markdownButton(), pdfButton()]) {
+      expect(disabled(button)).toBe(false)
+      expect(button.getAttribute('aria-busy')).toBeNull()
+    }
 
-    await userEvent.click(exportButton())
-    await waitFor(() => expect(tries).toBe(2))
+    await userEvent.click(markdownButton())
+    await waitFor(() => expect(tries).toEqual(['/api/report/pdf', '/api/report/markdown']))
     expect(reportReads(fetch)).toBe(1) // the report is not read again
   })
 
@@ -343,7 +366,7 @@ describe('Export', () => {
     render(<Report />)
     await shown()
 
-    await userEvent.click(exportButton())
+    await userEvent.click(pdfButton())
 
     expect((await screen.findByRole('alert')).textContent).toBe(SESSION_ENDED)
     expect(ended).toHaveBeenCalled()
@@ -359,9 +382,9 @@ describe('Export', () => {
     render(<Report />)
     await shown()
 
-    await userEvent.click(exportButton())
+    await userEvent.click(markdownButton())
     await screen.findByRole('alert')
-    await userEvent.click(exportButton())
+    await userEvent.click(markdownButton())
 
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('alert')).toBeNull()
