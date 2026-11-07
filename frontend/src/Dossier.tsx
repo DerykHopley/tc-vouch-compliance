@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness,
   SEGMENTS } from './overview.ts'
@@ -46,7 +47,7 @@ export default function Dossier({ state, onRetry, onOpen, running }: Props) {
           ))}
         </div>
       </section>
-      <Quotes overview={overview} />
+      <Quotes overview={overview} onOpen={onOpen} />
     </main>
   )
 }
@@ -122,6 +123,14 @@ function Band({ readiness: r }: { readiness: Readiness }) {
   )
 }
 
+/** A click on a link stretched over a card (#231, #311): a plain primary click opens the working paper in place; a
+ * Ctrl/Cmd/Shift/Alt or non-primary click is the browser's (a new tab or window). */
+function openInPlace(e: MouseEvent, open: () => void) {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+  e.preventDefault()
+  open()
+}
+
 /** A control's card; `language`, the profile's answer language, is its verdict's (#200). */
 function Card({ card, onOpen, assessing, language }:
   { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean; language: string }) {
@@ -129,13 +138,7 @@ function Card({ card, onOpen, assessing, language }:
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
-        onClick={(e) => {
-          // The link covers the whole card (#231): a Ctrl/Cmd/Shift/Alt or non-primary click is the browser's (a new
-          // tab or window), not an open in place.
-          if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
-          e.preventDefault()
-          onOpen(card.id, false)
-        }}>
+        onClick={(e) => openInPlace(e, () => onOpen(card.id, false))}>
         <b>{card.id}</b>
         {card.status !== 'not-assessed' && <span className={`tag tag-${card.status}`}>{REVIEW_WORDS[card.status]}</span>}
       </a>
@@ -148,7 +151,8 @@ function Card({ card, onOpen, assessing, language }:
   )
 }
 
-function Quotes({ overview }: { overview: Overview }) {
+/** The evidence quotes; each card's one link, its "for <control> <requirement>", opens that control's paper (#311). */
+function Quotes({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'] }) {
   return (
     <section className="controls" aria-labelledby="quotes-title">
       <div className="head">
@@ -172,7 +176,11 @@ function Quotes({ overview }: { overview: Overview }) {
                 <span>
                   <span className={`kind kind-${q.kind}`}>{q.kind}</span>
                   {q.stale && <span className="flag">stale</span>}
-                  {' '}· for <span className="mono">{q.control_id} {q.requirement_id}</span>
+                  {' '}·{' '}
+                  <a className="quote-link" href={controlPath(q.control_id)}
+                    onClick={(e) => openInPlace(e, () => onOpen(q.control_id, false))}>
+                    for <span className="mono">{q.control_id} {q.requirement_id}</span>
+                  </a>
                 </span>
               </footer>
             </article>

@@ -6,6 +6,7 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 from test_guided_chat import assess_in_the_chat
+from test_profiles import assessed as assessed_in
 from test_remediation import ITEM, accepted_with_an_item
 from test_review import assessed, open_paper, row
 from touch_targets import small_targets
@@ -22,7 +23,13 @@ def at_phone_width(page: Page, url: str) -> None:
 
 @pytest.mark.parametrize("path", PAGES)
 def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url, path):
+    if path == "/":
+        # #311: each evidence quote card is a link, so the overview is measured with quotes on it.
+        assessed_in(page.request, profiles_url, "nordlicht", "4.1.2")
     at_phone_width(page, f"{profiles_url}{path}")
+    if path == "/":
+        quotes = page.get_by_role("region", name="What the evidence says")
+        expect(quotes.get_by_role("link").first).to_be_visible()
     assert small_targets(page) == []
 
 
