@@ -62,7 +62,9 @@ def findings(issue: dict, comments: list[dict]) -> list[str]:
         and not re.search(r"\bcheck:", line, re.IGNORECASE)
     ]
     # A machine-local path reveals a username and no reader can open it (#340).
-    local = _load("local-paths.py", "local_paths").local_paths_in(lint.contract(checked))
+    # The body and the brief both: a brief comment holds the contract, but the body is public too.
+    published = f"{checked['body']}\n{lint.contract(checked)}"
+    local = dict.fromkeys(_load("local-paths.py", "local_paths").local_paths_in(published))
     return (
         found
         + [f"no **Check:** in: {line}" for line in unchecked]

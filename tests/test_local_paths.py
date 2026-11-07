@@ -206,3 +206,27 @@ def test_a_remote_commit_not_here_is_checked_from_main_not_a_crash(repo):
     assert done.returncode == 1, done.stderr
     assert "docs/notes.md:1" in done.stderr
     assert "Traceback" not in done.stderr
+
+
+def test_a_local_path_in_the_body_is_found_when_a_brief_comment_holds_the_contract():
+    brief = [{"body": "## Agent Brief\n\n" + CLEAN}]
+
+    found = lint_comment.findings(issue(CLEAN + f"\nScreenshot: {TMP}\n"), brief)
+
+    assert any(TMP in line for line in found), found
+
+
+def test_a_file_url_to_a_local_path_is_caught_and_a_tilde_path_is_not():
+    assert local_paths.local_paths_in("file://" + HOME) == [HOME]
+    assert local_paths.local_paths_in("~/" + "home/alice/x.png") == []
+
+
+def test_a_path_added_then_removed_within_one_push_is_still_refused(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    commit(repo, "docs/notes.md", f"{HOME}\n")
+    commit(repo, "docs/notes.md", "gone\n")  # the path stays in the first commit's history
+
+    done = push_check(repo, base)
+
+    assert done.returncode == 1
+    assert "docs/notes.md:1" in done.stderr

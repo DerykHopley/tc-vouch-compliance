@@ -16,7 +16,7 @@ import sys
 LOCAL_PATH = re.compile(
     # A path's start only (not a URL's or a longer path's own /home/), and each slash before a
     # name escaped, so this file holds no path the hook would refuse.
-    r"(?<![\w./:-])"
+    r"(?:(?<=file://)|(?<![\w./:~-]))"  # a file:// link's path too
     r"(?:/var\/home/|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|/tmp\/claude-)[^\s`'\")\]>]*"
 )
 TRAILING = ".,;:!?"  # a sentence's punctuation after a path isn't part of it
@@ -87,8 +87,12 @@ def pre_push(refs: str) -> int:
         if len(parts) != 4 or parts[1] == NO_COMMIT:  # a deleted branch adds nothing
             continue
         local, remote = parts[1], parts[3]
-        diff = _git("-c", "core.quotePath=false", "diff", "-U0", f"{_base(local, remote)}..{local}")
-        found += in_added_lines(diff)
+        # Commit by commit, so a path one commit adds and the next removes is still caught: it
+        # stays in history. A merge is left out: it brings what its other branch added.
+        commits = _git("rev-list", "--no-merges", f"{_base(local, remote)}..{local}").split()
+        for commit in commits:
+            shown = _git("-c", "core.quotePath=false", "show", "-U0", "--format=", commit)
+            found += [hit for hit in in_added_lines(shown) if hit not in found]
     for file, line, path in found:
         print(f"pre-push: {file}:{line} adds a machine-local path ({path})", file=sys.stderr)
     if found:
