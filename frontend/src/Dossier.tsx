@@ -91,6 +91,11 @@ function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props
 /** A verdict as the band says it, from VERDICT_WORDS: the one place verdict words live (M4's verdictWord later). */
 const bandWord = (verdict: Verdict) => VERDICT_WORDS[verdict].toLowerCase()
 
+/** The remediation tile's label: the approved part named when some, not all, are approved, as the readiness report
+ * counts only those (#310). */
+const remediationLabel = ({ remediation_items: all, remediation_approved: approved }: Readiness) =>
+  approved > 0 && approved < all ? `remediation items (${approved} approved)` : 'remediation items'
+
 function Band({ readiness: r }: { readiness: Readiness }) {
   // Not applicable gets a tile only when a control has it.
   const counted = SEGMENTS.filter((v) => v !== 'not-applicable' || r.by_verdict[v] > 0)
@@ -99,7 +104,7 @@ function Band({ readiness: r }: { readiness: Readiness }) {
     [r.accepted, `accepted of ${r.controls}`],
     ...counted.map((v): [number, string] => [r.by_verdict[v], bandWord(v)]),
     [r.open, 'open'],
-    [r.remediation_items, 'remediation items'],
+    [r.remediation_items, remediationLabel(r)],
   ]
   return (
     <section className="band" aria-labelledby="readiness">

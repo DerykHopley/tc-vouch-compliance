@@ -60,7 +60,7 @@ const REPORT: Served = {
     protection_level: 'high', overlays: [], answer_language: 'en', words_language: 'en', date: '2026-11-06' },
   readiness: { controls: 12, accepted: 1,
     by_verdict: { evidenced: 0, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 11,
-    remediation_items: 1 },
+    remediation_items: 1, remediation_approved: 1 },
   controls: [
     { id: '4.1.2', question: 'To what extent is access secured?', status: 'accepted', verdict: 'partly-evidenced',
       reviewer: 'Local user', reviewed_at: '2026-11-05T23:30:00+00:00', quotes: [
@@ -88,7 +88,7 @@ const NOTHING_ACCEPTED: Served = {
   ...REPORT,
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
-    remediation_items: 0 },
+    remediation_items: 0, remediation_approved: 0 },
   controls: [REPORT.controls[1]],
   remediation: [],
   not_applicable: [],

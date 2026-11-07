@@ -315,7 +315,8 @@ def readiness_report(
             "date": today.isoformat(),
         },
         # The accepted counts as the overview's; the items as the report lists them.
-        "readiness": readiness(controls, latest) | {"remediation_items": approved},
+        "readiness": readiness(controls, latest)
+        | {"remediation_items": approved, "remediation_approved": approved},
         "controls": shown,
         "remediation": remediation,
         "not_applicable": _not_applicable(profile, controls),
