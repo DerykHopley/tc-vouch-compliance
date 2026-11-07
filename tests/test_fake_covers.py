@@ -3,6 +3,7 @@ as well as 4.1.2, under both bundled profiles: no key, no ASSESS_FAKE_SCRIPT, no
 
 Through the HTTP API, as the Assess button and the chat start a run."""
 
+import datetime
 import json
 
 import pytest
@@ -12,9 +13,10 @@ from fastapi.testclient import TestClient
 from test_api import read_events
 from test_memory import as_user, restart
 
+from vouch import graph
 from vouch.api import PROFILE_HEADER, create_app, current_user
-from vouch.fake_model import ScriptedChatModel
-from vouch.graph import RemediationPlan
+from vouch.fake_model import AnswerTurn, ScriptedChatModel
+from vouch.graph import Judgement, RemediationPlan
 from vouch.language import mismatch
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile, read_profile_once
@@ -25,14 +27,34 @@ users = test_memory.users
 COVERED = ("1.1.1", "1.6.2", "5.1.1")
 PROFILES = ("nordlicht", "alpenwerk")
 CASES = [(profile, control) for profile in PROFILES for control in COVERED]
-DROPPED = "Dropped a citation"
+DROPPED = "Dropped a citation"  # a guard step's text (vouch.graph's Step.describe)
+NOT_JUDGED = "Not judged"  # in the judge step's text when a requirement went unjudged
+
+
+def expected_answers(profile: str) -> dict:
+    return yaml.safe_load((FIXTURES_DIR / profile / "expected-answers.yaml").read_text())
 
 
 def expected_verdicts(profile: str, control_id: str) -> dict[str, str]:
     """The profile's expected-answers.yaml verdict for each requirement of the control."""
-    answers = yaml.safe_load((FIXTURES_DIR / profile / "expected-answers.yaml").read_text())
-    (control,) = [c for c in answers["controls"] if c["id"] == control_id]
+    (control,) = [c for c in expected_answers(profile)["controls"] if c["id"] == control_id]
     return {r["id"]: r["verdict"] for r in control["requirements"]}
+
+
+@pytest.fixture(autouse=True)
+def as_of(monkeypatch) -> datetime.date:
+    """Judges staleness on the expected answers' `as_of`, as they do, not on the real date: a
+    document falling due later would otherwise change a verdict. The API passes assess no
+    `today`, so vouch.graph's date is pinned (test_kind_and_stale passes `today` instead)."""
+    (day,) = {expected_answers(profile)["as_of"] for profile in PROFILES}
+
+    class AsOf(datetime.date):
+        @classmethod
+        def today(cls) -> datetime.date:
+            return day
+
+    monkeypatch.setattr(graph, "date", AsOf)
+    return day
 
 
 @pytest.fixture
@@ -67,7 +89,7 @@ def test_a_covered_control_is_judged_in_full_by_its_own_script(client, users, pr
     assert assessment["status"] == "waiting-for-review"
     steps = [data for name, data in events if name == "step"]
     (judge,) = [step for step in steps if step["node"] == "judge"]
-    assert "Not judged" not in judge["text"]
+    assert NOT_JUDGED not in judge["text"]
     assert not [step for step in steps if step["text"].startswith(DROPPED)]
     verdicts = {r["id"]: r["verdict"] for r in assessment["requirements"]}
     assert verdicts == expected_verdicts(profile, control_id)
@@ -110,7 +132,7 @@ def test_the_chats_assess_1_1_1_runs_its_own_script(client, users):
 
     steps = [data for name, data in events if name == "step"]
     (judge,) = [step for step in steps if step["node"] == "judge"]
-    assert "Not judged" not in judge["text"]
+    assert NOT_JUDGED not in judge["text"]
     (finished,) = [data for name, data in events if name == "assessment"]
     assert finished["control_id"] == "1.1.1"
     assert finished["status"] == "waiting-for-review"
@@ -125,8 +147,10 @@ def test_a_covered_scripts_answer_and_reasons_are_in_the_profiles_language(profi
     path = demo_script(language, control_id)
     script = ScriptedChatModel.from_file(path).script
 
-    texts = [turn.answer for turn in script.gather if hasattr(turn, "answer")]
-    texts += [r.reason for judgement in script.replies_for(object) for r in judgement.requirements]
+    texts = [turn.answer for turn in script.gather if isinstance(turn, AnswerTurn)]
+    texts += [
+        r.reason for judgement in script.replies_for(Judgement) for r in judgement.requirements
+    ]
     texts += [i.missing for plan in script.replies_for(RemediationPlan) for i in plan.items]
     for text in texts:
         assert mismatch(text, language) is None, (path.name, text)

@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from test_auth import FakeClerk, bearer, clerk_app, token, unreachable
+from test_fake_covers import COVERED
 
 from vouch import model_choice
 from vouch import settings as vouch_settings
@@ -660,8 +661,6 @@ def test_a_fake_script_runs_every_assessment_whatever_the_language(tmp_path):
 
 # --- The fake covers more controls than 4.1.2 (#272) -------------------------------------------
 
-COVERED = ("1.1.1", "1.6.2", "5.1.1")
-
 
 @pytest.mark.parametrize("language, script", [("en", DEMO_SCRIPT), ("de", DEMO_SCRIPT_DE)])
 def test_on_the_fake_4_1_2_still_plays_the_languages_demo_script(language, script):
@@ -712,7 +711,7 @@ def test_a_fake_script_set_plays_for_a_covered_control_too(tmp_path):
 def test_a_covered_controls_script_that_cant_be_read_raises_naming_its_path(tmp_path, monkeypatch):
     broken = tmp_path / "1.1.1.json"
     broken.write_text('{"gather": ')
-    monkeypatch.setitem(vouch_settings.CONTROL_SCRIPTS["en"], "1.1.1", broken)
+    monkeypatch.setitem(vouch_settings.DEMO_SCRIPTS["en"].by_control, "1.1.1", broken)
     choice = ModelChoice(Settings(), MemoryModelStore())
 
     with pytest.raises(ScriptError, match=str(broken)):
