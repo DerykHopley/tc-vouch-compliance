@@ -44,6 +44,14 @@ CHAT_REPLY = (
     "Thank you for your question. Please ask what is missing for a control, or whether there "
     "is evidence of something in your documents."
 )
+CHAT_REPLIES = {
+    "de": (
+        "Vielen Dank für Ihre Frage. Fragen Sie bitte, was für eine Kontrolle noch fehlt, oder "
+        "ob es in Ihren Dokumenten Nachweise für etwas gibt."
+    ),
+}
+"""CHAT_REPLY in a profile's answer language, where the fake has one (#233): a real model answers
+in it; any other language gets CHAT_REPLY."""
 """The chat's fake answer: formal, in English, whatever else is asked."""
 _ID = r"(\d+(?:\.\d+)+)"
 ASSESS = re.compile(r"\bassess\s+(?:control\s+)?(\S+)", re.IGNORECASE)
@@ -118,6 +126,7 @@ class CannedChatModel(BaseChatModel):
     after_tool: str | None = None
     blocks: bool = False
     retry_reply: str | None = None  # its answer when asked again by the output check (#249)
+    language: str = "en"  # the profile's answer language: its canned reply is in it (#233)
 
     @property
     def _llm_type(self) -> str:
@@ -144,7 +153,13 @@ class CannedChatModel(BaseChatModel):
         call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
         if call is not None:
             return _words(self.before_tool), [call]
-        return (self.chunks if self.chunks is not None else _words(self.reply)), []
+        return (self.chunks if self.chunks is not None else _words(self._reply())), []
+
+    def _reply(self) -> str:
+        """`reply`, and the canned one in the profile's language where the fake has it (#233)."""
+        return (
+            CHAT_REPLIES.get(self.language, self.reply) if self.reply == CHAT_REPLY else self.reply
+        )
 
     def _tool_call(self, message: HumanMessage, messages: list[BaseMessage]) -> ToolCall | None:
         text = str(message.content)

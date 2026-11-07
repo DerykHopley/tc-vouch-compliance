@@ -220,7 +220,7 @@ def test_a_chat_builds_its_prompt_for_the_chosen_profile(
 ):
     alice, _ = users
     fake = CannedChatModel()
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
     with app_with(profiles) as client:
         response = client.post(
             "/api/chat",

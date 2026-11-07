@@ -65,7 +65,7 @@ def test_an_unknown_control_is_404_and_no_stream(client):
 
 def test_the_model_sees_the_page_and_control_the_compliance_lead_is_on(client, monkeypatch):
     fake = CannedChatModel()
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
 
     chat(client, message="What's missing here?", page="paper", control_id="4.1.2")
 
@@ -78,7 +78,7 @@ def test_the_model_sees_the_page_and_control_the_compliance_lead_is_on(client, m
 
 def test_a_model_failure_ends_the_stream_with_one_formal_error_event(client, monkeypatch):
     fake = CannedChatModel(fail_with=RuntimeError("socket on fire"))
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
 
     response = chat(client, message="Hello")
 
@@ -94,7 +94,7 @@ def test_a_secret_in_the_reply_is_removed_with_a_guard_step(client, monkeypatch)
         "Your token is Bearer abc123def456ghi and the address is anna.schmidt@example.com today."
     )
     fake = CannedChatModel(reply=leaked)
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
 
     response = chat(client, message="Hello")
 
@@ -142,7 +142,7 @@ def test_the_prompt_names_the_control_on_its_working_paper():
 def said_in_chunks(client, monkeypatch, chunks: list[str]) -> tuple[str, list[str]]:
     """The reply the chat sends when the model writes it in `chunks`, and its guard steps."""
     fake = CannedChatModel(chunks=chunks)
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: fake)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
     events = read_events(chat(client, message="Hello"))
     text = "".join(data["text"] for name, data in events if name == "token")
     return text, [data["text"] for name, data in events if name == "step"]
