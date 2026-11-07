@@ -30,7 +30,7 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 ## Pull requests
 
 - **A Done-when criterion the PR doesn't meet is listed in its description** as `Dropped: <criterion>, because …`, and the reviewer checks that list against the ticket. From #36, where phone-number redaction was dropped without a note and later described as never asked for.
-- **A PR or comment asking the owner to approve screenshots lists each one by its full absolute path, one per line** (never a shortened `…/scratchpad/` path), so the owner's client and the coordinator open them directly. From #228, whose shortened paths sent the coordinator searching (#238).
+- **Screenshots for the owner's approval: file names on GitHub, full paths in the thread.** A PR, issue or comment names each screenshot by its file name only, one per line; the full path, which the owner's client and the coordinator open directly, goes to the owner in the thread message (chat), never on GitHub. From #238, whose full-path rule put local paths on GitHub; replaced by #340.
 
 ## Filing tickets
 
