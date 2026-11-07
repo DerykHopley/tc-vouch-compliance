@@ -7,11 +7,14 @@ a rule using one must have a selector in ALLOWED below; in scripts (inline style
 Declaring the tokens (`--evidenced: #...`) is not a use. Exit 1 when anything is flagged.
 Project check from the M0 retro (2026-11-04); design-lint.py checks that colours are tokens at all.
 """
+
 import pathlib
 import re
 import sys
 
-VERDICT = re.compile(r"var\(\s*--(?P<t>(?:partly-evidenced|not-evidenced|not-applicable|evidenced)(?:-bg)?)\s*[,)]")
+VERDICT = re.compile(
+    r"var\(\s*--(?P<t>(?:partly-evidenced|not-evidenced|not-applicable|evidenced)(?:-bg)?)\s*[,)]"
+)
 # Selector prefixes for docs/design.md's three roles: verdict chips, card edges, the readiness bar.
 ALLOWED = (".v-", ".card-head", ".readiness")
 CSS = {".css"}
@@ -55,7 +58,9 @@ def main(paths):
             text = f.read_text(encoding="utf-8", errors="replace")
             hits = check_css(text) if f.suffix in CSS else check_script(text)
             for line, selector, token in hits:
-                print(f"{f}:{line} {selector} uses {token} (docs/design.md: verdict chips, card edges, readiness bar only)")
+                print(
+                    f"{f}:{line} {selector} uses {token} (docs/design.md: verdict chips, card edges, readiness bar only)"
+                )
                 found += 1
     print(f"{found} verdict token use(s) outside their roles")
     return 1 if found else 0

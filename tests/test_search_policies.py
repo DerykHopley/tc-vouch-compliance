@@ -20,9 +20,7 @@ def test_encrypt_finds_the_encryption_standard_under_a_heading():
     ids=["empty", "blank", "201-chars", "limit-0", "limit-11"],
 )
 @pytest.mark.parametrize("folder", ["fixture", "missing"])
-def test_bad_input_is_invalid_input_even_when_the_folder_is_missing(
-    query, limit, folder, tmp_path
-):
+def test_bad_input_is_invalid_input_even_when_the_folder_is_missing(query, limit, folder, tmp_path):
     where = POLICY_DIR if folder == "fixture" else tmp_path / "nowhere"
 
     result = search_policies(query, limit=limit, folder=where)

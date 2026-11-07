@@ -375,9 +375,7 @@ def test_a_real_model_with_no_key_is_refused_and_the_fake_still_runs(tmp_path, c
 
 
 @pytest.mark.parametrize("auth_mode", [None, "bogus"])
-def test_the_eval_starts_whatever_the_apps_sign_in_settings_say(
-    auth_mode, tmp_path, monkeypatch
-):
+def test_the_eval_starts_whatever_the_apps_sign_in_settings_say(auth_mode, tmp_path, monkeypatch):
     """The eval signs nobody in, so Clerk keys with no (or a wrong) auth mode don't stop it;
     it reads only the OpenRouter key (#173)."""
     for name in ("CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "CLERK_JWT_KEY"):
@@ -652,7 +650,9 @@ def test_a_router_runs_raw_results_and_summary_list_the_served_models_with_call_
 )
 def test_a_model_asked_for_directly_shows_no_served_models_in_the_summary(requested, served):
     endpoint = RoutedEndpoint(served)
-    report = run_eval(CASES.cases[:1], NORDLICHT, models(endpoint, name=requested), today=CASES.today)
+    report = run_eval(
+        CASES.cases[:1], NORDLICHT, models(endpoint, name=requested), today=CASES.today
+    )
 
     [score] = report.scores
     assert score.usage is not None and set(score.usage.served_models) == {served}  # kept as given
