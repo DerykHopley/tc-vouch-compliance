@@ -28,7 +28,12 @@ def make_profiles(folder: Path, *, broken: bool = True, language: str = "de") ->
     shutil.copytree(FIXTURES_DIR / "nordlicht", folder / SECOND)
     second = folder / SECOND / PROFILE_FILE
     data = yaml.safe_load(second.read_text(encoding="utf-8"))
-    data |= {"id": SECOND, "company": SECOND_COMPANY, "country": "Austria", "answer_language": language}
+    data |= {
+        "id": SECOND,
+        "company": SECOND_COMPANY,
+        "country": "Austria",
+        "answer_language": language,
+    }
     second.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     if broken:
         (folder / BROKEN).mkdir()

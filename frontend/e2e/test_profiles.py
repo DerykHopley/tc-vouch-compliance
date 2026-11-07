@@ -7,6 +7,7 @@ with the suite's raised request rate (Fix #138)."""
 
 import json
 import re
+import uuid
 
 import pytest
 from playwright.sync_api import APIRequestContext, Page, expect
@@ -90,20 +91,27 @@ def sent(page: Page, message: str):
     return answer.value.request
 
 
-def test_switching_clears_the_chat_and_the_next_message_is_under_the_new_profile(
+def test_switching_shows_the_new_profiles_own_chat_and_the_next_message_is_under_it(
     page: Page, profiles_url
 ):
+    """Since #251 each profile keeps its own conversation: after a switch the chat shows the
+    new profile's, never the old one's. The question is this run's own (an earlier test on this
+    server may have asked "Where do I stand?" under Testwerk), and each opening waits for the
+    kept conversation to be read before looking (#317: a check before it raced the restore)."""
+    question = f"Where do I stand? (run {uuid.uuid4().hex[:8]})"
     opened(page, profiles_url)
-    page.get_by_role("button", name="Ask Vouch").click()
-    first = sent(page, "Where do I stand?")
+    with page.expect_response("**/api/chat/current"):
+        page.get_by_role("button", name="Ask Vouch").click()
+    first = sent(page, question)
     log = page.locator("aside[aria-label='Chat with Vouch']").get_by_role("log")
-    expect(log).to_contain_text("Where do I stand?")
+    expect(log).to_contain_text(question)
     assert first.header_value("X-Vouch-Profile") == "nordlicht"
 
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):
         switch_profile(page, TESTWERK)
-    page.get_by_role("button", name="Ask Vouch").click()
-    expect(log).not_to_contain_text("Where do I stand?")
+    with page.expect_response("**/api/chat/current"):
+        page.get_by_role("button", name="Ask Vouch").click()
+    expect(log).not_to_contain_text(question)
     second = sent(page, "What is missing?")
     assert second.header_value("X-Vouch-Profile") == "testwerk"
 
