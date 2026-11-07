@@ -7,12 +7,13 @@ for <id>?" (the page's control when none is named) or with `sign_off` for "Accep
 `search_evidence` for "Is there evidence of <words>?", and `assessed_controls` for a
 question across controls ("Which controls have documented evidence only?", #210). Then it
 passes the tool's words on as its answer, each passage of evidence cited as the chat prompt asks:
-<cite doc="doc_id">its first line</cite>.
+<cite doc="doc_id">its first line</cite>. On a German profile it says them in German
+(german_answer, #330), as a real model answers in the profile's language.
 """
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -33,12 +34,15 @@ from vouch.chat_agent import (
     CITE_THEM,
     EXPLAIN_CONTROL,
     GREETING_REQUEST,
+    NO_EVIDENCE,
+    NO_SEARCH_ALLOWED,
     PROGRESS,
     SEARCH_EVIDENCE,
     START_ASSESSMENT,
     is_lead,
     is_refusal,
 )
+from vouch.chat_citations import CITE
 from vouch.fake_model import _usage
 
 CHAT_REPLY = (
@@ -96,6 +100,338 @@ def _cited(tool_words: str) -> str:
         f" {CITE_THEM}", ""
     )  # the model's instruction, not the lead's (#292)
     return _FINDINGS_DATA.sub(findings, _EVIDENCE_DATA.sub(cite, words))
+
+
+_MONTHS = {
+    "January": "Januar",
+    "February": "Februar",
+    "March": "März",
+    "April": "April",
+    "May": "Mai",
+    "June": "Juni",
+    "July": "Juli",
+    "August": "August",
+    "September": "September",
+    "October": "Oktober",
+    "November": "November",
+    "December": "Dezember",
+}
+_STATUSES = {  # vouch.chat_agent._STATUS_WORDS: (said of one control, of several)
+    "accepted": ("akzeptiert", "akzeptiert"),
+    "rejected": ("abgelehnt", "abgelehnt"),
+    "proposed and waiting for your review": (
+        "vorgeschlagen und wartet auf Ihre Prüfung",
+        "vorgeschlagen und warten auf Ihre Prüfung",
+    ),
+    "not assessed": ("nicht bewertet", "nicht bewertet"),
+}
+_STATUS = "(" + "|".join(_STATUSES) + ")"
+_SIGN_OFFS = {"accept": "akzeptieren", "reject": "ablehnen", "override": "überschreiben"}
+_KINDS = {"documented": "dokumentiert", "implemented": "umgesetzt"}
+_KIND_LIST = r"(?:documented|implemented)(?: and (?:documented|implemented))?"
+_SOURCES = {"the policies": "die Richtlinien", "the records": "die Aufzeichnungen"}
+_QUOTED = r"(“[^”\n]*”)"
+# The roll-up's explanation as the working paper's rollUpWords says it on `de` (review.ts).
+_NOUNS = {
+    "must requirement": ("Muss-Anforderung", "Muss-Anforderungen"),
+    "must, protection-level or overlay requirement": (
+        "Muss-, Schutzbedarfs- oder Overlay-Anforderung",
+        "Muss-, Schutzbedarfs- oder Overlay-Anforderungen",
+    ),
+}
+_NOUN = "(" + "|".join(re.escape(n) for n in _NOUNS) + ")"
+_SHOULDS = "should requirements count towards the should score only"
+_SOLL = "Soll-Anforderungen zählen nur zur Soll-Quote"
+_LABELS = {  # assessed_controls_words' closing labels
+    "Documented evidence only": "Nur dokumentierte Nachweise",
+    "Stale evidence": "Nachweise mit überfälliger Prüfung",
+    "Musts not evidenced": "Nicht nachgewiesene Muss-Anforderungen",
+    "Not assessed yet": "Noch nicht bewertet",
+}
+
+Say = str | Callable[[re.Match[str]], str]
+
+
+def _line(shape: str) -> re.Pattern[str]:
+    """A shape that is a whole line of the tool's words."""
+    return re.compile(f"^{shape}$", re.MULTILINE)
+
+
+_COUNT = rf"\d+ (?:is|are) {_STATUS}"
+_COUNTS = re.compile(rf"{_COUNT}(?:,(?: and)? {_COUNT})*")
+
+
+def _counts(found: re.Match[str]) -> str:
+    """progress_words' count of controls in each review state; any other sentence of that
+    shape (a document's, say) as it is."""
+    if not _COUNTS.fullmatch(found.group(2)):
+        return found.group(0)
+    parts: list[str] = []
+    for n, status in re.findall(rf"(\d+) (?:is|are) {_STATUS}", found.group(2)):
+        verb = "ist" if n == "1" else "sind"
+        words = _STATUSES[status][n != "1"]
+        parts.append(f"{n} {verb} {words}" if parts else f"{verb} {n} {words}")
+    listed = ", ".join(parts[:-1]) + ", und " + parts[-1] if len(parts) > 1 else parts[0]
+    return f"Von den {found.group(1)} Kontrollen {listed}."
+
+
+def _rests_on(found: re.Match[str]) -> str:
+    """What a control's counted requirements rest on, in assessed_controls_words."""
+    said = "die gezählten Anforderungen stützen sich "
+    if found.group(2) is None:
+        return said + "auf keine zitierten Nachweise."
+    named = " und ".join(f"{_KINDS[k]}e" for k in found.group(2).split(" and "))
+    return said + ("nur " if found.group(1) else "") + f"auf {named} Nachweise."
+
+
+def _requirement(found: re.Match[str]) -> str:
+    """A requirement in brief, in assessed_controls_words: its evidence kinds and staleness."""
+    kinds = found.group(2)
+    named = ", " + " und ".join(_KINDS[k] for k in kinds.split(" and ")) if kinds else ""
+    return found.group(1) + named + (", Prüfung überfällig" if found.group(3) else "")
+
+
+def _unread(found: re.Match[str]) -> str:
+    """search_evidence's note of the sources it could not read."""
+    named = " und ".join(_SOURCES[s] for s in found.group(1).lower().split(" and "))
+    return f"{named[0].upper()}{named[1:]} konnten nicht gelesen werden."
+
+
+def _why(german: Callable[[str, str, list[str]], str]) -> Callable[[re.Match[str]], str]:
+    """A "Why:" line's German: `german` given the noun, its plural and the shape's numbers."""
+
+    def say(found: re.Match[str]) -> str:
+        noun = next(g for g in found.groups() if g in _NOUNS)
+        numbers = [g for g in found.groups() if g != noun]
+        return f"Begründung: {german(*_NOUNS[noun], numbers)}."
+
+    return say
+
+
+_GERMAN: list[tuple[re.Pattern[str], Say]] = [
+    # progress_words and _next_words
+    (
+        re.compile(r"You have not assessed any of the (\d+) controls yet\."),
+        r"Sie haben noch keine der \1 Kontrollen bewertet.",
+    ),
+    (
+        re.compile(rf"You last worked on (\d+) ({'|'.join(_MONTHS)}) (\d{{4}})\."),
+        lambda f: f"Sie haben zuletzt am {f[1]}. {_MONTHS[f[2]]} {f[3]} gearbeitet.",
+    ),
+    (re.compile(r"Of the (\d+) controls, ([^.]+)\."), _counts),
+    (
+        re.compile(rf"The next step is to review control {_ID} on its working paper\."),
+        r"Der nächste Schritt ist, Kontrolle \1 auf ihrem Arbeitspapier zu prüfen.",
+    ),
+    (
+        re.compile(rf"The next step is to assess control {_ID} again\."),
+        r"Der nächste Schritt ist, Kontrolle \1 erneut zu bewerten.",
+    ),
+    (
+        re.compile(rf"The next step is to assess control {_ID}\."),
+        r"Der nächste Schritt ist, Kontrolle \1 zu bewerten.",
+    ),
+    (re.compile(r"Every control is accepted\."), "Alle Kontrollen sind akzeptiert."),
+    # assessed_words
+    (
+        _line(rf"Control {_ID}, {_QUOTED}: its newest assessment is (.+?), {_STATUS}\."),
+        lambda f: (
+            f"Die neueste Bewertung von Kontrolle {f[1]}, {f[2]}, lautet {f[3]}; "
+            f"sie ist {_STATUSES[f[4]][0]}."
+        ),
+    ),
+    (
+        _line(rf"Why: Evidenced: its one {_NOUN} is fully evidenced; {_SHOULDS}\."),
+        _why(
+            lambda noun, _, n: (
+                f"Nachgewiesen: die eine {noun} ist vollständig nachgewiesen; {_SOLL}"
+            )
+        ),
+    ),
+    (
+        _line(rf"Why: Evidenced: all (\d+) {_NOUN}s are fully evidenced; {_SHOULDS}\."),
+        _why(
+            lambda _, nouns, n: (
+                f"Nachgewiesen: alle {n[0]} {nouns} sind vollständig nachgewiesen; {_SOLL}"
+            )
+        ),
+    ),
+    (
+        _line(rf"Why: Partly evidenced: (\d+) of (\d+) {_NOUN}s (?:is|are) fully evidenced\."),
+        _why(
+            lambda _, nouns, n: (
+                f"Teilweise nachgewiesen: {n[0]} von {n[1]} {nouns} "
+                f"{'ist' if n[0] == '1' else 'sind'} vollständig nachgewiesen"
+            )
+        ),
+    ),
+    (
+        _line(
+            rf"Why: Not evidenced: no {_NOUN} is fully evidenced "
+            r"\((\d+) of (\d+) partly evidenced\)\."
+        ),
+        _why(
+            lambda noun, _, n: (
+                f"Nicht nachgewiesen: keine {noun} ist vollständig nachgewiesen "
+                f"({n[0]} von {n[1]} teilweise nachgewiesen)"
+            )
+        ),
+    ),
+    (
+        _line(rf"Why: Not evidenced: no {_NOUN} is evidenced; {_SHOULDS}\."),
+        _why(lambda noun, _, n: f"Nicht nachgewiesen: keine {noun} ist nachgewiesen; {_SOLL}"),
+    ),
+    (
+        _line(rf"Why: Not applicable: no {_NOUN} applies; {_SHOULDS}\."),
+        _why(lambda noun, _, n: f"Nicht anwendbar: keine {noun} ist anwendbar; {_SOLL}"),
+    ),
+    (_line(r"Not yet evidenced: (.*)"), r"Noch nicht nachgewiesen: \1"),
+    (_line(r"Evidenced: (.*)"), r"Nachgewiesen: \1"),
+    (
+        _line(r"Every requirement that applies is evidenced\."),
+        "Jede Anforderung, die gilt, ist nachgewiesen.",
+    ),
+    (
+        _line(r"The quotes these verdicts rest on, checked against each document:"),
+        "Die Zitate, auf denen diese Bewertungen beruhen, je mit ihrem Dokument abgeglichen:",
+    ),
+    # not_assessed_words
+    (
+        _line(
+            rf"Control {_ID}, {_QUOTED}, has not been assessed yet, so no evidence has been read "
+            r"for it\. Its requirements under this profile:"
+        ),
+        (
+            r"Kontrolle \1, \2, ist noch nicht bewertet, daher wurden für sie noch keine "
+            r"Nachweise gelesen. Ihre Anforderungen unter diesem Profil:"
+        ),
+    ),
+    # sign_off_words
+    (
+        re.compile(
+            r"I cannot (accept|reject|override) a verdict: signing off is yours, and Vouch never "
+            r"writes or changes a verdict for you\."
+        ),
+        lambda f: (
+            f"Ich kann keine Bewertung {_SIGN_OFFS[f[1]]}: Die Entscheidung liegt bei Ihnen, und "
+            "Vouch schreibt oder ändert nie eine Bewertung für Sie."
+        ),
+    ),
+    (
+        re.compile(
+            rf"Control {_ID} has not been assessed yet, so there is no verdict to sign off\. "
+            r"Its working paper is linked below\."
+        ),
+        (
+            r"Kontrolle \1 ist noch nicht bewertet, daher gibt es keine Bewertung, über die Sie "
+            r"entscheiden könnten. Ihr Arbeitspapier ist unten verlinkt."
+        ),
+    ),
+    (
+        re.compile(
+            rf"You can override a requirement of control {_ID}, with your reason, at the foot of "
+            r"its working paper, linked below\."
+        ),
+        (
+            r"Sie können eine Anforderung der Kontrolle \1 mit Ihrer Begründung am Ende ihres "
+            r"Arbeitspapiers überschreiben, das unten verlinkt ist."
+        ),
+    ),
+    (
+        re.compile(
+            rf"You can accept or reject control {_ID}, with a note, at the foot of its working "
+            r"paper, linked below\."
+        ),
+        (
+            r"Sie können die Kontrolle \1 mit einer Notiz am Ende ihres Arbeitspapiers "
+            r"akzeptieren oder ablehnen, das unten verlinkt ist."
+        ),
+    ),
+    # assessed_controls_words
+    (
+        _line(r"Each control's newest assessment under this profile:"),
+        "Die neueste Bewertung jeder Kontrolle unter diesem Profil:",
+    ),
+    (_line(rf"- {_ID}: not assessed yet\."), r"- \1: noch nicht bewertet."),
+    (
+        re.compile(rf"^(- {_ID}: .+?), {_STATUS}; its counted requirements rest ", re.MULTILINE),
+        lambda f: f"{f[1]}, {_STATUSES[f[3]][0]}; ",
+    ),
+    (re.compile(rf"(?<=; )(only )?on (?:no cited|({_KIND_LIST})) evidence\."), _rests_on),
+    (
+        # A requirement in brief: "M1 (must) Nachgewiesen, documented, stale", up to "; " or ".".
+        re.compile(
+            rf"(\b[A-Z]+\d+ \(\w+\) [^;\n]+?)(?:, ({_KIND_LIST}))?(, stale)?(?=; |\.$)",
+            re.MULTILINE,
+        ),
+        _requirement,
+    ),
+    (
+        _line(f"({'|'.join(_LABELS)}): (.*)"),
+        lambda f: f"{_LABELS[f[1]]}: {'keine.' if f[2] == 'none.' else f[2]}",
+    ),
+    # unknown_control
+    (
+        re.compile(rf"There is no VDA ISA control {_QUOTED}\. The controls are "),
+        r"Die Kontrolle \1 gibt es in der VDA ISA nicht. Die Kontrollen sind ",
+    ),
+    # start_assessment
+    (
+        re.compile(
+            rf"The assessment of control {_ID} has finished: (.+?)\. The verdict is proposed and "
+            r"waits for your review on the control's working paper\."
+        ),
+        (
+            r"Die Bewertung der Kontrolle \1 ist abgeschlossen: \2. Das Ergebnis ist "
+            r"vorgeschlagen und wartet auf dem Arbeitspapier der Kontrolle auf Ihre Prüfung."
+        ),
+    ),
+    # search_evidence
+    (
+        re.compile(rf"Found 1 passage for {_QUOTED}\."),
+        r"1 Textstelle für \1 wurde gefunden, die hier mit ihrem Dokument zitiert wird.",
+    ),
+    (
+        re.compile(rf"Found (\d+) passages for {_QUOTED}\."),
+        r"\1 Textstellen für \2 wurden gefunden, die hier mit ihrem Dokument zitiert werden.",
+    ),
+    (re.compile(r"(The policies(?: and the records)?|The records) could not be read\."), _unread),
+    (
+        re.compile(re.escape(NO_EVIDENCE)),
+        "Für diese Frage habe ich in Ihren Dokumenten keine Nachweise gefunden.",
+    ),
+    (
+        re.compile(re.escape(NO_SEARCH_ALLOWED)),
+        "Dieses Compliance-Profil erlaubt nicht, Richtlinien oder Aufzeichnungen zu durchsuchen.",
+    ),
+]
+"""Each tool sentence's English shape (vouch.chat_agent's tools' words) and its German, formal and
+with design.md's verdict words, applied in order (#330)."""
+
+
+def german_answer(words: str) -> str:
+    """The fake's answer to a tool's words (already cited) in German, sentence by sentence, for a
+    profile that answers in German (#330): the tools write English for the model, as a real model
+    answers in the profile's language. Cites, document ids, control and requirement ids and
+    columns, the document's own texts, reasons, numbers and the quoted query stay as they are; a
+    sentence the table doesn't know passes through unchanged. Document text is set aside first,
+    so no rule reads it: each cite, and each line giving a requirement's text (a finding, with
+    its reason, or a requirement not yet assessed)."""
+    kept: list[str] = []
+
+    def set_aside(found: re.Match[str]) -> str:
+        kept.append(found.group(0))
+        return f"\0{len(kept) - 1}\0"
+
+    words = _DOCUMENT_TEXT.sub(set_aside, words)
+    for shape, german in _GERMAN:
+        words = shape.sub(german, words)
+    return _SET_ASIDE.sub(lambda found: kept[int(found.group(1))], words)
+
+
+_DOCUMENT_TEXT = re.compile(rf"{CITE.pattern}|^- [\w.]+ \(\w+\): [^\n]*$", re.MULTILINE | re.DOTALL)
+"""What german_answer leaves as it is: a cite, or a line with a requirement's text."""
+_SET_ASIDE = re.compile(r"\0(\d+)\0")
 
 
 def _page(messages: list[BaseMessage]) -> str | None:
@@ -169,8 +505,12 @@ class CannedChatModel(BaseChatModel):
         return (self.chunks if self.chunks is not None else _words(self._reply())), []
 
     def _after(self, result: ToolMessage) -> str:
-        """Its answer to a tool's result: `after_tool`, else the result's words, cited."""
-        return self.after_tool or _cited(str(result.content))
+        """Its answer to a tool's result: `after_tool`, else the result's words, cited, and in
+        German on a German profile (#330)."""
+        if self.after_tool:
+            return self.after_tool
+        cited = _cited(str(result.content))
+        return german_answer(cited) if self.language == "de" else cited
 
     def _reply(self) -> str:
         """`reply`, and the canned one in the profile's language where the fake has it (#233)."""
