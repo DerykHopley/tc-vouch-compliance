@@ -157,3 +157,50 @@ def test_a_quote_with_a_character_the_font_lacks_still_gives_the_pdf_without_it(
     read = text(data)
     assert "Geprüft „gut“ – fertig." in read
     assert "🙂" not in read
+
+
+# --- Long carried text (#308 review): a row taller than a page would stop fpdf2 ---------------
+
+LONG_NOTE = " ".join(f"Prüfschritt {n} mit dem ISB besprochen." for n in range(80))  # ~3000
+
+
+def test_a_trail_note_of_60_lines_still_gives_the_pdf_with_every_line():
+    note = "".join(f"ok {n}\n" for n in range(60))
+    built = built_report(entries=[replace(entry("u", 1), id=1, note=note)])
+
+    read = text(report_pdf.pdf(built, report.words_for("en")))
+
+    assert " ".join(note.split()) in read
+
+
+def test_a_trail_note_of_3000_characters_still_gives_the_pdf_with_all_of_it():
+    assert len(LONG_NOTE) > 3000
+    built = built_report(entries=[replace(entry("u", 1), id=1, note=LONG_NOTE)])
+
+    read = text(report_pdf.pdf(built, report.words_for("de")))
+
+    assert LONG_NOTE in read
+
+
+def test_a_long_missing_text_and_company_still_give_the_pdf_with_all_of_it():
+    built = alpenwerk_report()
+    built["head"] = built["head"] | {"company": LONG_NOTE}
+    built["remediation"] = [
+        {
+            "control_id": "1.1.1",
+            "question": "Q?",
+            "items": [
+                {
+                    "requirement_id": "M1",
+                    "missing": "Fehlt\n" * 70 + LONG_NOTE,
+                    "owner_role": "ISB",
+                    "due_date": "2026-12-01",
+                }
+            ],
+        }
+    ]
+
+    read = text(report_pdf.pdf(built, report.words_for("de")))
+
+    assert read.count(LONG_NOTE) == 2
+    assert "Fehlt " * 70 in read

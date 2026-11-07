@@ -851,6 +851,33 @@ def attachment(name: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(name, safe='')}"
 
 
+def _export(
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    trail: audit.AuditTrail,
+    write: Callable[[dict[str, Any], dict[str, Any]], str | bytes],
+    extension: str,
+    media_type: str,
+) -> Response:
+    """A download of the readiness report: the same redacted report and words as GET
+    /api/report, but with the whole audit trail, newest first, not a page, written by `write`
+    (report, words). An attachment named `readiness-report-<profile>-<date>.<extension>`
+    (`attachment`); an unreadable ISA edition is a plain 500 with EXPORT_FAILED."""
+
+    def whole_trail() -> audit.Page:
+        return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
+
+    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
+    name = f"readiness-report-{profile.id}-{built['head']['date']}.{extension}"
+    return Response(
+        write(built, report.words_for(profile.answer_language)),
+        media_type=media_type,
+        headers={"Content-Disposition": attachment(name)},
+    )
+
+
 @router.get("/report/markdown")
 def readiness_report_markdown(
     profile: Profile,
@@ -859,21 +886,9 @@ def readiness_report_markdown(
     items: RemediationItems,
     trail: AuditTrail,
 ) -> Response:
-    """The readiness report as one Markdown file (vouch.report.markdown, #57): the same redacted
-    report and words as GET /api/report, but with the whole audit trail, newest first, not a
-    page. An attachment named for the profile and the day (`attachment`); an unreadable ISA
-    edition is a plain 500 with EXPORT_FAILED."""
-
-    def whole_trail() -> audit.Page:
-        return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
-
-    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
-    name = f"readiness-report-{profile.id}-{built['head']['date']}.md"
-    return Response(
-        report.markdown(built, report.words_for(profile.answer_language)),
-        media_type="text/markdown",
-        headers={"Content-Disposition": attachment(name)},
-    )
+    """The readiness report as one Markdown file (vouch.report.markdown, #57), as `_export`
+    makes every download."""
+    return _export(profile, memory, saver, items, trail, report.markdown, "md", "text/markdown")
 
 
 @router.get("/report/pdf")
@@ -884,21 +899,9 @@ def readiness_report_pdf(
     items: RemediationItems,
     trail: AuditTrail,
 ) -> Response:
-    """The readiness report as one PDF file (vouch.report_pdf, #308), built on the server: the
-    same redacted report, words and whole audit trail as GET /api/report/markdown, its failures
-    the same (an unreadable ISA edition a plain 500 with EXPORT_FAILED). An attachment named for
-    the profile and the day (`attachment`)."""
-
-    def whole_trail() -> audit.Page:
-        return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
-
-    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
-    name = f"readiness-report-{profile.id}-{built['head']['date']}.pdf"
-    return Response(
-        report_pdf.pdf(built, report.words_for(profile.answer_language)),
-        media_type="application/pdf",
-        headers={"Content-Disposition": attachment(name)},
-    )
+    """The readiness report as one PDF file built on the server (vouch.report_pdf, #308), as
+    `_export` makes every download: the same data and failures as the Markdown file."""
+    return _export(profile, memory, saver, items, trail, report_pdf.pdf, "pdf", "application/pdf")
 
 
 class ChatRequest(BaseModel):

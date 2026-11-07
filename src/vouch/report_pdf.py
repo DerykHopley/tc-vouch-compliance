@@ -1,13 +1,18 @@
 """The readiness report as a PDF (#308), built on the server with fpdf2 (docs/requirements.md,
-2026-11-07): the served report the Markdown export writes (vouch.report.markdown), in the same
-words and the page's order, so the two downloads never disagree.
+2026-11-07): the served report the Markdown export writes (vouch.report.markdown), from the
+same rows (vouch.report's head_rows, control_rows and the rest) in the same words and the page's
+order, so the two downloads never disagree.
 
 Plain, black on white, on A4: the title, the head as label and value lines, readiness, the
 controls table and each accepted control's quotes, the remediation items under their control,
 the not-applicable list, the audit trail table (on landscape A4 pages, for its 11 columns) and
-the disclaimer at the foot. Each table's
-header row repeats on every page it runs onto, its cells wrap, and fpdf2 never splits a row
-across pages.
+the disclaimer at the foot. Each table's header row repeats on every page it runs onto, its
+cells wrap, and fpdf2 never splits a row across pages.
+
+fpdf2 can't draw a row taller than a page, and carried text has no length limit (a lead's note,
+a remediation item's missing text). So a cell shows at most MAX_CELL_LINES lines, on one line
+of text as the Markdown's cells are; a longer one ends in `… [n]`, and its whole text, line by
+line as written, follows the table as note [n]. The PDF always builds.
 
 The text is drawn in DejaVu Sans (fonts/, with its licence), as fpdf2's built-in fonts are
 Latin-1 only and the German editions' quotes carry „ “ and –. A character the font lacks (an
@@ -22,16 +27,23 @@ from pathlib import Path
 from typing import Any
 
 from fpdf import FPDF
+from fpdf.enums import MethodReturnValue
 from fpdf.fonts import FontFace, TTFFont
 
-from vouch.report import day_of, minute_of, remediation_count
+from vouch import report as rows
 
 FONTS = Path(__file__).parent / "fonts"
 FAMILY = "dejavu"
 MARGIN = 15  # mm, on every side
+TITLE = 16  # pt
+SECTION = 12  # pt: Readiness, Controls and the other parts
+SUBSECTION = 10  # pt: a control's quotes, a control's remediation items
 BODY = 9  # pt
 TABLE = 8  # pt
 TRAIL = 7  # pt: the trail's 11 columns, on landscape pages
+KEEP_WITH_NEXT = 25  # mm: a heading with less room than this below it starts a new page
+MAX_CELL_LINES = 12  # a row of 12 lines is well under a page, in any column and font size
+CELL_PADDING = 1  # mm
 HEADINGS = FontFace(emphasis="BOLD", fill_color=None)
 
 
@@ -47,6 +59,7 @@ class _Sheet(FPDF):
         regular, bold = self.fonts[FAMILY], self.fonts[f"{FAMILY}B"]
         assert isinstance(regular, TTFFont) and isinstance(bold, TTFFont)
         self._glyphs = set(regular.cmap) & set(bold.cmap)  # drawn in either weight
+        self._notes = 0  # the long cells' notes so far, numbered through the document
 
     def drawable(self, text: object) -> str:
         """The text without the characters the font lacks; line breaks kept."""
@@ -69,34 +82,63 @@ class _Sheet(FPDF):
 
     def heading(self, text: object, size: float) -> None:
         """A heading, never alone at a page's foot: a page break first when little room is left."""
-        if self.y + 25 > self.page_break_trigger:
+        if self.y + KEEP_WITH_NEXT > self.page_break_trigger:
             self.add_page()
         self.ln(size * 0.4)
         self.paragraph(text, size, bold=True)
         self.ln(1.5)
 
+    def cell_text(self, text: object, width: float, notes: list[tuple[int, str]]) -> str:
+        """A cell's text in the current font: on one line of text (each line break a space),
+        cut to MAX_CELL_LINES lines of `width` mm ending in `… [n]` when longer, its whole text
+        then added to `notes` as note n."""
+        whole = self.drawable(text)
+        flat = " ".join(whole.split())
+        inner = width - 2 * CELL_PADDING - 0.5  # the border's width, and some slack
+        lines = self.multi_cell(
+            inner, 1, flat, dry_run=True, output=MethodReturnValue.LINES, padding=0
+        )
+        assert isinstance(lines, list)  # output=LINES: the wrapped lines
+        if len(lines) <= MAX_CELL_LINES:
+            return flat
+        self._notes += 1
+        notes.append((self._notes, whole))
+        kept = sum(len(line) + 1 for line in lines[: MAX_CELL_LINES - 1])
+        return f"{flat[:kept].rstrip()} … [{self._notes}]"
+
     def grid(
         self,
         columns: Sequence[str],
-        rows: Iterable[Sequence[object]],
+        body: Iterable[Sequence[object]],
         widths: Sequence[float],
         size: float = TABLE,
     ) -> None:
-        """A table: its header row on each page it runs onto, each cell's text wrapped."""
+        """A table: its header row on each page it runs onto, each cell's text wrapped, a long
+        cell's whole text after it as a note."""
         self.font(size)
+        notes: list[tuple[int, str]] = []
+        cells = [
+            [self.cell_text(v, w, notes) for v, w in zip(r, widths, strict=True)] for r in body
+        ]
         with self.table(
             col_widths=tuple(widths),
             headings_style=HEADINGS,
             repeat_headings=1,
             line_height=size * 0.45,
-            padding=1,
+            padding=CELL_PADDING,
             text_align="LEFT",
         ) as table:
-            for row in [columns, *rows]:
-                cells = table.row()
-                for value in row:
-                    cells.cell(self.drawable(value))
+            for values in [list(columns), *cells]:
+                row = table.row()
+                for value in values:
+                    row.cell(value)
         self.ln(2)
+        self.notes(notes, size)
+
+    def notes(self, notes: list[tuple[int, str]], size: float) -> None:
+        for n, whole in notes:
+            self.paragraph(f"[{n}] {whole}", size)
+            self.ln(1)
 
 
 def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
@@ -110,35 +152,45 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     sheet.set_creator("Vouch")
     sheet.add_page()
 
-    sheet.paragraph(words["title"], 16, bold=True)
+    sheet.paragraph(words["title"], TITLE, bold=True)
     sheet.ln(2)
     _head(sheet, report["head"], words)
 
-    sheet.heading(labels["readiness"], 12)
-    _readiness(sheet, report["readiness"], words)
+    sheet.heading(labels["readiness"], SECTION)
+    sentence, counts = rows.readiness_lines(report["readiness"], words)
+    sheet.paragraph(sentence)
+    sheet.ln(1)
+    for count in counts:
+        sheet.paragraph(f"• {count}", indent=3)
 
-    sheet.heading(labels["controls"], 12)
+    sheet.heading(labels["controls"], SECTION)
     _controls(sheet, report["controls"], words)
 
-    sheet.heading(labels["remediation"], 12)
-    if report["remediation"]:
-        _remediation(sheet, report["remediation"], words)
-    else:
+    sheet.heading(labels["remediation"], SECTION)
+    for group in report["remediation"]:
+        sheet.heading(f"{group['control_id']} {group['question']}", SUBSECTION)
+        sheet.grid(rows.remediation_columns(words), rows.remediation_rows(group), (24, 94, 38, 24))
+    if not report["remediation"]:
         sheet.paragraph(sentences["no_remediation"])
 
-    sheet.heading(labels["not_applicable"], 12)
-    if report["not_applicable"]:
-        _not_applicable(sheet, report["not_applicable"], words)
-    else:
+    sheet.heading(labels["not_applicable"], SECTION)
+    for r in report["not_applicable"]:
+        sheet.paragraph(f"{r['control_id']} {r['requirement_id']}", bold=True)
+        sheet.paragraph(r["text"])
+        sheet.paragraph(f"{labels['reason']}: {r['reason']}", indent=5)
+        sheet.ln(2)
+    if not report["not_applicable"]:
         sheet.paragraph(sentences["no_not_applicable"])
 
-    if report["trail"]["entries"]:
+    entries = report["trail"]["entries"]
+    if entries:
         # Its 11 columns need the width: the trail starts a landscape A4 page.
         sheet.add_page(orientation="landscape")
-        sheet.heading(labels["trail"], 12)
-        _trail(sheet, report["trail"]["entries"], words)
+        sheet.heading(labels["trail"], SECTION)
+        widths = (22, 22, 16, 20, 20, 26, 26, 44, 29, 20, 22)  # 267 mm: landscape A4's width
+        sheet.grid(rows.trail_columns(words), rows.trail_rows(entries, words), widths, TRAIL)
     else:
-        sheet.heading(labels["trail"], 12)
+        sheet.heading(labels["trail"], SECTION)
         sheet.paragraph(sentences["no_trail"])
 
     sheet.ln(4)
@@ -149,134 +201,36 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
 
 
 def _head(sheet: _Sheet, head: Mapping[str, Any], words: Mapping[str, Any]) -> None:
-    labels = words["labels"]
-    overlays = ", ".join(head["overlays"]) or words["sentences"]["no_overlays"]
-    rows = [
-        (labels["company"], head["company"]),
-        (labels["country"], head["country"]),
-        (labels["base_framework"], head["base_framework"]),
-        (labels["protection_level"], words["protection_levels"][head["protection_level"]]),
-        (labels["overlays"], overlays),
-        # The words name English and German only: another answer language shows as its code.
-        (
-            labels["answer_language"],
-            words["languages"].get(head["answer_language"], head["answer_language"]),
-        ),
-        (labels["date"], head["date"]),
-    ]
+    """The head as label and value lines: a table without borders."""
+    widths = (45, sheet.epw - 45)
     sheet.font(BODY)
+    notes: list[tuple[int, str]] = []
+    pairs = [
+        (sheet.drawable(f"{label}:"), sheet.cell_text(value, widths[1], notes))
+        for label, value in rows.head_rows(head, words)
+    ]
     with sheet.table(
-        col_widths=(45, sheet.epw - 45),
+        col_widths=widths,
         first_row_as_headings=False,
         borders_layout="NONE",
         line_height=BODY * 0.5,
-        padding=(0.5, 1, 0.5, 0),
+        padding=(0.5, CELL_PADDING, 0.5, 0),
         text_align="LEFT",
     ) as table:
-        for label, value in rows:
+        for label, value in pairs:
             row = table.row()
-            row.cell(sheet.drawable(f"{label}:"), style=HEADINGS)
-            row.cell(sheet.drawable(value))
-
-
-def _readiness(sheet: _Sheet, r: Mapping[str, Any], words: Mapping[str, Any]) -> None:
-    sentence = words["sentences"]["accepted_of"].format(
-        accepted=r["accepted"], controls=r["controls"]
-    )
-    sheet.paragraph(sentence)
-    sheet.ln(1)
-    counts = [f"{n} {words['verdicts'][v]}" for v, n in r["by_verdict"].items()]
-    counts += [
-        f"{r['open']} {words['statuses']['open']}",
-        remediation_count(r["remediation_items"], words),
-    ]
-    for count in counts:
-        sheet.paragraph(f"• {count}", indent=3)
+            row.cell(label, style=HEADINGS)
+            row.cell(value)
+    sheet.notes(notes, BODY)
 
 
 def _controls(sheet: _Sheet, controls: list[Mapping[str, Any]], words: Mapping[str, Any]) -> None:
     """The controls table, then each accepted control's quotes under a heading of its own."""
-    labels = words["labels"]
-    columns = ["control", "question", "status", "verdict", "reviewer", "reviewed_at"]
-    rows: list[list[object]] = []
-    for c in controls:
-        status = words["statuses"][c["status"]]
-        if c["status"] == "accepted" and c["verdict"]:
-            reviewed = day_of(c["reviewed_at"]) if c["reviewed_at"] else ""
-            verdict = words["verdicts"][c["verdict"]]
-            rows.append([c["id"], c["question"], status, verdict, c["reviewer"] or "", reviewed])
-        else:
-            open_control = words["sentences"]["open_control"]
-            rows.append([c["id"], c["question"], status, open_control, "", ""])
-    sheet.grid([labels[k] for k in columns], rows, (18, 58, 20, 34, 30, 20))
-    for c in controls:
-        if c["status"] == "accepted" and c["quotes"]:
-            sheet.heading(f"{labels['quotes']} {c['id']}", 10)
-            for q in c["quotes"]:
-                _quote(sheet, q, words)
-
-
-def _quote(sheet: _Sheet, q: Mapping[str, Any], words: Mapping[str, Any]) -> None:
-    """A quote, indented, line by line as written, then its source."""
-    source = f"{q['doc_id']} v{q['version']} · {q['section']}"
-    if q["stale"]:
-        source += f" · {words['labels']['stale']}"
-    sheet.paragraph(q["quote"], indent=5)
-    sheet.paragraph(f"— {source}", TABLE, indent=5)
-    sheet.ln(2)
-
-
-def _remediation(sheet: _Sheet, groups: list[Mapping[str, Any]], words: Mapping[str, Any]):
-    labels = words["labels"]
-    columns = [labels[k] for k in ("requirement", "missing", "owner_role", "due_date")]
-    for group in groups:
-        sheet.heading(f"{group['control_id']} {group['question']}", 10)
-        rows = [
-            [i["requirement_id"], i["missing"], i["owner_role"], i["due_date"]]
-            for i in group["items"]
-        ]
-        sheet.grid(columns, rows, (24, 94, 38, 24))
-
-
-def _not_applicable(sheet: _Sheet, listed: list[Mapping[str, Any]], words: Mapping[str, Any]):
-    reason = words["labels"]["reason"]
-    for r in listed:
-        sheet.paragraph(f"{r['control_id']} {r['requirement_id']}", bold=True)
-        sheet.paragraph(r["text"])
-        sheet.paragraph(f"{reason}: {r['reason']}", indent=5)
-        sheet.ln(2)
-
-
-def _trail(sheet: _Sheet, entries: list[Mapping[str, Any]], words: Mapping[str, Any]) -> None:
-    labels, verdicts = words["labels"], words["verdicts"]
-    columns = [
-        "at",
-        "who",
-        "control",
-        "requirement",
-        "action",
-        "verdict_before",
-        "verdict_after",
-        "note",
-        "evidence",
-        "model",
-        "prompt_version",
-    ]
-    rows = [
-        [
-            minute_of(e["at"]),
-            e["reviewer_name"],
-            e["control_id"],
-            e["requirement_id"] or "",
-            words["actions"][e["action"]],
-            verdicts[e["verdict_before"]] if e["verdict_before"] else "",
-            verdicts[e["verdict_after"]] if e["verdict_after"] else "",
-            e["note"],
-            ", ".join(f"{d['doc_id']} v{d['version']}" for d in e["evidence"]),
-            e["model"],
-            e["prompt_version"],
-        ]
-        for e in entries
-    ]
-    widths = (22, 22, 16, 20, 20, 26, 26, 44, 29, 20, 22)  # 267 mm: landscape A4's width
-    sheet.grid([labels[k] for k in columns], rows, widths, TRAIL)
+    widths = (18, 58, 20, 34, 30, 20)
+    sheet.grid(rows.control_columns(words), rows.control_rows(controls, words), widths)
+    for c in rows.quoted(controls):
+        sheet.heading(f"{words['labels']['quotes']} {c['id']}", SUBSECTION)
+        for q in c["quotes"]:
+            sheet.paragraph(q["quote"], indent=5)  # line by line as written
+            sheet.paragraph(f"— {rows.quote_source(q, words)}", TABLE, indent=5)
+            sheet.ln(2)
