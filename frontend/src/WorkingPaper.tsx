@@ -23,6 +23,10 @@ const ACTION: Record<Run['status'], string> = {
   unreachable: 'Retry',
 }
 
+/** The steps the trace marks apart (#232): a guard step and an overlay branch step, by their chip's border. */
+// The class that marks a step's chip apart, by node name (docs/design.md, Agent steps).
+const STEP_CLASS: Record<string, string> = { guard: 'guard', overlay_branch: 'branch' }
+
 /** The run's answer language, once it is done: its verdicts are in it (#48, #200). */
 const answerLanguage = (run: Run) => run.status === 'done' ? run.assessment.answer_language : undefined
 
@@ -160,7 +164,11 @@ export default function WorkingPaper(props: PaperProps) {
               <div className="sheet">
                 <span className="lbl">{run.status === 'running' ? ACTION.running : 'How Vouch reached this'}</span>
                 <ol className="trace" aria-label="Agent steps" aria-live="polite">
-                  {run.steps.map((step, i) => <li key={i}><b>{step.node}</b> <StepText step={step} language={overview.answer_language} /></li>)}
+                  {run.steps.map((step, i) => (
+                    <li key={i} className={STEP_CLASS[step.node]}>
+                      <span className="step-node">{step.node}</span> <span><StepText step={step} language={overview.answer_language} /></span>
+                    </li>
+                  ))}
                 </ol>
               </div>
             )}

@@ -99,9 +99,15 @@ button.prof-button:hover { border-color: var(--navy); }
 .head h2 { font-size: 30px; }
 .head p { margin: 0; color: var(--muted); max-width: 60ch; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
-.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; display: grid; gap: 8px; align-content: start; }
+.card { position: relative; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; display: grid; gap: 8px; align-content: start; }
+/* The whole card opens its working paper (#231): its one link, "Open <id>", stretched over the card by ::after. Hover
+   shows on the whole card; keyboard focus rings the whole card. */
+.card-head::after { content: ""; position: absolute; inset: 0; border-radius: 4px; }
+.card:hover { border-color: var(--muted); }
+.card-head:focus-visible { outline: none; }
+.card-head:focus-visible::after { outline: 2px solid var(--navy); outline-offset: 2px; }
 .card-head { background: var(--paper); border-radius: 2px 2px 0 0; height: 74px; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 8px 10px; border-bottom: 4px solid var(--not-applicable); color: var(--ink); text-decoration: none; }
-.card-head:hover b { text-decoration: underline; text-decoration-color: var(--navy); }
+.card:hover .card-head b { text-decoration: underline; text-decoration-color: var(--navy); }
 .card-head b { font: 400 24px/1 var(--f-display); }
 /* The verdict as the card's coloured bottom edge; not assessed is a dashed --rule edge (design.md, 2026-11-04). */
 .card-head.edge-evidenced { border-bottom-color: var(--evidenced); }
@@ -134,15 +140,26 @@ button.prof-button:hover { border-color: var(--navy); }
 .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .mono { font-family: var(--f-mono); text-transform: none; }
 .sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 16px; display: grid; gap: 8px; justify-items: start; margin: 0; }
-.trace { font: 12px/1.5 var(--f-mono); list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
-.trace li { animation: rise .18s ease-out; }
-.trace b { font-weight: 500; color: var(--navy); margin-right: 6px; }
-.answer { margin: 0; max-width: 72ch; }
+/* How Vouch reached this (#232): each step's node name a chip in a column of its own, so every step's text starts at
+   the same edge; under 700px the chip sits above its text. A guard step's chip is ink, an overlay branch's brass-edged. */
+.trace { font: 12px/1.5 var(--f-mono); list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; overflow-wrap: anywhere; }
+.trace li { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; animation: rise .18s ease-out; }
+.step-node { justify-self: start; max-width: 100%; padding: 0 8px; border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet); color: var(--navy); }
+.trace li.guard .step-node { color: var(--ink); border-color: var(--ink); }
+.trace li.branch .step-node { border-color: var(--brass); }
+/* The draft answer (#232): blocks 12px apart at line height 1.6, a heading 16px below the block before it. */
+.answer { margin: 0; max-width: 72ch; line-height: 1.6; }
+.answer .prose-p, .answer .prose-list { margin-bottom: 12px; }
+.answer .prose-h { margin: 16px 0 4px; }
+.answer .prose-h:first-child { margin-top: 0; }
 /* The model's Markdown, shown (#209): paragraphs and lists in the chat and the draft answer, spaced to read as
    separate points; the draft answer keeps its 72ch measure. */
 .prose-p { margin: 0 0 8px; }
 .prose-list { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .prose-p:last-child, .prose-list:last-child { margin-bottom: 0; }
+/* A heading the model wrote (#232): Manrope, not the display face, which stays for page and section headings. */
+.prose-h { font: 700 14px/1.5 var(--f-body); color: var(--ink); text-transform: none; letter-spacing: normal; margin: 0 0 8px; }
+.prose-h:last-child { margin-bottom: 0; }
 .notice { border-left: 3px solid var(--ink); }
 .crumb { margin-left: -10px; display: inline-flex; align-items: center; text-decoration: none; }
 .assess { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
@@ -234,13 +251,22 @@ textarea.field { resize: vertical; font-family: inherit; }
 .paper-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; }
 .bubble-foot { display: flex; gap: 6px; border-top: 1px solid var(--rule); padding: 10px 12px; }
 .bubble-foot .field { flex: 1 1 auto; }
-/* Enlarged: wider and taller, still floating. Pinned: a column of 400px beside the page, which makes room for it
+/* Enlarged: wider and taller, still floating. Pinned: a column beside the page, which makes room for exactly its width:
+   --chat-width, set by AskVouch (dragged from 360px to 720px; #231). The 480px fallback is CHAT_WIDTH in
+   chatWidth.ts: change both together.
    (design.md, Layout: only over 1000px; AskVouch offers no pin at 1000px or less). */
 .bubble.enlarged { width: min(640px, calc(100vw - 32px)); height: calc(100vh - 120px); }
 @media (min-width: 1001px) {
-  :root[data-chat="pinned"] body { padding-right: 400px; }
-  .bubble.pinned { top: 0; right: 0; bottom: 0; width: 400px; height: auto; border-width: 0 0 0 1px; border-radius: 0; box-shadow: none; animation: none; }
+  :root[data-chat="pinned"] body { padding-right: var(--chat-width, 480px); }
+  .bubble.pinned { top: 0; right: 0; bottom: 0; width: var(--chat-width, 480px); height: auto; border-width: 0 0 0 1px; border-radius: 0; box-shadow: none; animation: none; }
 }
+/* The pinned chat's resize handle (#231): a full-height strip, 12px wide, inside the chat's own left edge (over its
+   12px padding), so the page beside it keeps its pointer and clicks; a 2px line on the edge shows on hover (--muted)
+   and focus (--navy, with the focus ring). */
+.chat-resize { position: absolute; top: 0; bottom: 0; left: 0; width: 12px; z-index: 1; cursor: col-resize; touch-action: none; }
+.chat-resize::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: transparent; }
+.chat-resize:hover::before { background: var(--muted); }
+.chat-resize:focus-visible::before { background: var(--navy); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
 @media (max-width: 1000px) {
@@ -261,6 +287,8 @@ textarea.field { resize: vertical; font-family: inherit; }
   .bar-menu .menu-popup { position: static; margin-top: 4px; box-shadow: none; }
   .bubble, .bubble.enlarged, .bubble.pinned { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
   .shortcut-hint { display: none; }
+  .trace { grid-template-columns: minmax(0, 1fr); } /* each step's chip above its text (#232) */
+  .trace li { row-gap: 2px; }
   /* The page leaves room for the floating Ask Vouch button (#198): its foot scrolls clear of it, and a field brought
      into view (scrolled to, tapped, tabbed to) stops above it. 88px: the button's 45px, its 20px inset, a gap. */
   main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
@@ -289,4 +317,97 @@ textarea.field { resize: vertical; font-family: inherit; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+}
+
+/* The readiness report (#56): a formal document after the prototype's report page, on one sheet: the head as a
+   definition list, the readiness bar on the sheet under a --rule ring, then ruled tables. A wide table (controls,
+   trail) scrolls inside its own container (.table-wrap), never the page (design.md, Layout). */
+.report { max-width: 1000px; margin: 0 auto; padding-block: 20px 110px; display: grid; gap: 16px; }
+/* Each part's gap is a property, so print's margins (below) use the same value. */
+.report-doc { --report-doc-gap: 28px; padding: 28px 32px; gap: var(--report-doc-gap); justify-items: stretch; min-width: 0; }
+.report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
+.report-doc h2 { font-size: 20px; margin-bottom: 8px; }
+.report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
+.report-head { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
+.report-head dt, .report-reason dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  font-weight: 600; padding-top: 2px; }
+.report-head dd, .report-reason dd { margin: 0; overflow-wrap: anywhere; }
+.report-part { --report-part-gap: 10px; display: grid; gap: var(--report-part-gap); min-width: 0; }
+.report-lead { margin: 0; font-weight: 600; }
+.report .report-bar { box-shadow: inset 0 0 0 1px var(--rule); background: var(--paper); }
+.report-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; color: var(--muted);
+  font-size: 13px; font-variant-numeric: tabular-nums; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-controls { min-width: 680px; }
+.report-trail { min-width: 1100px; }
+.report-table thead th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--ink); padding: 6px 8px; font-weight: 600; vertical-align: bottom; }
+.report-table th[scope="row"], .report-table td { border-bottom: 1px solid var(--rule); padding: 7px 8px; vertical-align: top;
+  text-align: left; font-weight: 400; }
+.report-table .report-q { max-width: 52ch; overflow-wrap: anywhere; }
+/* A control's quotes sit under its row, as one entry with it: no rule between them. */
+.report-controls tbody tr:has(+ .report-quote-row) > * { border-bottom-color: transparent; }
+.report-table .report-quote-row td { padding: 0 8px 12px 24px; }
+.report-quotes { display: grid; gap: 8px; max-width: 72ch; }
+.report-quotes h3 { margin: 0; }
+.report-trail .mono { font-size: 12px; }
+.report-trail .report-q { min-width: 28ch; }
+/* A value on a line of its own, never broken: the trail's time, and each evidence version stacked under the last. */
+.report-line { white-space: nowrap; display: block; }
+.report-muted { color: var(--muted); margin: 0; }
+.report-group { --report-group-gap: 6px; display: grid; gap: var(--report-group-gap); }
+.report-group-head { margin: 0; font-weight: 600; }
+.report-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.report-list li { border-bottom: 1px solid var(--rule); padding-bottom: 10px; overflow-wrap: anywhere; }
+.report-reason { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 6px 0 0; }
+.report-older { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.report-disclaimer { margin: 0; border-top: 1px solid var(--rule); padding-top: 12px; font-size: 12px; color: var(--muted); }
+@media (max-width: 700px) {
+  .report-doc { padding: 20px 16px; }
+  .report-head { grid-template-columns: minmax(0, 1fr); }
+  .report-head dd { margin-bottom: 6px; }
+}
+/* Export (#57): its button and any failure message above the report, outside the report's language. */
+.report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.report-actions .field-note { margin: 0; }
+
+/* Shown only in print: the older entries sentence stands in for Show older entries (#57). */
+.print-only { display: none; }
+
+/* Print (#57): the browser's own print (Ctrl P) gives the report article alone, its tables whole (the colours are
+   tokens.css's print block: the light theme's ink on white). */
+@page { margin: 14mm; }
+@media print {
+  .top, .fab, .bubble, .report-actions, .report-older { display: none !important; }
+  :root[data-chat="pinned"] body { padding-right: 0; }
+  body { background: var(--sheet); }
+  .report { max-width: none; padding: 0; display: block; }
+  .report.wrap { padding-inline: 0; }
+  .report-doc { border: 0; border-radius: 0; padding: 0; }
+  /* The sheet and its parts flow as blocks, not grids: a grid placed the item after a table that broke across pages
+     as if the table had not grown from the break, so a heading overlapped the table's last row (#296). The gaps
+     become margins. */
+  .report-doc, .report-part, .report-group { display: block; }
+  .report-doc > * + * { margin-top: var(--report-doc-gap); }
+  .report-part > * + * { margin-top: var(--report-part-gap); }
+  .report-group > * + * { margin-top: var(--report-group-gap); }
+  .print-only { display: block; }
+  /* No table scrolls or clips: each fits the page's width, its long values wrapping. */
+  .table-wrap { overflow: visible; }
+  .report-table { min-width: 0; font-size: 10px; }
+  /* Words wrap at spaces only; a long id, document or model name (the mono values) may break anywhere, which also
+     narrows its column's least width, so an auto-laid table fits the page. */
+  .report-table th, .report-table td { overflow-wrap: break-word; }
+  .report-table .mono { overflow-wrap: anywhere; }
+  /* The question and note cells too: on screen they break anywhere, which in print squeezed the trail's Note to a
+     word's width, breaking its words (#296). */
+  .report-table .report-q { max-width: none; overflow-wrap: break-word; }
+  .report-table:not(.report-trail) .report-q { min-width: 0; }
+  .report-trail .mono { font-size: 9px; }
+  .report-table.report-trail .report-q { min-width: 16ch; }
+  .report-line { white-space: normal; }
+  .report-table tr { break-inside: avoid; }
+  .report-table thead { display: table-header-group; }
+  .report-doc h2, .report-quotes h3 { break-after: avoid; }
+  .report-doc a[href]::after { content: " (" attr(href) ")"; overflow-wrap: anywhere; }
 }

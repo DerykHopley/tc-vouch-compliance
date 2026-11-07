@@ -134,6 +134,18 @@ def scrolls_sideways(page: Page) -> bool:
     )
 
 
+def test_a_click_on_an_index_rows_question_opens_that_control(page: Page, paper_url):
+    """#231: the control index keeps opening a control from anywhere in its row."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    with page.expect_response("**/api/overview"):
+        page.goto(f"{paper_url}/controls/1.1.1")
+    index = page.get_by_role("navigation", name="Controls")
+    index.get_by_role("link").filter(has_text="5.2.4").locator(".wp-q").click()
+    expect(page).to_have_url(f"{paper_url}/controls/5.2.4")
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("heading", level=2)).to_contain_text("5.2.4")
+
+
 def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400px_fits(
     page: Page, paper_url
 ):
@@ -157,6 +169,33 @@ def test_the_index_is_beside_the_paper_wide_stacks_above_it_below_1000px_and_400
     expect(row(paper, "M1")).to_be_visible()
     expect(page.locator("body")).to_have_css("background-color", "rgb(13, 13, 14)")  # dark --paper
     assert not scrolls_sideways(page), "the working paper scrolls sideways at 400px in dark"
+
+
+# The assessment graph's nodes, as its steps name them.
+NODE_NAME = re.compile(r"^[a-z_]+$")  # a graph node name, as src/vouch/graph.py names them
+
+
+def test_after_assess_each_step_names_its_node_in_a_chip_and_the_answer_shows_at_every_width(
+    page: Page, paper_url
+):
+    """Story 18 (#232): how Vouch reached this, a node-name chip per step, and the draft answer,
+    with no sideways scroll at 400, 900 and 1400px."""
+    control_id = "2.1.3"  # assessed by this check only
+    page.set_viewport_size({"width": 1400, "height": 900})
+    paper = open_paper(page, paper_url, control_id, assessed=False)
+    paper.get_by_role("button", name=f"Assess {control_id}", exact=True).click()
+
+    answer = paper.get_by_role("region", name="Verdict and draft answer")
+    expect(answer.locator(".answer")).to_be_visible()
+    steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
+    expect(steps.first.locator(".step-node")).to_have_text("load_control")
+    expect(steps.locator(".step-node")).to_have_count(steps.count())  # one chip in every step
+    names = steps.locator(".step-node").all_inner_texts()
+    assert names and all(NODE_NAME.match(n) for n in names), names
+    for width in (400, 900, 1400):
+        page.set_viewport_size({"width": width, "height": 900})
+        expect(answer.locator(".answer")).to_be_visible()
+        assert not scrolls_sideways(page), f"the working paper scrolls sideways at {width}px"
 
 
 # Every card's parts, read in one go once the fonts have loaded and layout has settled (two frames):

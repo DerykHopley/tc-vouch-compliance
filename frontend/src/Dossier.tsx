@@ -1,6 +1,6 @@
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness }
-  from './overview.ts'
+import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness,
+  SEGMENTS } from './overview.ts'
 import VerdictChip from './VerdictChip.tsx'
 
 /** The Dossier overview (`docs/design.md`, Decisions: Screens): the headline with the next step, the readiness band,
@@ -87,8 +87,6 @@ function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props
   )
 }
 
-/** The verdicts in the readiness bar's order; the open rest stays the band's own colour. */
-const SEGMENTS: Verdict[] = ['evidenced', 'partly-evidenced', 'not-evidenced', 'not-applicable']
 
 /** A verdict as the band says it, from VERDICT_WORDS: the one place verdict words live (M4's verdictWord later). */
 const bandWord = (verdict: Verdict) => VERDICT_WORDS[verdict].toLowerCase()
@@ -126,7 +124,13 @@ function Card({ card, onOpen, assessing, language }:
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
-        onClick={(e) => { e.preventDefault(); onOpen(card.id, false) }}>
+        onClick={(e) => {
+          // The link covers the whole card (#231): a Ctrl/Cmd/Shift/Alt or non-primary click is the browser's (a new
+          // tab or window), not an open in place.
+          if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+          e.preventDefault()
+          onOpen(card.id, false)
+        }}>
         <b>{card.id}</b>
         {card.status !== 'not-assessed' && <span className={`tag tag-${card.status}`}>{REVIEW_WORDS[card.status]}</span>}
       </a>

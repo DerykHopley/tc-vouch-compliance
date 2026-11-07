@@ -108,6 +108,29 @@ describe('the requirement text on a phone, issue 211', () => {
   })
 })
 
+describe('how Vouch reached this, and the draft answer, issue 232', () => {
+  const STEPS = [{ node: 'load_control', text: 'Loaded control 5.1.2: transfer.' },
+    { node: 'guard', text: 'Held back a claim of compliance.' },
+    { node: 'overlay_branch', text: 'Added the AT NIS2 overlay.' }]
+
+  it("shows each step's node name in a chip, then its text; only a guard step is marked guard", () => {
+    show({ run: { status: 'done', steps: STEPS, assessment: ASSESSED } })
+    const steps = within(screen.getByRole('list', { name: 'Agent steps' })).getAllByRole('listitem')
+    expect(steps.map((step) => step.querySelector('.step-node')?.textContent))
+      .toEqual(['load_control', 'guard', 'overlay_branch'])
+    expect(steps.map((step) => step.querySelector('b'))).toEqual([null, null, null])
+    expect(steps[0].textContent).toContain('Loaded control 5.1.2: transfer.')
+    expect(steps.map((step) => step.classList.contains('guard'))).toEqual([false, true, false])
+  })
+
+  it('shows a heading in the draft answer as a heading', () => {
+    show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, answer: '## Gaps\n- no record' } } })
+    const answer = screen.getByRole('region', { name: 'Verdict and draft answer' })
+    expect(within(answer).getByRole('heading', { level: 3, name: 'Gaps' }).classList.contains('prose-h')).toBe(true)
+    expect(within(answer).getByRole('listitem').textContent).toBe('no record')
+  })
+})
+
 describe("the roll-up's explanation, issue 212", () => {
   /** 5.1.2 judged with these verdicts per requirement, the control's verdict rolled up from them. */
   const judgedAs = (verdicts: Record<string, RequirementVerdict['verdict']>, verdict: Assessment['verdict']): Run =>

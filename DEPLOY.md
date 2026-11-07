@@ -21,8 +21,8 @@ Cloud Run" and "the walking skeleton has no secrets").
 ## What runs where
 
 - **One container on Cloud Run**, region `europe-west1` (Belgium, as Patch): the API under `/api`
-  and the built front end on every other path (*checked* in the `Dockerfile` and README, "One
-  container").
+  and the built front end on every other path (*checked* in the `Dockerfile` and `docs/setup.md`, "One
+  container, as on Cloud Run").
 - **Min 0 instances** (it sleeps when nobody uses it; the first request after a sleep waits for the
   container to start) and **max 1**, set twice: `--max-instances=1` caps each revision and
   `--max=1` caps the whole service, shared by every revision that gets traffic (*checked* in

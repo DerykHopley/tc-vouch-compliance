@@ -8,21 +8,24 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 
 import asyncio
 import logging
+import re
 import threading
 import time
-from collections.abc import AsyncIterator, Iterable, Iterator
+import unicodedata
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from importlib.metadata import version
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, remediation
+from vouch import audit, remediation, report
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -131,6 +134,8 @@ SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Disc
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
+REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
+EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -623,7 +628,7 @@ def open_assessment(
         assessment = load_assessment(thread_id, saver, scope=memory.scope)
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    decided = items.decided(memory.user_id, memory.profile_id, thread_id)
+    decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
     clean, _ = redact_data({"assessment": assessment_data(assessment, decided)})
     return clean
 
@@ -761,6 +766,21 @@ def paper_requirements(
     return kept[1]
 
 
+def _standing(
+    profile: ComplianceProfile, memory: Memory, saver: BaseCheckpointSaver, failed: str
+) -> tuple[list[IsaControl], dict[str, Assessment], list[str]]:
+    """What the overview and the report are built from: the profile's controls in its ISA
+    edition (unreadable: the plain 500 with `failed`), each control's newest assessment, and the
+    accepted ones' thread ids (whose remediation decisions count)."""
+    latest = newest_by_control(memory, saver)  # from each control's newest thread
+    accepted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    try:
+        controls = profile.isa_edition().controls
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, failed) from None
+    return list(controls), latest, accepted
+
+
 @router.get("/overview")
 def dossier_overview(
     profile: Profile, memory: UserMemory, saver: Checkpointer, items: RemediationItems
@@ -769,15 +789,88 @@ def dossier_overview(
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
     each control's requirements, for its working paper (#41); its ISA text in the profile's
     edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
-    latest = newest_by_control(memory, saver)  # from each control's newest thread
-    counted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     discarded = items.discarded(memory.user_id, memory.profile_id, counted)
-    try:
-        controls = profile.isa_edition().controls
-    except BaseFrameworkError:
-        raise _unreadable_edition(profile, OVERVIEW_FAILED) from None
     clean, _ = redact_data(overview(profile, controls, latest, discarded))
     return clean | {"requirements": paper_requirements(profile, controls)}
+
+
+def _report(
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    read_trail: Callable[[], audit.Page],
+    failed: str,
+) -> dict[str, Any]:
+    """The readiness report for the profile, redacted (vouch.report): its standing first (an
+    unreadable ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads."""
+    controls, latest, accepted = _standing(profile, memory, saver, failed)
+    decided = items.decided(memory.user_id, memory.profile_id, accepted)
+    built = report.readiness_report(
+        profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
+    )
+    clean, _ = redact_data(built)
+    return clean
+
+
+@router.get("/report")
+def readiness_report(
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    trail: AuditTrail,
+) -> dict[str, Any]:
+    """The readiness report for the user's compliance profile (vouch.report, #234), in its
+    answer language: readiness with the overview's accepted counts (its remediation count is of
+    the approved items the report lists), each control's reviewed verdict, the
+    approved remediation items, the not-applicable list, the newest page of the audit trail
+    (`trail.next` reads on at GET /api/audit-trail) and the disclaimer, with the report's words.
+    No model runs. Dated the server's date in UTC; an unreadable ISA edition is a plain 500.
+    The data is redacted as every answer is; the words, the same for every report, are not."""
+
+    def newest_page() -> audit.Page:
+        return audit.read(trail, memory.user_id, memory.profile_id)
+
+    built = _report(profile, memory, saver, items, newest_page, REPORT_FAILED)
+    return built | {"words": report.words_for(profile.answer_language)}
+
+
+def attachment(name: str) -> str:
+    """A Content-Disposition for a download named `name`: `filename` an ASCII slug of it
+    (letters, digits, `-` and `.` kept, lower case) for any browser, `filename*` the name as
+    it is, in UTF-8 (RFC 6266, RFC 5987), so no character of a profile id breaks the header."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    stem, dot, extension = ascii_name.rpartition(".")
+    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]", "-", stem if dot else ascii_name))
+    fallback = f"{slug.strip('-') or 'download'}{dot}{re.sub(r'[^a-z0-9]', '', extension)}"
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(name, safe='')}"
+
+
+@router.get("/report/markdown")
+def readiness_report_markdown(
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    trail: AuditTrail,
+) -> Response:
+    """The readiness report as one Markdown file (vouch.report.markdown, #57): the same redacted
+    report and words as GET /api/report, but with the whole audit trail, newest first, not a
+    page. An attachment named for the profile and the day (`attachment`); an unreadable ISA
+    edition is a plain 500 with EXPORT_FAILED."""
+
+    def whole_trail() -> audit.Page:
+        return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
+
+    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
+    name = f"readiness-report-{profile.id}-{built['head']['date']}.md"
+    return Response(
+        report.markdown(built, report.words_for(profile.answer_language)),
+        media_type="text/markdown",
+        headers={"Content-Disposition": attachment(name)},
+    )
 
 
 class ChatRequest(BaseModel):

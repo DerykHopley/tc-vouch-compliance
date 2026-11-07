@@ -6,6 +6,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { controlPath, useOverview } from './overview.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
+import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
 import UserMenu from './UserMenu.tsx'
 import type { Theme } from './user.ts'
@@ -20,19 +21,23 @@ function startingTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-type View = { name: 'dossier' } | { name: 'developer' } | { name: 'paper'; controlId: string }
+type View = { name: 'dossier' } | { name: 'report' } | { name: 'developer' } | { name: 'paper'; controlId: string }
 
 const DEVELOPER_PATH = '/developer'
+const REPORT_PATH = '/report'
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
-/** Each view's address: a control's working paper at /controls/<id>, the developer page at /developer, the Dossier at /. */
+/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the developer
+ * page at /developer, the Dossier at /. */
 const pathOf = (view: View) =>
-  view.name === 'paper' ? controlPath(view.controlId) : view.name === 'developer' ? DEVELOPER_PATH : '/'
+  view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
+    : view.name === 'developer' ? DEVELOPER_PATH : '/'
 
 /** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
  * so its paper says not found. */
 function viewAt(path: string): View {
   if (path === DEVELOPER_PATH) return { name: 'developer' }
+  if (path === REPORT_PATH) return { name: 'report' }
   const control = CONTROL_PATH.exec(path)
   if (!control) return { name: 'dossier' }
   try {
@@ -101,11 +106,14 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
   const { load, noteAssessed } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
+  // The report shows none of it (#56): it is read on leaving the report for a view that does.
+  const needsOverview = view.name !== 'report'
   const read = useRef(false)
   useEffect(() => {
+    if (!needsOverview) return
     if (onDossier || !read.current) void load()
     read.current = true
-  }, [load, onDossier])
+  }, [load, onDossier, needsOverview])
   // The run sits above the views, so it carries on when the lead leaves its paper. A finished run puts its verdict on
   // its card (the working paper's index), and reads the overview afresh when the Dossier is showing (readiness too).
   const finished = useCallback((assessment: Assessment) => {
@@ -120,7 +128,8 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
   const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
-  const shown: View['name'] | null = view.name === 'developer' && developer ? 'developer' : control ? 'paper'
+  const shown: View['name'] | null = view.name === 'report' ? 'report'
+    : view.name === 'developer' && developer ? 'developer' : control ? 'paper'
     : notFound !== null ? null : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
   // is read for a control its card says is not assessed (a run in this page puts its result on the card), nor for the
@@ -180,6 +189,8 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
           <nav className="tabs" aria-label="Main">
             <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
               onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'dossier' }) }}>Overview</a>
+            <a href={REPORT_PATH} aria-current={shown === 'report' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'report' }) }}>Report</a>
             {developer && (
               <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
                 onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'developer' }) }}>Developer</a>
@@ -189,7 +200,8 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
           <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut} />
         </div>
       </TopBar>
-      {shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
+      {shown === 'report' ? <Report />
+        : shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
         : control && overview.state.status === 'ready' ? (
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
@@ -201,9 +213,11 @@ export default function App({ onSignOut, profileSwitcher, userName }: AppProps =
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
-      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads. An
-          assessment from the chat reads the overview afresh (its card, readiness), and its paper's newest if open. */}
-      <AskVouch context={{ page: shown ?? 'dossier', controlId: shown === 'paper' && control ? control.id : null }}
+      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
+          report too, which has no page context of its own (#56). An assessment from the chat reads the overview
+          afresh (its card, readiness), and its paper's newest if open. */}
+      <AskVouch context={{ page: shown === null || shown === 'report' ? 'dossier' : shown,
+        controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}
         onAssessed={(controlId) => {

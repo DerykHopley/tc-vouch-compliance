@@ -1,10 +1,15 @@
-import { type FormEvent, Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  type FormEvent, Fragment, type KeyboardEvent as KeyEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState,
+} from 'react'
 import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, verdictLang, verdictWord } from './assessment.ts'
 import {
   type ChatMessage, CHAT_UNREACHABLE, fetchConversation, GREETING_UNREACHABLE, namedControls, newConversation, type PageContext, pageLabel, sendChat, suggestionLabel,
   suggestionMessage,
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
+import {
+  CHAT_WIDTH_STEP, type ChatWidthRange, chatWidthRange, clampChatWidth, pageWidth, rememberChatWidth, rememberedChatWidth,
+} from './chatWidth.ts'
 import { controlPath, type NextStep } from './overview.ts'
 import StepText from './StepText.tsx'
 
@@ -108,6 +113,58 @@ function VerdictLine({ controlId, verdict, status, language, onOpen }:
   )
 }
 
+/** Shows `width` on the page while a drag is under way, without a render: the column and the page's room for it
+ * (--chat-width), and the handle's value. */
+function showWidth(handle: HTMLElement, width: number) {
+  document.documentElement.style.setProperty('--chat-width', `${width}px`)
+  handle.setAttribute('aria-valuenow', String(width))
+}
+
+/** The pinned chat's resize handle on its left edge (#231): dragged with the primary button (shown as it moves, chosen
+ * on release), or focused and moved with the arrows (left wider, right narrower, 32px a press), Home (narrowest) and
+ * End (widest), each chosen at once. */
+function WidthHandle({ width, range, onChange }:
+  { width: number; range: ChatWidthRange; onChange: (width: number) => void }) {
+  const drag = useRef<{ x: number; from: number; now: number } | null>(null)
+  const keys: Record<string, () => number> = {
+    ArrowLeft: () => width + CHAT_WIDTH_STEP,
+    ArrowRight: () => width - CHAT_WIDTH_STEP,
+    Home: () => range.min,
+    End: () => range.max,
+  }
+  function onKeyDown(e: KeyEvent) {
+    const to = keys[e.key]
+    if (!to) return
+    e.preventDefault()
+    onChange(to())
+  }
+  return (
+    <div className="chat-resize" role="separator" aria-orientation="vertical" aria-label="Chat width" tabIndex={0}
+      aria-valuenow={width} aria-valuemin={range.min} aria-valuemax={range.max} onKeyDown={onKeyDown}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || !e.isPrimary) return
+        e.preventDefault() // no text selection while dragging
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        e.currentTarget.focus()
+        drag.current = { x: e.clientX, from: width, now: width }
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return
+        drag.current.now = clampChatWidth(drag.current.from + drag.current.x - e.clientX, range)
+        showWidth(e.currentTarget, drag.current.now)
+      }}
+      onPointerUp={() => {
+        // A click without a move keeps the remembered width: `now` is only the clamped width shown.
+        if (drag.current && drag.current.now !== drag.current.from) onChange(drag.current.now)
+        drag.current = null
+      }}
+      onPointerCancel={(e) => {
+        if (drag.current) showWidth(e.currentTarget, drag.current.from)
+        drag.current = null
+      }} />
+  )
+}
+
 type Props = {
   /** The page the compliance lead is on. */
   context: PageContext
@@ -168,12 +225,38 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     return () => { for (const el of behind) el.removeAttribute('inert') }
   }, [open, sheet])
 
-  // Pinned, the page makes room for the chat's column (app.css, :root[data-chat="pinned"]).
+  // The pinned column's width (#231): the lead's choice as remembered, clamped only when shown, to what the window
+  // allows now; the window's width is followed only while pinned.
+  const [chosenWidth, setChosenWidth] = useState(rememberedChatWidth)
+  const [windowWidth, setWindowWidth] = useState(pageWidth)
+  const isPinned = state === 'pinned'
   useEffect(() => {
+    if (!isPinned) return
+    const onResize = () => setWindowWidth(pageWidth())
+    onResize() // it may have changed while not pinned
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [isPinned])
+  const widthRange = chatWidthRange(windowWidth)
+  const pinnedWidth = clampChatWidth(chosenWidth, widthRange)
+  const chooseWidth = (width: number) => {
+    const kept = clampChatWidth(width, widthRange)
+    setChosenWidth(kept)
+    rememberChatWidth(kept)
+  }
+
+  // Pinned, the page makes room for exactly the chat's column (app.css, :root[data-chat="pinned"] and --chat-width).
+  // A layout effect, so the page and the column never paint at different widths.
+  useLayoutEffect(() => {
     if (state !== 'pinned') return
-    document.documentElement.dataset.chat = 'pinned'
-    return () => { delete document.documentElement.dataset.chat }
-  }, [state])
+    const root = document.documentElement
+    root.dataset.chat = 'pinned'
+    root.style.setProperty('--chat-width', `${pinnedWidth}px`)
+    return () => {
+      delete root.dataset.chat
+      root.style.removeProperty('--chat-width')
+    }
+  }, [state, pinnedWidth])
 
   // Focus follows the chat: into its field when it opens, back to the button when it closes.
   const wasOpen = useRef(false)
@@ -311,6 +394,9 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
   const { className, size, pin } = STATES[state]
   return (
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
+      {state === 'pinned' && !sheet && pinnable && (
+        <WidthHandle width={pinnedWidth} range={widthRange} onChange={chooseWidth} />
+      )}
       <div className="bubble-head">
         <b>Vouch</b>
         <span className="page-context" title={pageLabel(context)}>{pageLabel(context)}</span>

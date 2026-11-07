@@ -166,8 +166,10 @@ class RemediationItems(Protocol):
         nothing is written. (The kept item, whether this call decided it.)"""
         ...
 
-    def decided(self, user_id: str, profile_id: str, thread_id: str) -> dict[Key, DecidedItem]:
-        """The user's decided items of one thread under the profile."""
+    def decided(
+        self, user_id: str, profile_id: str, thread_ids: Collection[str]
+    ) -> dict[Key, DecidedItem]:
+        """The user's decided items of those threads under the profile (one read)."""
         ...
 
     def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
@@ -206,8 +208,10 @@ class ProcessItems:
                 and key.thread_id in threads
             ]
 
-    def decided(self, user_id: str, profile_id: str, thread_id: str) -> dict[Key, DecidedItem]:
-        mine = self._mine(user_id, profile_id, [thread_id])
+    def decided(
+        self, user_id: str, profile_id: str, thread_ids: Collection[str]
+    ) -> dict[Key, DecidedItem]:
+        mine = self._mine(user_id, profile_id, thread_ids)
         return {(i.thread_id, i.requirement_id): i for i in mine}
 
     def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
@@ -241,10 +245,13 @@ class PostgresItems:
         kept, new = self.db.decide_remediation(row, [audit_row])
         return _from_row(kept), new
 
-    def decided(self, user_id: str, profile_id: str, thread_id: str) -> dict[Key, DecidedItem]:
-        items = [
-            _from_row(row) for row in self.db.remediation_items(user_id, profile_id, thread_id)
-        ]
+    def decided(
+        self, user_id: str, profile_id: str, thread_ids: Collection[str]
+    ) -> dict[Key, DecidedItem]:
+        if not thread_ids:
+            return {}
+        rows = self.db.remediation_items(user_id, profile_id, list(thread_ids))
+        items = [_from_row(row) for row in rows]
         return {(i.thread_id, i.requirement_id): i for i in items}
 
     def discarded(self, user_id: str, profile_id: str, thread_ids: Collection[str]) -> set[Key]:
@@ -328,7 +335,7 @@ def decide(
     draft = next((i for i in assessment.remediation if i.requirement_id == requirement_id), None)
     if draft is None:
         raise UnknownItemError(NO_ITEM.format(requirement_id=requirement_id))
-    kept = items.decided(reviewer.id, profile_id, thread_id).get((thread_id, requirement_id))
+    kept = items.decided(reviewer.id, profile_id, [thread_id]).get((thread_id, requirement_id))
     if kept is not None:
         return _as_kept(kept, request)
     at = (clock or now)()
