@@ -22,7 +22,7 @@ const PROFILES = readdirSync(FIXTURES, { withFileTypes: true })
 /** Each non-empty line of a profile's documents and `why` answers, with where it came from. */
 function corpus(profile: string): { where: string; line: string }[] {
   const found: { where: string; line: string }[] = []
-  for (const folder of ['policies', 'records']) {
+  for (const folder of ['policies', 'records', 'patch']) {
     const dir = join(FIXTURES, profile, folder)
     if (!existsSync(dir)) continue
     for (const file of readdirSync(dir).filter((name) => name.endsWith('.md')).sort()) {
@@ -35,7 +35,11 @@ function corpus(profile: string): { where: string; line: string }[] {
   if (existsSync(answers)) {
     readFileSync(answers, 'utf8').split('\n').forEach((line, i) => {
       const why = /^\s*why:\s*(.+)$/.exec(line)
-      if (why) found.push({ where: `${profile}/expected-answers.yaml:${i + 1}`, line: why[1].replace(/^(["'])(.*)\1$/, '$2') })
+      if (!why) return
+      const where = `${profile}/expected-answers.yaml:${i + 1}`
+      // A folded or block value (> or |) would be read as that one character: fail, so its text isn't lost.
+      if (/^[>|][-+]?$/.test(why[1].trim())) throw new Error(`${where}: a folded \`why\`; read its lines too`)
+      found.push({ where, line: why[1].replace(/^(["'])(.*)\1$/, '$2') })
     })
   }
   return found
@@ -44,7 +48,6 @@ function corpus(profile: string): { where: string; line: string }[] {
 const BULLET = /^\s*[-*•]\s+\S/
 const HEADING = /^\s*#{1,3}\s+\S/
 const BOLD = /\*\*\S(?:.*?\S)?\*\*/
-const ITALIC = /(?<![\p{L}\p{N}*])\*[^\s*](?:[^*]*[^\s*])?\*(?![\p{L}\p{N}*])/u
 
 /** What the line may render as, from its own Markdown markers; empty when it renders as it should. */
 function surprises(line: string, blocks: Block[]): string[] {
@@ -55,8 +58,9 @@ function surprises(line: string, blocks: Block[]): string[] {
     if (block.kind === 'h' && !HEADING.test(line) && !BOLD.test(line)) found.push('a heading')
     const runs = block.kind === 'h' ? [block.runs] : block.kind === 'p' ? block.lines : block.items
     for (const run of runs.flat()) {
-      if (run.bold && !BOLD.test(line)) found.push(`bold "${run.text}"`)
-      if (run.italic && !ITALIC.test(line)) found.push(`italic "${run.text}"`)
+      // Each run against its own markers in the line, so one real bold run excuses no other.
+      if (run.bold && !line.includes(`**${run.text}**`)) found.push(`bold "${run.text}"`)
+      if (run.italic && !line.includes(`*${run.text}*`)) found.push(`italic "${run.text}"`)
     }
   }
   return found
@@ -89,7 +93,6 @@ describe('Prose over lines the fixtures lack (issue 236)', () => {
     'Section 5. The policy names its owner.',
     'Zuständig: IT-Leitung, Datenschutz und Personal.',
   ])('renders "%s" as written', (line) => {
-    expect(surprises(line, proseBlocks(line))).toEqual([])
     expect(proseBlocks(line)).toEqual([{ kind: 'p', lines: [[{ text: line }]] }])
   })
 
