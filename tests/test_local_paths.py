@@ -173,3 +173,36 @@ def test_a_body_with_no_local_path_passes_as_before():
 
 def test_the_finding_survives_json_round_trip():
     json.dumps(lint_comment.findings(issue(CLEAN + VAR_HOME), []))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "https://x.com/" + "home/page/a",  # a URL's own /home/
+        "frontend/src/pages/" + "home/parts/x.tsx",  # a repo path with a home folder in it
+    ],
+)
+def test_home_inside_a_longer_path_or_url_is_not_a_local_path(text):
+    assert local_paths.local_paths_in(text) == []
+
+
+def test_a_trailing_full_stop_is_not_part_of_the_path():
+    assert local_paths.local_paths_in(f"It is at {HOME}.") == [HOME]
+
+
+def test_an_added_line_starting_with_plus_plus_is_a_line_not_a_header():
+    tricky = "diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -0,0 +1,2 @@\n"
+    tricky += "+++ a heading of pluses\n" + f"+{HOME}\n"
+
+    assert local_paths.in_added_lines(tricky) == [("notes.md", 2, HOME)]
+
+
+def test_a_remote_commit_not_here_is_checked_from_main_not_a_crash(repo):
+    git(repo, "switch", "-q", "-c", "fix")
+    commit(repo, "docs/notes.md", f"{HOME}\n")
+
+    done = push_check(repo, "1" * 40)  # the remote's commit, never fetched here
+
+    assert done.returncode == 1, done.stderr
+    assert "docs/notes.md:1" in done.stderr
+    assert "Traceback" not in done.stderr

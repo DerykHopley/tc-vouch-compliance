@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 
 MARKER = "<!-- ticket-lint -->"
@@ -21,6 +22,7 @@ READY = "ready-for-agent"
 SHOWN = {"fail", "labels"}  # what the standard requires; notes and staleness aren't for this
 
 
+@cache
 def _load(file: str, name: str):
     spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(file))
     module = importlib.util.module_from_spec(spec)

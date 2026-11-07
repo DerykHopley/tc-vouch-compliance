@@ -14,27 +14,36 @@ import subprocess
 import sys
 
 LOCAL_PATH = re.compile(
-    # Each slash before a name escaped, so this file holds no path the hook would refuse.
+    # A path's start only (not a URL's or a longer path's own /home/), and each slash before a
+    # name escaped, so this file holds no path the hook would refuse.
+    r"(?<![\w./:-])"
     r"(?:/var\/home/|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|/tmp\/claude-)[^\s`'\")\]>]*"
 )
+TRAILING = ".,;:!?"  # a sentence's punctuation after a path isn't part of it
 EXEMPT = ("trial/",)  # kept as evidence, as they were written
 NO_COMMIT = "0" * 40
 
 
 def local_paths_in(text: str) -> list[str]:
     """The machine-local paths in `text`, in order."""
-    return LOCAL_PATH.findall(text)
+    return [path.rstrip(TRAILING) for path in LOCAL_PATH.findall(text)]
 
 
 def in_added_lines(diff: str) -> list[tuple[str, int, str]]:
     """Each local path a unified diff adds, as (file, line in the new file, path); files under
     EXEMPT left out."""
     found: list[tuple[str, int, str]] = []
-    file, line = "", 0
+    file, line, after_old = "", 0, False
     for text in diff.splitlines():
-        if text.startswith("+++ "):
-            file = text[6:] if text.startswith("+++ b/") else ""
-        elif text.startswith("@@"):
+        if after_old and text.startswith("+++ "):  # the header: only right after its --- line
+            name = text[4:].strip('"')
+            file = name[2:] if name.startswith("b/") else ""
+            after_old = False
+            continue
+        after_old = text.startswith("--- ")
+        if text.startswith("\\"):  # "\ No newline at end of file": no line of the file
+            continue
+        if text.startswith("@@"):
             hunk = re.search(r"\+(\d+)", text)
             line = int(hunk.group(1)) if hunk else 0
         elif text.startswith("+") and file and not file.startswith(EXEMPT):
@@ -49,10 +58,19 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
+def _here(commit: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"], check=False, capture_output=True
+        ).returncode
+        == 0
+    )
+
+
 def _base(local: str, remote: str) -> str:
-    """Where the pushed commits start: the remote's commit, or for a new branch where it leaves
-    main (origin/main, else main)."""
-    if remote != NO_COMMIT:
+    """Where the pushed commits start: the remote's commit, or, for a new branch or a remote
+    commit never fetched here, where the branch leaves main (origin/main, else main)."""
+    if remote != NO_COMMIT and _here(remote):
         return remote
     for main in ("origin/main", "main"):
         try:
@@ -69,7 +87,8 @@ def pre_push(refs: str) -> int:
         if len(parts) != 4 or parts[1] == NO_COMMIT:  # a deleted branch adds nothing
             continue
         local, remote = parts[1], parts[3]
-        found += in_added_lines(_git("diff", "-U0", f"{_base(local, remote)}..{local}"))
+        diff = _git("-c", "core.quotePath=false", "diff", "-U0", f"{_base(local, remote)}..{local}")
+        found += in_added_lines(diff)
     for file, line, path in found:
         print(f"pre-push: {file}:{line} adds a machine-local path ({path})", file=sys.stderr)
     if found:

@@ -3,7 +3,8 @@
 # until M0 carries the code over, the missing ones are skipped with a note.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-refs=$(cat)  # git's ref lines, read first so no check below swallows them (#340)
+# git's ref lines, read first so no check below swallows them (#340); none when run by hand.
+if [ -t 0 ]; then refs=""; else refs=$(cat); fi
 if [ -f pyproject.toml ]; then
   # One check a line: under set -e a failure before the last command of an && chain doesn't
   # stop the script (#243 found `ruff check && mypy` passing a ruff failure).
