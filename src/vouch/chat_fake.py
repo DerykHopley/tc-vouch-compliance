@@ -29,7 +29,6 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import ConfigDict, Field
 
 from vouch.chat_agent import (
-    ANSWER_REFUSED,
     ASSESSED_CONTROLS,
     CITE_THEM,
     EXPLAIN_CONTROL,
@@ -37,6 +36,8 @@ from vouch.chat_agent import (
     PROGRESS,
     SEARCH_EVIDENCE,
     START_ASSESSMENT,
+    is_lead,
+    is_refusal,
 )
 from vouch.fake_model import _usage
 
@@ -106,14 +107,7 @@ def _page(messages: list[BaseMessage]) -> str | None:
 
 def _turns_tool_result(messages: list[BaseMessage]) -> ToolMessage | None:
     """The last tool result since the lead's last message (not the output check's), if any."""
-    lead = max(
-        (
-            i
-            for i, m in enumerate(messages)
-            if isinstance(m, HumanMessage) and m.name != ANSWER_REFUSED
-        ),
-        default=-1,
-    )
+    lead = max((i for i, m in enumerate(messages) if is_lead(m)), default=-1)
     results = [m for m in messages[lead + 1 :] if isinstance(m, ToolMessage)]
     return results[-1] if results else None
 
@@ -161,7 +155,7 @@ class CannedChatModel(BaseChatModel):
         if self.fail_with is not None:
             raise self.fail_with
         last = messages[-1] if messages else None
-        if isinstance(last, HumanMessage) and last.name == ANSWER_REFUSED:
+        if last is not None and is_refusal(last):
             if self.retry_reply is not None:
                 return _words(self.retry_reply), []
             # As it answered before (#208): the turn's last tool result passed on, else its reply.

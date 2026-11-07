@@ -84,7 +84,13 @@ from vouch.guards import (
     tagged,
 )
 from vouch.isa import IsaControl, UnknownControlError, load_base_framework
-from vouch.language import language_name, mismatch
+from vouch.language import (
+    kept_in_other_language,
+    language_name,
+    language_refusal,
+    mismatch,
+    written_in_not,
+)
 from vouch.memory import Memory, newest_assessment, newest_by_control, progress
 from vouch.profile import ComplianceProfile
 from vouch.redaction import redact, redact_data, redacted_event, removal_step
@@ -366,7 +372,7 @@ def _requirement_words(requirement: RequirementVerdict, language: str) -> str:
 
 
 def assessed_controls_words(
-    controls: Sequence[IsaControl], latest: dict[str, Assessment], language: str = DEFAULT_LANGUAGE
+    controls: Sequence[IsaControl], latest: dict[str, Assessment], language: str
 ) -> str:
     """Every control's newest assessment at once (#210): one line per control (its verdict, review
     state, the evidence its counted requirements rest on, and per requirement its verdict,
@@ -473,9 +479,7 @@ def judged(assessment: Assessment) -> list[RequirementVerdict]:
     return sorted(applying, key=lambda r: r.verdict == "evidenced")
 
 
-def assessed_words(
-    control: IsaControl, assessment: Assessment, language: str = DEFAULT_LANGUAGE
-) -> str:
+def assessed_words(control: IsaControl, assessment: Assessment, language: str) -> str:
     """What the control's newest assessment found: which requirements are missing and which
     evidenced, then the findings (each requirement's verdict and the reason given) and the
     quotes it kept, both as data: a reason is model or lead text, a quote document text. The
@@ -859,25 +863,22 @@ ASKED_AGAIN_STEP = (
     "Asked for the answer again: it claimed an audit result, which Vouch never claims."
 )
 
-WRONG_LANGUAGE = "Your last answer was written in "
-"""How the output check's refusal for an answer's language starts (#208): the language retry is
-counted apart from the audit-result retry, each with its own OUTPUT_RETRIES."""
+OUTPUT_CHECK = "output_check"
+"""The key in a refusal's additional_kwargs naming the check that refused the answer:
+LANGUAGE_CHECK for its language (#208); none for an audit result (#249, and threads kept before
+#208). Each check has its own OUTPUT_RETRIES."""
+LANGUAGE_CHECK = "language"
 
 
 def asked_again_in(found: str, expected: str) -> str:
     """The guard step for an answer asked for again in the profile's language (#208)."""
-    return (
-        f"Asked for the answer again: it was written in {language_name(found)}, "
-        f"not {language_name(expected)}."
-    )
+    written = written_in_not(language_name(found), language_name(expected))
+    return f"Asked for the answer again: it was {written}."
 
 
 def kept_in(found: str, expected: str) -> str:
     """The guard step for an answer still in another language after its retry, kept (#208)."""
-    return (
-        f"The answer is still written in {language_name(found)}, not "
-        f"{language_name(expected)}; it was kept as it is."
-    )
+    return f"The answer is {kept_in_other_language(language_name(found), language_name(expected))}."
 
 
 ANSWER_FAILED = "answer-failed"
@@ -885,14 +886,19 @@ ANSWER_FAILED = "answer-failed"
 OutputCheckError for it, once the node has taken the answer out of the thread."""
 
 
-def _is_refusal(message: BaseMessage) -> bool:
+def is_refusal(message: BaseMessage) -> bool:
     """The output check's message asking for the answer again (#249)."""
     return isinstance(message, HumanMessage) and message.name == ANSWER_REFUSED
 
 
-def _is_lead(message: BaseMessage) -> bool:
+def is_lead(message: BaseMessage) -> bool:
     """A message the compliance lead wrote (the greeting's request too), not the output check's."""
-    return isinstance(message, HumanMessage) and not _is_refusal(message)
+    return isinstance(message, HumanMessage) and not is_refusal(message)
+
+
+def _is_language_refusal(message: BaseMessage) -> bool:
+    """The output check's refusal of an answer for its language (#208)."""
+    return is_refusal(message) and message.additional_kwargs.get(OUTPUT_CHECK) == LANGUAGE_CHECK
 
 
 CITE_THEM = "Cite them as the chat prompt says."
@@ -925,10 +931,10 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     profile's (#208), is asked for again first."""
     chat = runtime.context
     messages = state["messages"]
-    lead = max(i for i, m in enumerate(messages) if _is_lead(m))
+    lead = max(i for i, m in enumerate(messages) if is_lead(m))
     replies = [m for m in messages[lead + 1 :] if isinstance(m, AIMessage)]
-    refusals = [m for m in messages[lead + 1 :] if _is_refusal(m)]
-    language_refusals = [r for r in refusals if r.text.startswith(WRONG_LANGUAGE)]
+    refusals = [m for m in messages[lead + 1 :] if is_refusal(m)]
+    language_refusals = [r for r in refusals if _is_language_refusal(r)]
     audit_refusals = [r for r in refusals if r not in language_refusals]
     text, dropped = checked_reply("".join(m.text for m in replies), chat.tools.check_quote)
     *earlier, last = replies
@@ -958,11 +964,11 @@ def _answer(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
             runtime.stream_writer(
                 ("step", {"node": GUARD, "text": asked_again_in(found, expected)})
             )
-            wanted = language_name(expected)
+            why = language_refusal(language_name(found), language_name(expected))
             refusal = HumanMessage(
-                f"{WRONG_LANGUAGE}{language_name(found)}, but the answer must be in {wanted}. "
-                f"Answer again in {wanted}, quoting documents unchanged in their own language.",
+                f"Your last answer was refused: {why}.",
                 name=ANSWER_REFUSED,
+                additional_kwargs={OUTPUT_CHECK: LANGUAGE_CHECK},
             )
             return {"messages": [*taken_out, refusal]}
         runtime.stream_writer(("step", {"node": GUARD, "text": kept_in(found, expected)}))
@@ -1012,7 +1018,7 @@ def _tools(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
 
 def _after_answer(state: ChatState) -> str:
     """Back to the agent when the answer was refused (#249), else the turn is done."""
-    return "agent" if _is_refusal(state["messages"][-1]) else END
+    return "agent" if is_refusal(state["messages"][-1]) else END
 
 
 def _next_node(state: ChatState) -> str:
@@ -1054,7 +1060,7 @@ def _window(messages: list[AnyMessage]) -> list[AnyMessage]:
         for m in messages
         if not (isinstance(m, AIMessage) and any(c["id"] not in answered for c in m.tool_calls))
     ]
-    leads = [i for i, m in enumerate(kept) if _is_lead(m)]
+    leads = [i for i, m in enumerate(kept) if is_lead(m)]
     start = next((i for i in leads if i >= len(kept) - HISTORY_WINDOW), leads[-1] if leads else 0)
     return kept[start:]
 

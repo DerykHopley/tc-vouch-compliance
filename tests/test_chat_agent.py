@@ -595,7 +595,7 @@ def test_assessed_controls_words_sort_the_controls_by_their_counted_evidence():
         d: _assessed(d, RequirementVerdict("M1", "must", "T.", "not-evidenced", "R.")),
     }
 
-    words = assessed_controls_words(controls, latest)
+    words = assessed_controls_words(controls, latest, "en")
 
     assert f"Documented evidence only: {a}, {c}." in words
     assert f"Stale evidence: {c}." in words
@@ -661,7 +661,7 @@ def test_explain_control_says_why_partly_evidenced_rows_roll_up_to_not_evidenced
         RequirementVerdict("S1", "should", "T.", "partly-evidenced", "R.", partly),
     )
 
-    words = assessed_words(control, replace(assessment, verdict="not-evidenced"))
+    words = assessed_words(control, replace(assessment, verdict="not-evidenced"), "en")
 
     why = "Why: Not evidenced: no must requirement is fully evidenced (1 of 1 partly evidenced)."
     assert why in words
