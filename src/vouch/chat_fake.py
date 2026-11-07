@@ -429,8 +429,11 @@ def german_answer(words: str) -> str:
     return _SET_ASIDE.sub(lambda found: kept[int(found.group(1))], words)
 
 
-_DOCUMENT_TEXT = re.compile(rf"{CITE.pattern}|^- [\w.]+ \(\w+\): [^\n]*$", re.MULTILINE | re.DOTALL)
-"""What german_answer leaves as it is: a cite, or a line with a requirement's text."""
+_DOCUMENT_TEXT = re.compile(
+    rf"{CITE.pattern}|^- [\w.]+ \(\w+\): [^\n]*$|\0", re.MULTILINE | re.DOTALL
+)
+"""What german_answer leaves as it is: a cite, a line with a requirement's text, or a NUL already
+in the text, so the only NULs left are its own set-aside markers."""
 _SET_ASIDE = re.compile(r"\0(\d+)\0")
 
 

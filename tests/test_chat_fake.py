@@ -504,6 +504,16 @@ def test_an_unknown_english_sentence_inside_a_cite_passes_through():
     assert german_answer(f"Ich habe gefunden:\n- {cited}") == f"Ich habe gefunden:\n- {cited}"
 
 
+@pytest.mark.parametrize("typed", ["Passwort \x000\x00", "Passwort \x0099\x00", "a \x00 b"])
+def test_a_query_with_nul_characters_stays_as_typed_and_raises_nothing(typed):
+    # The #330 verifier: text holding the set-aside marker (NUL, digits, NUL) pasted a cite into
+    # the query, or raised IndexError, on a German profile.
+    words = f'Found 2 passages for “{typed}”.\n- <cite doc="a">Eins.</cite>'
+    answer = german_answer(words)
+    assert f"“{typed}”" in answer
+    assert answer.count("<cite") == 1
+
+
 def test_a_findings_reason_and_requirement_text_stay_word_for_word():
     finding = (
         "- M1 (must): Every control is accepted. Nachgewiesen: The policies could not be read."
