@@ -107,6 +107,10 @@ describe('pageLabel', () => {
     expect(pageLabel({ page: 'developer', controlId: null })).toBe('on Developer')
     expect(pageLabel({ page: 'paper', controlId: '4.1.2' })).toBe('on 4.1.2 · Working paper')
   })
+
+  it('names the readiness report by the top bar\'s word for it (issue 268)', () => {
+    expect(pageLabel({ page: 'report', controlId: null })).toBe('on Report')
+  })
 })
 
 

@@ -61,7 +61,7 @@ export async function newConversation(): Promise<void> {
 }
 
 /** The page the compliance lead is on, as the chat request and the chat's header name it. */
-export type PageContext = { page: 'dossier' | 'paper' | 'developer'; controlId: string | null }
+export type PageContext = { page: 'dossier' | 'paper' | 'developer' | 'report'; controlId: string | null }
 
 /** An assessment the chat started has finished: proposed, waiting for the lead's review on its working paper. */
 export type ChatAssessment = {
@@ -101,6 +101,7 @@ const PAGE_WORDS: Record<PageContext['page'], string> = {
   dossier: 'Dossier',
   paper: 'Working paper',
   developer: 'Developer',
+  report: 'Report', // the top bar's word for the readiness report (#268)
 }
 
 /** The chat header's "on …": the page, and on a working paper its control first. */

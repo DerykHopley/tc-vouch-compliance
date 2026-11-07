@@ -963,6 +963,33 @@ describe('Ask Vouch', () => {
     expect(greetings).toHaveLength(1)
   })
 
+  it('on the readiness report, sends the greeting and messages with the report as the page (issue 268)', async () => {
+    const greetings: ChatBody[] = []
+    const asked: ChatBody[] = []
+    serveChat((body) => { asked.push(body); return QUIET() }, (body) => { greetings.push(body); return QUIET() })
+    window.history.replaceState(null, '', '/report')
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Report')).toBeTruthy()
+    await waitFor(() => expect(greetings).toEqual([{ page: 'report', control_id: null, thread_id: null }]))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'What is left?{Enter}')
+    await waitFor(() => expect(asked).toEqual([{ message: 'What is left?', page: 'report', control_id: null, thread_id: 't0' }]))
+  })
+
+  it('on the not-found page, speaks as on the Dossier (issue 268)', async () => {
+    const greetings: ChatBody[] = []
+    const asked: ChatBody[] = []
+    serveChat((body) => { asked.push(body); return QUIET() }, (body) => { greetings.push(body); return QUIET() })
+    window.history.replaceState(null, '', '/controls/9.9.9')
+    render(<App />)
+    await screen.findByRole('region', { name: 'Control not found' })
+    await open()
+    expect(within(bubble()!).getByText('on Dossier')).toBeTruthy()
+    await waitFor(() => expect(greetings).toEqual([{ page: 'dossier', control_id: null, thread_id: null }]))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Where now?{Enter}')
+    await waitFor(() => expect(asked).toEqual([{ message: 'Where now?', page: 'dossier', control_id: null, thread_id: 't0' }]))
+  })
+
   it('opens on the conversation kept on the server, as it was, without a greeting (issue 251)', async () => {
     kept = { thread_id: 'k'.repeat(32), lines: [
       { from: 'lead', text: 'Where do I stand?' },
