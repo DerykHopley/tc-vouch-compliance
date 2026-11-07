@@ -41,6 +41,7 @@ packages = ["src/vouch"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--disable-socket --allow-unix-socket -p no:deepeval -p no:asyncio"
+markers = ["postgres: runs against Postgres (tests/conftest.py adds it); CI's database job runs these"]
 # unix: the event loop's self-pipe (TestClient). no:deepeval: its plugin, installed with it for
 # the eval runner, would report each pytest session to its telemetry; no:asyncio, installed
 # with it too, is a plugin this suite never used.

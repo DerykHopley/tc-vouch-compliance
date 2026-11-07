@@ -56,12 +56,19 @@ def run(
     return done, calls.read_text() if calls.exists() else ""
 
 
-def ci_files() -> list[str]:
-    """Every test file the database job's Postgres steps run, read as YAML (the script reads
-    the job's text): each step that sets VOUCH_TEST_DATABASE_URL, in order."""
+def database_steps() -> list[str]:
+    """The run commands of the database job's Postgres steps (those that set
+    VOUCH_TEST_DATABASE_URL), read as YAML."""
     steps = yaml.safe_load(CI.read_text())["jobs"]["database"]["steps"]
-    runs = [s["run"] for s in steps if "VOUCH_TEST_DATABASE_URL" in s.get("env", {})]
-    return [f for run in runs for f in re.findall(r"tests/\S+\.py", run)]
+    return [s["run"] for s in steps if "VOUCH_TEST_DATABASE_URL" in s.get("env", {})]
+
+
+def test_ci_s_database_job_selects_the_postgres_tests_by_marker_and_fails_on_a_skip():
+    # #259: by marker, not a list of files a new test file could be missing from.
+    [run_line] = database_steps()
+    assert "pytest -m postgres" in run_line
+    assert not re.search(r"tests/\S+\.py", run_line)
+    assert "! grep -q SKIPPED" in run_line
 
 
 def published_port(calls: str) -> int:
@@ -70,7 +77,7 @@ def published_port(calls: str) -> int:
     return int(match.group(1))
 
 
-def test_with_no_arguments_it_runs_ci_s_database_files_on_a_free_port_and_removes_the_container(
+def test_with_no_arguments_it_runs_the_postgres_tests_on_a_free_port_and_removes_the_container(
     tmp_path,
 ):
     done, calls = run(tmp_path)
@@ -78,8 +85,7 @@ def test_with_no_arguments_it_runs_ci_s_database_files_on_a_free_port_and_remove
     port = published_port(calls)
     assert port != 5432
     [pytest] = [line for line in calls.splitlines() if line.startswith("uv ")]
-    assert "tests/test_database.py" in ci_files()  # the database job's own files, not another job's
-    assert [a for a in pytest.split(" DB=")[0].split()[3:] if a.endswith(".py")] == ci_files()
+    assert pytest.split(" DB=")[0].split()[3:] == ["-m", "postgres", "-rs"]  # as CI selects them
     assert f"DB=postgresql://postgres:throwaway@127.0.0.1:{port}/postgres" in pytest
     assert re.search(r"runtime rm -f vouch-test-db-\d+", calls)  # removed afterwards
 
