@@ -335,17 +335,20 @@ class ModelChoice:
         return self.openrouter.chat_model(chosen, callbacks)
 
     def for_chat(
-        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+        self,
+        chosen: str | None,
+        callbacks: list[BaseCallbackHandler] | None = None,
+        answer_language: str = "en",
     ) -> BaseChatModel:
         """A fresh model for one chat message (#44), on `chosen` (from `chosen()`), within
-        CALL_BUDGET calls; on the fake, the chat's canned answer. `callbacks` see every call
-        (the usage meter), as for_assessment's do."""
+        CALL_BUDGET calls; on the fake, the chat's canned answer, in `answer_language` where it
+        has one (#233). `callbacks` see every call (the usage meter), as for_assessment's do."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
             # Imported here: the fake knows the chat agent's tools, and the chat agent's
             # modules (vouch.spending among them) import this one.
             from vouch.chat_fake import CannedChatModel
 
-            return CannedChatModel(callbacks=callbacks)
+            return CannedChatModel(callbacks=callbacks, language=answer_language)
         return self.openrouter.chat_model(chosen, callbacks)
 
     def close(self) -> None:

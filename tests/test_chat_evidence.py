@@ -38,7 +38,7 @@ def client(database_url, lead):
 def fake(monkeypatch) -> CannedChatModel:
     """The chat's fake, kept, so a test can set its reply and read the prompts it was sent."""
     model = CannedChatModel()
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: model)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: model)
     return model
 
 

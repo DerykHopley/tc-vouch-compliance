@@ -137,7 +137,7 @@ def assess_and_review(client, control_id, decision=None):
 def fake(monkeypatch) -> CannedChatModel:
     """The chat's fake, kept, so a test can read the prompts it was sent."""
     model = CannedChatModel()
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None: model)
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: model)
     return model
 
 

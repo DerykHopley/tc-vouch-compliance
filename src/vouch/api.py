@@ -1035,7 +1035,9 @@ def chat(
     try:
         tools = ChatTools(profile, memory, run, spending, running, record)
         chat = chat_context(
-            models.for_chat(chosen, callbacks=[meter]), tools, chat_prompt(profile, context)
+            models.for_chat(chosen, callbacks=[meter], answer_language=profile.answer_language),
+            tools,
+            chat_prompt(profile, context),
         )
         message = request.message or GREETING_REQUEST
         for event, data in chat_turn(chat_graph(run.saver), chat, message, thread_id, memory.scope):
