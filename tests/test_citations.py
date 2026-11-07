@@ -3,6 +3,7 @@
 import datetime
 import json
 import logging
+from typing import Any
 
 import pytest
 from assess_steps import step_texts
@@ -28,7 +29,7 @@ def citing(
 ) -> ScriptedChatModel:
     """A run on 4.1.2 where M2 is judged with these citations; the rest are evidenced with a
     true quote."""
-    judge = [
+    judge: list[dict[str, Any]] = [
         {
             "requirement_id": r,
             "verdict": "evidenced",

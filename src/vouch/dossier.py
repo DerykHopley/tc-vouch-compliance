@@ -33,6 +33,7 @@ class Readiness(TypedDict):
     by_verdict: dict[Verdict, int]
     open: int
     remediation_items: int  # the accepted controls' items the lead hasn't discarded (#43)
+    remediation_approved: int  # of those, the ones the lead approved: the report's count (#310)
 
 
 class ControlCard(TypedDict):
@@ -112,25 +113,25 @@ def readiness(
     controls: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
     discarded: Collection[tuple[str, str]] = (),
+    approved: Collection[tuple[str, str]] = (),
 ) -> Readiness:
     """Readiness from the listed controls' accepted verdicts only (`latest`: each control's
     newest assessment); `discarded` names the remediation items the lead discarded, by thread and
-    requirement id, which `remediation_items` leaves out (#43). The overview's, and the readiness
-    report's (#234), so the two never disagree."""
+    requirement id, which `remediation_items` leaves out (#43); `approved` those approved, which
+    `remediation_approved` counts (#310). The overview's, and the readiness report's (#234), so
+    the two never disagree."""
     controls = list(controls)
     listed = [latest[c.id] for c in controls if c.id in latest]
     accepted = [a for a in listed if a.status == "accepted"]
     verdicts = Counter(a.verdict for a in accepted)
+    items = [(a.thread_id, i.requirement_id) for a in accepted for i in a.remediation]
     return {
         "controls": len(controls),
         "accepted": len(accepted),
         "by_verdict": {v: verdicts[v] for v in VERDICTS},
         "open": len(controls) - len(accepted),
-        "remediation_items": sum(
-            (a.thread_id, i.requirement_id) not in discarded
-            for a in accepted
-            for i in a.remediation
-        ),
+        "remediation_items": sum(key not in discarded for key in items),
+        "remediation_approved": sum(key in approved and key not in discarded for key in items),
     }
 
 
@@ -139,13 +140,14 @@ def overview(
     controls: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
     discarded: Collection[tuple[str, str]] = (),
+    approved: Collection[tuple[str, str]] = (),
 ) -> Overview:
     """The overview: the company, the profile's protection level and answer language, readiness from accepted verdicts only, a card per control
     (in the base framework's order) with its review state and verdict, how many controls are in
     each state, the evidence quotes from assessed controls not rejected, and the next step (None
     once every control is accepted). Assessments of controls not in `controls` are left out.
     `discarded` names the remediation items the lead discarded, by thread and requirement id:
-    the band counts the others (#43)."""
+    the band counts the others (#43); `approved` those approved, counted apart (#310)."""
     controls = list(controls)
     listed = {c.id: latest[c.id] for c in controls if c.id in latest}
     cards = [_card(control, listed.get(control.id)) for control in controls]
@@ -155,7 +157,7 @@ def overview(
         "country": profile.country,
         "protection_level": profile.protection_level,
         "answer_language": profile.answer_language,
-        "readiness": readiness(controls, listed, discarded),
+        "readiness": readiness(controls, listed, discarded, approved),
         "by_status": {status: statuses[status] for status in CARD_STATUSES},
         "next_step": _next_step(cards),
         "controls": cards,

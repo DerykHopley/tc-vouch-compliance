@@ -24,6 +24,7 @@ vouch-db-setup = "vouch.database:main"
 [dependency-groups]
 dev = [
     "deepeval==4.3.1",
+    "mypy>=2.4.1",
     "openpyxl>=3.1.5",
     "pyjwt[crypto]>=2.9",
     "pytest",
@@ -45,6 +46,19 @@ markers = ["postgres: runs against Postgres (tests/conftest.py adds it); CI's da
 # unix: the event loop's self-pipe (TestClient). no:deepeval: its plugin, installed with it for
 # the eval runner, would report each pytest session to its telemetry; no:asyncio, installed
 # with it too, is a plugin this suite never used.
+
+[tool.mypy]
+# Python's types, checked in CI's fast lane and the pre-push hook (#129).
+python_version = "3.12"
+files = ["src", "tests"]
+ignore_missing_imports = true  # libraries without type stubs (deepeval, langgraph's extras, ...)
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]  # pydantic models take what they convert (a script as a dict)
+
+[[tool.mypy.overrides]]
+# #129: their errors come from LangChain's message and model unions; each is a later Fix to clear.
+module = ["vouch.graph", "vouch.fake_model"]
+ignore_errors = true
 
 [tool.ruff]
 line-length = 100

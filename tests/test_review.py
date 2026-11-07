@@ -12,6 +12,7 @@ from vouch import ScriptedChatModel, assess, audit, load_named_profile
 from vouch.graph import (
     NO_OWNER,
     NOT_DRAFTED,
+    Decision,
     InvalidReviewError,
     NotWaitingForReviewError,
     OutputCheckError,
@@ -556,7 +557,7 @@ def test_two_reviews_at_once_resume_once_and_the_other_is_refused():
     trail = audit.ProcessTrail(lambda: saver)
     outcomes: dict[str, str] = {}
 
-    def review(decision: str) -> None:
+    def review(decision: Decision) -> None:
         saver.local.armed = True
         try:
             reviewed = audit.review(
@@ -565,6 +566,7 @@ def test_two_reviews_at_once_resume_once_and_the_other_is_refused():
                 ReviewDecision(decision=decision),
                 reviewer=audit.Reviewer("lead", "Lead"),
             )
+            assert reviewed.review is not None
             outcomes[decision] = reviewed.review.decision
         except NotWaitingForReviewError:
             outcomes[decision] = "refused"

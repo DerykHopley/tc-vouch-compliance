@@ -48,7 +48,7 @@ const OVERVIEW: Overview = {
   requirements: {},
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
-    remediation_items: 0 },
+    remediation_items: 0, remediation_approved: 0 },
   by_status: { 'not-assessed': 12, 'waiting-for-review': 0, accepted: 0, rejected: 0 },
   next_step: { control_id: '1.1.1', action: 'assess' },
   controls: IDS.map((id) => ({ id, question: `Question ${id}?`, iso_27001: 'ISO 27001:2022: A.5.1', status: 'not-assessed',

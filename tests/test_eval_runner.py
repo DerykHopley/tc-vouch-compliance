@@ -6,8 +6,10 @@ real-model path, each model made counted. Nothing leaves the machine and no key 
 """
 
 import json
+from typing import cast
 
 import pytest
+from langchain_core.language_models import BaseChatModel
 
 from vouch import eval_models, evals
 from vouch.eval_models import LOCAL_PRICE, cost_of
@@ -80,7 +82,7 @@ def answers(*replies: str):
 def fixed_judge(faithfulness: Faithfulness, cost_known: bool = True) -> FaithfulnessJudge:
     return FaithfulnessJudge(
         "judge/fixed",
-        lambda callbacks: None,
+        lambda callbacks: cast(BaseChatModel, None),  # never called: `measure` stands in
         PRICED if cost_known else None,
         measure=lambda *args: faithfulness,
     )

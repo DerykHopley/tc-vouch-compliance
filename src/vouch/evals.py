@@ -30,6 +30,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -489,10 +490,10 @@ def run_confirmed(
     the report and whether the rest ran."""
     fitting = [c for c in cases if isinstance(_columns(c, profile), dict)]
     report = EvalReport(scores=[], bad_cases=bad_cases(cases, profile))
-    run = {"profile": profile, "models": models, "today": today, "judge": judge, "clock": clock}
+    run = partial(run_eval, profile=profile, models=models, today=today, judge=judge, clock=clock)
     if not fitting:
         return report, True
-    report.extend(run_eval(fitting[:1], **run, on_case=on_case))
+    report.extend(run(fitting[:1], on_case=on_case))
     remaining = fitting[1:]
     if not remaining:
         return report, True
@@ -507,7 +508,7 @@ def run_confirmed(
     if answer.strip().lower() != CONFIRM_WORD:
         print(f"Stopped: the other {len(remaining)} cases were not run; nothing more was sent.")
         return report, False
-    report.extend(run_eval(remaining, **run, on_case=on_case))
+    report.extend(run(remaining, on_case=on_case))
     return report, True
 
 

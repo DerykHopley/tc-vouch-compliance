@@ -29,7 +29,8 @@ from vouch.evals import (
     score_case,
     spec_roll_up,
 )
-from vouch.graph import Assessment, RequirementVerdict, ShouldScore
+from vouch.graph import Assessment, RequirementVerdict, ShouldScore, Verdict
+from vouch.isa import Column
 from vouch.language import mismatch
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.spending import FAKE
@@ -44,7 +45,7 @@ def cited(*doc_ids: str) -> tuple[Citation, ...]:
     )
 
 
-def result(control_id: str, verdict: str, *requirements: RequirementVerdict) -> Assessment:
+def result(control_id: str, verdict: Verdict, *requirements: RequirementVerdict) -> Assessment:
     return Assessment(
         control_id=control_id,
         profile_id="nordlicht",
@@ -55,11 +56,13 @@ def result(control_id: str, verdict: str, *requirements: RequirementVerdict) -> 
     )
 
 
-def got(req_id: str, verdict: str, *doc_ids: str, column: str = "must") -> RequirementVerdict:
+def got(
+    req_id: str, verdict: Verdict, *doc_ids: str, column: Column = "must"
+) -> RequirementVerdict:
     return RequirementVerdict(req_id, column, "text", verdict, "reason", cited(*doc_ids))
 
 
-def expected(req_id: str, verdict: str, *cites: str) -> ExpectedRequirement:
+def expected(req_id: str, verdict: Verdict, *cites: str) -> ExpectedRequirement:
     return ExpectedRequirement(req_id, verdict, frozenset(cites))
 
 

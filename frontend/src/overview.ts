@@ -17,6 +17,8 @@ export type Readiness = {
   by_verdict: Record<Verdict, number>
   open: number
   remediation_items: number
+  /** Of those, how many the lead approved: the readiness report's count (#310). */
+  remediation_approved: number
 }
 
 /** The verdicts in the readiness bar's order (the Dossier's band, the readiness report); the open rest stays the

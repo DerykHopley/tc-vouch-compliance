@@ -2,13 +2,23 @@
 
 import pytest
 
-from vouch.graph import RequirementVerdict, ShouldScore, roll_up, should_score
+from vouch.graph import RequirementVerdict, ShouldScore, Verdict, roll_up, should_score
+from vouch.isa import Column
 
-COLUMNS = {"M": "must", "S": "should", "H": "high", "V": "very high", "O": "overlay"}
-E, P, N, NA = "evidenced", "partly-evidenced", "not-evidenced", "not-applicable"
+COLUMNS: dict[str, Column] = {
+    "M": "must",
+    "S": "should",
+    "H": "high",
+    "V": "very high",
+    "O": "overlay",
+}
+E: Verdict = "evidenced"
+P: Verdict = "partly-evidenced"
+N: Verdict = "not-evidenced"
+NA: Verdict = "not-applicable"
 
 
-def req(rid: str, verdict: str) -> RequirementVerdict:
+def req(rid: str, verdict: Verdict) -> RequirementVerdict:
     return RequirementVerdict(id=rid, column=COLUMNS[rid[0]], text="", verdict=verdict, reason="")
 
 

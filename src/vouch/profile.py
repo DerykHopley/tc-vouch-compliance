@@ -369,14 +369,21 @@ def _read_version(
         return BrokenProfile(name, load_problem(error))
 
 
-def read_profile_once(folder: Path, name: str) -> ComplianceProfile | BrokenProfile:
-    """The named profile in `folder`, or why it can't be used: read once per version of its
-    file (logged once per broken version), so a profile fixed or changed while the app runs is
-    read again. Raises UnknownProfileError, which isn't kept: a profile added later is found."""
-    return _read_version(folder, name, _version(folder, name))
+class _ProfileReader:
+    """read_profile_once: a function with its cache's `cache_clear`, typed (#129)."""
+
+    def __call__(self, folder: Path, name: str) -> ComplianceProfile | BrokenProfile:
+        """The named profile in `folder`, or why it can't be used: read once per version of its
+        file (logged once per broken version), so a profile fixed or changed while the app runs
+        is read again. Raises UnknownProfileError, which isn't kept: a profile added later is
+        found."""
+        return _read_version(folder, name, _version(folder, name))
+
+    def cache_clear(self) -> None:
+        _read_version.cache_clear()
 
 
-read_profile_once.cache_clear = _read_version.cache_clear  # type: ignore[attr-defined]
+read_profile_once = _ProfileReader()
 
 
 @dataclass(frozen=True)
@@ -388,7 +395,8 @@ class ProfileScan:
 
     def find(self, name: str) -> ComplianceProfile | BrokenProfile | None:
         """The profile in the folder `name`, loaded or broken; None when there's none."""
-        return next((p for p in (*self.loaded, *self.broken) if p.id == name), None)
+        profiles: tuple[ComplianceProfile | BrokenProfile, ...] = (*self.loaded, *self.broken)
+        return next((p for p in profiles if p.id == name), None)
 
 
 def scan_profiles(folder: Path) -> ProfileScan:

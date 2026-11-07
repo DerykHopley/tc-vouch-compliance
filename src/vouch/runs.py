@@ -9,7 +9,7 @@ allow-list (security layer 2); each refused call is a guard step.
 import logging
 import threading
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from dataclasses import asdict, dataclass, replace
 from typing import Any, cast
 
@@ -68,7 +68,7 @@ def assessment_events(
     *,
     thread_id: str,
     note: str = "",
-) -> Iterator[tuple[str, Any]]:
+) -> Generator[tuple[str, Any]]:
     """The run up to the review interrupt, as (event, data): a `step` per agent step (and per
     refused tool call), a `requirement` per judged requirement, then one `result`, the proposed
     Assessment itself. The run's meter sees every model call. Without a `note`, the lead's note
