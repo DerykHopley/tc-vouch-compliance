@@ -88,6 +88,7 @@ At every width, the page's top scroll padding follows the sticky top bar's heigh
 | Component | States |
 |---|---|
 | Button (pill) | default, primary (ink), sign-off (`--sign`), ghost; hover, focus, disabled, busy |
+| Icon button (#72) | a button showing one text glyph in the body font (`--f-body`, Manrope), drawn the way the app already draws `▾`, `›` and `←`: no icon library, image, SVG or new font. The glyph sits in a `<span aria-hidden="true">`; the button carries the action's name as `aria-label` and the same words as `title` (a tooltip for mouse users). The glyph takes the button's own colour (`--navy` on a ghost button), so it follows light and dark; about 20px; the box at least 44 by 44px; the `.btn` hover and focus ring unchanged. **Used by:** the chat's Close, `×` (U+00D7), named "Close the chat". An action gets a glyph only when the glyph reads the same way everywhere and Manrope has it: pin, make larger or smaller, and new conversation have no such glyph in Manrope (it would fall back to another font), so they keep their words |
 | Verdict chip | evidenced, partly evidenced, not evidenced, not applicable, not assessed (hollow outline), assessing |
 | Review state tag | proposed, accepted, rejected |
 | Evidence kind tag | documented (dashed), implemented (solid navy); stale flag |

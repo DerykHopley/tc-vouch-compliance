@@ -434,6 +434,15 @@ describe('Ask Vouch', () => {
     expect(bubble()).toBeNull()
   })
 
+  it('shows Close as a × glyph hidden from screen readers, keeping its name (#72)', async () => {
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
+    const close = screen.getByRole('button', { name: 'Close the chat' })
+    expect(close.textContent).toBe('×')
+    expect(close.querySelector('[aria-hidden="true"]')?.textContent).toBe('×')
+    expect(close.getAttribute('title')).toBe('Close the chat')
+  })
+
   it('closes on Esc and gives focus back to the button', async () => {
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: /ask vouch/i }))
