@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import App from './App.tsx'
+import { mayLeave } from './leaving.ts'
 import { fetchProfiles, type Profiles, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import { rememberedProfile, rememberProfile, setProfile } from './session.ts'
@@ -28,8 +29,10 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     setProfile(id) // before the app opens again, so its first calls name it
     setChosen(id)
   }
-  // The user's switch in the menu: remembered for the next reload, and it ends any fallback note.
+  // The user's switch in the menu: remembered for the next reload, and it ends any fallback note. A working paper
+  // with overrides not yet recorded asks first (#182).
   const switchTo = (id: string) => {
+    if (!mayLeave()) return
     rememberProfile(id)
     setFellBack(false)
     setSwitched(true)
