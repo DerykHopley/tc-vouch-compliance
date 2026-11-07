@@ -4,6 +4,7 @@ import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
+import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, useOverview } from './overview.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import Report from './Report.tsx'
@@ -88,15 +89,38 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     }
   }, [barOpen])
   const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
-    const onPopState = () => setView(viewAt(window.location.pathname)) // Back or Forward
+    shownPath.current = pathOf(view)
+  }, [view])
+  useEffect(() => {
+    // Back or Forward: the address has already changed, so staying on a paper with unsaved overrides puts it back.
+    const onPopState = () => {
+      if (window.location.pathname !== shownPath.current && !mayLeave()) {
+        window.history.pushState(null, '', shownPath.current)
+        return
+      }
+      setView(viewAt(window.location.pathname))
+    }
+    // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (unsavedCount() > 0) e.preventDefault()
+    }
     window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      window.removeEventListener('popstate', onPopState)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
   }, [])
-  /** Shows a view and gives it its address, so a refresh or a shared link opens it again. */
+  /** Shows a view and gives it its address, so a refresh or a shared link opens it again. Leaving a paper with
+   * overrides not yet recorded asks first (#182); false when the lead stays. */
   const showView = (next: View) => {
-    if (window.location.pathname !== pathOf(next)) window.history.pushState(null, '', pathOf(next))
+    const path = pathOf(next)
+    if (path !== shownPath.current && !mayLeave()) return false // the view shown again asks nothing
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
     setView(next)
+    return true
   }
   // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
   // shows the Dossier.
@@ -180,8 +204,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     return again !== null
   }
   const open = (controlId: string, assess: boolean) => {
-    showView({ name: 'paper', controlId })
-    if (assess) void start(controlId)
+    if (showView({ name: 'paper', controlId }) && assess) void start(controlId)
   }
 
   return (

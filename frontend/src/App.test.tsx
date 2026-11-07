@@ -231,6 +231,139 @@ describe('the working paper', () => {
       await userEvent.click(await within(bar).findByRole('button', { name: 'Refresh' }))
       expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
     })
+
+    describe('leaving with an override not yet recorded asks first (issue 182)', () => {
+      const ONE = 'You have 1 override not yet recorded. Leave and drop it?'
+      const m1 = () => screen.getByText('M1', { selector: 'th .mono' }).closest('tr')!
+      const headVerdict = () => screen.getByText('Verdict', { selector: '.paper-meta span' }).parentElement!
+      const indexLink = (id: string) =>
+        within(screen.getByRole('navigation', { name: 'Controls' })).getByRole('link', { name: new RegExp(`^${id}`) })
+      /** The browser's confirm, answering `answer`. */
+      function asking(answer: boolean) {
+        const confirm = vi.fn(() => answer)
+        vi.stubGlobal('confirm', confirm)
+        return confirm
+      }
+      /** 4.1.2's paper on WAITING, at its address. */
+      async function openPaper() {
+        serveReview(Response.json({ assessment: ACCEPTED }))
+        window.history.replaceState(null, '', '/controls/4.1.2')
+        render(<App />)
+        await screen.findByRole('region', { name: 'Review' })
+      }
+      async function saveOverrideOfM1() {
+        await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+        const editor = screen.getByRole('form', { name: 'Override M1' })
+        await userEvent.selectOptions(within(editor).getByLabelText('Verdict'), 'evidenced')
+        await userEvent.type(within(editor).getByLabelText('Reason (required)'), 'The rollout record shows it.')
+        await userEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+      }
+
+      it('opening another control from the index asks; Cancel keeps the paper, its override and its verdict',
+        async () => {
+          await openPaper()
+          await saveOverrideOfM1()
+          const confirm = asking(false)
+
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).toHaveBeenCalledWith(ONE)
+          expect(window.location.pathname).toBe('/controls/4.1.2')
+          expect(screen.getByRole('heading', { name: /4\.1\.2 Question 4\.1\.2\?/ })).toBeTruthy()
+          expect(within(m1()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+          expect(within(headVerdict()).getByText('Evidenced')).toBeTruthy()
+        })
+
+      it('OK opens the other control, and coming back shows no override (#42)', async () => {
+        await openPaper()
+        await saveOverrideOfM1()
+        asking(true)
+
+        await userEvent.click(indexLink('4.1.3'))
+
+        expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+        expect(window.location.pathname).toBe('/controls/4.1.3')
+        await userEvent.click(indexLink('4.1.2'))
+        await screen.findByRole('region', { name: 'Review' })
+        expect(within(m1()).queryByText(/^Overridden/)).toBeNull()
+        expect(within(headVerdict()).getByText('Partly evidenced')).toBeTruthy()
+      })
+
+      it('the breadcrumb "Overview" and the Report tab ask too; Cancel keeps the paper\'s address', async () => {
+        await openPaper()
+        await saveOverrideOfM1()
+        const confirm = asking(false)
+
+        await userEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
+          .getByRole('link', { name: 'Overview' }))
+        await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' }))
+          .getByRole('link', { name: 'Report' }))
+
+        expect(confirm).toHaveBeenCalledTimes(2)
+        expect(confirm).toHaveBeenLastCalledWith(ONE)
+        expect(window.location.pathname).toBe('/controls/4.1.2')
+        expect(within(m1()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+      })
+
+      it("Back asks; Cancel keeps the paper shown and puts its address back", async () => {
+        window.history.replaceState(null, '', '/')
+        window.history.pushState(null, '', '/controls/4.1.2')
+        serveReview(Response.json({ assessment: ACCEPTED }))
+        render(<App />)
+        await screen.findByRole('region', { name: 'Review' })
+        await saveOverrideOfM1()
+        const confirm = asking(false)
+
+        act(() => window.history.back())
+
+        await waitFor(() => expect(confirm).toHaveBeenCalledWith(ONE))
+        expect(window.location.pathname).toBe('/controls/4.1.2')
+        expect(screen.getByRole('region', { name: 'Working paper' })).toBeTruthy()
+        expect(within(m1()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+      })
+
+      it('a reload or closing the tab is held back while an override is unsaved, and not otherwise', async () => {
+        await openPaper()
+        const unload = () => {
+          const event = new Event('beforeunload', { cancelable: true })
+          window.dispatchEvent(event)
+          return event.defaultPrevented
+        }
+        expect(unload()).toBe(false)
+
+        await saveOverrideOfM1()
+
+        expect(unload()).toBe(true)
+      })
+
+      it('asks nothing with no override saved, or for the control already open', async () => {
+        await openPaper()
+        await saveOverrideOfM1()
+        const confirm = asking(false)
+        await userEvent.click(indexLink('4.1.2'))
+        expect(confirm).not.toHaveBeenCalled()
+        await userEvent.click(within(m1()).getByRole('button', { name: 'Undo the override of M1' }))
+
+        await userEvent.click(indexLink('4.1.3'))
+
+        expect(confirm).not.toHaveBeenCalled()
+        expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+      })
+
+      it('asks nothing after Accept verdict records the decision', async () => {
+        await openPaper()
+        await saveOverrideOfM1()
+        const confirm = asking(false)
+        await userEvent.click(within(screen.getByRole('region', { name: 'Review' }))
+          .getByRole('button', { name: 'Accept verdict' }))
+        await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')
+
+        await userEvent.click(indexLink('4.1.3'))
+
+        expect(confirm).not.toHaveBeenCalled()
+        expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+      })
+    })
   })
 
   it('marks the Dossier current when the overview fails at a paper address, as the Dossier is what shows', async () => {

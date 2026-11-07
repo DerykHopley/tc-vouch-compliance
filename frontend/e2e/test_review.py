@@ -9,7 +9,7 @@ read from storage as the paper opens it, so each starts from a proposed assessme
 import json
 import re
 
-from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from playwright.sync_api import APIRequestContext, Dialog, Locator, Page, expect
 from top_bar import back_to_overview
 
 CONTROL = "4.1.2"
@@ -208,3 +208,35 @@ def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(pag
     row(paper, "M1").get_by_role("button", name="Undo the override of M1").focus()
     page.keyboard.press("Enter")  # Undo goes once pressed: focus moves to Change, not the page
     expect(change).to_be_focused()
+
+
+def test_leaving_with_an_unsaved_override_asks_first_and_cancel_keeps_it(page: Page, paper_url):
+    # #182: an override saved but not yet recorded used to be dropped without a word.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    override(paper, "M1", "Evidenced", REASON).get_by_role("button", name="Save").click()
+    expect(row(paper, "M1")).to_contain_text("Overridden from Partly evidenced")
+    other = page.get_by_role("navigation", name="Controls").get_by_role(
+        "link", name=re.compile(r"^4\.1\.3")
+    )
+    asked: list[str] = []
+
+    def answer(accept: bool):
+        def handle(dialog: Dialog) -> None:
+            asked.append(dialog.message)
+            dialog.accept() if accept else dialog.dismiss()
+
+        return handle
+
+    page.once("dialog", answer(False))
+    other.click()
+    expect(row(paper, "M1")).to_contain_text("Overridden from Partly evidenced")
+    assert asked == ["You have 1 override not yet recorded. Leave and drop it?"]
+    assert page.url.endswith(f"/controls/{CONTROL}")
+
+    page.once("dialog", answer(True))
+    other.click()
+    expect(page).to_have_url(re.compile(r"/controls/4\.1\.3$"))
+    expect(page.get_by_role("heading", name=re.compile(r"^4\.1\.3 "))).to_be_visible()
+    assert len(asked) == 2

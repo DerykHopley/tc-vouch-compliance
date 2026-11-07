@@ -115,6 +115,9 @@ def test_the_close_glyph_keeps_a_44px_box_in_every_chat_state(page: Page, dossie
     # Close is a × glyph (#72): the button around it stays at least 44 by 44px in the 400px sheet
     # and in the 1400px bubble, enlarged and pinned.
     def box(state: str) -> tuple[str, float, float]:
+        # Measured once the sheet's rise has finished: a resize to 400px starts it again, and a
+        # box read mid-move is a fraction short (43.99…).
+        page.locator(SHEET).evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")
         b = page.get_by_role("button", name="Close the chat").bounding_box()
         assert b is not None, state
         return (state, b["width"], b["height"])
