@@ -673,8 +673,8 @@ class ChatTools:
         if not found:
             return NO_EVIDENCE + not_read
         return (
-            f"Found {plural(len(found), 'passage')} for “{query.strip()}”.{not_read} Cite them "
-            f"as the chat prompt says.\n{as_data(found)}"
+            f"Found {plural(len(found), 'passage')} for “{query.strip()}”.{not_read} {CITE_THEM}\n"
+            f"{as_data(found)}"
         )
 
     @property
@@ -833,6 +833,10 @@ def _is_lead(message: BaseMessage) -> bool:
     """A message the compliance lead wrote (the greeting's request too), not the output check's."""
     return isinstance(message, HumanMessage) and not _is_refusal(message)
 
+
+CITE_THEM = "Cite them as the chat prompt says."
+"""search_evidence's word to the model on how to cite what it found: for the model only (the chat's
+fake leaves it out of its reply, #292)."""
 
 REPLY_TEXT = "reply-text"
 """The agent's own event for the turn's answer, whole, its quotes checked: chat_turn redacts it
