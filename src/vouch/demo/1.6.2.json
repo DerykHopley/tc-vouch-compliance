@@ -1,0 +1,23 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "handling security event reports priority owners review after incidents authorities"}},
+    {"tool": "search_records", "args": {"query": "security event register first action closed review meeting"}},
+    {"answer": "The security desk records every report within one working day, sorts it by area, type and priority, and passes it to the owner for its area; the information security officer coordinates events across areas and each owner has a deputy. The register shows a median of 3 hours to first action and an action and closing date for each entry. A review is required after high and critical incidents, but none is recorded for 2026-007 or 2026-031. No document covers involving the authorities."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Reports are recorded within one working day, and the register shows a median of 3 hours to first action.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "The security desk records every report in the security event register within one working day."}, {"doc_id": "security-event-register", "quote": "Every report was recorded within one working day; the median time from report to first action was 3 hours."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Each register entry records the action taken and the date it was closed.", "citations": [{"doc_id": "security-event-register", "quote": "Phishing email clicked by two users; passwords reset, sessions ended, sender blocked"}]},
+      {"requirement_id": "M3", "verdict": "partly-evidenced", "reason": "The procedure requires a review after every high or critical incident, but the register shows none held for 2026-007 or 2026-031.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "After every incident of high or critical priority, the information security officer holds a short review with those involved and records what we will change."}, {"doc_id": "security-event-register", "quote": "No review meeting has been recorded yet for incidents 2026-007 and 2026-031."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Each report is sorted by area, type and priority, and the register carries all three.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "It sorts each report into personnel, physical or IT, decides whether it is a mere observation, a weakness or an incident, and gives it a priority of low, medium, high or critical."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Each area has an owner, the information security officer coordinates events across areas, and each owner names a deputy.", "citations": [{"doc_id": "security-event-reporting-procedure", "quote": "Personnel events go to HR, physical events to the facility manager, and IT events to the IT operations lead."}, {"doc_id": "security-event-reporting-procedure", "quote": "Where an event touches more than one area, the information security officer coordinates."}]},
+      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "No document covers when or how the authorities are involved in an incident.", "citations": []}
+    ]
+  },
+  "remediate": {
+    "items": [
+      {"requirement_id": "M3", "missing": "Recorded reviews of incidents 2026-007 and 2026-031, each with what will change and who does it.", "owner_role": "Information security officer", "due_in_days": 30},
+      {"requirement_id": "S3", "missing": "A section in the reporting procedure on when and how possibly criminal incidents are reported to the police or other authorities, and who decides.", "owner_role": "Information security officer", "due_in_days": 60}
+    ]
+  }
+}

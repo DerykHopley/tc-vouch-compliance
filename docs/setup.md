@@ -34,29 +34,29 @@ passes `/api` to it. When both answer it prints `Vouch is running: http://127.0.
   drops `OPENROUTER_API_KEY` even when your shell has it, so it never makes a paid call.
 - **No keys and no sign-in.** It runs in local auth mode: one default user, shown as "Local
   user". Nothing local needs a key.
-- **What the fake covers.** The bundled demo script answers for **4.1.2**: in English under
-  Nordlicht (the default profile), in German under Alpenwerk. The Dossier suggests 1.1.1 as the
-  next step, but on the fake another control replays 4.1.2's answers (about sign-in), which
-  don't fit it. The other controls are for the live app, or for an eval script (below).
+- **What the fake covers.** Four controls have bundled demo scripts of their own: **1.1.1**
+  (the Dossier's suggested first step), **1.6.2** (Alpenwerk's country overlay adds O1),
+  **4.1.2** and **5.1.1** (Nordlicht's stale encryption standard). Each answers in English under
+  Nordlicht (the default profile) and in German under Alpenwerk, and judges every requirement
+  that applies. Any other control plays 4.1.2's script, whose answers don't fit it: those
+  controls are for the live app, or for an eval script (below).
 - **Kept in memory.** Without `VOUCH_DATABASE_URL`, assessments and reviews last until the API
   stops.
 
 ### `ASSESS_FAKE_SCRIPT`: another scripted run
 
 `ASSESS_FAKE_SCRIPT` names a script for the fake model to play instead of the bundled demo
-script. `scripts/dev.sh` passes it on to the API, and the `assess` command needs it (or a key).
-The eval scripts in `evals/scripts/<profile>/<control>.json` are such scripts, one per control.
-
-The overlay branch is the example: only 1.6.2 under Alpenwerk takes it (the country overlay "AT
-NIS2 (illustrative)" adds requirement O1).
+scripts. `scripts/dev.sh` passes it on to the API, and the `assess` command needs it (or a key).
+The eval scripts in `evals/scripts/<profile>/<control>.json` are such scripts, one per control,
+so they are the way to try one of the eight controls the bundled scripts don't cover:
 
 ```sh
-ASSESS_FAKE_SCRIPT=evals/scripts/alpenwerk/1.6.2.json scripts/dev.sh
+ASSESS_FAKE_SCRIPT=evals/scripts/nordlicht/2.1.3.json scripts/dev.sh
 ```
 
-While it runs this way every assessment plays that script, so assess only 1.6.2 under
-Alpenwerk; stop it and start `scripts/dev.sh` plainly for anything else. The walk-through is in
-[features](features.md#the-overlay-branch).
+While it runs this way every assessment plays that script, so assess only that control under
+that profile; stop it and start `scripts/dev.sh` plainly for anything else. The eval scripts'
+answers are placeholders and their reasons are English, even under Alpenwerk.
 
 ## The `assess` command
 
