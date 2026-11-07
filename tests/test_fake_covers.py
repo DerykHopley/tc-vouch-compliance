@@ -50,8 +50,8 @@ def as_of(monkeypatch) -> datetime.date:
 
     class AsOf(datetime.date):
         @classmethod
-        def today(cls) -> datetime.date:
-            return day
+        def today(cls) -> "AsOf":
+            return cls(day.year, day.month, day.day)
 
     monkeypatch.setattr(graph, "date", AsOf)
     return day
