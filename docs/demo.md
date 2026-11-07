@@ -117,20 +117,13 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 
 Start the app on your own machine as [setup](setup.md#run-the-app) says (`scripts/dev.sh`, then
 open the URL it prints). It runs on the scripted fake model, offline and free, with no sign-in:
-you are "Local user". Follow the same steps, with these substitutions:
+you are "Local user". The fake covers 1.1.1, 1.6.2, 4.1.2 and 5.1.1, so the steps run as on the
+live app, with one difference:
 
-- **Step 2:** assess **4.1.2** in place of 5.1.1: it is the only control the fake covers. It shows
-  **Partly evidenced** and a remediation item for M1, but no stale evidence: skip the stale flag.
-- **Step 3:** override **S2** to **Partly evidenced**, as
-  [features](features.md#2-review-it-with-an-override) does. The override drafts a second
-  remediation item, for S2, which reads "not drafted" and needs an owner role before it can be
-  approved: approve M1's only. The Overview then counts 2 remediation items, and the report 1,
-  since the report counts only approved items.
 - **Step 4:** the fake recognises only some phrasings
-  ([features](features.md#3-ask-a-question)): ask "What's missing for 4.1.2?" or "Is there
-  evidence of hardware security keys?", then type "Accept 4.1.2".
-- **Step 5:** under Alpenwerk, assess **4.1.2** for the German answer. The overlay on 1.6.2 needs
-  a restart with `ASSESS_FAKE_SCRIPT=evals/scripts/alpenwerk/1.6.2.json` (see
-  [features](features.md#the-overlay-branch)), so show it last, after the report, or skip it.
-- **Step 6:** the report shows 4.1.2, reviewed by "Local user". Export downloads
-  `readiness-report-nordlicht-<date>.md`.
+  ([features](features.md#3-ask-a-question)): ask "What's missing for 5.1.1?" or "Is there
+  evidence of key management?", then type "Accept 5.1.1".
+
+Step 2 shows 5.1.1's stale encryption standard as on the live app, and step 5 runs 1.6.2 under
+Alpenwerk, overlay branch and all, without a restart. Export downloads
+`readiness-report-nordlicht-<date>.md`.

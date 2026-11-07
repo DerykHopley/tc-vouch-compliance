@@ -5,9 +5,9 @@ quotes are the app's own; the domain words are in the [glossary](../GLOSSARY.md)
 
 **Before you start:** run `scripts/dev.sh` (see [setup](setup.md#run-the-app)) and open the URL it
 prints. It runs on the scripted fake model, offline and free, with no sign-in: you are "Local
-user", on the Nordlicht Komponenten GmbH profile. On the fake, **4.1.2** is the control to
-assess: the bundled demo script answers for it. Work done here lasts until you stop the
-script. On the live app any control runs on the real model.
+user", on the Nordlicht Komponenten GmbH profile. The fake has scripted runs for four
+controls, **1.1.1**, **1.6.2**, **4.1.2** and **5.1.1**; these walk-throughs use 4.1.2. Work
+done here lasts until you stop the script. On the live app any control runs on the real model.
 
 Do the walk-throughs in order: each starts where the one before stopped.
 
@@ -123,22 +123,15 @@ Do the walk-throughs in order: each starts where the one before stopped.
 ### The overlay branch
 
 A country overlay adds a requirement, and the assessment graph takes its overlay branch for it.
-Locally, only 1.6.2 under Alpenwerk has a script for it.
+Alpenwerk's overlay adds O1 to 1.6.2.
 
-1. Stop `scripts/dev.sh` (Ctrl-C) and start it with the eval script for 1.6.2:
-
-   ```sh
-   ASSESS_FAKE_SCRIPT=evals/scripts/alpenwerk/1.6.2.json scripts/dev.sh
-   ```
-
-2. Choose **Alpenwerk Präzision GmbH** in the profile switcher, open **1.6.2** and select
+1. Choose **Alpenwerk Präzision GmbH** in the profile switcher, open **1.6.2** and select
    **Assess**.
-3. Under "How Vouch reached this":
+2. Under "How Vouch reached this":
    - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrative) adds O1.";
    - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrative))."
-4. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrative)", with
-   its own verdict and reason.
+3. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrative)", with
+   its own verdict and reason: "Nicht nachgewiesen", since nothing provides for an early warning
+   to the national CSIRT.
 
-While the script runs this way, every assessment plays 1.6.2's script: restart `scripts/dev.sh`
-plainly for anything else. On the live app any control runs on the real model, and the overlay
-branch is taken wherever a country overlay adds a requirement.
+On the live app the overlay branch is taken wherever a country overlay adds a requirement.

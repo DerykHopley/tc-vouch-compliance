@@ -18,12 +18,14 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from test_auth import FakeClerk, bearer, clerk_app, token, unreachable
+from test_fake_covers import COVERED
 
 from vouch import model_choice
+from vouch import settings as vouch_settings
 from vouch.api import create_app
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
-from vouch.fake_model import ScriptedChatModel
+from vouch.fake_model import ScriptedChatModel, ScriptError
 from vouch.graph import PROMPT_VERSION
 from vouch.model_choice import (
     CALL_BUDGET,
@@ -35,7 +37,7 @@ from vouch.model_choice import (
     ModelChoice,
     OpenRouter,
 )
-from vouch.settings import DEMO_SCRIPT, DEMO_SCRIPT_DE, Settings
+from vouch.settings import DEMO_SCRIPT, DEMO_SCRIPT_DE, Settings, demo_script
 from vouch.spending import MemorySpendingStore
 
 # langchain-openai probes which TCP keep-alive options the OS takes by opening (never
@@ -655,3 +657,62 @@ def test_a_fake_script_runs_every_assessment_whatever_the_language(tmp_path):
     own = ScriptedChatModel.from_file(script).script
     assert choice.for_assessment(None, answer_language="de").script == own
     assert choice.for_assessment(None, answer_language="en").script == own
+
+
+# --- The fake covers more controls than 4.1.2 (#272) -------------------------------------------
+
+
+@pytest.mark.parametrize("language, script", [("en", DEMO_SCRIPT), ("de", DEMO_SCRIPT_DE)])
+def test_on_the_fake_4_1_2_still_plays_the_languages_demo_script(language, script):
+    choice = ModelChoice(Settings(), MemoryModelStore())
+
+    model = choice.for_assessment(None, answer_language=language, control_id="4.1.2")
+
+    assert model.script == ScriptedChatModel.from_file(script).script
+
+
+@pytest.mark.parametrize("language, script", [("en", DEMO_SCRIPT), ("de", DEMO_SCRIPT_DE)])
+def test_a_control_without_a_script_of_its_own_plays_the_languages_script(language, script):
+    assert demo_script(language, "2.1.3") == script
+
+
+@pytest.mark.parametrize("control_id", COVERED)
+def test_each_covered_control_has_its_own_script_in_english_and_in_german(control_id):
+    english, german = demo_script("en", control_id), demo_script("de", control_id)
+
+    assert len({english, german, DEMO_SCRIPT, DEMO_SCRIPT_DE}) == 4
+    assert english.is_file() and german.is_file()
+
+
+@pytest.mark.parametrize("control_id", COVERED)
+def test_a_language_without_scripts_of_its_own_plays_the_english_one(control_id):
+    assert demo_script("fr", control_id) == demo_script("en", control_id)
+
+
+@pytest.mark.parametrize("control_id", COVERED)
+def test_on_the_fake_a_covered_control_plays_its_own_script(control_id):
+    choice = ModelChoice(Settings(), MemoryModelStore())
+
+    model = choice.for_assessment(None, answer_language="de", control_id=control_id)
+
+    assert model.script == ScriptedChatModel.from_file(demo_script("de", control_id)).script
+
+
+def test_a_fake_script_set_plays_for_a_covered_control_too(tmp_path):
+    script = tmp_path / "own.json"
+    script.write_text('{"gather": [{"answer": "Nothing found."}]}')
+    choice = ModelChoice(Settings(fake_script=script), MemoryModelStore())
+
+    model = choice.for_assessment(None, answer_language="en", control_id="1.1.1")
+
+    assert model.script == ScriptedChatModel.from_file(script).script
+
+
+def test_a_covered_controls_script_that_cant_be_read_raises_naming_its_path(tmp_path, monkeypatch):
+    broken = tmp_path / "1.1.1.json"
+    broken.write_text('{"gather": ')
+    monkeypatch.setitem(vouch_settings.DEMO_SCRIPTS["en"].by_control, "1.1.1", broken)
+    choice = ModelChoice(Settings(), MemoryModelStore())
+
+    with pytest.raises(ScriptError, match=str(broken)):
+        choice.for_assessment(None, answer_language="en", control_id="1.1.1")

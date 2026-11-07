@@ -197,18 +197,18 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
         assert small_targets(page) == []
 
 
-# --- Export (#57, story 9) ----------------------------------------------------------------------
+# --- Export (#57, story 9; #308, story 4 of spec #321) ---------------------------------------
 
 EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
 
 
-def test_export_downloads_one_markdown_file_under_the_servers_name(page: Page, report_url):
+def test_export_markdown_downloads_one_markdown_file_under_the_servers_name(page: Page, report_url):
     report = open_report(page, report_url)
     title = report.get_by_role("heading", level=1).text_content()
     disclaimer = report.locator(".report-disclaimer").text_content()
 
     with page.expect_download() as download_info:
-        page.get_by_role("button", name="Export").click()
+        page.get_by_role("button", name="Export Markdown").click()
     download = download_info.value
 
     name = download.suggested_filename
@@ -216,25 +216,54 @@ def test_export_downloads_one_markdown_file_under_the_servers_name(page: Page, r
     text = Path(download.path()).read_text(encoding="utf-8")
     assert text.startswith(f"# {title}\n")
     assert text.rstrip().endswith(str(disclaimer))
-    expect(page.get_by_role("button", name="Export")).to_be_enabled()
+    expect(page.get_by_role("button", name="Export Markdown")).to_be_enabled()
 
 
-def test_an_export_answered_503_says_so_and_downloads_nothing(page: Page, report_url):
+def test_export_pdf_downloads_alpenwerks_report_as_one_pdf_file(page: Page, report_url):
+    accepted(page.request, report_url, "4.1.2", "alpenwerk")
+    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    downloads = []
+    page.on("download", lambda download: downloads.append(download))
+    report = open_report(page, report_url)
+    title = str(report.get_by_role("heading", level=1).text_content())
+    disclaimer = str(report.locator(".report-disclaimer").text_content())
+
+    with page.expect_download() as download_info:
+        page.get_by_role("button", name="Export PDF").click()
+    download = download_info.value
+
+    name = download.suggested_filename
+    assert re.fullmatch(r"readiness-report-alpenwerk-\d{4}-\d{2}-\d{2}\.pdf", name), name
+    data = Path(download.path()).read_bytes()
+    assert data.startswith(b"%PDF-")
+    text = " ".join(word.text for word in pdf_words.read(data).words)
+    assert title == "Bereitschaftsbericht"
+    assert text.startswith(title)
+    assert " ".join(disclaimer.split()) in text
+    expect(page.get_by_role("button", name="Export PDF")).to_be_enabled()
+    assert len(downloads) == 1
+
+
+def test_a_pdf_export_answered_503_says_so_and_downloads_nothing(page: Page, report_url):
     page.set_viewport_size({"width": 400, "height": 900})
     downloads = []
     page.on("download", lambda download: downloads.append(download))
     page.route(
-        "**/api/report/markdown",
+        "**/api/report/pdf",
         lambda route: route.fulfill(status=503, json={"detail": "The database is unavailable."}),
     )
     report = open_report(page, report_url)
 
-    with page.expect_response("**/api/report/markdown"):
-        page.get_by_role("button", name="Export").click()
+    with page.expect_response("**/api/report/pdf"):
+        page.get_by_role("button", name="Export PDF").click()
 
     expect(page.get_by_role("alert")).to_have_text(EXPORT_FAILED)
     expect(report.get_by_role("heading", level=1)).to_be_visible()
-    expect(page.get_by_role("button", name="Export")).to_be_enabled()
+    for name in ("Export Markdown", "Export PDF"):
+        button = page.get_by_role("button", name=name)
+        expect(button).to_be_enabled()
+        box = button.bounding_box()
+        assert box is not None and box["width"] >= 44 and box["height"] >= 44, (name, box)
     assert downloads == []
     assert small_targets(page) == []
 
@@ -298,7 +327,8 @@ def test_printed_only_the_report_shows_and_its_tables_fit_the_page(page: Page, r
         "tabs": page.get_by_role("navigation", name="Main"),
         "chat button": page.locator(".fab"),
         "pinned chat": chat,
-        "Export": page.get_by_role("button", name="Export"),
+        "Export Markdown": page.get_by_role("button", name="Export Markdown"),
+        "Export PDF": page.get_by_role("button", name="Export PDF"),
         "Show older entries": page.get_by_role("button", name="Show older entries"),
     }
     assert [name for name, part in chrome.items() if shown(part)] == []
