@@ -52,9 +52,10 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
    **Assess**.
 2. Point at the steps as they appear under "How Vouch reached this": the control loaded, the
    policies searched, the quotes checked, the remediation item drafted.
-3. Point at the verdict: Partly evidenced at best. The evidence is the encryption standard
-   (`encryption-standard`, approved 2022-03-14, reviewed yearly), which is past its review, so the
-   requirements it backs are capped at **Partly evidenced**. Its quotes carry the flag "Stale:
+3. Point at the verdict: **Not evidenced**, because its one must requirement is only partly
+   evidenced. The evidence is the encryption standard (`encryption-standard`, approved 2022-03-14,
+   reviewed yearly), which is past its review, so the requirements it backs are capped at
+   **Partly evidenced**. Its quotes carry the flag "Stale:
    approved 2022-03-14 with a yearly review, due 2023-03-14", and the requirement's reason says
    why it is capped.
 4. Point at the exact quotes, each with its document, version and section, and "Quote verified".
