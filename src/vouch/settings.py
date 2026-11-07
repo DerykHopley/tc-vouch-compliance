@@ -56,15 +56,29 @@ ENV_NAMES = frozenset(
     | {RATE_REQUESTS_ENV}
 )
 
-DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
-DEMO_SCRIPT_DE = Path(__file__).parent / "demo" / "demo-de.json"
+DEMO_DIR = Path(__file__).parent / "demo"
+DEMO_SCRIPT = DEMO_DIR / "demo.json"
+DEMO_SCRIPT_DE = DEMO_DIR / "demo-de.json"
 DEMO_SCRIPTS = {"de": DEMO_SCRIPT_DE}
 """The demo script by answer language (#234): a German profile's assessment answers in German
-on the fake; every other language plays DEMO_SCRIPT."""
+on the fake; every other language plays DEMO_SCRIPT. Written for 4.1.2."""
+COVERED_CONTROLS = ("1.1.1", "1.6.2", "5.1.1")
+"""The controls with demo scripts of their own besides 4.1.2's (#272): the Dossier's suggested
+first step, Alpenwerk's overlay (1.6.2's O1) and Nordlicht's stale encryption standard."""
+CONTROL_SCRIPTS = {
+    "en": {control: DEMO_DIR / f"{control}.json" for control in COVERED_CONTROLS},
+    "de": {control: DEMO_DIR / f"{control}-de.json" for control in COVERED_CONTROLS},
+}
+"""Each covered control's script by answer language; a language not listed plays the English."""
 
 
-def demo_script(answer_language: str) -> Path:
-    """The bundled demo script for the answer language (ISO 639-1): DEMO_SCRIPT when it has none."""
+def demo_script(answer_language: str, control_id: str | None = None) -> Path:
+    """The bundled demo script for the answer language (ISO 639-1) and the control: the
+    control's own script when it has one (in English when the language has none), else the
+    language's demo script (DEMO_SCRIPT when it has none)."""
+    own = CONTROL_SCRIPTS.get(answer_language, CONTROL_SCRIPTS["en"])
+    if control_id in own:
+        return own[control_id]
     return DEMO_SCRIPTS.get(answer_language, DEMO_SCRIPT)
 
 
