@@ -23,7 +23,9 @@ what to fix. Vouch drafts; the lead decides.
   minute before you start, so Cloud Run is awake.
 - Choose **Nordlicht Komponenten GmbH** in the profile switcher in the top bar.
 - Start Nordlicht afresh before each run: in the user menu (your initials, top right), choose
-  **Start Nordlicht Komponenten GmbH afresh…** and OK the question. Every control is "Not
+  **Start Nordlicht Komponenten GmbH afresh…** and OK the question. Do the same under Alpenwerk
+  (switch to it, **Start Alpenwerk Präzision GmbH afresh…**, then switch back), so step 5's 1.6.2
+  shows **Assess**, not **Assess again**. Every control is "Not
   assessed" again and the chat opens a new conversation, so each run starts from the same place.
   Nothing is deleted: the report's audit trail still lists every earlier rehearsal's entries. Wait
   until no assessment is running, or Vouch asks you to.
@@ -51,7 +53,7 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 1. Open **5.1.1** ("To what extent is the use of cryptographic procedures managed?") and select
    **Assess**.
 2. Point at the steps as they appear under "How Vouch reached this": the control loaded, the
-   policies searched, the quotes checked, the remediation item drafted.
+   policies searched, the quotes checked, the remediation items drafted.
 3. Point at the verdict: **Not evidenced**, because its one must requirement is only partly
    evidenced. The evidence is the encryption standard (`encryption-standard`, approved 2022-03-14,
    reviewed yearly), which is past its review, so the requirements it backs are capped at
@@ -88,7 +90,8 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 ### 5. Switch to Alpenwerk and assess 1.6.2 (1:00)
 
 1. In the profile switcher, choose **Alpenwerk Präzision GmbH · Austria · German**.
-2. Open **1.6.2** and select **Assess**.
+2. Open **1.6.2** from the control index (the switch keeps you on 5.1.1's address) and select
+   **Assess**.
 3. Point at the steps: `apply_overlays` names the country overlay "AT NIS2 (illustrative)", which
    adds O1, and `overlay_branch` gathers evidence for it. O1 is in the requirements table, marked
    "Country overlay".
@@ -106,13 +109,12 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 4. Point at "Remediation items" (the approved items), "Not applicable" (what the profile excludes,
    each with its reason), the "Audit trail" (your override, with its reason as the note) and the
    disclaimer at the foot.
-5. Select **Export**: a Markdown file downloads.
-6. Print with the browser (Ctrl P): only the report is on the page, without the top bar, the chat
-   or the buttons.
+5. Select **Export PDF**: `readiness-report-nordlicht-<date>.pdf` downloads, plain A4 with the
+   report's parts in the page's order. **Export Markdown** downloads the same report as Markdown.
 
 > This is what management and the auditor read: only reviewed verdicts, who reviewed each, what is
-> missing and who owns it, and every decision in the audit trail. It exports as Markdown or
-> prints to PDF. Alpenwerk's report reads in German.
+> missing and who owns it, and every decision in the audit trail. It downloads as a PDF to
+> attach, or as Markdown. Alpenwerk's report reads in German.
 
 ## If the live app is slow or down: the local run
 
@@ -126,5 +128,5 @@ live app, with one difference:
   evidence of key management?", then type "Accept 5.1.1".
 
 Step 2 shows 5.1.1's stale encryption standard as on the live app, and step 5 runs 1.6.2 under
-Alpenwerk, overlay branch and all, without a restart. Export downloads
-`readiness-report-nordlicht-<date>.md`.
+Alpenwerk, overlay branch and all, without a restart. Export PDF downloads
+`readiness-report-nordlicht-<date>.pdf`, and Export Markdown the `.md`.

@@ -99,11 +99,12 @@ Do the walk-throughs in order: each starts where the one before stopped.
    with your reason as its note.
 8. At the foot, the disclaimer: "Drafted by an AI assistant, reviewed by Local user; not an
    audit result."
-9. Select **Export**: a Markdown file named `readiness-report-nordlicht-<date>.md` downloads, with
-   the report's parts in the page's order and the whole audit trail.
-10. Print with the browser's own print (Ctrl P, Cmd P on a Mac): only the report prints, without
-    the top bar, the tabs, the chat or the page's buttons; tables print whole, and a row doesn't
-    break across pages. Save as PDF from the print dialog for a file to attach.
+9. Select **Export PDF**: a PDF named `readiness-report-nordlicht-<date>.pdf` downloads, plain
+   black on white A4, with the report's parts in the page's order, the whole audit trail on a
+   landscape page, and each table's header repeated on every page. **Export Markdown** downloads
+   the same report as `readiness-report-nordlicht-<date>.md`.
+10. Print with the browser's own print (Ctrl P, Cmd P on a Mac) for a paper copy: only the report
+    prints, without the top bar, the tabs, the chat or the page's buttons.
 
 ## Examples
 
