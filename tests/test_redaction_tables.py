@@ -143,3 +143,30 @@ def test_no_secret_survives_any_container_and_the_shape_is_kept(path):
     assert clean == expected
     assert SECRET not in repr(clean)
     assert labels == ["a key"]
+
+
+# #298: a set or frozenset holds only hashable things, strings among them, so it gets its own rows;
+# it comes back a list (as JSON has it), in no set order.
+@pytest.mark.parametrize("kind", [set, frozenset])
+def test_no_secret_survives_a_set_and_it_comes_back_a_list(kind):
+    clean, labels = redact_data(kind({f"key {SECRET}", "plain"}))
+
+    assert isinstance(clean, list)
+    assert sorted(clean) == sorted([f"key {REMOVED}", "plain"])
+    assert labels == ["a key"]
+
+
+@pytest.mark.parametrize("kind", [set, frozenset])
+def test_a_set_inside_a_dict_or_list_is_reached_too(kind):
+    clean, labels = redact_data({"items": [kind({f"key {SECRET}"})]})
+
+    assert clean == {"items": [[f"key {REMOVED}"]]}
+    assert labels == ["a key"]
+
+
+def test_no_secret_survives_in_a_dict_key():
+    clean, labels = redact_data({f"key {SECRET}": "value", "plain": {f"key {SECRET}": 1}})
+
+    assert clean == {f"key {REMOVED}": "value", "plain": {f"key {REMOVED}": 1}}
+    assert SECRET not in repr(clean)
+    assert labels == ["a key"]

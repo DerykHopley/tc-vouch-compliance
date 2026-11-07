@@ -139,19 +139,22 @@ def redact(text: str) -> tuple[str, list[str]]:
 
 
 def redact_data(value: Any) -> tuple[Any, list[str]]:
-    """`redact` through every string in a JSON-like value (dicts, lists, tuples, strings). A
-    tuple comes back a list, as JSON has it: `dataclasses.asdict` keeps tuples (the citations
-    on an Assessment's requirements)."""
+    """`redact` through every string in a JSON-like value (dicts, their keys too, lists, tuples,
+    sets, strings). A tuple, set or frozenset comes back a list, as JSON has it:
+    `dataclasses.asdict` keeps tuples (the citations on an Assessment's requirements); a set's
+    order is its own (#298)."""
     if isinstance(value, str):
         return redact(value)
     found: list[str] = []
     if isinstance(value, dict):
         clean: dict[Any, Any] = {}
         for key, item in value.items():
-            clean[key], labels = redact_data(item)
+            clean_key, key_labels = redact(key) if isinstance(key, str) else (key, [])
+            clean[clean_key], labels = redact_data(item)
+            _merge(found, key_labels)
             _merge(found, labels)
         return clean, found
-    if isinstance(value, list | tuple):
+    if isinstance(value, list | tuple | set | frozenset):
         items = []
         for item in value:
             clean_item, labels = redact_data(item)
