@@ -163,6 +163,8 @@ button.prof-button:hover { border-color: var(--navy); }
 .prose-p { margin: 0 0 8px; }
 .prose-list { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .prose-p:last-child, .prose-list:last-child { margin-bottom: 0; }
+/* A numbered item's sub-bullets (#223): nested in the item, 20px further in, 4px below its text as between items. */
+.prose-list .prose-list { margin-top: 4px; }
 /* A heading the model wrote (#232): Manrope, not the display face, which stays for page and section headings. */
 .prose-h { font: 700 14px/1.5 var(--f-body); color: var(--ink); text-transform: none; letter-spacing: normal; margin: 0 0 8px; }
 .prose-h:last-child { margin-bottom: 0; }

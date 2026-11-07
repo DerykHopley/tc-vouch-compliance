@@ -143,6 +143,67 @@ describe('proseBlocks', () => {
     ])
   })
 
+  it('keeps a numbered list open across blank lines while the next number follows (ticket 223)', () => {
+    expect(proseBlocks('Schritte:\n1. a\n\n2. b\n\n3. c')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Schritte:' }]] },
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }], [{ text: 'c' }]] },
+    ])
+  })
+
+  it('reads an indented bullet under a numbered item as its sub-bullet, and the next number goes on (ticket 223)',
+    () => {
+      expect(proseBlocks('Schritte:\n1. Erfassen\n   - Datum\n2. Bewerten')).toEqual([
+        { kind: 'p', lines: [[{ text: 'Schritte:' }]] },
+        { kind: 'ol', items: [[{ text: 'Erfassen' }], [{ text: 'Bewerten' }]], subs: [[[{ text: 'Datum' }]], []] },
+      ])
+      expect(proseBlocks('Schritte:\n1. a\n\t- x')).toEqual([
+        { kind: 'p', lines: [[{ text: 'Schritte:' }]] },
+        { kind: 'ol', items: [[{ text: 'a' }]], subs: [[[{ text: 'x' }]]] },
+      ])
+    })
+
+  it('joins sub-bullets in a row and keeps the list across a blank line after them (ticket 223)', () => {
+    expect(proseBlocks('Schritte:\n1. a\n   - x\n   - y\n\n2. b')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Schritte:' }]] },
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]], subs: [[[{ text: 'x' }], [{ text: 'y' }]], []] },
+    ])
+    expect(proseBlocks('Schritte:\n1. a\n\n   - x\n   - \n2. b')).toEqual([
+      { kind: 'p', lines: [[{ text: 'Schritte:' }]] },
+      { kind: 'ol', items: [[{ text: 'a' }], [{ text: 'b' }]], subs: [[[{ text: 'x' }]], []] },
+    ])
+  })
+
+  it('ends the list after a blank line at a wrong number, text, a heading or an unindented bullet (ticket 223)', () => {
+    const steps = { kind: 'p', lines: [[{ text: 'Schritte:' }]] }
+    const a = { kind: 'ol', items: [[{ text: 'a' }]] }
+    expect(proseBlocks('Schritte:\n1. a\n\n3. c')).toEqual([steps, a, { kind: 'p', lines: [[{ text: '3. c' }]] }])
+    expect(proseBlocks('Schritte:\n1. a\n\nDanach.\n2. b')).toEqual([
+      steps, a, { kind: 'p', lines: [[{ text: 'Danach.' }], [{ text: '2. b' }]] },
+    ])
+    expect(proseBlocks('Schritte:\n1. a\n\n## Weiter\n2. b')).toEqual([
+      steps, a, { kind: 'h', runs: [{ text: 'Weiter' }] }, { kind: 'p', lines: [[{ text: '2. b' }]] },
+    ])
+    expect(proseBlocks('Schritte:\n1. a\n\n- x\n2. b')).toEqual([
+      steps, a, { kind: 'ul', items: [[{ text: 'x' }]] }, { kind: 'p', lines: [[{ text: '2. b' }]] },
+    ])
+    expect(proseBlocks('Schritte:\n1. a\n   - x\n- y')).toEqual([
+      steps, { ...a, subs: [[[{ text: 'x' }]]] }, { kind: 'ul', items: [[{ text: 'y' }]] },
+    ])
+  })
+
+  it('leaves blank-line numbers with no lead-in, and an indented bullet with no open list, as before (ticket 223)',
+    () => {
+      expect(proseBlocks('1. a\n\n2. b')).toEqual([
+        { kind: 'p', lines: [[{ text: '1. a' }]] }, { kind: 'p', lines: [[{ text: '2. b' }]] },
+      ])
+      expect(proseBlocks('Found:\n  - one')).toEqual([
+        { kind: 'p', lines: [[{ text: 'Found:' }]] }, { kind: 'ul', items: [[{ text: 'one' }]] },
+      ])
+      expect(proseBlocks('## Gaps\n  - one\n  - two')).toEqual([
+        { kind: 'h', runs: [{ text: 'Gaps' }] }, { kind: 'ul', items: [[{ text: 'one' }], [{ text: 'two' }]] },
+      ])
+    })
+
   it('leaves a dash or a number in running text alone', () => {
     expect(proseBlocks('Keys rotate yearly - not monthly - per 2. rule')).toEqual([
       { kind: 'p', lines: [[{ text: 'Keys rotate yearly - not monthly - per 2. rule' }]] },
@@ -167,6 +228,15 @@ describe('Prose', () => {
     const { container } = render(<Prose text={'## Gaps\n- no record\n\n**Next steps:**\n1. a'} />)
     expect([...container.querySelectorAll('h3.prose-h')].map((h) => h.textContent)).toEqual(['Gaps', 'Next steps:'])
     expect(container.querySelectorAll('ul > li, ol > li')).toHaveLength(2)
+  })
+
+  it('shows a numbered item\'s sub-bullets as a list nested in its item (ticket 223)', () => {
+    const { container } = render(<Prose text={'Schritte:\n1. Erfassen\n   - Datum\n2. Bewerten'} />)
+    expect(container.querySelectorAll('ol')).toHaveLength(1)
+    expect(container.querySelectorAll('ol > li')).toHaveLength(2)
+    expect([...container.querySelectorAll('ol > li > ul.prose-list > li')].map((li) => li.textContent))
+      .toEqual(['Datum'])
+    expect(container.querySelector('ol > li:first-child ul.prose-list')).not.toBeNull()
   })
 
   it('shows HTML in a heading line as text (ticket 232)', () => {
