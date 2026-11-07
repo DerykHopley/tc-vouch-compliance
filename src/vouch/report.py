@@ -509,7 +509,7 @@ def _md_readiness(r: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     return "\n".join([sentence, "", *counts])
 
 
-def _md_day(iso: str) -> str:
+def day_of(iso: str) -> str:
     """An ISO time's day in UTC, as the page shows it; one that doesn't parse as written."""
     try:
         return datetime.fromisoformat(iso).astimezone(UTC).date().isoformat()
@@ -517,7 +517,7 @@ def _md_day(iso: str) -> str:
         return iso
 
 
-def _md_minute(iso: str) -> str:
+def minute_of(iso: str) -> str:
     """An ISO time to the minute in UTC (`2026-11-06 14:05 UTC`), as the page shows it."""
     try:
         return datetime.fromisoformat(iso).astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
@@ -534,7 +534,7 @@ def _md_controls(controls: list[Mapping[str, Any]], words: Mapping[str, Any]) ->
     for c in controls:
         status = words["statuses"][c["status"]]
         if c["status"] == "accepted" and c["verdict"]:
-            reviewed = _md_day(c["reviewed_at"]) if c["reviewed_at"] else ""
+            reviewed = day_of(c["reviewed_at"]) if c["reviewed_at"] else ""
             verdict = words["verdicts"][c["verdict"]]
             rows.append([c["id"], c["question"], status, verdict, c["reviewer"] or "", reviewed])
         else:
@@ -597,7 +597,7 @@ def _md_trail(entries: list[Mapping[str, Any]], words: Mapping[str, Any]) -> str
     ]
     rows = [
         [
-            _md_minute(e["at"]),
+            minute_of(e["at"]),
             e["reviewer_name"],
             e["control_id"],
             e["requirement_id"] or "",

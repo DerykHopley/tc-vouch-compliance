@@ -15,6 +15,7 @@ the rest evidenced, and drafts one item, for M1.
 import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from io import BytesIO
 from typing import Any
 
 import pytest
@@ -22,6 +23,7 @@ import test_memory
 from fastapi.testclient import TestClient
 from profiles_dir import SECOND, make_profiles
 from pydantic import SecretStr
+from pypdf import PdfReader
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
 from test_dossier import seeded
@@ -930,3 +932,76 @@ def test_the_export_counts_one_remediation_item_in_the_singular(lang, one, many)
     assert report.remediation_count(1, words) == one
     assert report.remediation_count(2, words) == many
     assert f"- {one}\n" in report._md_readiness(readiness, words) + "\n"
+
+
+# --- The PDF export (#308): the same report, built with fpdf2 (vouch.report_pdf) --------------
+
+
+def pdf_pages(data: bytes) -> list[str]:
+    """Each page's text, read back with pypdf, its whitespace collapsed to single spaces."""
+    return [" ".join(page.extract_text().split()) for page in PdfReader(BytesIO(data)).pages]
+
+
+def pdf_text(data: bytes) -> str:
+    return " ".join(pdf_pages(data))
+
+
+def test_the_pdf_export_is_a_pdf_attachment_named_for_the_profile_and_the_day(users, monkeypatch):
+    monkeypatch.setattr(report, "today", lambda: date(2026, 11, 6))
+    with TestClient(app_on(None)) as client:
+        response = client.get("/api/report/pdf", headers=under(users[0], "alpenwerk"))
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="readiness-report-alpenwerk-2026-11-06.pdf"; '
+        "filename*=UTF-8''readiness-report-alpenwerk-2026-11-06.pdf"
+    )
+    assert response.content.startswith(b"%PDF-")
+    assert pdf_text(response.content).startswith("Bereitschaftsbericht")
+
+
+def test_a_note_with_an_emoji_still_gives_the_pdf(users):
+    alpenwerk = under(users[0], "alpenwerk")
+    with TestClient(app_on(None)) as client:
+        reviewed(client, alpenwerk, "4.1.2", note="Passt 🙂 – „gut“.")
+        response = client.get("/api/report/pdf", headers=alpenwerk)
+
+    assert response.status_code == 200, response.text
+    assert "Passt – „gut“." in pdf_text(response.content)
+
+
+def test_an_unknown_profile_is_a_404_on_the_pdf_export(users):
+    with TestClient(app_on(None)) as client:
+        response = client.get("/api/report/pdf", headers=under(users[0], "nowhere"))
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == api.UNKNOWN_PROFILE
+
+
+def test_a_broken_german_edition_is_a_plain_500_with_export_failed_on_the_pdf(
+    users, monkeypatch, tmp_path
+):
+    alpenwerk = under(users[0], "alpenwerk")
+    broken = tmp_path / "controls-de.yaml"
+    broken.write_text("controls: [\n", encoding="utf-8")
+    with TestClient(app_on(None), raise_server_exceptions=False) as client:
+        export_of(client, alpenwerk)  # the profile is read while its edition is whole
+        monkeypatch.setattr(isa, "CONTROLS_DE_FILE", broken)
+        # The standing is read before the trail, so the edition's 500 is the one answered.
+        monkeypatch.setattr(audit, "read_all", unreadable_trail)
+        response = client.get("/api/report/pdf", headers=alpenwerk)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == api.EXPORT_FAILED
+    assert str(tmp_path) not in response.text
+
+
+def test_with_the_database_down_the_pdf_export_answers_503(users):
+    app = app_on(SecretStr(UNREACHABLE_URL))
+    app.state.database = Database(SecretStr(UNREACHABLE_URL), timeout=0.3)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/report/pdf", headers=users[0])
+
+    assert response.status_code == 503
+    assert response.json()["unavailable"] == "database"

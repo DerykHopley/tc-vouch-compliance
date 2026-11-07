@@ -25,7 +25,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, remediation, report
+from vouch import audit, remediation, report, report_pdf
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -872,6 +872,31 @@ def readiness_report_markdown(
     return Response(
         report.markdown(built, report.words_for(profile.answer_language)),
         media_type="text/markdown",
+        headers={"Content-Disposition": attachment(name)},
+    )
+
+
+@router.get("/report/pdf")
+def readiness_report_pdf(
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    trail: AuditTrail,
+) -> Response:
+    """The readiness report as one PDF file (vouch.report_pdf, #308), built on the server: the
+    same redacted report, words and whole audit trail as GET /api/report/markdown, its failures
+    the same (an unreadable ISA edition a plain 500 with EXPORT_FAILED). An attachment named for
+    the profile and the day (`attachment`)."""
+
+    def whole_trail() -> audit.Page:
+        return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
+
+    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
+    name = f"readiness-report-{profile.id}-{built['head']['date']}.pdf"
+    return Response(
+        report_pdf.pdf(built, report.words_for(profile.answer_language)),
+        media_type="application/pdf",
         headers={"Content-Disposition": attachment(name)},
     )
 

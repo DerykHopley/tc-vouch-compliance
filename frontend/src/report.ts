@@ -123,9 +123,14 @@ export async function olderEntries(before: number): Promise<({ ok: true } & Trai
  * cancel the download in Safari and some Firefox versions. */
 const KEEP_URL_MS = 60_000
 
+/** The report's two downloads (#57, #308): the file each endpoint (`GET /api/report/<format>`) sends. */
+export type ReportFormat = 'markdown' | 'pdf'
+
+const EXTENSION: Record<ReportFormat, string> = { markdown: 'md', pdf: 'pdf' }
+
 /** The name a `Content-Disposition` gives (vouch.api.attachment): `filename*`'s UTF-8 name when it decodes, else the
- * ASCII `filename`, else a plain one. */
-function fileName(disposition: string | null): string {
+ * ASCII `filename`, else a plain one for the format. */
+function fileName(disposition: string | null, format: ReportFormat): string {
   const utf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(disposition ?? '')?.[1]
   if (utf8) {
     try {
@@ -134,19 +139,20 @@ function fileName(disposition: string | null): string {
       // malformed: the ASCII name stands in
     }
   }
-  return /filename="([^"]+)"/.exec(disposition ?? '')?.[1] ?? 'readiness-report.md'
+  return /filename="([^"]+)"/.exec(disposition ?? '')?.[1] ?? `readiness-report.${EXTENSION[format]}`
 }
 
-/** The report as one Markdown file (`GET /api/report/markdown`, #57), saved under the server's name. The whole body
- * is read before anything is saved, so a failure saves nothing and no file is ever half-downloaded. */
-export async function exportReport(): Promise<{ ok: true } | Failed> {
+/** The report as one file in the format, Markdown (`GET /api/report/markdown`, #57) or PDF (`GET /api/report/pdf`,
+ * #308), saved under the server's name. The whole body is read before anything is saved, so a failure saves nothing
+ * and no file is ever half-downloaded. */
+export async function exportReport(format: ReportFormat): Promise<{ ok: true } | Failed> {
   let file: Blob
   let name: string
   try {
-    const response = await fetch('/api/report/markdown', { headers: await authHeaders() })
+    const response = await fetch(`/api/report/${format}`, { headers: await authHeaders() })
     if (!response.ok) return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : EXPORT_FAILED }
     file = await response.blob()
-    name = fileName(response.headers.get('Content-Disposition'))
+    name = fileName(response.headers.get('Content-Disposition'), format)
   } catch {
     return { ok: false, message: EXPORT_FAILED }
   }
