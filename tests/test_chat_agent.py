@@ -4,6 +4,7 @@ bundled assessment script: no key, no paid call. Each case runs in memory and on
 fixtures), for a lead new to the test."""
 
 import json
+import re
 import threading
 import time
 from collections.abc import Iterator
@@ -24,6 +25,7 @@ from test_memory import app_on, as_user, restart
 
 from vouch import api, chat_agent
 from vouch.api import PROFILE_HEADER, create_app, current_user
+from vouch.chat import CHAT_PROMPT_VERSION, PageContext
 from vouch.chat_agent import (
     ASSESSED_CONTROLS,
     GREETING_REQUEST,
@@ -35,7 +37,9 @@ from vouch.chat_agent import (
     chat_config,
     chat_context,
     chat_graph,
+    chat_prompt,
     chat_turn,
+    verdict_words_for,
 )
 from vouch.chat_fake import CannedChatModel
 from vouch.citations import Citation
@@ -135,9 +139,16 @@ def assess_and_review(client, control_id, decision=None):
 
 @pytest.fixture
 def fake(monkeypatch) -> CannedChatModel:
-    """The chat's fake, kept, so a test can read the prompts it was sent."""
+    """The chat's fake, kept, so a test can read the prompts it was sent. Like the real one
+    (ModelChoice.for_chat), it answers in the profile's language (#233), so its canned reply
+    passes the chat's language check (#208)."""
     model = CannedChatModel()
-    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: model)
+
+    def for_chat(self, chosen, callbacks=None, answer_language="en"):
+        model.language = answer_language
+        return model
+
+    monkeypatch.setattr(ModelChoice, "for_chat", for_chat)
     return model
 
 
@@ -760,3 +771,72 @@ def test_the_chat_still_answers_when_its_conversation_cannot_be_kept(client, mon
 
     assert names(events)[-1] == "done"
     assert reply(events)
+
+
+# German verdict words in the chat's tools (#208): design.md's words, from the report's table
+
+GERMAN_VERDICTS = [
+    "Nachgewiesen",
+    "Teilweise nachgewiesen",
+    "Nicht nachgewiesen",
+    "Nicht anwendbar",
+]
+ENGLISH_VERDICT = re.compile(r"\b(?:partly |not )?evidenced\b|\bnot applicable\b", re.IGNORECASE)
+
+
+def test_verdict_words_follow_the_profile_language_where_the_report_has_words():
+    assert verdict_words_for("partly-evidenced", "de") == "Teilweise nachgewiesen"
+    assert verdict_words_for("not-applicable", "de") == "Nicht anwendbar"
+    assert verdict_words_for("partly-evidenced", "en") == "partly evidenced"
+    assert verdict_words_for("partly-evidenced", "fr") == "partly evidenced"  # no table
+
+
+def test_alpenwerks_chat_prompt_names_the_german_verdict_words_and_nordlichts_doesnt():
+    page = PageContext("dossier")
+    german = str(chat_prompt(load_named_profile("alpenwerk"), page).content)
+    english = str(chat_prompt(load_named_profile(DEFAULT_PROFILE), page).content)
+
+    assert all(word in german for word in GERMAN_VERDICTS)
+    assert not any(word in english for word in GERMAN_VERDICTS)
+    assert CHAT_PROMPT_VERSION == "chat-6"
+
+
+def tool_words(fake: CannedChatModel, name: str) -> str:
+    """What the named tool last said to the model this test (its ToolMessage)."""
+    said = [m for prompt in fake.prompts for m in prompt if m.type == "tool" and m.name == name]
+    assert said, f"{name} was never called"
+    return str(said[-1].content)
+
+
+def test_explain_control_on_alpenwerk_writes_the_german_verdict_words(app, lead, fake):
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as client:
+        assess_and_review(client, "1.6.2")
+        say(client, "Explain 1.6.2")
+
+    words = tool_words(fake, "explain_control")
+    summary = words.splitlines()[0]
+    assert any(f"its newest assessment is {word}," in summary for word in GERMAN_VERDICTS)
+    assert not ENGLISH_VERDICT.search(summary)
+    findings = json.loads(re.search(r"<findings>\n(.*?)\n</findings>", words, re.DOTALL)[1])
+    assert findings and all(f["verdict"] in GERMAN_VERDICTS for f in findings)
+
+
+def test_assessed_controls_and_start_assessment_on_alpenwerk_write_the_german_words(
+    app, lead, fake
+):
+    with TestClient(app, raise_server_exceptions=False, headers=lead | ALPENWERK) as client:
+        say(client, "Assess 1.6.2")
+        say(client, "Which controls have documented evidence only?")
+
+    finished = tool_words(fake, START_ASSESSMENT)
+    assert any(f"has finished: {word}." in finished for word in GERMAN_VERDICTS)
+    assert not ENGLISH_VERDICT.search(finished.split(". The verdict")[0])
+    [line] = [
+        x for x in tool_words(fake, ASSESSED_CONTROLS).splitlines() if x.startswith("- 1.6.2")
+    ]
+    head, requirements = line.split("; its counted requirements rest ")
+    assert any(
+        head == f"- 1.6.2: {word}, proposed and waiting for your review" for word in GERMAN_VERDICTS
+    )
+    assert not ENGLISH_VERDICT.search(requirements.split(" evidence. ", 1)[1])
+    assert any(word in requirements for word in GERMAN_VERDICTS)

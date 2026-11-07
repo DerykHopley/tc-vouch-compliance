@@ -7,7 +7,7 @@ from test_api import read_events
 from test_memory import app_on
 
 from vouch.api import PROFILE_HEADER
-from vouch.chat_agent import CITE_THEM, SEARCH_EVIDENCE
+from vouch.chat_agent import ANSWER_REFUSED, CITE_THEM, SEARCH_EVIDENCE
 from vouch.chat_fake import CHAT_REPLY, CannedChatModel
 from vouch.guards import as_data
 from vouch.language import mismatch, written_in
@@ -64,3 +64,42 @@ def test_through_the_api_on_alpenwerk_the_chat_answers_in_german(users):
 
     answer = "".join(d["text"] for n, d in events if n == "token")
     assert mismatch(answer, "de") is None and answer
+
+
+def refusal(text: str = "Your last answer was refused.") -> HumanMessage:
+    return HumanMessage(text, name=ANSWER_REFUSED)
+
+
+def test_asked_again_after_a_tool_call_the_fake_passes_the_tool_result_on_again():
+    # #208: the turn keeps its content, not the canned "Thank you for your question".
+    call = {"name": SEARCH_EVIDENCE, "args": {"query": "encryption"}, "id": "c1"}
+    tool_words = f"Found 1 passage for “encryption”. {CITE_THEM}\n{as_data(PASSAGES)}"
+    messages = [
+        HumanMessage("Is there evidence of encryption?"),
+        AIMessage("", tool_calls=[call]),
+        ToolMessage(tool_words, tool_call_id="c1", name=SEARCH_EVIDENCE),
+        refusal(),
+    ]
+
+    answer = CannedChatModel(language="de").invoke(messages).text
+
+    assert answer.startswith("Found 1 passage for “encryption”.")
+    assert '<cite doc="encryption-standard">' in answer
+
+
+def test_asked_again_with_no_tool_result_the_fake_gives_its_reply_in_the_profile_language():
+    messages = [HumanMessage("Hallo"), AIMessage("Hello there."), refusal()]
+
+    answer = CannedChatModel(language="de").invoke(messages).text
+
+    assert written_in(answer) == "de"
+
+
+def test_through_the_api_on_alpenwerk_the_greeting_keeps_the_progress_words(users):
+    lead = users[0]
+    with TestClient(app_on(None), headers={**lead, PROFILE_HEADER: "alpenwerk"}) as client:
+        events = read_events(client.post("/api/chat", json={"page": "dossier"}))
+
+    answer = "".join(d["text"] for n, d in events if n == "token")
+    assert "You have not assessed any of the 12 controls yet." in answer
+    assert [n for n, _ in events][-1] == "done"

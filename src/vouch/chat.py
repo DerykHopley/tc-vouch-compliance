@@ -9,7 +9,7 @@ from typing import Literal
 
 from vouch.isa import IsaControl
 
-CHAT_PROMPT_VERSION = "chat-5"
+CHAT_PROMPT_VERSION = "chat-6"
 """The chat agent's prompt version, beside the assessments' (vouch.graph.PROMPT_VERSION): on the
 developer page, and in the log line with each chat message's usage."""
 CHAT_FAILED = "Vouch could not answer just now. Please try again shortly."

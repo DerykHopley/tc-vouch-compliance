@@ -104,6 +104,20 @@ def _page(messages: list[BaseMessage]) -> str | None:
     return found.group(1) if found else None
 
 
+def _turns_tool_result(messages: list[BaseMessage]) -> ToolMessage | None:
+    """The last tool result since the lead's last message (not the output check's), if any."""
+    lead = max(
+        (
+            i
+            for i, m in enumerate(messages)
+            if isinstance(m, HumanMessage) and m.name != ANSWER_REFUSED
+        ),
+        default=-1,
+    )
+    results = [m for m in messages[lead + 1 :] if isinstance(m, ToolMessage)]
+    return results[-1] if results else None
+
+
 class CannedChatModel(BaseChatModel):
     """Answers every message with `reply`, streamed a word at a time (or as `chunks`, when
     given), with token counts estimated as the scripted fake's are, so the usage meter sees
@@ -112,7 +126,8 @@ class CannedChatModel(BaseChatModel):
     message asks for (or `call`, whatever is asked), writing `before_tool` with the call, and
     answers a tool's result with the result's words (or `after_tool`). With `blocks`, it writes
     its answer in content blocks, as some providers do. Asked again by the output check, it gives
-    `retry_reply` (or `reply` again)."""
+    `retry_reply`, or else answers as it did before: the turn's last tool result passed on, else
+    its reply in the profile's language (#208)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -147,13 +162,21 @@ class CannedChatModel(BaseChatModel):
             raise self.fail_with
         last = messages[-1] if messages else None
         if isinstance(last, HumanMessage) and last.name == ANSWER_REFUSED:
-            return _words(self.retry_reply if self.retry_reply is not None else self.reply), []
+            if self.retry_reply is not None:
+                return _words(self.retry_reply), []
+            # As it answered before (#208): the turn's last tool result passed on, else its reply.
+            result = _turns_tool_result(messages)
+            return _words(self._after(result) if result else self._reply()), []
         if isinstance(last, ToolMessage):
-            return _words(self.after_tool or _cited(str(last.content))), []
+            return _words(self._after(last)), []
         call = self._tool_call(last, messages) if isinstance(last, HumanMessage) else None
         if call is not None:
             return _words(self.before_tool), [call]
         return (self.chunks if self.chunks is not None else _words(self._reply())), []
+
+    def _after(self, result: ToolMessage) -> str:
+        """Its answer to a tool's result: `after_tool`, else the result's words, cited."""
+        return self.after_tool or _cited(str(result.content))
 
     def _reply(self) -> str:
         """`reply`, and the canned one in the profile's language where the fake has it (#233)."""
