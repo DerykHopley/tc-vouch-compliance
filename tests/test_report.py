@@ -481,9 +481,19 @@ def test_the_head_names_the_company_framework_level_overlays_language_and_todays
         "words_language": "en",
         "date": "2026-11-06",
     }
-    assert german["overlays"] == ["AT NIS2 (illustrative)"]
+    assert german["overlays"] == ["AT NIS2 (illustrativ)"]  # written in German (#379)
+    assert german["country"] == "Österreich"  # the stored "Austria", in the report's words
     assert german["words_language"] == "de"
     assert german["protection_level"] == "high"
+
+
+def test_a_country_the_words_dont_name_shows_as_stored_never_blank():
+    # #379: the stored name is English by design (the top bar finds its ISO code from it).
+    assert report.country_in("Austria", "de") == "Österreich"
+    assert report.country_in("Germany", "de") == "Deutschland"
+    assert report.country_in("Atlantis", "de") == "Atlantis"
+    assert report.country_in("Austria", "en") == "Austria"
+    assert report.country_in("Austria", "fr") == "Austria"  # a language with no words: English
 
 
 # --- Failures ----------------------------------------------------------------------------------

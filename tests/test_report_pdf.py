@@ -92,6 +92,7 @@ def test_alpenwerks_pdf_is_german_with_its_umlauts_and_quote_marks_as_written():
     for label in ("Länderergänzungen", "Geprüft von", "Maßnahmen", "Prüfpfad"):
         assert label in read, label
     assert ROLES_QUOTE in read
+    assert "Land: Österreich" in read and "AT NIS2 (illustrativ)" in read  # #379
     assert "Readiness" not in read and "Reviewed by" not in read  # no English word
 
 

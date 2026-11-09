@@ -16,7 +16,7 @@ from vouch.paths import FIXTURES_DIR
 from vouch.profile import load_named_profile
 
 PROFILE = "alpenwerk"
-OVERLAY = "AT NIS2 (illustrative)"
+OVERLAY = "AT NIS2 (illustrativ)"
 TWELVE = ["1.1.1", "1.6.1", "1.6.2", "2.1.3", "4.1.2", "4.1.3",
           "4.2.1", "5.1.1", "5.1.2", "5.2.4", "5.2.5", "5.2.9"]  # fmt: skip
 FOLDERS = {"policies": "documented", "records": "implemented", "patch": "implemented"}
