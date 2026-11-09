@@ -27,11 +27,13 @@ export type DeveloperSettings = {
 /** A company made in company setup, as the developer page lists it: its id, its name and when it was made. */
 export type MadeCompany = { id: string; company: string; created_at: string }
 
-/** How removing a company went (#418): removed (the new settings); refused (the API's detail: not a company made in
- * setup, or none of that id); the database unavailable; the session ended (signed out already); or failed. */
+/** How removing a company went (#418): removed (the new settings, or null when the API removed it but couldn't read
+ * them after); refused (the API's detail: not a company made in setup); gone (none of that id: removed already,
+ * elsewhere); the database unavailable; the session ended (signed out already); or failed. */
 export type CompanyRemoval =
-  | { status: 'removed'; settings: DeveloperSettings }
+  | { status: 'removed'; settings: DeveloperSettings | null }
   | { status: 'refused'; problem: string }
+  | { status: 'gone' }
   | { status: 'unavailable' }
   | { status: 'signed-out' }
   | { status: 'failed' }
@@ -116,11 +118,13 @@ export async function removeCompany(id: string): Promise<CompanyRemoval> {
     return { status: 'failed' }
   }
   if (response.ok) {
-    const settings = (await response.json().catch(() => null)) as DeveloperSettings | null
-    return settings ? { status: 'removed', settings } : { status: 'failed' }
+    const body = (await response.json().catch(() => null)) as DeveloperSettings | { settings_unavailable: true } | null
+    if (!body) return { status: 'failed' }
+    return { status: 'removed', settings: 'settings_unavailable' in body ? null : body }
   }
   if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
-  if (response.status === 409 || response.status === 404) return { status: 'refused', problem: await refusedBecause(response) }
+  if (response.status === 404) return { status: 'gone' }
+  if (response.status === 409) return { status: 'refused', problem: await refusedBecause(response) }
   if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
   return { status: 'failed' }
 }

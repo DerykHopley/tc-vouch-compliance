@@ -5,22 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import type { DeveloperSettings } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
+import { DEVELOPER_SETTINGS, NO_RUNS } from './developerFixtures.ts'
 import { setOnSignedOut } from './session.ts'
 
-const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
-
-const SETTINGS: DeveloperSettings = {
-  model: 'anthropic/claude-haiku-5.5',
-  runs_on: 'openrouter',
-  fake_reason: null,
-  prompt_version: '1',
-  usage_url: 'https://openrouter.ai/activity',
-  kept_in: 'database',
-  daily_limit: 30,
-  usage: { openrouter: NO_RUNS, fake: NO_RUNS },
-  broken_profiles: [],
-  companies: [],
-}
+const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
 
 /** The developer page with SETTINGS and no-op handlers, but for those given. */
 function renderPage(props: Partial<ComponentProps<typeof DeveloperPage>> = {}) {
@@ -248,8 +236,6 @@ describe('the companies made in setup, issue 418', () => {
   it.each([
     [409, { detail: 'Only a company made in company setup can be removed.' },
       'Vouch could not remove this company: Only a company made in company setup can be removed.'],
-    [404, { detail: 'There is no such compliance profile.' },
-      'Vouch could not remove this company: There is no such compliance profile.'],
     [503, { detail: 'The database is unavailable just now.', unavailable: 'database' },
       'The database is unavailable just now. Nothing was removed; try again in a moment.'],
     [500, { detail: 'Internal Server Error' }, 'The company could not be removed. Nothing changed.'],
@@ -262,6 +248,54 @@ describe('the companies made in setup, issue 418', () => {
     expect((await within(sheet()).findByRole('alert')).textContent).toBe(message)
     expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
     expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('on a 404, removed already elsewhere: reads the settings again, says so, and has the list read again', async () => {
+    const fetch = vi.fn((url: string, init?: RequestInit) => init?.method === 'DELETE'
+      ? Promise.resolve(Response.json({ detail: 'There is no such compliance profile.' }, { status: 404 }))
+      : url === '/api/developer/settings' ? Promise.resolve(Response.json(SETTINGS))
+      : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onRemoved })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(SETTINGS))
+    expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh')
+    expect(within(sheet()).getByRole('status').textContent).toBe('Musterfirma Süd GmbH was already removed.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("on a 404 whose settings can't be read again, drops the company from the list held", async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE'
+      ? Response.json({ detail: 'There is no such compliance profile.' }, { status: 404 })
+      : new Response(null, { status: 500 }))))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [] }))
+  })
+
+  it("on a 200 whose settings couldn't be read after, says removed and drops it from the list held", async () => {
+    deleting(200, { settings_unavailable: true })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onRemoved })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh'))
+    expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [] })
+    expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('opened afresh after removing the company shown, says what was removed, once', () => {
+    const onRemovedShown = vi.fn()
+    renderPage({ removedCompany: 'Musterfirma Süd GmbH', onRemovedShown })
+    expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
+    expect(onRemovedShown).toHaveBeenCalledOnce()
   })
 
   it('on a 401, signs out with no alert', async () => {

@@ -17,10 +17,10 @@ COMPANY_ID = "musterfirma-sud-gmbh"
 FELL_BACK = "Your last profile is no longer available: showing Nordlicht Komponenten GmbH."
 
 
-def create(page: Page, setup_url: str) -> str:
-    """Makes COMPANY through company setup; the id it was given. The app lands on it."""
+def create(page: Page, setup_url: str, company: str = COMPANY) -> str:
+    """Makes `company` through company setup; the id it was given. The app lands on it."""
     open_setup(page, setup_url)
-    to_step_7(page, COMPANY)
+    to_step_7(page, company)
     with (
         page.expect_response(lambda r: r.url.endswith(PROFILES)) as created,
         page.expect_response(lambda r: r.url.endswith("/api/overview")),
@@ -67,6 +67,11 @@ def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Pag
     )
     assert asked == [question]
 
+    # The app opened afresh under Nordlicht; the developer page still says what was removed, and
+    # focus is on that note, as the button pressed is gone (#418 review).
+    note = sheet.get_by_role("status")
+    expect(note).to_have_text(f"Removed {COMPANY}.")
+    expect(note).to_be_focused()
     expect(banner.get_by_role("status")).to_have_text(FELL_BACK)
     expect(
         banner.get_by_role("button", name=re.compile(r"^Profile: Nordlicht Komponenten GmbH"))
@@ -89,3 +94,33 @@ def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Pag
     page.get_by_role("link", name="Developer").click()
     expect(sheet.get_by_text(f"{COMPANY_ID}-2", exact=True)).to_be_visible()
     expect(sheet.get_by_text(COMPANY_ID, exact=True)).to_have_count(0)
+
+
+def test_removing_a_company_not_shown_keeps_the_profile_and_focuses_the_note(page: Page, setup_url):
+    company = "Abriss Werk GmbH"
+    page.set_viewport_size({"width": 1280, "height": 900})
+    made = create(page, setup_url, company)
+    banner = page.get_by_role("banner")
+    banner.get_by_role("button", name=re.compile(rf"^Profile: {company}")).click()
+    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
+        banner.get_by_role("menuitemradio", name=re.compile(r"^Nordlicht Komponenten GmbH")).click()
+
+    page.get_by_role("link", name="Developer").click()
+    sheet = page.get_by_role("region", name="Company setup")
+    page.once("dialog", lambda dialog: dialog.accept())
+    with (
+        page.expect_response(lambda r: r.request.method == "DELETE") as removed,
+        page.expect_response(lambda r: r.url.endswith("/api/profiles")),
+    ):
+        sheet.get_by_role("button", name=f"Remove {company}").click()
+    assert removed.value.status == 200
+
+    note = sheet.get_by_role("status")
+    expect(note).to_have_text(f"Removed {company}.")
+    expect(note).to_be_focused()
+    expect(sheet.get_by_text(made, exact=True)).to_have_count(0)
+    expect(banner.get_by_role("status")).to_have_count(0)
+    expect(
+        banner.get_by_role("button", name=re.compile(r"^Profile: Nordlicht Komponenten GmbH"))
+    ).to_be_visible()
+    assert not any(name.startswith(company) for name in switcher_companies(page))

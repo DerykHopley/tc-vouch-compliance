@@ -18,7 +18,7 @@ from test_auth import FakeClerk, bearer, clerk_app, token
 from test_database import needs_postgres
 from test_memory import app_on, as_user, assess, restart
 
-from vouch import company_profiles
+from vouch import api, company_profiles
 from vouch.api import PROFILE_HEADER, app_company_profiles, create_app, current_user
 from vouch.audit import now
 from vouch.company_profiles import (
@@ -745,3 +745,40 @@ def test_a_removed_companys_audit_trail_and_row_are_kept(postgres, users):
     assert row is not None
     assert row["removed_at"] is not None
     assert row["removed_by"] == alice["X-Test-User"]
+
+
+def test_a_removal_done_answers_200_even_when_the_settings_cannot_be_read_after_it(
+    users, monkeypatch, caplog
+):
+    """#418 review: the removal has committed; a failure reading the settings after it must not
+    say "nothing was removed". The page is told the settings are unavailable instead."""
+    alice, _ = users
+
+    def down(*args: Any) -> dict[str, Any]:
+        raise DatabaseUnavailable("the database is unavailable: test")
+
+    with TestClient(app_on(None), raise_server_exceptions=False) as client:
+        create(client, alice)
+        monkeypatch.setattr(api, "_developer_page", down)
+        removed = remove(client, alice)
+        listed = listed_ids(client, alice)
+
+    assert removed.status_code == 200, removed.text
+    assert removed.json() == {"settings_unavailable": True}
+    assert listed == ["alpenwerk", "nordlicht"]
+    assert "the developer settings can't be read after removing" in caplog.text
+
+
+def test_a_removal_forgets_the_companys_reads_kept_in_the_process(users):
+    """#418 review: the per-profile caches drop a removed id, so they don't grow with removals."""
+    alice, _ = users
+    under = alice | {PROFILE_HEADER: MUSTERFIRMA_ID}
+    with TestClient(app_on(None)) as client:
+        create(client, alice)
+        assert client.get("/api/overview", headers=under).status_code == 200
+        assert MUSTERFIRMA_ID in api._paper_requirements
+        assert MUSTERFIRMA_ID in read_stored_once._kept
+        assert remove(client, alice).status_code == 200
+
+    assert MUSTERFIRMA_ID not in api._paper_requirements
+    assert MUSTERFIRMA_ID not in read_stored_once._kept

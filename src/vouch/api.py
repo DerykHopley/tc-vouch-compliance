@@ -387,10 +387,10 @@ def user_profiles(settings: Settings, user: User, companies: CompanyProfiles) ->
     taken since, as the file profile is the one opened. When the stored ones can't be read, the
     file ones (logged). Which profile a request is under is compliance_profile's to decide,
     with the same file-first rule; a per-user choice must change both (#163)."""
-    return _profile_scan(settings, stored_companies(companies))
+    return _profile_scan(settings, _stored_companies(companies))
 
 
-def stored_companies(companies: CompanyProfiles) -> list[company_profiles.StoredProfile] | None:
+def _stored_companies(companies: CompanyProfiles) -> list[company_profiles.StoredProfile] | None:
     """Every live company made in the app, oldest first; None when they can't be read (logged)."""
     try:
         return companies.all()
@@ -1349,7 +1349,7 @@ def _company_settings(settings: Settings, companies: CompanyProfiles) -> dict[st
     """The developer page's profiles: `broken_profiles`, and `companies`, each live company made
     in setup, oldest first, broken and shadowed ones included, so any can be removed (#418);
     None when they can't be read (logged)."""
-    rows = stored_companies(companies)
+    rows = _stored_companies(companies)
     broken = _profile_scan(settings, rows).broken
     made = None if rows is None else [_made_company(row) for row in rows]
     return {"broken_profiles": [asdict(b) for b in broken], "companies": made}
@@ -1464,7 +1464,8 @@ def remove_company_profile(
 ) -> dict[str, Any]:
     """Remove a company made in setup (#418): it leaves every list and can't be opened, its row
     kept so its id is never used again, its audit trail, threads, remediation items and Goal
-    left as they are. Answers the developer settings after it. A stored company is removed
+    left as they are. Answers the developer settings after it; when they can't be read then,
+    `settings_unavailable` (still a 200: the removal is done). A stored company is removed
     even when a profile folder of its id was added since (the file profile stays). A profile
     folder's name with no such company is a 409; any other id a 404; the database down a 503,
     nothing changed. An assessment already streaming under it runs to its end."""
@@ -1474,7 +1475,19 @@ def remove_company_profile(
         raise HTTPException(status_code=409, detail=NOT_A_MADE_COMPANY)
     else:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
-    return developer_settings(models, spending, settings, user, companies)
+    _forget_profile(profile_id)
+    try:
+        return developer_settings(models, spending, settings, user, companies)
+    except Exception:  # removed already: never answer as if nothing was (#418 review)
+        log.exception("the developer settings can't be read after removing %s", profile_id)
+        return {"settings_unavailable": True}
+
+
+def _forget_profile(profile_id: str) -> None:
+    """Drop what this process keeps under a removed company's id (#418), so the caches don't grow
+    with removals; the id is never used again."""
+    _paper_requirements.pop(profile_id, None)
+    company_profiles.read_stored_once.forget(profile_id)
 
 
 @router.get("/access")

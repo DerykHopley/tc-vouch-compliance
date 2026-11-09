@@ -79,6 +79,10 @@ type AppProps = {
   onCompanyCreated?: (profile: ProfileSummary) => void
   /** A company made in setup was removed on the developer page (#418): ProfiledApp reads the profile list again. */
   onCompanyRemoved?: (id: string) => void
+  /** The company shown was removed, so the app opened afresh (#418): the developer page says so, once. */
+  removedCompany?: string
+  /** The developer page said removedCompany. */
+  onRemovedShown?: () => void
   /** The app opens on a company just made (#409): the Dossier's heading takes focus, until the first move elsewhere. */
   focusHeading?: boolean
 }
@@ -86,7 +90,7 @@ type AppProps = {
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
 export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh, onCompanyCreated,
-  onCompanyRemoved, focusHeading: arriving = false }: AppProps = {}) {
+  onCompanyRemoved, removedCompany, onRemovedShown, focusHeading: arriving = false }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -262,7 +266,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         : shown === 'developer' && developer ? (
           <main>
             <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })}
-              onRemoved={onCompanyRemoved} />
+              onRemoved={onCompanyRemoved} removedCompany={removedCompany} onRemovedShown={onRemovedShown} />
           </main>
         )
         : shown === 'setup' && developer ? (

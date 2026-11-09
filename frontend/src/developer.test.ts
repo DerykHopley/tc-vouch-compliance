@@ -1,21 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { changeModel, developerSettings, type DeveloperSettings, removeCompany } from './developer.ts'
+import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
-const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
-
-const SETTINGS: DeveloperSettings = {
-  model: 'anthropic/claude-haiku-5.5',
-  runs_on: 'openrouter',
-  fake_reason: null,
-  prompt_version: '1',
-  usage_url: 'https://openrouter.ai/activity',
-  kept_in: 'database',
-  daily_limit: 30,
-  usage: { openrouter: NO_RUNS, fake: NO_RUNS },
-  broken_profiles: [],
-  companies: [],
-}
+const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
 
 const answer = (status: number, body: unknown) => () => Promise.resolve(new Response(JSON.stringify(body), { status }))
 
@@ -116,12 +104,20 @@ describe('removeCompany, issue 418', () => {
     expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe('/api/developer/profiles/a%2Fb%3Fc')
   })
 
-  it.each([
-    [409, 'Only a company made in company setup can be removed.'],
-    [404, 'There is no such compliance profile.'],
-  ])("is refused on a %i, with the API's detail", async (status, detail) => {
-    vi.stubGlobal('fetch', answer(status, { detail }))
+  it("is refused on a 409, with the API's detail", async () => {
+    const detail = 'Only a company made in company setup can be removed.'
+    vi.stubGlobal('fetch', answer(409, { detail }))
     expect(await removeCompany('x')).toEqual({ status: 'refused', problem: detail })
+  })
+
+  it('is gone on a 404: removed already, elsewhere (review of issue 418)', async () => {
+    vi.stubGlobal('fetch', answer(404, { detail: 'There is no such compliance profile.' }))
+    expect(await removeCompany('x')).toEqual({ status: 'gone' })
+  })
+
+  it("is removed with no settings when the API removed it but couldn't read them after (review of issue 418)", async () => {
+    vi.stubGlobal('fetch', answer(200, { settings_unavailable: true }))
+    expect(await removeCompany('x')).toEqual({ status: 'removed', settings: null })
   })
 
   it("is unavailable on the database's 503", async () => {

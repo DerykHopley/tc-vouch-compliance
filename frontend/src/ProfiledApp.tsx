@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import App from './App.tsx'
 import { mayLeave } from './leaving.ts'
 import {
@@ -29,8 +29,9 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   const [switched, setSwitched] = useState(false) // the user switched: the dropdown takes focus again
   const [freshStarts, setFreshStarts] = useState(0) // each fresh start opens the app afresh
   const [arrived, setArrived] = useState(false) // a company was just made: focus goes to the Dossier's heading
+  const [removedNote, setRemovedNote] = useState<string | null>(null) // the company shown was removed: said once
   const open = useRef(true) // false once closed (signed out): a late answer then changes nothing
-  // The list held and the profile shown, as last rendered, for an answer that arrives later (#418).
+  // The list held and the profile shown, as last rendered: the one way a late answer reads them (#418).
   const latest = useRef<{ profiles: Profiles | null; chosen: string | null }>({ profiles: null, chosen: null })
   useEffect(() => {
     latest.current = { profiles: listing.status === 'read' ? listing.profiles : null, chosen }
@@ -42,7 +43,7 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     }
   }, [])
   // Opens the app under `id`: at start (the remembered or the default profile) and on each switch.
-  const choose = (id: string) => {
+  const choose = (id: string | null) => {
     setProfile(id) // before the app opens again, so its first calls name it
     setChosen(id)
   }
@@ -54,51 +55,56 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     setFellBack(false)
     setSwitched(true)
     setArrived(false)
+    setRemovedNote(null)
     choose(id)
   }
   // The lead started the profile afresh (#285): the app opens again on the Overview, as after a switch.
   const startedAfresh = () => {
     toRoot()
     setArrived(false)
+    setRemovedNote(null)
     setFreshStarts((n) => n + 1)
+  }
+  // The profile list read again after a company was made or removed, then `apply`, given the list read (or null, when
+  // it can't be) and the list held and the profile shown as they are when it answers. Closed or signed out meanwhile:
+  // nothing changes.
+  const afterRelist = (apply: (found: Profiles | null, held: Profiles | null, shown: string | null) => void) => {
+    const signOuts = signOutCount()
+    void fetchProfiles().then((found) => {
+      if (!open.current || signOutCount() !== signOuts) return
+      apply(found, latest.current.profiles, latest.current.chosen)
+    })
   }
   // A developer made a company in company setup (#409): once the list is read again (so the switcher names it), it is
   // remembered as a switch is and the app opens afresh under it on the Dossier, focus on its heading. A list that can't
-  // be read again gains it, so the switcher names it still. Closed or signed out meanwhile: nothing changes.
-  const created = (profile: ProfileSummary) => {
-    const signOuts = signOutCount()
-    void fetchProfiles().then((found) => {
-      if (!open.current || signOutCount() !== signOuts) return
-      rememberProfile(profile.id)
-      setListing((was) => ({ status: 'read', profiles: withProfile(found ?? (was.status === 'read' ? was.profiles : null),
-        profile) }))
-      setFellBack(false)
-      setSwitched(false)
-      setArrived(true)
-      toRoot()
-      choose(profile.id)
-    })
-  }
+  // be read again gains it, so the switcher names it still.
+  const created = (profile: ProfileSummary) => afterRelist((found, held) => {
+    rememberProfile(profile.id)
+    setListing({ status: 'read', profiles: withProfile(found ?? held, profile) })
+    setFellBack(false)
+    setSwitched(false)
+    setArrived(true)
+    setRemovedNote(null)
+    toRoot()
+    choose(profile.id)
+  })
   // A developer removed a company made in setup (#418): the list is read again (or, when it can't be, the list held
   // less it), so the switcher drops it. Removing another company changes only the list. Removing the one shown forgets
-  // it and opens the default (or the first listed) afresh where the developer is, the top bar saying the profile is no
-  // longer available. Closed or signed out meanwhile: nothing changes.
-  const removed = (id: string) => {
-    const signOuts = signOutCount()
-    void fetchProfiles().then((found) => {
-      if (!open.current || signOutCount() !== signOuts) return
-      const { profiles: held, chosen: shown } = latest.current
-      const list = found ?? withoutProfile(held, id)
-      setListing({ status: 'read', profiles: list })
-      if (shown !== id) return
-      rememberProfile(null)
-      const start = startingProfile(list, id)
-      setFellBack(start.fellBack)
-      setSwitched(false)
-      setArrived(false)
-      if (start.id) choose(start.id)
-    })
-  }
+  // it and opens the default (or the first listed; with neither, no profile named, so the API's default answers) afresh
+  // where the developer is, the top bar saying the profile is no longer available and the developer page what was
+  // removed.
+  const removed = (id: string) => afterRelist((found, held, shown) => {
+    const list = found ?? withoutProfile(held, id)
+    setListing({ status: 'read', profiles: list })
+    if (shown !== id) return
+    rememberProfile(null)
+    const start = startingProfile(list, id)
+    setFellBack(start.fellBack)
+    setSwitched(false)
+    setArrived(false)
+    setRemovedNote(held?.profiles.find((p) => p.id === id)?.company ?? id)
+    choose(start.id)
+  })
   useEffect(() => {
     let current = true
     void fetchProfiles().then((found) => {
@@ -113,6 +119,7 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
       current = false
     }
   }, [])
+  const forgetRemovedNote = useCallback(() => setRemovedNote(null), [])
   useEffect(() => () => setProfile(null), []) // signing out leaves no profile for the next sign-in
 
   if (listing.status === 'reading') return <TopBar />
@@ -123,7 +130,7 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   const company = listing.profiles?.profiles.find((p) => p.id === chosen)?.company
   return <App key={`${chosen ?? ''}:${freshStarts}`} onSignOut={onSignOut} profileSwitcher={switcher}
     userName={userName} company={company} onStartedAfresh={startedAfresh} onCompanyCreated={created} onCompanyRemoved={removed}
-    focusHeading={arrived} />
+    removedCompany={removedNote ?? undefined} onRemovedShown={forgetRemovedNote} focusHeading={arrived} />
 }
 
 /** Puts the Dossier's address in the address bar, as a new history entry, unless it is there already. */

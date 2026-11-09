@@ -201,8 +201,8 @@ class ProcessCompanyProfiles:
 
     def __init__(self) -> None:
         self._rows: dict[str, StoredProfile] = {}
-        self._removed: dict[str, tuple[str, datetime]] = {}
-        """Each removed company's id: by whom and when. Its row stays in _rows, its id taken."""
+        self._removed: set[str] = set()
+        """Each removed company's id. Its row stays in _rows, its id taken."""
         self._guard = threading.Lock()
 
     def create(
@@ -225,7 +225,7 @@ class ProcessCompanyProfiles:
         with self._guard:
             if profile_id not in self._rows or profile_id in self._removed:
                 return False
-            self._removed[profile_id] = (removed_by, now())
+            self._removed.add(profile_id)
             return True
 
 
@@ -316,6 +316,11 @@ class _StoredReader:
         with self._guard:
             self._kept[stored.id] = (key, read)
         return read
+
+    def forget(self, profile_id: str) -> None:
+        """Drop the read kept for `profile_id`: a removed company is never read again (#418)."""
+        with self._guard:
+            self._kept.pop(profile_id, None)
 
     def cache_clear(self) -> None:
         with self._guard:

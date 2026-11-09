@@ -11,6 +11,19 @@ vi.mock('./CompanySetupWizard.tsx', () => ({
       country: 'Germany', answer_language: 'de' })}>Created</button>
   ),
 }))
+// Each list read is kept, so a test can wait on a late one's answer having been handled (#418 review): ProfiledApp's
+// own `.then` on it runs before a test's `await` on the same promise.
+const reads = vi.hoisted(() => [] as Promise<unknown>[])
+vi.mock('./profiles.ts', async (original) => {
+  const actual = await original<typeof import('./profiles.ts')>()
+  return { ...actual, fetchProfiles: () => {
+    const read = actual.fetchProfiles()
+    reads.push(read)
+    return read
+  } }
+})
+import type { DeveloperSettings } from './developer.ts'
+import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
 import {
   fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile, withoutProfile, withProfile,
 } from './profiles.ts'
@@ -23,8 +36,6 @@ const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Kompone
   answer_language: 'en' }
 const MUSTERFIRMA: ProfileSummary = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany',
   answer_language: 'de' }
-const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0,
-  incomplete: 0 }
 const TESTWERK: ProfileSummary = { id: 'testwerk', company: 'Testwerk Prüfstand GmbH', country: 'Austria',
   answer_language: 'de' }
 
@@ -34,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  reads.length = 0
   setProfile(null)
   setTokenSource(null)
   setOnSignedOut(null)
@@ -124,6 +136,11 @@ describe('withoutProfile, issue 418', () => {
     const held = { profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }
     expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: 'nordlicht' })
     expect(withoutProfile(held, 'nobody')).toEqual(held)
+  })
+
+  it('with the profile as the default, leaves no default, so the first listed opens (review of issue 418)', () => {
+    const held = { profiles: [MUSTERFIRMA, NORDLICHT], default: 'musterfirma-gmbh' }
+    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: null })
   })
 
   it('with no list held, is none', () => {
@@ -518,17 +535,16 @@ describe('a company made in company setup, issue 409', () => {
 
 describe('a company removed on the developer page, issue 418', () => {
   const MADE = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', created_at: '2026-11-09T10:15:00+00:00' }
-  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
-    kept_in: 'memory', daily_limit: 10, usage: { openrouter: NO_RUNS, fake: NO_RUNS }, broken_profiles: [],
-    companies: [MADE] }
+  const SETTINGS = { ...DEVELOPER_SETTINGS, companies: [MADE] } satisfies DeveloperSettings
 
   /** The API as `serve` answers it, for a developer on the developer page with Musterfirma made in setup: the
    * DELETE answers the settings without it, and the list read again answers `relisted` (null: a 500), or is held
    * until `release` answers it when `hold` is set. */
-  function serveRemoval(relisted: ProfileSummary[] | null, hold = false) {
+  function serveRemoval(relisted: ProfileSummary[] | null, hold = false,
+    listed: ProfileSummary[] = [NORDLICHT, TESTWERK, MUSTERFIRMA], fallback = 'nordlicht') {
     window.history.replaceState(null, '', '/developer')
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const fetch = serve(listed, fallback)
     const answered = fetch.getMockImplementation()!
     let listings = 0
     let release: (answer: Response) => void = () => {}
@@ -591,9 +607,33 @@ describe('a company removed on the developer page, issue 418', () => {
       expect(rememberedProfile()).toBeNull()
       expect(window.location.pathname).toBe('/developer')
       expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+      // The note is carried through the app opened afresh (#418 review), and focus goes to it, not the heading.
+      const note = await within(screen.getByRole('region', { name: 'Company setup' })).findByRole('status')
+      expect(note.textContent).toBe('Removed Musterfirma GmbH.')
       expect(document.activeElement).not.toBe(screen.queryByRole('heading', { level: 1 }))
       expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH', 'Testwerk Prüfstand GmbH'])
     })
+
+  it("the one shown, the default, with no list read again: leaves it for the profile the held list has left",
+    async () => {
+      serveRemoval(null, false, [MUSTERFIRMA, NORDLICHT], 'musterfirma-gmbh')
+      render(<ProfiledApp />)
+      await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
+      await removeMusterfirma()
+
+      await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' }))
+    })
+
+  it("the one shown, and no other profile can be had: opens with none named, not under the one removed", async () => {
+    serveRemoval(null, false, [MUSTERFIRMA], 'musterfirma-gmbh')
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: 'Remove Musterfirma GmbH' })
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' })
+    await removeMusterfirma()
+
+    await waitFor(async () => expect(await authHeaders()).toEqual({}))
+    expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+  })
 
   it('a list read again that answers after a sign-out changes nothing', async () => {
     rememberProfile('musterfirma-gmbh')
@@ -604,9 +644,10 @@ describe('a company removed on the developer page, issue 418', () => {
     await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
     await removeMusterfirma()
     await screen.findByText('Removed Musterfirma GmbH.')
+    await waitFor(() => expect(reads).toHaveLength(2))
     release(new Response(null, { status: 401 }))
-    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await reads[1] // ProfiledApp has handled the late answer by now
+    expect(signOut).toHaveBeenCalledOnce()
     expect(rememberedProfile()).toBe('musterfirma-gmbh')
     expect(screen.getByRole('button', { name: /^Profile: Musterfirma/ })).toBeTruthy()
     expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()

@@ -681,6 +681,38 @@ def test_before_the_setup_added_the_removal_columns_files_are_listed_and_a_remov
 
 
 @needs_postgres
+@pytest.mark.parametrize("column", ["removed_at", "removed_by"])
+def test_health_says_needs_setup_while_a_removal_column_is_missing(empty_database, column):
+    """#418 review: code deployed before vouch-db-setup added the columns shows in health."""
+    empty_database.setup()
+    assert empty_database.health() == "reachable"
+    with empty_database.connection() as conn:
+        conn.execute(f"ALTER TABLE {database.COMPANY_PROFILES_TABLE} DROP COLUMN {column}")
+    empty_database._health = None
+
+    assert empty_database.health() == "needs-setup"
+
+
+@needs_postgres
+def test_a_missing_column_other_than_the_removal_ones_is_not_taken_for_needs_setup(
+    empty_database,
+):
+    """#418 review: only removed_at and removed_by mean vouch-db-setup hasn't run; any other
+    missing column is a bug, raised as itself."""
+    empty_database.setup()
+    with pytest.raises(psycopg.errors.UndefinedColumn):
+        empty_database._read_company_profiles("WHERE no_such_column IS NULL", {})
+    with (
+        pytest.raises(psycopg.errors.UndefinedColumn),
+        empty_database.connection() as conn,
+        empty_database._needs_setup(
+            database.COMPANY_PROFILES_TABLE, columns=database.REMOVAL_COLUMNS
+        ),
+    ):
+        conn.execute(f"SELECT no_such_column FROM {database.COMPANY_PROFILES_TABLE}")
+
+
+@needs_postgres
 def test_a_setting_is_kept_and_read_back_once_the_setup_has_run(empty_database):
     """Vouch's own settings table (#34, the model choice), made by the setup command alone."""
     empty_database.setup()
