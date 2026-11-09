@@ -276,6 +276,24 @@ def test_done_items_stay_done_while_their_reassessment_waits_or_shows_a_gap():
         assert statuses == ["done"], newest.thread_id
 
 
+def test_a_new_gaps_item_after_a_closed_control_reads_open():
+    # #420's review: A's item done, B closed the control, C found a new gap with an approved item.
+    planned = assessment("a", {"M1": "not-evidenced"})
+    closed_by = assessment("b", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(days=2))
+    new_gap = assessment("c", {"M2": "not-evidenced"}, reviewed_at=T0 + timedelta(days=3))
+    decided = {("a", "M1"): approved("a", "M1"), ("c", "M2"): approved("c", "M2")}
+    marks = {("a", "M1"): done(DAY_1, "Fixed.")}
+
+    shown = built(
+        {"4.1.2": new_gap},
+        history=[new_gap, closed_by, planned],
+        decided=decided,
+        marks=marks,
+    )
+
+    assert plan_of(shown) == [("high", [("4.1.2", "M2", "open", "")])]
+
+
 def test_items_follow_the_base_frameworks_control_order_within_a_priority():
     later = assessment("x", {"M1": "not-evidenced"}, control_id="4.1.2")
     earlier = assessment("y", {"M1": "not-evidenced"}, control_id="1.1.1")

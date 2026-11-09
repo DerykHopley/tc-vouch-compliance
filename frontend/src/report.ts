@@ -1,6 +1,7 @@
 import type { Citation, Verdict } from './assessment.ts'
 import type { Readiness, RoundComparison } from './overview.ts'
 import type { OpenQuestion } from './questions.ts'
+import type { Priority } from './remediation.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The readiness report from `GET /api/report` (#234), as `vouch.report.readiness_report` sends it, with its own words
@@ -86,7 +87,7 @@ export type ReportWords = {
   /** The improvement report's (#420). */
   priorities: Record<Priority, string>
   item_statuses: Record<ItemState, string>
-  question_statuses: Record<'answered' | 'overdue' | 'open', string>
+  question_statuses: Record<QuestionState, string>
   languages: Record<string, string>
   sentences: Record<string, string>
 }
@@ -122,7 +123,9 @@ export type AuditReadinessReport = ReportBase & {
   not_applicable: NotApplicable[]
 }
 
-export type Priority = 'high' | 'medium' | 'low'
+/** An open question's status in the report (`vouch.report.QuestionState`): Answered once answered, else Overdue when
+ * it is, else Open. */
+export type QuestionState = 'answered' | 'overdue' | 'open'
 
 /** A plan item's status (`vouch.report.ItemState`): Closed with its control, else Done once marked done, else Open. */
 export type ItemState = 'open' | 'done' | 'closed'

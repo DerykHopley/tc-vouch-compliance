@@ -37,6 +37,7 @@ from fpdf.enums import MethodReturnValue
 from fpdf.fonts import FontFace, TTFFont
 
 from vouch import report as rows
+from vouch.plan import IMPROVEMENT
 
 FONTS = Path(__file__).parent / "fonts"
 DISPLAY, SANS, MONO, QUOTE = "caslon", "manrope", "plexmono", "plexserif"  # the app's type
@@ -300,7 +301,7 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
 
 
 def _sheet(report: Mapping[str, Any], words: Mapping[str, Any], pages: int) -> _Sheet:
-    if report.get("goal") == "internal-improvement":
+    if report.get("goal") == IMPROVEMENT:
         return _improvement_sheet(report, words, pages)
     labels, sentences = words["labels"], words["sentences"]
     sheet = _opened(report, words, words["title"], pages)

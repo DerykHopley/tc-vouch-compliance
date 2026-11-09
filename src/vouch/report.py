@@ -40,7 +40,7 @@ from vouch.database import Priority
 from vouch.dossier import Readiness, control_requirements, readiness
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
-from vouch.plan import CardFlags
+from vouch.plan import IMPROVEMENT, CardFlags
 from vouch.profile import ComplianceProfile, ProtectionLevel
 from vouch.questions import OpenQuestion
 from vouch.questions import shown as shown_question
@@ -356,6 +356,9 @@ class Report(TypedDict):
 
 ItemState = Literal["open", "done", "closed"]
 """A plan item's status (#420): Closed with its control, else Done once marked done, else Open."""
+QuestionState = Literal["answered", "overdue", "open"]
+"""An open question's status in the report (#420): Answered once answered, else Overdue when it
+is, else Open."""
 PRIORITIES: tuple[Priority, ...] = ("high", "medium", "low")
 """The plan's groups, in this order."""
 
@@ -937,7 +940,7 @@ def question_columns(words: Mapping[str, Any]) -> list[str]:
     return [labels[k] for k in ("control", "question", "asked_of", "due_date", "status", "answer")]
 
 
-def question_status(q: Mapping[str, Any]) -> str:
+def question_status(q: Mapping[str, Any]) -> QuestionState:
     """Answered once answered, else overdue when it is, else open."""
     return "answered" if q["answer"] is not None else "overdue" if q["overdue"] else "open"
 
@@ -958,7 +961,7 @@ def question_rows(questions: list[Mapping[str, Any]], words: Mapping[str, Any]) 
     ]
 
 
-# --- The Markdown export (#57)-----------------------------------------------------------------
+# --- The Markdown export (#57) ----------------------------------------------------------------
 #
 # Each writer is `_md_*`, apart from the data builders above. Text carried from elsewhere (the
 # company, questions, quotes, the lead's notes, reasons) stays as written, but never as Markdown
@@ -973,7 +976,7 @@ def markdown(report: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     line break in the head, a list item or a table cell becomes a space; a quote stays a
     blockquote line by line. No model, no database. The improvement report (`goal`
     "internal-improvement", #420) has its own parts (`_md_improvement`)."""
-    if report.get("goal") == "internal-improvement":
+    if report.get("goal") == IMPROVEMENT:
         return _md_improvement(report, words)
     labels, sentences = words["labels"], words["sentences"]
     parts = [

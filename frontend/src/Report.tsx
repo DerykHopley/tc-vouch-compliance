@@ -4,7 +4,7 @@ import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
 import Prose from './Prose.tsx'
 import { actionWord, type AuditReadinessReport, exportReport, fetchReport, type ImprovementReport, olderEntries,
-  type ReadinessReport, type ReportControl, type ReportFormat, type ReportQuestion, type ReportWords, type TrailEntry }
+  type QuestionState, type ReadinessReport, type ReportControl, type ReportFormat, type ReportQuestion, type ReportWords, type TrailEntry }
   from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -261,7 +261,7 @@ function Plan({ report: { plan, words } }: { report: ImprovementReport }) {
 }
 
 /** A question's status, as `vouch.report.question_status` has it. */
-const questionStatus = (q: ReportQuestion) => q.answer !== null ? 'answered' : q.overdue ? 'overdue' : 'open'
+const questionStatus = (q: ReportQuestion): QuestionState => q.answer !== null ? 'answered' : q.overdue ? 'overdue' : 'open'
 
 /** The open questions (#420), in the base framework's control order, oldest first within a control. */
 function Questions({ report: { questions, words } }: { report: ImprovementReport }) {
