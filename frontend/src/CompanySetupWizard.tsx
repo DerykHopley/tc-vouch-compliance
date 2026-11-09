@@ -1,11 +1,11 @@
-import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ProtectionLevel } from './assessment.ts'
 import DocumentTable from './DocumentTable.tsx'
 import type { ProfileSummary } from './profiles.ts'
 import {
-  type ChosenEvidence, type CompanyCreated, COUNTRIES, createCompany, type FrameworkControl, frameworkControls,
-  type LibraryDocument, type LibrarySource, MAX_COMPANY_LENGTH, type NotApplicable, notApplicableProblems,
-  PROTECTION_LEVELS, protectionLevels, type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
+  type AnswerLanguage, type ChosenEvidence, type CompanyCreated, COUNTRIES, createCompany, type FrameworkControl,
+  frameworkControls, LANGUAGES, type LibraryDocument, type LibrarySource, MAX_COMPANY_LENGTH, type NotApplicable,
+  notApplicableProblems, PROTECTION_LEVELS, protectionLevels, type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
 /** Every step of company setup, by name; those NOT_BUILT are a later slice of #351. */
@@ -20,15 +20,16 @@ const FINISH = 7
 const NOT_BUILT = [GOAL] // skipped by Next and Back until slice 5 of #351 builds it
 const later = (n: number) => NOT_BUILT.includes(n)
 
-/** A press within this long of the last move is that move's press landing again (a double-click, a double-tap, two
- * quick clicks) on the new step's Next, Back or Create company: it is ignored, so each press moves one step and none
- * creates the company. From #403's verifier. */
+/** A press of its own (detail 1) within this long of the last move is that move's press landing again (two quick
+ * clicks, a double-tap) on the new step's Next, Back or Create company: it is ignored, so each press moves one step and
+ * none creates the company. From #403's verifier. A double-click's second press is kept from acting at all (see
+ * `secondPress`). */
 const SETTLE_MS = 400
 
 type Answers = {
   company: string
   country: string
-  language: 'en' | 'de'
+  language: AnswerLanguage
   level: ProtectionLevel | null
   notApplicable: NotApplicable[]
   evidence: ChosenEvidence
@@ -48,24 +49,44 @@ const STEP_NOTICES: Readonly<Record<string, string>> = {
   [ALL_MARKED]: 'At least one control must apply.',
   [NO_EVIDENCE]: 'Choose at least one document.',
 }
+/** What the current step shows until the next move: Next's problems, and why the last Create company made no
+ * company. */
+type Shown = { problems: Problems; failure: string | null }
+const NOTHING_SHOWN: Shown = { problems: NO_PROBLEMS, failure: null }
 type Read<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed' }
 type Scope = Read<ProtectionScope[]>
 type Controls = Read<FrameworkControl[]>
 type Library = Read<LibraryDocument[]>
 
-const LANGUAGES = [{ code: 'en', name: 'English' }, { code: 'de', name: 'German' }] as const
 const LEVELS = Object.keys(PROTECTION_LEVELS) as ProtectionLevel[]
 
-/** What step 7 says when Create company didn't make the company: the problem a refusal names, or why it failed. */
+/** What step 7 says when Create company didn't make the company: the problem a refusal names (as one sentence), why
+ * it failed, or that it may have been made after all. */
 function failureWords(created: Exclude<CompanyCreated, { status: 'created' | 'signed-out' }>): string {
-  if (created.status === 'refused') return `Vouch could not create this company: ${created.problem}.`
+  if (created.status === 'refused') {
+    const problem = created.problem.trim().replace(/\.$/, '')
+    return problem ? `Vouch could not create this company: ${problem}.` : 'Vouch could not create this company.'
+  }
   if (created.status === 'unavailable') return 'The database is unavailable just now. Nothing was saved; try again in a moment.'
+  if (created.status === 'unknown')
+    return 'The company may not have been created. Check the profile switcher before trying again.'
   return 'The company could not be created. Nothing was saved.'
 }
 
+/** A double-click's second press (detail 2 or more) lands on whatever the first press left under the pointer: the next
+ * step's Next or Create company, a checkbox it ticked, the page's body after a move or a scroll. Kept from acting
+ * anywhere, it neither moves, creates, ticks a box back nor takes focus off where the first press put it. A text field
+ * keeps it, to select a word. From #403's, #407's and #408's verifiers. */
+function secondPress(e: MouseEvent) {
+  const typing = e.target instanceof HTMLTextAreaElement
+    || (e.target instanceof HTMLInputElement && TEXT_INPUTS.has(e.target.type))
+  if (e.detail > 1 && !typing) e.preventDefault()
+}
+const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number'])
+
 /** `developerPath`: the developer page's address, for the breadcrumb's link; `onDeveloper` opens it. `onCreated`: the
  * company was created, as GET /api/profiles lists it; the app then opens under it. */
-type Props = { developerPath: string; onDeveloper: () => void; onCreated: (profile: ProfileSummary) => void }
+type Props = { developerPath: string; onDeveloper: () => void; onCreated?: (profile: ProfileSummary) => void }
 
 /**
  * Company setup (#403, M8 #351): a developer walks the steps that make a company, going back and forward without
@@ -78,14 +99,16 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
   const [step, setStep] = useState(COMPANY)
   const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, notApplicable: [],
     evidence: { policies: [], records: [] } })
-  const [problems, setProblems] = useState<Problems>(NO_PROBLEMS)
+  const [shown, setShown] = useState<Shown>(NOTHING_SHOWN)
+  const { problems, failure } = shown
+  const setProblems = (change: (now: Problems) => Problems) =>
+    setShown((now) => ({ ...now, problems: change(now.problems) }))
   const [scope, setScope] = useState<Scope | null>(null) // read when step 3 first opens
   const [controls, setControls] = useState<Controls | null>(null) // read when step 5 first opens
   const [library, setLibrary] = useState<Library | null>(null) // read when step 6 first opens
   const formRef = useRef<HTMLFormElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const [creating, setCreating] = useState(false)
-  const [failure, setFailure] = useState<string | null>(null) // why the last Create company made no company
   const createRef = useRef<HTMLButtonElement>(null)
   // Disabled while the create was out, Create company lost focus: it takes it back with the alert, to press again.
   useEffect(() => {
@@ -104,21 +127,15 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
   const readControls = useReader(frameworkControls, setControls)
   const readLibrary = useReader(sampleLibrary, setLibrary)
   const settling = () => performance.now() - lastMove.current < SETTLE_MS
-  // A double-click's second press after a move lands on whatever the new step put under the pointer, anywhere on the
-  // page (the step is taller or shorter): it would take focus off the new heading to the page's body, and on a label
-  // tick a box. Within SETTLE_MS of a move, that press (detail 2 or more) does neither. From #408's verifier.
   useEffect(() => {
-    const landing = (e: globalThis.MouseEvent) => {
-      if (e.detail > 1 && performance.now() - lastMove.current < SETTLE_MS) e.preventDefault()
-    }
-    window.addEventListener('mousedown', landing, true)
-    window.addEventListener('click', landing, true)
+    window.addEventListener('mousedown', secondPress, true)
+    window.addEventListener('click', secondPress, true)
     return () => {
-      window.removeEventListener('mousedown', landing, true)
-      window.removeEventListener('click', landing, true)
+      window.removeEventListener('mousedown', secondPress, true)
+      window.removeEventListener('click', secondPress, true)
     }
   }, [])
-  // Leaving a step drops its problems: they show again only when Next checks it again.
+  // Leaving a step drops what it showed: its problems show again only when Next checks it again.
   const go = (to: number) => {
     if (settling()) return
     lastMove.current = performance.now()
@@ -126,8 +143,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
     while (NOT_BUILT.includes(to)) to += by
     moved.current = true
     setStep(to)
-    setProblems(NO_PROBLEMS)
-    setFailure(null)
+    setShown(NOTHING_SHOWN)
     if (to === LEVEL && scope === null) readScope()
     if (to === NOT_APPLICABLE && controls === null) readControls()
     if (to === EVIDENCE && library === null) readLibrary()
@@ -145,13 +161,14 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
   }
   const next = (e: FormEvent) => {
     e.preventDefault()
-    if (settling() || creating) return // the last move's press landing on this step's Next: not a check of this step
+    // A press of its own landing again just after a move (not a check of this step), or Enter while a create is out.
+    if (settling() || creating) return
     if (step === FINISH) {
       void create()
       return
     }
     const found = check()
-    setProblems(found)
+    setShown((now) => ({ ...now, problems: found }))
     if (found.length > 0) {
       focusProblem(found[0])
       return
@@ -161,7 +178,11 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
   // Step 7's Create company: one press makes one company (`creating` disables it, and Back, while it is out). A
   // created company opens the app under it, which closes the wizard, so nothing here changes after that.
   const create = async () => {
-    if (answers.level === null) return // step 3 never lets it through
+    const setFailure = (words: string | null) => setShown((now) => ({ ...now, failure: words }))
+    if (answers.level === null) { // step 3 never lets it through
+      setFailure(failureWords({ status: 'failed' }))
+      return
+    }
     setCreating(true)
     setFailure(null)
     const created = await createCompany({
@@ -169,7 +190,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
       protection_level: answers.level, not_applicable: answers.notApplicable, evidence: answers.evidence,
     })
     if (created.status === 'created') {
-      onCreated(created.profile)
+      onCreated?.(created.profile)
       return
     }
     setCreating(false)
@@ -181,13 +202,6 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
     const found = formRef.current?.querySelector<HTMLElement>(`[data-problem="${problem}"]`)
     const field = found instanceof HTMLFieldSetElement ? found.querySelector<HTMLElement>('input') : found
     ;(field ?? headingRef.current)?.focus()
-  }
-  // Focusing a field above the fold scrolls the page (step 6's first checkbox, from Next at the table's foot), so a
-  // double-click's second press lands on whatever scrolled under the pointer and takes focus to the page's body.
-  // While a problem shows, that second press (detail 2 or more), off a control, leaves focus where Next put it.
-  const keepFocus = (e: MouseEvent) => {
-    const off = !(e.target as HTMLElement).closest('input, select, textarea, button, a, label')
-    if (e.detail > 1 && problems.length > 0 && off) e.preventDefault()
   }
   // A changed answer's problem clears at once; Next checks again.
   const answer = (change: Partial<Answers>) => {
@@ -232,7 +246,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
           </li>
         ))}
       </ol>
-      <form ref={formRef} className="sheet setup-step" noValidate onSubmit={next} onMouseDown={keepFocus}>
+      <form ref={formRef} className="sheet setup-step" noValidate onSubmit={next}>
         <span className="lbl">Step {step} of {STEPS.length}</span>
         <h3 ref={headingRef} tabIndex={-1}>{STEPS[step - 1]}</h3>
         {step === COMPANY && <CompanyStep answers={answers} problems={problems} answer={answer} />}

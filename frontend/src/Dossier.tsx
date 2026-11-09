@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react'
+import { type MouseEvent, useEffect, useRef } from 'react'
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness,
   SEGMENTS } from './overview.ts'
@@ -14,9 +14,11 @@ type Props = {
   onOpen: (controlId: string, assess: boolean) => void
   /** The control being assessed just now, if any: its card says so, and the hero offers no second run. */
   running: string | null
+  /** The app opened on a company just made (#409): the headline takes focus once it shows. */
+  focusHeading?: boolean
 }
 
-export default function Dossier({ state, onRetry, onOpen, running }: Props) {
+export default function Dossier({ state, onRetry, onOpen, running, focusHeading = false }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -33,7 +35,7 @@ export default function Dossier({ state, onRetry, onOpen, running }: Props) {
   const { overview } = state
   return (
     <main className="dossier wrap">
-      <Hero overview={overview} onOpen={onOpen} running={running} />
+      <Hero overview={overview} onOpen={onOpen} running={running} focus={focusHeading} />
       <Band readiness={overview.readiness} />
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
@@ -58,7 +60,16 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
   assess: (id) => `Assess ${id}`,
 }
 
-function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props['onOpen']; running: string | null }) {
+function Hero({ overview, onOpen, running, focus }: {
+  overview: Overview
+  onOpen: Props['onOpen']
+  running: string | null
+  focus: boolean
+}) {
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (focus) heading.current?.focus()
+  }, [focus])
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
@@ -75,7 +86,7 @@ function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
-      <h1>Prepared for audit. One piece of evidence at a time.</h1>
+      <h1 ref={heading} tabIndex={-1}>Prepared for audit. One piece of evidence at a time.</h1>
       <p><b>{headline}</b> {detail}</p>
       {next && (
         <div className="next">

@@ -17,8 +17,9 @@ LEVELS = "/api/developer/protection-levels"
 CONTROLS = "/api/developer/controls"
 LIBRARY = "/api/developer/sample-library"
 PROFILES = "/api/developer/profiles"
-# The wizard ignores a move within 400 ms of the last (a double-click's second press); a person's
-# separate presses come further apart, so each helper move waits this long first.
+# The wizard ignores a press of its own within 400 ms of the last move (two quick clicks, a
+# double-tap); a person's separate presses come further apart, so each helper move waits this long
+# first. A double-click's second press is kept from acting whenever it comes.
 SETTLE_MS = 450
 
 
@@ -33,8 +34,8 @@ def open_setup(page: Page, profiles_url: str) -> None:
     page.get_by_role("button", name="Set up a company").click()
 
 
-def to_step_3(page: Page) -> None:
-    page.get_by_role("textbox", name="Company name").fill("Musterfirma Nord GmbH")
+def to_step_3(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
+    page.get_by_role("textbox", name="Company name").fill(company)
     page.get_by_role("combobox", name="Country").select_option("Germany")
     press(page, "Next")
     page.get_by_role("radio", name="German").check()
@@ -43,8 +44,8 @@ def to_step_3(page: Page) -> None:
     assert answer.value.status == 200
 
 
-def to_step_5(page: Page) -> None:
-    to_step_3(page)
+def to_step_5(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
+    to_step_3(page, company)
     page.get_by_role("radio", name=re.compile(r"^Normal")).check()
     with page.expect_response(lambda r: CONTROLS in r.url) as answer:
         press(page, "Next")
@@ -212,8 +213,7 @@ def test_a_double_click_on_next_or_back_moves_exactly_one_step(page: Page, profi
     page.wait_for_timeout(SETTLE_MS)
     page.get_by_role("button", name="Back").dblclick()
     expect(page.get_by_text("Step 2 of 7")).to_be_visible()
-    page.wait_for_timeout(SETTLE_MS)
-    expect(page.get_by_text("Step 2 of 7")).to_be_visible()
+    expect(page.get_by_role("heading", name="Language")).to_be_focused()
 
 
 def test_two_quick_clicks_on_next_or_back_move_exactly_one_step(page: Page, profiles_url):
@@ -345,8 +345,8 @@ def test_a_double_click_on_next_that_doesnt_move_keeps_focus_on_the_first_invali
 ):
     """From #407's verifier: the problem shown above the buttons moved Next down, so the second
     press landed on the form and took focus to the page's body. The problem now shows below them
-    (step 3); on step 6, focusing the first checkbox scrolls the page, and the second press is
-    kept from taking focus."""
+    (step 3); on step 6, focusing the first checkbox scrolls the page, and the second press, like
+    every double-click's, is kept from taking focus."""
     open_setup(page, profiles_url)
     to_step_3(page)
 
@@ -453,7 +453,7 @@ def test_in_forced_colours_a_document_checkbox_keeps_its_44px_target(page: Page,
 
 
 def to_step_7(page: Page) -> None:
-    """Steps 1 to 6 answered (5.1.1's reason typed with spaces around it), then Next to step 7."""
+    """Steps 1 to 6 answered (no control marked, the backup policy chosen), then Next to step 7."""
     to_step_6(page)
     document(page, "Backup policy").check()
     press(page, "Next")
@@ -461,12 +461,13 @@ def to_step_7(page: Page) -> None:
 
 
 def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
-    """Stories 1 to 4 end to end: every answer summed up on step 7, Create company, then the new
-    company on the Dossier, in the top bar and the switcher, its marked controls' reasons kept
-    trimmed in its profile."""
+    """Stories 1 to 4 end to end: every answer summed up on step 7 (the name and a reason typed
+    with spaces around them, shown and sent trimmed), Create company, then the new company on the
+    Dossier, focus on its heading, in the top bar and the switcher, its marked controls' reasons
+    kept in its profile."""
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
-    to_step_5(page)
+    to_step_5(page, "  Musterfirma Nord GmbH ")
     control(page, "1.6.1").check()
     reason(page, "1.6.1").fill("We build no prototype vehicles.")
     control(page, "5.1.1").check()
@@ -480,13 +481,16 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
 
     expect(page.get_by_text("Step 7 of 7")).to_be_visible()
     summary = page.locator("dl.setup-summary")
-    expect(summary).to_contain_text("Musterfirma Nord GmbH")
+    # textContent, not to_have_text, which would forgive the spaces
+    assert summary.get_by_role("definition").first.text_content() == "Musterfirma Nord GmbH"
     expect(summary).to_contain_text("Germany")
     expect(summary).to_contain_text("German")
     expect(summary).to_contain_text("Normal")
-    expect(summary.get_by_role("listitem")).to_have_text(
-        ["1.6.1: We build no prototype vehicles.", "5.1.1: No cryptography in our own products"]
-    )
+    expect(summary.get_by_role("listitem")).to_have_count(2)
+    assert summary.get_by_role("listitem").all_text_contents() == [
+        "1.6.1: We build no prototype vehicles.",
+        "5.1.1: No cryptography in our own products",
+    ]
     expect(summary).to_contain_text(
         "Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale)."
     )
@@ -500,10 +504,17 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
     ):
         press(page, "Create company")
     assert created.value.status == 201
+    sent = created.value.request.post_data_json
+    assert sent["company"] == "Musterfirma Nord GmbH"
+    assert sent["not_applicable"] == [
+        {"control": "1.6.1", "reason": "We build no prototype vehicles."},
+        {"control": "5.1.1", "reason": "No cryptography in our own products"},
+    ]
     profile = created.value.json()
     assert profile["company"] == "Musterfirma Nord GmbH"
 
     expect(page).to_have_url(f"{setup_url}/")
+    expect(page.get_by_role("heading", level=1)).to_be_focused()
     banner = page.get_by_role("banner")
     expect(
         banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
@@ -548,8 +559,10 @@ def test_a_double_click_on_step_6s_next_lands_on_step_7_and_creates_nothing(
 
     expect(page.get_by_text("Step 7 of 7")).to_be_visible()
     expect(page.get_by_role("heading", name="Finish")).to_be_focused()
-    page.wait_for_timeout(SETTLE_MS)
-    expect(page.get_by_role("button", name="Create company")).to_have_text("Create company")
+    create = page.get_by_role("button", name="Create company")
+    page.wait_for_load_state("networkidle")  # a create, had one gone out, has answered by now
+    expect(create).to_have_text("Create company")
+    expect(create).not_to_have_attribute("aria-busy", "true")
     assert not any(PROFILES in url for url in posted)
 
 

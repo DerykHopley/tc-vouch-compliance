@@ -45,10 +45,17 @@ export function setOnSignedOut(next: (() => void) | null) {
   onSignedOut = next
 }
 
+let signOuts = 0
+
 /** The API said this session is no longer valid. */
 export function signedOut() {
+  signOuts += 1
   onSignedOut?.()
 }
+
+/** How many times this page has signed out: a call that started before a sign-out compares it after, so its late
+ * answer changes nothing (the sign-in replaces the app only on its next render). */
+export const signOutCount = () => signOuts
 
 /** Shown where an API call found the sign-in ended. */
 export const SESSION_ENDED = 'Your sign-in has ended. Please sign in again.'
