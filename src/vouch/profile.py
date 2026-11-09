@@ -348,19 +348,21 @@ class BrokenProfile:
     problem: str
 
 
-def _version(folder: Path, name: str) -> tuple[int, int] | None:
-    """The profile file's version: its modification time and size; None when it can't be
-    looked at (then the load says why)."""
+def _version(folder: Path, name: str) -> tuple[int, int, int] | None:
+    """The profile file's version: its modification time, its change time and its size; None
+    when it can't be looked at (then the load says why). The change time moves with a change
+    of permissions or owner too, so a profile left out as unreadable and then made readable is
+    read again (#167)."""
     try:
         stat = (folder / name / PROFILE_FILE).stat()
     except (OSError, ValueError):
         return None
-    return stat.st_mtime_ns, stat.st_size
+    return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
 
 
 @lru_cache(maxsize=256)
 def _read_version(
-    folder: Path, name: str, version: tuple[int, int] | None
+    folder: Path, name: str, version: tuple[int, int, int] | None
 ) -> ComplianceProfile | BrokenProfile:
     try:
         return load_named_profile(name, folder)
