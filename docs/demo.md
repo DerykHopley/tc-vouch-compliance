@@ -87,7 +87,7 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
 
 #### 3. Review in three steps (1:15)
 
-1. **Confirm findings.** In M1's row, select **Change**. Pick a "Verdict", type a reason under
+1. **Confirm findings.** In M1's row, select **Change**. Pick **Not evidenced** as the "Verdict", type a reason under
    "Reason (required)" (**Save** stays disabled until you do), and select **Save**: "1 override,
    recorded with the findings." Then select **Confirm findings**.
 2. **Plan fixes.** The foot counts the remediation items decided (on the local run, "0 of 2
@@ -150,7 +150,7 @@ live app, with one difference:
   ([features](features.md#3-ask-a-question)): ask "What's missing for 5.1.1?" or "Is there
   evidence of key management?", then type "Accept 5.1.1".
 
-Step 2 shows 5.1.1's stale encryption standard as on the live app, step 3 drafts two remediation
+Step 2 shows 5.1.1's stale encryption standard as on the live app, step 3 (with M1 set to Not evidenced) drafts two remediation
 items (M1 and S1), and step 5 runs 1.6.2 under Alpenwerk, overlay branch and all, without a
 restart. Export PDF downloads `readiness-report-nordlicht-<date>.pdf`, and Export Markdown the
 `.md`.
