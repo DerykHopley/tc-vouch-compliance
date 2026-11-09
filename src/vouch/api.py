@@ -65,6 +65,7 @@ from vouch.isa import (
     BaseFrameworkError,
     IsaControl,
     UnknownControlError,
+    load_base_framework,
 )
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
@@ -145,6 +146,7 @@ SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
 PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
+CONTROLS_FAILED = "The framework's controls could not be read."
 NOT_A_MEMBER = (
     "Vouch is open to members of the course's Discord server. This Discord account is not in it."
 )
@@ -1338,6 +1340,18 @@ def protection_levels() -> dict[str, Any]:
         log.exception("the base framework could not be read")
         raise HTTPException(status_code=500, detail=PROTECTION_LEVELS_FAILED) from None
     return {"levels": [asdict(scope) for scope in levels]}
+
+
+@router.get("/developer/controls", dependencies=DEVELOPERS)
+def framework_controls() -> dict[str, Any]:
+    """Every control of the base framework's English edition, in its order (#407), for company
+    setup's step 5; the base framework unreadable, a plain 500 naming no file."""
+    try:
+        controls = load_base_framework().controls
+    except BaseFrameworkError:
+        log.exception("the base framework could not be read")
+        raise HTTPException(status_code=500, detail=CONTROLS_FAILED) from None
+    return {"controls": [{"id": c.id, "question": c.question} for c in controls]}
 
 
 @router.post("/developer/profiles", dependencies=DEVELOPERS, status_code=201)

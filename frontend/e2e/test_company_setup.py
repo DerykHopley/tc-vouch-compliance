@@ -1,8 +1,9 @@
-"""Company setup (#403, M8 #351), steps 1 to 3: a developer opens it from the developer page and
-walks it, going back and forward without losing an answer; a compliance lead never reaches it.
+"""Company setup (#403, #407, M8 #351), steps 1 to 3 and 5: a developer opens it from the
+developer page and walks it, going back and forward without losing an answer; a compliance lead
+never reaches it.
 
 On the profiles server, as the developer page's checks are (local mode: its one user is a
-developer). Nothing is stored: steps 1 to 3 send no profile.
+developer). Nothing is stored: no step sends a profile yet.
 """
 
 import re
@@ -11,6 +12,7 @@ from playwright.sync_api import Page, expect
 from test_developer_page import as_compliance_lead
 
 LEVELS = "/api/developer/protection-levels"
+CONTROLS = "/api/developer/controls"
 
 
 def open_setup(page: Page, profiles_url: str) -> None:
@@ -26,6 +28,23 @@ def to_step_3(page: Page) -> None:
     with page.expect_response(lambda r: LEVELS in r.url) as answer:
         page.get_by_role("button", name="Next").click()
     assert answer.value.status == 200
+
+
+def to_step_5(page: Page) -> None:
+    to_step_3(page)
+    page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+    with page.expect_response(lambda r: CONTROLS in r.url) as answer:
+        page.get_by_role("button", name="Next").click()
+    assert answer.value.status == 200
+    expect(page.get_by_role("checkbox")).to_have_count(12)
+
+
+def control(page: Page, control_id: str):
+    return page.get_by_role("checkbox", name=re.compile(rf"^{re.escape(control_id)} "))
+
+
+def reason(page: Page, control_id: str):
+    return page.get_by_role("textbox", name=f"Why {control_id} doesn't apply")
 
 
 def test_a_developer_opens_company_setup_from_the_developer_page(page: Page, profiles_url):
@@ -64,7 +83,6 @@ def test_a_developer_walks_steps_1_to_3_and_back_keeping_every_answer(page: Page
     expect(levels).to_contain_text(
         re.compile(r"Adds 10 very-high-protection requirements, .*: 109 in all\.")
     )
-    expect(page.get_by_role("button", name="Next")).to_have_count(0)
     page.get_by_role("radio", name=re.compile(r"^High")).check()
 
     page.get_by_role("button", name="Back").click()
@@ -116,3 +134,76 @@ def test_enter_in_the_name_field_moves_on_as_next_does(page: Page, profiles_url)
     name.press("Enter")
 
     expect(page.get_by_role("heading", name="Language")).to_be_focused()
+
+
+def test_a_developer_marks_two_controls_not_applicable_and_keeps_them_going_back(
+    page: Page, profiles_url
+):
+    """Story 2: step 3's Next skips the Goal to step 5; two controls ticked with reasons stay
+    ticked, their reasons as typed, after Back to step 3 and Next again."""
+    posted: list[str] = []
+    page.on("request", lambda r: posted.append(r.url) if r.method == "POST" else None)
+    open_setup(page, profiles_url)
+    to_step_5(page)
+
+    expect(page.get_by_text("Step 5 of 7")).to_be_visible()
+    expect(page.get_by_role("heading", name="Not applicable")).to_be_focused()
+    control(page, "1.6.1").check()
+    reason(page, "1.6.1").fill("We build no prototype vehicles.")
+    control(page, "5.1.1").check()
+    reason(page, "5.1.1").fill("No cryptography in our own products ")
+
+    page.get_by_role("button", name="Back").click()
+    expect(page.get_by_text("Step 3 of 7")).to_be_visible()
+    page.get_by_role("button", name="Next").click()
+
+    expect(control(page, "1.6.1")).to_be_checked()
+    expect(reason(page, "1.6.1")).to_have_value("We build no prototype vehicles.")
+    expect(control(page, "5.1.1")).to_be_checked()
+    expect(reason(page, "5.1.1")).to_have_value("No cryptography in our own products ")
+    expect(control(page, "4.1.2")).not_to_be_checked()
+    assert not any("/api/developer/profiles" in url for url in posted)
+
+
+def test_a_double_click_on_next_moves_exactly_one_step(page: Page, profiles_url):
+    """From #403's verifier: a double-click on step 1's Next landed on step 3."""
+    open_setup(page, profiles_url)
+    page.get_by_role("textbox", name="Company name").fill("Musterfirma Nord GmbH")
+    page.get_by_role("combobox", name="Country").select_option("Germany")
+
+    page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_text("Step 2 of 7")).to_be_visible()
+
+    with page.expect_response(lambda r: LEVELS in r.url):
+        page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_text("Step 3 of 7")).to_be_visible()
+
+    page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+    with page.expect_response(lambda r: CONTROLS in r.url):
+        page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_text("Step 5 of 7")).to_be_visible()
+
+    page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_text("Step 5 of 7")).to_be_visible()
+    expect(page.get_by_role("heading", name="Not applicable")).to_be_visible()
+
+
+def test_step_5_is_walked_by_keyboard(page: Page, profiles_url):
+    """Each checkbox, its reason field and the buttons are reached and left with Tab."""
+    open_setup(page, profiles_url)
+    to_step_5(page)
+
+    first = control(page, "1.1.1")
+    first.focus()
+    page.keyboard.press("Space")
+    expect(first).to_be_checked()
+    page.keyboard.press("Tab")
+    expect(reason(page, "1.1.1")).to_be_focused()
+    page.keyboard.type("Not here")
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("checkbox").nth(1)).to_be_focused()
+    page.get_by_role("checkbox").last.focus()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Back")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Next")).to_be_focused()

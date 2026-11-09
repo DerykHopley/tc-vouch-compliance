@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { profileTag } from './profiles.ts'
-import { COUNTRIES, protectionLevels, type ProtectionScope, scopeWords } from './setup.ts'
+import { COUNTRIES, frameworkControls, protectionLevels, type ProtectionScope, scopeWords } from './setup.ts'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -50,5 +50,23 @@ describe('the protection levels', () => {
     expect(scopeWords({ ...HIGH, added: 1, added_controls: ['1.6.2'] }))
       .toBe('Adds 1 high-protection requirement, in 1 control (1.6.2): 99 in all.')
     expect(scopeWords({ ...normal, controls: 1 })).toBe('Must and should requirements: 85 in 1 control.')
+  })
+})
+
+describe("the framework's controls", () => {
+  const CONTROLS = [{ id: '1.1.1', question: 'To what extent are policies available?' }]
+
+  it("read the route's controls", async () => {
+    const fetch = vi.fn((_url: string) => Promise.resolve(new Response(JSON.stringify({ controls: CONTROLS }))))
+    vi.stubGlobal('fetch', fetch)
+    expect(await frameworkControls()).toEqual(CONTROLS)
+    expect(fetch.mock.calls[0][0]).toBe('/api/developer/controls')
+  })
+
+  it('are null when refused or unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))))
+    expect(await frameworkControls()).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    expect(await frameworkControls()).toBeNull()
   })
 })
