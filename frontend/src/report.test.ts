@@ -98,7 +98,7 @@ describe('exportReport', () => {
     setProfile('nordlicht')
     const files = saves()
 
-    expect(await exportReport()).toEqual({ ok: true })
+    expect(await exportReport('markdown')).toEqual({ ok: true })
     expect(fetch).toHaveBeenCalledWith('/api/report/markdown',
       { headers: { Authorization: 'Bearer tok', 'X-Vouch-Profile': 'nordlicht' } })
     expect(await files.all()).toEqual([{ name: 'readiness-report-nordlicht-2026-11-06.md', text: MARKDOWN }])
@@ -113,8 +113,30 @@ describe('exportReport', () => {
   ])('saves under %s', async (_, disposition, name) => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(MARKDOWN, { headers: { 'Content-Disposition': disposition } })))
     const files = saves()
-    expect(await exportReport()).toEqual({ ok: true })
+    expect(await exportReport('markdown')).toEqual({ ok: true })
     expect((await files.all()).map((f) => f.name)).toEqual([name])
+  })
+
+  it("saves the PDF (`GET /api/report/pdf`) under the server's name", async () => {
+    const fetch = vi.fn(() => Promise.resolve(new Response('%PDF-1.3 a sheet', { headers: {
+      'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="readiness-report-nordlicht-2026-11-06.pdf"; '
+        + "filename*=UTF-8''readiness-report-nordlicht-2026-11-06.pdf" } })))
+    vi.stubGlobal('fetch', fetch)
+    setTokenSource(() => Promise.resolve('tok'))
+    setProfile('nordlicht')
+    const files = saves()
+
+    expect(await exportReport('pdf')).toEqual({ ok: true })
+    expect(fetch).toHaveBeenCalledWith('/api/report/pdf',
+      { headers: { Authorization: 'Bearer tok', 'X-Vouch-Profile': 'nordlicht' } })
+    expect(await files.all()).toEqual([{ name: 'readiness-report-nordlicht-2026-11-06.pdf', text: '%PDF-1.3 a sheet' }])
+  })
+
+  it('saves the PDF as readiness-report.pdf when the header names none', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('%PDF-1.3', { headers: { 'Content-Disposition': 'attachment' } })))
+    const files = saves()
+    expect(await exportReport('pdf')).toEqual({ ok: true })
+    expect((await files.all()).map((f) => f.name)).toEqual(['readiness-report.pdf'])
   })
 
   it('lets the browser keep the file a minute before its object URL is released', async () => {
@@ -122,7 +144,7 @@ describe('exportReport', () => {
     try {
       vi.stubGlobal('fetch', markdown())
       saves()
-      expect(await exportReport()).toEqual({ ok: true })
+      expect(await exportReport('markdown')).toEqual({ ok: true })
       vi.advanceTimersByTime(59_000)
       expect(URL.revokeObjectURL).not.toHaveBeenCalled()
       vi.advanceTimersByTime(1_000)
@@ -135,14 +157,14 @@ describe('exportReport', () => {
   it.each([404, 429, 500, 503])('says the report could not be exported on a %i, and saves nothing', async (status) => {
     vi.stubGlobal('fetch', markdown(status))
     const files = saves()
-    expect(await exportReport()).toEqual({ ok: false, message: EXPORT_FAILED })
+    expect(await exportReport('markdown')).toEqual({ ok: false, message: EXPORT_FAILED })
     expect(await files.all()).toEqual([])
   })
 
   it('says so when the network fails, and saves nothing', async () => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')))
     const files = saves()
-    expect(await exportReport()).toEqual({ ok: false, message: EXPORT_FAILED })
+    expect(await exportReport('markdown')).toEqual({ ok: false, message: EXPORT_FAILED })
     expect(await files.all()).toEqual([])
   })
 
@@ -153,7 +175,7 @@ describe('exportReport', () => {
     } })
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(broken, { status: 200 })))
     const files = saves()
-    expect(await exportReport()).toEqual({ ok: false, message: EXPORT_FAILED })
+    expect(await exportReport('markdown')).toEqual({ ok: false, message: EXPORT_FAILED })
     expect(await files.all()).toEqual([])
   })
 
@@ -162,7 +184,7 @@ describe('exportReport', () => {
     setOnSignedOut(ended)
     vi.stubGlobal('fetch', markdown(401))
     const files = saves()
-    expect(await exportReport()).toEqual({ ok: false, message: SESSION_ENDED })
+    expect(await exportReport('markdown')).toEqual({ ok: false, message: SESSION_ENDED })
     expect(ended).toHaveBeenCalled()
     expect(await files.all()).toEqual([])
   })

@@ -1,0 +1,26 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "information security policy objectives approval requirements review"}},
+    {"tool": "search_records", "args": {"query": "policy publication intranet change notices review"}},
+    {"answer": "The information security policy 4.0 was approved by management on 14 July 2026. It states why security matters to the business, sets its objectives, and derives the security requirements each year from the business plan, customer contracts and German law. It is published on the intranet with nine supporting standards and procedures, and change notices go to employees and, through the supplier portal, to suppliers. No document says what happens when someone breaks the policy, and the encryption standard it names has not been reviewed since March 2022."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The policy says how the security requirements are worked out each year and where they are written down.", "citations": [{"doc_id": "information-security-policy", "quote": "The requirements are written down in the security requirements list, which is kept with this policy and updated when the business plan or a major contract changes."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "The policy records management's approval on 14 July 2026, signed by both managing directors.", "citations": [{"doc_id": "information-security-policy", "quote": "Management approved this policy on 14 July 2026. It is signed by both managing directors."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "The purpose and objectives sections state why security matters to the business and what it aims for.", "citations": [{"doc_id": "information-security-policy", "quote": "This policy sets out why information security matters to us and what we aim for."}, {"doc_id": "information-security-policy", "quote": "We keep customer and company information confidential, correct and available when it is needed."}]},
+      {"requirement_id": "M4", "verdict": "evidenced", "reason": "The policy is published on the intranet, and the export shows the page and its views.", "citations": [{"doc_id": "information-security-policy", "quote": "This policy and all supporting standards are published on the intranet"}, {"doc_id": "policy-publication-record", "quote": "Page views since January: 1,412, from 163 of 171 employees."}]},
+      {"requirement_id": "M5", "verdict": "evidenced", "reason": "Change notices go to all employees and, through the supplier portal, to suppliers, and the record lists each one sent.", "citations": [{"doc_id": "information-security-policy", "quote": "Suppliers and service providers who work with our information receive the notice through the supplier portal."}, {"doc_id": "policy-publication-record", "quote": "Information security policy 4.0: new objectives section"}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "The requirements come from the business plan, the customer contracts and German law.", "citations": [{"doc_id": "information-security-policy", "quote": "the business plan agreed by management, the security clauses in our customer contracts, and the laws that apply to us in Germany, including data protection law"}]},
+      {"requirement_id": "S2", "verdict": "not-evidenced", "reason": "No document says what happens when someone breaks the policy.", "citations": []},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "The policy names nine supporting standards and procedures, each with its own owner.", "citations": [{"doc_id": "information-security-policy", "quote": "This policy is backed by topic standards and procedures, each with its own owner"}]},
+      {"requirement_id": "S4", "verdict": "partly-evidenced", "reason": "A review process is set and the policy's July 2026 review is recorded, but the encryption standard it names has missed its yearly reviews since March 2022.", "citations": [{"doc_id": "information-security-policy", "quote": "The information security officer reviews this policy every year and after any serious security incident, and proposes changes to management."}, {"doc_id": "policy-publication-record", "quote": "The information security officer reviewed the information security policy on 1 July 2026 and proposed version 4.0"}, {"doc_id": "encryption-standard", "quote": "We use only encryption methods that the national cyber security authority recommends"}]}
+    ]
+  },
+  "remediate": {
+    "items": [
+      {"requirement_id": "S2", "missing": "A section in the information security policy that names the consequences of breaking it, for employees and for business partners, approved by management.", "owner_role": "Information security officer", "due_in_days": 60},
+      {"requirement_id": "S4", "missing": "A review and new approval of the encryption standard, with each supporting standard's next review date tracked.", "owner_role": "Information security officer", "due_in_days": 30}
+    ]
+  }
+}

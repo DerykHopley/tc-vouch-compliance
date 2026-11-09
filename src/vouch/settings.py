@@ -56,16 +56,41 @@ ENV_NAMES = frozenset(
     | {RATE_REQUESTS_ENV}
 )
 
-DEMO_SCRIPT = Path(__file__).parent / "demo" / "demo.json"
-DEMO_SCRIPT_DE = Path(__file__).parent / "demo" / "demo-de.json"
-DEMO_SCRIPTS = {"de": DEMO_SCRIPT_DE}
-"""The demo script by answer language (#234): a German profile's assessment answers in German
-on the fake; every other language plays DEMO_SCRIPT."""
+DEMO_DIR = Path(__file__).parent / "demo"
+DEMO_SCRIPT = DEMO_DIR / "demo.json"
+"""The English demo script, written for 4.1.2; the default for any control without its own."""
+DEMO_SCRIPT_DE = DEMO_DIR / "demo-de.json"
+"""The German demo script (#234), written for 4.1.2; the default for any control without its
+own, so a German profile's assessment answers in German on the fake."""
+COVERED_CONTROLS = ("1.1.1", "1.6.2", "5.1.1")
+"""The controls with demo scripts of their own besides 4.1.2's (#272): the Dossier's suggested
+first step, Alpenwerk's overlay (1.6.2's O1) and Nordlicht's stale encryption standard."""
 
 
-def demo_script(answer_language: str) -> Path:
-    """The bundled demo script for the answer language (ISO 639-1): DEMO_SCRIPT when it has none."""
-    return DEMO_SCRIPTS.get(answer_language, DEMO_SCRIPT)
+@dataclass(frozen=True)
+class DemoScripts:
+    """One answer language's bundled demo scripts: each covered control's own, and the default
+    (4.1.2's) for every other control."""
+
+    default: Path
+    by_control: dict[str, Path]
+
+    def for_control(self, control_id: str | None) -> Path:
+        return self.by_control.get(control_id or "", self.default)
+
+
+DEMO_SCRIPTS = {
+    "en": DemoScripts(DEMO_SCRIPT, {c: DEMO_DIR / f"{c}.json" for c in COVERED_CONTROLS}),
+    "de": DemoScripts(DEMO_SCRIPT_DE, {c: DEMO_DIR / f"{c}-de.json" for c in COVERED_CONTROLS}),
+}
+"""The demo scripts by answer language (ISO 639-1); a language not listed plays the English."""
+
+
+def demo_script(answer_language: str, control_id: str | None = None) -> Path:
+    """The bundled demo script for the answer language and the control: the control's own
+    script when it has one, else the language's default (4.1.2's); a language with no scripts
+    of its own plays the English ones."""
+    return DEMO_SCRIPTS.get(answer_language, DEMO_SCRIPTS["en"]).for_control(control_id)
 
 
 class SettingsError(RuntimeError):

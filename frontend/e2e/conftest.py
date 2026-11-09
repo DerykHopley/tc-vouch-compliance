@@ -45,6 +45,13 @@ def report_url() -> str:
 
 
 @pytest.fixture
+def afresh_url() -> str:
+    """A seventh Vouch like vouch_url, for the fresh start's check (#285): starting Nordlicht
+    afresh there hides no other check's progress."""
+    return os.environ["AFRESH_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

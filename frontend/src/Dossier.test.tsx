@@ -160,8 +160,31 @@ describe('the Dossier overview', () => {
       .toContain('Nothing is assessed yet. Start with 1.1.1')
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     expect(within(quotes).queryAllByRole('article')).toHaveLength(0)
+    expect(within(quotes).queryAllByRole('link')).toHaveLength(0)
     expect(quotes.textContent).toContain('No evidence on file yet')
   })
+
+  it("opens a quote's control from the quote card's link, in place and without assessing (ticket 311)", async () => {
+    const onOpen = vi.fn()
+    render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
+      onRetry={() => {}} onOpen={onOpen} running={null} />)
+    const quotes = screen.getByRole('region', { name: 'What the evidence says' })
+    const link = within(quotes).getByRole('link', { name: 'for 1.1.1 M1' })
+    expect(link.getAttribute('href')).toBe('/controls/1.1.1')
+    await userEvent.click(link)
+    expect(onOpen).toHaveBeenCalledWith('1.1.1', false)
+  })
+
+  it("links two quotes for one control each to it, and leaves the card's Open link the only one so named (ticket 311)",
+    () => {
+      const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } })
+      overview.quotes = [overview.quotes[0], { ...overview.quotes[0], requirement_id: 'M2', quote: 'Every site.' }]
+      render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+      const quotes = screen.getByRole('region', { name: 'What the evidence says' })
+      const links = within(quotes).getAllByRole('link')
+      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/controls/1.1.1', '/controls/1.1.1'])
+      expect(screen.getAllByRole('link', { name: 'Open 1.1.1' })).toHaveLength(1)
+    })
 
   it('says when the overview could not be loaded, and retries', async () => {
     const onRetry = vi.fn()

@@ -109,7 +109,7 @@ The agent's proposed judgement of a requirement's or control's evidence: evidenc
 _Avoid_: Status, result, score, found / partial / gap
 
 **Guard step**:
-A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, or a secret or personal data removed from what is shown.
+A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, an answer asked for again (it claimed an audit result, or was written in another language than the profile's) or kept in another language after its one retry, or a secret or personal data removed from what is shown.
 _Avoid_: Alert, block, filter step (a warning is something else: a source that could not be read)
 
 **Reviewed verdict**:
@@ -139,6 +139,10 @@ _Avoid_: Compliance score, maturity
 **Progress**:
 Where a user stands under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with. On screen, an assessment waiting for review is **Proposed** (its review state tag, `docs/design.md`); `waiting-for-review` is the same state in code and the API.
 _Avoid_: Status, history
+
+**Fresh start**:
+The lead's progress under a compliance profile listed from a time on (#285): what they started before it is no longer listed or counted, so every control is not assessed again, and the chat opens a new conversation. Nothing is deleted: the assessments, the remediation decisions and the audit trail stay whole, and the audit trail still shows every entry. Started from the user menu ("Start <company> afresh…"), for a repeat demo.
+_Avoid_: Reset, clear
 
 **Long-term memory**:
 What Vouch keeps for a user under a compliance profile from one visit to the next (which assessments they started, when they last worked), in LangGraph's store. The assessments themselves wait in the checkpointer, keyed by the same user and profile.
