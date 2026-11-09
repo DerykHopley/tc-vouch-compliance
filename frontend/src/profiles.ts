@@ -26,6 +26,12 @@ export function withProfile(held: Profiles | null, profile: ProfileSummary): Pro
   return list.profiles.some((p) => p.id === profile.id) ? list : { ...list, profiles: [...list.profiles, profile] }
 }
 
+/** `held` less the profile `id`; none when nothing is held. A company removed on the developer page (#418) leaves the
+ * switcher even when the list can't be read again. */
+export function withoutProfile(held: Profiles | null, id: string): Profiles | null {
+  return held && { ...held, profiles: held.profiles.filter((p) => p.id !== id) }
+}
+
 /** How a fresh start went: started, refused while an assessment runs (the 409), the session ended (a 401: signed out
  * already, so nothing more to say), or failed any other way. */
 export type FreshStart = 'started' | 'running' | 'signed-out' | 'failed'

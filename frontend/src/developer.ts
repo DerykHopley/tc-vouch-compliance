@@ -1,5 +1,5 @@
 import { UNREACHABLE, type Usage } from './assessment.ts'
-import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
+import { authHeaders, refusedBecause, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The developer page's API (#34). Only a developer gets an answer; anyone else gets a 403, and no page. */
 
@@ -20,7 +20,21 @@ export type DeveloperSettings = {
   usage: { openrouter: RunTotals; fake: RunTotals }
   /** The compliance profiles left out of the profile switcher because they could not be loaded (#47). */
   broken_profiles: BrokenProfile[]
+  /** Each company made in setup, oldest first, broken ones included (#418); null when they can't be read just now. */
+  companies: MadeCompany[] | null
 }
+
+/** A company made in company setup, as the developer page lists it: its id, its name and when it was made. */
+export type MadeCompany = { id: string; company: string; created_at: string }
+
+/** How removing a company went (#418): removed (the new settings); refused (the API's detail: not a company made in
+ * setup, or none of that id); the database unavailable; the session ended (signed out already); or failed. */
+export type CompanyRemoval =
+  | { status: 'removed'; settings: DeveloperSettings }
+  | { status: 'refused'; problem: string }
+  | { status: 'unavailable' }
+  | { status: 'signed-out' }
+  | { status: 'failed' }
 
 /** A compliance profile left out because it can't be loaded: its name and the problem, with no server path. */
 export type BrokenProfile = { id: string; problem: string }
@@ -90,4 +104,23 @@ async function put(path: string, body: object, badForm: string, refused: string)
   const detail = await response.json().then((body: { detail?: unknown }) => body.detail, () => undefined)
   if (typeof detail === 'string') return { ok: false, message: detail }
   return { ok: false, message: response.status === 422 ? badForm : refused } // 422 with a list: pydantic's shape check
+}
+
+/** Removes a company made in company setup (#418): it leaves the profile switcher for everyone, its audit trail kept. */
+export async function removeCompany(id: string): Promise<CompanyRemoval> {
+  let response: Response
+  try {
+    response = await fetch(`/api/developer/profiles/${encodeURIComponent(id)}`,
+      { method: 'DELETE', headers: await authHeaders() })
+  } catch {
+    return { status: 'failed' }
+  }
+  if (response.ok) {
+    const settings = (await response.json().catch(() => null)) as DeveloperSettings | null
+    return settings ? { status: 'removed', settings } : { status: 'failed' }
+  }
+  if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
+  if (response.status === 409 || response.status === 404) return { status: 'refused', problem: await refusedBecause(response) }
+  if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
+  return { status: 'failed' }
 }

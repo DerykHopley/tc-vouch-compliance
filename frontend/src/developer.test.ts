@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { changeModel, developerSettings, type DeveloperSettings } from './developer.ts'
+import { changeModel, developerSettings, type DeveloperSettings, removeCompany } from './developer.ts'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
 const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
@@ -14,6 +14,7 @@ const SETTINGS: DeveloperSettings = {
   daily_limit: 30,
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
   broken_profiles: [],
+  companies: [],
 }
 
 const answer = (status: number, body: unknown) => () => Promise.resolve(new Response(JSON.stringify(body), { status }))
@@ -95,5 +96,53 @@ describe('changeModel', () => {
     vi.stubGlobal('fetch', answer(401, { detail: 'Sign in to use Vouch.' }))
     expect((await changeModel('x/y')).ok).toBe(false)
     expect(signedOut).toHaveBeenCalled()
+  })
+})
+
+describe('removeCompany, issue 418', () => {
+  it('deletes the company and gives back the new settings', async () => {
+    const fetch = vi.fn(answer(200, SETTINGS))
+    vi.stubGlobal('fetch', fetch)
+    setTokenSource(() => Promise.resolve('tok'))
+    expect(await removeCompany('musterfirma-sud-gmbh')).toEqual({ status: 'removed', settings: SETTINGS })
+    expect(fetch).toHaveBeenCalledWith('/api/developer/profiles/musterfirma-sud-gmbh',
+      { method: 'DELETE', headers: { Authorization: 'Bearer tok' } })
+  })
+
+  it('names the id safely in the address', async () => {
+    const fetch = vi.fn(answer(404, { detail: 'There is no such compliance profile.' }))
+    vi.stubGlobal('fetch', fetch)
+    await removeCompany('a/b?c')
+    expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe('/api/developer/profiles/a%2Fb%3Fc')
+  })
+
+  it.each([
+    [409, 'Only a company made in company setup can be removed.'],
+    [404, 'There is no such compliance profile.'],
+  ])("is refused on a %i, with the API's detail", async (status, detail) => {
+    vi.stubGlobal('fetch', answer(status, { detail }))
+    expect(await removeCompany('x')).toEqual({ status: 'refused', problem: detail })
+  })
+
+  it("is unavailable on the database's 503", async () => {
+    vi.stubGlobal('fetch', answer(503, { detail: 'The database is unavailable just now.', unavailable: 'database' }))
+    expect(await removeCompany('x')).toEqual({ status: 'unavailable' })
+  })
+
+  it.each([
+    ['a 500', () => answer(500, { detail: 'Internal Server Error' })()],
+    ['a 403', () => answer(403, { detail: 'This is available to developers only.' })()],
+    ['no answer', () => Promise.reject(new TypeError('offline'))],
+  ])('fails on %s', async (_, fetch) => {
+    vi.stubGlobal('fetch', fetch)
+    expect(await removeCompany('x')).toEqual({ status: 'failed' })
+  })
+
+  it('signs out on a 401', async () => {
+    const signedOut = vi.fn()
+    setOnSignedOut(signedOut)
+    vi.stubGlobal('fetch', answer(401, { detail: 'Sign in to use Vouch.' }))
+    expect(await removeCompany('x')).toEqual({ status: 'signed-out' })
+    expect(signedOut).toHaveBeenCalledOnce()
   })
 })

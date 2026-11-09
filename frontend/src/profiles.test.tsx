@@ -12,7 +12,7 @@ vi.mock('./CompanySetupWizard.tsx', () => ({
   ),
 }))
 import {
-  fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile, withProfile,
+  fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile, withoutProfile, withProfile,
 } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import {
@@ -23,6 +23,8 @@ const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Kompone
   answer_language: 'en' }
 const MUSTERFIRMA: ProfileSummary = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany',
   answer_language: 'de' }
+const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0,
+  incomplete: 0 }
 const TESTWERK: ProfileSummary = { id: 'testwerk', company: 'Testwerk Prüfstand GmbH', country: 'Austria',
   answer_language: 'de' }
 
@@ -114,6 +116,18 @@ describe('withProfile, issue 409', () => {
 
   it('with no list held, is a list of that profile alone, with no default', () => {
     expect(withProfile(null, MUSTERFIRMA)).toEqual({ profiles: [MUSTERFIRMA], default: null })
+  })
+})
+
+describe('withoutProfile, issue 418', () => {
+  it('leaves the profile out of the list held, keeping its default', () => {
+    const held = { profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }
+    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: 'nordlicht' })
+    expect(withoutProfile(held, 'nobody')).toEqual(held)
+  })
+
+  it('with no list held, is none', () => {
+    expect(withoutProfile(null, 'musterfirma-gmbh')).toBeNull()
   })
 })
 
@@ -499,5 +513,102 @@ describe('a company made in company setup, issue 409', () => {
     expect(rememberedProfile()).toBeNull()
     expect(window.location.pathname).toBe('/developer/setup')
     expect(screen.queryByRole('button', { name: /^Profile: Musterfirma/ })).toBeNull()
+  })
+})
+
+describe('a company removed on the developer page, issue 418', () => {
+  const MADE = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', created_at: '2026-11-09T10:15:00+00:00' }
+  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
+    kept_in: 'memory', daily_limit: 10, usage: { openrouter: NO_RUNS, fake: NO_RUNS }, broken_profiles: [],
+    companies: [MADE] }
+
+  /** The API as `serve` answers it, for a developer on the developer page with Musterfirma made in setup: the
+   * DELETE answers the settings without it, and the list read again answers `relisted` (null: a 500), or is held
+   * until `release` answers it when `hold` is set. */
+  function serveRemoval(relisted: ProfileSummary[] | null, hold = false) {
+    window.history.replaceState(null, '', '/developer')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    let release: (answer: Response) => void = () => {}
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/developer/profiles/musterfirma-gmbh' && init?.method === 'DELETE')
+        return Promise.resolve(Response.json({ ...SETTINGS, companies: [] }))
+      if (url === '/api/profiles' && ++listings > 1) {
+        if (hold) return new Promise<Response>((resolve) => { release = resolve })
+        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
+          : new Response(null, { status: 500 }))
+      }
+      return answered(url, init)
+    })
+    return { fetch, release: (answer: Response) => release(answer) }
+  }
+
+  const listings = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/profiles')
+
+  async function removeMusterfirma() {
+    const sheet = await screen.findByRole('region', { name: 'Company setup' })
+    await userEvent.click(await within(sheet).findByRole('button', { name: 'Remove Musterfirma GmbH' }))
+  }
+
+  async function switcherCompanies() {
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    const names = screen.getAllByRole('menuitemradio').map((m) => m.textContent?.split(' · ')[0])
+    await userEvent.keyboard('{Escape}')
+    return names
+  }
+
+  it('one not shown: the list is read again and the switcher drops it; the page and the profile stay', async () => {
+    const { fetch } = serveRemoval([NORDLICHT, TESTWERK])
+    render(<ProfiledApp />)
+    await removeMusterfirma()
+
+    await waitFor(() => expect(listings(fetch)).toHaveLength(2))
+    await waitFor(async () => expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH',
+      'Testwerk Prüfstand GmbH']))
+    expect(screen.getByRole('status').textContent).toBe('Removed Musterfirma GmbH.')
+    expect(window.location.pathname).toBe('/developer')
+    expect(screen.getByRole('button', { name: /^Profile: Nordlicht/ })).toBeTruthy()
+    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
+  })
+
+  it.each([
+    ['read again', [NORDLICHT, TESTWERK]],
+    ["held, less it, when the list can't be read again", null],
+  ])('the one shown: opens the default on the developer page with the fallback note, forgotten (%s)',
+    async (_, relisted) => {
+      rememberProfile('musterfirma-gmbh')
+      serveRemoval(relisted)
+      render(<ProfiledApp />)
+      await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
+      await removeMusterfirma()
+
+      await screen.findByRole('button', { name: /^Profile: Nordlicht/ })
+      expect(within(screen.getByRole('banner')).getByRole('status').textContent)
+        .toBe('Your last profile is no longer available: showing Nordlicht Komponenten GmbH.')
+      expect(rememberedProfile()).toBeNull()
+      expect(window.location.pathname).toBe('/developer')
+      expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+      expect(document.activeElement).not.toBe(screen.queryByRole('heading', { level: 1 }))
+      expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH', 'Testwerk Prüfstand GmbH'])
+    })
+
+  it('a list read again that answers after a sign-out changes nothing', async () => {
+    rememberProfile('musterfirma-gmbh')
+    const { release } = serveRemoval(null, true)
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
+    await removeMusterfirma()
+    await screen.findByText('Removed Musterfirma GmbH.')
+    release(new Response(null, { status: 401 }))
+    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    expect(screen.getByRole('button', { name: /^Profile: Musterfirma/ })).toBeTruthy()
+    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
   })
 })

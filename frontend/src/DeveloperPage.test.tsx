@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import type { DeveloperSettings } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
+import { setOnSignedOut } from './session.ts'
 
 const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
 
@@ -18,6 +19,7 @@ const SETTINGS: DeveloperSettings = {
   daily_limit: 30,
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
   broken_profiles: [],
+  companies: [],
 }
 
 /** The developer page with SETTINGS and no-op handlers, but for those given. */
@@ -45,6 +47,8 @@ afterEach(() => {
   cleanup()
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  setOnSignedOut(null)
 })
 
 describe('the developer page', () => {
@@ -174,6 +178,101 @@ describe('the developer page', () => {
     expect((field as HTMLInputElement).value).toBe('x/y')
     expect(field.getAttribute('aria-invalid')).toBe('true')
     expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('the companies made in setup, issue 418', () => {
+  const MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', created_at: '2026-11-09T10:15:00+00:00' }
+  const WITH_ONE: DeveloperSettings = { ...SETTINGS, companies: [MUSTERFIRMA] }
+  const QUESTION = 'Remove Musterfirma Süd GmbH? It leaves the profile switcher for everyone and can\'t be opened again. '
+    + 'Its audit trail is kept.'
+
+  /** The API answering the DELETE with `status` and `body`, or held until the returned function answers it. */
+  function deleting(status?: number, body: unknown = WITH_ONE) {
+    let release: (answer: Response) => void = () => {}
+    const fetch = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method !== 'DELETE') return new Promise<Response>(() => {})
+      if (status === undefined) return new Promise<Response>((resolve) => { release = resolve })
+      return Promise.resolve(new Response(JSON.stringify(body), { status }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    return { fetch, release: (answer: Response) => release(answer) }
+  }
+
+  const sheet = () => screen.getByRole('region', { name: 'Company setup' })
+  const removeButton = () => within(sheet()).getByRole('button', { name: 'Remove Musterfirma Süd GmbH' })
+
+  it('lists each company with its id and the date it was made, under Set up a company', () => {
+    renderPage({ settings: WITH_ONE })
+    const item = within(sheet()).getByRole('listitem')
+    expect(within(item).getByText('Musterfirma Süd GmbH')).toBeTruthy()
+    expect(within(item).getByText('musterfirma-sud-gmbh').className).toContain('mono')
+    expect(item.querySelector('time')?.getAttribute('dateTime')).toBe('2026-11-09T10:15:00+00:00')
+    expect(removeButton().className).toContain('btn')
+  })
+
+  it('says when none was made, and when they cannot be read', () => {
+    renderPage()
+    expect(within(sheet()).getByText('No companies made in setup yet.')).toBeTruthy()
+    cleanup()
+    renderPage({ settings: { ...SETTINGS, companies: null } })
+    expect(within(sheet()).getByText("The companies made in setup can't be read just now.")).toBeTruthy()
+  })
+
+  it('asks first, and Cancel sends nothing and keeps the company listed', async () => {
+    const { fetch } = deleting(200)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(removeButton())
+    expect(confirm).toHaveBeenCalledWith(QUESTION)
+    expect(fetch).not.toHaveBeenCalled()
+    expect(removeButton()).toBeTruthy()
+  })
+
+  it('removes once on a double press, saying Removing… while the request is out', async () => {
+    const { fetch, release } = deleting()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onRemoved })
+    await userEvent.dblClick(removeButton())
+    const busy = within(sheet()).getByRole('button', { name: 'Removing…' })
+    expect((busy as HTMLButtonElement).disabled).toBe(true)
+    expect(fetch).toHaveBeenCalledOnce()
+    release(new Response(JSON.stringify(SETTINGS), { status: 200 }))
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh'))
+    expect(onChange).toHaveBeenCalledWith(SETTINGS)
+    expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
+  })
+
+  it.each([
+    [409, { detail: 'Only a company made in company setup can be removed.' },
+      'Vouch could not remove this company: Only a company made in company setup can be removed.'],
+    [404, { detail: 'There is no such compliance profile.' },
+      'Vouch could not remove this company: There is no such compliance profile.'],
+    [503, { detail: 'The database is unavailable just now.', unavailable: 'database' },
+      'The database is unavailable just now. Nothing was removed; try again in a moment.'],
+    [500, { detail: 'Internal Server Error' }, 'The company could not be removed. Nothing changed.'],
+  ])('on a %i, says why under the list, keeps it, and Remove can be pressed again', async (status, body, message) => {
+    deleting(status, body)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onRemoved })
+    await userEvent.click(removeButton())
+    expect((await within(sheet()).findByRole('alert')).textContent).toBe(message)
+    expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('on a 401, signs out with no alert', async () => {
+    deleting(401, { detail: 'Sign in to use Vouch.' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const signedOut = vi.fn()
+    setOnSignedOut(signedOut)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(signedOut).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 

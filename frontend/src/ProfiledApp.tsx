@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import App from './App.tsx'
 import { mayLeave } from './leaving.ts'
-import { fetchProfiles, type Profiles, type ProfileSummary, startingProfile, withProfile } from './profiles.ts'
+import {
+  fetchProfiles, type Profiles, type ProfileSummary, startingProfile, withoutProfile, withProfile,
+} from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import { rememberedProfile, rememberProfile, setProfile, signOutCount } from './session.ts'
 import TopBar from './TopBar.tsx'
@@ -17,7 +19,8 @@ type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | nu
  * default answers. The browser remembers the last switch, so a reload or a pasted link opens that profile while it is
  * still listed; otherwise the default, and the top bar says so (#201). A fresh start from the user menu (#285) opens
  * the app afresh the same way, on the Overview. A company made in company setup (#409) opens the same way, under it,
- * the list read again so the switcher names it.
+ * the list read again so the switcher names it. A company removed on the developer page (#418) leaves the switcher the
+ * same way; when it was the one shown, the default opens in its place, on the developer page, and the top bar says so.
  */
 export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () => void; userName?: string }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
@@ -27,6 +30,11 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   const [freshStarts, setFreshStarts] = useState(0) // each fresh start opens the app afresh
   const [arrived, setArrived] = useState(false) // a company was just made: focus goes to the Dossier's heading
   const open = useRef(true) // false once closed (signed out): a late answer then changes nothing
+  // The list held and the profile shown, as last rendered, for an answer that arrives later (#418).
+  const latest = useRef<{ profiles: Profiles | null; chosen: string | null }>({ profiles: null, chosen: null })
+  useEffect(() => {
+    latest.current = { profiles: listing.status === 'read' ? listing.profiles : null, chosen }
+  }, [listing, chosen])
   useEffect(() => {
     open.current = true
     return () => {
@@ -71,6 +79,26 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
       choose(profile.id)
     })
   }
+  // A developer removed a company made in setup (#418): the list is read again (or, when it can't be, the list held
+  // less it), so the switcher drops it. Removing another company changes only the list. Removing the one shown forgets
+  // it and opens the default (or the first listed) afresh where the developer is, the top bar saying the profile is no
+  // longer available. Closed or signed out meanwhile: nothing changes.
+  const removed = (id: string) => {
+    const signOuts = signOutCount()
+    void fetchProfiles().then((found) => {
+      if (!open.current || signOutCount() !== signOuts) return
+      const { profiles: held, chosen: shown } = latest.current
+      const list = found ?? withoutProfile(held, id)
+      setListing({ status: 'read', profiles: list })
+      if (shown !== id) return
+      rememberProfile(null)
+      const start = startingProfile(list, id)
+      setFellBack(start.fellBack)
+      setSwitched(false)
+      setArrived(false)
+      if (start.id) choose(start.id)
+    })
+  }
   useEffect(() => {
     let current = true
     void fetchProfiles().then((found) => {
@@ -94,7 +122,7 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     : undefined
   const company = listing.profiles?.profiles.find((p) => p.id === chosen)?.company
   return <App key={`${chosen ?? ''}:${freshStarts}`} onSignOut={onSignOut} profileSwitcher={switcher}
-    userName={userName} company={company} onStartedAfresh={startedAfresh} onCompanyCreated={created}
+    userName={userName} company={company} onStartedAfresh={startedAfresh} onCompanyCreated={created} onCompanyRemoved={removed}
     focusHeading={arrived} />
 }
 
