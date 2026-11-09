@@ -177,9 +177,9 @@ controls:
   - id: "4.1.2"
     requirements:
       - id: M1
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [authentication-standard]
-        why: The login method per system follows a risk assessment that weighs internet access.
+        why: The standard says each system's login method follows a risk assessment, but no record shows that assessment was done.
       - id: M2
         verdict: evidenced
         cites: [authentication-standard]
@@ -380,9 +380,9 @@ controls:
         cites: [logging-standard, log-check-record]
         why: Alerts pointing to an incident go to the incident team, as the open VPN session did.
       - id: S2
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [logging-standard]
-        why: Logs sit on a central server where nobody can change entries.
+        why: The standard keeps logs on a central server where nobody can change entries, but nothing shows it is so.
       - id: S3
         verdict: evidenced
         cites: [logging-standard, log-check-record]
