@@ -531,6 +531,39 @@ describe('the working paper', () => {
   })
 })
 
+describe('the Documents tab (issue 424)', () => {
+  const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name })
+
+  it('sits after Report for every user, opens straight at /documents marked current, and Back returns', async () => {
+    serve()
+    render(<App />)
+    await screen.findAllByRole('article', { name: /^Control / })
+    const names = within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
+    expect(names).toEqual(['Overview', 'Report', 'Documents'])
+
+    await userEvent.click(tab('Documents'))
+    expect(window.location.pathname).toBe('/documents')
+    expect(tab('Documents').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+
+    act(() => window.history.back())
+    await waitFor(() => expect(window.location.pathname).toBe('/'))
+    expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(tab('Documents').getAttribute('aria-current')).toBeNull()
+  })
+
+  it('opened directly (a reload), shows the Documents page with its tab current and reads no overview', async () => {
+    const fetch = serve()
+    window.history.replaceState(null, '', '/documents')
+    render(<App />)
+    expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+    expect(tab('Documents').getAttribute('aria-current')).toBe('page')
+    expect(tab('Overview').getAttribute('aria-current')).toBeNull()
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
+  })
+})
+
 describe('theme', () => {
   it('starts dark when the system prefers dark', () => {
     systemPrefers(true)

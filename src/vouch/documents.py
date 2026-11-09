@@ -189,8 +189,9 @@ def read_facts(path: Path, source: str, today: datetime.date) -> DocumentFacts:
 @dataclass(frozen=True)
 class DocumentSummary:
     """What Vouch has read from a document, for a page (#408): its title, kind, version,
-    approval date (ISO), review cycle, and why it is stale (None when current). The kind and
-    staleness are the judge's (kind_of, stale_because)."""
+    approval date (ISO), review cycle, why it is stale (None when current), and the language
+    it is written in (#424, its front matter's, for the page's `lang`). The kind and staleness
+    are the judge's (kind_of, stale_because)."""
 
     id: str
     source: str  # the folder it is in: policies, records
@@ -200,6 +201,7 @@ class DocumentSummary:
     approval_date: str | None
     review_cycle: str | None
     stale_because: str | None
+    language: str | None  # ISO 639-1, as the front matter gives it
 
 
 def _text(value: Any) -> str | None:
@@ -209,7 +211,7 @@ def _text(value: Any) -> str | None:
 def document_summary(path: Path, source: str, today: datetime.date) -> DocumentSummary:
     """The summary of the document at this path in a source's folder, judged on `today`. A
     missing title gives the id; a version, approval date or review cycle that can't be read
-    gives None; no front matter at all, the source's kind and NO_REVIEW_DATE. The kind and
+    gives None, and so does a missing or empty language; no front matter at all, the source's kind and NO_REVIEW_DATE. The kind and
     staleness are facts_of's, read without logging (a page lists them on every request)."""
     data, _ = split_front_matter(path.read_text(encoding="utf-8"))
     front = data or {}
@@ -224,7 +226,13 @@ def document_summary(path: Path, source: str, today: datetime.date) -> DocumentS
         approval_date=approved.isoformat() if approved else None,
         review_cycle=_text(front.get("review_cycle")),
         stale_because=facts.stale_because,
+        language=_text(front.get("language")),
     )
+
+
+def by_title(summaries: list[DocumentSummary]) -> list[DocumentSummary]:
+    """The summaries by title, ignoring case, then by id: how a page lists a source's documents."""
+    return sorted(summaries, key=lambda s: (s.title.casefold(), s.id))
 
 
 def library_summaries(
@@ -237,7 +245,7 @@ def library_summaries(
     found: list[DocumentSummary] = []
     for source in sources:
         summaries = [document_summary(p, source, today) for p in document_files(library / source)]
-        found += sorted(summaries, key=lambda s: (s.title.casefold(), s.id))
+        found += by_title(summaries)
     return found
 
 

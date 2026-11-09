@@ -2,15 +2,17 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import DocumentTable from './DocumentTable.tsx'
+import type { TableWords } from './documents.ts'
 import { BACKUP_POLICY as BACKUP, BACKUP_STALE } from './libraryFixtures.ts'
 import type { LibraryDocument } from './setup.ts'
 const UNDATED: LibraryDocument = {
   id: 'draft-note', source: 'policies', title: 'draft-note', kind: 'documented', version: null,
-  approval_date: null, review_cycle: null, stale_because: 'no review date', stale: true,
+  approval_date: null, review_cycle: null, stale_because: 'no review date', stale: true, language: null,
 }
 const TRAINING: LibraryDocument = {
   id: 'training-record', source: 'records', title: 'Security training record 2026', kind: 'implemented',
   version: '2026-10', approval_date: '2026-10-05', review_cycle: 'yearly', stale_because: null, stale: false,
+  language: 'en',
 }
 
 afterEach(cleanup)
@@ -61,5 +63,42 @@ describe('the document table', () => {
     expect(onToggle).toHaveBeenCalledWith('training-record', 'records')
     await userEvent.click(backup)
     expect(onToggle).toHaveBeenLastCalledWith('backup-policy', 'policies')
+  })
+})
+
+describe('the document table, with words and an extra column (the Documents tab, issue 424)', () => {
+  const WORDS: TableWords = {
+    columns: { document: 'Dokument', kind: 'Art', version: 'Version', approved: 'Freigegeben am', review: 'Überprüfung',
+      status: 'Status', cited_by: 'Zitiert von' },
+    kinds: { documented: 'Dokumentiert', implemented: 'Umgesetzt' },
+    cycles: { quarterly: 'Vierteljährlich', 'half-yearly': 'Halbjährlich', yearly: 'Jährlich', 'two-yearly': 'Zweijährlich' },
+    stale: 'Prüfung überfällig', current: 'Aktuell', no_version: 'keine Version', no_date: 'kein Datum', no_cycle: 'keine',
+  }
+  const extra = { heading: 'Zitiert von', cell: (d: LibraryDocument) => `cell ${d.id}` }
+
+  it('shows the given headings, the kind and cycle words, the stale word alone, and the extra column', () => {
+    render(<DocumentTable caption="Richtlinien" documents={[BACKUP, UNDATED, TRAINING]} words={WORDS}
+      extraColumn={extra} />)
+    expect(within(screen.getByRole('table')).getAllByRole('columnheader').map((h) => h.textContent))
+      .toEqual(['Dokument', 'Art', 'Version', 'Freigegeben am', 'Überprüfung', 'Status', 'Zitiert von'])
+    const [backup, undated, training] = rows()
+    expect(cells(backup)).toEqual(['Dokumentiert', '1.0', '2024-02-12', 'Jährlich', 'Prüfung überfällig',
+      'cell backup-policy'])
+    expect(within(backup).getByText('Dokumentiert').className).toBe('kind kind-documented')
+    expect(within(backup).getByText('Prüfung überfällig').className).toBe('flag')
+    expect(cells(undated).slice(1, 5)).toEqual(['keine Version', 'kein Datum', 'keine', 'Prüfung überfällig'])
+    expect(cells(training).slice(0, 5)).toEqual(['Umgesetzt', '2026-10', '2026-10-05', 'Jährlich', 'Aktuell'])
+  })
+
+  it('shows a review cycle it has no word for as written', () => {
+    render(<DocumentTable caption="Policies" documents={[{ ...TRAINING, review_cycle: 'monthly' }]} words={WORDS} />)
+    expect(cells(rows()[0])[3]).toBe('monthly')
+  })
+
+  it("marks each title with its document's language, and none without one", () => {
+    render(<DocumentTable caption="Policies" documents={[BACKUP, UNDATED]} />)
+    const [backup, undated] = rows()
+    expect(within(backup).getByText('Backup policy').closest('[lang]')?.getAttribute('lang')).toBe('en')
+    expect(within(undated).getByText('draft-note', { selector: '.doc-title' }).closest('[lang]')).toBeNull()
   })
 })

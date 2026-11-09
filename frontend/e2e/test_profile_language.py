@@ -95,3 +95,11 @@ def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url):
     expect(report).to_have_attribute("lang", "de")
     expect(report.get_by_role("heading", level=1)).to_have_text("Bereitschaftsbericht")
     assert_marked(page, "Was fehlt?")
+
+    # The Documents tab: its words follow the profile's language (#424); the tab name stays English.
+    with page.expect_response("**/api/documents"):
+        page.get_by_role("link", name="Documents").click()
+    documents = page.locator("article.documents-doc")
+    expect(documents).to_have_attribute("lang", "de")
+    expect(documents.get_by_role("heading", level=1)).to_have_text("Dokumente")
+    assert_marked(page, "Was fehlt?")

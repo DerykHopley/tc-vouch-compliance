@@ -45,6 +45,7 @@ def test_a_summary_gives_each_field_from_the_front_matter(tmp_path):
         approval_date="2024-02-12",
         review_cycle="yearly",
         stale_because=BACKUP_STALE,
+        language=None,
     )
 
 
@@ -113,6 +114,7 @@ def test_no_front_matter_gives_the_id_the_sources_kind_and_no_review_date(tmp_pa
         approval_date=None,
         review_cycle=None,
         stale_because=NO_REVIEW_DATE,
+        language=None,
     )
 
 
@@ -164,6 +166,7 @@ def test_each_listed_document_carries_its_front_matter_and_staleness(pinned):
         "approval_date": "2024-02-12",
         "review_cycle": "yearly",
         "stale_because": BACKUP_STALE,
+        "language": "en",
         "stale": True,
     }
     # approved 2026-10-19, in the last month
@@ -176,6 +179,7 @@ def test_each_listed_document_carries_its_front_matter_and_staleness(pinned):
         "approval_date": "2026-10-19",
         "review_cycle": "yearly",
         "stale_because": None,
+        "language": "en",
         "stale": False,
     }
 
@@ -279,3 +283,19 @@ def test_listing_a_document_with_no_kind_logs_nothing(tmp_path, caplog):
 
 def test_the_listed_folders_are_the_ones_a_companys_evidence_chooses_from():
     assert set(api.LIBRARY_SOURCES) == set(company_profiles.Evidence.model_fields)
+
+
+# The document's own language (#424): its front matter's, for the page's `lang`
+
+
+def test_a_summary_gives_the_front_matters_language(tmp_path):
+    path = write(tmp_path, "richtlinie", "---\ntitle: Richtlinie\nlanguage: de\n---\n")
+
+    assert document_summary(path, "policies", TODAY).language == "de"
+
+
+@pytest.mark.parametrize("front", ["title: No language\n", 'language: ""\n', "language: [de]\n"])
+def test_no_or_an_empty_language_gives_none(tmp_path, front):
+    path = write(tmp_path, "doc", f"---\n{front}---\n")
+
+    assert document_summary(path, "policies", TODAY).language is None
