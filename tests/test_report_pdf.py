@@ -296,3 +296,21 @@ def test_ids_too_long_to_fit_whole_break_only_after_a_dash_or_slash():
     built = built_report(entries=[replace(entry("u", 1), id=1, model=long_id)])
     shown = text(report_pdf.pdf(built, report.words_for("en"))).replace(report_pdf.BREAK, "")
     assert long_id in shown  # the id as written, its BREAKs drawn as nothing
+
+
+def test_a_note_with_a_token_too_long_for_any_column_breaks_only_that_token():
+    # #353's verify: a 96-character hash in a note once shrank every column, so even the headers
+    # broke mid-word. Now only the note's own column gives way.
+    token = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + "0" * 32
+    words = report.words_for("en")
+    body = report.trail_rows(
+        [replace(e, note=f"Hash {token}").to_dict() for e in fixture_trail("nordlicht")], words
+    )
+    sheet = report_pdf._Sheet()
+    sheet.add_page(orientation="landscape")
+
+    head, cells, widths = report_pdf.trail_table(sheet, report.trail_columns(words), body)
+
+    assert sum(widths) <= sheet.epw + 0.01
+    broken = breaks_inside_words(sheet, head, cells, widths)
+    assert broken and all(token[:8] in line for line in broken)  # the token's cells, no other

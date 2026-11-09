@@ -227,19 +227,35 @@ def trail_table(
     """The audit trail's header, rows and column widths across the page (#353), so no line
     breaks inside a word. Each column is at least as wide as its widest word or id (a header's
     in bold); the rest of the page is shared out by how much more each column's longest cell
-    wants. When the words can't all fit, an id may break after a "-" or "/" instead (a BREAK
-    there), each column then as wide as its widest piece; past that, the page is shared."""
+    wants. When the words can't all fit, the widest columns give way first, down to their
+    widest piece: an id may then break after a "-" or "/" (a BREAK there). Only a column whose
+    piece is wider than any column can be breaks inside a word, and only there."""
     head = [str(c) for c in columns]
     rows = [[str(v) for v in r] for r in body]
-    widths = _fitted(sheet, head, rows, str.split)
-    if widths is None:
-        head = [_breakable(c) for c in head]
-        rows = [[_breakable(v) for v in r] for r in rows]
-        widths = _fitted(sheet, head, rows, _pieces)
-    if widths is None:  # pieces too wide for the page: scaled to it
-        least = _least(sheet, head, rows, _pieces)
-        widths = tuple(w * sheet.epw / sum(least) for w in least)
-    return head, rows, widths
+    words = _least(sheet, head, rows, str.split)
+    if sum(words) <= sheet.epw:
+        return head, rows, _shared(sheet, head, rows, words)
+    head = [_breakable(c) for c in head]
+    rows = [[_breakable(v) for v in r] for r in rows]
+    pieces = _least(sheet, head, rows, _pieces)
+    if sum(pieces) <= sheet.epw:  # whole words where they fit, pieces in the widest columns
+        least = _capped(words, pieces, sheet.epw)
+    else:  # a piece too wide for the page: its column alone breaks inside a word
+        least = _capped(pieces, [0.0] * len(pieces), sheet.epw)
+    return head, rows, _shared(sheet, head, rows, least)
+
+
+def _capped(widths: list[float], floors: list[float], total: float) -> list[float]:
+    """`widths` with the widest cut to one cap, never under their `floors`, so they sum to
+    `total`: the narrow columns keep their width and the widest give way."""
+    low, high = 0.0, max(widths)
+    for _ in range(60):  # halving: well under a hundredth of a millimetre
+        cap = (low + high) / 2
+        if sum(max(f, min(w, cap)) for w, f in zip(widths, floors, strict=True)) > total:
+            high = cap
+        else:
+            low = cap
+    return [max(f, min(w, low)) for w, f in zip(widths, floors, strict=True)]
 
 
 def _breakable(text: str) -> str:
@@ -274,15 +290,12 @@ def _least(
     ]
 
 
-def _fitted(
-    sheet: _Sheet, head: list[str], rows: list[list[str]], parts: Callable[[str], list[str]]
-) -> tuple[float, ...] | None:
-    """Widths at least the widest of each column's `parts`, the rest of the page shared by
-    what each column's longest cell wants on one line; None when the parts don't fit."""
-    least = _least(sheet, head, rows, parts)
-    spare = sheet.epw - sum(least)
-    if spare < 0:
-        return None
+def _shared(
+    sheet: _Sheet, head: list[str], rows: list[list[str]], least: list[float]
+) -> tuple[float, ...]:
+    """The `least` widths with the rest of the page shared by what each column's longest cell
+    wants on one line, and anything left after that evenly."""
+    spare = max(sheet.epw - sum(least), 0)
     whole = [
         max(_width(sheet, " ".join(t.replace(BREAK, "").split()), b) for t, b in col)
         for col in _columns(head, rows)
