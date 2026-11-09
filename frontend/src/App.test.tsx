@@ -46,6 +46,7 @@ const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1
 const OVERVIEW: Overview = {
   company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
   goal: 'audit-readiness', requirements: {},
+  rounds: { current: { name: 'First round', opened_at: null }, comparison: null },
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0, remediation_approved: 0 },

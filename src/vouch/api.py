@@ -26,7 +26,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, goal, remediation, report, report_pdf
+from vouch import audit, goal, remediation, report, report_pdf, rounds
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -420,6 +420,15 @@ def profile_goals(db: AppDatabase) -> goal.ProfileGoals:
 
 
 ProfileGoals = Annotated[goal.ProfileGoals, Depends(profile_goals)]
+
+
+def review_rounds(db: AppDatabase) -> rounds.ReviewRounds:
+    """Where each user's review rounds under each profile are kept, with their audit entries
+    (#402): Postgres with a database URL, else this process."""
+    return rounds.process_rounds() if db is None else rounds.PostgresRounds(db)
+
+
+ReviewRounds = Annotated[rounds.ReviewRounds, Depends(review_rounds)]
 
 
 def assessment_data(
@@ -947,12 +956,14 @@ def dossier_overview(
     saver: Checkpointer,
     items: RemediationItems,
     goals: ProfileGoals,
+    review: ReviewRounds,
 ) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
     each control's requirements, for its working paper (#41); its ISA text in the profile's
-    edition (#199), an unreadable edition a plain 500; and the user's Goal under the profile
-    (#369). Redacted as the stream's events are."""
+    edition (#199), an unreadable edition a plain 500; the user's Goal under the profile
+    (#369); and their review rounds (#402): the open one, and the comparison with the last one
+    closed since the fresh start. Redacted as the stream's events are."""
     controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
@@ -961,7 +972,81 @@ def dossier_overview(
     return clean | {
         "requirements": paper_requirements(profile, controls),
         "goal": goals.goal(memory.user_id, memory.profile_id),
+        "rounds": _rounds(review, memory, controls, latest),
     }
+
+
+def _rounds(
+    review: rounds.ReviewRounds,
+    memory: Memory,
+    controls: list[IsaControl],
+    latest: dict[str, Assessment],
+) -> dict[str, Any]:
+    """The overview's review rounds (#402): the open one (None when none is), and now compared
+    with the last round closed since the fresh start (None when there is none)."""
+    current = review.current(memory.user_id, memory.profile_id)
+    against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
+    comparison = None
+    if against is not None and against.closed_at is not None:
+        comparison = {
+            "against": {"name": against.name, "closed_at": against.closed_at.isoformat()}
+        } | dict(rounds.compare(against.results, controls, latest))
+    return {
+        "current": None if current is None else _opened(current),
+        "comparison": comparison,
+    }
+
+
+def _opened(current: rounds.Round) -> dict[str, Any]:
+    opened = current.opened_at
+    return {"name": current.name, "opened_at": None if opened is None else opened.isoformat()}
+
+
+@router.post("/rounds")
+def start_round(
+    request: Annotated[rounds.RoundRequest, Body()],
+    review: ReviewRounds,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead starts the next review round under the profile, by name (#402), with its audit
+    entry, together (when the entry can't be written, neither is: a 503). While a round is
+    open, the first one too, a 409 with nothing written; a blank or longer name a 422. It
+    starts no run, so it works while one goes on."""
+    try:
+        started = rounds.start(
+            review, request.name, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id
+        )
+    except rounds.RoundOpen as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    return {"current": _opened(started)}
+
+
+@router.post("/rounds/close")
+def close_round(
+    review: ReviewRounds,
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead closes the open review round under the profile (#402): its results frozen (each
+    control's newest assessment as it stands now) with its audit entry, together (when the
+    entry can't be written, neither is: a 503). With none open, a 409 with nothing written."""
+    controls, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    try:
+        closed = rounds.close(
+            review,
+            rounds.freeze(controls, latest),
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+        )
+    except rounds.NoRoundOpen as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    assert closed.closed_at is not None
+    return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
 
 
 @router.put("/goal")

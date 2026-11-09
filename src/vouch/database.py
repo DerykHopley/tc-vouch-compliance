@@ -21,10 +21,11 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
 limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
-the remediation items the lead decided on (#43) and each profile's Goal (#369); nothing else
-does. Before it has run, a setting reads as unset and a Goal as Audit readiness, and a write, a
-count, the usage, a review, a remediation decision or a Goal change is DatabaseUnavailable (a
-503).
+the remediation items the lead decided on (#43), each profile's Goal (#369) and its review
+rounds (#402); nothing else does. Before it has run, a setting reads as unset, a Goal as Audit
+readiness and the review rounds as the first one, open; and a write, a count, the usage, a
+review, a remediation decision, a Goal change or a round started or closed is
+DatabaseUnavailable (a 503).
 """
 
 import hashlib
@@ -34,7 +35,7 @@ import sys
 import threading
 import time
 import urllib.parse
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Any, Literal, Protocol, Self, get_args
@@ -111,9 +112,20 @@ CREATE_USAGE = (
 
 AUDIT_TABLE = "vouch_audit_trail"
 """Every reviewed verdict and override (vouch.audit), append-only, in its decision's transaction."""
-AuditAction = Literal["accept", "reject", "override", "confirm", "approve", "discard", "goal"]
+AuditAction = Literal[
+    "accept",
+    "reject",
+    "override",
+    "confirm",
+    "approve",
+    "discard",
+    "goal",
+    "round-start",
+    "round-close",
+]
 """What an audit entry records the compliance lead doing (vouch.audit's Action): `goal` is a
-change of the profile's Goal (#369)."""
+change of the profile's Goal (#369); `round-start` and `round-close` a review round started or
+closed (#402)."""
 Goal = Literal["audit-readiness", "internal-improvement"]
 """What a compliance profile is used for (#369, vouch.goal): kept per user and profile."""
 AUDIT_COLUMNS = (
@@ -133,6 +145,7 @@ AUDIT_COLUMNS = (
     "prompt_version",
     "goal_before",
     "goal_after",
+    "round_name",
 )
 CREATE_AUDIT = (
     f"CREATE TABLE IF NOT EXISTS {AUDIT_TABLE} (id bigserial PRIMARY KEY, "
@@ -142,7 +155,7 @@ CREATE_AUDIT = (
     f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})), "
     "requirement_id text, note text NOT NULL, verdict_before text, verdict_after text, "
     "evidence jsonb NOT NULL, model text NOT NULL, prompt_version text NOT NULL, "
-    "goal_before text, goal_after text)"
+    "goal_before text, goal_after text, round_name text)"
 )
 CREATE_AUDIT_INDEX = (
     f"CREATE INDEX IF NOT EXISTS {AUDIT_TABLE}_by_owner ON {AUDIT_TABLE} "
@@ -186,6 +199,9 @@ ADD_AUDIT_GOAL_COLUMNS = (
 """A trail made before #369 gains the goal columns, nullable: every row keeps them empty, so
 none is rewritten and the append-only guard stays on (an ALTER fires no row trigger). Once
 they are there, a second run does nothing."""
+ADD_AUDIT_ROUND_NAME = f"ALTER TABLE {AUDIT_TABLE} ADD COLUMN IF NOT EXISTS round_name text"
+"""A trail made before #402 gains the round's name, nullable, as the goal columns were added:
+no row rewritten, the append-only guard kept, and nothing done on a second run."""
 AUDIT_ACTION_CHECK = f"{AUDIT_TABLE}_action_check"
 """The name Postgres gave CREATE_AUDIT's action CHECK (table, column, "check")."""
 REPLACE_AUDIT_ACTION_CHECK = (
@@ -200,7 +216,8 @@ REPLACE_AUDIT_ACTION_CHECK = (
     f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})); "
     "END IF; END $$"
 )
-"""A trail made before an action was added (`confirm`, #372; `goal`, #369) has a CHECK refusing it: replaced
+"""A trail made before an action was added (`confirm`, #372; `goal`, #369; the rounds', #402)
+has a CHECK refusing it: replaced
 by one naming every AuditAction. No row is changed (the trail's guard is on update and delete,
 which an ALTER doesn't fire), and once the CHECK names them all, a second run does nothing."""
 REMEDIATION_TABLE = "vouch_remediation_items"
@@ -250,6 +267,21 @@ CREATE_GOALS = (
     f"CHECK (goal IN ({', '.join(repr(g) for g in get_args(Goal))})), "
     "changed_at timestamptz NOT NULL, PRIMARY KEY (user_id, profile_id))"
 )
+ROUNDS_TABLE = "vouch_review_rounds"
+"""Each user's review rounds under each compliance profile (vouch.rounds, #402): at most one open
+(`closed_at` null), each closed one with its frozen results. None kept is the first round, open
+since the start (`opened_at` null), written only when it is closed. Each start and close is
+written in its audit entry's transaction."""
+CREATE_ROUNDS = (
+    f"CREATE TABLE IF NOT EXISTS {ROUNDS_TABLE} (id bigserial PRIMARY KEY, "
+    "user_id text NOT NULL, profile_id text NOT NULL, name text NOT NULL, "
+    "opened_at timestamptz, closed_at timestamptz, results jsonb)"
+)
+CREATE_ROUNDS_ONE_OPEN = (
+    f"CREATE UNIQUE INDEX IF NOT EXISTS {ROUNDS_TABLE}_one_open ON {ROUNDS_TABLE} "
+    "(user_id, profile_id) WHERE closed_at IS NULL"
+)
+"""At most one open round per user and profile, whoever writes."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -271,6 +303,7 @@ SETUP_TABLES = (
     AUDIT_TABLE,
     REMEDIATION_TABLE,
     GOALS_TABLE,
+    ROUNDS_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -748,6 +781,123 @@ class Database:
             _insert_audit(conn, [entry(before)])
         return True
 
+    def review_rounds(
+        self, user_id: str, profile_id: str, closed_since: datetime | None
+    ) -> tuple[bool, dict[str, Any] | None, dict[str, Any] | None]:
+        """The user's review rounds under the profile (#402): whether any is kept, the open one,
+        and the last one closed at or after `closed_since` (any, when None), each a mapping of
+        `name`, `opened_at`, `closed_at` and `results`. Before vouch-db-setup made the table,
+        none (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
+        columns = "name, opened_at, closed_at, results"
+        mine = "user_id = %(user_id)s AND profile_id = %(profile_id)s"
+        args = {"user_id": user_id, "profile_id": profile_id, "since": closed_since}
+        with self.connection() as conn:
+            try:
+                kept = conn.execute(
+                    f"SELECT EXISTS (SELECT 1 FROM {ROUNDS_TABLE} WHERE {mine}) AS kept", args
+                ).fetchone()
+                open_round = conn.execute(
+                    f"SELECT {columns} FROM {ROUNDS_TABLE} WHERE {mine} AND closed_at IS NULL",
+                    args,
+                ).fetchone()
+                closed = conn.execute(
+                    f"SELECT {columns} FROM {ROUNDS_TABLE} WHERE {mine} "
+                    "AND closed_at IS NOT NULL "
+                    "AND (%(since)s::timestamptz IS NULL OR closed_at >= %(since)s) "
+                    "ORDER BY closed_at DESC, id DESC LIMIT 1",
+                    args,
+                ).fetchone()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", ROUNDS_TABLE)
+                return False, None, None
+        return bool(kept and kept["kept"]), open_round, closed
+
+    def start_round(
+        self,
+        user_id: str,
+        profile_id: str,
+        name: str,
+        opened_at: datetime,
+        entry: Mapping[str, Any],
+    ) -> bool:
+        """Open a round named `name` at `opened_at` with its audit entry (a mapping of
+        AUDIT_COLUMNS), in one transaction: both, or neither. While a round is open (the first
+        one too, open while none is kept) it writes nothing: False. Two at once take turns on
+        the user's and profile's lock. Raises DatabaseUnavailable for any database failure, also
+        before vouch-db-setup ran."""
+        tables = f"{ROUNDS_TABLE} or {AUDIT_TABLE}"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            conn.execute(DECIDE_LOCK, (lock_id(json.dumps(["round", user_id, profile_id])),))
+            row = conn.execute(
+                "SELECT count(*) AS kept, count(*) FILTER (WHERE closed_at IS NULL) AS open "
+                f"FROM {ROUNDS_TABLE} WHERE user_id = %s AND profile_id = %s",
+                (user_id, profile_id),
+            ).fetchone()
+            if row is None or row["kept"] == 0 or row["open"] > 0:
+                return False
+            conn.execute(
+                f"INSERT INTO {ROUNDS_TABLE} (user_id, profile_id, name, opened_at) "
+                "VALUES (%s, %s, %s, %s)",
+                (user_id, profile_id, name, opened_at),
+            )
+            _insert_audit(conn, [entry])
+        return True
+
+    def close_round(
+        self,
+        user_id: str,
+        profile_id: str,
+        first_name: str,
+        closed_at: datetime,
+        results: Sequence[Mapping[str, Any]],
+        entry: Callable[[str], Mapping[str, Any]],
+    ) -> tuple[str, datetime | None] | None:
+        """Close the open round at `closed_at` with its frozen `results` and its audit entry
+        (`entry` of the round's name: a mapping of AUDIT_COLUMNS), in one transaction: both, or
+        neither. With none kept, the first round (named `first_name`, opened at no time) is
+        written closed. The closed round's name and opening time; None when no round is open,
+        with nothing written. Two at once take turns on the user's and profile's lock, so one closes.
+        Raises DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
+        tables = f"{ROUNDS_TABLE} or {AUDIT_TABLE}"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            conn.execute(DECIDE_LOCK, (lock_id(json.dumps(["round", user_id, profile_id])),))
+            mine = (user_id, profile_id)
+            closed = conn.execute(
+                f"UPDATE {ROUNDS_TABLE} SET closed_at = %s, results = %s "
+                "WHERE user_id = %s AND profile_id = %s AND closed_at IS NULL "
+                "RETURNING name, opened_at",
+                (closed_at, Jsonb(results), *mine),
+            ).fetchone()
+            opened_at: datetime | None = None
+            if closed is not None:
+                name: str = closed["name"]
+                opened_at = closed["opened_at"]
+            else:
+                kept = conn.execute(
+                    f"SELECT 1 FROM {ROUNDS_TABLE} WHERE user_id = %s AND profile_id = %s",
+                    mine,
+                ).fetchone()
+                if kept is not None:
+                    return None
+                name = first_name
+                conn.execute(
+                    f"INSERT INTO {ROUNDS_TABLE} (user_id, profile_id, name, closed_at, results) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (*mine, name, closed_at, Jsonb(results)),
+                )
+            _insert_audit(conn, [entry(name)])
+        return name, opened_at
+
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[dict[str, Any]]:
@@ -792,12 +942,15 @@ class Database:
                     conn.execute(trigger)
                 conn.execute(ADD_AUDIT_REVIEWER_NAME)
                 conn.execute(ADD_AUDIT_GOAL_COLUMNS)
+                conn.execute(ADD_AUDIT_ROUND_NAME)
                 conn.execute(REPLACE_AUDIT_ACTION_CHECK)
                 conn.execute(CREATE_REMEDIATION)
                 conn.execute(CREATE_REMEDIATION_GUARD)
                 for trigger in CREATE_REMEDIATION_TRIGGERS:
                     conn.execute(trigger)
                 conn.execute(CREATE_GOALS)
+                conn.execute(CREATE_ROUNDS)
+                conn.execute(CREATE_ROUNDS_ONE_OPEN)
         finally:
             conn.close()
 

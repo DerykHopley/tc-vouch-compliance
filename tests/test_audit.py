@@ -100,6 +100,7 @@ def test_confirm_findings_with_one_override_writes_it_then_confirm_and_accept_wr
         "prompt_version": reviewed["prompt_version"],
         "goal_before": None,  # a goal change's only (#369)
         "goal_after": None,
+        "round_name": None,
     }
     confirm_entry, override = after_confirm  # newest first: the override, then the confirm
     assert entries[1:] == after_confirm

@@ -51,7 +51,27 @@ export type Overview = {
   next_step: NextStep
   controls: ControlCard[]
   quotes: Quote[]
+  /** The lead's review rounds under the profile (#402). */
+  rounds: Rounds
 }
+
+/** The open review round: `opened_at` null for the first one, open since the start. */
+export type OpenRound = { name: string; opened_at: string | null }
+
+/** A count now, and when the compared round closed. */
+export type NowAndThen = { now: number; then: number }
+
+/** Now against the last closed review round (#402), accepted verdicts only: `now` is the overview's readiness. */
+export type RoundComparison = {
+  against: { name: string; closed_at: string }
+  accepted: NowAndThen
+  by_verdict: Record<Verdict, NowAndThen>
+  /** Each control whose accepted verdict changed, in the base framework's order; null: not accepted. */
+  changed: { control_id: string; before: Verdict | null; after: Verdict | null }[]
+}
+
+/** The open round (null when none is), and the comparison (null when no round was closed since the fresh start). */
+export type Rounds = { current: OpenRound | null; comparison: RoundComparison | null }
 
 /** A control's ISO 27001 reference as the screens show it: "ISO A.5.15, A.8.5" (ISA writes "ISO 27001:2022: …"). */
 export const isoLabel = (iso: string) => iso.replace(/^ISO 27001:2022:? /, 'ISO ')
@@ -97,6 +117,39 @@ export async function changeGoal(goal: Goal): Promise<GoalChange> {
   }
 }
 
+/** How starting or closing a review round went: changed, refused with the server's sentence (a 409: a round is open
+ * already, or none is), the session ended (a 401), or failed any other way. */
+export type RoundChange = { result: 'changed' } | { result: 'refused'; message: string } | { result: 'signed-out' }
+  | { result: 'failed' }
+
+async function changeRound(path: string, body?: object): Promise<RoundChange> {
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+    if (response.ok) return { result: 'changed' }
+    if (sessionEnded(response)) return { result: 'signed-out' }
+    if (response.status === 409) {
+      const detail = await response.json().then((answer: { detail?: unknown }) => answer.detail, () => undefined)
+      if (typeof detail === 'string') return { result: 'refused', message: detail }
+    }
+    return { result: 'failed' }
+  } catch {
+    return { result: 'failed' }
+  }
+}
+
+/** A round's name is at most this many characters, as the API takes it (`vouch.rounds.NAME_LENGTH`). */
+export const ROUND_NAME_LENGTH = 60
+
+/** Starts the next review round by name (`POST /api/rounds`, #402); the start is an audit trail entry. */
+export const startRound = (name: string) => changeRound('/api/rounds', { name })
+
+/** Closes the open review round, freezing its results (`POST /api/rounds/close`, #402); an audit trail entry. */
+export const closeRound = () => changeRound('/api/rounds/close')
+
 export type OverviewState =
   | { status: 'loading' }
   | { status: 'ready'; overview: Overview }
@@ -105,7 +158,8 @@ export type OverviewState =
 /**
  * The overview as the page shows it; `load` reads it again (only the latest answer is shown). `goalChanged` reads it
  * again after a goal change (#369) without failing the page: the change was kept, so when the read fails the overview
- * stays, showing the new goal, and it answers false for the hero to say so. `noteAssessed` puts a
+ * stays, showing the new goal, and it answers false for the hero to say so. `roundChanged` does the same after a
+ * review round is started or closed (#402), the overview kept as it was when the read fails. `noteAssessed` puts a
  * finished run's verdict and review state on its control's card without a read (each counts to the rate limit), so
  * the working paper's index stays current; the Dossier reads the overview afresh anyway.
  */
@@ -140,5 +194,12 @@ export function useOverview() {
       : now.status === 'ready' ? { status: 'ready', overview: { ...now.overview, goal } } : now)
     return answer.ok
   }, [])
-  return { state, load, retry, noteAssessed, goalChanged }
+  const roundChanged = useCallback(async () => {
+    const asked = ++latest.current
+    const answer = await fetchOverview()
+    if (asked !== latest.current) return true
+    if (answer.ok) setState({ status: 'ready', overview: answer.overview })
+    return answer.ok
+  }, [])
+  return { state, load, retry, noteAssessed, goalChanged, roundChanged }
 }

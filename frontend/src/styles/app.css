@@ -79,7 +79,15 @@ button.prof-button:hover { border-color: var(--navy); }
 .hero .next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 /* The goal (#369, design.md Components: Goal): its own line under the company pill, Change goal beside it. */
 .hero .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 10px; color: var(--muted); }
-/* The profile pass (#390, design.md Components: Profile pass): its note under the hero's buttons, then its result as a
+/* The review round (#402, design.md Components: Review round): its own line under the goal, as the goal's; with none
+   open, the next round's name field between the words and Start round. */
+.hero .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
+.hero .round .field { flex: 0 1 240px; }
+/* The round comparison (#402, design.md Components: Round comparison): counts now and their change, then the changed
+   controls, each a link to its working paper at least 44px tall. */
+.compare-counts, .compare-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.compare-rows { display: grid; gap: 0; }
+.compare-rows a { display: inline-flex; align-items: center; min-height: 44px; }/* The profile pass (#390, design.md Components: Profile pass): its note under the hero's buttons, then its result as a
    sheet, one row per new assessment: the id, verdict chip and review state tag, then Open and Assess again. */
 .hero .field-note { margin-top: 8px; }
 .pass h2 { font-size: 20px; }

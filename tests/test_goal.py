@@ -145,6 +145,7 @@ def test_a_change_writes_one_goal_entry_with_empty_control_fields(database_url, 
         "prompt_version": "",
         "goal_before": "audit-readiness",
         "goal_after": "internal-improvement",
+        "round_name": None,
     }
     assert (back["goal_before"], back["goal_after"]) == ("internal-improvement", "audit-readiness")
     assert before <= datetime.fromisoformat(first["at"]) <= datetime.fromisoformat(back["at"])

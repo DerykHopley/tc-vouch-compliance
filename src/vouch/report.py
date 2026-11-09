@@ -98,6 +98,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "approve": "Approved",
             "discard": "Discarded",
             "goal": "Goal changed from {before} to {after}",
+            "round-start": "Review round started: {round}",
+            "round-close": "Review round closed: {round}",
         },
         "goals": {
             "audit-readiness": "Audit readiness",
@@ -178,6 +180,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "approve": "Freigegeben",
             "discard": "Verworfen",
             "goal": "Ziel geändert von {before} zu {after}",
+            "round-start": "Prüfrunde begonnen: {round}",
+            "round-close": "Prüfrunde abgeschlossen: {round}",
         },
         # As `actions.goal` reads them, after "von" and "zu" (dative): "Interner Verbesserung".
         "goals": {
@@ -593,8 +597,10 @@ def trail_columns(words: Mapping[str, Any]) -> list[str]:
 
 def action_word(e: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     """An entry's action in the report's words; a goal change's (#369) with its goals before and
-    after filled in."""
+    after filled in, a review round's (#402) with the round's name."""
     word: str = words["actions"][e["action"]]
+    if e["action"] in ("round-start", "round-close"):
+        return word.replace("{round}", e.get("round_name") or "")
     if e["action"] != "goal":
         return word
     goals = words["goals"]

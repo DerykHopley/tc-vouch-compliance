@@ -59,6 +59,13 @@ def pass_url() -> str:
 
 
 @pytest.fixture
+def rounds_url() -> str:
+    """A ninth Vouch like vouch_url, for the review rounds' checks (#402): closing a round changes
+    the hero and the comparison other checks read, and accepting a control the counts."""
+    return os.environ["ROUNDS_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

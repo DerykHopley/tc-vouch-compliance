@@ -1,7 +1,8 @@
-import { type MouseEvent, useState } from 'react'
+import { type MouseEvent, useId, useState } from 'react'
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { changeGoal, type ControlCard, controlPath, GOAL_WORDS, isoLabel, type NextStep, type Overview,
-  type OverviewState, type Readiness, SEGMENTS } from './overview.ts'
+import { changeGoal, closeRound, type ControlCard, controlPath, GOAL_WORDS, isoLabel, type NextStep, type Overview,
+  type OverviewState, type Readiness, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
+  from './overview.ts'
 import type { PassState } from './profilePass.ts'
 import type { Goal } from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
@@ -23,9 +24,12 @@ type Props = {
   /** The goal was changed to `goal` (#369): reads the overview again, so the hero shows the new one; whether it was
    * read. */
   onGoalChanged: (goal: Goal) => Promise<boolean>
+  /** A review round was started or closed (#402): reads the overview again; whether it was read. */
+  onRoundChanged: () => Promise<boolean>
 }
 
-export default function Dossier({ state, onRetry, onOpen, running, pass, onPass, onGoalChanged }: Props) {
+export default function Dossier({ state, onRetry, onOpen, running, pass, onPass, onGoalChanged, onRoundChanged }:
+  Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -43,9 +47,10 @@ export default function Dossier({ state, onRetry, onOpen, running, pass, onPass,
   return (
     <main className="dossier wrap">
       <Hero overview={overview} onOpen={onOpen} running={running} pass={pass} onPass={onPass}
-        onGoalChanged={onGoalChanged} />
+        onGoalChanged={onGoalChanged} onRoundChanged={onRoundChanged} />
       <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} running={running} />
       <Band readiness={overview.readiness} />
+      <Comparison overview={overview} onOpen={onOpen} />
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
           <span className="pill">The controls</span>
@@ -70,9 +75,9 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
 }
 
 type HeroProps = { overview: Overview; onOpen: Props['onOpen']; running: string | null; pass: PassState;
-  onPass: () => void; onGoalChanged: Props['onGoalChanged'] }
+  onPass: () => void; onGoalChanged: Props['onGoalChanged']; onRoundChanged: Props['onRoundChanged'] }
 
-function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged }: HeroProps) {
+function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundChanged }: HeroProps) {
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
@@ -92,6 +97,7 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged }: HeroPr
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
       <GoalRow overview={overview} onChanged={onGoalChanged} />
+      <RoundRow overview={overview} onChanged={onRoundChanged} />
       <h1>Prepared for audit. One piece of evidence at a time.</h1>
       <p><b>{headline}</b> {detail}</p>
       {(next || readiness.open > 0) && (
@@ -167,6 +173,163 @@ function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props
         </div>
       )}
     </>
+  )
+}
+
+const ROUND_FAILED = 'The review round could not be changed just now. Please try again.'
+const ROUND_STALE = 'The review round was changed, but the overview could not be read again just now.'
+const NAME_FIRST = 'Name the round first.'
+
+/** A date as the Dossier says it: "9 November 2026" (English, as the rest of the interface). */
+const dateWords = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+/**
+ * The review round on the hero (`docs/design.md`, Components: Review round, #402), under the goal: the open round
+ * with a ghost Close round, which asks first (the browser's own confirm, as Change goal does); with none open, a name
+ * field and a ghost Start round. Either starts no run, so it stays usable while one goes on. Afterwards the overview
+ * is read again; a refusal (409) says the server's sentence, any other failure says so.
+ */
+function RoundRow({ overview, onChanged }: { overview: Overview; onChanged: Props['onRoundChanged'] }) {
+  const [busy, setBusy] = useState(false)
+  const [name, setName] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
+  // The change was kept but the overview wasn't read again: Retry reads it again.
+  const [stale, setStale] = useState(false)
+  // A blank name refused in the browser marks the field, described by the message (as DeveloperPage's fields).
+  const messageId = useId()
+  const unnamed = message === NAME_FIRST
+  const reread = async () => setStale(!await onChanged())
+  const send = async (request: () => Promise<RoundChange>) => {
+    setBusy(true)
+    setMessage(null)
+    setStale(false)
+    try {
+      const answer = await request()
+      if (answer.result === 'changed') {
+        setName('')
+        await reread()
+      } else if (answer.result === 'refused') {
+        setMessage(answer.message)
+        await reread()
+      } else if (answer.result === 'failed') setMessage(ROUND_FAILED)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const current = overview.rounds.current
+  const close = () => {
+    if (busy || current === null) return
+    const question = `Close the review round "${current.name}"? Its results are frozen, and the overview compares `
+      + 'later work with them. The close is recorded in the audit trail.'
+    if (!window.confirm(question)) return
+    void send(closeRound)
+  }
+  const start = () => {
+    if (busy) return
+    const trimmed = name.trim()
+    if (trimmed === '') {
+      setStale(false)
+      setMessage(NAME_FIRST)
+      return
+    }
+    void send(() => startRound(trimmed))
+  }
+  return (
+    <>
+      {current !== null ? (
+        <div className="round">
+          <span>
+            Review round: {current.name}, open since{' '}
+            {current.opened_at === null ? 'the start' : dateWords(current.opened_at)}
+          </span>
+          <button className="btn btn-ghost" onClick={close} disabled={busy} aria-busy={busy || undefined}>
+            Close round
+          </button>
+        </div>
+      ) : (
+        <form className="round" onSubmit={(e) => { e.preventDefault(); start() }}>
+          <span>No review round open.</span>
+          <input className="field" type="text" aria-label="Name of the next round" placeholder="Name of the next round"
+            value={name} onChange={(e) => setName(e.target.value)} maxLength={ROUND_NAME_LENGTH}
+            aria-invalid={unnamed || undefined} aria-describedby={unnamed ? messageId : undefined} />
+          <button className="btn btn-ghost" type="submit" disabled={busy} aria-busy={busy || undefined}>
+            Start round
+          </button>
+        </form>
+      )}
+      {message !== null && <p id={messageId} role="alert" className="field-note notice">{message}</p>}
+      {stale && (
+        <div className="next">
+          <p role="alert" className="field-note notice">{ROUND_STALE}</p>
+          <button className="btn" onClick={() => void reread()}>Retry</button>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** A count's change since the compared round, in words: "(+2)", "(-1)", "(no change)". */
+const change = (now: number, then: number) =>
+  now === then ? '(no change)' : `(${now > then ? '+' : '-'}${Math.abs(now - then)})`
+
+/** An accepted verdict, or none, as the comparison names it. */
+const acceptedWord = (verdict: Verdict | null) => verdict === null ? 'Not accepted' : VERDICT_WORDS[verdict]
+
+/**
+ * Now against the last closed review round (`docs/design.md`, Components: Round comparison, #402): accepted verdicts
+ * only, as readiness counts them, then each control whose accepted verdict changed, its link opening its working
+ * paper in place (as a Control card's). Never called progress.
+ */
+function Comparison({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'] }) {
+  const comparison: RoundComparison | null = overview.rounds.comparison
+  if (comparison === null) {
+    return (
+      <section className="controls compare" aria-labelledby="compare-title">
+        <div className="head">
+          <span className="pill">Review rounds</span>
+          <h2 id="compare-title">Compared with the last round</h2>
+        </div>
+        <p className="sheet empty">
+          {overview.rounds.current === null
+            // None open and none closed since the fresh start: the last one closed before it.
+            ? 'No review round has been closed since the fresh start. Start the next round, and once it is closed the '
+              + 'overview compares later work with it.'
+            : 'No closed review round yet. Close this one to compare the next with it.'}
+        </p>
+      </section>
+    )
+  }
+  const { against, accepted, by_verdict: verdicts, changed } = comparison
+  const counted = SEGMENTS.filter((v) => v !== 'not-applicable' || verdicts[v].now > 0 || verdicts[v].then > 0)
+  return (
+    <section className="controls compare" aria-labelledby="compare-title">
+      <div className="head">
+        <span className="pill">Since {dateWords(against.closed_at)}</span>
+        <h2 id="compare-title">Compared with {against.name}</h2>
+        <p>Accepted: {accepted.now} now, {accepted.then} when {against.name} closed.</p>
+      </div>
+      <div className="sheet">
+        <ul className="compare-counts">
+          {counted.map((v) => (
+            <li key={v}>{VERDICT_WORDS[v]} {verdicts[v].now} {change(verdicts[v].now, verdicts[v].then)}</li>
+          ))}
+        </ul>
+        {changed.length === 0 ? <p>Nothing has changed since {against.name} closed.</p> : (
+          <>
+            <h3 className="prose-h">Changed controls</h3>
+            <ul className="compare-rows">
+              {changed.map((c) => (
+                <li key={c.control_id}>
+                  <a href={controlPath(c.control_id)} onClick={(e) => openInPlace(e, () => onOpen(c.control_id, false))}>
+                    <span className="mono">{c.control_id}</span>: {acceptedWord(c.before)} → {acceptedWord(c.after)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </section>
   )
 }
 

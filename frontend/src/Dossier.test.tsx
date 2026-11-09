@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Dossier from './Dossier.tsx'
 import type { ControlCard, Overview } from './overview.ts'
+import type { Verdict } from './assessment.ts'
 import type { Goal } from './report.ts'
 import type { PassAssessment, PassState } from './profilePass.ts'
 
@@ -16,7 +17,7 @@ afterEach(() => {
 const NO_PASS = { pass: { kind: 'idle' } as const, onPass: () => {} }
 
 /** No goal change: one would read the overview again, and say it did. */
-const NO_GOAL = { onGoalChanged: () => Promise.resolve(true) }
+const NO_GOAL = { onGoalChanged: () => Promise.resolve(true), onRoundChanged: () => Promise.resolve(true) }
 
 const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
 
@@ -29,6 +30,7 @@ function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verd
   return {
     company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
     goal: 'audit-readiness', requirements: {},
+    rounds: { current: { name: 'First round', opened_at: null }, comparison: null },
     readiness: { controls: 12, accepted: 2,
       by_verdict: { evidenced: 1, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 10,
       remediation_items: 3, remediation_approved: 0 },
@@ -396,7 +398,7 @@ describe('the goal on the Dossier (ticket 369)', () => {
     { running = null as string | null, pass = NO_PASS.pass as PassState, read = true } = {}) {
     const onGoalChanged = vi.fn((_goal: Goal) => Promise.resolve(read))
     render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={running}
-      pass={pass} onPass={() => {}} onGoalChanged={onGoalChanged} />)
+      pass={pass} onPass={() => {}} onGoalChanged={onGoalChanged} onRoundChanged={() => Promise.resolve(true)} />)
     return { onGoalChanged }
   }
 
@@ -488,5 +490,208 @@ describe('the goal on the Dossier (ticket 369)', () => {
     cleanup()
     shown(seeded(), { pass: { kind: 'running' } })
     expect(changeButton().disabled).toBe(false)
+  })
+})
+
+describe('the review round on the Dossier (ticket 402)', () => {
+  const FAILED = 'The review round could not be changed just now. Please try again.'
+  const roundLine = () => screen.getByText(/^Review round: |^No review round open\./)
+  const closeButton = () => screen.getByRole('button', { name: 'Close round' }) as HTMLButtonElement
+  const startButton = () => screen.getByRole('button', { name: 'Start round' }) as HTMLButtonElement
+  const nameField = () => screen.getByRole('textbox', { name: 'Name of the next round' }) as HTMLInputElement
+  const closed = { current: null, comparison: null }
+
+  /** The API: POST to the rounds answers `answer`; nothing else is asked. */
+  function serve(answer: () => Promise<Response>) {
+    const fetch = vi.fn((url: string, init?: RequestInit) =>
+      url.startsWith('/api/rounds') && init?.method === 'POST' ? answer() : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  function shown(rounds: Overview['rounds'] = seeded().rounds, { read = true } = {}) {
+    const onRoundChanged = vi.fn(() => Promise.resolve(read))
+    render(<Dossier state={{ status: 'ready', overview: { ...seeded(), rounds } }} onRetry={() => {}}
+      onOpen={() => {}} running={null} {...NO_PASS} onGoalChanged={() => Promise.resolve(true)}
+      onRoundChanged={onRoundChanged} />)
+    return { onRoundChanged }
+  }
+
+  it('shows the first round open since the start, under the goal, with a ghost Close round', () => {
+    shown()
+    expect(roundLine().textContent).toBe('Review round: First round, open since the start')
+    expect(closeButton().className).toBe('btn btn-ghost')
+    const hero = screen.getByRole('heading', { level: 1 }).parentElement!
+    const order = [...hero.children].map((el) => el.className || el.tagName)
+    expect(order.indexOf('round')).toBe(order.indexOf('goal') + 1)
+  })
+
+  it('names a started round with the day it opened', () => {
+    shown({ current: { name: 'Q4 2026', opened_at: '2026-11-09T10:30:00+00:00' }, comparison: null })
+    expect(roundLine().textContent).toBe('Review round: Q4 2026, open since 9 November 2026')
+  })
+
+  it('asks before closing, and on Cancel sends nothing', async () => {
+    const fetch = serve(() => Promise.resolve(new Response('{}')))
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { onRoundChanged } = shown({ current: { name: 'Q4 2026', opened_at: '2026-11-09T10:30:00Z' }, comparison: null })
+    await userEvent.click(closeButton())
+    expect(ask).toHaveBeenCalledWith('Close the review round "Q4 2026"? Its results are frozen, and the overview '
+      + 'compares later work with them. The close is recorded in the audit trail.')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(onRoundChanged).not.toHaveBeenCalled()
+  })
+
+  it('on OK closes the round, busy meanwhile, then reads the overview again', async () => {
+    let answer: (r: Response) => void = () => {}
+    const fetch = serve(() => new Promise<Response>((resolve) => { answer = resolve }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { onRoundChanged } = shown()
+    await userEvent.click(closeButton())
+    expect(fetch.mock.calls[0][0]).toBe('/api/rounds/close')
+    expect(closeButton().disabled).toBe(true)
+    expect(closeButton().getAttribute('aria-busy')).toBe('true')
+    answer(new Response(JSON.stringify({ closed: { name: 'First round', closed_at: '2026-11-09T10:30:00Z' } })))
+    await waitFor(() => expect(onRoundChanged).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(closeButton().disabled).toBe(false))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("when the change is kept but the overview can't be read again, says so with Retry", async () => {
+    serve(() => Promise.resolve(new Response('{}')))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { onRoundChanged } = shown(seeded().rounds, { read: false })
+    await userEvent.click(closeButton())
+    expect((await screen.findByRole('alert')).textContent)
+      .toBe('The review round was changed, but the overview could not be read again just now.')
+    onRoundChanged.mockResolvedValue(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRoundChanged).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('with none open, offers a labelled name field and Start round', () => {
+    shown(closed)
+    expect(roundLine().textContent).toBe('No review round open.')
+    expect(nameField().value).toBe('')
+    expect(startButton().className).toBe('btn btn-ghost')
+    expect(screen.queryByRole('button', { name: 'Close round' })).toBeNull()
+  })
+
+  it('refuses a blank name in the browser and sends nothing', async () => {
+    const fetch = serve(() => Promise.resolve(new Response('{}')))
+    const { onRoundChanged } = shown(closed)
+    await userEvent.type(nameField(), '   ')
+    await userEvent.click(startButton())
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('Name the round first.')
+    expect(nameField().getAttribute('aria-invalid')).toBe('true')
+    expect(nameField().getAttribute('aria-describedby')).toBe(alert.id)
+    expect(alert.id).not.toBe('')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(onRoundChanged).not.toHaveBeenCalled()
+  })
+
+  it('caps the name at the API\'s 60 characters', () => {
+    shown(closed)
+    expect(nameField().maxLength).toBe(60)
+    expect(nameField().getAttribute('aria-invalid')).toBeNull()
+  })
+
+  it('starts the round by its trimmed name, then reads the overview again', async () => {
+    const fetch = serve(() => Promise.resolve(new Response(JSON.stringify({ current: { name: 'Q4 2026' } }))))
+    const { onRoundChanged } = shown(closed)
+    await userEvent.type(nameField(), ' Q4 2026 ')
+    await userEvent.click(startButton())
+    await waitFor(() => expect(onRoundChanged).toHaveBeenCalledTimes(1))
+    const [url, init] = fetch.mock.calls[0]
+    expect(url).toBe('/api/rounds')
+    expect(JSON.parse(String(init?.body))).toEqual({ name: 'Q4 2026' })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("shows a 409's sentence under the line", async () => {
+    const message = 'Close the current review round before starting the next.'
+    serve(() => Promise.resolve(new Response(JSON.stringify({ detail: message }), { status: 409 })))
+    shown(closed)
+    await userEvent.type(nameField(), 'Q4 2026')
+    await userEvent.click(startButton())
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(message)
+    expect(alert.className).toBe('field-note notice')
+  })
+
+  it.each([
+    ['a 503', () => Promise.resolve(new Response('{}', { status: 503 }))],
+    ['no answer', () => Promise.reject(new TypeError('offline'))],
+  ])('on %s says the round could not be changed', async (_, answer) => {
+    serve(answer)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { onRoundChanged } = shown()
+    await userEvent.click(closeButton())
+    expect((await screen.findByRole('alert')).textContent).toBe(FAILED)
+    expect(onRoundChanged).not.toHaveBeenCalled()
+    expect(roundLine().textContent).toBe('Review round: First round, open since the start')
+  })
+})
+
+describe('the round comparison on the Dossier (ticket 402)', () => {
+  const comparison = (changed: { control_id: string; before: Verdict | null; after: Verdict | null }[]) => ({
+    against: { name: 'Q4 2026', closed_at: '2026-11-09T10:30:00Z' },
+    accepted: { now: 5, then: 3 },
+    by_verdict: { evidenced: { now: 4, then: 2 }, 'partly-evidenced': { now: 1, then: 1 },
+      'not-evidenced': { now: 0, then: 1 }, 'not-applicable': { now: 0, then: 0 } },
+    changed,
+  })
+
+  function shown(rounds: Overview['rounds']) {
+    const onOpen = vi.fn()
+    render(<Dossier state={{ status: 'ready', overview: { ...seeded(), rounds } }} onRetry={() => {}}
+      onOpen={onOpen} running={null} {...NO_PASS} {...NO_GOAL} />)
+    return { onOpen, section: screen.getByRole('region', { name: 'Compared with Q4 2026' }) }
+  }
+
+  it('shows the counts now with their change, after the readiness band', () => {
+    const { section } = shown({ current: null, comparison: comparison([]) })
+    expect(within(section).getByText('Since 9 November 2026').className).toBe('pill')
+    expect(within(section).getByText('Accepted: 5 now, 3 when Q4 2026 closed.')).toBeTruthy()
+    const counts = within(section).getAllByRole('listitem').map((li) => li.textContent)
+    expect(counts).toEqual(['Evidenced 4 (+2)', 'Partly evidenced 1 (no change)', 'Not evidenced 0 (-1)'])
+    const band = screen.getByRole('region', { name: 'Readiness' })
+    expect(band.nextElementSibling).toBe(section)
+  })
+
+  it('says when nothing has changed', () => {
+    const { section } = shown({ current: null, comparison: comparison([]) })
+    expect(within(section).getByText('Nothing has changed since Q4 2026 closed.')).toBeTruthy()
+    expect(within(section).queryByText('Changed controls')).toBeNull()
+  })
+
+  it('lists each changed control, its link opening the working paper in place', async () => {
+    const { section, onOpen } = shown({ current: null, comparison: comparison([
+      { control_id: '1.1.1', before: null, after: 'evidenced' },
+      { control_id: '4.1.2', before: 'partly-evidenced', after: null },
+    ]) })
+    expect(within(section).getByRole('heading', { name: 'Changed controls' })).toBeTruthy()
+    const links = within(section).getAllByRole('link')
+    expect(links.map((a) => a.textContent)).toEqual(
+      ['1.1.1: Not accepted → Evidenced', '4.1.2: Partly evidenced → Not accepted'])
+    expect(links[0].getAttribute('href')).toBe('/controls/1.1.1')
+    await userEvent.click(links[0])
+    expect(onOpen).toHaveBeenCalledWith('1.1.1', false)
+  })
+
+  it('with no closed round says how to get a comparison', () => {
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}}
+      running={null} {...NO_PASS} {...NO_GOAL} />)
+    expect(screen.getByText('No closed review round yet. Close this one to compare the next with it.')).toBeTruthy()
+  })
+
+  it('with no round open and none closed since the fresh start says to start the next round', () => {
+    render(<Dossier state={{ status: 'ready', overview: { ...seeded(), rounds: { current: null, comparison: null } } }}
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
+    expect(screen.getByText('No review round has been closed since the fresh start. Start the next round, and once it '
+      + 'is closed the overview compares later work with it.')).toBeTruthy()
+    expect(screen.queryByText(/Close this one/)).toBeNull()
   })
 })
