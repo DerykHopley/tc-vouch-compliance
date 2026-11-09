@@ -730,3 +730,33 @@ describe('the improvement plan on the Dossier (ticket 410)', () => {
     expect(screen.queryByText(FIXES_DONE)).toBeNull()
   })
 })
+
+describe("the open questions' reasons on the Dossier (ticket 414)", () => {
+  function showReasons(goal: Goal, reasons: Record<string, ControlCard['reassess_reasons']>) {
+    const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' },
+      '4.1.2': { status: 'accepted', verdict: 'partly-evidenced' } })
+    overview.goal = goal
+    overview.controls = overview.controls.map((c) => reasons[c.id]
+      ? { ...c, reassess_suggested: true, reassess_reasons: reasons[c.id] } : c)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null}
+      {...NO_PASS} {...NO_GOAL} />)
+  }
+  const notes = (id: string) => [...screen.getByRole('article', { name: `Control ${id}` })
+    .querySelectorAll('.field-note')].map((p) => p.textContent)
+
+  it('says "Question answered: assess again" and "Question overdue: assess again" under Audit readiness', () => {
+    showReasons('audit-readiness', { '1.1.1': ['question-answered'], '4.1.2': ['question-overdue'] })
+    expect(notes('1.1.1')).toEqual(['Question answered: assess again'])
+    expect(notes('4.1.2')).toEqual(['Question overdue: assess again'])
+  })
+
+  it('lists one line per reason, in order, with the fixes under Internal improvement only', () => {
+    const all = ['fixes-done', 'question-answered', 'question-overdue'] as const
+    showReasons('internal-improvement', { '1.1.1': [...all] })
+    expect(notes('1.1.1')).toEqual(['Fixes done: assess again', 'Question answered: assess again',
+      'Question overdue: assess again'])
+    cleanup()
+    showReasons('audit-readiness', { '1.1.1': [...all] })
+    expect(notes('1.1.1')).toEqual(['Question answered: assess again', 'Question overdue: assess again'])
+  })
+})

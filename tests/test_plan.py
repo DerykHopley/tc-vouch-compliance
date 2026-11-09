@@ -242,10 +242,12 @@ def test_an_assessment_accepted_before_the_last_done_mark_is_no_reassessment():
     assert flags([reassessed, planned()], plan_of(), all_done()) == (True, False)
 
 
-def test_a_waiting_reassessment_keeps_the_suggestion_and_is_not_closed():
+def test_a_waiting_reassessment_hides_the_suggestion_and_is_not_closed():
+    """The newest run waits for review: its review is the next step, not another assessment
+    (#414, the spec thread's decision from #410's verify)."""
     waiting = assessment("n", {"M1": "evidenced"}, status="waiting-for-review")
 
-    assert flags([waiting, planned()], plan_of(), all_done()) == (True, False)
+    assert flags([waiting, planned()], plan_of(), all_done()) == NEITHER
 
 
 def test_a_rejected_reassessment_keeps_the_suggestion():
@@ -667,7 +669,7 @@ def test_the_card_suggests_a_reassessment_then_reads_closed_after_one_with_no_ga
 
     assert flagged(planned_card) == ("accepted", False, False)
     assert flagged(suggested) == ("accepted", True, False)
-    assert flagged(waiting) == ("waiting-for-review", True, False)  # kept until one is accepted
+    assert flagged(waiting) == ("waiting-for-review", False, False)  # hidden while it waits
     assert flagged(closed) == ("accepted", False, True)
     assert flagged(under_readiness) == ("accepted", False, False)
 

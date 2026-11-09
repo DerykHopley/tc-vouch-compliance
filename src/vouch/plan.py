@@ -24,7 +24,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from functools import cache
-from typing import Annotated, Any, NamedTuple, Protocol
+from typing import Annotated, Any, Literal, NamedTuple, Protocol, get_args
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
@@ -343,16 +343,30 @@ def mark_done(
         return _shown(item, mark)
 
 
+ReassessReason = Literal["fixes-done", "question-answered", "question-overdue"]
+"""Why a re-assessment of a control is suggested: its fixes are all done (#410, Internal
+improvement only), or an open question on it was answered or is overdue (#414, vouch.questions,
+in both goals). Listed in this order."""
+REASSESS_REASONS: tuple[ReassessReason, ...] = get_args(ReassessReason)
+
+
 @dataclass(frozen=True)
 class CardFlags:
-    """What the improvement plan adds to a control's card (#410)."""
+    """What the improvement plan (#410) and the open questions (#414) add to a control's card."""
 
     reassess_suggested: bool
-    """Every approved item of the control's latest accepted plan is done, and no assessment of
-    it was accepted after the last done mark."""
+    """A re-assessment is suggested: true exactly when `reasons` isn't empty."""
     closed: bool
-    """The first assessment accepted after that last done mark has no requirement not or partly
-    evidenced."""
+    """The first assessment accepted after the last done mark of the control's latest accepted
+    plan has no requirement not or partly evidenced."""
+    reasons: tuple[ReassessReason, ...] = ()
+    """Why the re-assessment is suggested, in REASSESS_REASONS' order, each at most once.
+    `fixes-done`: every approved item of the control's latest accepted plan is done, and no
+    assessment of it was accepted after the last done mark."""
+
+    def __post_init__(self) -> None:
+        if self.reassess_suggested != bool(self.reasons):
+            raise ValueError("a re-assessment is suggested exactly when it has a reason")
 
 
 def _approved(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> list[Key]:
@@ -371,7 +385,7 @@ def _last_done(keys: Iterable[Key], marks: Mapping[Key, Mark]) -> datetime | Non
     return max(times, default=None)
 
 
-def _accepted_at(assessment: Assessment) -> datetime | None:
+def accepted_at(assessment: Assessment) -> datetime | None:
     """When an accepted assessment was accepted; None for any other, or one with no time kept."""
     review = assessment.review
     if assessment.status != "accepted" or review is None or not review.reviewed_at:
@@ -389,21 +403,23 @@ def _flags(
 ) -> CardFlags | None:
     """One control's flags from its assessments, oldest first: the latest accepted plan whose
     approved items are all done, then the first assessment accepted after its last done mark
-    decides. None accepted since: a re-assessment is suggested (a waiting or rejected run
-    keeps the suggestion); one with no gap: Closed; one with a gap: neither (its items start
+    decides. None accepted since: a re-assessment is suggested (a rejected run keeps the
+    suggestion), hidden while the newest run waits for review, which is the next step then; one with no gap: Closed; one with a gap: neither (its items start
     the plan again)."""
     done_by: datetime | None = None
     for run in runs:
-        if _accepted_at(run) is None:
+        if accepted_at(run) is None:
             continue
         last = _last_done(_approved(run, decided), marks)
         if last is not None:
             done_by = last
     if done_by is None:
         return None
-    after = next((r for r in runs if (at := _accepted_at(r)) is not None and at > done_by), None)
+    after = next((r for r in runs if (at := accepted_at(r)) is not None and at > done_by), None)
     if after is None:
-        return CardFlags(reassess_suggested=True, closed=False)
+        if runs[-1].status == "waiting-for-review":
+            return None
+        return CardFlags(reassess_suggested=True, closed=False, reasons=("fixes-done",))
     return None if _has_gap(after) else CardFlags(reassess_suggested=False, closed=True)
 
 
@@ -423,3 +439,19 @@ def card_flags(
         runs.setdefault(assessment.control_id, []).append(assessment)
     flags = {control_id: _flags(mine, decided, marks) for control_id, mine in runs.items()}
     return {control_id: f for control_id, f in flags.items() if f is not None}
+
+
+def with_reasons(
+    flags: Mapping[str, CardFlags], more: Mapping[str, Iterable[ReassessReason]]
+) -> dict[str, CardFlags]:
+    """The cards' flags with `more` reasons per control (the open questions', #414) added to
+    those they have, in REASSESS_REASONS' order, each once; only controls with a flag set are
+    named."""
+    merged: dict[str, CardFlags] = {}
+    for control_id in {*flags, *more}:
+        kept = flags.get(control_id, CardFlags(reassess_suggested=False, closed=False))
+        reasons = {*kept.reasons, *more.get(control_id, ())}
+        ordered = tuple(r for r in REASSESS_REASONS if r in reasons)
+        if ordered or kept.closed:
+            merged[control_id] = CardFlags(bool(ordered), kept.closed, ordered)
+    return merged

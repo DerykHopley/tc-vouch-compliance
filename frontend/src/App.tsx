@@ -260,7 +260,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
               run={paperRun ?? idle} checking={paperRun === null}
               passing={passing} onAssess={() => { if (!passing) void start(control.id) }} onOpen={(id) => open(id, false)}
               onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh}
-              onItemDecided={noteItem} />
+              onItemDecided={noteItem} onQuestionsChanged={() => void refreshOverview()} />
           </main>
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>

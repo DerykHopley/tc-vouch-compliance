@@ -378,6 +378,7 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
             "status": "waiting-for-review",
             "verdict": "partly-evidenced",
             "reassess_suggested": False,  # the improvement plan's (#410)
+            "reassess_reasons": [],  # the open questions' too (#414)
             "closed": False,
         }
         assert proposed["readiness"]["accepted"] == 0

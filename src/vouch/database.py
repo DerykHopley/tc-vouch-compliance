@@ -22,10 +22,11 @@ direct connection outside the pool, so a wrong password or a missing database is
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
 limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
 the remediation items the lead decided on (#43), the improvement plan's marks on them (#410),
-each profile's Goal (#369) and its review rounds (#402); nothing else does. Before it has run, a
-setting reads as unset, a Goal as Audit readiness, the plan as no marks and the review rounds as
-the first one, open; and a write, a count, the usage, a review, a remediation decision, a plan
-mark, a Goal change or a round started or closed is
+each profile's Goal (#369), its review rounds (#402) and the open questions on its controls
+(#414); nothing else does. Before it has run, a setting reads as unset, a Goal as Audit
+readiness, the plan as no marks, the review rounds as the first one, open, and the open
+questions as none; and a write, a count, the usage, a review, a remediation decision, a plan
+mark, a Goal change, a round started or closed, or a question logged or answered is
 DatabaseUnavailable (a 503).
 """
 
@@ -125,11 +126,14 @@ AuditAction = Literal[
     "round-close",
     "priority",
     "done",
+    "question",
+    "answer",
 ]
 """What an audit entry records the compliance lead doing (vouch.audit's Action): `goal` is a
 change of the profile's Goal (#369); `round-start` and `round-close` a review round started or
 closed (#402); `priority` and `done` a remediation item's priority changed or marked done, in the
-improvement plan (#410)."""
+improvement plan (#410); `question` and `answer` an open question logged on a control and its
+answer recorded (#414)."""
 Goal = Literal["audit-readiness", "internal-improvement"]
 """What a compliance profile is used for (#369, vouch.goal): kept per user and profile."""
 Priority = Literal["high", "medium", "low"]
@@ -222,7 +226,8 @@ REPLACE_AUDIT_ACTION_CHECK = (
     f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})); "
     "END IF; END $$"
 )
-"""A trail made before an action was added (`confirm`, #372; `goal`, #369; the rounds', #402)
+"""A trail made before an action was added (`confirm`, #372; `goal`, #369; the rounds', #402;
+the plan's, #410; the open questions', #414)
 has a CHECK refusing it: replaced
 by one naming every AuditAction. No row is changed (the trail's guard is on update and delete,
 which an ALTER doesn't fire), and once the CHECK names them all, a second run does nothing."""
@@ -311,6 +316,33 @@ CREATE_ROUNDS_ONE_OPEN = (
     "(user_id, profile_id) WHERE closed_at IS NULL"
 )
 """At most one open round per user and profile, whoever writes."""
+QUESTIONS_TABLE = "vouch_open_questions"
+"""Each open question the lead logged on a control (vouch.questions, #414), per user and profile:
+what is asked, of whom, when it is due, and its answer once recorded (null until then; final).
+`id` is the question's, which lead-supplied evidence cites. Each write in its audit entry's
+transaction; a fresh start hides the questions asked before it but deletes none."""
+QUESTION_COLUMNS = (
+    "id",
+    "user_id",
+    "profile_id",
+    "control_id",
+    "question",
+    "asked_of",
+    "due_date",
+    "asked_at",
+    "answer",
+    "answered_at",
+)
+CREATE_QUESTIONS = (
+    f"CREATE TABLE IF NOT EXISTS {QUESTIONS_TABLE} (id bigserial PRIMARY KEY, "
+    "user_id text NOT NULL, profile_id text NOT NULL, control_id text NOT NULL, "
+    "question text NOT NULL, asked_of text NOT NULL, due_date date NOT NULL, "
+    "asked_at timestamptz NOT NULL, answer text, answered_at timestamptz)"
+)
+CREATE_QUESTIONS_INDEX = (
+    f"CREATE INDEX IF NOT EXISTS {QUESTIONS_TABLE}_by_owner ON {QUESTIONS_TABLE} "
+    "(user_id, profile_id, asked_at, id)"
+)
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -334,6 +366,7 @@ SETUP_TABLES = (
     PLAN_TABLE,
     GOALS_TABLE,
     ROUNDS_TABLE,
+    QUESTIONS_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -966,6 +999,83 @@ class Database:
             _insert_audit(conn, [entry(name)])
         return name, opened_at
 
+    def open_questions(self, user_id: str, profile_id: str) -> list[dict[str, Any]]:
+        """The user's open questions under the profile (#414), oldest first: mappings of
+        QUESTION_COLUMNS. None before vouch-db-setup made the table (logged: run vouch-db-setup).
+        Raises DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                return conn.execute(
+                    f"SELECT {', '.join(QUESTION_COLUMNS)} FROM {QUESTIONS_TABLE} "
+                    "WHERE user_id = %s AND profile_id = %s ORDER BY asked_at, id",
+                    (user_id, profile_id),
+                ).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", QUESTIONS_TABLE)
+                return []
+
+    def log_question(self, row: Mapping[str, Any], entry: Mapping[str, Any]) -> dict[str, Any]:
+        """Keep an open question (a mapping of QUESTION_COLUMNS but `id`, `answer` and
+        `answered_at`) with its audit entry (a mapping of AUDIT_COLUMNS), in one transaction:
+        both, or neither. The question as kept, with its id. Raises DatabaseUnavailable for any
+        database failure, also before vouch-db-setup ran."""
+        columns = QUESTION_COLUMNS[1:-2]
+        tables = f"{QUESTIONS_TABLE} or {AUDIT_TABLE}"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            kept = conn.execute(
+                f"INSERT INTO {QUESTIONS_TABLE} ({', '.join(columns)}) "
+                f"VALUES ({', '.join(f'%({c})s' for c in columns)}) "
+                f"RETURNING {', '.join(QUESTION_COLUMNS)}",
+                row,
+            ).fetchone()
+            _insert_audit(conn, [entry])
+        if kept is None:  # an INSERT … RETURNING returns its row
+            raise DatabaseUnavailable(f"a question in {QUESTIONS_TABLE} was not kept")
+        return kept
+
+    def answer_question(
+        self,
+        key: Mapping[str, Any],
+        answer: str,
+        answered_at: datetime,
+        entry: Mapping[str, Any],
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Record the answer to the question `key` names (`id`, `user_id`, `profile_id`,
+        `control_id`) with its audit entry (a mapping of AUDIT_COLUMNS), in one transaction:
+        both, or neither. The question's row is locked first, so two answers at once take
+        turns. (None, False) when there is no such question; (the question as kept, False) when
+        it was answered already, writing nothing; else (the question answered, True). Raises
+        DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
+        tables = f"{QUESTIONS_TABLE} or {AUDIT_TABLE}"
+        mine = (
+            "id = %(id)s AND user_id = %(user_id)s AND profile_id = %(profile_id)s "
+            "AND control_id = %(control_id)s"
+        )
+        columns = ", ".join(QUESTION_COLUMNS)
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            kept = conn.execute(
+                f"SELECT {columns} FROM {QUESTIONS_TABLE} WHERE {mine} FOR UPDATE", key
+            ).fetchone()
+            if kept is None or kept["answer"] is not None:
+                return kept, False
+            answered = conn.execute(
+                f"UPDATE {QUESTIONS_TABLE} SET answer = %(answer)s, answered_at = %(at)s "
+                f"WHERE {mine} RETURNING {columns}",
+                {**key, "answer": answer, "at": answered_at},
+            ).fetchone()
+            _insert_audit(conn, [entry])
+        return answered, True
+
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[dict[str, Any]]:
@@ -1020,6 +1130,8 @@ class Database:
                 conn.execute(CREATE_GOALS)
                 conn.execute(CREATE_ROUNDS)
                 conn.execute(CREATE_ROUNDS_ONE_OPEN)
+                conn.execute(CREATE_QUESTIONS)
+                conn.execute(CREATE_QUESTIONS_INDEX)
         finally:
             conn.close()
 

@@ -102,6 +102,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "round-close": "Review round closed: {round}",
             "priority": "Priority changed",
             "done": "Marked done",
+            "question": "Open question logged",
+            "answer": "Question answered",
         },
         "goals": {
             "audit-readiness": "Audit readiness",
@@ -186,6 +188,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "round-close": "Prüfrunde abgeschlossen: {round}",
             "priority": "Priorität geändert",
             "done": "Als erledigt markiert",
+            "question": "Offene Frage erfasst",
+            "answer": "Frage beantwortet",
         },
         # As `actions.goal` reads them, after "von" and "zu" (dative): "Interner Verbesserung".
         "goals": {

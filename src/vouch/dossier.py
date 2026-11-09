@@ -13,7 +13,7 @@ from typing import Literal, TypedDict, get_args
 from vouch.citations import EvidenceKind
 from vouch.graph import Assessment, Status, Verdict
 from vouch.isa import Column, IsaControl, Requirement
-from vouch.plan import CardFlags
+from vouch.plan import CardFlags, ReassessReason
 from vouch.profile import ComplianceProfile, ProtectionLevel
 
 QUOTES_SHOWN = 6  # the evidence quote cards on the overview, at most
@@ -44,9 +44,12 @@ class ControlCard(TypedDict):
     iso_27001: str
     status: CardStatus
     verdict: Verdict | None
-    # The improvement plan's (#410, vouch.plan.card_flags): false under Audit readiness and on a
-    # control not assessed. Neither changes the status, the counts or the next step.
+    # The improvement plan's (#410, vouch.plan.card_flags) and the open questions' (#414,
+    # vouch.questions): false (empty) on a control not assessed; `closed` and the `fixes-done`
+    # reason under Internal improvement only. `reassess_suggested` is true exactly when
+    # `reassess_reasons` isn't empty. None changes the status, the counts or the next step.
     reassess_suggested: bool
+    reassess_reasons: list[ReassessReason]
     closed: bool
 
 
@@ -155,7 +158,8 @@ def overview(
     once every control is accepted). Assessments of controls not in `controls` are left out.
     `discarded` names the remediation items the lead discarded, by thread and requirement id:
     the band counts the others (#43); `approved` those approved, counted apart (#310). `flags`
-    are the improvement plan's per control (#410; none: neither flag set)."""
+    are the improvement plan's and the open questions' per control (#410, #414; none: no flag
+    set)."""
     controls = list(controls)
     listed = {c.id: latest[c.id] for c in controls if c.id in latest}
     flags = flags or {}
@@ -193,6 +197,7 @@ def _card(
         "status": assessment.status if assessment else NOT_ASSESSED,
         "verdict": assessment.verdict if assessment else None,
         "reassess_suggested": bool(assessment and flags and flags.reassess_suggested),
+        "reassess_reasons": list(flags.reasons) if assessment and flags else [],
         "closed": bool(assessment and flags and flags.closed),
     }
 
