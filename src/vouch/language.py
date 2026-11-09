@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vouch.citations import occurs
+from vouch.documents import CYCLE_MONTHS, NO_REVIEW_DATE
 
 
 @dataclass(frozen=True)
@@ -137,13 +138,13 @@ CAP_WORDS = {
         capped="At most partly evidenced:",
         stale="{doc} is stale ({because})",
         because="approved {approved} with a {cycle} review, due {due}",
-        cycles={c: c for c in ("quarterly", "half-yearly", "yearly", "two-yearly")},
-        no_review_date="no review date",
+        cycles={cycle: cycle for cycle in CYCLE_MONTHS},
+        no_review_date=NO_REVIEW_DATE,
         documented_only="it asks for something to be done, and only documented evidence shows it",
     ),
     "de": CapWords(
         capped="Höchstens teilweise nachgewiesen:",
-        stale="{doc} ist veraltet ({because})",
+        stale="{doc}: Prüfung überfällig ({because})",  # as the report's stale label says
         because="freigegeben am {approved}, {cycle} zu prüfen, fällig am {due}",
         cycles={
             "quarterly": "vierteljährlich",
@@ -152,7 +153,10 @@ CAP_WORDS = {
             "two-yearly": "alle zwei Jahre",
         },
         no_review_date="kein Prüfdatum",
-        documented_only="es verlangt, dass etwas getan wird, und nur dokumentierte Nachweise zeigen es",
+        documented_only=(
+            "die Anforderung verlangt, dass etwas getan wird, und nur dokumentierte Nachweise "
+            "zeigen es"
+        ),
     ),
 }
 """The cap's words per answer language; any other language gets English's."""
