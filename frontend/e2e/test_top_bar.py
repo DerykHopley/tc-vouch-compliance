@@ -27,7 +27,8 @@ def scrolls_sideways(page: Page) -> bool:
 def test_the_tabs_mark_the_current_page(page: Page, profiles_url):
     opened(page, profiles_url)
     tabs = page.get_by_role("navigation", name="Main").get_by_role("link")
-    expect(tabs).to_have_text(["Overview", "Report", "Developer"])  # Report after Overview (#56)
+    # Report after Overview (#56), Documents after Report (#424)
+    expect(tabs).to_have_text(["Overview", "Report", "Documents", "Developer"])
     expect(overview_tab(page)).to_have_attribute("aria-current", "page")
 
     page.get_by_role("link", name="Report").click()

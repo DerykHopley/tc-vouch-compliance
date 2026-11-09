@@ -109,6 +109,8 @@ export type LibraryDocument = {
   /** Why it is stale on the server's today, or null when it is current. */
   stale_because: string | null
   stale: boolean
+  /** ISO 639-1: the language it is written in, from its front matter (#424); null when it names none. */
+  language: string | null
 }
 
 /** Every document of the sample library, policies then records, each by title; null when it could not be read. */

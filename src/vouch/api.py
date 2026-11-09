@@ -29,7 +29,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, company_profiles, remediation, report, report_pdf
+from vouch import audit, company_profiles, documents_tab, remediation, report, report_pdf
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -150,6 +150,7 @@ DEVELOPERS_ONLY = "This is available to developers only."
 PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
 CONTROLS_FAILED = "The framework's controls could not be read."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
+DOCUMENTS_FAILED = "The documents could not be read."
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
 # in the order step 6 lists them.
 LIBRARY_SOURCES = ("policies", "records")
@@ -1006,6 +1007,25 @@ def readiness_report(
 
     built = _report(profile, memory, saver, items, newest_page, REPORT_FAILED)
     return built | {"words": report.words_for(profile.answer_language)}
+
+
+@router.get("/documents")
+def profile_documents_tab(
+    profile: Profile, memory: UserMemory, saver: Checkpointer
+) -> dict[str, Any]:
+    """The Documents tab (#424), for every signed-in user: each evidence document the profile
+    uses, with its summary, whether it is stale today and the controls whose newest assessment
+    cites it (vouch.documents_tab), and the tab's words in the profile's language. Redacted as
+    the overview is; an unreadable ISA edition, folder or document a plain 500 naming no path."""
+    controls, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
+    try:
+        listed = documents_tab.profile_documents(profile, controls, latest, report.today())
+    except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
+        log.exception("the documents of %s could not be read", profile.id)
+        raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None
+    clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
+    language, words = documents_tab.document_words(profile.answer_language)
+    return clean | {"words": words, "words_language": language}
 
 
 def attachment(name: str) -> str:

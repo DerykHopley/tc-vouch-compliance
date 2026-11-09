@@ -21,7 +21,7 @@ const CONTROLS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1',
 
 const libraryDocument = (id: string, title: string, more: Partial<LibraryDocument> = {}): LibraryDocument => ({
   id, source: 'policies', title, kind: 'documented', version: '1.0', approval_date: '2026-07-20', review_cycle: 'yearly',
-  stale_because: null, stale: false, ...more,
+  stale_because: null, stale: false, language: 'en', ...more,
 })
 /** The sample library as GET /api/developer/sample-library sends it: two policies (one stale), then a record. */
 const LIBRARY: LibraryDocument[] = [

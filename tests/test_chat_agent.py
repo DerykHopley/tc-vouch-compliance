@@ -857,7 +857,7 @@ def test_alpenwerks_chat_prompt_names_the_german_verdict_words_and_nordlichts_do
 
     assert all(word in german for word in GERMAN_VERDICTS)
     assert not any(word in english for word in GERMAN_VERDICTS)
-    assert CHAT_PROMPT_VERSION == "chat-7"
+    assert CHAT_PROMPT_VERSION == "chat-8"
 
 
 def tool_words(fake: CannedChatModel, name: str) -> str:

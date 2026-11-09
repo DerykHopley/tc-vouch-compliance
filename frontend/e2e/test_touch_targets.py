@@ -22,7 +22,7 @@ from test_remediation import ITEM, accepted_with_an_item
 from test_review import assessed, open_paper, row
 from touch_targets import small_targets
 
-PAGES = ["/", "/controls/4.1.2", "/developer"]
+PAGES = ["/", "/controls/4.1.2", "/developer", "/documents"]
 
 
 def at_phone_width(page: Page, url: str) -> None:

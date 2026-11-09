@@ -53,8 +53,8 @@ def to_step_5(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
     expect(page.get_by_role("checkbox")).to_have_count(12)
 
 
-def to_step_6(page: Page) -> None:
-    to_step_5(page)
+def to_step_6(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
+    to_step_5(page, company)
     with page.expect_response(lambda r: LIBRARY in r.url) as answer:
         press(page, "Next")
     assert answer.value.status == 200
@@ -452,9 +452,9 @@ def test_in_forced_colours_a_document_checkbox_keeps_its_44px_target(page: Page,
     expect(box).to_be_checked()
 
 
-def to_step_7(page: Page) -> None:
+def to_step_7(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
     """Steps 1 to 6 answered (no control marked, the backup policy chosen), then Next to step 7."""
-    to_step_6(page)
+    to_step_6(page, company)
     document(page, "Backup policy").check()
     press(page, "Next")
     expect(page.get_by_role("heading", name="Finish")).to_be_focused()
