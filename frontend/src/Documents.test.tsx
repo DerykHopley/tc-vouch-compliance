@@ -18,7 +18,10 @@ const ENGLISH: DocumentWords = {
     status: 'Status', cited_by: 'Cited by' },
   kinds: { documented: 'Documented', implemented: 'Implemented' },
   cycles: { quarterly: 'Quarterly', 'half-yearly': 'Half-yearly', yearly: 'Yearly', 'two-yearly': 'Two-yearly' },
-  stale: 'Stale', current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
+  stale: 'Stale',
+  stale_reasons: { no_approval_date: 'no approval date', no_review_cycle: 'no review cycle',
+    unknown_cycle: 'unknown review cycle' },
+  current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
   not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.',
 }
 
@@ -61,7 +64,16 @@ describe('the Documents page', () => {
     const cells = (row: HTMLElement) => within(row).getAllByRole('cell').map((c) => c.textContent)
     expect(cells(authentication)).toEqual(['Documented', '3.1', '2026-04-08', 'Two-yearly', 'Current', '1.1.1, 4.1.2'])
     expect(cells(backup).slice(3)).toEqual(['Yearly', 'Stale', 'Not cited yet'])
-    expect(within(backup).getByText('Not cited yet').className).toContain('muted')
+    expect(within(backup).getByText('Not cited yet').className).toBe('report-muted')
+  })
+
+  it("names a source it has no word for as written, even one named like an object's own member", async () => {
+    serve(() => json({ ...NORDLICHT, documents: [{ ...RECORD, source: 'constructor' }, { ...BACKUP, source: 'toString' }] }))
+    render(<Documents />)
+
+    const sheet = await screen.findByRole('article', { name: 'Documents' })
+    expect(within(sheet).getAllByRole('table').map((t) => t.querySelector('caption')?.textContent))
+      .toEqual(['constructor', 'toString'])
   })
 
   it('with no documents, shows the no_documents sentence and no table', async () => {

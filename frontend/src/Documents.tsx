@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import DocumentTable from './DocumentTable.tsx'
-import { fetchDocuments, type ProfileDocument, type ProfileDocuments } from './documents.ts'
+import { fetchDocuments, type ProfileDocument, type ProfileDocuments, wordFor } from './documents.ts'
 
 /** The Documents tab (#424): each evidence document the profile uses, read-only, one table per source, with the
  * controls citing it. Its words are the served ones, and the sheet carries their language (`words_language`); the
@@ -8,7 +8,8 @@ import { fetchDocuments, type ProfileDocument, type ProfileDocuments } from './d
 
 type State = { status: 'loading' } | { status: 'ready'; documents: ProfileDocuments } | { status: 'failed'; message: string }
 
-export default function Documents() {
+/** `reloads`: bumped to read the documents again without the loading line (a chat assessment changes Cited by). */
+export default function Documents({ reloads = 0 }: { reloads?: number }) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0) // bumped by Try again to read the documents again
   useEffect(() => {
@@ -16,7 +17,7 @@ export default function Documents() {
     void fetchDocuments().then((read) => answer.wanted && setState(read.ok
       ? { status: 'ready', documents: read.documents } : { status: 'failed', message: read.message }))
     return () => { answer.wanted = false }
-  }, [attempt])
+  }, [attempt, reloads])
   const tryAgain = () => {
     setState({ status: 'loading' })
     setAttempt((n) => n + 1)
@@ -51,7 +52,7 @@ function Sheet({ documents, words, words_language }: ProfileDocuments) {
       <h1 id="documents-title">{words.title}</h1>
       {documents.length === 0 ? <p className="report-muted">{words.no_documents}</p>
         : sources.map((source) => (
-          <DocumentTable key={source} caption={words.sources[source] ?? source}
+          <DocumentTable key={source} caption={wordFor(words.sources, source) ?? source}
             documents={documents.filter((d) => d.source === source)} words={words} extraColumn={citedBy} />
         ))}
     </article>

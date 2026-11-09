@@ -7,7 +7,7 @@ rejected assessment shows on its control's card, but not in the counts.
 
 import itertools
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from typing import Literal, TypedDict, get_args
 
 from vouch.citations import EvidenceKind
@@ -193,16 +193,25 @@ def _next_step(cards: list[ControlCard]) -> NextStep | None:
     return None
 
 
+def cited_assessments(
+    controls: Iterable[IsaControl], latest: Mapping[str, Assessment]
+) -> Iterator[tuple[IsaControl, Assessment]]:
+    """Each control, in order, with its newest assessment, whose citations count as evidence:
+    none for a control not assessed or whose newest assessment is rejected (the lead turned its
+    evidence down). The overview's quotes and the Documents tab's Cited by (#424) both read it."""
+    for control in controls:
+        assessment = latest.get(control.id)
+        if assessment is not None and assessment.status != "rejected":
+            yield control, assessment
+
+
 def _quotes(controls: list[IsaControl], latest: Mapping[str, Assessment]) -> list[Quote]:
     """Each checked quote once, up to QUOTES_SHOWN, spread across the assessed controls: one
     from each in control order, then a second from each, and so on (#147), so the first
     control's evidence doesn't fill them all. None from a rejected assessment, whose evidence
     the lead turned down."""
     per_control: list[list[Quote]] = []
-    for control in controls:
-        assessment = latest.get(control.id)
-        if assessment is None or assessment.status == "rejected":
-            continue
+    for control, assessment in cited_assessments(controls, latest):
         per_control.append(
             [
                 {

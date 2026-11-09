@@ -1023,11 +1023,9 @@ def profile_documents_tab(
     except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
         log.exception("the documents of %s could not be read", profile.id)
         raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None
-    clean, _ = redact_data({"documents": listed})
-    return clean | {
-        "words": documents_tab.document_words(profile.answer_language),
-        "words_language": report.words_language(profile.answer_language),
-    }
+    clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
+    language, words = documents_tab.document_words(profile.answer_language)
+    return clean | {"words": words, "words_language": language}
 
 
 def attachment(name: str) -> str:

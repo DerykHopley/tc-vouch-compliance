@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import type { TableWords } from './documents.ts'
-import type { ChosenEvidence, LibraryDocument, LibrarySource } from './setup.ts'
+import { type TableWords, wordFor } from './documents.ts'
+import type { LibraryDocument } from './setup.ts'
 
 /** A document as the table shows it: the sample library's, or a profile's from any source (patch too). */
 export type ShownDocument = Omit<LibraryDocument, 'source'> & { source: string }
@@ -9,21 +9,42 @@ type Props<D extends ShownDocument> = {
   caption: string
   documents: readonly D[]
   /** The chosen documents, by folder; with `onToggle`, each row leads with a checkbox (the sample library's only). */
-  selected?: ChosenEvidence
-  onToggle?: (id: string, source: LibrarySource) => void
+  selected?: Partial<Record<D['source'], string[]>>
+  onToggle?: (id: string, source: D['source']) => void
   /** The headings and cell words, in the page's language (#424); without them, the table's own English, the stale
-   * reason shown. With them, the status shows the stale word alone: the approval date and cycle beside it say why. */
+   * reason shown. With them, an overdue document shows the stale word alone (the approval date and cycle beside it
+   * say why), and one whose review date can't be worked out the stale word and a reason word. */
   words?: TableWords
   /** A last column, given each document (the Documents tab's Cited by). */
   extraColumn?: { heading: string; cell: (document: D) => ReactNode }
 }
 
+// The table's own English, for company setup's step 6: the wizard keeps its lower-case kind words and shows cycles
+// and the stale reason as written, so it isn't vouch.documents_tab.DOCUMENT_WORDS["en"], which the Documents tab is
+// served. The stale reasons are unused here: without words, the server's reason is shown whole.
 const ENGLISH: TableWords = {
   columns: { document: 'Document', kind: 'Kind', version: 'Version', approved: 'Approved', review: 'Review',
     status: 'Status', cited_by: 'Cited by' },
   kinds: { documented: 'documented', implemented: 'implemented' },
   cycles: {}, // shown as written
-  stale: 'Stale', current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
+  stale: 'Stale',
+  stale_reasons: { no_approval_date: 'no approval date', no_review_cycle: 'no review cycle',
+    unknown_cycle: 'unknown review cycle' },
+  current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
+}
+
+/** Whether `selected` holds this document of this source. */
+function isChosen<S extends string>(selected: Partial<Record<S, string[]>> | undefined, source: S, id: string) {
+  return selected?.[source]?.includes(id) ?? false
+}
+
+/** With words, why a stale document's review date can't be worked out, or null for an overdue one (its approval
+ * date and known cycle say why). */
+function staleReason(d: ShownDocument, words: TableWords): string | null {
+  if (d.approval_date === null) return words.stale_reasons.no_approval_date
+  if (d.review_cycle === null) return words.stale_reasons.no_review_cycle
+  if (wordFor(words.cycles, d.review_cycle) === undefined) return words.stale_reasons.unknown_cycle
+  return null
 }
 
 /**
@@ -35,7 +56,10 @@ const ENGLISH: TableWords = {
 export default function DocumentTable<D extends ShownDocument>({ caption, documents, selected, onToggle, words,
   extraColumn }: Props<D>) {
   const w = words ?? ENGLISH
-  const staleWord = (d: D) => words || !d.stale_because ? w.stale : `Stale: ${d.stale_because}`
+  const staleWord = (d: D) => {
+    const reason = words ? staleReason(d, words) : d.stale_because
+    return reason ? `${w.stale}: ${reason}` : w.stale
+  }
   return (
     <div className="table-wrap doc-table-wrap">
       <table className="report-table doc-table">
@@ -60,8 +84,8 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
                   {/* A label, so the whole 44px cell takes the press, in forced colours too (the box is drawn 18px). */}
                   <label className="setup-choice setup-check">
                     <input type="checkbox" aria-label={`Choose ${d.title}`}
-                      checked={selected?.[d.source as LibrarySource].includes(d.id) ?? false}
-                      onChange={() => onToggle(d.id, d.source as LibrarySource)} />
+                      checked={isChosen(selected, d.source, d.id)}
+                      onChange={() => onToggle(d.id, d.source)} />
                   </label>
                 </td>
               )}
@@ -72,7 +96,7 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
               <td><span className={`kind kind-${d.kind}`}>{w.kinds[d.kind]}</span></td>
               <td>{d.version ?? w.no_version}</td>
               <td>{d.approval_date ?? w.no_date}</td>
-              <td>{d.review_cycle === null ? w.no_cycle : w.cycles[d.review_cycle] ?? d.review_cycle}</td>
+              <td>{d.review_cycle === null ? w.no_cycle : wordFor(w.cycles, d.review_cycle) ?? d.review_cycle}</td>
               <td>
                 {d.stale
                   ? <span className="flag">{staleWord(d)}</span>

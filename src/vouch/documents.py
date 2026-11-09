@@ -14,6 +14,7 @@ from typing import Any, Literal
 from vouch.front_matter import split_front_matter
 
 HEADING = re.compile(r"^#{1,6}\s+(.*\S)\s*$")
+LANGUAGE_CODE = re.compile(r"[a-z]{2}")  # ISO 639-1, the only form a page's `lang` takes
 SUFFIX = ".md"
 CYCLE_MONTHS = {"quarterly": 3, "half-yearly": 6, "yearly": 12, "two-yearly": 24}
 NO_REVIEW_DATE = "no review date"
@@ -211,7 +212,8 @@ def _text(value: Any) -> str | None:
 def document_summary(path: Path, source: str, today: datetime.date) -> DocumentSummary:
     """The summary of the document at this path in a source's folder, judged on `today`. A
     missing title gives the id; a version, approval date or review cycle that can't be read
-    gives None, and so does a missing or empty language; no front matter at all, the source's kind and NO_REVIEW_DATE. The kind and
+    gives None, and so does a language that isn't two lower-case letters (it becomes an HTML
+    `lang`); no front matter at all, the source's kind and NO_REVIEW_DATE. The kind and
     staleness are facts_of's, read without logging (a page lists them on every request)."""
     data, _ = split_front_matter(path.read_text(encoding="utf-8"))
     front = data or {}
@@ -226,8 +228,12 @@ def document_summary(path: Path, source: str, today: datetime.date) -> DocumentS
         approval_date=approved.isoformat() if approved else None,
         review_cycle=_text(front.get("review_cycle")),
         stale_because=facts.stale_because,
-        language=_text(front.get("language")),
+        language=_language(front.get("language")),
     )
+
+
+def _language(value: Any) -> str | None:
+    return value if isinstance(value, str) and LANGUAGE_CODE.fullmatch(value) else None
 
 
 def by_title(summaries: list[DocumentSummary]) -> list[DocumentSummary]:

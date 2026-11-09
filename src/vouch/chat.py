@@ -9,15 +9,15 @@ from typing import Literal
 
 from vouch.isa import IsaControl
 
-CHAT_PROMPT_VERSION = "chat-7"
+CHAT_PROMPT_VERSION = "chat-8"
 """The chat agent's prompt version, beside the assessments' (vouch.graph.PROMPT_VERSION): on the
 developer page, and in the log line with each chat message's usage."""
 CHAT_FAILED = "Vouch could not answer just now. Please try again shortly."
 """Must match NOT_ANSWERED in frontend/src/chat.ts: the one sentence for a chat that failed."""
 
-Page = Literal["dossier", "paper", "developer", "report"]
+Page = Literal["dossier", "paper", "developer", "report", "documents"]
 """The page the compliance lead is on: the Dossier overview, a control's working paper, the
-developer page, the readiness report (#268)."""
+developer page, the readiness report (#268), the Documents tab (#424)."""
 
 _PAGE_NAMES: dict[Page, str] = {
     "dossier": "the Dossier overview (readiness, the 12 controls as cards, the evidence quotes)",
@@ -26,6 +26,10 @@ _PAGE_NAMES: dict[Page, str] = {
     "report": (
         "the readiness report (readiness, each control's reviewed verdict, the remediation items,"
         " the controls not applicable, the audit trail)"
+    ),
+    "documents": (
+        "the Documents tab (each evidence document with its version, approval date, review"
+        " cycle, whether it is stale, and the controls citing it)"
     ),
 }
 

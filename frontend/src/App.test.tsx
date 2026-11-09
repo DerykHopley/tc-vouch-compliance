@@ -1009,6 +1009,41 @@ describe('Ask Vouch', () => {
     await waitFor(() => expect(asked).toEqual([{ message: 'What is left?', page: 'report', control_id: null, thread_id: 't0' }]))
   })
 
+  it('on the Documents tab, sends the greeting and messages with the documents as the page (issue 424)', async () => {
+    const greetings: ChatBody[] = []
+    const asked: ChatBody[] = []
+    serveChat((body) => { asked.push(body); return QUIET() }, (body) => { greetings.push(body); return QUIET() })
+    window.history.replaceState(null, '', '/documents')
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Documents')).toBeTruthy()
+    await waitFor(() => expect(greetings).toEqual([{ page: 'documents', control_id: null, thread_id: null }]))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Which are stale?{Enter}')
+    await waitFor(() => expect(asked).toEqual([{ message: 'Which are stale?', page: 'documents', control_id: null,
+      thread_id: 't0' }]))
+  })
+
+  it('an assessment from the chat on the Documents tab reads the documents again, for Cited by (issue 424)', async () => {
+    serveChat(() => Promise.resolve(sse([
+      'event: assessment\ndata: {"control_id":"4.1.2","verdict":"evidenced","status":"waiting-for-review","thread_id":"a1"}\n\n',
+      'event: token\ndata: {"text":"The assessment of control 4.1.2 has finished."}\n\n',
+      'event: done\ndata: {}\n\n'])))
+    const served = fetch
+    const documentReads: string[] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url === '/api/documents') documentReads.push(url)
+      return served(url, init)
+    })
+    window.history.replaceState(null, '', '/documents')
+    render(<App />)
+    await waitFor(() => expect(documentReads).toHaveLength(1))
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+    await within(within(bubble()!).getByRole('log')).findByText('The assessment of control 4.1.2 has finished.')
+
+    await waitFor(() => expect(documentReads).toHaveLength(2))
+  })
+
   it('on the not-found page, speaks as on the Dossier (issue 268)', async () => {
     const greetings: ChatBody[] = []
     const asked: ChatBody[] = []

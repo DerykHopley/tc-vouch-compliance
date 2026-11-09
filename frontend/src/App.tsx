@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
+import type { PageContext } from './chat.ts'
 import { developerSettings, type DeveloperSettings, UNAVAILABLE } from './developer.ts'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
 import DeveloperPage from './DeveloperPage.tsx'
@@ -41,6 +42,11 @@ const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
     : view.name === 'documents' ? DOCUMENTS_PATH : view.name === 'developer' ? DEVELOPER_PATH
       : view.name === 'setup' ? SETUP_PATH : '/'
+
+/** The page the chat says the lead is on for the view shown: company setup is the developer page's, and the
+ * not-found page (no view shown) speaks as the Dossier, where its way back leads. */
+const chatPage = (shown: View['name'] | null): PageContext['page'] =>
+  shown === 'setup' ? 'developer' : shown ?? 'dossier'
 
 /** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
  * so its paper says not found. */
@@ -184,6 +190,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   const readStored = control !== undefined && control.status !== 'not-assessed' && runFor !== control.id
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
   const [paperReloads, setPaperReloads] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
+  const [documentsReloads, setDocumentsReloads] = useState(0) // bumped to read the documents again (Cited by changed)
   useEffect(() => {
     if (paperId === null || !readStored) return
     const answer = { wanted: true } // until the paper changes
@@ -249,7 +256,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         </div>
       </TopBar>
       {shown === 'report' ? <Report />
-        : shown === 'documents' ? <Documents />
+        : shown === 'documents' ? <Documents reloads={documentsReloads} />
         : shown === 'developer' && developer ? (
           <main>
             <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
@@ -276,16 +283,16 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running}
             focusHeading={focusHeading} />}
-      {/* On the not-found page (no view current) and the documents (a page the chat doesn't know yet, #424) the chat
-          speaks as on the Dossier, where its way back leads; on the readiness report it knows the report page (#268). An
-          assessment from the chat reads the overview afresh (its card, readiness), and its paper's newest if open. */}
-      <AskVouch context={{ page: shown === 'setup' ? 'developer' : shown === 'documents' ? 'dossier' : shown ?? 'dossier',
+      {/* An assessment from the chat reads the overview afresh (its card, readiness), its paper's newest if open, and
+          the documents if shown (their Cited by, #424). */}
+      <AskVouch context={{ page: chatPage(shown),
         controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}
         onAssessed={(controlId) => {
           void load()
           if (controlId === paperId) setPaperReloads((n) => n + 1)
+          if (shown === 'documents') setDocumentsReloads((n) => n + 1)
         }} />
     </>
   )

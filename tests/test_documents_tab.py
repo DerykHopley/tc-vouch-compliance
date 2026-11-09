@@ -19,7 +19,8 @@ from test_report import every_word, reviewed, under
 
 from vouch import api, documents_tab, isa, report
 from vouch.database import Database
-from vouch.documents_tab import DOCUMENT_WORDS, document_words, profile_documents
+from vouch.documents_tab import DOCUMENT_WORDS, document_words
+from vouch.documents_tab import profile_documents as documents
 from vouch.graph import Assessment
 from vouch.isa import load_base_framework
 from vouch.language import audit_claim
@@ -47,6 +48,11 @@ def ids(listed: list[dict[str, Any]]) -> list[str]:
 
 def by_id(listed: list[dict[str, Any]], doc_id: str) -> dict[str, Any]:
     return next(d for d in listed if d["id"] == doc_id)
+
+
+def profile_documents(*args: Any) -> list[dict[str, Any]]:
+    """profile_documents' rows as the API sends them."""
+    return [d.as_dict() for d in documents(*args)]
 
 
 def citing(control_id: str, *doc_ids: str, status: str = "accepted") -> Assessment:
@@ -150,9 +156,15 @@ def test_a_citation_of_a_document_the_profile_doesnt_list_adds_no_row():
 
 
 def test_german_gets_the_german_words_and_english_or_an_unknown_language_the_english():
-    assert document_words("de")["title"] == "Dokumente"
-    assert document_words("en")["title"] == "Documents"
-    assert document_words("lt") == DOCUMENT_WORDS["en"]
+    assert document_words("de") == ("de", DOCUMENT_WORDS["de"])
+    assert document_words("en") == ("en", DOCUMENT_WORDS["en"])
+    assert document_words("lt") == ("en", DOCUMENT_WORDS["en"])
+
+
+def test_the_language_is_chosen_from_the_tabs_own_tables(monkeypatch):
+    monkeypatch.setattr(documents_tab, "DOCUMENT_WORDS", {"en": DOCUMENT_WORDS["en"]})
+
+    assert document_words("de") == ("en", DOCUMENT_WORDS["en"])
 
 
 def test_both_tables_have_the_same_keys():
@@ -167,11 +179,6 @@ def test_every_review_cycle_has_a_word():
 
     for words in DOCUMENT_WORDS.values():
         assert set(words["cycles"]) == set(CYCLE_MONTHS)
-
-
-def test_the_stale_word_is_the_reports():
-    for language in ("en", "de"):
-        assert document_words(language)["stale"] == report.words_for(language)["labels"]["stale"]
 
 
 @pytest.mark.parametrize("language", ["en", "de"])
@@ -240,6 +247,15 @@ def test_under_alpenwerk_the_words_are_german(users):
     assert shown["words_language"] == "de"
     assert shown["words"]["title"] == "Dokumente"
     assert {d["language"] for d in shown["documents"]} == {"de"}
+
+
+def test_the_pages_lang_is_the_language_of_the_words_sent(users, monkeypatch):
+    monkeypatch.setattr(documents_tab, "DOCUMENT_WORDS", {"en": DOCUMENT_WORDS["en"]})
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        shown = documents_of(client, under(alice, "alpenwerk"))
+
+    assert (shown["words_language"], shown["words"]) == ("en", DOCUMENT_WORDS["en"])
 
 
 def test_a_compliance_lead_gets_the_documents_and_signed_out_401():

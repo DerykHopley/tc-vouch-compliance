@@ -294,7 +294,19 @@ def test_a_summary_gives_the_front_matters_language(tmp_path):
     assert document_summary(path, "policies", TODAY).language == "de"
 
 
-@pytest.mark.parametrize("front", ["title: No language\n", 'language: ""\n', "language: [de]\n"])
+@pytest.mark.parametrize(
+    "front",
+    [
+        "title: No language\n",
+        'language: ""\n',
+        "language: [de]\n",
+        # Only a two-lower-case-letter code goes into an HTML `lang` (#424 review).
+        'language: "de\\" onclick=x"\n',
+        "language: DE\n",
+        "language: deu\n",
+        "language: de-AT\n",
+    ],
+)
 def test_no_or_an_empty_language_gives_none(tmp_path, front):
     path = write(tmp_path, "doc", f"---\n{front}---\n")
 
