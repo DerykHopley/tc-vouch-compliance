@@ -1,0 +1,87 @@
+{
+ "assessments": [
+  {
+   "thread_id": "22298548de0442439998a6e8ad97b97c",
+   "control_id": "1.1.1",
+   "status": "waiting-for-review",
+   "verdict": "partly-evidenced"
+  },
+  {
+   "thread_id": "1adb291a579c4852bfc39d03e2aadba2",
+   "control_id": "1.6.1",
+   "status": "waiting-for-review",
+   "verdict": "evidenced"
+  },
+  {
+   "thread_id": "ff5b2ae0556045b2b5bccda6e8e726ce",
+   "control_id": "1.6.2",
+   "status": "waiting-for-review",
+   "verdict": "partly-evidenced"
+  },
+  {
+   "thread_id": "454387134bf948fc9d37f7d5026c73d1",
+   "control_id": "2.1.3",
+   "status": "waiting-for-review",
+   "verdict": "evidenced"
+  },
+  {
+   "thread_id": "c94b8a191a2f4ba1aee51f8dbe5c888a",
+   "control_id": "4.1.2",
+   "status": "waiting-for-review",
+   "verdict": "evidenced"
+  },
+  {
+   "thread_id": "e08efa9ada07408da39c4166043bd0a2",
+   "control_id": "4.1.3",
+   "status": "waiting-for-review",
+   "verdict": "partly-evidenced"
+  },
+  {
+   "thread_id": "8e4fdb2b3c0b4e35a133c89537750848",
+   "control_id": "4.2.1",
+   "status": "waiting-for-review",
+   "verdict": "partly-evidenced"
+  },
+  {
+   "thread_id": "d956b31fc9334fe48a58661c31915c7d",
+   "control_id": "5.1.1",
+   "status": "waiting-for-review",
+   "verdict": "not-evidenced"
+  },
+  {
+   "thread_id": "83b4749522574a118a8dfc9a394a3edf",
+   "control_id": "5.1.2",
+   "status": "waiting-for-review",
+   "verdict": "evidenced"
+  },
+  {
+   "thread_id": "dfa9ac258c2f4f44a7720ac5819d82f7",
+   "control_id": "5.2.4",
+   "status": "waiting-for-review",
+   "verdict": "partly-evidenced"
+  },
+  {
+   "thread_id": "fc916498f3f748dcb7db881967c3ba05",
+   "control_id": "5.2.5",
+   "status": "waiting-for-review",
+   "verdict": "partly-evidenced"
+  },
+  {
+   "thread_id": "d479daa5f9fb4cd091316ea322be65b2",
+   "control_id": "5.2.9",
+   "status": "waiting-for-review",
+   "verdict": "not-evidenced"
+  }
+ ],
+ "skipped": [],
+ "usage": {
+  "model": "anthropic/claude-sonnet-5.5",
+  "input_tokens": 16839,
+  "output_tokens": 26097,
+  "reported_cost_usd": 0.294648,
+  "estimated_cost_usd": 0.0,
+  "estimated": false,
+  "cost_complete": true,
+  "cost_usd": 0.294648
+ }
+}
