@@ -566,6 +566,77 @@ describe('the profile pass (ticket 390)', () => {
     expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
     expect(fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')).toHaveLength(1)
   })
+
+  /** The API with a pass held open until `finish`, the stored assessments as `store` holds them (newest first), and a
+   * per-control run that ends in `onItsOwn`. */
+  function passServer(store: (typeof STORED)[], onItsOwn?: typeof STORED) {
+    let answer: (response: Response) => void = () => {}
+    let overview = overviewWith(store)
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      const post = init?.method === 'POST'
+      if (url === '/api/overview') return Promise.resolve(Response.json(overview))
+      if (url === '/api/profile-pass' && post) return new Promise<Response>((resolve) => { answer = resolve })
+      if (url === '/api/assessments' && post) {
+        return onItsOwn
+          ? Promise.resolve(new Response(`event: result\ndata: ${JSON.stringify({ assessment: onItsOwn })}\n\n`))
+          : new Promise<Response>(() => {})
+      }
+      if (url === '/api/assessments') return Promise.resolve(Response.json({ assessments: store }))
+      const one = store.find((a) => url === `/api/assessments/${a.thread_id}`)
+      return one ? Promise.resolve(Response.json({ assessment: one })) : new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    /** The pass ends, having proposed `made` (put first in the store, as newest). */
+    const finish = async (made: (typeof STORED)[]) => {
+      store.unshift(...made)
+      overview = overviewWith(store)
+      await act(async () => answer(Response.json({
+        assessments: made.map(({ thread_id, control_id, status, verdict }) => ({ thread_id, control_id, status, verdict })),
+        skipped: [], usage: {},
+      })))
+    }
+    return { fetch, finish }
+  }
+  const answerShown = () => screen.findByRole('region', { name: 'Verdict and draft answer' })
+  const toOverview = () =>
+    userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
+
+  it("reads an open paper's control afresh when the pass ends, showing the pass's assessment", async () => {
+    const { finish } = passServer([STORED])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Open 4.1.2' }))
+    expect(within(await answerShown()).getByText('Keys for administrators.')).toBeTruthy()
+    await finish([{ ...STORED, thread_id: 't2', answer: 'From the pass.' }])
+    await waitFor(async () => expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy())
+  })
+
+  it("shows the pass's assessment, not an earlier run's, for a control assessed on its own before", async () => {
+    const own = { ...STORED, control_id: '1.1.1', thread_id: 't-own', answer: 'On its own.' }
+    const { finish } = passServer([], own)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 1.1.1' }))
+    expect(within(await answerShown()).getByText('On its own.')).toBeTruthy()
+    await toOverview()
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await finish([{ ...own, thread_id: 't-pass', answer: 'From the pass.' }])
+    await userEvent.click(screen.getByRole('link', { name: 'Open 1.1.1' }))
+    expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy()
+  })
+
+  it("holds a working paper's Assess while the pass runs, saying why", async () => {
+    const { fetch } = passServer([])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Open 1.1.1' }))
+    const paper = await screen.findByRole('region', { name: 'Working paper' })
+    const assess = within(paper).getByRole('button', { name: 'Assess 1.1.1' }) as HTMLButtonElement
+    expect(assess.disabled).toBe(true)
+    expect(paper.textContent).toContain('Vouch is running a profile pass. One run at a time.')
+    await userEvent.click(assess)
+    expect(fetch.mock.calls.filter(([url, init]) => url === '/api/assessments' && init?.method === 'POST'))
+      .toHaveLength(0)
+  })
 })
 
 describe('theme', () => {

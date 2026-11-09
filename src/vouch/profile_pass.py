@@ -53,6 +53,8 @@ from vouch.graph import (
     model_name_of,
     never_claim,
     new_thread_id,
+    overlay_requirements_of,
+    overlays_step,
     plural,
     remediation_drafts,
     thread_config,
@@ -60,7 +62,7 @@ from vouch.graph import (
     verdict_changes,
 )
 from vouch.guards import DATA_RULE, as_data, flagged_steps
-from vouch.isa import IsaControl, Requirement
+from vouch.isa import IsaControl
 from vouch.language import language_name
 from vouch.memory import Memory, newest_by_control
 from vouch.profile import ComplianceProfile, ControlRequirements
@@ -255,7 +257,7 @@ def _assessed(
     values = {
         "control": included.control,
         "control_requirements": included.requirements,
-        "overlay_requirements": _overlays(included.requirements),
+        "overlay_requirements": overlay_requirements_of(included.requirements),
         "answer": answer,
         "requirements": requirements,
         "not_judged": judged.not_judged,
@@ -271,13 +273,6 @@ def _assessed(
         *(f"{d.missing} {d.owner_role}" for d in drafts),
     ]
     return _Assessed(values, texts)
-
-
-def _overlays(requirements: ControlRequirements) -> tuple[Requirement, ...]:
-    """The applicable requirements the country overlays add, in order, as the agent's
-    apply_overlays node sets them."""
-    applicable = set(requirements.applicable)
-    return tuple(r for r in requirements.overlay if r in applicable)
 
 
 def _pass_step(controls: int, documents: int, rejected: str | None) -> dict[str, str]:
@@ -315,7 +310,7 @@ def _write(
             control = part.values["control"]
             loaded = loaded_step(control, shared["profile"]).to_dict()
             # The agent's own overlay step; no overlay_branch step, as the pass gathers nothing.
-            overlays = Step("apply_overlays", part.values).to_dict()
+            overlays = overlays_step(part.values["overlay_requirements"]).to_dict()
             values = {
                 **{k: v for k, v in shared.items() if k != "profile"},
                 **part.values,

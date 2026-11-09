@@ -16,14 +16,12 @@ type Props = {
   /** The control being assessed just now, if any: its card says so, and the hero offers no second run. */
   running: string | null
   /** The page's profile pass (#390): held above the views, so its result waits here. */
-  pass?: PassState
+  pass: PassState
   /** Starts a profile pass. */
-  onPass?: () => void
+  onPass: () => void
 }
 
-const IDLE: PassState = { kind: 'idle' }
-
-export default function Dossier({ state, onRetry, onOpen, running, pass = IDLE, onPass = () => {} }: Props) {
+export default function Dossier({ state, onRetry, onOpen, running, pass, onPass }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -41,7 +39,7 @@ export default function Dossier({ state, onRetry, onOpen, running, pass = IDLE, 
   return (
     <main className="dossier wrap">
       <Hero overview={overview} onOpen={onOpen} running={running} pass={pass} onPass={onPass} />
-      <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} />
+      <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} running={running} />
       <Band readiness={overview.readiness} />
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
@@ -123,12 +121,14 @@ const shortOf = (verdict: Verdict | null) => verdict === 'not-evidenced' || verd
 /**
  * The profile pass's result (`docs/design.md`, Components: Profile pass): what waits for review, with a row per new
  * assessment read from its card as it stands now (a review since shows), or why the pass didn't run and the way on.
- * Nothing while the pass is idle or running.
+ * Nothing while the pass is idle or running. While a per-control assessment runs (`running`), it starts nothing: it
+ * offers to open a control rather than assess it, holds Try again, and says why.
  */
-function PassPanel({ overview, pass, onOpen, onPass }:
-  { overview: Overview; pass: PassState; onOpen: Props['onOpen']; onPass: () => void }) {
+function PassPanel({ overview, pass, onOpen, onPass, running }:
+  { overview: Overview; pass: PassState; onOpen: Props['onOpen']; onPass: () => void; running: string | null }) {
   if (pass.kind === 'idle' || pass.kind === 'running') return null
   const cards = new Map(overview.controls.map((c) => [c.id, c]))
+  const held = running !== null && <p className="field-note">Vouch is assessing {running}. One run at a time.</p>
   let body
   if (pass.kind === 'done') {
     const skipped = pass.skipped.length > 0 && (
@@ -156,7 +156,7 @@ function PassPanel({ overview, pass, onOpen, onPass }:
                 {status !== 'not-assessed' && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
                 <span className="pass-actions">
                   <button className="btn" onClick={() => onOpen(a.control_id, false)}>Open {a.control_id}</button>
-                  {shortOf(verdict) && (
+                  {shortOf(verdict) && running === null && (
                     <button className="btn btn-ghost" onClick={() => onOpen(a.control_id, true)}>
                       Assess {a.control_id} again
                     </button>
@@ -166,6 +166,7 @@ function PassPanel({ overview, pass, onOpen, onPass }:
             )
           })}
         </ul>
+        {held}
       </>
     )
   } else if (pass.kind === 'refused' || pass.kind === 'limit') {
@@ -174,16 +175,18 @@ function PassPanel({ overview, pass, onOpen, onPass }:
     body = (
       <>
         <p role="alert">{pass.message}</p>
-        {first && (
-          <button className="btn btn-primary" onClick={() => onOpen(first.id, true)}>Assess {first.id} on its own</button>
-        )}
+        {first && (running === null
+          ? <button className="btn btn-primary" onClick={() => onOpen(first.id, true)}>Assess {first.id} on its own</button>
+          : <button className="btn" onClick={() => onOpen(first.id, false)}>Open {first.id}</button>)}
+        {held}
       </>
     )
   } else {
     body = (
       <>
         <p role="alert">{pass.message}</p>
-        <button className="btn" onClick={onPass}>Try again</button>
+        <button className="btn" onClick={onPass} disabled={running !== null}>Try again</button>
+        {held}
       </>
     )
   }

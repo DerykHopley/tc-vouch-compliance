@@ -42,9 +42,9 @@ export type PassState = { kind: 'idle' } | { kind: 'running' } | PassResult
 /**
  * The page's profile pass, held above the views as the per-control run is (`useAssessment`), so it carries on while
  * the lead opens a working paper and its result waits on the Dossier. `start` is ignored while a pass runs; `onDone`
- * is called once a pass made or skipped its assessments.
+ * is called once a pass made or skipped its assessments, with the ones it made.
  */
-export function useProfilePass(onDone?: () => void) {
+export function useProfilePass(onDone?: (made: PassAssessment[]) => void) {
   const [pass, setPass] = useState<PassState>({ kind: 'idle' })
   const running = useRef(false) // a ref, so two clicks in one tick still start one pass
 
@@ -55,7 +55,7 @@ export function useProfilePass(onDone?: () => void) {
     try {
       const result = await runProfilePass()
       setPass(result)
-      if (result.kind === 'done') onDone?.()
+      if (result.kind === 'done') onDone?.(result.assessments)
     } finally {
       running.current = false
     }
