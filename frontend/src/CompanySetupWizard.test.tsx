@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
 import type { ProtectionScope } from './setup.ts'
 
@@ -33,13 +33,24 @@ function api(levels: Answer[] = [], controls: Answer[] = []) {
   return fetch
 }
 
+/** The wizard's clock (performance.now): it ignores a move within 400 ms of the last, so each helper press below comes
+ * a second after the one before, as a person's separate presses do. */
+let clock = 0
+beforeEach(() => {
+  clock = 0
+  vi.spyOn(performance, 'now').mockImplementation(() => clock)
+})
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
-const next = () => userEvent.click(screen.getByRole('button', { name: 'Next' }))
-const back = () => userEvent.click(screen.getByRole('button', { name: 'Back' }))
+const nextButton = () => screen.getByRole('button', { name: 'Next' })
+const backButton = () => screen.getByRole('button', { name: 'Back' })
+const next = () => { clock += 1000; return userEvent.click(nextButton()) }
+const back = () => { clock += 1000; return userEvent.click(backButton()) }
 const heading = (name: string) => screen.getByRole('heading', { name })
 const nameField = () => screen.getByRole('textbox', { name: 'Company name' })
 const countryField = () => screen.getByRole('combobox', { name: 'Country' })
@@ -295,8 +306,13 @@ describe('company setup', () => {
     }
     await next()
     expect(heading('Not applicable')).toBeTruthy()
-    expect(screen.getByText('At least one control must apply.')).toBeTruthy()
+    const list = screen.getByRole('group', { name: 'Controls not applicable' })
+    expect(list.getAttribute('aria-invalid')).toBe('true')
+    expect(list.getAttribute('aria-describedby')
+      && document.getElementById(list.getAttribute('aria-describedby')!)?.textContent).toBe('At least one control must apply.')
     expect(document.activeElement).toBe(control(CONTROLS[0].id))
+    await userEvent.click(control(CONTROLS[3].id))
+    expect(list.getAttribute('aria-invalid')).toBeNull()
   })
 
   it('keeps the ticked controls and their reasons as typed through Back and Next', async () => {
@@ -352,6 +368,61 @@ describe('company setup', () => {
     await back()
     await next()
     expect(fetch.mock.calls.map((c) => c[0])).toEqual(['/api/developer/protection-levels', '/api/developer/controls'])
+  })
+
+  it('a second press within 400 ms of a move is ignored, on Next and on Back, so each press moves one step', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await stepOne()
+    await next()
+    await userEvent.click(nextButton()) // the same moment: a double-click's second press
+    expect(screen.getByText('Step 2 of 7')).toBeTruthy()
+    clock += 399
+    await userEvent.click(nextButton())
+    expect(screen.getByText('Step 2 of 7')).toBeTruthy()
+    clock += 1
+    await userEvent.click(nextButton())
+    await userEvent.click(nextButton()) // lands on step 3's Next: no move, and no "Choose a protection level."
+    expect(screen.getByText('Step 3 of 7')).toBeTruthy()
+    expect(screen.queryByText('Choose a protection level.')).toBeNull()
+    clock += 1000
+    await userEvent.click(backButton())
+    await userEvent.click(backButton())
+    expect(screen.getByText('Step 2 of 7')).toBeTruthy()
+  })
+
+  it("leaving a step clears its problems: they don't show again on return before Next", async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep3()
+    await next()
+    expect(screen.getByText('Choose a protection level.')).toBeTruthy()
+    await back()
+    await next()
+    expect(screen.queryByText('Choose a protection level.')).toBeNull()
+    expect(screen.getByRole('group', { name: 'Protection level' }).getAttribute('aria-invalid')).toBeNull()
+    await userEvent.click(screen.getByRole('radio', { name: /^Normal/ }))
+    await next()
+    await userEvent.click(await findControl('1.6.1'))
+    await next()
+    expect(reason('1.6.1').getAttribute('aria-invalid')).toBe('true')
+    await back()
+    await next()
+    expect(reason('1.6.1').getAttribute('aria-invalid')).toBeNull()
+    expect(screen.queryByText("Say why 1.6.1 doesn't apply.")).toBeNull()
+  })
+
+  it("Next on step 5 with good answers keeps the reasons as typed, and points to the note that it's not built yet", async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep5()
+    await userEvent.click(await findControl('1.6.1'))
+    await userEvent.type(reason('1.6.1'), ' No prototype vehicles ')
+    await next()
+    expect(heading('Not applicable')).toBeTruthy()
+    expect((reason('1.6.1') as HTMLTextAreaElement).value).toBe(' No prototype vehicles ')
+    expect(document.activeElement)
+      .toBe(screen.getByText('The next steps (evidence, finish) are not built yet. Nothing has been saved.'))
   })
 
   it('the breadcrumb leads back to the developer page', async () => {

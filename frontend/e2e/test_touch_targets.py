@@ -5,7 +5,7 @@ import re
 
 import pytest
 from playwright.sync_api import Page, expect
-from test_company_setup import LEVELS, control, open_setup, to_step_3, to_step_5
+from test_company_setup import LEVELS, control, open_setup, press, to_step_3, to_step_5
 from test_guided_chat import assess_in_the_chat
 from test_profiles import assessed as assessed_in
 from test_remediation import ITEM, accepted_with_an_item
@@ -72,9 +72,9 @@ def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     if step == "levels failed":
         page.get_by_role("textbox", name="Company name").fill("Musterfirma Nord GmbH")
         page.get_by_role("combobox", name="Country").select_option("Germany")
-        page.get_by_role("button", name="Next").click()
+        press(page, "Next")
         with page.expect_response(lambda r: LEVELS in r.url):
-            page.get_by_role("button", name="Next").click()
+            press(page, "Next")
         expect(page.get_by_role("button", name="Try again")).to_be_visible()
     if step == "not applicable":
         to_step_5(page)

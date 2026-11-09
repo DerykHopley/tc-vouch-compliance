@@ -467,6 +467,11 @@ textarea.field { resize: vertical; font-family: inherit; }
   linear-gradient(135deg, transparent 40%, var(--sheet) 40% 60%, transparent 60%) 19px 16px / 10px 10px no-repeat,
   linear-gradient(var(--ink), var(--ink)) center / 18px 18px no-repeat; }
 .setup-reason { margin-left: 32px; }
+/* Forced colours (Windows High Contrast) drop the drawn ring and box above, leaving an empty target: give the radio
+   and the checkbox back the system's own, which draws in the system colours. */
+@media (forced-colors: active) {
+  .setup-choice input { appearance: auto; width: 18px; height: 18px; margin: 13px 13px 13px 1px; }
+}
 .setup-alert { display: grid; gap: 8px; justify-items: start; }
 .setup-alert p { margin: 0; }
 .setup-nav { display: flex; gap: 8px; }

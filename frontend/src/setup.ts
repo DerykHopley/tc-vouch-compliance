@@ -72,3 +72,17 @@ export type FrameworkControl = { id: string; question: string }
 export async function frameworkControls(): Promise<FrameworkControl[] | null> {
   return (await read<{ controls: FrameworkControl[] }>('/api/developer/controls'))?.controls ?? null
 }
+
+/** A control marked not applicable on step 5 (#407), as CompanySetup.not_applicable takes it: whole controls only, so
+ * no requirement. The reason is kept as typed; it is trimmed where the create request is built (#409). */
+export type NotApplicable = { control: string; reason: string }
+
+/** Step 5's checks (#407): the marked controls whose reason is empty or only spaces, in the framework's order, and
+ * whether every control is marked (at least one must apply). Nothing is found while `controls` is empty (unread). */
+export function notApplicableProblems(marked: readonly NotApplicable[], controls: readonly FrameworkControl[]) {
+  const ids = new Set(marked.map((m) => m.control))
+  return {
+    blank: controls.filter((c) => marked.some((m) => m.control === c.id && m.reason.trim() === '')).map((c) => c.id),
+    allMarked: controls.length > 0 && controls.every((c) => ids.has(c.id)),
+  }
+}

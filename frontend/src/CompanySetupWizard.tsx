@@ -1,8 +1,8 @@
-import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ProtectionLevel } from './assessment.ts'
 import {
-  COUNTRIES, type FrameworkControl, frameworkControls, MAX_COMPANY_LENGTH, PROTECTION_LEVELS, protectionLevels,
-  type ProtectionScope, scopeWords,
+  COUNTRIES, type FrameworkControl, frameworkControls, MAX_COMPANY_LENGTH, type NotApplicable, notApplicableProblems,
+  PROTECTION_LEVELS, protectionLevels, type ProtectionScope, scopeWords,
 } from './setup.ts'
 
 /** Every step of company setup, by name; steps after BUILT, and those NOT_BUILT, are later slices of #351. */
@@ -16,9 +16,10 @@ const BUILT = NOT_APPLICABLE
 const NOT_BUILT = [GOAL] // skipped by Next and Back until slice 5 of #351 builds it
 const later = (n: number) => n > BUILT || NOT_BUILT.includes(n)
 
-/** A control marked not applicable, as CompanySetup.not_applicable takes it: whole controls only, so no requirement.
- * The reason is kept as typed; Next on step 5 trims it. */
-type NotApplicable = { control: string; reason: string }
+/** A press within this long of the last move is that move's press landing again (a double-click, a double-tap, two
+ * quick clicks) on the new step's Next or Back: it is ignored, so each press moves one step. From #403's verifier. */
+const SETTLE_MS = 400
+
 type Answers = {
   company: string
   country: string
@@ -26,13 +27,14 @@ type Answers = {
   level: ProtectionLevel | null
   notApplicable: NotApplicable[]
 }
-/** `blank`: the controls marked not applicable whose reason is empty; `allMarked`: every control is. */
-type Problems = { company: boolean; country: boolean; level: boolean; blank: string[]; allMarked: boolean }
+/** What Next found wrong on the current step, each by the `data-problem` of the field that takes focus for it: an
+ * answer's name ('company', 'country', 'level'), ALL_MARKED, or a marked control's id (its reason blank). */
+type Problems = readonly string[]
+const NO_PROBLEMS: Problems = []
+const ALL_MARKED = 'all marked'
 type Read<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed' }
 type Scope = Read<ProtectionScope[]>
 type Controls = Read<FrameworkControl[]>
-
-const NO_PROBLEMS: Problems = { company: false, country: false, level: false, blank: [], allMarked: false }
 
 const LANGUAGES = [{ code: 'en', name: 'English' }, { code: 'de', name: 'German' }] as const
 const LEVELS = Object.keys(PROTECTION_LEVELS) as ProtectionLevel[]
@@ -52,77 +54,66 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
   const [problems, setProblems] = useState<Problems>(NO_PROBLEMS)
   const [scope, setScope] = useState<Scope | null>(null) // read when step 3 first opens
   const [controls, setControls] = useState<Controls | null>(null) // read when step 5 first opens
+  const formRef = useRef<HTMLFormElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const nameRef = useRef<HTMLInputElement>(null)
-  const countryRef = useRef<HTMLSelectElement>(null)
-  const levelsRef = useRef<HTMLFieldSetElement>(null)
-  const controlsRef = useRef<HTMLFieldSetElement>(null)
+  const notBuiltRef = useRef<HTMLParagraphElement>(null)
+  const lastMove = useRef(-Infinity)
   const moved = useRef(false)
   useEffect(() => {
     if (moved.current) headingRef.current?.focus() // on each step change, not on opening
   }, [step])
 
   // Only each read's latest answer lands, and none after the wizard has closed.
-  const scopeReads = useReader(protectionLevels, setScope)
-  const readScope = scopeReads.read
-  const readControls = useReader(frameworkControls, setControls).read
+  const readScope = useReader(protectionLevels, setScope)
+  const readControls = useReader(frameworkControls, setControls)
+  const settling = () => performance.now() - lastMove.current < SETTLE_MS
+  // Leaving a step drops its problems: they show again only when Next checks it again.
   const go = (to: number) => {
+    if (settling()) return
+    lastMove.current = performance.now()
     const by = Math.sign(to - step)
     while (NOT_BUILT.includes(to)) to += by
     moved.current = true
     setStep(to)
+    setProblems(NO_PROBLEMS)
     if (to === LEVEL && scope === null) readScope()
     if (to === NOT_APPLICABLE && controls === null) readControls()
   }
+  const check = (): Problems => {
+    if (step === COMPANY)
+      return [answers.company.trim() === '' && 'company', answers.country === '' && 'country'].filter((p) => p !== false)
+    if (step === LEVEL) return answers.level === null ? ['level'] : NO_PROBLEMS
+    if (step === NOT_APPLICABLE) {
+      const found = notApplicableProblems(answers.notApplicable, controls?.status === 'ready' ? controls.data : [])
+      return [...(found.allMarked ? [ALL_MARKED] : []), ...found.blank]
+    }
+    return NO_PROBLEMS
+  }
   const next = (e: FormEvent) => {
     e.preventDefault()
-    if (step === COMPANY) {
-      const found = { company: answers.company.trim() === '', country: answers.country === '' }
-      setProblems({ ...NO_PROBLEMS, ...found })
-      if (found.company) return nameRef.current?.focus()
-      if (found.country) return countryRef.current?.focus()
-    }
-    if (step === LEVEL && answers.level === null) {
-      setProblems({ ...NO_PROBLEMS, level: true })
-      return levelsRef.current?.querySelector('input')?.focus()
-    }
-    if (step === NOT_APPLICABLE) {
-      const marked = answers.notApplicable
-      const order = controls?.status === 'ready' ? controls.data.map((c) => c.id) : []
-      const blank = order.filter((c) => marked.some((m) => m.control === c && m.reason.trim() === ''))
-      const allMarked = controls?.status === 'ready' && marked.length === controls.data.length
-      setProblems({ ...NO_PROBLEMS, blank, allMarked })
-      if (allMarked) return controlsRef.current?.querySelector('input')?.focus()
-      if (blank.length > 0) return controlsRef.current?.querySelector<HTMLElement>(`[data-control="${blank[0]}"]`)?.focus()
-      setAnswers((now) => ({ ...now, notApplicable: now.notApplicable.map((m) => ({ ...m, reason: m.reason.trim() })) }))
+    if (settling()) return // the last move's press landing on this step's Next: not a check of this step
+    const found = check()
+    setProblems(found)
+    if (found.length > 0) {
+      formRef.current?.querySelector<HTMLElement>(`[data-problem="${found[0]}"]`)?.focus()
+      return
     }
     if (step < BUILT) go(step + 1)
-  }
-  // A double-click on Next moves one step: its second click (detail 2) would land on the next step's Next.
-  const once = (e: MouseEvent) => {
-    if (e.detail > 1) e.preventDefault()
+    else notBuiltRef.current?.focus() // nowhere to go yet (#408): say so, so Next doesn't look dead
   }
   // A changed answer's problem clears at once; Next checks again.
   const answer = (change: Partial<Answers>) => {
     setAnswers((now) => ({ ...now, ...change }))
-    setProblems((now) => ({
-      ...now,
-      company: now.company && !('company' in change),
-      country: now.country && !('country' in change),
-      level: now.level && !('level' in change),
-    }))
+    setProblems((now) => now.filter((p) => !(p in change)))
   }
-  // Step 5: ticking a control asks why, unticking drops its reason; a changed control's problems clear.
+  // Step 5: ticking a control asks why, unticking drops its reason; a changed control's problems clear. The list's
+  // order is the framework's, from `controls`, so the answers' order doesn't matter.
   const mark = (control: string, reason: string | null) => {
     setAnswers((now) => {
       const others = now.notApplicable.filter((m) => m.control !== control)
-      const at = now.notApplicable.findIndex((m) => m.control === control)
-      if (reason === null) return { ...now, notApplicable: others }
-      const marked = [...others]
-      marked.splice(at === -1 ? others.length : at, 0, { control, reason })
-      return { ...now, notApplicable: marked }
+      return { ...now, notApplicable: reason === null ? others : [...others, { control, reason }] }
     })
-    setProblems((now) => ({ ...now, blank: now.blank.filter((c) => c !== control), allMarked: now.allMarked && reason !== null }))
+    setProblems((now) => now.filter((p) => p !== control && !(p === ALL_MARKED && reason === null)))
   }
 
   return (
@@ -144,76 +135,71 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
           </li>
         ))}
       </ol>
-      <form className="sheet setup-step" noValidate onSubmit={next}>
+      <form ref={formRef} className="sheet setup-step" noValidate onSubmit={next}>
         <span className="lbl">Step {step} of {STEPS.length}</span>
         <h3 ref={headingRef} tabIndex={-1}>{STEPS[step - 1]}</h3>
-        {step === COMPANY && (
-          <CompanyStep answers={answers} problems={problems} answer={answer} nameRef={nameRef} countryRef={countryRef} />
-        )}
+        {step === COMPANY && <CompanyStep answers={answers} problems={problems} answer={answer} />}
         {step === LANGUAGE && <LanguageStep answers={answers} answer={answer} />}
         {step === LEVEL && (
-          <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} problem={problems.level}
-            fieldsetRef={levelsRef} />
+          <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} problem={problems.includes('level')} />
         )}
         {step === NOT_APPLICABLE && (
           <NotApplicableStep marked={answers.notApplicable} mark={mark} controls={controls} onRetry={readControls}
-            problems={problems} fieldsetRef={controlsRef} />
+            problems={problems} />
         )}
         <div className="setup-nav">
           {step > COMPANY && <button type="button" className="btn btn-ghost" onClick={() => go(step - 1)}>Back</button>}
-          <button type="submit" className="btn btn-primary" onClick={once}>Next</button>
+          <button type="submit" className="btn btn-primary">Next</button>
         </div>
         {step === BUILT && (
-          <p className="field-note">The next steps (evidence, finish) are not built yet. Nothing has been saved.</p>
+          <p ref={notBuiltRef} tabIndex={-1} className="field-note">
+            The next steps (evidence, finish) are not built yet. Nothing has been saved.
+          </p>
         )}
       </form>
     </section>
   )
 }
 
-/** A read that starts on `read()` and lands its answer in `set`; only the latest read's answer lands, and none after
- * the wizard has closed. */
-function useReader<T>(fetch: () => Promise<T | null>, set: (read: Read<T>) => void) {
+/** A read that starts when the returned function is called and lands its answer in `set`; only the latest read's
+ * answer lands, and none after the wizard has closed. */
+function useReader<T>(load: () => Promise<T | null>, set: (read: Read<T>) => void) {
   const reads = useRef(0)
   useEffect(() => () => { reads.current += 1 }, [])
-  return {
-    read: () => {
-      const read = ++reads.current
-      set({ status: 'loading' })
-      void fetch().then((data) => {
-        if (read === reads.current) set(data ? { status: 'ready', data } : { status: 'failed' })
-      })
-    },
+  return () => {
+    const read = ++reads.current
+    set({ status: 'loading' })
+    void load().then((data) => {
+      if (read === reads.current) set(data ? { status: 'ready', data } : { status: 'failed' })
+    })
   }
 }
 
 type StepProps = { answers: Answers; answer: (change: Partial<Answers>) => void }
 
-function CompanyStep({ answers, problems, answer, nameRef, countryRef }: StepProps & {
-  problems: Problems
-  nameRef: React.RefObject<HTMLInputElement | null>
-  countryRef: React.RefObject<HTMLSelectElement | null>
-}) {
+function CompanyStep({ answers, problems, answer }: StepProps & { problems: Problems }) {
   const nameId = useId()
   const countryId = useId()
+  const noName = problems.includes('company')
+  const noCountry = problems.includes('country')
   return (
     <>
       <div className="setup-field">
         <label htmlFor={nameId}>Company name</label>
-        <input id={nameId} ref={nameRef} className="field" value={answers.company} maxLength={MAX_COMPANY_LENGTH}
+        <input id={nameId} data-problem="company" className="field" value={answers.company} maxLength={MAX_COMPANY_LENGTH}
           autoComplete="organization" onChange={(e) => answer({ company: e.target.value })}
-          aria-invalid={problems.company || undefined} aria-describedby={problems.company ? `${nameId}-problem` : undefined} />
-        {problems.company && <p id={`${nameId}-problem`} className="notice field-note">Give the company a name.</p>}
+          aria-invalid={noName || undefined} aria-describedby={noName ? `${nameId}-problem` : undefined} />
+        {noName && <p id={`${nameId}-problem`} className="notice field-note">Give the company a name.</p>}
       </div>
       <div className="setup-field">
         <label htmlFor={countryId}>Country</label>
-        <select id={countryId} ref={countryRef} className="field" value={answers.country}
+        <select id={countryId} data-problem="country" className="field" value={answers.country}
           onChange={(e) => answer({ country: e.target.value })}
-          aria-invalid={problems.country || undefined} aria-describedby={problems.country ? `${countryId}-problem` : undefined}>
+          aria-invalid={noCountry || undefined} aria-describedby={noCountry ? `${countryId}-problem` : undefined}>
           <option value="">Choose a country</option>
           {COUNTRIES.map((c) => <option key={c.code} value={c.name}>{c.name}</option>)}
         </select>
-        {problems.country && <p id={`${countryId}-problem`} className="notice field-note">Choose the company's country.</p>}
+        {noCountry && <p id={`${countryId}-problem`} className="notice field-note">Choose the company's country.</p>}
       </div>
     </>
   )
@@ -238,11 +224,10 @@ function LanguageStep({ answers, answer }: StepProps) {
   )
 }
 
-function LevelStep({ answers, answer, scope, onRetry, problem, fieldsetRef }: StepProps & {
+function LevelStep({ answers, answer, scope, onRetry, problem }: StepProps & {
   scope: Scope | null
   onRetry: () => void
   problem: boolean
-  fieldsetRef: React.RefObject<HTMLFieldSetElement | null>
 }) {
   const problemId = useId()
   const brings = (level: ProtectionLevel) => {
@@ -253,15 +238,15 @@ function LevelStep({ answers, answer, scope, onRetry, problem, fieldsetRef }: St
     return scope?.status === 'failed' ? null : 'Loading what this level brings in…'
   }
   return (
-    <fieldset ref={fieldsetRef} className="setup-choices" aria-invalid={problem || undefined}
-      aria-describedby={problem ? problemId : undefined}>
+    <fieldset className="setup-choices" aria-invalid={problem || undefined} aria-describedby={problem ? problemId : undefined}>
       <legend>Protection level</legend>
-      {LEVELS.map((level) => {
+      {LEVELS.map((level, i) => {
         const { name } = PROTECTION_LEVELS[level]
         const words = brings(level)
         return (
           <label key={level} className="setup-choice setup-option">
             <input type="radio" name="protection-level" value={level} checked={answers.level === level}
+              data-problem={i === 0 ? 'level' : undefined}
               onChange={() => answer({ level })} />
             <span className="setup-option-text">
               <span className="setup-option-name">{name}</span>
@@ -281,39 +266,40 @@ function LevelStep({ answers, answer, scope, onRetry, problem, fieldsetRef }: St
   )
 }
 
-function NotApplicableStep({ marked, mark, controls, onRetry, problems, fieldsetRef }: {
+function NotApplicableStep({ marked, mark, controls, onRetry, problems }: {
   marked: NotApplicable[]
   mark: (control: string, reason: string | null) => void
   controls: Controls | null
   onRetry: () => void
   problems: Problems
-  fieldsetRef: React.RefObject<HTMLFieldSetElement | null>
 }) {
   const id = useId()
   const allMarkedId = `${id}-all`
+  const allMarked = problems.includes(ALL_MARKED)
   return (
-    <fieldset ref={fieldsetRef} className="setup-choices" aria-describedby={problems.allMarked ? allMarkedId : undefined}>
+    <fieldset className="setup-choices" aria-invalid={allMarked || undefined}
+      aria-describedby={allMarked ? allMarkedId : undefined}>
       <legend>Controls not applicable</legend>
       <p className="field-note">
         Mark a control not applicable only when it doesn't apply to the company at all; the assessment leaves it out
         and the readiness report lists it with your reason.
       </p>
       {(controls === null || controls.status === 'loading') && <p className="field-note">Loading the controls…</p>}
-      {controls?.status === 'ready' && controls.data.map((control) => {
+      {controls?.status === 'ready' && controls.data.map((control, i) => {
         const entry = marked.find((m) => m.control === control.id)
         const reasonId = `${id}-${control.id}`
-        const blank = problems.blank.includes(control.id)
+        const blank = problems.includes(control.id)
         return (
           <div key={control.id} className="setup-na">
             <label className="setup-choice setup-check">
-              <input type="checkbox" checked={entry !== undefined}
+              <input type="checkbox" checked={entry !== undefined} data-problem={i === 0 ? ALL_MARKED : undefined}
                 onChange={(e) => mark(control.id, e.target.checked ? '' : null)} />
               <span className="setup-option-text"><span className="setup-option-name">{control.id}</span> {control.question}</span>
             </label>
             {entry && (
               <div className="setup-field setup-reason">
                 <label htmlFor={reasonId}>Why {control.id} doesn't apply</label>
-                <textarea id={reasonId} className="field" rows={2} value={entry.reason} data-control={control.id}
+                <textarea id={reasonId} className="field" rows={2} value={entry.reason} data-problem={control.id}
                   onChange={(e) => mark(control.id, e.target.value)}
                   aria-invalid={blank || undefined} aria-describedby={blank ? `${reasonId}-problem` : undefined} />
                 {blank && <p id={`${reasonId}-problem`} className="notice field-note">Say why {control.id} doesn't apply.</p>}
@@ -322,7 +308,7 @@ function NotApplicableStep({ marked, mark, controls, onRetry, problems, fieldset
           </div>
         )
       })}
-      {problems.allMarked && <p id={allMarkedId} className="notice field-note">At least one control must apply.</p>}
+      {allMarked && <p id={allMarkedId} className="notice field-note">At least one control must apply.</p>}
       {controls?.status === 'failed' && (
         <div className="notice field-note setup-alert" role="alert">
           <p>The controls could not be loaded.</p>
