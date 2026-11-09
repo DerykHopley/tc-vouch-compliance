@@ -637,6 +637,33 @@ describe('a reviewed control', () => {
     expect(screen.queryByRole('button', { name: 'Change M1' })).toBeNull()
   })
 
+  const ACCEPTED_BEFORE: Assessment = { ...PROPOSED, status: 'accepted', before_three_step_review: true,
+    review: { ...REJECTED.review!, decision: 'accept', note: '' } }
+  const MARK = 'before the three-step review'
+
+  it('marks a control accepted before the three-step review, beside who accepted it and when', () => {
+    review({ assessment: ACCEPTED_BEFORE })
+    expect(within(bar()).getByText('Accepted')).toBeTruthy()
+    expect(within(bar()).getByText(/^by Jana Weber on /)).toBeTruthy()
+    expect(within(bar()).getByText(MARK).className).toBe('field-note')
+  })
+
+  it('marks it also when its review names no reviewer, with no "by" line', () => {
+    review({ assessment: { ...ACCEPTED_BEFORE,
+      review: { ...ACCEPTED_BEFORE.review!, reviewer_id: '', reviewer_name: '', reviewed_at: '' } } })
+    expect(within(bar()).getByText(MARK)).toBeTruthy()
+    expect(within(bar()).queryByText(/^by /)).toBeNull()
+  })
+
+  it.each([
+    ['accepted in the three steps', { ...ACCEPTED_BEFORE, before_three_step_review: false }],
+    ['rejected', { ...REJECTED, before_three_step_review: false }],
+    ['rejected with the one-shot review', { ...REJECTED, before_three_step_review: true }],
+  ])('shows no mark on a control %s', (_, assessment) => {
+    review({ assessment })
+    expect(within(bar()).queryByText(MARK)).toBeNull()
+  })
+
   it('closes an open override when the decision lands, so nothing unsaved is left to save', async () => {
     const again = review()
     await overrideM1()
