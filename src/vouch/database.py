@@ -109,7 +109,7 @@ CREATE_USAGE = (
 
 AUDIT_TABLE = "vouch_audit_trail"
 """Every reviewed verdict and override (vouch.audit), append-only, in its decision's transaction."""
-AuditAction = Literal["accept", "reject", "override", "approve", "discard"]
+AuditAction = Literal["accept", "reject", "override", "confirm", "approve", "discard"]
 """What an audit entry records the compliance lead doing (vouch.audit's Action)."""
 AUDIT_COLUMNS = (
     "user_id",
@@ -171,6 +171,23 @@ ADD_AUDIT_REVIEWER_NAME = (
 the name then). One statement, so one transaction: the guard is off only inside it, for this
 one fill, and no other session sees it off. Runs after CREATE_AUDIT_TRIGGERS, so the trigger
 it lifts is there."""
+AUDIT_ACTION_CHECK = f"{AUDIT_TABLE}_action_check"
+"""The name Postgres gave CREATE_AUDIT's action CHECK (table, column, "check")."""
+REPLACE_AUDIT_ACTION_CHECK = (
+    "DO $$ BEGIN "
+    "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = "
+    f"'{AUDIT_TABLE}'::regclass AND conname = '{AUDIT_ACTION_CHECK}' "
+    "AND pg_get_constraintdef(oid) LIKE ALL (ARRAY["
+    + ", ".join(f"'%''{a}''%'" for a in get_args(AuditAction))
+    + "])) THEN "
+    f"ALTER TABLE {AUDIT_TABLE} DROP CONSTRAINT IF EXISTS {AUDIT_ACTION_CHECK}, "
+    f"ADD CONSTRAINT {AUDIT_ACTION_CHECK} "
+    f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})); "
+    "END IF; END $$"
+)
+"""A trail made before an action was added (`confirm`, #372) has a CHECK refusing it: replaced
+by one naming every AuditAction. No row is changed (the trail's guard is on update and delete,
+which an ALTER doesn't fire), and once the CHECK names them all, a second run does nothing."""
 REMEDIATION_TABLE = "vouch_remediation_items"
 """Each remediation item the lead approved or discarded (vouch.remediation), per user, profile,
 assessment thread and requirement: one decision each, written in its audit entry's transaction.
@@ -710,6 +727,7 @@ class Database:
                 for trigger in CREATE_AUDIT_TRIGGERS:
                     conn.execute(trigger)
                 conn.execute(ADD_AUDIT_REVIEWER_NAME)
+                conn.execute(REPLACE_AUDIT_ACTION_CHECK)
                 conn.execute(CREATE_REMEDIATION)
                 conn.execute(CREATE_REMEDIATION_GUARD)
                 for trigger in CREATE_REMEDIATION_TRIGGERS:

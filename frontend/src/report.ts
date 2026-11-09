@@ -41,7 +41,7 @@ export type ReportItem = { requirement_id: string; missing: string; owner_role: 
 
 export type NotApplicable = { control_id: string; requirement_id: string; text: string; reason: string }
 
-export type TrailAction = 'accept' | 'reject' | 'override' | 'approve' | 'discard'
+export type TrailAction = 'accept' | 'reject' | 'override' | 'confirm' | 'approve' | 'discard'
 
 /** One audit-trail entry (`vouch.audit.AuditEntry.to_dict`). */
 export type TrailEntry = {

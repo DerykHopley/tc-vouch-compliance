@@ -10,7 +10,15 @@ from assess_steps import step_texts
 from langchain_core.messages import ToolMessage
 
 from vouch import ScriptedChatModel, assess, language, load_named_profile, load_profile
-from vouch.graph import ReviewDecision, Step, claims_audit_result, memory_checkpointer, resume
+from vouch.graph import (
+    ConfirmFindings,
+    ReviewDecision,
+    Step,
+    claims_audit_result,
+    confirm_findings,
+    memory_checkpointer,
+    resume,
+)
 from vouch.language import written_in
 
 
@@ -391,6 +399,7 @@ def test_a_thread_saved_before_51_reads_its_profiles_answer_language_on_resume()
     for key in [k for k in saver.blobs if k[2] == "answer_language"]:
         del saver.blobs[key]
 
+    confirm_findings(result.thread_id, ConfirmFindings(), saver)
     reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), saver)
 
     assert reviewed.answer_language == "de"

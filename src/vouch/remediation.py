@@ -1,8 +1,9 @@
 """Remediation items the compliance lead approves or discards (#43).
 
 The assessment graph drafts one item per requirement not or partly evidenced (vouch.graph's
-RemediationItem), kept in the assessment's thread. Once the control's verdict is accepted, the
-lead approves each draft (maybe with another owner role or due date) or discards it. The
+RemediationItem), kept in the assessment's thread. Once the findings are confirmed (the review's
+Plan fixes step, #372), the lead approves each draft (maybe with another owner role or due date)
+or discards it; the control is accepted only once none is left a draft. The
 decision is kept per user and compliance profile, keyed by the assessment's thread and the
 requirement, with its audit entry: both, or neither (Postgres: one transaction,
 vouch.database's `decide_remediation`; without a database, this process's memory and trail,
@@ -10,8 +11,9 @@ whose writes can't fail).
 
 A decision is final: the same decision again changes nothing and writes no entry (a double
 click approves once); the other one, or an approval with other values, is refused, naming what
-was kept. Only an accepted assessment's items are decided, as the review can still change a
-proposed one's (an override adds or removes items), and a rejected one is assessed again.
+was kept. Only items whose findings are confirmed are decided, as an override at Confirm
+findings adds or removes items; a rejected assessment's wait, as it is assessed again. An
+assessment accepted before the three-step review can still have drafts: they are decided too.
 
 The lead picks a due date in their own calendar, which the server doesn't know: a date is
 refused only when it is past everywhere (before today in UTC-12), or further away than the
@@ -34,6 +36,7 @@ from vouch.graph import (
     MAX_DUE_DAYS,
     NO_NUL_PATTERN,
     NO_OWNER,
+    WAITING,
     Assessment,
     RemediationItem,
     load_assessment,
@@ -49,7 +52,8 @@ LATEST_OFFSET = timedelta(hours=14)  # UTC+14: the first place a calendar day be
 PAST_DUE = "The due date {due} has passed. Choose today or a later date."
 TOO_FAR = "The due date {due} is more than {days} days away. Choose an earlier date."
 OWNER_NEEDED = "Vouch suggested no owner for this item. Name the role that owns the fix."
-NOT_ACCEPTED = "Remediation items are approved or discarded once the control's verdict is accepted."
+NOT_CONFIRMED = "Remediation items are approved or discarded once the findings are confirmed."
+REJECTED = "This control's verdict was rejected, so its remediation items wait: assess it again."
 NO_ITEM = "This assessment has no remediation item for requirement {requirement_id}."
 DECIDED_ALREADY = "This remediation item was {status} already."
 APPROVED_WITH_OTHERS = (
@@ -115,8 +119,9 @@ class OwnerNeededError(ValueError):
     """An approval of an item Vouch suggested no owner for names none (a 422)."""
 
 
-class NotAcceptedError(RuntimeError):
-    """The assessment isn't accepted, so its items wait (a 409)."""
+class NotDecidableError(RuntimeError):
+    """The assessment's findings aren't confirmed, or it was rejected, so its items wait (a
+    409)."""
 
 
 class UnknownItemError(LookupError):
@@ -145,6 +150,29 @@ def shown_items(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> l
         kept = decided.get((assessment.thread_id, item.requirement_id))
         shown.append(kept.shown() if kept else item_data(item, "draft"))
     return shown
+
+
+ReviewStep = Literal["confirm-findings", "plan-fixes", "accept"]
+"""The step of the review a waiting assessment is at (#372)."""
+
+
+def drafts_left(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> list[str]:
+    """The requirements whose remediation items are still drafts, in the assessment's order."""
+    return [
+        i.requirement_id
+        for i in assessment.remediation
+        if (assessment.thread_id, i.requirement_id) not in decided
+    ]
+
+
+def review_step(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> ReviewStep | None:
+    """Where the assessment's review stands: Confirm findings until they are confirmed, then
+    Plan fixes while any item is a draft, then Accept; None once reviewed."""
+    if assessment.status != WAITING:
+        return None
+    if assessment.confirmed is None:
+        return "confirm-findings"
+    return "plan-fixes" if drafts_left(assessment, decided) else "accept"
 
 
 def check_due(due: date, at: datetime) -> None:
@@ -312,12 +340,14 @@ def decide(
     entry; the kept item. A decision made already is looked up first: the same one again
     returns it, writing nothing, whatever the date.
 
-    Raises UnknownAssessmentError (another user's or profile's thread too), NotAcceptedError,
+    Raises UnknownAssessmentError (another user's or profile's thread too), NotDecidableError,
     UnknownItemError, DecidedAlreadyError, OwnerNeededError and DueDateError (an approval), and
     DatabaseUnavailable (Postgres). `clock` defaults to vouch.audit's `now`."""
     assessment = load_assessment(thread_id, saver, scope=scope)
-    if assessment.status != "accepted":
-        raise NotAcceptedError(NOT_ACCEPTED)
+    if assessment.status == "rejected":
+        raise NotDecidableError(REJECTED)
+    if assessment.status == WAITING and assessment.confirmed is None:
+        raise NotDecidableError(NOT_CONFIRMED)
     draft = next((i for i in assessment.remediation if i.requirement_id == requirement_id), None)
     if draft is None:
         raise UnknownItemError(NO_ITEM.format(requirement_id=requirement_id))

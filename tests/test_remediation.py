@@ -8,11 +8,13 @@ those cases are skipped). The user is set per request by a test header (test_mem
 
 The fake model's 4.1.2 run judges M1 partly evidenced and the rest evidenced, so it drafts one
 item, for M1 (#212). The lead's overrides of M1 to evidenced (its draft dropped) and of S1 to not
-evidenced give S1 a "not drafted" item to fill in (graph._reviewed_remediation), which is the item
-these cases decide on.
+evidenced, confirmed with the findings (#372), give S1 a "not drafted" item to fill in
+(graph._reviewed_remediation), which is the item these cases decide on, at Plan fixes. The
+overview counts an accepted control's items only, so those cases accept it once it is decided.
 """
 
 import threading
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -20,16 +22,19 @@ import psycopg
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from langgraph.store.memory import InMemoryStore
 from profiles_dir import SECOND, make_profiles
+from reviewing import confirm, reviewed
 from test_auth import api_routes
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
 from test_profile_switch import app_with
 
-from vouch import api, remediation
+from vouch import api, graph, remediation
 from vouch.api import PROFILE_HEADER
 from vouch.database import AUDIT_TABLE, REMEDIATION_TABLE
-from vouch.graph import MAX_DUE_DAYS, NO_OWNER, NOT_DRAFTED
+from vouch.graph import MAX_DUE_DAYS, NO_OWNER, NOT_DRAFTED, build_graph, thread_config
+from vouch.memory import Memory, process_checkpointer
 from vouch.profile import DEFAULT_PROFILE
 
 database_url = test_memory.database_url
@@ -48,17 +53,22 @@ def later(days: int = 30) -> str:
     return (date.today() + timedelta(days=days)).isoformat()
 
 
-def accepted_with_an_item(client: TestClient, user: dict[str, str]) -> str:
-    """An accepted 4.1.2 assessment with M1 overridden to evidenced and S1 to not evidenced:
-    its thread id."""
+def confirmed_with_an_item(client: TestClient, user: dict[str, str]) -> str:
+    """A 4.1.2 assessment at Plan fixes, its findings confirmed with M1 overridden to evidenced
+    and S1 to not evidenced: its thread id."""
     thread_id = assess(client, user)
+    response = confirm(client, thread_id, OVERRIDES, headers=user)
+    assert response.status_code == 200, response.text
+    assert response.json()["assessment"]["review_step"] == "plan-fixes"
+    return thread_id
+
+
+def accept(client: TestClient, user: dict[str, str], thread_id: str) -> None:
+    """The assessment accepted, its items decided."""
     response = client.post(
-        f"/api/assessments/{thread_id}/review",
-        json={"decision": "accept", "overrides": OVERRIDES},
-        headers=user,
+        f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=user
     )
     assert response.status_code == 200, response.text
-    return thread_id
 
 
 def decide(
@@ -91,10 +101,10 @@ def open_items(client: TestClient, user: dict[str, str]) -> int:
     return response.json()["readiness"]["remediation_items"]
 
 
-def test_a_reviewed_assessment_shows_its_items_as_drafts(database_url, users):
+def test_confirmed_findings_show_their_items_as_drafts(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         shown = items(client, alice, thread_id)
 
     (item,) = shown
@@ -113,7 +123,7 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
     alice, _ = users
     due = later()
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         response = decide(
             client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due
         )
@@ -153,7 +163,7 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
 def test_approve_with_only_an_owner_keeps_the_drafts_due_date(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         (draft,) = items(client, alice, thread_id)
         response = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
 
@@ -164,7 +174,7 @@ def test_approve_with_only_an_owner_keeps_the_drafts_due_date(database_url, user
 def test_a_not_drafted_item_needs_an_owner_role_to_be_approved(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         refused = decide(client, alice, thread_id, decision="approve")
         placeholder = decide(client, alice, thread_id, decision="approve", owner_role=NO_OWNER)
         shown = items(client, alice, thread_id)
@@ -177,37 +187,39 @@ def test_a_not_drafted_item_needs_an_owner_role_to_be_approved(database_url, use
 def test_discard_takes_the_item_out_of_the_open_count_and_writes_one_entry(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
-        before = open_items(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         response = decide(client, alice, thread_id, decision="discard")
+        entries = trail(client, alice)
+        accept(client, alice, thread_id)
         after = open_items(client, alice)
         shown = items(client, alice, thread_id)
-        entries = trail(client, alice)
 
     assert response.status_code == 200, response.text
-    assert (before, after) == (1, 0)
+    assert after == 0
     assert [i["status"] for i in shown] == ["discarded"]
     assert [(e["action"], e["requirement_id"]) for e in entries[:1]] == [("discard", ITEM)]
 
 
 def test_the_overview_counts_the_approved_items_beside_all(database_url, users):
-    """#310: approving an item adds it to the approved count; the open count stays."""
+    """#310: approving an item adds it to the approved count as to the open one."""
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         before = client.get("/api/overview", headers=alice).json()["readiness"]
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, alice, thread_id)
         after = client.get("/api/overview", headers=alice).json()["readiness"]
 
-    assert (before["remediation_items"], before["remediation_approved"]) == (1, 0)
+    assert (before["remediation_items"], before["remediation_approved"]) == (0, 0)  # not accepted
     assert (after["remediation_items"], after["remediation_approved"]) == (1, 1)
 
 
 def test_an_approved_item_stays_in_the_open_count(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, alice, thread_id)
         assert open_items(client, alice) == 1
 
 
@@ -215,7 +227,7 @@ def test_a_due_date_in_the_past_is_refused_with_a_hint_and_nothing_is_kept(datab
     alice, _ = users
     yesterday = (date.today() - timedelta(days=2)).isoformat()  # past in every time zone
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         before = trail(client, alice)
         refused = decide(
             client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=yesterday
@@ -232,7 +244,7 @@ def test_a_due_date_in_the_past_is_refused_with_a_hint_and_nothing_is_kept(datab
 def test_a_due_date_of_today_is_accepted(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         response = decide(
             client,
             alice,
@@ -248,7 +260,7 @@ def test_a_due_date_of_today_is_accepted(database_url, users):
 def test_approving_twice_keeps_one_item_and_one_entry(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         first = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         second = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         approvals = [e for e in trail(client, alice) if e["action"] == "approve"]
@@ -262,7 +274,7 @@ def test_a_second_approval_with_other_values_is_refused_naming_the_kept_ones(dat
     alice, _ = users
     due = later()
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due)
         other_owner = decide(
             client, alice, thread_id, decision="approve", owner_role="Someone else"
@@ -288,7 +300,7 @@ def test_repeating_an_approval_after_its_due_date_gives_the_kept_item(
     alice, _ = users
     due = date.today().isoformat()
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         first = decide(client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=due)
         later_on = datetime.now(UTC) + timedelta(days=3)
         monkeypatch.setattr(remediation, "now", lambda: later_on)
@@ -304,7 +316,7 @@ def test_a_due_date_beyond_the_horizon_is_refused_with_a_hint(database_url, user
     alice, _ = users
     too_far = (date.today() + timedelta(days=MAX_DUE_DAYS + 2)).isoformat()
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         refused = decide(
             client, alice, thread_id, decision="approve", owner_role=OWNER, due_date=too_far
         )
@@ -356,7 +368,7 @@ def test_the_horizon_counts_from_the_latest_calendar_day_current_anywhere():
 def test_two_approvals_at_once_keep_one_item_and_one_entry(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         start = threading.Barrier(2)
         codes: list[int] = []
 
@@ -379,7 +391,7 @@ def test_two_approvals_at_once_keep_one_item_and_one_entry(database_url, users):
 def test_a_decided_item_cannot_be_decided_the_other_way(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="discard")
         refused = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
         shown = items(client, alice, thread_id)
@@ -391,31 +403,81 @@ def test_a_decided_item_cannot_be_decided_the_other_way(database_url, users):
     assert actions.count("approve") == 0
 
 
-def test_items_of_a_control_not_accepted_wait_for_the_review(database_url, users):
+def test_a_decision_waits_for_the_findings_then_is_kept_with_its_entry(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        waiting = assess(client, alice)
+        thread_id = assess(client, alice)
+        early = decide(client, alice, thread_id, "M1", decision="discard")
+        before = trail(client, alice)
+        confirm(client, thread_id, headers=alice)
+        kept = decide(client, alice, thread_id, "M1", decision="discard")
+        entries = trail(client, alice)
+        shown = items(client, alice, thread_id)
+
+    assert early.status_code == 409
+    assert early.json()["detail"] == remediation.NOT_CONFIRMED
+    assert before == []
+    assert kept.status_code == 200, kept.text
+    assert [(e["action"], e["requirement_id"]) for e in entries] == [
+        ("discard", "M1"),
+        ("confirm", None),
+    ]
+    assert [i["status"] for i in shown] == ["discarded"]
+
+
+def test_a_rejected_controls_items_wait_for_it_to_be_assessed_again(database_url, users):
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
         rejected = assess(client, alice)
-        client.post(
-            f"/api/assessments/{rejected}/review",
-            json={"decision": "reject", "overrides": OVERRIDES},
-            headers=alice,
-        )
-        codes = [
-            decide(client, alice, thread_id, decision="approve").status_code
-            for thread_id in (waiting, rejected)
-        ]
+        reviewed(client, rejected, "reject", overrides=OVERRIDES, headers=alice)
+        refused = decide(client, alice, rejected, decision="approve", owner_role=OWNER)
         entries = trail(client, alice)
 
-    assert codes == [409, 409]
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == remediation.REJECTED
     assert [e["action"] for e in entries if e["action"] in ("approve", "discard")] == []
+
+
+def test_a_review_kept_before_the_three_steps_reads_as_one_and_its_drafts_are_decidable(users):
+    """An accept from before #372: no `three_step` in its checkpoint, its drafts undecided."""
+    alice, _ = users
+
+    @dataclass(frozen=True)
+    class Review:  # graph.Review as it was before #372, written under its name
+        decision: str
+        note: str
+        overrides: list
+        reviewer_id: str = ""
+        reviewer_name: str = ""
+        reviewed_at: str = ""
+
+    Review.__module__, Review.__qualname__ = graph.Review.__module__, "Review"
+    with TestClient(app_on(None)) as client:
+        thread_id = assess(client, alice)
+        scope = Memory(InMemoryStore(), alice["X-Test-User"], DEFAULT_PROFILE).scope
+        build_graph(None, checkpointer=process_checkpointer()).update_state(
+            thread_config(thread_id, scope),
+            {"review": Review("accept", "Accepted before.", [])},
+            as_node="review",
+        )
+        opened = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
+        kept = decide(client, alice, thread_id, "M1", decision="approve")
+        after = items(client, alice, thread_id)
+
+    assert opened["status"] == "accepted"
+    assert opened["review_step"] is None
+    assert opened["review"]["three_step"] is False
+    assert opened["review"]["note"] == "Accepted before."
+    assert [(i["requirement_id"], i["status"]) for i in opened["remediation"]] == [("M1", "draft")]
+    assert kept.status_code == 200, kept.text
+    assert [i["status"] for i in after] == ["approved"]
 
 
 @pytest.mark.parametrize("thread", ["unknown", "bobs"])
 def test_an_unknown_or_another_users_assessment_is_a_404(database_url, users, thread):
     alice, bob = users
     with TestClient(app_on(database_url)) as client:
-        bobs = accepted_with_an_item(client, bob)
+        bobs = confirmed_with_an_item(client, bob)
         thread_id = "no-such-thread" if thread == "unknown" else bobs
         response = decide(client, alice, thread_id, decision="approve")
         bobs_items = items(client, bob, bobs)
@@ -427,7 +489,7 @@ def test_an_unknown_or_another_users_assessment_is_a_404(database_url, users, th
 def test_a_requirement_with_no_item_is_a_404(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         response = decide(client, alice, thread_id, "M2", decision="approve")  # evidenced
 
     assert response.status_code == 404
@@ -446,7 +508,7 @@ def test_a_requirement_with_no_item_is_a_404(database_url, users):
 def test_a_malformed_decision_is_refused_on_every_backend(database_url, users, body):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         refused = decide(client, alice, thread_id, **body)
         shown = items(client, alice, thread_id)
 
@@ -457,20 +519,24 @@ def test_a_malformed_decision_is_refused_on_every_backend(database_url, users, b
 def test_each_user_keeps_their_own_decisions(database_url, users):
     alice, bob = users
     with TestClient(app_on(database_url)) as client:
-        alices = accepted_with_an_item(client, alice)
-        bobs = accepted_with_an_item(client, bob)
+        alices = confirmed_with_an_item(client, alice)
+        bobs = confirmed_with_an_item(client, bob)
         decide(client, alice, alices, decision="discard")
+        accept(client, alice, alices)
+        decide(client, bob, bobs, decision="approve", owner_role=OWNER)
+        accept(client, bob, bobs)
 
         assert open_items(client, alice) == 0
         assert open_items(client, bob) == 1
-        assert [i["status"] for i in items(client, bob, bobs)] == ["draft"]
+        assert [i["status"] for i in items(client, alice, alices)] == ["discarded"]
+        assert [i["status"] for i in items(client, bob, bobs)] == ["approved"]
 
 
 @needs_postgres
 def test_decisions_outlast_a_restart_on_postgres(postgres, users):
     alice, _ = users
     with TestClient(app_on(postgres.url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
 
     restart()
@@ -484,7 +550,7 @@ def test_decisions_outlast_a_restart_on_postgres(postgres, users):
 def test_a_failing_trail_write_keeps_no_item(postgres, users):
     alice, _ = users
     with TestClient(app_on(postgres.url), raise_server_exceptions=False) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         with postgres.connection() as conn:  # the entry breaks a constraint
             conn.execute(f"ALTER TABLE {AUDIT_TABLE} ADD CONSTRAINT no CHECK (action != 'approve')")
         failed = decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
@@ -503,7 +569,7 @@ def test_no_route_lists_changes_or_removes_a_decision_but_the_decision_route(use
     app = app_on(None)
     routes = {(method, path) for method, path in api_routes(app) if "remediation" in path}
     with TestClient(app) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         url = f"/api/assessments/{thread_id}/remediation/{ITEM}"
         changed = [
             getattr(client, verb)(url, headers=alice).status_code for verb in ("put", "delete")
@@ -518,8 +584,9 @@ def test_one_profiles_items_and_decisions_do_not_show_under_another(tmp_path, us
     alice, _ = users
     nordlicht, testwerk = (alice | {PROFILE_HEADER: p} for p in ("nordlicht", SECOND))
     with app_with(make_profiles(tmp_path / "profiles")) as client:
-        thread_id = accepted_with_an_item(client, nordlicht)
+        thread_id = confirmed_with_an_item(client, nordlicht)
         approved = decide(client, nordlicht, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, nordlicht, thread_id)
         elsewhere = decide(client, testwerk, thread_id, decision="discard")
         opened_elsewhere = client.get(f"/api/assessments/{thread_id}", headers=testwerk)
 
@@ -539,8 +606,10 @@ def test_before_vouch_db_setup_adds_the_table_reads_see_no_decisions_and_writes_
     vouch-db-setup."""
     alice, _ = users
     with TestClient(app_on(postgres.url), raise_server_exceptions=False) as client:
-        thread_id = accepted_with_an_item(client, alice)
-        with postgres.connection() as conn:
+        thread_id = confirmed_with_an_item(client, alice)
+        decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, alice, thread_id)
+        with postgres.connection() as conn:  # the decision with it: reads see none
             conn.execute(f"DROP TABLE {REMEDIATION_TABLE}")
         overview = client.get("/api/overview", headers=alice)
         opened = client.get(f"/api/assessments/{thread_id}", headers=alice)
@@ -558,7 +627,7 @@ def test_before_vouch_db_setup_adds_the_table_reads_see_no_decisions_and_writes_
 def test_the_items_table_refuses_an_update_a_delete_and_a_truncate(postgres, users):
     alice, _ = users
     with TestClient(app_on(postgres.url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="discard")
 
     for statement in (
@@ -579,11 +648,11 @@ def test_the_overview_asks_only_for_the_counted_threads_decided_items(database_u
     alice, _ = users
     app = app_on(database_url)
     with TestClient(app) as client:
-        counted = accepted_with_an_item(client, alice)
-        other = accepted_with_an_item(client, alice)
+        counted = confirmed_with_an_item(client, alice)
+        other = confirmed_with_an_item(client, alice)
         decide(client, alice, counted, decision="discard")
         decide(client, alice, other, decision="discard")
-        approved = accepted_with_an_item(client, alice)
+        approved = confirmed_with_an_item(client, alice)
         decide(client, alice, approved, decision="approve", owner_role=OWNER)
         store = api.remediation_items(app.state.database)
         user, profile = alice["X-Test-User"], DEFAULT_PROFILE

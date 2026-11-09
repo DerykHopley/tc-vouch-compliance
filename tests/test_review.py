@@ -1,4 +1,5 @@
-"""Remediation drafts, the review interrupt, and resuming with the compliance lead's decision."""
+"""Remediation drafts, the review's two interrupts (Confirm findings, then Accept, #372), and
+resuming with the compliance lead's findings and decision."""
 
 import threading
 from datetime import date
@@ -12,6 +13,7 @@ from vouch import ScriptedChatModel, assess, audit, load_named_profile
 from vouch.graph import (
     NO_OWNER,
     NOT_DRAFTED,
+    ConfirmFindings,
     Decision,
     InvalidReviewError,
     NotWaitingForReviewError,
@@ -19,8 +21,10 @@ from vouch.graph import (
     RemediationPlan,
     ReviewDecision,
     UnknownAssessmentError,
+    WrongStepError,
     assess_steps,
     build_graph,
+    confirm_findings,
     load_assessment,
     memory_checkpointer,
     resume,
@@ -253,27 +257,67 @@ def test_the_run_stops_at_the_review_interrupt_and_returns_the_proposed_assessme
     assert [d.requirement_id for d in result.remediation] == ["M2", "S2"]
 
 
-def test_accept_resumes_and_records_the_decision():
+def confirmed(result, saver, *overrides: dict):
+    """The assessment with its findings confirmed, with `overrides`."""
+    return confirm_findings(result.thread_id, ConfirmFindings(overrides=list(overrides)), saver)
+
+
+def test_confirm_findings_waits_for_the_decision_then_accept_records_it():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
 
+    waiting = confirmed(result, saver)
     reviewed = resume(result.thread_id, ReviewDecision(decision="accept", note="Fine."), saver)
 
+    assert (waiting.status, waiting.confirmed, waiting.review) == ("waiting-for-review", [], None)
+    assert waiting.steps[-2:] == [
+        {"node": "review", "text": "The compliance lead confirmed the findings."},
+        {
+            "node": "accept",
+            "text": "Findings confirmed. Waiting for the compliance lead's plan and decision.",
+        },
+    ]
     assert reviewed.status == "accepted"
     assert reviewed.review.decision == "accept"
     assert reviewed.review.note == "Fine."
     assert reviewed.review.overrides == []
+    assert reviewed.review.three_step is True
     assert reviewed.verdict == "partly-evidenced"
     assert reviewed.thread_id == result.thread_id
     assert reviewed.remediation == result.remediation
-    assert reviewed.steps[:-1] == result.steps[:-1]  # every step of the run is kept
+    assert reviewed.steps[:-2] == result.steps[:-1]  # every step of the run is kept
     assert reviewed.steps[-1] == {
-        "node": "review",
+        "node": "accept",
         "text": "The compliance lead accepted the assessment.",
     }
 
 
-def test_reject_resumes_and_records_the_note():
+def test_accept_before_the_findings_are_confirmed_is_refused_and_resumes_nothing():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
+
+    with pytest.raises(WrongStepError, match="Confirm the findings first"):
+        resume(result.thread_id, ReviewDecision(decision="accept"), saver)
+    with pytest.raises(WrongStepError, match="Confirm the findings first"):
+        build_graph(None, checkpointer=saver).invoke(
+            Command(resume={"decision": "accept"}),
+            {"configurable": {"thread_id": result.thread_id}},
+        )
+    assert load_assessment(result.thread_id, saver).confirmed is None
+
+
+def test_a_second_confirm_findings_is_refused():
+    result, _, saver = proposed("4.1.2", mixed_4_1_2())
+    confirmed(result, saver)
+
+    with pytest.raises(WrongStepError, match="confirmed already"):
+        confirmed(result, saver, override("M2", "evidenced"))
+    assert load_assessment(result.thread_id, saver).confirmed == []
+
+
+@pytest.mark.parametrize("confirm_first", [False, True], ids=["at-confirm", "at-accept"])
+def test_reject_resumes_and_records_the_note_at_either_interrupt(confirm_first):
+    result, _, saver = proposed("4.1.2", mixed_4_1_2())
+    if confirm_first:
+        confirmed(result, saver, override("M2", "evidenced"))
 
     reviewed = resume(
         result.thread_id,
@@ -283,51 +327,51 @@ def test_reject_resumes_and_records_the_note():
 
     assert reviewed.status == "rejected"
     assert reviewed.review.note == "The 2025 MFA rollout record was missed."
+    assert reviewed.review.three_step is True
+    assert [o.requirement_id for o in reviewed.review.overrides] == (
+        ["M2"] if confirm_first else []
+    )
     assert reviewed.steps[-1]["text"] == "The compliance lead rejected the assessment."
 
 
 def test_an_override_changes_the_verdict_keeps_the_agents_and_recalculates_the_roll_up():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
-    decision = ReviewDecision(
-        decision="accept",
-        overrides=[
-            {
-                "requirement_id": "M2",
-                "verdict": "evidenced",
-                "reason": "The MFA rollout record shows it.",
-            }
-        ],
+    waiting = confirmed(
+        result,
+        saver,
+        {
+            "requirement_id": "M2",
+            "verdict": "evidenced",
+            "reason": "The MFA rollout record shows it.",
+        },
     )
 
-    reviewed = resume(result.thread_id, decision, saver)
+    reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), saver)
 
     m2 = next(r for r in reviewed.requirements if r.id == "M2")
     assert (m2.verdict, m2.reason) == ("evidenced", "The MFA rollout record shows it.")
     assert result.verdict == "partly-evidenced"
-    assert reviewed.verdict == "evidenced"
-    (override,) = reviewed.review.overrides
-    assert (override.agent_verdict, override.agent_reason) == (
+    assert waiting.verdict == reviewed.verdict == "evidenced"
+    (override_kept,) = reviewed.review.overrides
+    assert waiting.confirmed == reviewed.review.overrides
+    assert (override_kept.agent_verdict, override_kept.agent_reason) == (
         "not-evidenced",
         "From the standard.",
     )
-    assert reviewed.steps[-1]["text"] == (
-        "The compliance lead accepted the assessment, overriding M2."
-    )
+    assert waiting.steps[-2]["text"] == "The compliance lead confirmed the findings, overriding M2."
 
 
 def test_an_override_on_a_should_requirement_changes_the_should_score_not_the_verdict():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
-    decision = ReviewDecision(
-        decision="accept",
-        overrides=[
-            {"requirement_id": "S2", "verdict": "evidenced", "reason": "Shown in the export."}
-        ],
+
+    waiting = confirmed(
+        result,
+        saver,
+        {"requirement_id": "S2", "verdict": "evidenced", "reason": "Shown in the export."},
     )
 
-    reviewed = resume(result.thread_id, decision, saver)
-
-    assert (result.should_score.evidenced, reviewed.should_score.evidenced) == (2, 3)
-    assert reviewed.verdict == "partly-evidenced"
+    assert (result.should_score.evidenced, waiting.should_score.evidenced) == (2, 3)
+    assert waiting.verdict == "partly-evidenced"
 
 
 def test_a_re_run_after_reject_receives_the_note():
@@ -358,16 +402,19 @@ def test_resuming_runs_nothing_before_the_interrupt_again_and_a_second_resume_is
     assert calls_before == 4
     assert "review" not in thread_values(saver, result.thread_id)  # nothing written yet
 
+    confirmed(result, saver)
     reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), saver)
 
     assert len(model.prompts) == calls_before  # no model call on resume: no node re-drafted
     assert reviewed.remediation == result.remediation
     with pytest.raises(NotWaitingForReviewError):
         resume(result.thread_id, ReviewDecision(decision="reject"), saver)
+    with pytest.raises(NotWaitingForReviewError):
+        confirmed(result, saver)
     values = thread_values(saver, result.thread_id)
     assert values["review"].decision == "accept"  # the refused second resume wrote nothing
-    assert [s["node"] for s in values["steps"]].count("review") == 1  # one review written
-    assert [s["node"] for s in values["steps"]].count("remediate") == 1
+    nodes = [s["node"] for s in values["steps"]]
+    assert (nodes.count("review"), nodes.count("accept"), nodes.count("remediate")) == (1, 1, 1)
 
 
 def test_resuming_an_unknown_thread_is_refused():
@@ -396,6 +443,8 @@ def test_a_run_that_failed_before_the_review_is_unknown_to_open_and_to_review():
         load_assessment("failed", saver)
     with pytest.raises(UnknownAssessmentError):
         resume("failed", ReviewDecision(decision="accept"), saver)
+    with pytest.raises(UnknownAssessmentError):
+        confirm_findings("failed", ConfirmFindings(), saver)
 
 
 @pytest.mark.parametrize(
@@ -414,9 +463,8 @@ def test_an_override_naming_a_requirement_the_assessment_did_not_judge_is_refuse
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
 
     with pytest.raises(InvalidReviewError):
-        resume(result.thread_id, ReviewDecision(decision="accept", overrides=overrides), saver)
-    reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), saver)
-    assert reviewed.status == "accepted"  # the refused decision resumed nothing
+        confirm_findings(result.thread_id, ConfirmFindings(overrides=overrides), saver)
+    assert confirmed(result, saver).confirmed == []  # the refused findings resumed nothing
 
 
 def test_an_override_on_a_not_applicable_requirement_is_refused():
@@ -429,48 +477,42 @@ def test_an_override_on_a_not_applicable_requirement_is_refused():
     assert any(r.id == "S3" and r.verdict == "not-applicable" for r in result.requirements)
 
     with pytest.raises(InvalidReviewError):
-        resume(
-            result.thread_id,
-            ReviewDecision(
-                decision="accept",
-                overrides=[
-                    {"requirement_id": "S3", "verdict": "evidenced", "reason": "We do run it."}
-                ],
-            ),
+        confirmed(
+            result,
             saver,
+            {"requirement_id": "S3", "verdict": "evidenced", "reason": "We do run it."},
         )
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"decision": "maybe"},
-        {"decision": "accept", "overrides": [{"requirement_id": "M1", "verdict": "evidenced"}]},
-        {
-            "decision": "accept",
-            "overrides": [{"requirement_id": "M1", "verdict": "evidenced", "reason": "  "}],
-        },
-        {
-            "decision": "accept",
-            "overrides": [{"requirement_id": "M1", "verdict": "compliant", "reason": "Shown."}],
-        },
-        {
-            "decision": "accept",
-            "overrides": [
-                {"requirement_id": "M1", "verdict": "not-applicable", "reason": "Shown."}
-            ],
-        },
+        {"overrides": [{"requirement_id": "M1", "verdict": "evidenced"}]},
+        {"overrides": [{"requirement_id": "M1", "verdict": "evidenced", "reason": "  "}]},
+        {"overrides": [{"requirement_id": "M1", "verdict": "compliant", "reason": "Shown."}]},
+        {"overrides": [{"requirement_id": "M1", "verdict": "not-applicable", "reason": "Shown."}]},
     ],
-    ids=["bad-decision", "no-reason", "blank-reason", "invalid-verdict", "not-applicable"],
+    ids=["no-reason", "blank-reason", "invalid-verdict", "not-applicable"],
+)
+def test_malformed_findings_do_not_validate(body):
+    with pytest.raises(ValidationError):
+        ConfirmFindings.model_validate(body)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"decision": "maybe"}, {"decision": "accept", "overrides": []}],
+    ids=["bad-decision", "with-overrides"],
 )
 def test_a_malformed_review_decision_does_not_validate(body):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="bad-decision|Input should be|Confirm findings"):
         ReviewDecision.model_validate(body)
 
 
 def test_the_reviewed_assessment_names_the_model_that_drafted_it_without_one_to_resume():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
 
+    confirmed(result, saver)
     reviewed = resume(result.thread_id, ReviewDecision(decision="accept"), saver)
 
     assert (reviewed.model, reviewed.prompt_version) == ("scripted-fake", result.prompt_version)
@@ -494,12 +536,10 @@ def override(requirement_id: str, verdict: str) -> dict:
 def test_an_override_to_evidenced_drops_its_draft_and_to_partly_keeps_it():
     # Partly evidenced still needs a fix (#212): only an override to evidenced drops the draft.
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
-    decision = ReviewDecision(
-        decision="accept",
-        overrides=[override("M2", "evidenced"), override("S2", "partly-evidenced")],
-    )
 
-    reviewed = resume(result.thread_id, decision, saver)
+    reviewed = confirmed(
+        result, saver, override("M2", "evidenced"), override("S2", "partly-evidenced")
+    )
 
     assert [d.requirement_id for d in result.remediation] == ["M2", "S2"]
     assert [d.requirement_id for d in reviewed.remediation] == ["S2"]
@@ -508,9 +548,8 @@ def test_an_override_to_evidenced_drops_its_draft_and_to_partly_keeps_it():
 
 def test_an_override_to_not_evidenced_adds_a_not_drafted_item_for_the_lead():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
-    decision = ReviewDecision(decision="accept", overrides=[override("M1", "not-evidenced")])
 
-    reviewed = resume(result.thread_id, decision, saver)
+    reviewed = confirmed(result, saver, override("M1", "not-evidenced"))
 
     assert [d.requirement_id for d in reviewed.remediation] == ["M1", "M2", "S2"]
     m1 = reviewed.remediation[0]
@@ -518,12 +557,9 @@ def test_an_override_to_not_evidenced_adds_a_not_drafted_item_for_the_lead():
     assert reviewed.remediation[1:] == result.remediation
 
 
-def test_the_review_step_refuses_an_override_resume_did_not_check():
+def test_the_review_step_refuses_an_override_confirm_findings_did_not_check():
     result, _, saver = proposed("4.1.2", mixed_4_1_2())
-    twice = {
-        "decision": "accept",
-        "overrides": [override("M2", "evidenced"), override("M2", "not-evidenced")],
-    }
+    twice = {"overrides": [override("M2", "evidenced"), override("M2", "not-evidenced")]}
 
     with pytest.raises(InvalidReviewError):
         build_graph(None, checkpointer=saver).invoke(
@@ -556,6 +592,8 @@ def test_two_reviews_at_once_resume_once_and_the_other_is_refused():
     result, _, _ = proposed("4.1.2", mixed_4_1_2(), saver)
     trail = audit.ProcessTrail(lambda: saver)
     outcomes: dict[str, str] = {}
+
+    confirmed(result, saver)
 
     def review(decision: Decision) -> None:
         saver.local.armed = True

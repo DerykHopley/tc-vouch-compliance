@@ -18,6 +18,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from langgraph.store.memory import InMemoryStore
+from reviewing import reviewed
 from test_memory import as_user
 
 from vouch import ScriptedChatModel, load_named_profile
@@ -27,8 +28,10 @@ from vouch.graph import (
     CITATIONS_DROPPED,
     GUARD,
     WAITING,
+    ConfirmFindings,
     OutputCheckError,
     ReviewDecision,
+    confirm_findings,
     load_assessment,
     memory_checkpointer,
     resume,
@@ -102,6 +105,8 @@ class Lead:
         )
 
     def review(self, thread_id: str, decision: str) -> None:
+        if decision == "accept":
+            confirm_findings(thread_id, ConfirmFindings(), self.saver, scope=self.memory.scope)
         resume(thread_id, ReviewDecision(decision=decision), self.saver, scope=self.memory.scope)
 
 
@@ -392,10 +397,7 @@ def claiming_script(tmp_path: Path, replies: int) -> Path:
 
 
 def review_through_api(client: TestClient, user: dict[str, str], thread_id: str, decision: str):
-    reviewed = client.post(
-        f"/api/assessments/{thread_id}/review", json={"decision": decision}, headers=user
-    )
-    assert reviewed.status_code == 200, reviewed.text
+    reviewed(client, thread_id, decision, headers=user)  # type: ignore[arg-type]
 
 
 def test_the_route_makes_one_call_and_lists_one_waiting_assessment_per_control(pass_calls):
@@ -494,7 +496,7 @@ def test_a_prompt_over_the_threshold_is_a_422_offering_the_agent_with_nothing_co
 
 
 def test_with_every_control_accepted_the_route_answers_200_with_nothing_counted(pass_calls):
-    app = pass_app()
+    app = pass_app(Settings(rate_requests=500))  # each review takes a few requests (#372)
     client, lead = TestClient(app), new_user()
     for assessment in client.post(PASS, headers=lead).json()["assessments"]:
         review_through_api(client, lead, assessment["thread_id"], "accept")
