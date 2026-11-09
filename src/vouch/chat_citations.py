@@ -96,16 +96,31 @@ PAIRS: dict[str, tuple[str, ...]] = {
     "〖": ("〗",),
     "″": ("″",),
     "‵": ("′",),
+    "❟": ("❛", "❜"),
+    "❮": ("❯",),
+    "🙶": ("🙷",),
+    "🙸": ("🙶", "🙷"),
     "<blockquote>": ("</blockquote>",),
 }
 """Each opening quotation mark and its own closing marks. Any other mark closes it too, when
 none of its own does in its paragraph (a model mixing “ and "). A tag (`<q>`, `<blockquote>`)
-matches in any case and with attributes; every other Unicode initial or final quotation mark
-(Pi, Pf) is added below, closed by itself."""
+matches in any case and with attributes; every other mark _is_quotation_mark finds is added
+below, closed by itself."""
+
+
+def _is_quotation_mark(mark: str) -> bool:
+    """Unicode's initial and final quotation marks (Pi, Pf), and every other character it
+    names a quotation mark (ornaments, ❮ ❯), but an invisible tag character."""
+    category = unicodedata.category(mark)
+    if category == "Cf":
+        return False
+    return category in ("Pi", "Pf") or "QUOTATION MARK" in unicodedata.name(mark, "")
+
+
 PAIRS |= {
     mark: (mark,)
     for mark in map(chr, range(sys.maxunicode + 1))
-    if unicodedata.category(mark) in ("Pi", "Pf") and mark not in PAIRS
+    if mark not in PAIRS and _is_quotation_mark(mark)
 }
 _APOSTROPHES = "'’"
 """Marks that are also apostrophes: inside a word (company’s, don't) or before a digit (’90s)

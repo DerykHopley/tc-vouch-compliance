@@ -451,6 +451,10 @@ MORE_FORMS = [
     ("〖", "〗"),
     ("″", "″"),
     ("‵", "′"),
+    ("❟", "❜"),
+    ("❮", "❯"),
+    ("🙶", "🙷"),
+    ("🙸", "🙷"),
     ("<blockquote>", "</blockquote>"),
     ('<BLOCKQUOTE class="a">', "</Blockquote >"),
 ]
@@ -473,12 +477,15 @@ def test_a_real_quote_in_every_other_form_is_kept(opening, closing):
 
 
 UNICODE_QUOTES = sorted(
-    chr(c) for c in range(sys.maxunicode + 1) if unicodedata.category(chr(c)) in ("Pi", "Pf")
+    chr(c)
+    for c in range(sys.maxunicode + 1)
+    if unicodedata.category(chr(c)) in ("Pi", "Pf")
+    or ("QUOTATION MARK" in unicodedata.name(chr(c), "") and unicodedata.category(chr(c)) != "Cf")
 )
 
 
 @pytest.mark.parametrize("mark", UNICODE_QUOTES, ids=lambda m: f"U+{ord(m):04X}")
-def test_every_unicode_initial_or_final_quotation_mark_opens_a_checked_quote(mark):
+def test_every_unicode_quotation_mark_opens_a_checked_quote(mark):
     text, steps, check = checked(f"It says {mark}{QUOTE}” here.")
 
     assert check.asked == [(QUOTE, None)]
