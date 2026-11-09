@@ -1,4 +1,4 @@
-"""Company setup (#403, #407, M8 #351), steps 1 to 3 and 5: a developer opens it from the
+"""Company setup (#403, #407, #408, M8 #351), steps 1 to 3, 5 and 6: a developer opens it from the
 developer page and walks it, going back and forward without losing an answer; a compliance lead
 never reaches it.
 
@@ -8,11 +8,13 @@ developer). Nothing is stored: no step sends a profile yet.
 
 import re
 
+import pytest
 from playwright.sync_api import Page, expect
 from test_developer_page import as_compliance_lead
 
 LEVELS = "/api/developer/protection-levels"
 CONTROLS = "/api/developer/controls"
+LIBRARY = "/api/developer/sample-library"
 # The wizard ignores a move within 400 ms of the last (a double-click's second press); a person's
 # separate presses come further apart, so each helper move waits this long first.
 SETTLE_MS = 450
@@ -46,6 +48,18 @@ def to_step_5(page: Page) -> None:
         press(page, "Next")
     assert answer.value.status == 200
     expect(page.get_by_role("checkbox")).to_have_count(12)
+
+
+def to_step_6(page: Page) -> None:
+    to_step_5(page)
+    with page.expect_response(lambda r: LIBRARY in r.url) as answer:
+        press(page, "Next")
+    assert answer.value.status == 200
+    expect(page.get_by_role("checkbox")).to_have_count(17)
+
+
+def document(page: Page, title: str):
+    return page.get_by_role("checkbox", name=f"Choose {title}", exact=True)
 
 
 def control(page: Page, control_id: str):
@@ -273,3 +287,93 @@ def test_step_5_is_walked_by_keyboard(page: Page, profiles_url):
     expect(page.get_by_role("button", name="Back")).to_be_focused()
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Next")).to_be_focused()
+
+
+def test_a_developer_chooses_evidence_and_sees_it_ready_to_cite(page: Page, profiles_url):
+    """Stories 3 and 4: two policies (one of them the stale backup policy) and one record, each
+    row with what Vouch read from it; the count follows; Back and Next keep all three ticked."""
+    posted: list[str] = []
+    page.on("request", lambda r: posted.append(r.url) if r.method == "POST" else None)
+    open_setup(page, profiles_url)
+    to_step_6(page)
+
+    expect(page.get_by_text("Step 6 of 7")).to_be_visible()
+    expect(page.get_by_role("heading", name="Evidence")).to_be_focused()
+    policies = page.get_by_role("table", name="Policies")
+    backup = policies.get_by_role("row").filter(has_text="Backup policy")
+    expect(backup).to_contain_text("backup-policy")
+    expect(backup.locator(".kind.kind-documented")).to_have_text("documented")
+    expect(backup).to_contain_text("1.0")
+    expect(backup).to_contain_text("2024-02-12")
+    expect(backup.locator(".flag")).to_have_text("Stale")
+    access = policies.get_by_role("row").filter(has_text="Access rights policy")
+    expect(access).to_contain_text("3.2")
+    expect(access).to_contain_text("2026-07-20")
+    expect(access).to_contain_text("Current")
+    records = page.get_by_role("table", name="Records")
+    training = records.get_by_role("row").filter(has_text="Security training record 2026")
+    expect(training.locator(".kind.kind-implemented")).to_have_text("implemented")
+    expect(training).to_contain_text("2026-10-05")
+
+    status = page.get_by_role("status")
+    expect(status).to_have_text("No documents chosen yet.")
+    document(page, "Backup policy").check()
+    document(page, "Access rights policy").check()
+    document(page, "Security training record 2026").check()
+    expect(status).to_have_text(
+        "Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale)."
+    )
+
+    press(page, "Back")
+    expect(page.get_by_text("Step 5 of 7")).to_be_visible()
+    press(page, "Next")
+    for title in ("Backup policy", "Access rights policy", "Security training record 2026"):
+        expect(document(page, title)).to_be_checked()
+    expect(document(page, "Logging standard")).not_to_be_checked()
+    expect(status).to_have_text(
+        "Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale)."
+    )
+    assert not any("/api/developer/profiles" in url for url in posted)
+
+
+def test_a_double_click_on_next_that_doesnt_move_keeps_focus_on_the_first_invalid_field(
+    page: Page, profiles_url
+):
+    """From #407's verifier: the problem shown above the buttons moved Next down, so the second
+    press landed on the form and took focus to the page's body."""
+    open_setup(page, profiles_url)
+    to_step_3(page)
+
+    page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_text("Choose a protection level.")).to_be_visible()
+    expect(page.get_by_role("radio", name=re.compile(r"^Normal"))).to_be_focused()
+
+    page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+    with page.expect_response(lambda r: CONTROLS in r.url):
+        press(page, "Next")
+    expect(page.get_by_role("checkbox")).to_have_count(12)
+    with page.expect_response(lambda r: LIBRARY in r.url):
+        press(page, "Next")
+    expect(page.get_by_role("checkbox")).to_have_count(17)
+
+    page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_text("Choose at least one document.")).to_be_visible()
+    expect(page.get_by_role("checkbox").first).to_be_focused()
+
+
+@pytest.mark.parametrize("width", [400, 900, 1400])
+def test_step_6_scrolls_sideways_only_inside_its_tables(page: Page, profiles_url, width):
+    """design.md, Layout: wide tables scroll in their own container, never the page."""
+    page.set_viewport_size({"width": width, "height": 900})
+    open_setup(page, profiles_url)
+    to_step_6(page)
+
+    page_overflow = page.evaluate(
+        "document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth"
+    )
+    assert page_overflow <= 0
+    if width == 400:
+        wrap = page.get_by_role("table", name="Policies").locator("xpath=..")
+        assert wrap.evaluate("w => w.scrollWidth > w.clientWidth")

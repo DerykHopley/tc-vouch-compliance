@@ -1,8 +1,10 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ProtectionLevel } from './assessment.ts'
+import DocumentTable from './DocumentTable.tsx'
 import {
-  COUNTRIES, type FrameworkControl, frameworkControls, MAX_COMPANY_LENGTH, type NotApplicable, notApplicableProblems,
-  PROTECTION_LEVELS, protectionLevels, type ProtectionScope, scopeWords,
+  type ChosenEvidence, COUNTRIES, type FrameworkControl, frameworkControls, type LibraryDocument, type LibrarySource,
+  MAX_COMPANY_LENGTH, type NotApplicable, notApplicableProblems, PROTECTION_LEVELS, protectionLevels,
+  type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
 /** Every step of company setup, by name; steps after BUILT, and those NOT_BUILT, are later slices of #351. */
@@ -12,7 +14,8 @@ const LANGUAGE = 2
 const LEVEL = 3
 const GOAL = 4
 const NOT_APPLICABLE = 5
-const BUILT = NOT_APPLICABLE
+const EVIDENCE = 6
+const BUILT = EVIDENCE
 const NOT_BUILT = [GOAL] // skipped by Next and Back until slice 5 of #351 builds it
 const later = (n: number) => n > BUILT || NOT_BUILT.includes(n)
 
@@ -26,15 +29,19 @@ type Answers = {
   language: 'en' | 'de'
   level: ProtectionLevel | null
   notApplicable: NotApplicable[]
+  evidence: ChosenEvidence
 }
 /** What Next found wrong on the current step, each by the `data-problem` of the field that takes focus for it: an
- * answer's name ('company', 'country', 'level'), ALL_MARKED, or a marked control's id (its reason blank). */
+ * answer's name ('company', 'country', 'level'), ALL_MARKED, a marked control's id (its reason blank), or
+ * NO_EVIDENCE. */
 type Problems = readonly string[]
 const NO_PROBLEMS: Problems = []
 const ALL_MARKED = 'all marked'
+const NO_EVIDENCE = 'no evidence'
 type Read<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed' }
 type Scope = Read<ProtectionScope[]>
 type Controls = Read<FrameworkControl[]>
+type Library = Read<LibraryDocument[]>
 
 const LANGUAGES = [{ code: 'en', name: 'English' }, { code: 'de', name: 'German' }] as const
 const LEVELS = Object.keys(PROTECTION_LEVELS) as ProtectionLevel[]
@@ -45,19 +52,23 @@ type Props = { developerPath: string; onDeveloper: () => void }
 /**
  * Company setup (#403, M8 #351): a developer walks the steps that make a company, going back and forward without
  * losing an answer. The answers live here only: leaving or reloading starts afresh, and nothing is sent yet. Steps 1
- * to 3 are built (company and country, answer language, protection level with what each brings into scope), and step
- * 5 (#407, controls marked not applicable, each with a reason); step 4 is skipped until it is built.
+ * to 3 are built (company and country, answer language, protection level with what each brings into scope), step 5
+ * (#407, controls marked not applicable, each with a reason) and step 6 (#408, the evidence chosen from the sample
+ * library); step 4 is skipped until it is built.
  */
 export default function CompanySetupWizard({ developerPath, onDeveloper }: Props) {
   const [step, setStep] = useState(COMPANY)
-  const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, notApplicable: [] })
+  const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, notApplicable: [],
+    evidence: { policies: [], records: [] } })
   const [problems, setProblems] = useState<Problems>(NO_PROBLEMS)
   const [scope, setScope] = useState<Scope | null>(null) // read when step 3 first opens
   const [controls, setControls] = useState<Controls | null>(null) // read when step 5 first opens
+  const [library, setLibrary] = useState<Library | null>(null) // read when step 6 first opens
   const formRef = useRef<HTMLFormElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const notBuiltRef = useRef<HTMLParagraphElement>(null)
   const lastMove = useRef(-Infinity)
+  const lastRefusal = useRef(-Infinity) // when Next last found a problem
   const moved = useRef(false)
   useEffect(() => {
     if (moved.current) headingRef.current?.focus() // on each step change, not on opening
@@ -66,6 +77,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
   // Only each read's latest answer lands, and none after the wizard has closed.
   const readScope = useReader(protectionLevels, setScope)
   const readControls = useReader(frameworkControls, setControls)
+  const readLibrary = useReader(sampleLibrary, setLibrary)
   const settling = () => performance.now() - lastMove.current < SETTLE_MS
   // Leaving a step drops its problems: they show again only when Next checks it again.
   const go = (to: number) => {
@@ -78,6 +90,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
     setProblems(NO_PROBLEMS)
     if (to === LEVEL && scope === null) readScope()
     if (to === NOT_APPLICABLE && controls === null) readControls()
+    if (to === EVIDENCE && library === null) readLibrary()
   }
   const check = (): Problems => {
     if (step === COMPANY)
@@ -87,6 +100,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
       const found = notApplicableProblems(answers.notApplicable, controls?.status === 'ready' ? controls.data : [])
       return [...(found.allMarked ? [ALL_MARKED] : []), ...found.blank]
     }
+    if (step === EVIDENCE) return Object.values(answers.evidence).flat().length === 0 ? [NO_EVIDENCE] : NO_PROBLEMS
     return NO_PROBLEMS
   }
   const next = (e: FormEvent) => {
@@ -95,11 +109,21 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
     const found = check()
     setProblems(found)
     if (found.length > 0) {
+      lastRefusal.current = performance.now()
       formRef.current?.querySelector<HTMLElement>(`[data-problem="${found[0]}"]`)?.focus()
       return
     }
     if (step < BUILT) go(step + 1)
-    else notBuiltRef.current?.focus() // nowhere to go yet (#408): say so, so Next doesn't look dead
+    else notBuiltRef.current?.focus() // nowhere to go yet (#409): say so, so Next doesn't look dead
+  }
+  // A refused Next shows its problem above the buttons, so they move down: a double-click's second press lands on
+  // the form around them, which would take focus off the field Next just focused (to the page's body). Within
+  // SETTLE_MS of a refusal, a press on anything that can't take focus leaves focus where it is (#408, from #407's
+  // verifier).
+  const keepFocus = (e: MouseEvent) => {
+    const target = e.target as HTMLElement
+    if (performance.now() - lastRefusal.current < SETTLE_MS && !target.closest('input, select, textarea, button, a, label'))
+      e.preventDefault()
   }
   // A changed answer's problem clears at once; Next checks again.
   const answer = (change: Partial<Answers>) => {
@@ -114,6 +138,15 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
       return { ...now, notApplicable: reason === null ? others : [...others, { control, reason }] }
     })
     setProblems((now) => now.filter((p) => p !== control && !(p === ALL_MARKED && reason === null)))
+  }
+  // Step 6: ticking a document chooses it as evidence, unticking drops it; any change clears NO_EVIDENCE.
+  const choose = (id: string, source: LibrarySource) => {
+    setAnswers((now) => {
+      const chosen = now.evidence[source]
+      const evidence = { ...now.evidence, [source]: chosen.includes(id) ? chosen.filter((c) => c !== id) : [...chosen, id] }
+      return { ...now, evidence }
+    })
+    setProblems((now) => now.filter((p) => p !== NO_EVIDENCE))
   }
 
   return (
@@ -135,7 +168,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
           </li>
         ))}
       </ol>
-      <form ref={formRef} className="sheet setup-step" noValidate onSubmit={next}>
+      <form ref={formRef} className="sheet setup-step" noValidate onSubmit={next} onMouseDown={keepFocus}>
         <span className="lbl">Step {step} of {STEPS.length}</span>
         <h3 ref={headingRef} tabIndex={-1}>{STEPS[step - 1]}</h3>
         {step === COMPANY && <CompanyStep answers={answers} problems={problems} answer={answer} />}
@@ -147,13 +180,17 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
           <NotApplicableStep marked={answers.notApplicable} mark={mark} controls={controls} onRetry={readControls}
             problems={problems} />
         )}
+        {step === EVIDENCE && (
+          <EvidenceStep chosen={answers.evidence} choose={choose} library={library} onRetry={readLibrary}
+            problem={problems.includes(NO_EVIDENCE)} />
+        )}
         <div className="setup-nav">
           {step > COMPANY && <button type="button" className="btn btn-ghost" onClick={() => go(step - 1)}>Back</button>}
           <button type="submit" className="btn btn-primary">Next</button>
         </div>
         {step === BUILT && (
           <p ref={notBuiltRef} tabIndex={-1} className="field-note">
-            The next steps (evidence, finish) are not built yet. Nothing has been saved.
+            The finish is not built yet. Nothing has been saved.
           </p>
         )}
       </form>
@@ -313,6 +350,45 @@ function NotApplicableStep({ marked, mark, controls, onRetry, problems }: {
         <div className="notice field-note setup-alert" role="alert">
           <p>The controls could not be loaded.</p>
           <button type="button" className="btn" onClick={onRetry}>Try again</button>
+        </div>
+      )}
+    </fieldset>
+  )
+}
+
+function EvidenceStep({ chosen, choose, library, onRetry, problem }: {
+  chosen: ChosenEvidence
+  choose: (id: string, source: LibrarySource) => void
+  library: Library | null
+  onRetry: () => void
+  problem: boolean
+}) {
+  const problemId = useId()
+  const documents = library?.status === 'ready' ? library.data : []
+  const of = (source: LibrarySource) => documents.filter((d) => d.source === source)
+  const picked = documents.filter((d) => chosen[d.source].includes(d.id))
+  return (
+    <fieldset className="setup-choices" aria-invalid={problem || undefined}
+      aria-describedby={problem ? problemId : undefined}>
+      <legend className="sr-only">Evidence documents</legend>
+      <p className="field-note">Choose the documents that are this company's evidence. Vouch searches and cites only these.</p>
+      {/* With nothing loaded there is no checkbox: Next focuses this note, or Try again, in its place. */}
+      {(library === null || library.status === 'loading') && (
+        <p className="field-note" tabIndex={-1} data-problem={NO_EVIDENCE}>Loading the sample library…</p>
+      )}
+      {library?.status === 'ready' && (
+        <>
+          <DocumentTable caption="Policies" documents={of('policies')} selected={chosen} onToggle={choose}
+            firstProblem={NO_EVIDENCE} />
+          <DocumentTable caption="Records" documents={of('records')} selected={chosen} onToggle={choose} />
+          <p className="field-note setup-ready" role="status">{readyToCite(picked)}</p>
+        </>
+      )}
+      {problem && <p id={problemId} className="notice field-note">Choose at least one document.</p>}
+      {library?.status === 'failed' && (
+        <div className="notice field-note setup-alert" role="alert">
+          <p>The sample library could not be loaded.</p>
+          <button type="button" className="btn" onClick={onRetry} data-problem={NO_EVIDENCE}>Try again</button>
         </div>
       )}
     </fieldset>

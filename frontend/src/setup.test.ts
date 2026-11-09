@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { profileTag } from './profiles.ts'
 import {
-  COUNTRIES, frameworkControls, notApplicableProblems, protectionLevels, type ProtectionScope, scopeWords,
+  COUNTRIES, frameworkControls, type LibraryDocument, notApplicableProblems, protectionLevels, type ProtectionScope,
+  readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -95,5 +96,41 @@ describe("step 5's checks on the controls marked not applicable", () => {
 
   it('find nothing to check while the controls are unknown', () => {
     expect(notApplicableProblems([{ control: '1.1.1', reason: '' }], [])).toEqual({ blank: [], allMarked: false })
+  })
+})
+
+const DOCUMENT: LibraryDocument = {
+  id: 'backup-policy', source: 'policies', title: 'Backup policy', kind: 'documented', version: '1.0',
+  approval_date: '2024-02-12', review_cycle: 'yearly',
+  stale_because: 'approved 2024-02-12 with a yearly review, due 2025-02-12', stale: true,
+}
+
+describe('the sample library', () => {
+  it("reads the route's documents", async () => {
+    const fetch = vi.fn((_url: string) => Promise.resolve(new Response(JSON.stringify({ documents: [DOCUMENT] }))))
+    vi.stubGlobal('fetch', fetch)
+    expect(await sampleLibrary()).toEqual([DOCUMENT])
+    expect(fetch.mock.calls[0][0]).toBe('/api/developer/sample-library')
+  })
+
+  it('is null when refused or unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))))
+    expect(await sampleLibrary()).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    expect(await sampleLibrary()).toBeNull()
+  })
+})
+
+describe("step 6's ready-to-cite line", () => {
+  const current = { ...DOCUMENT, stale: false, stale_because: null }
+  const record = { ...current, id: 'training-record', source: 'records' as const, kind: 'implemented' as const }
+
+  it('says when nothing is chosen', () => {
+    expect(readyToCite([])).toBe('No documents chosen yet.')
+  })
+
+  it('counts the chosen documents by kind, and the stale ones only when there are some', () => {
+    expect(readyToCite([DOCUMENT, current, record])).toBe('Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale).')
+    expect(readyToCite([current])).toBe('Ready to cite: 1 document (1 documented, 0 implemented).')
   })
 })

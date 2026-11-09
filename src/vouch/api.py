@@ -50,6 +50,7 @@ from vouch.chat_agent import (
     chat_turn,
 )
 from vouch.database import Connection, Database, DatabaseUnavailable
+from vouch.documents import library_summaries
 from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
@@ -82,6 +83,7 @@ from vouch.model_choice import (
     UnknownModel,
     model_store,
 )
+from vouch.paths import SAMPLE_LIBRARY_DIR
 from vouch.profile import (
     DEFAULT_PROFILE,
     SAMPLE_LIBRARY,
@@ -147,6 +149,9 @@ CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again 
 DEVELOPERS_ONLY = "This is available to developers only."
 PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
 CONTROLS_FAILED = "The framework's controls could not be read."
+SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
+# The library's folders a company's evidence chooses from, in the order step 6 lists them.
+LIBRARY_SOURCES = tuple(company_profiles.Evidence.model_fields)
 NOT_A_MEMBER = (
     "Vouch is open to members of the course's Discord server. This Discord account is not in it."
 )
@@ -1352,6 +1357,19 @@ def framework_controls() -> dict[str, Any]:
         log.exception("the base framework could not be read")
         raise HTTPException(status_code=500, detail=CONTROLS_FAILED) from None
     return {"controls": [{"id": c.id, "question": c.question} for c in controls]}
+
+
+@router.get("/developer/sample-library", dependencies=DEVELOPERS)
+def sample_library() -> dict[str, Any]:
+    """Every document of the sample library (#408), policies then records, each by title, with
+    what Vouch reads from it (DocumentSummary) and whether it is stale today, for company
+    setup's step 6; the library unreadable, a plain 500 naming no path."""
+    try:
+        summaries = library_summaries(SAMPLE_LIBRARY_DIR, LIBRARY_SOURCES, report.today())
+    except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
+        log.exception("the sample library could not be read")
+        raise HTTPException(status_code=500, detail=SAMPLE_LIBRARY_FAILED) from None
+    return {"documents": [asdict(s) | {"stale": s.stale_because is not None} for s in summaries]}
 
 
 @router.post("/developer/profiles", dependencies=DEVELOPERS, status_code=201)

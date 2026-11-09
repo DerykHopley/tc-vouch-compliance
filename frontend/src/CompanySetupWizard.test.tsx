@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
-import type { ProtectionScope } from './setup.ts'
+import type { LibraryDocument, ProtectionScope } from './setup.ts'
 
 const LEVELS: ProtectionScope[] = [
   { level: 'normal', requirements: { must: 37, should: 48 }, total: 85, controls: 12, added: 0, added_controls: [] },
@@ -16,17 +16,34 @@ const LEVELS: ProtectionScope[] = [
 const CONTROLS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
   .map((id) => ({ id, question: `To what extent is ${id} handled?` }))
 
+const libraryDocument = (id: string, title: string, more: Partial<LibraryDocument> = {}): LibraryDocument => ({
+  id, source: 'policies', title, kind: 'documented', version: '1.0', approval_date: '2026-07-20', review_cycle: 'yearly',
+  stale_because: null, stale: false, ...more,
+})
+/** The sample library as GET /api/developer/sample-library sends it: two policies (one stale), then a record. */
+const LIBRARY: LibraryDocument[] = [
+  libraryDocument('access-rights-policy', 'Access rights policy'),
+  libraryDocument('backup-policy', 'Backup policy', {
+    approval_date: '2024-02-12', stale_because: 'approved 2024-02-12 with a yearly review, due 2025-02-12', stale: true,
+  }),
+  libraryDocument('training-record', 'Security training record 2026', { source: 'records', kind: 'implemented' }),
+]
+
 const levelsAnswer = () => new Response(JSON.stringify({ levels: LEVELS }))
 const controlsAnswer = () => new Response(JSON.stringify({ controls: CONTROLS }))
+const libraryAnswer = () => new Response(JSON.stringify({ documents: LIBRARY }))
+const CONTROLS_PATH = '/api/developer/controls'
+const LIBRARY_PATH = '/api/developer/sample-library'
 
 type Answer = Response | 'offline'
 
-/** fetch answering the scope read with `levels` in turn and the controls read with `controls` in turn (a Response, or
- * 'offline' to reject), then with the full answer. */
-function api(levels: Answer[] = [], controls: Answer[] = []) {
+/** fetch answering the scope read with `levels` in turn, the controls read with `controls` in turn and the library
+ * read with `library` in turn (a Response, or 'offline' to reject), then with the full answer. */
+function api(levels: Answer[] = [], controls: Answer[] = [], library: Answer[] = []) {
   const fetch = vi.fn((url: string) => {
-    const reading = url === '/api/developer/controls'
-    const next = (reading ? controls.shift() : levels.shift()) ?? (reading ? controlsAnswer() : levelsAnswer())
+    const next = url === CONTROLS_PATH ? controls.shift() ?? controlsAnswer()
+      : url === LIBRARY_PATH ? library.shift() ?? libraryAnswer()
+        : levels.shift() ?? levelsAnswer()
     return next === 'offline' ? Promise.reject(new TypeError('offline')) : Promise.resolve(next)
   })
   vi.stubGlobal('fetch', fetch)
@@ -78,6 +95,16 @@ const control = (id: string) => screen.getByRole('checkbox', { name: controlName
 const findControl = (id: string) => screen.findByRole('checkbox', { name: controlName(id) })
 const reason = (id: string) => screen.getByRole('textbox', { name: `Why ${id} doesn't apply` })
 
+async function toStep6() {
+  await toStep5()
+  await findControl('1.1.1')
+  await next()
+}
+
+const choose = (title: string) => screen.getByRole('checkbox', { name: `Choose ${title}` })
+const findChoose = (title: string) => screen.findByRole('checkbox', { name: `Choose ${title}` })
+const NOT_BUILT = 'The finish is not built yet. Nothing has been saved.'
+
 describe('company setup', () => {
   it('lists all seven steps, marks the current one, and starts on step 1 with no Back', () => {
     api()
@@ -85,7 +112,7 @@ describe('company setup', () => {
     const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
     expect(steps.map((s) => s.textContent)).toEqual([
       '1Company', '2Language', '3Protection level', '4Goal (not yet available)', '5Not applicable',
-      '6Evidence (not yet available)', '7Finish (not yet available)'])
+      '6Evidence', '7Finish (not yet available)'])
     expect(steps[0].getAttribute('aria-current')).toBe('step')
     expect(screen.getByText('Step 1 of 7')).toBeTruthy()
     expect(heading('Company')).toBeTruthy()
@@ -255,7 +282,7 @@ describe('company setup', () => {
     expect(boxes.map((b) => b.closest('label')?.textContent)).toEqual(CONTROLS.map((c) => `${c.id} ${c.question}`))
     expect(boxes.every((b) => !(b as HTMLInputElement).checked)).toBe(true)
     expect(screen.queryAllByRole('textbox')).toEqual([])
-    expect(screen.getByText('The next steps (evidence, finish) are not built yet. Nothing has been saved.')).toBeTruthy()
+    expect(screen.queryByText(/not built yet/)).toBeNull()
   })
 
   it('ticking a control asks why; unticking drops the reason, and ticking again starts empty', async () => {
@@ -343,8 +370,6 @@ describe('company setup', () => {
     answer(new Response('{}', { status: 503 }))
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('The controls could not be loaded.')
-    await next() // Next still works with nothing marked
-    expect(screen.queryByText('At least one control must apply.')).toBeNull()
     await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
     expect(await screen.findAllByRole('checkbox')).toHaveLength(12)
     expect(screen.queryByRole('alert')).toBeNull()
@@ -367,7 +392,7 @@ describe('company setup', () => {
     await next()
     await back()
     await next()
-    expect(fetch.mock.calls.map((c) => c[0])).toEqual(['/api/developer/protection-levels', '/api/developer/controls'])
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual(['/api/developer/protection-levels', CONTROLS_PATH, LIBRARY_PATH])
   })
 
   it('a second press within 400 ms of a move is ignored, on Next and on Back, so each press moves one step', async () => {
@@ -412,17 +437,155 @@ describe('company setup', () => {
     expect(screen.queryByText("Say why 1.6.1 doesn't apply.")).toBeNull()
   })
 
-  it("Next on step 5 with good answers keeps the reasons as typed, and points to the note that it's not built yet", async () => {
+  it('Next on step 5 with good answers goes to step 6, focus on its heading, and keeps the reasons as typed', async () => {
     api()
     render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     await toStep5()
     await userEvent.click(await findControl('1.6.1'))
     await userEvent.type(reason('1.6.1'), ' No prototype vehicles ')
     await next()
-    expect(heading('Not applicable')).toBeTruthy()
+    expect(screen.getByText('Step 6 of 7')).toBeTruthy()
+    expect(document.activeElement).toBe(heading('Evidence'))
+    const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
+    expect(steps[5].textContent).toBe('6Evidence')
+    expect(steps[5].className).toBe('')
+    expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, null, null, 'step', null])
+    await back()
     expect((reason('1.6.1') as HTMLTextAreaElement).value).toBe(' No prototype vehicles ')
-    expect(document.activeElement)
-      .toBe(screen.getByText('The next steps (evidence, finish) are not built yet. Nothing has been saved.'))
+  })
+
+  it('step 6 lists the library under Policies and Records, none chosen, under the sentence that says what it is for', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    expect(screen.getByText("Choose the documents that are this company's evidence. Vouch searches and cites only these."))
+      .toBeTruthy()
+    const policies = await screen.findByRole('table', { name: 'Policies' })
+    expect(within(policies).getAllByRole('checkbox').map((b) => b.getAttribute('aria-label')))
+      .toEqual(['Choose Access rights policy', 'Choose Backup policy'])
+    const records = screen.getByRole('table', { name: 'Records' })
+    expect(within(records).getAllByRole('checkbox').map((b) => b.getAttribute('aria-label')))
+      .toEqual(['Choose Security training record 2026'])
+    expect(screen.getAllByRole('checkbox').every((b) => !(b as HTMLInputElement).checked)).toBe(true)
+    expect(screen.getByRole('status').textContent).toBe('No documents chosen yet.')
+    expect(screen.queryByText(NOT_BUILT)).toBeTruthy()
+  })
+
+  it('the ready-to-cite line follows each tick', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    expect(screen.getByRole('status').textContent).toBe('Ready to cite: 1 document (1 documented, 0 implemented, 1 stale).')
+    await userEvent.click(choose('Access rights policy'))
+    await userEvent.click(choose('Security training record 2026'))
+    expect(screen.getByRole('status').textContent).toBe('Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale).')
+    await userEvent.click(choose('Backup policy'))
+    expect(screen.getByRole('status').textContent).toBe('Ready to cite: 2 documents (1 documented, 1 implemented).')
+  })
+
+  it('Next on step 6 with no document stays, says so and focuses the first checkbox; ticking one clears it', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await findChoose('Access rights policy')
+    await next()
+    expect(heading('Evidence')).toBeTruthy()
+    const group = screen.getByRole('group', { name: 'Evidence documents' })
+    expect(group.getAttribute('aria-invalid')).toBe('true')
+    expect(group.getAttribute('aria-describedby')
+      && document.getElementById(group.getAttribute('aria-describedby')!)?.textContent).toBe('Choose at least one document.')
+    expect(document.activeElement).toBe(choose('Access rights policy'))
+    await userEvent.click(choose('Security training record 2026'))
+    expect(screen.queryByText('Choose at least one document.')).toBeNull()
+    expect(group.getAttribute('aria-invalid')).toBeNull()
+  })
+
+  it('Next on step 6 with a document chosen stays and focuses the note that the finish is not built yet', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    await next()
+    expect(heading('Evidence')).toBeTruthy()
+    expect(screen.queryByText('Choose at least one document.')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByText(NOT_BUILT))
+  })
+
+  it('the note that the finish is not built yet shows on no other step', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    const seen = [screen.queryByText(NOT_BUILT)]
+    await stepOne()
+    await next()
+    seen.push(screen.queryByText(NOT_BUILT))
+    await next()
+    seen.push(screen.queryByText(NOT_BUILT))
+    await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
+    await next()
+    seen.push(screen.queryByText(NOT_BUILT))
+    expect(seen).toEqual([null, null, null, null])
+    await findControl('1.1.1')
+    await next()
+    expect(screen.getByText(NOT_BUILT)).toBeTruthy()
+  })
+
+  it('keeps the chosen documents through Back and Next', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    await userEvent.click(choose('Security training record 2026'))
+    await back()
+    await next()
+    expect((choose('Backup policy') as HTMLInputElement).checked).toBe(true)
+    expect((choose('Security training record 2026') as HTMLInputElement).checked).toBe(true)
+    expect((choose('Access rights policy') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it.each([
+    ['an error answer', new Response('{}', { status: 500 }) as Answer],
+    ['offline', 'offline' as Answer],
+  ])('when the library read fails (%s) it says so with Try again, which reads once more and lists it', async (_, failure) => {
+    const fetch = api([], [], [failure])
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('The sample library could not be loaded.')
+    expect(screen.queryAllByRole('checkbox')).toEqual([])
+    await next() // nothing loaded: stays and says so, focus on Try again, as there is no checkbox
+    expect(heading('Evidence')).toBeTruthy()
+    expect(screen.getByText('Choose at least one document.')).toBeTruthy()
+    expect(document.activeElement).toBe(within(alert).getByRole('button', { name: 'Try again' }))
+    await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    expect(await findChoose('Backup policy')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(fetch.mock.calls.filter((c) => c[0] === LIBRARY_PATH)).toHaveLength(2)
+  })
+
+  it('says while the library loads', async () => {
+    const fetch = api()
+    fetch.mockImplementation((url: string) => url === LIBRARY_PATH ? new Promise<Response>(() => {})
+      : Promise.resolve(url === CONTROLS_PATH ? controlsAnswer() : levelsAnswer()))
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    expect(screen.getByText('Loading the sample library…')).toBeTruthy()
+  })
+
+  it('reads the library once across Back and Next, and posts no profile at any step', async () => {
+    const fetch = api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    await next()
+    await back()
+    await next()
+    await back()
+    await back()
+    await next()
+    await next()
+    expect(fetch.mock.calls.map((c) => c[0]))
+      .toEqual(['/api/developer/protection-levels', CONTROLS_PATH, LIBRARY_PATH])
   })
 
   it('the breadcrumb leads back to the developer page', async () => {

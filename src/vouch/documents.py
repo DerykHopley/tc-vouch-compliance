@@ -154,6 +154,70 @@ def read_facts(path: Path, source: str, today: datetime.date) -> DocumentFacts:
     return facts_of(data, source, path.stem, today)
 
 
+@dataclass(frozen=True)
+class DocumentSummary:
+    """What Vouch has read from a document, for a page (#408): its title, kind, version,
+    approval date (ISO), review cycle, and why it is stale (None when current). The kind and
+    staleness are the judge's (kind_of, stale_because)."""
+
+    id: str
+    source: str  # the folder it is in: policies, records
+    title: str
+    kind: EvidenceKind
+    version: str | None
+    approval_date: str | None
+    review_cycle: str | None
+    stale_because: str | None
+
+
+def _approval_date(value: Any) -> str | None:
+    if isinstance(value, datetime.datetime):
+        value = value.date()
+    if isinstance(value, str):
+        try:
+            value = datetime.date.fromisoformat(value)
+        except ValueError:
+            return None
+    return value.isoformat() if isinstance(value, datetime.date) else None
+
+
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def document_summary(path: Path, source: str, today: datetime.date) -> DocumentSummary:
+    """The summary of the document at this path in a source's folder, judged on `today`. A
+    missing title gives the id; a version, approval date or review cycle that can't be read
+    gives None; no front matter at all, the source's kind and NO_REVIEW_DATE."""
+    data, _ = split_front_matter(path.read_text(encoding="utf-8"))
+    front = data or {}
+    return DocumentSummary(
+        id=path.stem,
+        source=source,
+        title=_text(front.get("title")) or path.stem,
+        kind=kind_of(data, source, path.stem),
+        version=_text(front.get("version")),
+        approval_date=_approval_date(front.get("approval_date")),
+        review_cycle=_text(front.get("review_cycle")),
+        stale_because=stale_because(data, today),
+    )
+
+
+def library_summaries(
+    library: Path, sources: tuple[str, ...], today: datetime.date
+) -> list[DocumentSummary]:
+    """Every document directly in each of the library's source folders, in the sources'
+    order, each source's by title. An unreadable folder or document raises (OSError, or ValueError
+    for one that isn't UTF-8 text)."""
+    found: list[DocumentSummary] = []
+    for source in sources:
+        folder = library / source
+        paths = [p for p in folder.iterdir() if p.suffix == SUFFIX and p.is_file()]
+        summaries = [document_summary(p, source, today) for p in paths]
+        found += sorted(summaries, key=lambda s: (s.title.casefold(), s.id))
+    return found
+
+
 def paragraphs(body: str) -> list[tuple[str, str]]:
     """Each paragraph of the body (a table counts as one), with the heading of its section:
     (heading, text), the text's lines stripped."""
