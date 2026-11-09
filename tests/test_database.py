@@ -591,6 +591,47 @@ def test_the_setup_command_reports_a_real_refusal_at_once(change, reason, capsys
 
 
 @needs_postgres
+def test_the_setup_makes_the_company_profiles_table_health_counts_it_and_runs_twice(
+    empty_database,
+):
+    """#385: one row per company made in the app, its profile as jsonb."""
+    url = empty_database.url.get_secret_value()
+    assert database.main([], env={DATABASE_URL_ENV: url}) == 0
+    assert database.main([], env={DATABASE_URL_ENV: url}) == 0
+
+    assert database.COMPANY_PROFILES_TABLE in database.SETUP_TABLES
+    assert database.COMPANY_PROFILES_TABLE in tables(empty_database)
+    assert empty_database.health() == "reachable"
+    with empty_database.connection() as conn:
+        conn.execute(f"DROP TABLE {database.COMPANY_PROFILES_TABLE}")
+    empty_database._health = None
+    assert empty_database.health() == "needs-setup"  # health counts it among setup's tables
+
+
+@needs_postgres
+def test_before_the_setup_made_the_company_profiles_table_files_are_listed_and_a_create_is_503(
+    empty_database, caplog
+):
+    app = create_app(Settings(database_url=empty_database.url))
+    body = {
+        "company": "Musterfirma Süd GmbH",
+        "country": "Germany",
+        "answer_language": "en",
+        "protection_level": "normal",
+        "evidence": {"policies": ["backup-policy"]},
+    }
+    with TestClient(app, raise_server_exceptions=False) as client:
+        listed = client.get("/api/profiles")
+        made = client.post("/api/developer/profiles", json=body)
+
+    assert listed.status_code == 200
+    assert [p["id"] for p in listed.json()["profiles"]] == ["alpenwerk", "nordlicht"]
+    assert made.status_code == 503
+    assert f"no {database.COMPANY_PROFILES_TABLE} table" in caplog.text
+    assert database.COMPANY_PROFILES_TABLE not in tables(empty_database)
+
+
+@needs_postgres
 def test_a_setting_is_kept_and_read_back_once_the_setup_has_run(empty_database):
     """Vouch's own settings table (#34, the model choice), made by the setup command alone."""
     empty_database.setup()

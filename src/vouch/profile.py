@@ -8,6 +8,7 @@ and risks.
 
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -36,7 +37,7 @@ from vouch.isa import (
     UnknownControlError,
     load_base_framework,
 )
-from vouch.paths import FIXTURES_DIR
+from vouch.paths import FIXTURES_DIR, SAMPLE_LIBRARY_DIR
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,9 @@ NORDLICHT_PROFILE = FIXTURES_DIR / "nordlicht" / PROFILE_FILE
 # The sample library's reference profile (#370): the eval judges the library under it, and it is
 # no company, so no user sees it (vouch.api.user_profiles).
 SAMPLE_LIBRARY = "sample-library"
+
+STORED = "stored"
+"""The validation context's flag for a profile kept in the database (load_stored_profile)."""
 
 ProtectionLevel = Literal["normal", "high", "very high"]
 EvidenceSourceName = Literal["policies", "records", "patch"]
@@ -185,6 +189,9 @@ class ComplianceProfile(_Strict):
     @field_validator("id", mode="after")
     @classmethod
     def _id_is_folder_name(cls, profile_id: str, info: ValidationInfo) -> str:
+        """A file profile's id is its folder's name; a stored one's is its row's (#385)."""
+        if isinstance(info.context, dict) and info.context.get(STORED):
+            return profile_id
         folder = _profile_dir(info).name
         if profile_id != folder:
             raise ValueError(f"must be the profile's folder name, {folder}")
@@ -337,6 +344,43 @@ def load_profile(path: Path) -> ComplianceProfile:
         raise ProfileError(
             path, f"a path it names can't be used: {error.strerror or error}"
         ) from error
+
+
+STORED_SOURCES: tuple[EvidenceSourceName, ...] = ("policies", "records")
+"""The sample library's folders a stored profile's evidence is chosen from."""
+
+
+STORED_FIELDS = ("company", "country", "answer_language", "protection_level", "not_applicable")
+"""A stored profile's own fields, beside its evidence."""
+
+
+def load_stored_profile(
+    profile_id: str, fields: Mapping[str, Any], library: Path = SAMPLE_LIBRARY_DIR
+) -> ComplianceProfile:
+    """The validated profile of a company made in the app (#385), from its stored fields
+    (`company`, `country`, `answer_language`, `protection_level`, `not_applicable`, and
+    `evidence`: each source's chosen document ids): the ISA with no overlays, its evidence the
+    chosen documents of the sample library's folders, its id the stored one. A source with no
+    document chosen is left out. ProfileError (its path the id) when it doesn't validate."""
+    evidence = fields.get("evidence")
+    chosen = evidence if isinstance(evidence, Mapping) else {}
+    data: dict[str, Any] = {
+        "id": profile_id,
+        **{key: fields.get(key) for key in STORED_FIELDS},
+        "base_framework": SOURCE,
+        "overlays": [],
+        "evidence_sources": {
+            name: {"folder": name, "documents": chosen[name]}
+            for name in STORED_SOURCES
+            if chosen.get(name)
+        },
+    }
+    try:
+        return ComplianceProfile.model_validate(data, context={"base_dir": library, STORED: True})
+    except ValidationError as error:
+        raise ProfileError(Path(profile_id), _describe(error)) from error
+    except BaseFrameworkError as error:
+        raise ProfileError(Path(profile_id), str(error)) from error
 
 
 PROFILE_LOAD_ERRORS: tuple[type[Exception], ...] = (ProfileError, BaseFrameworkError)
