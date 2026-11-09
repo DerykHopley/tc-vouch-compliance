@@ -21,10 +21,11 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
 limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
-the remediation items the lead decided on (#43), each profile's Goal (#369) and its review
-rounds (#402); nothing else does. Before it has run, a setting reads as unset, a Goal as Audit
-readiness and the review rounds as the first one, open; and a write, a count, the usage, a
-review, a remediation decision, a Goal change or a round started or closed is
+the remediation items the lead decided on (#43), the improvement plan's marks on them (#410),
+each profile's Goal (#369) and its review rounds (#402); nothing else does. Before it has run, a
+setting reads as unset, a Goal as Audit readiness, the plan as no marks and the review rounds as
+the first one, open; and a write, a count, the usage, a review, a remediation decision, a plan
+mark, a Goal change or a round started or closed is
 DatabaseUnavailable (a 503).
 """
 
@@ -122,12 +123,17 @@ AuditAction = Literal[
     "goal",
     "round-start",
     "round-close",
+    "priority",
+    "done",
 ]
 """What an audit entry records the compliance lead doing (vouch.audit's Action): `goal` is a
 change of the profile's Goal (#369); `round-start` and `round-close` a review round started or
-closed (#402)."""
+closed (#402); `priority` and `done` a remediation item's priority changed or marked done, in the
+improvement plan (#410)."""
 Goal = Literal["audit-readiness", "internal-improvement"]
 """What a compliance profile is used for (#369, vouch.goal): kept per user and profile."""
+Priority = Literal["high", "medium", "low"]
+"""A remediation item's priority in the improvement plan (#410, vouch.plan)."""
 AUDIT_COLUMNS = (
     "user_id",
     "reviewer_name",
@@ -258,6 +264,29 @@ CREATE_REMEDIATION_TRIGGERS = (
 )
 """A decision is kept as made, as its audit entry is: the table refuses an update, a delete or
 a truncate, whoever asks."""
+PLAN_TABLE = "vouch_remediation_plan"
+"""The improvement plan's marks on approved remediation items (vouch.plan, #410), per user,
+profile, assessment thread and requirement, beside the decisions (whose table stays final): the
+lead's priority (null: the default from the verdict) and the done mark (null: not done). Each
+write in its audit entry's transaction."""
+PLAN_COLUMNS = (
+    "user_id",
+    "profile_id",
+    "thread_id",
+    "requirement_id",
+    "control_id",
+    "priority",
+    "done_at",
+    "done_note",
+)
+CREATE_PLAN = (
+    f"CREATE TABLE IF NOT EXISTS {PLAN_TABLE} (user_id text NOT NULL, "
+    "profile_id text NOT NULL, thread_id text NOT NULL, requirement_id text NOT NULL, "
+    "control_id text NOT NULL, priority text "
+    f"CHECK (priority IN ({', '.join(repr(p) for p in get_args(Priority))})), "
+    "done_at timestamptz, done_note text, "
+    "PRIMARY KEY (user_id, profile_id, thread_id, requirement_id))"
+)
 GOALS_TABLE = "vouch_profile_goals"
 """Each user's Goal under each compliance profile (vouch.goal, #369), the latest change; none
 kept is Audit readiness. Written in its audit entry's transaction."""
@@ -302,6 +331,7 @@ SETUP_TABLES = (
     USAGE_TABLE,
     AUDIT_TABLE,
     REMEDIATION_TABLE,
+    PLAN_TABLE,
     GOALS_TABLE,
     ROUNDS_TABLE,
 )
@@ -729,6 +759,44 @@ class Database:
                 log.error("no %s table: run vouch-db-setup on this database", REMEDIATION_TABLE)
                 return []
 
+    @contextmanager
+    def planning(
+        self, lock_key: str, serde: SerializerProtocol | None = None
+    ) -> Iterator[tuple[PostgresSaver, "RemediationWrites", "PlanWrites"]]:
+        """One transaction for a mark in the improvement plan (vouch.plan, #410): it first takes
+        the thread's lock on `lock_key`, as `deciding` does, so the assessment, its decisions
+        and its marks are read as they stand and two marks at once take turns. A checkpointer,
+        the decisions' reads and the plan's reads and writes, all on its connection. Raises
+        DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
+        tables = f"checkpoints, {REMEDIATION_TABLE}, {PLAN_TABLE} or {AUDIT_TABLE}"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            conn.execute(DECIDE_LOCK, (lock_id(lock_key),))
+            yield PostgresSaver(conn, serde=serde), RemediationWrites(conn), PlanWrites(conn)
+
+    def plan_marks(
+        self, user_id: str, profile_id: str, thread_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """The user's plan marks on those assessments' threads under the profile (#410), in one
+        query: mappings of PLAN_COLUMNS. None before vouch-db-setup made the table (logged: run
+        vouch-db-setup): every item reads its default priority, none done. Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                return conn.execute(
+                    f"SELECT {', '.join(PLAN_COLUMNS)} FROM {PLAN_TABLE} "
+                    "WHERE user_id = %(user_id)s AND profile_id = %(profile_id)s "
+                    "AND thread_id = ANY(%(thread_ids)s)",
+                    {"user_id": user_id, "profile_id": profile_id, "thread_ids": thread_ids},
+                ).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", PLAN_TABLE)
+                return []
+
     def profile_goal(self, user_id: str, profile_id: str) -> Goal | None:
         """The user's Goal under the profile; None when none was ever changed, or before
         vouch-db-setup made the table (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
@@ -948,6 +1016,7 @@ class Database:
                 conn.execute(CREATE_REMEDIATION_GUARD)
                 for trigger in CREATE_REMEDIATION_TRIGGERS:
                     conn.execute(trigger)
+                conn.execute(CREATE_PLAN)
                 conn.execute(CREATE_GOALS)
                 conn.execute(CREATE_ROUNDS)
                 conn.execute(CREATE_ROUNDS_ONE_OPEN)
@@ -1052,6 +1121,39 @@ class RemediationWrites:
         if existing is None:  # the insert met it, and the guard lets nothing delete one
             raise DatabaseUnavailable(f"a decision in {REMEDIATION_TABLE} vanished")
         return existing, False
+
+
+class PlanWrites:
+    """A plan mark's reads and writes, on the connection of its transaction
+    (`Database.planning`)."""
+
+    COLUMNS = ", ".join(PLAN_COLUMNS)
+
+    def __init__(self, conn: Connection) -> None:
+        self.conn = conn
+
+    def kept(self, key: Mapping[str, Any]) -> dict[str, Any] | None:
+        """The marks kept under `key` (user_id, profile_id, thread_id, requirement_id), if any:
+        a mapping of PLAN_COLUMNS."""
+        return self.conn.execute(
+            f"SELECT {self.COLUMNS} FROM {PLAN_TABLE} WHERE user_id = %(user_id)s "
+            "AND profile_id = %(profile_id)s AND thread_id = %(thread_id)s "
+            "AND requirement_id = %(requirement_id)s",
+            key,
+        ).fetchone()
+
+    def mark(self, row: Mapping[str, Any], entries: list[Mapping[str, Any]]) -> None:
+        """Keep the item's marks (a mapping of PLAN_COLUMNS), replacing those kept, with their
+        audit entries (mappings of AUDIT_COLUMNS), in the transaction: both, or neither."""
+        values = ", ".join(f"%({c})s" for c in PLAN_COLUMNS)
+        self.conn.execute(
+            f"INSERT INTO {PLAN_TABLE} ({self.COLUMNS}) VALUES ({values}) "
+            "ON CONFLICT (user_id, profile_id, thread_id, requirement_id) DO UPDATE SET "
+            "priority = EXCLUDED.priority, done_at = EXCLUDED.done_at, "
+            "done_note = EXCLUDED.done_note",
+            row,
+        )
+        _insert_audit(self.conn, entries)
 
 
 def _insert_audit(conn: Connection, entries: list[Mapping[str, Any]]) -> None:

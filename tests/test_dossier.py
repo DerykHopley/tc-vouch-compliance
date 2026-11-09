@@ -377,6 +377,8 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
             "iso_27001": "ISO 27001:2022: A.5.15, A.8.5",
             "status": "waiting-for-review",
             "verdict": "partly-evidenced",
+            "reassess_suggested": False,  # the improvement plan's (#410)
+            "closed": False,
         }
         assert proposed["readiness"]["accepted"] == 0
         assert proposed["readiness"]["by_verdict"]["partly-evidenced"] == 0
