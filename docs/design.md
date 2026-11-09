@@ -9,7 +9,10 @@ Keep this file short enough to read before each UI ticket: a component gets a ro
 ## Source and approval
 
 - **Identity from:** the owner's mood board (glen-check suits with a navy tie and brass details; the Atlas Accounting site; a near-black product page with a champagne accent), tried in the UI prototype on branch `prototype/ui` (variant E, style Tailored). The mood images are not in the repo.
-- **Visual changes approved by:** the owner. A ticket that needs a visual choice this file doesn't settle goes to them, with a screenshot of each option.
+- **Visual changes approved by:** the owner, in one of two ways (#341, the owner, 2026-11-07):
+  - **Interactive changes** (a handle, drag, resize, focus, hover, motion, the keyboard): the owner tries them in the owner preview or on the live app. The spec's ready message lists each as a one-line "try this" step; no screenshot approval.
+  - **A static choice between options** this file doesn't settle (two layouts, colours, wording on a page): one screenshot per option, side by side.
+  - Screenshots as proof in a PR (a fix works, before and after) stay, uncommitted until approved. Either way the answer lands in this file.
 
 ## Identity
 
