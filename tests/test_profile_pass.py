@@ -31,10 +31,12 @@ from vouch.graph import (
     ConfirmFindings,
     OutputCheckError,
     ReviewDecision,
+    build_graph,
     confirm_findings,
     load_assessment,
     memory_checkpointer,
     resume,
+    thread_config,
 )
 from vouch.memory import Memory, newest_by_control, process_store
 from vouch.paths import FIXTURES_DIR
@@ -104,6 +106,10 @@ class Lead:
             **kwargs,
         )
 
+    def thread_values(self, thread_id: str) -> dict:
+        config = thread_config(thread_id, self.memory.scope)
+        return build_graph(None, checkpointer=self.saver).get_state(config).values
+
     def review(self, thread_id: str, decision: str) -> None:
         if decision == "accept":
             confirm_findings(thread_id, ConfirmFindings(), self.saver, scope=self.memory.scope)
@@ -151,10 +157,37 @@ def test_each_assessment_says_it_came_from_a_profile_pass_with_the_agents_steps(
     result = Lead().run(fake())
 
     nodes = [s["node"] for s in result.assessments[0].steps]
-    assert nodes[:2] == ["load_control", PASS_NODE]
+    assert nodes[:3] == ["load_control", "apply_overlays", PASS_NODE]
     assert nodes[-4:] == ["judge", "check_quotes", "remediate", "review"]
-    passed = result.assessments[0].steps[1]["text"]
+    passed = result.assessments[0].steps[2]["text"]
     assert passed.startswith("Assessed in a profile pass: one model run over 12 controls")
+
+
+def test_a_pass_assessment_of_an_overlaid_control_holds_its_overlay_and_the_agents_step():
+    lead = Lead(load_named_profile("alpenwerk"))
+    result = lead.run(fake({"controls": []}))
+
+    overlaid = next(a for a in result.assessments if a.control_id == "1.6.2")
+    assert [r.id for r in lead.thread_values(overlaid.thread_id)["overlay_requirements"]] == ["O1"]
+    nodes = [s["node"] for s in overlaid.steps]
+    assert nodes[:3] == ["load_control", "apply_overlays", PASS_NODE]
+    assert overlaid.steps[1]["text"] == (
+        "Applied the country overlays: AT NIS2 (illustrative) adds O1."
+    )
+    assert "overlay_branch" not in nodes
+
+
+def test_a_pass_assessment_no_overlay_touches_has_the_agents_no_overlay_step():
+    lead = Lead()
+    result = lead.run(fake())
+
+    first = result.assessments[0]
+    assert list(lead.thread_values(first.thread_id)["overlay_requirements"]) == []
+    assert first.steps[1] == {
+        "node": "apply_overlays",
+        "text": "No country overlay adds a requirement to this control, "
+        "so no overlay branch is taken.",
+    }
 
 
 def test_the_prompt_holds_every_document_as_data_with_its_kind_and_staleness():
@@ -278,7 +311,7 @@ def test_an_audit_claim_gets_the_whole_reply_asked_for_again_and_the_clean_one_k
     assert "Reply refused" in str(model.prompts[1][-1].content)
     assessed = next(a for a in result.assessments if a.control_id == "4.1.2")
     assert "compliant" not in assessed.answer
-    assert "“compliant”" in assessed.steps[1]["text"]
+    assert "“compliant”" in assessed.steps[2]["text"]
 
 
 def test_a_second_audit_claim_fails_the_pass_and_keeps_nothing():
@@ -444,7 +477,7 @@ def test_a_pass_assessment_is_reviewed_through_the_route_and_counts_on_the_overv
 
     opened = client.get(f"/api/assessments/{first['thread_id']}", headers=lead).json()
     assert opened["assessment"]["status"] == "accepted"
-    assert opened["assessment"]["steps"][1]["node"] == PASS_NODE
+    assert opened["assessment"]["steps"][2]["node"] == PASS_NODE
     assert client.get("/api/overview", headers=lead).json()["readiness"]["accepted"] == 1
 
 

@@ -975,12 +975,9 @@ def build_graph(
         prompt that starts gathering."""
         control = state["control"]
         control_requirements = profile.requirements_for(control)
-        applicable = set(control_requirements.applicable)
         return {
             "control_requirements": control_requirements,
-            "overlay_requirements": tuple(
-                r for r in control_requirements.overlay if r in applicable
-            ),
+            "overlay_requirements": overlay_requirements_of(control_requirements),
             "messages": _prompt(control, control_requirements, profile, state.get("note", "")),
         }
 
@@ -1480,6 +1477,18 @@ def loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
     """The first step: the control, loaded before the graph runs, and what applies of it."""
     update = {"control": control, "control_requirements": profile.requirements_for(control)}
     return Step("load_control", update, profile)
+
+
+def overlay_requirements_of(requirements: ControlRequirements) -> tuple[Requirement, ...]:
+    """The applicable requirements the country overlays add to a control, in order: what the
+    apply_overlays node sets (the profile pass too, #390)."""
+    applicable = set(requirements.applicable)
+    return tuple(r for r in requirements.overlay if r in applicable)
+
+
+def overlays_step(overlay_requirements: tuple[Requirement, ...]) -> Step:
+    """The apply_overlays step for these overlay requirements, in the agent's own words."""
+    return Step("apply_overlays", {"overlay_requirements": overlay_requirements})
 
 
 def _waiting_step(node: str = "review") -> Step:

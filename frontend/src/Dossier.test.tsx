@@ -3,8 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Dossier from './Dossier.tsx'
 import type { ControlCard, Overview } from './overview.ts'
+import type { PassAssessment, PassState } from './profilePass.ts'
 
 afterEach(cleanup)
+
+/** No profile pass: idle, and starting one does nothing. */
+const NO_PASS = { pass: { kind: 'idle' } as const, onPass: () => {} }
 
 const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
 
@@ -45,7 +49,7 @@ const cardChip = (id: string) =>
 describe('the Dossier overview', () => {
   it('shows the readiness band from the overview, in figures and words', () => {
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
-      onRetry={() => {}} onOpen={() => {}} running={null} />)
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     const band = screen.getByRole('region', { name: 'Readiness' })
     expect(within(band).getByText('accepted of 12')).toBeTruthy()
     expect(tile('accepted of 12')).toBe('2')
@@ -65,18 +69,18 @@ describe('the Dossier overview', () => {
   ])('labels the remediation count with %i approved as "%s"', (approved, label) => {
     const overview = seeded()
     overview.readiness = { ...overview.readiness, remediation_items: 3, remediation_approved: approved }
-    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     expect(tile(label)).toBe('3')
   })
 
   it('names the controls by their count, from the data', () => {
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     expect(screen.getByRole('heading', { name: '12 controls' })).toBeTruthy()
   })
 
   it("shows Assessing on the card of the control being assessed, and doesn't offer to assess it again", async () => {
     const onOpen = vi.fn()
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running="1.1.1" />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running="1.1.1" {...NO_PASS} />)
     const card = screen.getByRole('article', { name: 'Control 1.1.1' })
     expect(within(card).getByText('Assessing').className).toBe('chip v-assessing')
     expect(screen.queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
@@ -88,7 +92,7 @@ describe('the Dossier overview', () => {
     const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } })
     overview.quotes = [overview.quotes[0], { ...overview.quotes[0] }]
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     expect(within(quotes).getAllByRole('article')).toHaveLength(2)
     expect(errors.mock.calls.flat().join(' ')).not.toMatch(/same key/)
@@ -100,7 +104,7 @@ describe('the Dossier overview', () => {
       '1.1.1': { status: 'accepted', verdict: 'evidenced' },
       '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' },
       '4.1.3': { status: 'rejected', verdict: 'not-evidenced' },
-    }) }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    }) }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     const cards = screen.getAllByRole('article', { name: /^Control / })
     expect(cards).toHaveLength(12)
     const card = (id: string) => screen.getByRole('article', { name: `Control ${id}` })
@@ -114,7 +118,7 @@ describe('the Dossier overview', () => {
   it("shows a German profile's card verdicts in German, marked lang=\"de\" (ticket 200)", () => {
     const overview = { ...seeded(ALL_VERDICTS), company: 'Alpenwerk Präzision GmbH', country: 'Austria',
       answer_language: 'de' }
-    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     expect(['1.1.1', '4.1.2', '4.1.3', '5.2.9'].map(cardChip).map((c) => [c.textContent, c.lang])).toEqual([
       ['Nachgewiesen', 'de'], ['Teilweise nachgewiesen', 'de'], ['Nicht nachgewiesen', 'de'], ['Nicht anwendbar', 'de']])
     // The interface stays English: the review state and Not assessed.
@@ -125,28 +129,28 @@ describe('the Dossier overview', () => {
 
   it("shows an English profile's card verdicts in English, with no lang (ticket 200)", () => {
     render(<Dossier state={{ status: 'ready', overview: seeded(ALL_VERDICTS) }} onRetry={() => {}} onOpen={() => {}}
-      running={null} />)
+      running={null} {...NO_PASS} />)
     expect(['1.1.1', '4.1.2', '4.1.3', '5.2.9'].map(cardChip).map((c) => [c.textContent, c.hasAttribute('lang')]))
       .toEqual([['Evidenced', false], ['Partly evidenced', false], ['Not evidenced', false], ['Not applicable', false]])
   })
 
   it('opens a control from its card', async () => {
     const onOpen = vi.fn()
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} />)
     await userEvent.click(screen.getByRole('link', { name: 'Open 5.2.9' }))
     expect(onOpen).toHaveBeenCalledWith('5.2.9', false)
   })
 
   it('offers the next step, which assesses a control not yet assessed', async () => {
     const onOpen = vi.fn()
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} />)
     await userEvent.click(screen.getByRole('button', { name: 'Assess 1.1.1' }))
     expect(onOpen).toHaveBeenCalledWith('1.1.1', true)
   })
 
   it('shows the evidence quotes with their document, version and section', () => {
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
-      onRetry={() => {}} onOpen={() => {}} running={null} />)
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     const card = within(quotes).getByRole('article')
     expect(within(card).getByText('The ISMS covers every site.')).toBeTruthy()
@@ -155,7 +159,7 @@ describe('the Dossier overview', () => {
   })
 
   it('with nothing assessed names the first step instead of quotes', () => {
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
     expect(screen.getByRole('heading', { level: 1 }).parentElement!.textContent)
       .toContain('Nothing is assessed yet. Start with 1.1.1')
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
@@ -167,7 +171,7 @@ describe('the Dossier overview', () => {
   it("opens a quote's control from the quote card's link, in place and without assessing (ticket 311)", async () => {
     const onOpen = vi.fn()
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
-      onRetry={() => {}} onOpen={onOpen} running={null} />)
+      onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} />)
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     const link = within(quotes).getByRole('link', { name: 'for 1.1.1 M1' })
     expect(link.getAttribute('href')).toBe('/controls/1.1.1')
@@ -179,7 +183,7 @@ describe('the Dossier overview', () => {
     () => {
       const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } })
       overview.quotes = [overview.quotes[0], { ...overview.quotes[0], requirement_id: 'M2', quote: 'Every site.' }]
-      render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} />)
+      render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
       const quotes = screen.getByRole('region', { name: 'What the evidence says' })
       const links = within(quotes).getAllByRole('link')
       expect(links.map((a) => a.getAttribute('href'))).toEqual(['/controls/1.1.1', '/controls/1.1.1'])
@@ -189,9 +193,179 @@ describe('the Dossier overview', () => {
   it('says when the overview could not be loaded, and retries', async () => {
     const onRetry = vi.fn()
     render(<Dossier state={{ status: 'failed', message: 'The overview could not be loaded just now. Please try again.' }}
-      onRetry={onRetry} onOpen={() => {}} running={null} />)
+      onRetry={onRetry} onOpen={() => {}} running={null} {...NO_PASS} />)
     expect(screen.getByRole('alert').textContent).toBe('The overview could not be loaded just now. Please try again.')
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalled()
+  })
+})
+
+describe('the profile pass on the Dossier (ticket 390)', () => {
+  const NOTE = 'Assesses every open control in one run. Accepted controls are skipped.'
+  const passButton = () => screen.getByRole('button', { name: /profile pass/i })
+  const panel = () => screen.getByRole('region', { name: 'Profile pass' })
+  const row = (id: string) => within(panel()).getByRole('listitem', { name: `Control ${id}` })
+  const proposed = (control_id: string, verdict: PassAssessment['verdict']): PassAssessment =>
+    ({ thread_id: `t-${control_id}`, control_id, status: 'waiting-for-review', verdict })
+
+  function shown(pass: PassState, { overview = seeded(), running = null as string | null } = {}) {
+    const onOpen = vi.fn()
+    const onPass = vi.fn()
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={onOpen} running={running}
+      pass={pass} onPass={onPass} />)
+    return { onOpen, onPass }
+  }
+
+  it('offers Run a profile pass beside the next step while a control is open, with its note', async () => {
+    const { onPass, onOpen } = shown({ kind: 'idle' })
+    expect(passButton().textContent).toBe('Run a profile pass')
+    expect(passButton().className).toBe('btn btn-ghost')
+    expect((passButton() as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText(NOTE)).toBeTruthy()
+    await userEvent.click(passButton())
+    expect(onPass).toHaveBeenCalled()
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(screen.queryByRole('region', { name: 'Profile pass' })).toBeNull()
+  })
+
+  it("isn't offered once every control is accepted", () => {
+    const overview = seeded()
+    overview.readiness = { ...overview.readiness, open: 0, accepted: 12 }
+    overview.next_step = null
+    shown({ kind: 'idle' }, { overview })
+    expect(screen.queryByRole('button', { name: /profile pass/i })).toBeNull()
+    expect(screen.queryByText(NOTE)).toBeNull()
+  })
+
+  it('while the pass runs, is busy and disabled, says so, and the next step opens its paper without assessing',
+    async () => {
+      const { onOpen } = shown({ kind: 'running' })
+      expect(passButton().textContent).toBe('Running the profile pass…')
+      expect(passButton().getAttribute('aria-busy')).toBe('true')
+      expect((passButton() as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByRole('status').textContent).toBe(
+        'Vouch is assessing every open control in one run. This can take a few minutes.')
+      expect(screen.queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
+      await userEvent.click(screen.getByRole('button', { name: 'Open 1.1.1' }))
+      expect(onOpen).toHaveBeenCalledWith('1.1.1', false)
+    })
+
+  it('while a per-control assessment runs, is disabled and says why', () => {
+    shown({ kind: 'idle' }, { running: '1.1.1' })
+    expect((passButton() as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('Vouch is assessing 1.1.1. One run at a time.')).toBeTruthy()
+    expect(screen.queryByText(NOTE)).toBeNull()
+  })
+
+  it('when done, counts what waits for review, names the skipped, and reads each row from its card', () => {
+    // 1.1.1 was accepted since the pass: its row says so, from the card.
+    const overview = seeded({
+      '1.1.1': { status: 'accepted', verdict: 'evidenced' },
+      '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' },
+      '4.1.3': { status: 'waiting-for-review', verdict: 'not-evidenced' },
+      '5.2.9': { status: 'accepted', verdict: 'evidenced' },
+    })
+    shown({ kind: 'done', skipped: ['5.2.9'], assessments: [
+      proposed('1.1.1', 'not-evidenced'), proposed('4.1.2', 'partly-evidenced'), proposed('4.1.3', 'not-evidenced'),
+    ] }, { overview })
+    expect(panel().className).toContain('sheet')
+    expect(panel().textContent).toContain('3 assessments waiting for your review.')
+    expect(panel().textContent).toContain('1 accepted control skipped: 5.2.9.')
+    expect(within(row('1.1.1')).getByText('Accepted')).toBeTruthy()
+    expect(within(row('1.1.1')).getByText('Evidenced').className).toBe('chip v-evidenced')
+    expect(within(row('4.1.2')).getByText('Proposed')).toBeTruthy()
+    expect(within(row('4.1.2')).getByText('Partly evidenced').className).toBe('chip v-partly-evidenced')
+  })
+
+  it('offers Assess <id> again only on not- and partly-evidenced rows, and Open <id> on each', async () => {
+    const overview = seeded({
+      '1.1.1': { status: 'waiting-for-review', verdict: 'evidenced' },
+      '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' },
+      '4.1.3': { status: 'waiting-for-review', verdict: 'not-evidenced' },
+      '5.2.9': { status: 'waiting-for-review', verdict: 'not-applicable' },
+    })
+    const { onOpen } = shown({ kind: 'done', skipped: [], assessments: [
+      proposed('1.1.1', 'evidenced'), proposed('4.1.2', 'partly-evidenced'), proposed('4.1.3', 'not-evidenced'),
+      proposed('5.2.9', 'not-applicable'),
+    ] }, { overview })
+    const again = within(panel()).getAllByRole('button', { name: /again$/ })
+    expect(again.map((b) => b.textContent)).toEqual(['Assess 4.1.2 again', 'Assess 4.1.3 again'])
+    expect(again[0].className).toBe('btn btn-ghost')
+    await userEvent.click(again[1])
+    expect(onOpen).toHaveBeenLastCalledWith('4.1.3', true)
+    await userEvent.click(within(row('1.1.1')).getByRole('button', { name: 'Open 1.1.1' }))
+    expect(onOpen).toHaveBeenLastCalledWith('1.1.1', false)
+  })
+
+  it('with nothing to assess, says every applicable control is accepted already and names the skipped', () => {
+    shown({ kind: 'done', skipped: ['1.1.1', '4.1.2'], assessments: [] })
+    expect(panel().textContent).toContain('Every applicable control is accepted already. Nothing was assessed.')
+    expect(panel().textContent).toContain('2 accepted controls skipped: 1.1.1, 4.1.2.')
+    expect(within(panel()).queryAllByRole('listitem')).toHaveLength(0)
+  })
+
+  it.each([
+    ['refused', 'The profile pass can\'t run: its prompt is about 90,000 tokens.'],
+    ['limit', 'You have started 3 profile passes today. The limit resets at 00:00 UTC.'],
+  ] as const)('when %s, gives the API\'s sentence and offers the first control not assessed or rejected on its own',
+    async (kind, message) => {
+      const overview = seeded({
+        '1.1.1': { status: 'accepted', verdict: 'evidenced' },
+        '1.6.1': { status: 'waiting-for-review', verdict: 'partly-evidenced' },
+        '1.6.2': { status: 'rejected', verdict: 'not-evidenced' },
+      })
+      const { onOpen } = shown({ kind, message }, { overview })
+      expect(panel().textContent).toContain(message)
+      const own = within(panel()).getByRole('button', { name: 'Assess 1.6.2 on its own' })
+      expect(own.className).toBe('btn btn-primary')
+      await userEvent.click(own)
+      expect(onOpen).toHaveBeenCalledWith('1.6.2', true)
+      expect(within(panel()).queryByRole('button', { name: 'Try again' })).toBeNull()
+    })
+
+  it('when refused with no control left to assess on its own, offers no button', () => {
+    const overview = seeded(Object.fromEntries(IDS.map((id) =>
+      [id, { status: 'waiting-for-review', verdict: 'evidenced' } as const])))
+    shown({ kind: 'refused', message: 'Too long.' }, { overview })
+    expect(within(panel()).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it.each(['failed', 'unreachable'] as const)('when %s, gives the message and Try again runs the pass again',
+    async (kind) => {
+      const { onPass } = shown({ kind, message: 'An assessment is already running.' })
+      expect(within(panel()).getByRole('alert').textContent).toBe('An assessment is already running.')
+      await userEvent.click(within(panel()).getByRole('button', { name: 'Try again' }))
+      expect(onPass).toHaveBeenCalled()
+    })
+
+  describe('while a per-control assessment runs (one run at a time)', () => {
+    const HELD = 'Vouch is assessing 4.1.3. One run at a time.'
+
+    it('holds Try again, saying why', () => {
+      const { onPass } = shown({ kind: 'failed', message: 'The profile pass could not be completed.' },
+        { running: '4.1.3' })
+      const again = within(panel()).getByRole('button', { name: 'Try again' }) as HTMLButtonElement
+      expect(again.disabled).toBe(true)
+      expect(within(panel()).getByText(HELD)).toBeTruthy()
+      expect(onPass).not.toHaveBeenCalled()
+    })
+
+    it.each(['refused', 'limit'] as const)('when %s, offers Open <id> instead of assessing it on its own',
+      async (kind) => {
+        const { onOpen } = shown({ kind, message: 'Too long.' }, { running: '4.1.3' })
+        expect(within(panel()).queryByRole('button', { name: /on its own/ })).toBeNull()
+        await userEvent.click(within(panel()).getByRole('button', { name: 'Open 1.1.1' }))
+        expect(onOpen).toHaveBeenCalledWith('1.1.1', false)
+        expect(within(panel()).getByText(HELD)).toBeTruthy()
+      })
+
+    it('offers no Assess again on the rows, saying why', () => {
+      const overview = seeded({ '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' } })
+      shown({ kind: 'done', skipped: [], assessments: [proposed('4.1.2', 'partly-evidenced')] },
+        { overview, running: '4.1.3' })
+      expect(within(panel()).queryByRole('button', { name: /again$/ })).toBeNull()
+      expect(within(row('4.1.2')).getByRole('button', { name: 'Open 4.1.2' })).toBeTruthy()
+      expect(within(panel()).getByText(HELD)).toBeTruthy()
+    })
   })
 })

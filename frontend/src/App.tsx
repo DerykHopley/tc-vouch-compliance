@@ -6,6 +6,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, useOverview } from './overview.ts'
+import { type PassAssessment, useProfilePass } from './profilePass.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
@@ -150,6 +151,13 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   }, [load, noteAssessed])
   const { run, controlId: runFor, start } = useAssessment(finished)
   const running = run.status === 'running' ? runFor : null
+  // The per-control run a finished profile pass assessed its control again in, if any: it is no longer that control's
+  // newest, so its paper reads the stored newest instead (#390). A new run is shown again.
+  const [overtaken, setOvertaken] = useState<Run | null>(null)
+  const latestRun = useRef({ run, runFor }) // read when a pass ends, which may be renders after it started
+  useEffect(() => {
+    latestRun.current = { run, runFor }
+  }, [run, runFor])
   // A control's working paper needs its question from the overview; an overview not read shows the Dossier, and a
   // control the overview doesn't list says it isn't found.
   const control = view.name === 'paper' && overview.state.status === 'ready'
@@ -163,9 +171,20 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   // is read for a control its card says is not assessed (a run in this page puts its result on the card), nor for the
   // one this page's run is of, which holds its result: each read counts to the rate limit.
   const paperId = control ? control.id : null
-  const readStored = control !== undefined && control.status !== 'not-assessed' && runFor !== control.id
+  const ownRun = runFor === control?.id && run !== overtaken // the paper's control's run in this page, still its newest
+  const readStored = control !== undefined && control.status !== 'not-assessed' && !ownRun
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
   const [paperReloads, setPaperReloads] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
+  // The profile pass sits above the views too (#390): its result waits on the Dossier. A finished pass reads the
+  // overview afresh, so the cards (the working paper's index too) show what it proposed, and the open paper's newest.
+  const passed = useCallback((made: PassAssessment[]) => {
+    void load()
+    setPaperReloads((n) => n + 1)
+    const { run: last, runFor: lastFor } = latestRun.current
+    if (made.some((a) => a.control_id === lastFor)) setOvertaken(last)
+  }, [load])
+  const { pass, start: startPass } = useProfilePass(passed)
+  const passing = pass.kind === 'running' // one run at a time: a working paper's Assess waits for the pass
   useEffect(() => {
     if (paperId === null || !readStored) return
     const answer = { wanted: true } // until the paper changes
@@ -179,7 +198,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     noteAssessed(assessment)
   }
   const idle: Run = { status: 'idle', steps: [] }
-  const shownRun: Run | null = runFor === paperId && run.status !== 'idle' ? run
+  const shownRun: Run | null = ownRun && run.status !== 'idle' ? run
     : !readStored ? idle
       : stored?.controlId !== paperId ? null
         : stored.assessment ? { status: 'done', steps: [], assessment: stored.assessment } : idle
@@ -204,7 +223,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     return again !== null
   }
   const open = (controlId: string, assess: boolean) => {
-    if (showView({ name: 'paper', controlId }) && assess) void start(controlId)
+    if (showView({ name: 'paper', controlId }) && assess && !passing) void start(controlId)
   }
 
   return (
@@ -234,13 +253,14 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
               run={paperRun ?? idle} checking={paperRun === null}
-              onAssess={() => void start(control.id)} onOpen={(id) => open(id, false)}
+              passing={passing} onAssess={() => { if (!passing) void start(control.id) }} onOpen={(id) => open(id, false)}
               onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh}
               onItemDecided={noteItem} />
           </main>
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
-          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
+          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running}
+            pass={pass} onPass={() => void startPass()} />}
       {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
           readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
           readiness), and its paper's newest if open. */}

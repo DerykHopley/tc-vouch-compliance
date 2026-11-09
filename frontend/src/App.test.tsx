@@ -536,6 +536,109 @@ describe('the working paper', () => {
   })
 })
 
+describe('the profile pass (ticket 390)', () => {
+  it('carries on while the lead opens a working paper, and its result shows on the Dossier on return', async () => {
+    let answer: (response: Response) => void = () => {}
+    let passed = false
+    const proposed = IDS.map((id) => ({ ...STORED, control_id: id, thread_id: `t-${id}` }))
+    const fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/overview' ? Promise.resolve(Response.json(passed ? overviewWith(proposed) : OVERVIEW))
+        : url === '/api/profile-pass' && init?.method === 'POST'
+          ? new Promise<Response>((resolve) => { answer = resolve })
+          : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    expect(screen.getByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: 'Open 4.1.2' }))
+    expect(await screen.findByRole('region', { name: 'Working paper' })).toBeTruthy()
+    passed = true
+    await act(async () => answer(Response.json({
+      assessments: proposed.map(({ thread_id, control_id }) =>
+        ({ thread_id, control_id, status: 'waiting-for-review', verdict: 'partly-evidenced' })),
+      skipped: [], usage: {},
+    })))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
+    const panel = await screen.findByRole('region', { name: 'Profile pass' })
+    expect(panel.textContent).toContain('12 assessments waiting for your review.')
+    await waitFor(() => expect(within(screen.getByRole('article', { name: 'Control 5.2.9' })).getByText('Proposed'))
+      .toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')).toHaveLength(1)
+  })
+
+  /** The API with a pass held open until `finish`, the stored assessments as `store` holds them (newest first), and a
+   * per-control run that ends in `onItsOwn`. */
+  function passServer(store: (typeof STORED)[], onItsOwn?: typeof STORED) {
+    let answer: (response: Response) => void = () => {}
+    let overview = overviewWith(store)
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      const post = init?.method === 'POST'
+      if (url === '/api/overview') return Promise.resolve(Response.json(overview))
+      if (url === '/api/profile-pass' && post) return new Promise<Response>((resolve) => { answer = resolve })
+      if (url === '/api/assessments' && post) {
+        return onItsOwn
+          ? Promise.resolve(new Response(`event: result\ndata: ${JSON.stringify({ assessment: onItsOwn })}\n\n`))
+          : new Promise<Response>(() => {})
+      }
+      if (url === '/api/assessments') return Promise.resolve(Response.json({ assessments: store }))
+      const one = store.find((a) => url === `/api/assessments/${a.thread_id}`)
+      return one ? Promise.resolve(Response.json({ assessment: one })) : new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    /** The pass ends, having proposed `made` (put first in the store, as newest). */
+    const finish = async (made: (typeof STORED)[]) => {
+      store.unshift(...made)
+      overview = overviewWith(store)
+      await act(async () => answer(Response.json({
+        assessments: made.map(({ thread_id, control_id, status, verdict }) => ({ thread_id, control_id, status, verdict })),
+        skipped: [], usage: {},
+      })))
+    }
+    return { fetch, finish }
+  }
+  const answerShown = () => screen.findByRole('region', { name: 'Verdict and draft answer' })
+  const toOverview = () =>
+    userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
+
+  it("reads an open paper's control afresh when the pass ends, showing the pass's assessment", async () => {
+    const { finish } = passServer([STORED])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Open 4.1.2' }))
+    expect(within(await answerShown()).getByText('Keys for administrators.')).toBeTruthy()
+    await finish([{ ...STORED, thread_id: 't2', answer: 'From the pass.' }])
+    await waitFor(async () => expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy())
+  })
+
+  it("shows the pass's assessment, not an earlier run's, for a control assessed on its own before", async () => {
+    const own = { ...STORED, control_id: '1.1.1', thread_id: 't-own', answer: 'On its own.' }
+    const { finish } = passServer([], own)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 1.1.1' }))
+    expect(within(await answerShown()).getByText('On its own.')).toBeTruthy()
+    await toOverview()
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await finish([{ ...own, thread_id: 't-pass', answer: 'From the pass.' }])
+    await userEvent.click(screen.getByRole('link', { name: 'Open 1.1.1' }))
+    expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy()
+  })
+
+  it("holds a working paper's Assess while the pass runs, saying why", async () => {
+    const { fetch } = passServer([])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Open 1.1.1' }))
+    const paper = await screen.findByRole('region', { name: 'Working paper' })
+    const assess = within(paper).getByRole('button', { name: 'Assess 1.1.1' }) as HTMLButtonElement
+    expect(assess.disabled).toBe(true)
+    expect(paper.textContent).toContain('Vouch is running a profile pass. One run at a time.')
+    await userEvent.click(assess)
+    expect(fetch.mock.calls.filter(([url, init]) => url === '/api/assessments' && init?.method === 'POST'))
+      .toHaveLength(0)
+  })
+})
+
 describe('theme', () => {
   it('starts dark when the system prefers dark', () => {
     systemPrefers(true)

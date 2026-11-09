@@ -68,6 +68,8 @@ type PaperProps = {
   card: ControlCard
   /** The control being assessed just now, if any (one run at a time, maybe of another control). */
   running: string | null
+  /** A profile pass is running (#390): Assess waits for it, as for another control's run. */
+  passing?: boolean
   run: Run
   /** The control's stored assessment is still being read: the paper shows neither verdict nor Assess yet. */
   checking?: boolean
@@ -90,7 +92,7 @@ type PaperProps = {
  * draft answer, then one row per requirement: its column, verdict, evidence kind, stale flag, reason and exact quotes.
  */
 export default function WorkingPaper(props: PaperProps) {
-  const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
+  const { overview, card, running, passing = false, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
     onItemDecided } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
@@ -137,7 +139,9 @@ export default function WorkingPaper(props: PaperProps) {
     setEditing(null)
   }
   const undo = (id: string) => setOverrides((now) => now.filter((o) => o.requirement_id !== id))
-  const assessingElsewhere = elsewhere !== null && <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
+  const assessingElsewhere = elsewhere !== null ? <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
+    : passing && <p className="field-note">Vouch is running a profile pass. One run at a time.</p>
+  const held = elsewhere !== null || passing
   return (
     <div className="wp">
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
@@ -200,7 +204,7 @@ export default function WorkingPaper(props: PaperProps) {
                   profile.
                 </p>
               )}
-              <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
+              <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />
               {assessingElsewhere}
             </div>}
             {judged ? (
@@ -218,7 +222,7 @@ export default function WorkingPaper(props: PaperProps) {
                 review={assessed.review} step={step} overrides={overrides} editing={editing} onReviewed={onReviewed}
                 items={{ decided: remediation.filter((i) => i.status !== 'draft').length, total: remediation.length }}
                 onRefresh={onRefresh} assessAgain={<>
-                  <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
+                  <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />
                   {assessingElsewhere}
                 </>} />
             )}
