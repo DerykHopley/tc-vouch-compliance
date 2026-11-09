@@ -11,7 +11,7 @@ from vouch import ScriptedChatModel, assess, load_named_profile
 from vouch.profile import CountryOverlay
 
 NORDLICHT = load_named_profile("nordlicht")
-OVERLAY = "AT NIS2 (illustrative)"
+OVERLAY = "AT NIS2 (illustrativ)"
 WITH_OVERLAY = NORDLICHT.model_copy(
     update={
         "overlays": (

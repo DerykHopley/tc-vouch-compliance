@@ -117,7 +117,7 @@ Do the walk-throughs in order: each starts where the one before stopped.
    the verdict, the draft answer and the requirements are in German: "Teilweise nachgewiesen",
    with 6 requirements under Alpenwerk's high protection level.
 3. Select **Accept verdict**, then **Report**: the report is in German ("Bereitschaftsbericht",
-   "1 von 12 Kontrollen akzeptiert"), with Alpenwerk's country overlay "AT NIS2 (illustrative)"
+   "1 von 12 Kontrollen akzeptiert"), with Alpenwerk's country overlay "AT NIS2 (illustrativ)"
    in its head and the disclaimer "Erstellt von einem KI-Assistenten, geprüft von Local user;
    kein Auditergebnis."
 
@@ -129,9 +129,9 @@ Alpenwerk's overlay adds O1 to 1.6.2.
 1. Choose **Alpenwerk Präzision GmbH** in the profile switcher, open **1.6.2** and select
    **Assess**.
 2. Under "How Vouch reached this":
-   - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrative) adds O1.";
-   - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrative))."
-3. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrative)", with
+   - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrativ) adds O1.";
+   - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrativ))."
+3. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrativ)", with
    its own verdict and reason: "Nicht nachgewiesen", since nothing provides for an early warning
    to the national CSIRT.
 
