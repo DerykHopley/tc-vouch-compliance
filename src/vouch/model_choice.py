@@ -20,7 +20,8 @@ has no limit of its own), each retried at most MAX_RETRIES times. The openai SDK
 timeout, a dropped connection, 408, 409, 429 and 5xx, after its backoff (0.5 s less up to 25%
 jitter, or the server's Retry-After). A request that timed out may still have been generated and
 billed by OpenRouter, so its retry may be billed again: TIMEOUT_SECONDS is long enough for a slow
-but valid answer, and one retry the most. What still fails raises, and the API turns it into one
+but valid answer, and one retry the most. A profile pass request is never retried
+(PROFILE_PASS_MAX_RETRIES). What still fails raises, and the API turns it into one
 `error` event.
 """
 
@@ -61,9 +62,15 @@ MAX_RETRIES = 1
 """Retries of one call after the first try: each may be billed (a timeout too)."""
 TIMEOUT_SECONDS = 120.0
 """One request's limit: long enough that a slow but valid answer isn't cut off and paid twice."""
-PROFILE_PASS_TIMEOUT_SECONDS = 300.0
-"""One profile pass request's limit (#371): one reply holds every control's answer, verdicts and
-drafts, several times an assessment call's output."""
+PROFILE_PASS_TIMEOUT_SECONDS = 600.0
+"""One profile pass request's limit (#371, #432): one reply holds every control's answer, verdicts
+and drafts, several times an assessment call's output. Alpenwerk's took 219 s on Sonnet 5.5
+(#430); the largest reply the token threshold lets through (about 58k tokens) takes 300 to 335 s.
+No cap is set on the reply: a capped reply is cut-off JSON, paid for and unreadable; the
+threshold bounds it before the call instead."""
+PROFILE_PASS_MAX_RETRIES = 0
+"""A profile pass request is never retried (#432): a timed-out pass may still be billed, so a
+retry could pay for it twice and hold the run for twice the timeout. The lead's Try again stays."""
 CATALOGUE_TIMEOUT_SECONDS = 10.0
 CATALOGUE_TTL_SECONDS = 600.0
 """How long one reading of OpenRouter's model list answers id checks."""
@@ -197,15 +204,17 @@ class OpenRouter:
         model: str,
         callbacks: list[BaseCallbackHandler] | None = None,
         timeout: float = TIMEOUT_SECONDS,
+        max_retries: int = MAX_RETRIES,
     ) -> BaseChatModel:
         """A chat model for one assessment, within CALL_BUDGET calls. `timeout`: one request's
-        limit (a local model through the eval runner may need longer)."""
+        limit (a local model through the eval runner may need longer); `max_retries`: retries of
+        one request after its first try."""
         return _budgeted_chat_openai()(
             callbacks=callbacks,
             model=model,
             api_key=self.api_key,
             base_url=str(self.base_url),
-            max_retries=MAX_RETRIES,
+            max_retries=max_retries,
             timeout=timeout,
             http_client=self._chat_client,
         )
@@ -343,14 +352,20 @@ class ModelChoice:
         self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
     ) -> BaseChatModel:
         """A fresh model for one profile pass (#371), on `chosen` (from `chosen()`), within
-        CALL_BUDGET calls and PROFILE_PASS_TIMEOUT_SECONDS a request; on the fake,
+        CALL_BUDGET calls, PROFILE_PASS_TIMEOUT_SECONDS a request and no retry
+        (PROFILE_PASS_MAX_RETRIES); on the fake,
         ASSESS_FAKE_SCRIPT when set, else the bundled pass script (PROFILE_PASS_SCRIPT, written
         for Nordlicht). `callbacks` see every call (the usage meter)."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
             fake = fake_model(self._settings, PROFILE_PASS_SCRIPT)
             fake.callbacks = callbacks
             return fake
-        return self.openrouter.chat_model(chosen, callbacks, timeout=PROFILE_PASS_TIMEOUT_SECONDS)
+        return self.openrouter.chat_model(
+            chosen,
+            callbacks,
+            timeout=PROFILE_PASS_TIMEOUT_SECONDS,
+            max_retries=PROFILE_PASS_MAX_RETRIES,
+        )
 
     def for_chat(
         self,

@@ -122,7 +122,7 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundC
         </p>
         : <p id="pass-note" className="field-note">
           {running !== null ? `Vouch is assessing ${running}. One run at a time.`
-            : 'Assesses every open control in one run. Accepted controls are skipped.'}
+            : 'Assesses every open control in one run. Accepted controls are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'}
         </p>)}
     </section>
   )

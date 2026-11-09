@@ -160,7 +160,7 @@ restart. Export PDF downloads `readiness-report-nordlicht-<date>.pdf`, and Expor
 Nordlicht switches its goal to Internal improvement: no audit is planned, and the lead works
 through review rounds with an improvement plan for the team. Part 2 runs on the **local app with
 the scripted fake model** only. The profile pass on the live app runs the real model and costs
-money, so the demo shows it locally.
+money (on Sonnet 5.5, about $0.30–0.50 a pass over 12 controls), so the demo shows it locally.
 
 ### Before you present
 
@@ -192,14 +192,14 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 #### 2. Profile pass (1:00)
 
 1. Select **Run a profile pass** ("Assesses every open control in one run. Accepted controls are
-   skipped.").
+   skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.").
 2. Point at the result panel, "Profile pass": "12 assessments waiting for your review.", each
    control with its verdict and "Proposed". The cards under "The controls" read "Proposed" too.
 
 > One model run assessed every open control, with all of Nordlicht's evidence in front of it. The
 > same guards as the per-control agent hold: every quote checked word for word, stale evidence
-> capped, the output guard on every answer. Vouch uses the pass only while the evidence fits
-> under a token threshold, and it has its own daily limit; above the threshold, Vouch offers the
+> capped, the output guard on every answer. Vouch uses the pass only while its prompt and
+> expected reply fit under a token threshold, and it has its own daily limit; above the threshold, Vouch offers the
 > per-control agent instead.
 
 #### 3. Three-step review of 4.1.2 (1:00)

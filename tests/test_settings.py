@@ -245,8 +245,8 @@ def test_started_with_a_bad_rate_setting_the_app_exits_naming_it():
     assert "VOUCH_RATE_REQUESTS" in refused_start({"VOUCH_RATE_REQUESTS": "x"})
 
 
-def test_the_profile_pass_threshold_is_50000_tokens_unless_a_setting_names_another():
-    assert load_settings({}).profile_pass_tokens == 50_000
+def test_the_profile_pass_threshold_is_100000_tokens_unless_a_setting_names_another():
+    assert load_settings({}).profile_pass_tokens == 100_000
     assert load_settings({"VOUCH_PROFILE_PASS_TOKENS": " 12000 "}).profile_pass_tokens == 12_000
 
 
