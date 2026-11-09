@@ -4,6 +4,8 @@ MIN_QUOTE_WORDS or more words is checked against what the tools returned. One th
 replaced with QUOTE_REMOVED, with a guard step."""
 
 import logging
+import sys
+import unicodedata
 
 import pytest
 
@@ -431,3 +433,92 @@ def test_mixed_marks_around_two_quotations_leave_neither_unchecked():
 
     assert text == f"It says {QUOTE_REMOVED} end."
     assert len(check.asked) == 1 and QUOTE in check.asked[0][0] and OTHER in check.asked[0][0]
+
+
+# Every quotation mark, tag form and blockquote depth (#181)
+
+MORE_FORMS = [
+    ("｢", "｣"),  # half-width corner brackets
+    ("<Q>", "</Q>"),
+    ('<q cite="x">', "</q>"),
+    ("＇", "＇"),
+    ("﹁", "﹂"),
+    ("﹃", "﹄"),
+    ("⹂", "“"),
+    ("❛", "❜"),
+    ("❠", "❞"),
+    ("〈", "〉"),
+    ("〖", "〗"),
+    ("″", "″"),
+    ("‵", "′"),
+    ("❟", "❜"),
+    ("❮", "❯"),
+    ("🙶", "🙷"),
+    ("🙸", "🙷"),
+    ("<blockquote>", "</blockquote>"),
+    ('<BLOCKQUOTE class="a">', "</Blockquote >"),
+]
+
+
+@pytest.mark.parametrize(("opening", "closing"), MORE_FORMS)
+def test_an_invented_quote_in_every_other_form_is_dropped(opening, closing):
+    text, steps, check = checked(f"It says {opening}{QUOTE}{closing}, as noted.")
+
+    assert check.asked == [(QUOTE, None)]
+    assert text == f"It says {QUOTE_REMOVED}, as noted."
+    assert steps == [dropped_step(None, NOT_FOUND)]
+
+
+@pytest.mark.parametrize(("opening", "closing"), MORE_FORMS)
+def test_a_real_quote_in_every_other_form_is_kept(opening, closing):
+    reply = f"It says {opening}{QUOTE}{closing}, as noted."
+
+    assert checked(reply, QUOTE)[:2] == (reply, [])
+
+
+UNICODE_QUOTES = sorted(
+    chr(c)
+    for c in range(sys.maxunicode + 1)
+    if unicodedata.category(chr(c)) in ("Pi", "Pf")
+    or ("QUOTATION MARK" in unicodedata.name(chr(c), "") and unicodedata.category(chr(c)) != "Cf")
+)
+
+
+@pytest.mark.parametrize("mark", UNICODE_QUOTES, ids=lambda m: f"U+{ord(m):04X}")
+def test_every_unicode_quotation_mark_opens_a_checked_quote(mark):
+    text, steps, check = checked(f"It says {mark}{QUOTE}” here.")
+
+    assert check.asked == [(QUOTE, None)]
+    assert text == f"It says {QUOTE_REMOVED} here."
+    assert steps == [dropped_step(None, NOT_FOUND)]
+
+
+@pytest.mark.parametrize("item", ["- ", "* ", "1. ", "  - ", "- 2) "])
+def test_a_blockquote_in_a_list_item_is_checked_and_the_item_kept(item):
+    text, steps, check = checked(f"Items:\n{item}> {QUOTE}\nDone.")
+
+    assert check.asked == [(QUOTE, None)]
+    assert text == f"Items:\n{item}{QUOTE_REMOVED}\nDone."
+    assert steps == [dropped_step(None, NOT_FOUND)]
+
+
+def test_an_inch_mark_opens_no_quotation():
+    reply = 'The laptop has a 15" screen and all company laptops use encryption daily.'
+
+    assert checked(reply)[:2] == (reply, [])
+
+
+def test_a_quote_after_an_inch_mark_is_still_checked():
+    text, _, check = checked(f'A 15" screen; the policy says "{QUOTE}" here.')
+
+    assert check.asked == [(QUOTE, None)]
+    assert text == f'A 15" screen; the policy says {QUOTE_REMOVED} here.'
+
+
+def test_blockquotes_in_two_list_items_are_each_checked_and_each_item_kept():
+    other = "staff lock every screen at night"
+    text, steps, check = checked(f"Items:\n2. > {QUOTE}\n3. > {other}\nDone.")
+
+    assert check.asked == [(QUOTE, None), (other, None)]
+    assert text == f"Items:\n2. {QUOTE_REMOVED}\n3. {QUOTE_REMOVED}\nDone."
+    assert len(steps) == 2
