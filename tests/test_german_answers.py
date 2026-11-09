@@ -145,7 +145,7 @@ def test_an_audit_word_outside_a_quote_is_still_caught():
 ALPENWERK = load_named_profile("alpenwerk")
 ALPENWERK_DIR = Path(__file__).parent.parent / "fixtures" / "alpenwerk"
 TODAY = datetime.date(2026, 11, 4)  # the expected answers' as_of
-OVERLAY = "AT NIS2 (illustrative)"
+OVERLAY = "AT NIS2 (illustrativ)"
 GERMAN_ANSWER = (
     "Das Verfahren zur Behandlung von Sicherheitsvorfällen legt Zuständigkeiten, "
     "Reaktionszeiten und Meldepflichten fest, und das Register zeigt, dass jede Meldung am "

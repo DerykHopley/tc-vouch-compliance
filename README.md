@@ -65,6 +65,9 @@ The optional tasks done; the full table, with the code and the app page for each
   [`docs/course-tasks.md`](docs/course-tasks.md),
   [`docs/eval-summary.md`](docs/eval-summary.md) and [`docs/reflection.md`](docs/reflection.md).
 - [`docs/eval-report.md`](docs/eval-report.md): the full eval report.
+- [How Vouch runs](https://derykhopley.github.io/tc-vouch-compliance/flow/) ([`docs/flow/index.html`](docs/flow/index.html)):
+  the runtime process flow, from the lead's click through FastAPI, the LangGraph graphs and the
+  model calls to what is written to Postgres, and the chat.
 - [`DEPLOY.md`](DEPLOY.md): deploying to Cloud Run.
 - [`GLOSSARY.md`](GLOSSARY.md): the domain words. [`docs/requirements.md`](docs/requirements.md):
   requirements and dated decisions.

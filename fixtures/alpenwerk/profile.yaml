@@ -9,7 +9,7 @@ answer_language: de  # reads the German ISA edition
 protection_level: high  # normal, high or very high
 base_framework: VDA ISA 2027.1
 overlays:
-  - name: AT NIS2 (illustrative)
+  - name: AT NIS2 (illustrativ)  # in the profile's language: the German report shows it (#379)
     requirements:
       - control: 1.6.2
         id: O1

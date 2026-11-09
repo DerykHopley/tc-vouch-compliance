@@ -113,6 +113,7 @@ WORDS: dict[str, dict[str, Any]] = {
                 "Drafted by an AI assistant; nothing has been reviewed yet; not an audit result."
             ),
             "and": "and",  # joins the last two names
+            "page_of": "Page {page} of {pages}",  # the PDF's footer (#352)
         },
     },
     "de": {
@@ -189,6 +190,7 @@ WORDS: dict[str, dict[str, Any]] = {
                 "Erstellt von einem KI-Assistenten; noch nichts geprüft; kein Auditergebnis."
             ),
             "and": "und",
+            "page_of": "Seite {page} von {pages}",
         },
     },
 }
@@ -275,6 +277,38 @@ def words_for(language: str) -> dict[str, Any]:
     return WORDS[words_language(language)]
 
 
+COUNTRY_NAMES: dict[str, dict[str, str]] = {
+    # A profile's country is stored in English (the top bar finds its ISO code from it); a report
+    # in another language names it from here (#379), and one missing here shows as stored.
+    "de": {
+        "Austria": "Österreich",
+        "Belgium": "Belgien",
+        "Czechia": "Tschechien",
+        "Denmark": "Dänemark",
+        "France": "Frankreich",
+        "Germany": "Deutschland",
+        "Hungary": "Ungarn",
+        "Italy": "Italien",
+        "Liechtenstein": "Liechtenstein",
+        "Luxembourg": "Luxemburg",
+        "Netherlands": "Niederlande",
+        "Poland": "Polen",
+        "Slovakia": "Slowakei",
+        "Slovenia": "Slowenien",
+        "Spain": "Spanien",
+        "Sweden": "Schweden",
+        "Switzerland": "Schweiz",
+        "United Kingdom": "Vereinigtes Königreich",
+    },
+}
+
+
+def country_in(country: str, language: str) -> str:
+    """The profile's country (stored in English) in the report's words for the language; as
+    stored when they don't name it (#379)."""
+    return COUNTRY_NAMES.get(words_language(language), {}).get(country, country)
+
+
 def disclaimer(names: Iterable[str], language: str) -> str:
     """The AI disclaimer, naming the reviewers in the order given (each once), joined in the
     language ("A, B and C", "A, B und C"); the nothing-reviewed wording when there are none."""
@@ -308,7 +342,7 @@ def readiness_report(
     return {
         "head": {
             "company": profile.company,
-            "country": profile.country,
+            "country": country_in(profile.country, profile.answer_language),
             "base_framework": profile.base_framework,
             "protection_level": profile.protection_level,
             "overlays": [overlay.name for overlay in profile.overlays],

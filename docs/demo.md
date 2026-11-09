@@ -92,7 +92,7 @@ Budgets: 0:45 + 1:30 + 1:00 + 1:00 + 1:00 + 1:15 = 6 minutes 30 seconds.
 1. In the profile switcher, choose **Alpenwerk Präzision GmbH · Austria · German**.
 2. Open **1.6.2** from the control index (the switch keeps you on 5.1.1's address) and select
    **Assess**.
-3. Point at the steps: `apply_overlays` names the country overlay "AT NIS2 (illustrative)", which
+3. Point at the steps: `apply_overlays` names the country overlay "AT NIS2 (illustrativ)", which
    adds O1, and `overlay_branch` gathers evidence for it. O1 is in the requirements table, marked
    "Country overlay".
 4. Point at "Answer language: German": the verdict, the draft answer and the requirements are in

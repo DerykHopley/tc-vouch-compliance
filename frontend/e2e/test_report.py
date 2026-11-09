@@ -253,7 +253,8 @@ def test_export_pdf_downloads_alpenwerks_report_as_one_pdf_file(page: Page, repo
     assert data.startswith(b"%PDF-")
     text = " ".join(word.text for word in pdf_words.read(data).words)
     assert title == "Bereitschaftsbericht"
-    assert text.startswith(title)
+    assert text.startswith("VOUCH")  # the letterhead (#352), then the title in capitals
+    assert f"Alpenwerk Präzision GmbH {title.upper()} " in text
     assert " ".join(disclaimer.split()) in text
     expect(page.get_by_role("button", name="Export PDF")).to_be_enabled()
     assert len(downloads) == 1
