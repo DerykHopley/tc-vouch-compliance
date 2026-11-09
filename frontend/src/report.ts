@@ -42,6 +42,7 @@ export type ReportItem = { requirement_id: string; missing: string; owner_role: 
 export type NotApplicable = { control_id: string; requirement_id: string; text: string; reason: string }
 
 export type TrailAction = 'accept' | 'reject' | 'override' | 'confirm' | 'approve' | 'discard' | 'goal'
+  | 'round-start' | 'round-close'
 
 /** A compliance profile's Goal (#369), on the wire. */
 export type Goal = 'audit-readiness' | 'internal-improvement'
@@ -63,6 +64,8 @@ export type TrailEntry = {
   /** A goal change's (`goal`, #369) goals before and after; null on every other entry. */
   goal_before: Goal | null
   goal_after: Goal | null
+  /** A review round's (`round-start`, `round-close`, #402) name; null on every other entry. */
+  round_name: string | null
 }
 
 /** The report's own words, in its language (English for one without a table): every heading, column name, status,
@@ -72,7 +75,8 @@ export type ReportWords = {
   labels: Record<string, string>
   verdicts: Record<Verdict, string>
   statuses: Record<ReportControl['status'], string>
-  /** `goal` has `{before}` and `{after}` to fill in from `goals` (#369). */
+  /** `goal` has `{before}` and `{after}` to fill in from `goals` (#369); the rounds' `{round}`, the round's name
+   * (#402). */
   actions: Record<TrailAction, string>
   goals: Record<Goal, string>
   protection_levels: Record<ReportHead['protection_level'], string>
@@ -80,10 +84,11 @@ export type ReportWords = {
   sentences: Record<string, string>
 }
 
-/** An entry's action in the report's words; a goal change's with its goals before and after filled in (#369), as
- * `vouch.report.action_word` does. */
+/** An entry's action in the report's words; a goal change's with its goals before and after filled in (#369), a
+ * review round's with its name (#402), as `vouch.report.action_word` does. */
 export function actionWord(e: TrailEntry, words: ReportWords): string {
   const word = words.actions[e.action]
+  if (e.action === 'round-start' || e.action === 'round-close') return word.replace('{round}', e.round_name ?? '')
   if (e.action !== 'goal' || !e.goal_before || !e.goal_after) return word
   return word.replace('{before}', words.goals[e.goal_before]).replace('{after}', words.goals[e.goal_after])
 }

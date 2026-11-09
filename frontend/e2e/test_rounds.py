@@ -1,0 +1,142 @@
+"""Review rounds (#402, spec #350 stories 7 and 8), on a Vouch of their own (rounds_url): closing a
+round changes the hero and the comparison, and accepting a control the counts, which other
+servers' checks read.
+
+The lead closes the first round from the hero (OK on the browser's confirm), starts "Q4 2026",
+accepts 4.1.2 (its review seeded through the API, as test_report does: the review's own steps
+are test_review's), and the overview's comparison names 4.1.2 as changed with the counts'
+change; its link opens the working paper; the report's audit trail shows the close and the
+start. Then, at 1280px and 400px, light and dark, both states of the round line (open, and none
+open with the name field) and the comparison fit: nothing scrolls sideways and every control is
+at least 44px. The layout check runs from whatever state the server is in."""
+
+import json
+import re
+
+import pytest
+from playwright.sync_api import APIRequestContext, Dialog, Page, expect
+from reviewing import reviewed
+from touch_targets import small_targets
+
+CLOSE_FIRST = (
+    'Close the review round "First round"? Its results are frozen, and the overview compares '
+    "later work with them. The close is recorded in the audit trail."
+)
+
+
+def open_dossier(page: Page, url: str) -> None:
+    with page.expect_response("**/api/overview"):
+        page.goto(url)
+
+
+def close_round(page: Page) -> list[str]:
+    """Close round, OK on the confirm, and wait for the overview read after it: what was asked."""
+    asked: list[str] = []
+
+    def ok(dialog: Dialog) -> None:
+        asked.append(dialog.message)
+        dialog.accept()
+
+    page.once("dialog", ok)
+    with (
+        page.expect_response("**/api/rounds/close") as closed,
+        page.expect_response("**/api/overview"),
+    ):
+        page.get_by_role("button", name="Close round").click()
+    assert closed.value.ok, closed.value.status
+    return asked
+
+
+def start_round(page: Page, name: str) -> None:
+    """Name the next round and Start round, waiting for the overview read after it."""
+    page.get_by_role("textbox", name="Name of the next round").fill(name)
+    with (
+        page.expect_response(re.compile(r".*/api/rounds$")) as started,
+        page.expect_response("**/api/overview"),
+    ):
+        page.get_by_role("button", name="Start round").click()
+    assert started.value.ok, started.value.status
+
+
+def accepted(request: APIRequestContext, url: str, control_id: str) -> str:
+    """The control assessed on the fake model and accepted through the three steps: its
+    accepted verdict."""
+    response = request.post(f"{url}/api/assessments", data={"control_id": control_id})
+    assert response.ok, response.status
+    data = re.search(r"event: result\r?\ndata: (.*)", response.text())
+    assert data, response.text()
+    thread_id = json.loads(data.group(1))["assessment"]["thread_id"]
+    return reviewed(request, url, thread_id)["verdict"]
+
+
+VERDICT_WORDS = {
+    "evidenced": "Evidenced",
+    "partly-evidenced": "Partly evidenced",
+    "not-evidenced": "Not evidenced",
+    "not-applicable": "Not applicable",
+}
+
+
+def test_the_lead_closes_the_first_round_starts_the_next_and_sees_what_changed(
+    page: Page, rounds_url
+):
+    open_dossier(page, rounds_url)
+    line = page.locator(".hero .round")
+    expect(line).to_contain_text("Review round: First round, open since the start")
+    expect(page.get_by_role("region", name="Compared with the last round")).to_contain_text(
+        "No closed review round yet."
+    )
+
+    assert close_round(page) == [CLOSE_FIRST]
+    expect(line).to_contain_text("No review round open.")
+    compared = page.get_by_role("region", name="Compared with First round")
+    expect(compared).to_contain_text("Nothing has changed since First round closed.")
+
+    start_round(page, "Q4 2026")
+    expect(line).to_contain_text("Review round: Q4 2026, open since")
+
+    verdict = accepted(page.request, rounds_url, "4.1.2")
+    open_dossier(page, rounds_url)
+    expect(compared).to_contain_text("Accepted: 1 now, 0 when First round closed.")
+    expect(compared).to_contain_text(f"{VERDICT_WORDS[verdict]} 1 (+1)")
+    changed = compared.get_by_role("link")
+    expect(changed).to_have_count(1)
+    expect(changed).to_have_text(f"4.1.2: Not accepted → {VERDICT_WORDS[verdict]}")
+    changed.click()
+    expect(page).to_have_url(f"{rounds_url}/controls/4.1.2")
+
+    with page.expect_response("**/api/report"):
+        page.goto(f"{rounds_url}/report")
+    trail = page.get_by_role("table", name="Audit trail")
+    expect(trail.get_by_text("Review round started: Q4 2026")).to_be_visible()
+    expect(trail.get_by_text("Review round closed: First round")).to_be_visible()
+
+
+def fits(page: Page, where: str) -> None:
+    assert not page.evaluate(
+        "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+    ), f"the Dossier scrolls sideways, {where}"
+    assert small_targets(page) == [], where
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_round_line_and_the_comparison_fit_in_both_states(
+    page: Page, rounds_url, width, scheme
+):
+    page.set_viewport_size({"width": width, "height": 900})
+    page.emulate_media(color_scheme=scheme)
+    open_dossier(page, rounds_url)
+    line = page.locator(".hero .round")
+    expect(line).to_be_visible()
+    fits(page, f"{width}px {scheme}, as it was")
+    name = f"Check {width} {scheme}"
+    if page.get_by_role("button", name="Close round").count():
+        close_round(page)
+        expect(line).to_contain_text("No review round open.")
+        fits(page, f"{width}px {scheme}, none open")
+        start_round(page, name)
+    else:
+        start_round(page, name)
+    expect(line).to_contain_text(f"Review round: {name}, open since")
+    fits(page, f"{width}px {scheme}, open")

@@ -32,7 +32,8 @@ const ENGLISH: ReportWords = {
     'not-applicable': 'Not applicable' },
   statuses: { accepted: 'Accepted', open: 'Open' },
   actions: { accept: 'Accepted', reject: 'Rejected', override: 'Overridden',
-    confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded', goal: 'Goal changed from {before} to {after}' },
+    confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded', goal: 'Goal changed from {before} to {after}',
+    'round-start': 'Review round started: {round}', 'round-close': 'Review round closed: {round}' },
   goals: { 'audit-readiness': 'Audit readiness', 'internal-improvement': 'Internal improvement' },
   protection_levels: { normal: 'Normal', high: 'High', 'very high': 'Very high' },
   languages: { en: 'English', de: 'German' },
@@ -54,7 +55,7 @@ const entry = (id: number, at: string, action: TrailEntry['action'], extra: Part
   id, at, reviewer_name: 'Local user', control_id: '4.1.2', requirement_id: null, action, note: '',
   verdict_before: 'partly-evidenced', verdict_after: 'partly-evidenced',
   evidence: [{ doc_id: 'authentication-standard', version: '3' }], model: 'fake', prompt_version: '7',
-  goal_before: null, goal_after: null, ...extra,
+  goal_before: null, goal_after: null, round_name: null, ...extra,
 })
 
 /** Nordlicht's report with 4.1.2 accepted (one stale quote, one current) and the rest open. */
@@ -264,6 +265,36 @@ describe('A goal change in the trail (ticket 369)', () => {
     const report = await shown()
 
     expect(within(report).getByText('Ziel geändert von Audit-Bereitschaft zu Interner Verbesserung')).toBeTruthy()
+  })
+})
+
+describe('Review round entries in the trail (ticket 402)', () => {
+  /** A round's entry, as `vouch.rounds.round_entry` writes it: no control, verdict, evidence, model or prompt. */
+  const roundEntry = (id: number, action: 'round-start' | 'round-close', round_name: string) =>
+    entry(id, '2026-11-09T10:30:00+00:00', action, { control_id: '', verdict_before: null, verdict_after: null,
+      evidence: [], model: '', prompt_version: '', round_name })
+
+  it('shows the close with the round named as its action, its control cells empty', async () => {
+    serve({ ...REPORT, trail: { entries: [roundEntry(3, 'round-close', 'First round'), ...REPORT.trail.entries],
+      next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    const trail = within(report).getByRole('table', { name: 'Audit trail' })
+    const [, close] = within(trail).getAllByRole('row')
+    const cells = within(close).getAllByRole('cell').map((c) => c.textContent)
+    expect(cells).toEqual(['2026-11-09 10:30 UTC', 'Local user', '', '', 'Review round closed: First round',
+      '', '', '', '', '', ''])
+  })
+
+  it('fills the start from the served words', async () => {
+    const words: ReportWords = { ...ENGLISH,
+      actions: { ...ENGLISH.actions, 'round-start': 'Prüfrunde begonnen: {round}' } }
+    serve({ ...REPORT, words, trail: { entries: [roundEntry(4, 'round-start', 'Q4 2026')], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    expect(within(report).getByText('Prüfrunde begonnen: Q4 2026')).toBeTruthy()
   })
 })
 

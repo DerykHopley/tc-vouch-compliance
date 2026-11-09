@@ -164,6 +164,7 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
         "prompt_version": reviewed["prompt_version"],
         "goal_before": None,  # a goal change's only (#369)
         "goal_after": None,
+        "round_name": None,
     }
 
 

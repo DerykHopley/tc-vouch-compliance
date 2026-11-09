@@ -33,6 +33,16 @@ def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url,
     assert small_targets(page) == []
 
 
+def test_the_review_round_s_name_field_and_start_round_are_at_least_44px(page: Page, rounds_url):
+    # #402: the overview above measures the open round's Close round; here, none open. On the
+    # rounds' own server, whose checks read whichever state it is in.
+    closed = page.request.post(f"{rounds_url}/api/rounds/close")
+    assert closed.status in (200, 409), closed.status  # 409: none was open
+    at_phone_width(page, rounds_url)
+    expect(page.get_by_role("button", name="Start round")).to_be_visible()
+    assert small_targets(page) == []
+
+
 def test_the_readiness_report_s_controls_are_at_least_44px(page: Page, report_url):
     # #56: the report page on its own server, with whatever the report's checks have reviewed.
     at_phone_width(page, f"{report_url}/report")
