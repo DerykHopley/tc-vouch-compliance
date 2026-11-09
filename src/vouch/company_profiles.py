@@ -113,8 +113,11 @@ class CompanySetup(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # The constraints sit on str itself, so the limit counts the trimmed name (#385's verifier).
     company: Annotated[
-        Text, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_COMPANY_LENGTH)
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_COMPANY_LENGTH),
+        AfterValidator(_storable),
     ]
     country: Annotated[NonEmpty, AfterValidator(_storable)]
     answer_language: Literal["en", "de"]
