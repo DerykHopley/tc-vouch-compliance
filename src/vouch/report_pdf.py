@@ -45,6 +45,7 @@ TRAIL = 7  # pt: the trail's 11 columns, on landscape pages
 KEEP_WITH_NEXT = 25  # mm: a heading with less room than this below it starts a new page
 MAX_CELL_LINES = 12  # a row of 12 lines is well under a page, in any column and font size
 CELL_PADDING = 1  # mm
+CELL_SLACK = 0.5  # mm: a cell's lines are measured this much narrower, for its border
 HEADINGS = FontFace(emphasis="BOLD", fill_color=None)
 
 
@@ -89,11 +90,12 @@ class _Sheet(FPDF):
         self.paragraph(text, size, bold=True)
         self.ln(1.5)
 
-    def wrapped(self, text: object, width: float, size: float, bold: bool = False) -> list[str]:
-        """The lines a table cell `width` mm wide draws `text` in, in this font size and weight."""
-        self.font(size, bold)
+    def wrapped(self, text: object, width: float) -> list[str]:
+        """The lines a table cell `width` mm wide draws `text` in, in the current font: the
+        table's own padding (with it, fpdf2 leaves out its cell margin). The one measure of a
+        cell's lines, for the line cap and for the trail's widths and their test."""
         lines = self.multi_cell(
-            width,
+            width - CELL_SLACK,
             1,
             self.drawable(text),
             dry_run=True,
@@ -109,11 +111,7 @@ class _Sheet(FPDF):
         then added to `notes` as note n."""
         whole = self.drawable(text)
         flat = " ".join(whole.split())
-        inner = width - 2 * CELL_PADDING - 0.5  # the border's width, and some slack
-        lines = self.multi_cell(
-            inner, 1, flat, dry_run=True, output=MethodReturnValue.LINES, padding=0
-        )
-        assert isinstance(lines, list)  # output=LINES: the wrapped lines
+        lines = self.wrapped(flat, width)
         if len(lines) <= MAX_CELL_LINES:
             return flat
         self._notes += 1
@@ -217,10 +215,10 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     return bytes(sheet.output())
 
 
-_PIECE = re.compile(r"[^\s/-]*[/-]?")
-"""A piece of an id a line may break after: up to and with a "-" or "/"."""
+_PIECE = re.compile(r"[^\s/-]*[/-]?")  # a piece of an id: up to and with a "-" or "/"
+# A zero-width space after an id's "-" or "/": where fpdf2 may break a line inside it. Only when
+# whole ids don't fit (it stays in the PDF's text where no line breaks; the Markdown never has it).
 BREAK = "\u200b"
-"""A zero-width space: where a line may break inside an id, after its "-" or "/"."""
 
 
 def trail_table(
@@ -237,29 +235,39 @@ def trail_table(
     if widths is None:
         head = [_breakable(c) for c in head]
         rows = [[_breakable(v) for v in r] for r in rows]
-        widths = _fitted(sheet, head, rows, lambda text: _PIECE.findall(text.replace(BREAK, "")))
+        widths = _fitted(sheet, head, rows, _pieces)
     if widths is None:  # pieces too wide for the page: scaled to it
-        least = _least(sheet, head, rows, lambda text: _PIECE.findall(text.replace(BREAK, "")))
+        least = _least(sheet, head, rows, _pieces)
         widths = tuple(w * sheet.epw / sum(least) for w in least)
     return head, rows, widths
 
 
 def _breakable(text: str) -> str:
+    """`text` with a BREAK after each "-" or "/" that something follows."""
     return re.sub(r"(?<=[/-])(?=\S)", BREAK, text)
 
 
+def _pieces(text: str) -> list[str]:
+    """The pieces of `text` no line breaks inside once BREAKs are in: words cut after "-", "/"."""
+    return _PIECE.findall(text.replace(BREAK, ""))
+
+
 def _width(sheet: _Sheet, text: str, bold: bool) -> float:
+    """The cell width `text` fits on one line of, in the trail's font: the measure
+    `_Sheet.wrapped` makes, plus a hair for rounding."""
     sheet.font(TRAIL, bold)
-    return sheet.get_string_width(sheet.drawable(text)) + 2 * CELL_PADDING + 2 * sheet.c_margin
+    return sheet.get_string_width(sheet.drawable(text)) + 2 * CELL_PADDING + CELL_SLACK + 0.1
 
 
 def _columns(head: list[str], rows: list[list[str]]) -> list[list[tuple[str, bool]]]:
+    """The table by column: each column's header (bold) and then its cells."""
     return [[(c, True)] + [(r[i], False) for r in rows] for i, c in enumerate(head)]
 
 
 def _least(
     sheet: _Sheet, head: list[str], rows: list[list[str]], parts: Callable[[str], list[str]]
 ) -> list[float]:
+    """Each column's least width: its widest part."""
     return [
         max([_width(sheet, p, bold) for text, bold in col for p in parts(text) if p], default=0)
         for col in _columns(head, rows)

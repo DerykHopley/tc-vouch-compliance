@@ -23,7 +23,6 @@ from test_report import (
 )
 from test_report import pdf_pages as pages
 from test_report import pdf_text as text
-from test_report import pdf_text as text_of
 
 from vouch import audit, report, report_pdf
 from vouch.graph import PROMPT_VERSION, Verdict
@@ -257,7 +256,8 @@ def breaks_inside_words(sheet, head, cells, widths) -> list[str]:
     broken = []
     for bold, row in [(True, head), *((False, r) for r in cells)]:
         for cell, width in zip(row, widths, strict=True):
-            lines = sheet.wrapped(cell, width, report_pdf.TRAIL, bold)
+            sheet.font(report_pdf.TRAIL, bold)
+            lines = sheet.wrapped(cell, width)
             broken += [f"{cell!r} at {line!r}" for line in at_a_boundary(cell, lines)]
     return broken
 
@@ -276,7 +276,7 @@ def test_no_audit_trail_cell_breaks_a_word_and_the_trail_fits_the_page(profile_i
     assert breaks_inside_words(sheet, head, cells, widths) == []
 
     data = report_pdf.pdf(built_report(entries=fixture_trail(profile_id)), words)
-    assert PROMPT_VERSION in text_of(data)  # the PDF still draws, with its whole ids
+    assert PROMPT_VERSION in text(data)  # the PDF still draws, with its whole ids
 
 
 def test_ids_too_long_to_fit_whole_break_only_after_a_dash_or_slash():
@@ -293,3 +293,6 @@ def test_ids_too_long_to_fit_whole_break_only_after_a_dash_or_slash():
     assert sum(widths) <= sheet.epw + 0.01
     assert report_pdf.BREAK in cells[0][0]
     assert breaks_inside_words(sheet, head, cells, widths) == []
+    built = built_report(entries=[replace(entry("u", 1), id=1, model=long_id)])
+    shown = text(report_pdf.pdf(built, report.words_for("en"))).replace(report_pdf.BREAK, "")
+    assert long_id in shown  # the id as written, its BREAKs drawn as nothing
