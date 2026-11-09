@@ -6,8 +6,9 @@ quotes or attributes, no document, whitespace or zero-width characters inside th
 unchecked, and so does one never closed; a cite tag that opens or closes no citation is removed
 alone.
 
-Any other quotation, in any quotation marks or `<q>`, or a Markdown blockquote (`>` lines), is
-checked as citing no document: against what the tools returned this turn. Any quotation mark
+Any other quotation, in any quotation mark (every Unicode initial or final one, and the
+brackets and primes used as quotation marks), in `<q>` or `<blockquote>` (any case, with
+attributes), or a Markdown blockquote (`>` lines, in a list item too), is checked as citing no document: against what the tools returned this turn. Any quotation mark
 may close it, a blank line doesn't end it, and one never closed runs to its paragraph's end
 (_quoted says which mark closes it). It counts when it is long
 enough to be a quote (MIN_QUOTE_WORDS words, or MIN_CJK_CHARS CJK characters) outside the
@@ -101,9 +102,11 @@ PAIRS: dict[str, tuple[str, ...]] = {
 none of its own does in its paragraph (a model mixing “ and "). A tag (`<q>`, `<blockquote>`)
 matches in any case and with attributes; every other Unicode initial or final quotation mark
 (Pi, Pf) is added below, closed by itself."""
-for _code in range(sys.maxunicode + 1):
-    if unicodedata.category(chr(_code)) in ("Pi", "Pf"):
-        PAIRS.setdefault(chr(_code), (chr(_code),))
+PAIRS |= {
+    mark: (mark,)
+    for mark in map(chr, range(sys.maxunicode + 1))
+    if unicodedata.category(mark) in ("Pi", "Pf") and mark not in PAIRS
+}
 _APOSTROPHES = "'’"
 """Marks that are also apostrophes: inside a word (company’s, don't) or before a digit (’90s)
 they neither open nor close a quotation, and they close only a quotation opened by a single
@@ -112,6 +115,9 @@ _SINGLE = "‘’‚‛'"
 _INCHES = '"″＂'
 """Marks that are also inch marks: right after a digit (a 15" screen) they open nothing."""
 _TAG_MARK = re.compile(r"</?([a-z]+)>")
+"""A tag in PAIRS, as written there."""
+_TAG_NAME = re.compile(r"</?(\w+)")
+"""A tag's name as matched in an answer (_mark's patterns allow no space after `<`)."""
 _PARAGRAPH_END = re.compile(r"\n[ \t]*\n")
 
 
@@ -146,7 +152,7 @@ _OPENING = re.compile(
 
 def _pair_of(found: str) -> str:
     """The PAIRS key of an opening mark as written: a tag in its plain form."""
-    tag = re.match(r"<\s*(\w+)", found)
+    tag = _TAG_NAME.match(found)
     return f"<{tag.group(1).lower()}>" if tag else found
 
 
@@ -172,8 +178,9 @@ def _quoted(text: str, opening: re.Match[str]) -> tuple[int, int, bool]:
 
 _ITEM = r"[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*"
 """Indentation and list markers at any depth (`- `, `1. `, `- 2) `) before a blockquote's `>`."""
-_BLOCKQUOTE = re.compile(rf"^{_ITEM}(>[^\n]*(?:\n{_ITEM}>[^\n]*)*)", re.MULTILINE)
-"""A blockquote; group 1 starts at its `>`, so a dropped one leaves its list item."""
+_BLOCKQUOTE = re.compile(rf"^{_ITEM}(>[^\n]*(?:\n[ \t]*>[^\n]*)*)", re.MULTILINE)
+"""A blockquote; group 1 starts at its `>`, so a dropped one leaves its list item. A new list
+item starts a blockquote of its own, so each item keeps its marker."""
 _BLOCKQUOTE_MARK = re.compile(rf"^{_ITEM}>[ \t]?", re.MULTILINE)
 _CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]")
 

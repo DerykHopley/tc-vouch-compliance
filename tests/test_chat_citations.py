@@ -506,3 +506,12 @@ def test_a_quote_after_an_inch_mark_is_still_checked():
 
     assert check.asked == [(QUOTE, None)]
     assert text == f'A 15" screen; the policy says {QUOTE_REMOVED} here.'
+
+
+def test_blockquotes_in_two_list_items_are_each_checked_and_each_item_kept():
+    other = "staff lock every screen at night"
+    text, steps, check = checked(f"Items:\n2. > {QUOTE}\n3. > {other}\nDone.")
+
+    assert check.asked == [(QUOTE, None), (other, None)]
+    assert text == f"Items:\n2. {QUOTE_REMOVED}\n3. {QUOTE_REMOVED}\nDone."
+    assert len(steps) == 2
