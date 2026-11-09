@@ -200,6 +200,10 @@ _Avoid_: Dashboard, home page
 The summary of a compliance profile's reviewed verdicts, citations and remediation items, written in the profile's language.
 _Avoid_: Audit report, self-assessment, export
 
+**Improvement report**:
+The readiness report's shape in the Internal improvement goal, written for the team: where it stands compared with the last closed review round, the improvement plan by priority with each item's status, and the open questions; an internal self-assessment, from the same report page and exports.
+_Avoid_: Team report, internal audit report
+
 **Eval**:
 A measured run of assessments against cases with known expected verdicts and citations, used to compare models.
 _Avoid_: Test (for model-graded runs), benchmark

@@ -405,14 +405,18 @@ def _flags(
     approved items are all done, then the first assessment accepted after its last done mark
     decides. None accepted since: a re-assessment is suggested (a rejected run keeps the
     suggestion), hidden while the newest run waits for review, which is the next step then; one with no gap: Closed; one with a gap: neither (its items start
-    the plan again)."""
+    the plan again). A later accepted plan with an approved item not done is the open one: it
+    resets the earlier done plan, so a Closed control reopens (#420's review)."""
     done_by: datetime | None = None
     for run in runs:
         if accepted_at(run) is None:
             continue
-        last = _last_done(_approved(run, decided), marks)
+        approved = _approved(run, decided)
+        last = _last_done(approved, marks)
         if last is not None:
             done_by = last
+        elif approved:  # approved items, not all done: this plan is open again
+            done_by = None
     if done_by is None:
         return None
     after = next((r for r in runs if (at := accepted_at(r)) is not None and at > done_by), None)

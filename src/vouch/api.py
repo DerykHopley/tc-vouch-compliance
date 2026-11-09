@@ -13,11 +13,11 @@ import re
 import threading
 import time
 import unicodedata
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from importlib.metadata import version
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request
@@ -1119,11 +1119,43 @@ def _plan_flags(
     start, with the user's decisions and marks on them; none read under Audit readiness."""
     if current != plan.IMPROVEMENT:
         return {}
+    return plan.card_flags(*_plan_reads(memory, saver, items, marks), current)
+
+
+def _plan_reads(
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    marks: plan.RemediationPlan,
+) -> tuple[
+    list[Assessment],
+    dict[remediation.Key, remediation.DecidedItem],
+    dict[remediation.Key, remediation.Mark],
+]:
+    """What the improvement plan is read from (#410): every assessment listed since the fresh
+    start, newest first, with the user's decisions and marks on them."""
     history = memory.assessments(saver)
     threads = [a.thread_id for a in history]
     decided = items.decided(memory.user_id, memory.profile_id, threads)
     marked = marks.marks(memory.user_id, memory.profile_id, threads)
-    return plan.card_flags(history, decided, marked, current)
+    return history, decided, marked
+
+
+def _comparison(
+    review: rounds.ReviewRounds,
+    memory: Memory,
+    controls: list[IsaControl],
+    latest: dict[str, Assessment],
+) -> report.ReportComparison | None:
+    """Now compared with the last round closed since the fresh start (None when there is none):
+    the overview's (#402) and the improvement report's (#420)."""
+    against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
+    if against is None or against.closed_at is None:
+        return None
+    return {
+        "against": {"name": against.name, "closed_at": against.closed_at.isoformat()},
+        **rounds.compare(against.results, controls, latest),
+    }
 
 
 def _rounds(
@@ -1135,15 +1167,9 @@ def _rounds(
     """The overview's review rounds (#402): the open one (None when none is), and now compared
     with the last round closed since the fresh start (None when there is none)."""
     current = review.current(memory.user_id, memory.profile_id)
-    against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
-    comparison = None
-    if against is not None and against.closed_at is not None:
-        comparison = {
-            "against": {"name": against.name, "closed_at": against.closed_at.isoformat()}
-        } | dict(rounds.compare(against.results, controls, latest))
     return {
         "current": None if current is None else _opened(current),
-        "comparison": comparison,
+        "comparison": _comparison(review, memory, controls, latest),
     }
 
 
@@ -1289,22 +1315,65 @@ def change_goal(
     return {"goal": request.goal}
 
 
+class ImprovementStores(NamedTuple):
+    """What the improvement report (#420) reads beyond the readiness report's stores: the Goal
+    that picks the shape, the plan's marks, the review rounds and the open questions."""
+
+    goals: goal.ProfileGoals
+    marks: plan.RemediationPlan
+    review: rounds.ReviewRounds
+    asked: questions.OpenQuestions
+
+
+def improvement_stores(
+    goals: ProfileGoals, marks: RemediationPlan, review: ReviewRounds, asked: OpenQuestions
+) -> ImprovementStores:
+    return ImprovementStores(goals, marks, review, asked)
+
+
+Improvement = Annotated[ImprovementStores, Depends(improvement_stores)]
+
+
 def _report(
     profile: ComplianceProfile,
     memory: Memory,
     saver: BaseCheckpointSaver,
     items: remediation.RemediationItems,
+    stores: ImprovementStores,
     read_trail: Callable[[], audit.Page],
     failed: str,
 ) -> dict[str, Any]:
-    """The readiness report for the profile, redacted (vouch.report): its standing first (an
-    unreadable ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads."""
+    """The report for the profile, redacted (vouch.report): its standing first (an unreadable
+    ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads. Under the
+    user's Goal: the readiness report, or in Internal improvement the improvement report (#420),
+    its plan, comparison and questions read as the overview reads them."""
     controls, latest, accepted = _standing(profile, memory, saver, failed)
-    decided = items.decided(memory.user_id, memory.profile_id, accepted)
-    built = report.readiness_report(
-        profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
-    )
-    clean, _ = redact_data(built)
+    current = stores.goals.goal(memory.user_id, memory.profile_id)
+    built: Mapping[str, Any]
+    if current != plan.IMPROVEMENT:
+        decided = items.decided(memory.user_id, memory.profile_id, accepted)
+        built = report.readiness_report(
+            profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
+        )
+    else:
+        history, decided, marked = _plan_reads(memory, saver, items, stores.marks)
+        listed = questions.since(
+            stores.asked.listed(memory.user_id, memory.profile_id), memory.fresh_start()
+        )
+        built = report.improvement_report(
+            profile,
+            controls,
+            latest,
+            history=history,
+            decided=decided,
+            marks=marked,
+            flags=plan.card_flags(history, decided, marked, current),
+            comparison=_comparison(stores.review, memory, controls, latest),
+            questions=listed,
+            trail=read_trail(),
+            today=report.today(),
+        )
+    clean, _ = redact_data(dict(built))
     return clean
 
 
@@ -1314,20 +1383,25 @@ def readiness_report(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    stores: Improvement,
     trail: AuditTrail,
 ) -> dict[str, Any]:
-    """The readiness report for the user's compliance profile (vouch.report, #234), in its
-    answer language: readiness with the overview's accepted counts (its remediation count is of
+    """The report for the user's compliance profile (vouch.report), in its answer language,
+    with the report's words; its `goal` names its shape. Under Audit readiness the readiness
+    report (#234): readiness with the overview's accepted counts (its remediation count is of
     the approved items the report lists), each control's reviewed verdict, the
     approved remediation items, the not-applicable list, the newest page of the audit trail
-    (`trail.next` reads on at GET /api/audit-trail) and the disclaimer, with the report's words.
-    No model runs. Dated the server's date in UTC; an unreadable ISA edition is a plain 500.
-    The data is redacted as every answer is; the words, the same for every report, are not."""
+    (`trail.next` reads on at GET /api/audit-trail) and the disclaimer. In Internal improvement
+    the improvement report (#420): readiness, the comparison with the last round closed since the
+    fresh start, the plan by priority, the open questions, the trail's newest page and the
+    internal self-assessment disclaimer. No model runs. Dated the server's date in UTC; an
+    unreadable ISA edition is a plain 500. The data is redacted as every answer is; the words,
+    the same for every report, are not."""
 
     def newest_page() -> audit.Page:
         return audit.read(trail, memory.user_id, memory.profile_id)
 
-    built = _report(profile, memory, saver, items, newest_page, REPORT_FAILED)
+    built = _report(profile, memory, saver, items, stores, newest_page, REPORT_FAILED)
     return built | {"words": report.words_for(profile.answer_language)}
 
 
@@ -1347,21 +1421,24 @@ def _export(
     memory: Memory,
     saver: BaseCheckpointSaver,
     items: remediation.RemediationItems,
+    stores: ImprovementStores,
     trail: audit.AuditTrail,
     write: Callable[[dict[str, Any], dict[str, Any]], str | bytes],
     extension: str,
     media_type: str,
 ) -> Response:
-    """A download of the readiness report: the same redacted report and words as GET
-    /api/report, but with the whole audit trail, newest first, not a page, written by `write`
-    (report, words). An attachment named `readiness-report-<profile>-<date>.<extension>`
-    (`attachment`); an unreadable ISA edition is a plain 500 with EXPORT_FAILED."""
+    """A download of the report: the same redacted report and words as GET /api/report, but
+    with the whole audit trail, newest first, not a page, written by `write` (report, words).
+    An attachment named `readiness-report-<profile>-<date>.<extension>`, or in Internal
+    improvement `improvement-report-…` (#420) (`attachment`); an unreadable ISA edition is a
+    plain 500 with EXPORT_FAILED."""
 
     def whole_trail() -> audit.Page:
         return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
 
-    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
-    name = f"readiness-report-{profile.id}-{built['head']['date']}.{extension}"
+    built = _report(profile, memory, saver, items, stores, whole_trail, EXPORT_FAILED)
+    shape = "improvement" if built["goal"] == plan.IMPROVEMENT else "readiness"
+    name = f"{shape}-report-{profile.id}-{built['head']['date']}.{extension}"
     return Response(
         write(built, report.words_for(profile.answer_language)),
         media_type=media_type,
@@ -1375,11 +1452,14 @@ def readiness_report_markdown(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    stores: Improvement,
     trail: AuditTrail,
 ) -> Response:
-    """The readiness report as one Markdown file (vouch.report.markdown, #57), as `_export`
-    makes every download."""
-    return _export(profile, memory, saver, items, trail, report.markdown, "md", "text/markdown")
+    """The report as one Markdown file (vouch.report.markdown, #57), as `_export` makes every
+    download."""
+    return _export(
+        profile, memory, saver, items, stores, trail, report.markdown, "md", "text/markdown"
+    )
 
 
 @router.get("/report/pdf")
@@ -1388,11 +1468,14 @@ def readiness_report_pdf(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    stores: Improvement,
     trail: AuditTrail,
 ) -> Response:
-    """The readiness report as one PDF file built on the server (vouch.report_pdf, #308), as
-    `_export` makes every download: the same data and failures as the Markdown file."""
-    return _export(profile, memory, saver, items, trail, report_pdf.pdf, "pdf", "application/pdf")
+    """The report as one PDF file built on the server (vouch.report_pdf, #308), as `_export`
+    makes every download: the same data and failures as the Markdown file."""
+    return _export(
+        profile, memory, saver, items, stores, trail, report_pdf.pdf, "pdf", "application/pdf"
+    )
 
 
 class ChatRequest(BaseModel):

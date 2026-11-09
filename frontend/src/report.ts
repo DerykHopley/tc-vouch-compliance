@@ -1,5 +1,7 @@
 import type { Citation, Verdict } from './assessment.ts'
-import type { Readiness } from './overview.ts'
+import type { Readiness, RoundComparison } from './overview.ts'
+import type { OpenQuestion } from './questions.ts'
+import type { Priority } from './remediation.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The readiness report from `GET /api/report` (#234), as `vouch.report.readiness_report` sends it, with its own words
@@ -72,6 +74,8 @@ export type TrailEntry = {
  * action and sentence the report shows. `sentences.accepted_of` has `{accepted}` and `{controls}` to fill in. */
 export type ReportWords = {
   title: string
+  /** The improvement report's title (#420). */
+  improvement_title: string
   labels: Record<string, string>
   verdicts: Record<Verdict, string>
   statuses: Record<ReportControl['status'], string>
@@ -80,6 +84,10 @@ export type ReportWords = {
   actions: Record<TrailAction, string>
   goals: Record<Goal, string>
   protection_levels: Record<ReportHead['protection_level'], string>
+  /** The improvement report's (#420). */
+  priorities: Record<Priority, string>
+  item_statuses: Record<ItemState, string>
+  question_statuses: Record<QuestionState, string>
   languages: Record<string, string>
   sentences: Record<string, string>
 }
@@ -96,18 +104,61 @@ export function actionWord(e: TrailEntry, words: ReportWords): string {
 /** A page of the audit trail, newest first; `next` reads on at `olderEntries`, null when there are no more. */
 export type TrailPage = { entries: TrailEntry[]; next: number | null }
 
-export type ReadinessReport = {
+/** What both shapes of the report have. */
+type ReportBase = {
   head: ReportHead
   readiness: Readiness
-  controls: ReportControl[]
-  remediation: { control_id: string; question: string; items: ReportItem[] }[]
-  not_applicable: NotApplicable[]
   /** The newest page. */
   trail: TrailPage
   /** The finished sentence, the reviewers' names joined. */
   disclaimer: string
   words: ReportWords
 }
+
+/** The report under Audit readiness (#234): what an auditor checks. */
+export type AuditReadinessReport = ReportBase & {
+  goal: 'audit-readiness'
+  controls: ReportControl[]
+  remediation: { control_id: string; question: string; items: ReportItem[] }[]
+  not_applicable: NotApplicable[]
+}
+
+/** An open question's status in the report (`vouch.report.QuestionState`): Answered once answered, else Overdue when
+ * it is, else Open. */
+export type QuestionState = 'answered' | 'overdue' | 'open'
+
+/** A plan item's status (`vouch.report.ItemState`): Closed with its control, else Done once marked done, else Open. */
+export type ItemState = 'open' | 'done' | 'closed'
+
+export type PlanItem = {
+  control_id: string
+  requirement_id: string
+  missing: string
+  owner_role: string
+  due_date: string
+  status: ItemState
+  /** The done note; empty when none. */
+  note: string
+}
+
+/** One priority's items; a priority with none isn't sent. High, then Medium, then Low. */
+export type PlanGroup = { priority: Priority; items: PlanItem[] }
+
+/** An open question with its control, `overdue` as of the day the report was drawn up. */
+export type ReportQuestion = OpenQuestion & { control_id: string }
+
+/** The report under Internal improvement (#420): for the team, with the comparison, the plan and the questions. */
+export type ImprovementReport = ReportBase & {
+  goal: 'internal-improvement'
+  /** Null: no review round closed since the fresh start. */
+  comparison: RoundComparison | null
+  plan: PlanGroup[]
+  /** In the base framework's control order, oldest first within a control. */
+  questions: ReportQuestion[]
+}
+
+/** The served report, its shape by the user's Goal under the profile. */
+export type ReadinessReport = AuditReadinessReport | ImprovementReport
 
 /** The API's own wording (vouch.api.REPORT_FAILED). */
 export const REPORT_FAILED = 'The readiness report could not be loaded just now. Please try again.'

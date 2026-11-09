@@ -285,6 +285,17 @@ def test_the_first_reassessment_after_the_fixes_decides_a_gap_there_is_not_close
     assert flags([clean, with_gap, planned()], decided, all_done()) == NEITHER
 
 
+def test_a_later_accepted_plan_with_open_items_reopens_a_closed_control():
+    """A's fixes done, B closed it, then C found a new gap whose approved item isn't done: the
+    later plan is the open one (#420's review), so the control is neither Closed nor suggested."""
+    closed_by = assessment("b", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(days=2))
+    new_gap = assessment("c", {"M2": "not-evidenced"}, reviewed_at=T0 + timedelta(days=3))
+    decided = plan_of() | {("c", "M2"): approved("c", "M2")}
+
+    assert flags([closed_by, planned()], plan_of(), all_done()) == (False, True)
+    assert flags([new_gap, closed_by, planned()], decided, all_done()) == NEITHER
+
+
 def test_nothing_is_suggested_or_closed_under_audit_readiness():
     reassessed = assessment("n", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(days=2))
 

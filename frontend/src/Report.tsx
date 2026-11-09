@@ -3,7 +3,8 @@ import type { Verdict } from './assessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
 import Prose from './Prose.tsx'
-import { actionWord, exportReport, fetchReport, olderEntries, type ReadinessReport, type ReportFormat, type ReportControl, type ReportWords, type TrailEntry }
+import { actionWord, type AuditReadinessReport, exportReport, fetchReport, type ImprovementReport, olderEntries,
+  type QuestionState, type ReadinessReport, type ReportControl, type ReportFormat, type ReportQuestion, type ReportWords, type TrailEntry }
   from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -98,10 +99,11 @@ const filled = (sentence: string, values: Record<string, number | string>) =>
 function Document({ report }: { report: ReadinessReport }) {
   const { head, words } = report
   const { labels, sentences } = words
+  const improvement = report.goal === 'internal-improvement'
   return (
     <article className="sheet report-doc" lang={head.words_language} aria-labelledby="report-title">
       <header className="report-top">
-        <h1 id="report-title">{words.title}</h1>
+        <h1 id="report-title">{improvement ? words.improvement_title : words.title}</h1>
         <dl className="report-head">
           <dt>{labels.company}</dt><dd>{head.company}</dd>
           <dt>{labels.country}</dt><dd>{head.country}</dd>
@@ -115,9 +117,19 @@ function Document({ report }: { report: ReadinessReport }) {
         </dl>
       </header>
       <Readiness report={report} />
-      <Controls report={report} />
-      <Remediation report={report} />
-      <NotApplicableList report={report} />
+      {report.goal === 'internal-improvement' ? (
+        <>
+          <Comparison report={report} />
+          <Plan report={report} />
+          <Questions report={report} />
+        </>
+      ) : (
+        <>
+          <Controls report={report} />
+          <Remediation report={report} />
+          <NotApplicableList report={report} />
+        </>
+      )}
       <Trail report={report} />
       <p className="report-disclaimer">{report.disclaimer}</p>
     </article>
@@ -145,7 +157,151 @@ function Readiness({ report: { readiness: r, words } }: { report: ReadinessRepor
   )
 }
 
-function Controls({ report: { controls, words } }: { report: ReadinessReport }) {
+/** A count now against then, as `vouch.report.comparison_lines` writes it: "(+2)", "(-1)" or the served no-change
+ * word. */
+const change = (now: number, then: number, words: ReportWords) =>
+  now === then ? words.sentences.no_change : `(${now > then ? '+' : '-'}${Math.abs(now - then)})`
+
+/** The improvement report's comparison (#420): now against the last review round closed since the fresh start,
+ * accepted verdicts only, as the overview's (#402); its lines styled as readiness's counts. */
+function Comparison({ report: { comparison: c, words } }: { report: ImprovementReport }) {
+  const { labels, sentences } = words
+  const accepted = (v: Verdict | null) => v ? <VerdictChip verdict={v} label={words.verdicts[v]} />
+    : <span data-word>{sentences.not_accepted}</span>
+  return (
+    <section className="report-part" aria-labelledby="report-comparison">
+      <h2 id="report-comparison">{labels.comparison}</h2>
+      {c === null ? <p className="report-muted" data-word>{sentences.no_comparison}</p> : (
+        <>
+          <p className="report-lead">
+            {filled(sentences.compared_with, { name: c.against.name, date: dayOf(c.against.closed_at) })}
+          </p>
+          <p className="report-muted">
+            {filled(sentences.accepted_now_then, { now: c.accepted.now, then: c.accepted.then, name: c.against.name })}
+          </p>
+          <ul className="report-counts">
+            {SEGMENTS.filter((v) => c.by_verdict[v].now > 0 || c.by_verdict[v].then > 0).map((v) => (
+              <li key={v}>{words.verdicts[v]} {c.by_verdict[v].now} {change(c.by_verdict[v].now, c.by_verdict[v].then, words)}</li>
+            ))}
+          </ul>
+          {c.changed.length === 0 ? <p className="report-muted">{filled(sentences.nothing_changed, { name: c.against.name })}</p> : (
+            <div className="report-group">
+              <h3 id="report-changed" className="report-group-head">{labels.changed}</h3>
+              <div className="table-wrap">
+                <table className="report-table" aria-labelledby="report-changed">
+                  <thead>
+                    <tr>
+                      <th scope="col">{labels.control}</th>
+                      <th scope="col">{labels.before}</th>
+                      <th scope="col">{labels.after}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {c.changed.map((x) => (
+                      <tr key={x.control_id}>
+                        <th scope="row" className="mono">{x.control_id}</th>
+                        <td>{accepted(x.before)}</td>
+                        <td>{accepted(x.after)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+/** The improvement plan (#420): a table per priority, High, then Medium, then Low, each item with its status and done
+ * note. */
+function Plan({ report: { plan, words } }: { report: ImprovementReport }) {
+  const { labels } = words
+  return (
+    <section className="report-part" aria-labelledby="report-plan">
+      <h2 id="report-plan">{labels.plan}</h2>
+      {plan.length === 0 ? <p className="report-muted" data-word>{words.sentences.no_plan}</p>
+        : plan.map((group) => (
+          <div key={group.priority} className="report-group">
+            <h3 id={`report-plan-${group.priority}`} className="report-group-head">{words.priorities[group.priority]}</h3>
+            <div className="table-wrap">
+              <table className="report-table report-plan" aria-labelledby={`report-plan-${group.priority}`}>
+                <thead>
+                  <tr>
+                    <th scope="col">{labels.control}</th>
+                    <th scope="col">{labels.requirement}</th>
+                    <th scope="col">{labels.missing}</th>
+                    <th scope="col">{labels.owner_role}</th>
+                    <th scope="col">{labels.due_date}</th>
+                    <th scope="col">{labels.status}</th>
+                    <th scope="col">{labels.note}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.items.map((item) => (
+                    <tr key={`${item.control_id} ${item.requirement_id}`}>
+                      <th scope="row" className="mono">{item.control_id}</th>
+                      <td className="mono">{item.requirement_id}</td>
+                      <td className="report-q"><Prose text={item.missing} /></td>
+                      <td>{item.owner_role}</td>
+                      <td className="mono">{item.due_date}</td>
+                      <td><span data-word>{words.item_statuses[item.status]}</span></td>
+                      <td className="report-q">{item.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+    </section>
+  )
+}
+
+/** A question's status, as `vouch.report.question_status` has it. */
+const questionStatus = (q: ReportQuestion): QuestionState => q.answer !== null ? 'answered' : q.overdue ? 'overdue' : 'open'
+
+/** The open questions (#420), in the base framework's control order, oldest first within a control. */
+function Questions({ report: { questions, words } }: { report: ImprovementReport }) {
+  const { labels } = words
+  return (
+    <section className="report-part" aria-labelledby="report-questions">
+      <h2 id="report-questions">{labels.open_questions}</h2>
+      {questions.length === 0 ? <p className="report-muted" data-word>{words.sentences.no_questions}</p> : (
+        <div className="table-wrap">
+          <table className="report-table report-questions" aria-labelledby="report-questions">
+            <thead>
+              <tr>
+                <th scope="col">{labels.control}</th>
+                <th scope="col">{labels.question}</th>
+                <th scope="col">{labels.asked_of}</th>
+                <th scope="col">{labels.due_date}</th>
+                <th scope="col">{labels.status}</th>
+                <th scope="col">{labels.answer}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {questions.map((q) => (
+                <tr key={q.id}>
+                  <th scope="row" className="mono">{q.control_id}</th>
+                  <td className="report-q">{q.question}</td>
+                  <td>{q.asked_of}</td>
+                  <td className="mono">{q.due_date}</td>
+                  <td><span data-word>{words.question_statuses[questionStatus(q)]}</span></td>
+                  <td className="report-q">{q.answer ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function Controls({ report: { controls, words } }: { report: AuditReadinessReport }) {
   const { labels } = words
   return (
     <section className="report-part" aria-labelledby="report-controls">
@@ -206,7 +362,7 @@ function ControlRows({ control: c, words }: { control: ReportControl; words: Rep
   )
 }
 
-function Remediation({ report: { remediation, words } }: { report: ReadinessReport }) {
+function Remediation({ report: { remediation, words } }: { report: AuditReadinessReport }) {
   const { labels } = words
   return (
     <section className="report-part" aria-labelledby="report-remediation">
@@ -243,7 +399,7 @@ function Remediation({ report: { remediation, words } }: { report: ReadinessRepo
   )
 }
 
-function NotApplicableList({ report: { not_applicable: listed, words } }: { report: ReadinessReport }) {
+function NotApplicableList({ report: { not_applicable: listed, words } }: { report: AuditReadinessReport }) {
   return (
     <section className="report-part" aria-labelledby="report-not-applicable">
       <h2 id="report-not-applicable">{words.labels.not_applicable}</h2>
