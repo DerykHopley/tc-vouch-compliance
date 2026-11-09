@@ -407,3 +407,105 @@ def test_the_two_ports_must_differ(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "must differ" in result.stderr
     assert not calls.exists()
+
+
+# --- An owner preview that outlives its shell (#309) -------------------------------------------
+# systemd-run, systemctl and curl are stand-ins that log their arguments; the real run (a shell
+# that exits, both ports answering, the stop freeing them) is checked by hand: see the PR.
+
+
+def detach_tree(tmp_path: Path, *, active: bool = True) -> tuple[Path, str, Path]:
+    """dev.sh copied into a tree with frontend/node_modules, and stand-ins logging to calls.log."""
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(DEV, tmp_path / "scripts" / "dev.sh")
+    (tmp_path / "frontend" / "node_modules").mkdir(parents=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls.log"
+    stand_ins = {
+        "systemd-run": 'echo "systemd-run $*" >> "{calls}"; env > "{env}"',
+        "systemctl": 'echo "systemctl $*" >> "{calls}"; exit {state}',
+        "curl": "exit 0",
+        "uv": 'echo "uv $*" >> "{calls}"',
+        "npm": 'echo "npm $*" >> "{calls}"',
+    }
+    for tool, body in stand_ins.items():
+        text = body.format(calls=calls, env=tmp_path / "env.log", state=0 if active else 3)
+        (bin_dir / tool).write_text(f"#!/bin/sh\n{text}\n")
+        (bin_dir / tool).chmod(0o755)
+    return tmp_path / "scripts" / "dev.sh", f"{bin_dir}:{os.environ['PATH']}", calls
+
+
+def run_script(script: Path, path: str, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [BASH, str(script), *args],
+        check=False,
+        cwd=script.parent.parent,
+        env=dev_env() | {"PATH": path, "HOME": str(script.parent.parent)} | env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_detach_runs_the_preview_as_its_own_user_unit_with_no_keys(tmp_path: Path) -> None:
+    script, path, calls = detach_tree(tmp_path)
+    api, web = free_ports(2)
+
+    done = run_script(
+        script,
+        path,
+        "--api-port",
+        str(api),
+        "--web-port",
+        str(web),
+        "--detach",
+        "m7",
+        OPENROUTER_API_KEY="sk-or-v1-secret",
+        VOUCH_DATABASE_URL="postgresql://live",
+        ASSESS_FAKE_SCRIPT="demo.json",
+    )
+
+    assert done.returncode == 0, done.stderr
+    [run] = [line for line in calls.read_text().splitlines() if line.startswith("systemd-run")]
+    assert "--user" in run and "--collect" in run and "--unit=vouch-preview-m7" in run
+    assert f"scripts/dev.sh --api-port {api} --web-port {web}" in run
+    assert "--detach" not in run.split("bash", 1)[1]  # the unit runs the servers themselves
+    assert "-u VOUCH_DATABASE_URL -u OPENROUTER_API_KEY" in run
+    assert "sk-or-v1-secret" not in run and "postgresql://live" not in run
+    assert f"--setenv=ASSESS_FAKE_SCRIPT={tmp_path}/demo.json" in run
+    assert "uv " not in calls.read_text()  # nothing started in this shell's own group
+    assert "scripts/dev.sh --stop m7" in done.stdout
+
+
+def test_stop_stops_the_named_unit(tmp_path: Path) -> None:
+    script, path, calls = detach_tree(tmp_path)
+
+    done = run_script(script, path, "--stop", "m7")
+
+    assert done.returncode == 0, done.stderr
+    assert calls.read_text().splitlines() == ["systemctl --user stop vouch-preview-m7"]
+
+
+def test_a_preview_that_dies_while_starting_says_so_and_is_stopped(tmp_path: Path) -> None:
+    script, path, calls = detach_tree(tmp_path, active=False)
+    (tmp_path / "bin" / "curl").write_text("#!/bin/sh\nexit 7\n")  # never answers
+    api, web = free_ports(2)
+
+    done = run_script(script, path, "--api-port", str(api), "--web-port", str(web), "--detach", "x")
+
+    assert done.returncode == 1
+    assert "didn't start" in done.stderr
+    assert "systemctl --user stop vouch-preview-x" in calls.read_text()
+
+
+@pytest.mark.parametrize("args", [["--detach", "a b"], ["--detach"], ["--stop", "../x"]])
+def test_a_bad_preview_name_stops_with_usage(tmp_path: Path, args: list[str]) -> None:
+    script, path, calls = detach_tree(tmp_path)
+
+    done = run_script(script, path, *args)
+
+    assert done.returncode == 2
+    assert "Usage: scripts/dev.sh" in done.stderr
+    assert not calls.exists()
