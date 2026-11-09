@@ -42,6 +42,7 @@ from vouch.documents import (
 )
 from vouch.guards import (
     DATA_RULE,
+    allowed_documents,
     allowed_folder,
     as_data,
     draft_as_data,
@@ -223,9 +224,13 @@ SEARCH_RECORDS_TOOL = _search_tool_spec(
 )
 
 
-def _search(args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
+def _search(
+    args: dict[str, Any], folder: Path, documents: tuple[str, ...] | None
+) -> list[Passage] | ErrorResult:
     # Looked up when called, so a test can replace vouch.graph.search_folder.
-    return search_folder(args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder)
+    return search_folder(
+        args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder, documents=documents
+    )
 
 
 class EvidencePassage(Passage):
@@ -276,8 +281,13 @@ VULNERABILITY_STATUS_TOOL = {
 }
 
 
-def _vulnerability_status(_args: dict[str, Any], folder: Path) -> list[Passage] | ErrorResult:
-    return vulnerability_status(folder)
+def _vulnerability_status(
+    _args: dict[str, Any], folder: Path, documents: tuple[str, ...] | None
+) -> list[Passage] | ErrorResult:
+    result = vulnerability_status(folder)
+    if isinstance(result, list) and documents is not None:
+        return [p for p in result if p["doc_id"] in documents]
+    return result
 
 
 def _for_query(args: dict[str, Any]) -> str:
@@ -290,12 +300,14 @@ def _for_query(args: dict[str, Any]) -> str:
 class EvidenceTool:
     """An evidence-source tool: the profile source it reads, what the compliance lead calls
     it, and once built, its spec for the model and how to run it in the folder the guards
-    allow."""
+    allow, on the documents of it the profile chose (None: every one)."""
 
     source: EvidenceSourceName
     label: str  # in step text, never the tool's name: "the policies"
     spec: dict[str, Any] | None = None  # None: not built yet, so never offered or run
-    run: Callable[[dict[str, Any], Path], list[Passage] | ErrorResult] | None = None
+    run: (
+        Callable[[dict[str, Any], Path, tuple[str, ...] | None], list[Passage] | ErrorResult] | None
+    ) = None
 
 
 # Every evidence-source tool, by the name the model calls. A new source tool goes here, so the
@@ -567,6 +579,9 @@ class AssessState(TypedDict, total=False):
     not_judged: list[str]
     claims: dict[str, list[CitationClaim]]  # the judge's citations per requirement, unchecked
     document_folders: dict[str, str]  # source name to folder: where cited documents are found
+    # Source name to the documents of its folder the profile chose (EvidenceSource.documents); a
+    # source using its whole folder is absent. A state saved before #384 has none.
+    document_choices: dict[str, list[str]]
     about_doing: list[str]  # the requirements the judge said ask for something to be done
     dropped_citations: list[DroppedCitation]
     verdict_changes: list[str]  # "M1 to partly evidenced": verdicts the quote check changed
@@ -987,7 +1002,7 @@ def build_graph(
                 content = json.dumps(ErrorResult(error=EVIDENCE_PENDING, detail=detail))
                 said.append(f"{detail}, so it wasn't asked again.")
             else:
-                result = tool.run(args, folder)
+                result = tool.run(args, folder, allowed_documents(profile, tool.source))
                 if isinstance(result, list):
                     result = with_facts(result, tool.source, folder, today)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)
@@ -1138,7 +1153,7 @@ def build_graph(
         judge's rules (`_apply_rules`) cap what the checked citations can show. Each document
         is read once.
         """
-        checker = QuoteChecker(state["document_folders"], today=date.fromisoformat(state["today"]))
+        checker = quote_checker(state)
         results, dropped = checked_requirements(
             state["requirements"],
             state.get("claims", {}),
@@ -1564,6 +1579,17 @@ def state_serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=None).with_msgpack_allowlist(STATE_TYPES)
 
 
+def quote_checker(state: AssessState) -> QuoteChecker:
+    """The quote check for an assessment's state: its folders, limited to the documents it
+    chose; a state saved before `document_choices` (#384) is checked against the whole
+    folders."""
+    return QuoteChecker(
+        state["document_folders"],
+        today=date.fromisoformat(state["today"]),
+        choices=state.get("document_choices"),
+    )
+
+
 def memory_checkpointer() -> InMemorySaver:
     """LangGraph's in-memory saver, where a paused assessment waits for review when there's no
     database (the API's Postgres saver otherwise, vouch.database)."""
@@ -1668,6 +1694,7 @@ def assess_steps(
         "today": (today or date.today()).isoformat(),
         "note": note,
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
+        "document_choices": profile.document_choices(),
     }
     config = thread_config(thread_id, scope)
     yield loaded

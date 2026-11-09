@@ -68,6 +68,14 @@ def allowed_folder(profile: ComplianceProfile, source: EvidenceSourceName) -> Pa
     return allowed.folder
 
 
+def allowed_documents(
+    profile: ComplianceProfile, source: EvidenceSourceName
+) -> tuple[str, ...] | None:
+    """The documents of the source's folder the profile chose; None: the whole folder."""
+    allowed = profile.evidence_sources.get(source)
+    return None if allowed is None else allowed.documents
+
+
 def refusal_step(tool: str, detail: str) -> str:
     """The guard step's sentence for a refused tool call."""
     return f"Refused {tool}: {detail}."

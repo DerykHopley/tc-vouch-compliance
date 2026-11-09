@@ -7,10 +7,13 @@ from typing import Any
 
 import pytest
 from assess_steps import step_texts
+from chosen_documents import CHOSEN, CHOSEN_QUOTE, UNCHOSEN, UNCHOSEN_QUOTE
 
 from vouch import ScriptedChatModel, assess, load_named_profile
 from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.graph import GUARD
+from vouch.paths import FIXTURES_DIR
+from vouch.profile import SAMPLE_LIBRARY
 
 NORDLICHT = load_named_profile("nordlicht")
 TODAY = datetime.date(2026, 11, 4)
@@ -279,3 +282,25 @@ def test_each_document_is_read_once_per_check(tmp_path):
 
     assert isinstance(first, Citation)
     assert isinstance(second, Citation)  # served from the copy read the first time
+
+
+@pytest.mark.parametrize("suffix", ["", ".md"])
+def test_a_citation_of_a_document_the_source_didnt_choose_is_no_document(suffix):
+    folder = FIXTURES_DIR / SAMPLE_LIBRARY / "policies"
+    checker = QuoteChecker({"policies": folder}, today=TODAY, choices={"policies": CHOSEN})
+
+    unchosen = checker.check(CitationClaim(doc_id=UNCHOSEN + suffix, quote=UNCHOSEN_QUOTE))
+    chosen = checker.check(CitationClaim(doc_id="backup-policy" + suffix, quote=CHOSEN_QUOTE))
+
+    assert unchosen == DropReason.NO_DOCUMENT
+    assert isinstance(chosen, Citation) and chosen.doc_id == "backup-policy"
+
+
+def test_a_source_absent_from_the_choices_keeps_its_whole_folder():
+    library = FIXTURES_DIR / SAMPLE_LIBRARY
+    sources = {"policies": library / "policies", "records": library / "records"}
+    checker = QuoteChecker(sources, today=TODAY, choices={"records": ["no-such-record"]})
+
+    checked = checker.check(CitationClaim(doc_id=UNCHOSEN, quote=UNCHOSEN_QUOTE))
+
+    assert isinstance(checked, Citation)

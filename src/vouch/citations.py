@@ -16,7 +16,7 @@ stitched together across rows or paragraphs. It needs at least MIN_QUOTE_WORDS w
 import datetime
 import re
 import unicodedata
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -109,8 +109,17 @@ def occurs(quote: str, text: str) -> bool:
     return re.search(start + re.escape(quote) + end, text) is not None
 
 
-def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Document | DropReason:
-    found = [(s, p) for s, f in sources.items() if (p := document_path(f, doc_id))]
+def _load(
+    doc_id: str,
+    sources: dict[str, Path],
+    choices: Mapping[str, Collection[str]],
+    today: datetime.date,
+) -> _Document | DropReason:
+    found = [
+        (s, p)
+        for s, f in sources.items()
+        if (p := document_path(f, doc_id)) and (s not in choices or p.stem in choices[s])
+    ]
     if not found:
         return DropReason.NO_DOCUMENT
     if len(found) > 1:  # which one the judge read can't be told, so neither is taken
@@ -131,7 +140,9 @@ def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Docum
 
 class QuoteChecker:
     """Checks citations against the documents in these sources' folders (source name to
-    folder), reading each document once; staleness is judged on `today`. With `seen_as`, each
+    folder), reading each document once; staleness is judged on `today`. A source in `choices`
+    (source name to chosen ids, EvidenceSource.documents) has only those documents: a citation
+    of any other is NO_DOCUMENT. With `seen_as`, each
     block of a document is checked as the quote's writer saw it (the chat's model sees
     documents with secrets and personal data removed: vouch.redaction)."""
 
@@ -140,9 +151,11 @@ class QuoteChecker:
         sources: Mapping[str, str | Path],
         *,
         today: datetime.date,
+        choices: Mapping[str, Collection[str]] | None = None,
         seen_as: Callable[[str], str] | None = None,
     ):
         self._sources = {name: Path(folder) for name, folder in sources.items()}
+        self._choices = dict(choices or {})
         self._today = today
         self._seen_as = seen_as
         self._documents: dict[str, _Document | DropReason] = {}
@@ -150,7 +163,7 @@ class QuoteChecker:
     def _document(self, doc_id: str) -> _Document | DropReason:
         key = doc_id.removesuffix(".md")
         if key not in self._documents:
-            document = _load(key, self._sources, self._today)
+            document = _load(key, self._sources, self._choices, self._today)
             if self._seen_as is not None and isinstance(document, _Document):
                 seen = tuple((h, normalise(self._seen_as(b))) for h, b in document.blocks)
                 document = replace(document, blocks=seen)

@@ -121,8 +121,8 @@ class _Included:
 
 
 def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
-    """Every document of every evidence source the profile allows, whole, with its source, kind
-    and staleness on `today`. ProfilePassRefused for a source whose folder can't be read
+    """Every document of every evidence source the profile allows (only the chosen ones, where
+    it chose: EvidenceSource.documents), whole, with its source, kind and staleness on `today`. ProfilePassRefused for a source whose folder can't be read
     (missing, unreadable, or `escaped` since the profile loaded)."""
 
     def refused(why: str) -> ProfilePassRefused:
@@ -140,6 +140,8 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
                 raise FileNotFoundError(folder)
             for path in sorted(folder.glob("*.md")):
                 if document_path(folder, path.stem) is None:  # a link out of the folder
+                    continue
+                if allowed.documents is not None and path.stem not in allowed.documents:
                     continue
                 data, body = split_front_matter(path.read_text(encoding="utf-8"))
                 facts = facts_of(data, source, path.stem, today)
@@ -367,7 +369,8 @@ def run_profile_pass(
         )
     count()
     folders: dict[str, str] = {name: str(s.folder) for name, s in profile.evidence_sources.items()}
-    checker = QuoteChecker(folders, today=today)
+    choices = profile.document_choices()
+    checker = QuoteChecker(folders, today=today, choices=choices)
     by_id = {i.control.id: i for i in included}
     paragraphs = [p["text"] for d in documents for p in passages_of(d["doc_id"], d["text"])]
 
@@ -413,6 +416,7 @@ def run_profile_pass(
         "today": today.isoformat(),
         "note": "",
         "document_folders": folders,
+        "document_choices": choices,
         "claims": {},
     }
     log.info("a profile pass of %d controls used %s", len(included), usage)

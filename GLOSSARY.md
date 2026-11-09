@@ -101,7 +101,7 @@ A company document, or a passage in one, that shows a control is met.
 _Avoid_: Proof, artefact, attachment
 
 **Evidence source**:
-A place the agent may search for evidence, allowed by the compliance profile, such as the policy folder or Patch.
+A place the agent may search for evidence, allowed by the compliance profile, such as the policy folder or Patch. A source may be limited to chosen documents of its folder (a company set up in the app chooses from the sample library); then no other document of that folder exists for the profile.
 _Avoid_: Connector, integration, data source
 
 **Documented evidence**:

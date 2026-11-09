@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 
+from vouch.documents import document_path
 from vouch.isa import (
     SOURCE,
     BaseFramework,
@@ -116,6 +117,25 @@ class EvidenceSource(_Strict):
         if not found:
             raise ValueError(f"folder {resolved} does not exist")
         return resolved
+
+    # The documents of the folder the profile may use (ids: file names without .md); None, the
+    # whole folder. A company set up in the app chooses from the sample library (#384).
+    documents: tuple[str, ...] | None = Field(default=None, min_length=1)
+
+    @field_validator("documents", mode="after")
+    @classmethod
+    def _documents_in_folder(
+        cls, documents: tuple[str, ...] | None, info: ValidationInfo
+    ) -> tuple[str, ...] | None:
+        folder = info.data.get("folder")
+        if documents is None or folder is None:  # no choice, or the folder already refused
+            return documents
+        for index, doc_id in enumerate(documents):
+            if doc_id in documents[:index]:
+                raise ValueError(f"{doc_id} is named twice")
+            if document_path(folder, doc_id) is None:
+                raise ValueError(f"no document {doc_id} in the folder {folder.name}")
+        return documents
 
 
 class CountryOverlayRequirement(_Strict):
@@ -217,6 +237,15 @@ class ComplianceProfile(_Strict):
                     f"doesn't apply at {self.protection_level} protection"
                 )
         return self
+
+    def document_choices(self) -> dict[str, list[str]]:
+        """Each source limited to chosen documents, to its chosen ids; a source using its whole
+        folder is absent. An assessment keeps it in its state (`document_choices`)."""
+        return {
+            name: list(source.documents)
+            for name, source in self.evidence_sources.items()
+            if source.documents is not None
+        }
 
     def isa_edition(self) -> BaseFramework:
         """The base framework in the ISA edition of this profile's answer language (English

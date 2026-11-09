@@ -76,6 +76,7 @@ from vouch.graph import (
 )
 from vouch.guards import (
     DATA_RULE,
+    allowed_documents,
     allowed_folder,
     as_data,
     flagged_steps,
@@ -684,7 +685,8 @@ class ChatTools:
             if not isinstance(folder, Path) or tool.run is None:
                 continue
             allowed += 1
-            result = tool.run({"query": query}, folder)
+            documents = allowed_documents(self.profile, tool.source)
+            result = tool.run({"query": query}, folder, documents)
             if isinstance(result, list):
                 passages = with_facts(result, tool.source, folder, self.today)
                 found += passages
@@ -720,11 +722,17 @@ class ChatTools:
 
     @cached_property
     def _quotes(self) -> QuoteChecker:
-        """The documents of every source the profile allows, as the model saw them: redacted."""
+        """The documents of every source the profile allows (only the chosen ones, where it
+        chose), as the model saw them: redacted."""
         folders: dict[str, str | Path] = {
             name: source.folder for name, source in self.profile.evidence_sources.items()
         }
-        return QuoteChecker(folders, today=self.today, seen_as=lambda text: redact(text)[0])
+        return QuoteChecker(
+            folders,
+            today=self.today,
+            choices=self.profile.document_choices(),
+            seen_as=lambda text: redact(text)[0],
+        )
 
     def check_quote(self, quote: str, doc_id: str | None) -> str | None:
         """A quote in a chat answer (vouch.chat_citations): None when it is in the document it
