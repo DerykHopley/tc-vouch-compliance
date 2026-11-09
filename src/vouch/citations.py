@@ -23,7 +23,15 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from vouch.documents import EvidenceKind, Section, document_path, facts_of, sections
+from vouch.documents import (
+    EvidenceKind,
+    Section,
+    choice_in,
+    document_path,
+    facts_of,
+    is_chosen,
+    sections,
+)
 from vouch.front_matter import split_front_matter
 
 MIN_QUOTE_WORDS = 4
@@ -118,7 +126,7 @@ def _load(
     found = [
         (s, p)
         for s, f in sources.items()
-        if (p := document_path(f, doc_id)) and (s not in choices or p.stem in choices[s])
+        if (p := document_path(f, doc_id)) and is_chosen(p.stem, choice_in(choices, s))
     ]
     if not found:
         return DropReason.NO_DOCUMENT

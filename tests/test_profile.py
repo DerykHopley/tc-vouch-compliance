@@ -356,6 +356,10 @@ BAD_CHOICES = {
         ["backup-policy", "backup-policy"],
         "evidence_sources.policies.documents: backup-policy is named twice",
     ),
+    "repeated id, once with .md": (
+        ["backup-policy", "backup-policy.md"],
+        "evidence_sources.policies.documents: backup-policy is named twice",
+    ),
     "missing document": (
         ["backup-policy", "no-such-policy"],
         "evidence_sources.policies.documents: no document no-such-policy in the folder",
@@ -387,3 +391,29 @@ def test_a_chosen_document_linking_out_of_its_folder_fails(tmp_path):
 
     with pytest.raises(ProfileError, match=r"documents: no document outside in the folder"):
         load_profile(path)
+
+
+def test_a_chosen_id_given_with_md_is_kept_without_it(tmp_path):
+    profile = load_profile(chosen_profile_path(tmp_path, [f"{d}.md" for d in CHOSEN]))
+
+    assert profile.evidence_sources["policies"].documents == CHOSEN
+
+
+def test_choosing_documents_of_a_folder_that_has_escaped_says_the_folder_is_refused(
+    tmp_path, monkeypatch
+):
+    """Only a folder swapped for a link between the two checks gets here, so both modules'
+    `escaped` stand in for it."""
+    from vouch import documents, profile
+
+    monkeypatch.setattr(documents, "escaped", lambda folder: True)
+    monkeypatch.setattr(profile, "escaped", lambda folder: True, raising=False)
+    path = chosen_profile_path(tmp_path)
+
+    with pytest.raises(ProfileError) as raised:
+        load_profile(path)
+
+    assert (
+        "evidence_sources.policies.documents: the folder policies now points outside its "
+        "allowed folder" in str(raised.value)
+    )

@@ -34,15 +34,16 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.documents import (
     DOCUMENTED,
+    DocumentChoice,
     DocumentFacts,
     EvidenceKind,
+    choice_in,
     document_path,
     facts_of,
     read_facts,
 )
 from vouch.guards import (
     DATA_RULE,
-    allowed_documents,
     allowed_folder,
     as_data,
     draft_as_data,
@@ -225,7 +226,7 @@ SEARCH_RECORDS_TOOL = _search_tool_spec(
 
 
 def _search(
-    args: dict[str, Any], folder: Path, documents: tuple[str, ...] | None
+    args: dict[str, Any], folder: Path, documents: DocumentChoice
 ) -> list[Passage] | ErrorResult:
     # Looked up when called, so a test can replace vouch.graph.search_folder.
     return search_folder(
@@ -282,12 +283,9 @@ VULNERABILITY_STATUS_TOOL = {
 
 
 def _vulnerability_status(
-    _args: dict[str, Any], folder: Path, documents: tuple[str, ...] | None
+    _args: dict[str, Any], folder: Path, documents: DocumentChoice
 ) -> list[Passage] | ErrorResult:
-    result = vulnerability_status(folder)
-    if isinstance(result, list) and documents is not None:
-        return [p for p in result if p["doc_id"] in documents]
-    return result
+    return vulnerability_status(folder, documents)
 
 
 def _for_query(args: dict[str, Any]) -> str:
@@ -305,9 +303,7 @@ class EvidenceTool:
     source: EvidenceSourceName
     label: str  # in step text, never the tool's name: "the policies"
     spec: dict[str, Any] | None = None  # None: not built yet, so never offered or run
-    run: (
-        Callable[[dict[str, Any], Path, tuple[str, ...] | None], list[Passage] | ErrorResult] | None
-    ) = None
+    run: Callable[[dict[str, Any], Path, DocumentChoice], list[Passage] | ErrorResult] | None = None
 
 
 # Every evidence-source tool, by the name the model calls. A new source tool goes here, so the
@@ -1002,7 +998,9 @@ def build_graph(
                 content = json.dumps(ErrorResult(error=EVIDENCE_PENDING, detail=detail))
                 said.append(f"{detail}, so it wasn't asked again.")
             else:
-                result = tool.run(args, folder, allowed_documents(profile, tool.source))
+                # The state's choice, not the live profile's: the quote check reads the same one.
+                documents = choice_in(state.get("document_choices"), tool.source)
+                result = tool.run(args, folder, documents)
                 if isinstance(result, list):
                     result = with_facts(result, tool.source, folder, today)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)

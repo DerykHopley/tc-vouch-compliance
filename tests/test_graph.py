@@ -463,13 +463,50 @@ def test_a_state_saved_before_document_choices_is_quote_checked_against_the_whol
     assert quote_checker(limited).check(claim) == DropReason.NO_DOCUMENT
 
 
-def test_patchs_status_keeps_only_the_chosen_documents_of_its_folder():
+def test_patchs_status_chosen_without_its_response_is_pending_and_patch_is_never_read(
+    monkeypatch,
+):
+    from vouch import patch
+
+    def unread(folder):
+        raise AssertionError("Patch's response was read though the choice leaves it out")
+
     run = EVIDENCE_TOOLS["vulnerability_status"].run
     assert run is not None
     folder = NORDLICHT.evidence_sources["patch"].folder
-
     whole = run({}, folder, None)
-    chosen = run({}, folder, ("another-document",))
+    monkeypatch.setattr(patch, "read_response", unread)
+
+    left_out = run({}, folder, ("another-document",))
 
     assert isinstance(whole, list) and whole
-    assert chosen == []
+    assert isinstance(left_out, dict)
+    assert left_out["error"] == patch.EVIDENCE_PENDING
+    assert left_out["detail"] == f"{patch.UNREADABLE} (there is no recorded response)"
+
+
+def test_a_continued_assessment_searches_the_documents_its_state_chose_not_the_live_profiles(
+    tmp_path, monkeypatch
+):
+    """The state's choice (kept from when the assessment started) is what the quote check
+    uses, so the search uses it too, even when the live profile now chooses otherwise."""
+    from vouch.profile import ComplianceProfile
+
+    monkeypatch.setattr(
+        ComplianceProfile, "document_choices", lambda self: {"policies": [UNCHOSEN]}
+    )
+
+    _, state = chosen_run(tmp_path, [])
+
+    assert state["document_choices"] == {"policies": [UNCHOSEN]}
+    assert {p["doc_id"] for p in state["evidence"] if p["source"] == "policies"} == {UNCHOSEN}
+
+
+def test_a_state_without_document_choices_searches_the_whole_folders(tmp_path, monkeypatch):
+    from vouch.profile import ComplianceProfile
+
+    monkeypatch.setattr(ComplianceProfile, "document_choices", lambda self: {})
+
+    _, state = chosen_run(tmp_path, [])
+
+    assert UNCHOSEN in {p["doc_id"] for p in state["evidence"]}

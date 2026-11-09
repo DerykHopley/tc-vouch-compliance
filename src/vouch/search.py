@@ -2,11 +2,10 @@
 (search_policies) or the records' (search_records)."""
 
 import re
-from collections.abc import Collection
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from vouch.documents import escaped, paragraphs
+from vouch.documents import DocumentChoice, escaped, is_chosen, paragraphs
 from vouch.front_matter import split_front_matter
 
 MAX_QUERY_CHARS = 200
@@ -35,7 +34,7 @@ def search_folder(
     limit: int = DEFAULT_LIMIT,
     *,
     folder: Path,
-    documents: Collection[str] | None = None,
+    documents: DocumentChoice = None,
 ) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
@@ -52,7 +51,7 @@ def search_folder(
         return folder_escaped()
     try:
         files = _document_files(folder)
-        chosen = [f for f in files if documents is None or f.stem in documents]
+        chosen = [f for f in files if is_chosen(f.stem, documents)]
         passages = [p for doc in chosen for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)

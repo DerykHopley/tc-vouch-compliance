@@ -25,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from vouch.documents import document_path
+from vouch.documents import SUFFIX, DocumentChoice, document_path, escaped, is_chosen
 from vouch.isa import (
     SOURCE,
     BaseFramework,
@@ -120,22 +120,32 @@ class EvidenceSource(_Strict):
 
     # The documents of the folder the profile may use (ids: file names without .md); None, the
     # whole folder. A company set up in the app chooses from the sample library (#384).
-    documents: tuple[str, ...] | None = Field(default=None, min_length=1)
+    # An id given with `.md` is kept without it.
+    documents: DocumentChoice = Field(default=None, min_length=1)
 
     @field_validator("documents", mode="after")
     @classmethod
     def _documents_in_folder(
-        cls, documents: tuple[str, ...] | None, info: ValidationInfo
-    ) -> tuple[str, ...] | None:
+        cls, documents: DocumentChoice, info: ValidationInfo
+    ) -> DocumentChoice:
         folder = info.data.get("folder")
         if documents is None or folder is None:  # no choice, or the folder already refused
             return documents
-        for index, doc_id in enumerate(documents):
-            if doc_id in documents[:index]:
+        if escaped(folder):  # swapped for a link since its own check: none of it may be read
+            raise ValueError(f"the folder {folder.name} now points outside its allowed folder")
+        ids = tuple(doc_id.removesuffix(SUFFIX) for doc_id in documents)
+        seen: set[str] = set()
+        for doc_id in ids:
+            if doc_id in seen:
                 raise ValueError(f"{doc_id} is named twice")
+            seen.add(doc_id)
             if document_path(folder, doc_id) is None:
                 raise ValueError(f"no document {doc_id} in the folder {folder.name}")
-        return documents
+        return ids
+
+    def uses(self, doc_id: str) -> bool:
+        """Whether the profile may use this document of the folder (every one, with no choice)."""
+        return is_chosen(doc_id, self.documents)
 
 
 class CountryOverlayRequirement(_Strict):

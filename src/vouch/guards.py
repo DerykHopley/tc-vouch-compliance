@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from vouch.documents import DocumentChoice
 from vouch.profile import ComplianceProfile, EvidenceSourceName
 from vouch.search import ErrorResult, Passage
 
@@ -68,9 +69,7 @@ def allowed_folder(profile: ComplianceProfile, source: EvidenceSourceName) -> Pa
     return allowed.folder
 
 
-def allowed_documents(
-    profile: ComplianceProfile, source: EvidenceSourceName
-) -> tuple[str, ...] | None:
+def allowed_documents(profile: ComplianceProfile, source: EvidenceSourceName) -> DocumentChoice:
     """The documents of the source's folder the profile chose; None: the whole folder."""
     allowed = profile.evidence_sources.get(source)
     return None if allowed is None else allowed.documents
