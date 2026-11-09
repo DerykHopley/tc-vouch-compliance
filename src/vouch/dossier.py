@@ -5,6 +5,7 @@ Readiness counts accepted verdicts only (GLOSSARY: Reviewed verdict, Readiness):
 rejected assessment shows on its control's card, but not in the counts.
 """
 
+import itertools
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
 from typing import Literal, TypedDict, get_args
@@ -193,31 +194,39 @@ def _next_step(cards: list[ControlCard]) -> NextStep | None:
 
 
 def _quotes(controls: list[IsaControl], latest: Mapping[str, Assessment]) -> list[Quote]:
-    """Each checked quote once, control by control, up to QUOTES_SHOWN; none from a rejected
-    assessment, whose evidence the lead turned down."""
-    quotes: list[Quote] = []
-    seen: set[tuple[str, str]] = set()
+    """Each checked quote once, up to QUOTES_SHOWN, spread across the assessed controls: one
+    from each in control order, then a second from each, and so on (#147), so the first
+    control's evidence doesn't fill them all. None from a rejected assessment, whose evidence
+    the lead turned down."""
+    per_control: list[list[Quote]] = []
     for control in controls:
         assessment = latest.get(control.id)
         if assessment is None or assessment.status == "rejected":
             continue
-        for requirement in assessment.requirements:
-            for citation in requirement.citations:
-                if len(quotes) == QUOTES_SHOWN:
-                    return quotes
-                if (citation.doc_id, citation.quote) in seen:
-                    continue
-                seen.add((citation.doc_id, citation.quote))
-                quotes.append(
-                    {
-                        "control_id": control.id,
-                        "requirement_id": requirement.id,
-                        "doc_id": citation.doc_id,
-                        "version": citation.version,
-                        "section": citation.section,
-                        "quote": citation.quote,
-                        "kind": citation.kind,
-                        "stale": citation.stale,
-                    }
-                )
+        per_control.append(
+            [
+                {
+                    "control_id": control.id,
+                    "requirement_id": requirement.id,
+                    "doc_id": citation.doc_id,
+                    "version": citation.version,
+                    "section": citation.section,
+                    "quote": citation.quote,
+                    "kind": citation.kind,
+                    "stale": citation.stale,
+                }
+                for requirement in assessment.requirements
+                for citation in requirement.citations
+            ]
+        )
+    quotes: list[Quote] = []
+    seen: set[tuple[str, str]] = set()
+    for round_ in itertools.zip_longest(*per_control):  # each control's 1st, then 2nd, ...
+        for found in round_:
+            if found is None or (found["doc_id"], found["quote"]) in seen:
+                continue
+            seen.add((found["doc_id"], found["quote"]))
+            quotes.append(found)
+            if len(quotes) == QUOTES_SHOWN:
+                return quotes
     return quotes

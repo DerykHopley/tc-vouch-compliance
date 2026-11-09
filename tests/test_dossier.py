@@ -290,6 +290,53 @@ def test_quotes_come_from_assessed_controls_in_control_order_each_once_and_cappe
     }
 
 
+def test_quotes_are_spread_across_assessed_controls_before_any_gives_a_second():
+    # #147: the first assessed control's quotes once filled all QUOTES_SHOWN places.
+    ids = ("1.1.1", "4.1.2", "5.2.9")
+    latest = {
+        cid: seeded(
+            cid,
+            "evidenced",
+            "accepted",
+            citations=tuple(quote(cid, f"{cid} rule {i}.") for i in range(5)),
+        )
+        for cid in ids
+    }
+
+    quotes = overview(NORDLICHT, CONTROLS, latest)["quotes"]
+
+    assert [q["quote"] for q in quotes] == [
+        f"{cid} rule {i}." for i in range(QUOTES_SHOWN // len(ids)) for cid in ids
+    ]
+
+
+def test_spread_quotes_stay_capped_each_once_and_leave_out_rejected_controls():
+    shared = quote("isms", "Shared words.")
+    latest = {
+        "1.1.1": seeded("1.1.1", "evidenced", "accepted", citations=(shared, quote("a", "A1."))),
+        "4.1.2": seeded("4.1.2", "evidenced", "accepted", citations=(shared, quote("b", "B1."))),
+        "5.2.9": seeded(
+            "5.2.9",
+            "evidenced",
+            "rejected",
+            citations=tuple(quote("c", f"C{i}.") for i in range(9)),
+        ),
+        "5.1.1": seeded(
+            "5.1.1",
+            "evidenced",
+            "accepted",
+            citations=tuple(quote("d", f"D{i}.") for i in range(9)),
+        ),
+    }
+
+    texts = [q["quote"] for q in overview(NORDLICHT, CONTROLS, latest)["quotes"]]
+
+    assert len(texts) == QUOTES_SHOWN
+    assert len(set(texts)) == len(texts)
+    assert not any(t.startswith("C") for t in texts)
+    assert {"Shared words.", "A1.", "B1.", "D0."} <= set(texts)
+
+
 # --- Through the API, on #38's memory: in memory, and on Postgres in CI's database job ---------
 
 
