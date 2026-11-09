@@ -31,7 +31,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command, StateSnapshot, interrupt
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
-from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
+from vouch.citations import Citation, CitationClaim, DropReason, LeadStatement, QuoteChecker
 from vouch.documents import (
     DOCUMENTED,
     DocumentFacts,
@@ -57,6 +57,7 @@ from vouch.language import (
     kept_in_other_language,
     language_name,
     language_refusal,
+    lead_statement_label,
     mismatch,
     written_in_not,
 )
@@ -86,7 +87,7 @@ SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m4-answer-language-2"  # with main's partly evidenced remediation (#212)
+PROMPT_VERSION = "m7-lead-statements-1"  # the lead's statements as evidence (#422)
 """The version of the prompts below: change it whenever a prompt changes, so a run can say
 which prompts drafted it (the developer page, #34; the audit trail, M2)."""
 
@@ -124,6 +125,23 @@ NOT_DRAFTED = "not drafted"  # its "missing"
 NO_OWNER = "no owner suggested"  # its owner role
 DEFAULT_DUE_DAYS = 90  # its due date, counted from today
 MAX_DUE_DAYS = 365
+
+LEAD_SOURCE = "lead"
+"""The source a lead statement's passage gives (#422): the lead's answer, not a document."""
+LEAD_RULE = (
+    f"Passages from {LEAD_SOURCE} are the compliance lead's own statements, answers to open "
+    "questions on this control, each headed by the question it answers: cite one only where "
+    "no document shows the requirement, quoting the answer; a statement shows a requirement "
+    "partly at most."
+)
+"""What the prompts say of the lead's statements, only when there are some (#422)."""
+
+
+def lead_rule(statements: object) -> str:
+    """LEAD_RULE to follow a system prompt's rules when there are lead statements; nothing when
+    there are none, so such a prompt is as it was before #422."""
+    return f" {LEAD_RULE}" if statements else ""
+
 
 log = logging.getLogger(__name__)
 
@@ -235,6 +253,34 @@ class EvidencePassage(Passage):
     source: str
     kind: EvidenceKind
     stale: bool
+
+
+def statement_passages(statements: Iterable[LeadStatement], language: str) -> list[EvidencePassage]:
+    """Each lead statement as one evidence passage (#422): its "Q<id>", headed by the label in
+    the answer `language` and the question it answers, the answer as its text (only that is
+    quoted), from LEAD_SOURCE, documented, never stale."""
+    label = lead_statement_label(language)
+    return [
+        EvidencePassage(
+            doc_id=s.doc_id,
+            heading=f"{label}: {s.question}",
+            text=s.answer,
+            source=LEAD_SOURCE,
+            kind=DOCUMENTED,
+            stale=False,
+        )
+        for s in statements
+    ]
+
+
+def statements_text(passages: list[EvidencePassage]) -> str:
+    """The lead's statements as data for a prompt, after what it lists; nothing without any."""
+    if not passages:
+        return ""
+    return (
+        "\n\nThe compliance lead's statements on this control, answers to open questions:\n"
+        f"{as_data(passages)}"
+    )
 
 
 def with_facts(
@@ -587,13 +633,19 @@ class AssessState(TypedDict, total=False):
     profile_id: str
     evidence: Annotated[list[EvidencePassage], operator.add]
     warnings: Annotated[list[str], operator.add]
-    guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
+    # The last step's guard sentences: the tools step's refusals and flagged passages, or the
+    # apply_overlays step's flagged lead statements (#422).
+    guards: list[str]
     searched: list[str]  # the last tools step's searches that ran, one sentence each
     # The tools pending in this run, by label: EVIDENCE_PENDING or TIMED_OUT. An update of ""
     # clears one (it answered later).
     pending: Annotated[dict[str, str], _merge_pending]
     pending_said: list[str]  # the last tools step's sentences about pending sources
     pending_ids: list[str]  # requirements left not evidenced while a source was pending
+    # Judged on the lead's statements though no source could be read (#422): that reason, and the
+    # requirements citing no statement, left not evidenced with it and no remediation item.
+    unread_reason: str | None
+    unread_ids: list[str]
     unreadable: list[str]  # the last tools step's sources that couldn't be read, by label
     searches_run: Annotated[int, operator.add]
     searches_refused: Annotated[int, operator.add]
@@ -625,6 +677,7 @@ class AssessState(TypedDict, total=False):
     model: str  # the model that drafted it, and its prompt version
     prompt_version: str
     answer_language: str  # the profile's, ISO 639-1
+    lead_statements: list[LeadStatement]  # the lead's on this control (#422)
 
 
 def format_requirements(requirements: Iterable[Requirement]) -> str:
@@ -667,6 +720,7 @@ def _prompt(
     control_requirements: ControlRequirements,
     profile: ComplianceProfile,
     note: str = "",
+    statements: list[EvidencePassage] | None = None,
 ) -> list[AnyMessage]:
     offered = [t["function"]["name"] for t in _offered_tools(profile)]
     search = (
@@ -681,10 +735,12 @@ def _prompt(
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
             f"{language_name(profile.answer_language)}; quote a document only unchanged, in its "
             f"own language. Say what the evidence shows; {never_claim(profile)} {DATA_RULE}"
+            f"{lead_rule(statements)}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
             f"Requirements:\n{format_requirements(control_requirements.applicable)}"
+            f"{statements_text(statements or [])}"
             f"{_note_text(note)}"
         ),
     ]
@@ -698,12 +754,18 @@ def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage
     )
 
 
+def _statements_of(state: AssessState, profile: ComplianceProfile) -> list[EvidencePassage]:
+    """The lead's statements on the control, as the prompts list them (#422)."""
+    return statement_passages(state.get("lead_statements", []), profile.answer_language)
+
+
 def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMessage]:
     control = state["control"]
     pending = [
         f"{label} could not be read, so its evidence is pending" for label in state["pending"]
     ]
-    evidence = as_data(state["evidence"], pending) if state["evidence"] or pending else "(none)"
+    passages = [*state["evidence"], *_statements_of(state, profile)]
+    evidence = as_data(passages, pending) if passages or pending else "(none)"
     return [
         SystemMessage(
             "Judge each requirement listed from the evidence alone, not the draft answer. "
@@ -720,6 +782,7 @@ def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMes
             "evidence. Stale evidence shows a requirement partly at most. Write each reason in "
             f"{language_name(profile.answer_language)}; copy each quote unchanged, in its "
             f"document's language, never translated. {never_claim(profile)} {DATA_RULE}"
+            f"{lead_rule(state.get('lead_statements'))}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -842,6 +905,30 @@ def apply_overrides(
     return reviewed, kept
 
 
+UNREAD_REASONS = frozenset({NO_SOURCE, NO_ALLOWED_SEARCH})
+"""The reasons no allowed source could be read, which a requirement citing no lead statement
+keeps when the control is judged on the statements alone (#422)."""
+
+
+def _kept_unread(
+    requirements: list[RequirementVerdict], reason: str | None
+) -> tuple[list[RequirementVerdict], list[str]]:
+    """With no source read (`reason`, one of UNREAD_REASONS), each applicable requirement that
+    cites no lead statement is not evidenced for that reason, its citations gone, and the ids of
+    those requirements: the source may hold what they lack, so no remediation item is drafted
+    for them, as for pending ones (#422). Nothing changes without a reason."""
+    if reason is None:
+        return requirements, []
+    kept, ids = [], []
+    for r in requirements:
+        if r.verdict == NOT_APPLICABLE or any(c.lead_statement for c in r.citations):
+            kept.append(r)
+            continue
+        kept.append(replace(r, verdict="not-evidenced", reason=reason, citations=()))
+        ids.append(r.id)
+    return kept, ids
+
+
 def _noted_pending(
     requirements: list[RequirementVerdict], pending: dict[str, str]
 ) -> tuple[list[RequirementVerdict], list[str]]:
@@ -913,8 +1000,10 @@ def _usage_of(message: Any) -> list[dict[str, int]]:
 
 
 def _gathered(state: AssessState) -> list[str]:
-    """The texts of the passages this assessment gathered: search results, records, Patch."""
-    return [p["text"] for p in state.get("evidence", [])]
+    """The texts of the passages this assessment gathered: search results, records, Patch, and
+    the lead's statements (#422)."""
+    statements = [s.answer for s in state.get("lead_statements", [])]
+    return [p["text"] for p in state.get("evidence", [])] + statements
 
 
 def ask_until_clean[T](
@@ -975,10 +1064,13 @@ def build_graph(
         prompt that starts gathering."""
         control = state["control"]
         control_requirements = profile.requirements_for(control)
+        statements = _statements_of(state, profile)
+        prompt = _prompt(control, control_requirements, profile, state.get("note", ""), statements)
         return {
             "control_requirements": control_requirements,
             "overlay_requirements": overlay_requirements_of(control_requirements),
-            "messages": _prompt(control, control_requirements, profile, state.get("note", "")),
+            "messages": prompt,
+            "guards": flagged_steps(statements),  # an instruction-like answer (#422)
         }
 
     def overlay_branch(state: AssessState) -> dict[str, Any]:
@@ -1142,9 +1234,18 @@ def build_graph(
         """
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
-        if reason is not None:  # nothing could be read, so nothing is shown
+        # With the lead's statements there is always something to judge on (#422); where no
+        # source could be read, only what a statement shows counts (check_quotes).
+        if reason is not None and not state.get("lead_statements"):  # nothing read, none shown
             results = judged_requirements(control_requirements, None, reason).results
-            return {"requirements": results, "not_judged": [], "claims": {}, "about_doing": []}
+            return {
+                "requirements": results,
+                "not_judged": [],
+                "claims": {},
+                "about_doing": [],
+                "unread_reason": None,
+            }
+        unread = reason if reason in UNREAD_REASONS else None
 
         def read(judgement: Judgement | None) -> tuple[JudgedRequirements, list[str]]:
             judged = judged_requirements(control_requirements, judgement)
@@ -1168,6 +1269,7 @@ def build_graph(
             "about_doing": judged.about_doing,
             "judge_rejected_word": rejected,
             "usage": usage,
+            "unread_reason": unread,
         }
 
     def check_quotes(state: AssessState) -> dict[str, Any]:
@@ -1178,7 +1280,12 @@ def build_graph(
         judge's rules (`_apply_rules`) cap what the checked citations can show. Each document
         is read once.
         """
-        checker = QuoteChecker(state["document_folders"], today=date.fromisoformat(state["today"]))
+        checker = QuoteChecker(
+            state["document_folders"],
+            today=date.fromisoformat(state["today"]),
+            statements=state.get("lead_statements", []),
+            label=lead_statement_label(profile.answer_language),
+        )
         results, dropped = checked_requirements(
             state["requirements"],
             state.get("claims", {}),
@@ -1186,12 +1293,14 @@ def build_graph(
             state.get("about_doing", []),
             profile.answer_language,
         )
+        results, unread_ids = _kept_unread(results, state.get("unread_reason"))
         results, pending_ids = _noted_pending(results, state["pending"])
         changes = verdict_changes(state["requirements"], results)
         return {
             "requirements": results,
             "dropped_citations": dropped,
             "pending_ids": pending_ids,
+            "unread_ids": unread_ids,
             "verdict_changes": changes,
         }
 
@@ -1199,7 +1308,9 @@ def build_graph(
         """The model drafts one remediation item per requirement not or partly evidenced (#212);
         none of those, no call. A draft claiming an audit result gets the plan asked for again
         once, then an error. Before the interrupt, so it only reads and asks the model."""
-        to_fix = to_remediate(state["requirements"], state["pending_ids"])
+        unread = state.get("unread_ids", [])
+        to_fix = to_remediate(state["requirements"], [*state["pending_ids"], *unread])
+        said_unread = {"unread_ids": unread, "unread_reason": state.get("unread_reason")}
         if not to_fix:
             return {
                 "remediation": [],
@@ -1207,6 +1318,7 @@ def build_graph(
                 "remediate_rejected_word": None,
                 "partly_drafted": 0,
                 "pending_ids": state["pending_ids"],
+                **said_unread,
             }
         today = date.fromisoformat(state["today"])
 
@@ -1233,6 +1345,7 @@ def build_graph(
             "partly_drafted": len(partly - set(not_drafted)),
             "usage": usage,
             "pending_ids": state["pending_ids"],
+            **said_unread,
         }
 
     def review(state: AssessState) -> dict[str, Any]:
@@ -1250,7 +1363,8 @@ def build_graph(
         requirements, overrides = apply_overrides(state["requirements"], findings.overrides)
         today = date.fromisoformat(state["today"])
         overridden = {o.requirement_id for o in overrides}
-        still_pending = [i for i in state["pending_ids"] if i not in overridden]
+        left_out = [*state["pending_ids"], *state.get("unread_ids", [])]
+        still_pending = [i for i in left_out if i not in overridden]
         remediation = _reviewed_remediation(
             requirements, state["remediation"], today, still_pending
         )
@@ -1415,8 +1529,11 @@ class Step:
         if self.node == "remediate":
             drafts, pending = update["remediation"], update.get("pending_ids", [])
             waiting = f"the evidence for {', '.join(pending)} is pending"
-            if not drafts and pending:
-                return f"No remediation item drafted: {waiting}."
+            unread = update.get("unread_ids", [])
+            unread_said = f" None for {', '.join(unread)}: {update.get('unread_reason')}."
+            if not drafts and (pending or unread):
+                text = f"No remediation item drafted: {waiting}." if pending else ""
+                return (text + (unread_said if unread else "")).strip()
             if not drafts:
                 return (
                     "Every requirement that applies is evidenced, so no remediation item was "
@@ -1433,6 +1550,8 @@ class Step:
             )
             if pending:
                 text += f" None for {', '.join(pending)}: {waiting}."
+            if unread:
+                text += unread_said
             word = update.get("remediate_rejected_word")
             if word:
                 text = (
@@ -1519,16 +1638,18 @@ def _apply_rules(
     """The judge's rules on a requirement whose citations are checked (spec #2, ticket #22).
 
     Stale evidence caps it at partly-evidenced, and the reason names each stale document and
-    why. A requirement about doing something (as the judge said) needs implemented evidence to
-    be evidenced; with documented evidence only it is capped too, and the reason says so.
+    why; so does a lead statement cited, whatever else is (#422), the reason naming it. A
+    requirement about doing something (as the judge said) needs implemented evidence to be
+    evidenced; with documented evidence only it is capped too, and the reason says so.
     """
     if requirement.verdict not in SHOWN_VERDICTS:
         return requirement
     stale = {c.doc_id: c.stale_because for c in requirement.citations if c.stale}
+    statements = [c.doc_id for c in requirement.citations if c.lead_statement]
     documented_only = all(c.kind == DOCUMENTED for c in requirement.citations)
     doing_unshown = about_doing and documented_only and requirement.verdict == "evidenced"
     # In the profile's answer language, as the rest of the reason is (#354).
-    note = cap_note(stale, doing_unshown, language)
+    note = cap_note(stale, doing_unshown, language, dict.fromkeys(statements))
     if note is None:
         return requirement
     return replace(requirement, verdict="partly-evidenced", reason=f"{requirement.reason} {note}")
@@ -1619,6 +1740,7 @@ STATE_TYPES: tuple[type, ...] = (
     CitationClaim,
     DropReason,
     DroppedCitation,
+    LeadStatement,
     RemediationItem,
     Review,
     Override,
@@ -1701,6 +1823,7 @@ def assess_steps(
     today: date | None = None,
     thread_id: str | None = None,
     scope: str = "",
+    statements: Iterable[LeadStatement] = (),
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
     Step saying the control was loaded, a Step per node as it finishes (and a guard Step per
@@ -1711,7 +1834,8 @@ def assess_steps(
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
     again; `today` (default: the date now) is what due dates count from and what staleness is
     judged on. `thread_id` (default: a new one) must name a new thread; `scope` says whose
-    thread it is (see `thread_config`).
+    thread it is (see `thread_config`). `statements` are the lead's on this control (#422): the
+    judge may cite them, each showing a requirement partly at most.
 
     The control is assessed as given: a caller picks its ISA edition, normally the profile's
     (`ComplianceProfile.isa_control`)."""
@@ -1737,6 +1861,7 @@ def assess_steps(
         "today": (today or date.today()).isoformat(),
         "note": note,
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
+        "lead_statements": list(statements),
     }
     config = thread_config(thread_id, scope)
     yield loaded

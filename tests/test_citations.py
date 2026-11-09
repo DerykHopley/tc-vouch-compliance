@@ -201,6 +201,7 @@ def test_the_citations_reach_the_assessment_as_plain_json():
             "kind": "documented",
             "stale": False,
             "stale_because": None,
+            "lead_statement": False,
         }
     ]
     assert "sources" not in data

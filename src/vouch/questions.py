@@ -3,8 +3,8 @@
 The lead logs a question they can't answer alone on any control of the profile, assessed or not:
 what is asked, who it is for (`asked_of`) and when it is due; and records its answer once it
 comes. An answer is final: the same answer again writes nothing, another is refused naming the
-kept one. Nothing edits or deletes a question: lead-supplied evidence (slice 10) cites an answer
-by the question's id.
+kept one. Nothing edits or deletes a question: lead-supplied evidence (#422, `lead_statements`)
+cites an answer by the question's id.
 
 The questions are kept per user and profile, each write with its audit entry (`question`,
 `answer`): in Postgres, table vouch_open_questions, in one transaction, an answer under its
@@ -31,6 +31,7 @@ from typing import Annotated, Any, Protocol
 from pydantic import BaseModel, StringConstraints
 
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, now, process_trail
+from vouch.citations import LeadStatement
 from vouch.database import AuditAction, Database
 from vouch.graph import NO_NUL_PATTERN, Assessment
 from vouch.plan import REASSESS_REASONS, ReassessReason, accepted_at
@@ -125,6 +126,18 @@ def shown(question: OpenQuestion, at: datetime) -> dict[str, Any]:
 def since(questions: Iterable[OpenQuestion], fresh_start: datetime | None) -> list[OpenQuestion]:
     """The questions asked at or after the fresh start (all of them when there was none)."""
     return [q for q in questions if fresh_start is None or q.asked_at >= fresh_start]
+
+
+def lead_statements(questions: Iterable[OpenQuestion]) -> list[LeadStatement]:
+    """The answered ones of the questions, as the lead's statements on their controls (#422):
+    lead-supplied evidence, dated by the day each was answered in UTC."""
+    return [
+        LeadStatement(
+            q.id, q.control_id, q.answer, q.answered_at.astimezone(UTC).date(), q.question
+        )
+        for q in questions
+        if q.answer is not None and q.answered_at is not None
+    ]
 
 
 def by_control(questions: Iterable[OpenQuestion], at: datetime) -> dict[str, list[dict[str, Any]]]:
