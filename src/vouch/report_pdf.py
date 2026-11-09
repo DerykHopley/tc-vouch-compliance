@@ -48,20 +48,79 @@ CELL_PADDING = 1  # mm
 CELL_SLACK = 0.5  # mm: a cell's lines are measured this much narrower, for its border
 HEADINGS = FontFace(emphasis="BOLD", fill_color=None)
 
+# The letterhead (#352): docs/design.md's light tokens, as frontend/src/styles/tokens.css holds them
+# (tests/test_report_pdf.py keeps the two the same). A printed page is the light theme.
+INK, MUTED, RULE, BRASS, PAPER = "#1B1D21", "#62656B", "#D0CEC8", "#A8834A", "#E8E7E3"
+HEAD_TOP = 8  # mm: the letterhead's line, from the page's top edge
+FOOT_FROM_BOTTOM = 10  # mm: the footer's line, from the page's bottom edge
+TOP = 24  # mm: where a page's text starts, under the letterhead
+BOTTOM = 18  # mm: where it stops, over the footer
+LETTERHEAD = 7.5  # pt
+STYLE = "rule"  # "rule" (A: a thin brass rule) or "band" (B: a tinted band): the owner's pick
+
 
 class _Sheet(FPDF):
     """An A4 page in DejaVu Sans that draws only the characters the font has."""
 
-    def __init__(self) -> None:
+    def __init__(self, letterhead: tuple[str, str, str] | None = None) -> None:
         super().__init__(orientation="portrait", unit="mm", format="A4")
-        self.set_margins(MARGIN, MARGIN, MARGIN)
-        self.set_auto_page_break(auto=True, margin=MARGIN)
+        self.letterhead = letterhead  # the company, the page words, the date; None: no letterhead
+        top, bottom = (TOP, BOTTOM) if letterhead else (MARGIN, MARGIN)
+        self.set_margins(MARGIN, top, MARGIN)
+        self.set_auto_page_break(auto=True, margin=bottom)
         self.add_font(FAMILY, "", FONTS / "DejaVuSans.ttf")
         self.add_font(FAMILY, "B", FONTS / "DejaVuSans-Bold.ttf")
         regular, bold = self.fonts[FAMILY], self.fonts[f"{FAMILY}B"]
         assert isinstance(regular, TTFFont) and isinstance(bold, TTFFont)
         self._glyphs = set(regular.cmap) & set(bold.cmap)  # drawn in either weight
         self._notes = 0  # the long cells' notes so far, numbered through the document
+
+    def header(self) -> None:
+        """The letterhead on each page: Vouch and the company, on a thin brass rule or a tinted
+        band (STYLE)."""
+        if not self.letterhead:
+            return
+        company = self.letterhead[0]
+        if STYLE == "band":
+            self.set_fill_color(PAPER)
+            self.rect(0, 0, self.w, HEAD_TOP + 8, style="F")
+            self.set_fill_color(BRASS)
+            self.rect(0, HEAD_TOP + 8, self.w, 0.8, style="F")
+        self._letterhead_line(HEAD_TOP, "Vouch", company, bold=True)
+        if STYLE == "rule":
+            self.set_draw_color(BRASS)
+            self.set_line_width(0.5)
+            self.line(self.l_margin, HEAD_TOP + 6, self.w - self.r_margin, HEAD_TOP + 6)
+        self._reset()
+        self.set_xy(self.l_margin, self.t_margin)  # the page's text starts under it
+
+    def footer(self) -> None:
+        """Page x of y on the right, the report's date on the left, over a hairline rule."""
+        if not self.letterhead:
+            return
+        _, page_of, date = self.letterhead
+        y = self.h - FOOT_FROM_BOTTOM
+        self.set_draw_color(RULE)
+        self.set_line_width(0.2)
+        self.line(self.l_margin, y - 1.5, self.w - self.r_margin, y - 1.5)
+        pages = page_of.format(page=self.page_no(), pages=self.str_alias_nb_pages)
+        self._letterhead_line(y, date, pages, bold=False)
+        self._reset()
+
+    def _letterhead_line(self, y: float, left: str, right: str, bold: bool) -> None:
+        width = self.w - self.l_margin - self.r_margin
+        self.set_xy(self.l_margin, y)
+        self.font(LETTERHEAD + (1 if bold else 0), bold)
+        self.set_text_color(INK)
+        self.cell(width / 2, 4, self.drawable(left), align="L")
+        self.font(LETTERHEAD)
+        self.set_text_color(MUTED)
+        self.cell(width / 2, 4, self.drawable(right), align="R")
+
+    def _reset(self) -> None:
+        self.set_text_color(0)
+        self.set_draw_color(0)
+        self.set_line_width(0.2)
 
     def drawable(self, text: object) -> str:
         """The text without the characters the font lacks; line breaks kept."""
@@ -159,7 +218,8 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     (`vouch.report.words_for`): the page's parts in the page's order, an empty list's sentence in
     its place. No model, no database."""
     labels, sentences = words["labels"], words["sentences"]
-    sheet = _Sheet()
+    head = report["head"]
+    sheet = _Sheet((head["company"], sentences["page_of"], f"{labels['date']} {head['date']}"))
     sheet.set_title(sheet.drawable(words["title"]))
     sheet.set_lang(report["head"]["words_language"])
     sheet.set_creator("Vouch")

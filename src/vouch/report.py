@@ -112,6 +112,7 @@ WORDS: dict[str, dict[str, Any]] = {
                 "Drafted by an AI assistant; nothing has been reviewed yet; not an audit result."
             ),
             "and": "and",  # joins the last two names
+            "page_of": "Page {page} of {pages}",  # the PDF's footer (#352)
         },
     },
     "de": {
@@ -187,6 +188,7 @@ WORDS: dict[str, dict[str, Any]] = {
                 "Erstellt von einem KI-Assistenten; noch nichts geprüft; kein Auditergebnis."
             ),
             "and": "und",
+            "page_of": "Seite {page} von {pages}",
         },
     },
 }

@@ -4,14 +4,17 @@ back with pypdf: each page's text, its whitespace collapsed, so a wrapped paragr
 line. The endpoint's own cases are in test_report.py, beside the Markdown export's.
 """
 
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 from test_memory import app_on
 from test_report import (
     built_report,
@@ -21,6 +24,7 @@ from test_report import (
     seed_nordlicht,
     table_rows,
 )
+from test_report import pdf_letterheads as letterheads
 from test_report import pdf_pages as pages
 from test_report import pdf_text as text
 
@@ -314,3 +318,67 @@ def test_a_note_with_a_token_too_long_for_any_column_breaks_only_that_token():
     assert sum(widths) <= sheet.epw + 0.01
     broken = breaks_inside_words(sheet, head, cells, widths)
     assert broken and all(token[:8] in line for line in broken)  # the token's cells, no other
+
+
+# --- The letterhead (#352): on every page, clear of the tables ----------------------------------
+
+
+def long_report(profile_id: str) -> dict[str, Any]:
+    """The profile's report running onto several pages: a long trail, on a landscape page too."""
+    built = alpenwerk_report() if profile_id == "alpenwerk" else built_report()
+    entries = [replace(e, id=n + 1) for n, e in enumerate(fixture_trail(profile_id) * 6)]
+    built["trail"] = built["trail"] | {"entries": [e.to_dict() for e in entries]}
+    return built
+
+
+@pytest.mark.parametrize(
+    ("profile_id", "language", "company", "footer"),
+    [
+        ("nordlicht", "en", "Nordlicht Komponenten GmbH", "Drawn up on 2026-11-06 Page {} of {}"),
+        ("alpenwerk", "de", "Alpenwerk Präzision GmbH", "Erstellt am 2026-11-06 Seite {} von {}"),
+    ],
+)
+def test_every_page_has_the_letterhead_and_page_x_of_y_with_the_date(
+    profile_id, language, company, footer
+):
+    data = report_pdf.pdf(long_report(profile_id), report.words_for(language))
+
+    shown = letterheads(data)
+
+    assert len(shown) >= 3
+    for n, (head, foot) in enumerate(shown, 1):
+        assert head == f"Vouch {company}"
+        assert foot == footer.format(n, len(shown))
+
+
+def test_no_text_falls_in_the_letterhead_or_the_footer_on_any_page():
+    data = report_pdf.pdf(long_report("alpenwerk"), report.words_for("de"))
+    mm = 72 / 25.4
+    for number, page in enumerate(PdfReader(BytesIO(data)).pages, 1):
+        height = float(page.mediabox.height)
+        top, bottom = height - report_pdf.TOP * mm, report_pdf.BOTTOM * mm
+        outside: list[str] = []
+
+        def seen(text, cm, tm, font, size, outside=outside, top=top, bottom=bottom):
+            y = tm[5] * cm[3] + cm[5]
+            if text.strip() and not bottom <= y <= top:
+                outside.append(text)
+
+        page.extract_text(visitor_text=seen)
+        drawn = re.sub(r"\s+", "", "".join(outside))
+        head, foot = letterheads(data)[number - 1]
+        assert drawn == re.sub(r"\s+", "", head + foot), number  # only the letterhead's own
+
+
+def test_the_pdfs_colours_are_the_light_themes_tokens():
+    css = (Path(__file__).resolve().parents[1] / "frontend/src/styles/tokens.css").read_text()
+    light = dict(re.findall(r"--([a-z-]+): (#[0-9A-Fa-f]{6})", css.split("}", 1)[0]))
+    used = {
+        "ink": report_pdf.INK,
+        "muted": report_pdf.MUTED,
+        "rule": report_pdf.RULE,
+        "brass": report_pdf.BRASS,
+        "paper": report_pdf.PAPER,
+    }
+
+    assert {name: light[name] for name in used} == used
