@@ -1,54 +1,28 @@
 """Controls accepted before the three-step review (#373, story 3 of #350): an assessment whose
-stored `Review` was made with the one-shot review reads `before_three_step_review` true, and still
-counts as accepted on the overview and in the report; reading it rewrites nothing.
+stored `Review` was made before the three-step review reads `before_three_step_review` true, and
+still counts as accepted on the overview and in the report; reading it rewrites nothing.
 
 Through the HTTP API on the bundled fake model, in memory: such a review is written into the
-thread's checkpoint as it was kept before #372 (a `Review` without `three_step`), as
-test_remediation's case does. The fake model's 4.1.2 run judges M1 partly evidenced, so it
+thread's checkpoint as it was kept before #372 (a `Review` without `three_step`, reviewing's
+accept_as_before_three_steps). The fake model's 4.1.2 run judges M1 partly evidenced, so it
 drafts one item, for M1.
 """
 
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
-from langgraph.store.memory import InMemoryStore
-from reviewing import accepted, reviewed
+from reviewing import accept_as_before_three_steps, accepted, reviewed, thread_graph
 from test_memory import DEMO_CONTROL, app_on, assess
-
-from vouch import graph
-from vouch.graph import build_graph, thread_config
-from vouch.memory import Memory, process_checkpointer
-from vouch.profile import DEFAULT_PROFILE
 
 users = test_memory.users
 
 
-@dataclass(frozen=True)
-class Review:  # graph.Review as it was before #372, written under its name
-    decision: str
-    note: str
-    overrides: list
-    reviewer_id: str = ""
-    reviewer_name: str = ""
-    reviewed_at: str = ""
-
-
-Review.__module__, Review.__qualname__ = graph.Review.__module__, "Review"
-
-
-def _graph_and_config(user: dict[str, str], thread_id: str) -> tuple[Any, dict[str, Any]]:
-    scope = Memory(InMemoryStore(), user["X-Test-User"], DEFAULT_PROFILE).scope
-    return build_graph(None, checkpointer=process_checkpointer()), thread_config(thread_id, scope)
-
-
 def accepted_before(client: TestClient, user: dict[str, str]) -> str:
-    """A 4.1.2 assessment accepted with the one-shot review, as kept before #372: its thread."""
+    """A 4.1.2 assessment accepted before the three-step review: its thread."""
     thread_id = assess(client, user)
-    built, config = _graph_and_config(user, thread_id)
-    built.update_state(config, {"review": Review("accept", "Accepted before.", [])}, "review")
+    accept_as_before_three_steps(user, thread_id)
     return thread_id
 
 
@@ -98,7 +72,7 @@ def test_it_counts_as_accepted_on_the_overview_and_in_the_report_and_reading_wri
     alice, _ = users
     with TestClient(app_on(None)) as client:
         thread_id = accepted_before(client, alice)
-        built, config = _graph_and_config(alice, thread_id)
+        built, config = thread_graph(alice, thread_id)
 
         def kept() -> tuple[Any, ...]:
             state = built.get_state(config)

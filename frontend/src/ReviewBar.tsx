@@ -69,7 +69,7 @@ type ReviewBarProps = {
   threadId: string
   /** The recorded decision, on a reviewed control. */
   review: Review | null | undefined
-  /** Reviewed with the one-shot review kept before the three steps (#373): an accepted one is marked so. */
+  /** Reviewed before the three-step review (#373): an accepted one is marked so. */
   beforeThreeStep?: boolean
   /** The step a proposed control's review waits at (`review.ts`'s `reviewStep`). */
   step: ReviewStep | null

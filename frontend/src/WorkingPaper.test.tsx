@@ -658,7 +658,7 @@ describe('a reviewed control', () => {
   it.each([
     ['accepted in the three steps', { ...ACCEPTED_BEFORE, before_three_step_review: false }],
     ['rejected', { ...REJECTED, before_three_step_review: false }],
-    ['rejected with the one-shot review', { ...REJECTED, before_three_step_review: true }],
+    ['rejected before the three-step review',{ ...REJECTED, before_three_step_review: true }],
   ])('shows no mark on a control %s', (_, assessment) => {
     review({ assessment })
     expect(within(bar()).queryByText(MARK)).toBeNull()
