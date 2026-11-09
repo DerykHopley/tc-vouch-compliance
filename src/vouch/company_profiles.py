@@ -13,6 +13,10 @@ run, gone on restart), as the remediation decisions are.
 
 Its id comes from the company name, made free of every profile folder's name and every stored
 id by `-2`, `-3`, ..., so a demo can be run again under the same name.
+
+A developer may remove one (#418): its row is kept, marked removed (by whom and when), so it is
+never read back, and its id is never used again: the audit trail, the threads, the remediation
+items and the Goal stay under that id, and a new company under it would show them.
 """
 
 import json
@@ -185,12 +189,20 @@ class CompanyProfiles(Protocol):
         """The stored company profile `profile_id`; None when there's none."""
         ...
 
+    def remove(self, profile_id: str, removed_by: str) -> bool:
+        """Mark the company `profile_id` removed, by whom and when: it is no longer in `all` or
+        `one`, and its id stays taken. False when no company of that id is there (none, or
+        already removed), so two removes at once mark it once."""
+        ...
+
 
 class ProcessCompanyProfiles:
     """Company profiles without a database: in this process, gone on restart."""
 
     def __init__(self) -> None:
         self._rows: dict[str, StoredProfile] = {}
+        self._removed: set[str] = set()
+        """Each removed company's id. Its row stays in _rows, its id taken."""
         self._guard = threading.Lock()
 
     def create(
@@ -203,11 +215,18 @@ class ProcessCompanyProfiles:
 
     def all(self) -> list[StoredProfile]:
         with self._guard:
-            return list(self._rows.values())
+            return [row for row in self._rows.values() if row.id not in self._removed]
 
     def one(self, profile_id: str) -> StoredProfile | None:
         with self._guard:
-            return self._rows.get(profile_id)
+            return None if profile_id in self._removed else self._rows.get(profile_id)
+
+    def remove(self, profile_id: str, removed_by: str) -> bool:
+        with self._guard:
+            if profile_id not in self._rows or profile_id in self._removed:
+                return False
+            self._removed.add(profile_id)
+            return True
 
 
 class PostgresCompanyProfiles:
@@ -228,6 +247,9 @@ class PostgresCompanyProfiles:
     def one(self, profile_id: str) -> StoredProfile | None:
         row = self.db.company_profile(profile_id)
         return None if row is None else StoredProfile(**row)
+
+    def remove(self, profile_id: str, removed_by: str) -> bool:
+        return self.db.remove_company_profile(profile_id, removed_by, now())
 
 
 @cache
@@ -294,6 +316,11 @@ class _StoredReader:
         with self._guard:
             self._kept[stored.id] = (key, read)
         return read
+
+    def forget(self, profile_id: str) -> None:
+        """Drop the read kept for `profile_id`: a removed company is never read again (#418)."""
+        with self._guard:
+            self._kept.pop(profile_id, None)
 
     def cache_clear(self) -> None:
         with self._guard:

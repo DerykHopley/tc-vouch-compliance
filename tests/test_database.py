@@ -625,6 +625,93 @@ def test_before_the_setup_made_the_company_profiles_table_files_are_listed_and_a
     assert database.COMPANY_PROFILES_TABLE not in tables(empty_database)
 
 
+OLD_COMPANY_ROW = (
+    f"INSERT INTO {database.COMPANY_PROFILES_TABLE} (id, profile, created_by, created_at) "
+    "VALUES ('musterfirma-sud-gmbh', %s, 'user_dev', now())"
+)
+"""A company kept before #418's removal columns."""
+
+
+def made_before_removal(db: Database) -> None:
+    """The company profiles table as #385 made it, holding one company."""
+    with db.connection() as conn:
+        conn.execute(database.CREATE_COMPANY_PROFILES)
+        conn.execute(OLD_COMPANY_ROW, (psycopg.types.json.Jsonb(MUSTERFIRMA),))
+
+
+@needs_postgres
+def test_the_setup_adds_the_removal_columns_to_a_table_made_before_them_and_runs_twice(
+    empty_database,
+):
+    """#418: a company already stored stays live (both columns null)."""
+    made_before_removal(empty_database)
+    url = empty_database.url.get_secret_value()
+
+    assert database.main([], env={DATABASE_URL_ENV: url}) == 0
+    assert database.main([], env={DATABASE_URL_ENV: url}) == 0
+
+    with empty_database.connection() as conn:
+        columns = {
+            row["column_name"]: row["data_type"]
+            for row in conn.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = %s AND column_name LIKE 'removed_%%'",
+                (database.COMPANY_PROFILES_TABLE,),
+            )
+        }
+    assert columns == {"removed_at": "timestamp with time zone", "removed_by": "text"}
+    assert [row["id"] for row in empty_database.company_profiles()] == ["musterfirma-sud-gmbh"]
+
+
+@needs_postgres
+def test_before_the_setup_added_the_removal_columns_files_are_listed_and_a_remove_is_503(
+    empty_database, caplog
+):
+    made_before_removal(empty_database)
+    app = create_app(Settings(database_url=empty_database.url))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        listed = client.get("/api/profiles")
+        removed = client.delete("/api/developer/profiles/musterfirma-sud-gmbh")
+
+    assert listed.status_code == 200
+    assert [p["id"] for p in listed.json()["profiles"]] == ["alpenwerk", "nordlicht"]
+    assert "run vouch-db-setup" in caplog.text
+    assert removed.status_code == 503
+    assert removed.json()["unavailable"] == "database"
+
+
+@needs_postgres
+@pytest.mark.parametrize("column", ["removed_at", "removed_by"])
+def test_health_says_needs_setup_while_a_removal_column_is_missing(empty_database, column):
+    """#418 review: code deployed before vouch-db-setup added the columns shows in health."""
+    empty_database.setup()
+    assert empty_database.health() == "reachable"
+    with empty_database.connection() as conn:
+        conn.execute(f"ALTER TABLE {database.COMPANY_PROFILES_TABLE} DROP COLUMN {column}")
+    empty_database._health = None
+
+    assert empty_database.health() == "needs-setup"
+
+
+@needs_postgres
+def test_a_missing_column_other_than_the_removal_ones_is_not_taken_for_needs_setup(
+    empty_database,
+):
+    """#418 review: only removed_at and removed_by mean vouch-db-setup hasn't run; any other
+    missing column is a bug, raised as itself."""
+    empty_database.setup()
+    with pytest.raises(psycopg.errors.UndefinedColumn):
+        empty_database._read_company_profiles("WHERE no_such_column IS NULL", {})
+    with (
+        pytest.raises(psycopg.errors.UndefinedColumn),
+        empty_database.connection() as conn,
+        empty_database._needs_setup(
+            database.COMPANY_PROFILES_TABLE, columns=database.REMOVAL_COLUMNS
+        ),
+    ):
+        conn.execute(f"SELECT no_such_column FROM {database.COMPANY_PROFILES_TABLE}")
+
+
 @needs_postgres
 def test_a_setting_is_kept_and_read_back_once_the_setup_has_run(empty_database):
     """Vouch's own settings table (#34, the model choice), made by the setup command alone."""

@@ -160,6 +160,7 @@ NOT_A_MEMBER = (
 SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Discord servers."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
+NOT_A_MADE_COMPANY = "Only a company made in company setup can be removed."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
 EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
@@ -386,11 +387,23 @@ def user_profiles(settings: Settings, user: User, companies: CompanyProfiles) ->
     taken since, as the file profile is the one opened. When the stored ones can't be read, the
     file ones (logged). Which profile a request is under is compliance_profile's to decide,
     with the same file-first rule; a per-user choice must change both (#163)."""
-    files = file_profiles(settings)
+    return _profile_scan(settings, _stored_companies(companies))
+
+
+def _stored_companies(companies: CompanyProfiles) -> list[company_profiles.StoredProfile] | None:
+    """Every live company made in the app, oldest first; None when they can't be read (logged)."""
     try:
-        rows = companies.all()
+        return companies.all()
     except DatabaseUnavailable:
         log.warning("the companies made in the app can't be read: listing the file profiles only")
+        return None
+
+
+def _profile_scan(
+    settings: Settings, rows: list[company_profiles.StoredProfile] | None
+) -> ProfileScan:
+    files = file_profiles(settings)
+    if rows is None:
         return files
     file_ids = {p.id for p in files.loaded} | {p.id for p in files.broken}
     stored: list[ComplianceProfile | BrokenProfile] = [
@@ -1326,10 +1339,30 @@ def developer_settings(
     companies: CompanyProfiles,
 ) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
-    limit, every assessment's usage totalled, and the compliance profiles left out of the
-    profile switcher because they can't be loaded (#47), each with its problem."""
-    broken = user_profiles(settings, user, companies).broken
-    return _developer_page(models, spending) | {"broken_profiles": [asdict(b) for b in broken]}
+    limit, every assessment's usage totalled, the compliance profiles left out of the profile
+    switcher because they can't be loaded (#47), each with its problem, and the companies made
+    in setup (#418)."""
+    return _developer_page(models, spending) | _company_settings(settings, companies)
+
+
+def _company_settings(settings: Settings, companies: CompanyProfiles) -> dict[str, Any]:
+    """The developer page's profiles: `broken_profiles`, and `companies`, each live company made
+    in setup, oldest first, broken and shadowed ones included, so any can be removed (#418);
+    None when they can't be read (logged)."""
+    rows = _stored_companies(companies)
+    broken = _profile_scan(settings, rows).broken
+    made = None if rows is None else [_made_company(row) for row in rows]
+    return {"broken_profiles": [asdict(b) for b in broken], "companies": made}
+
+
+def _made_company(row: company_profiles.StoredProfile) -> dict[str, str]:
+    """A company made in setup as the developer page lists it: its id, its name, when made."""
+    name = row.profile.get("company")
+    return {
+        "id": row.id,
+        "company": name if isinstance(name, str) else row.id,
+        "created_at": row.created_at.isoformat(),
+    }
 
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)
@@ -1418,6 +1451,43 @@ def create_company_profile(
     profile_id = companies.create(setup.company, fields, user.id, taken)
     log.info("company profile %s created by %s", profile_id, user.id)
     return listed_profile(profile) | {"id": profile_id}
+
+
+@router.delete("/developer/profiles/{profile_id}", dependencies=DEVELOPERS)
+def remove_company_profile(
+    profile_id: str,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
+) -> dict[str, Any]:
+    """Remove a company made in setup (#418): it leaves every list and can't be opened, its row
+    kept so its id is never used again, its audit trail, threads, remediation items and Goal
+    left as they are. Answers the developer settings after it; when they can't be read then,
+    `settings_unavailable` (still a 200: the removal is done). A stored company is removed
+    even when a profile folder of its id was added since (the file profile stays). A profile
+    folder's name with no such company is a 409; any other id a 404; the database down a 503,
+    nothing changed. An assessment already streaming under it runs to its end."""
+    if companies.remove(profile_id, user.id):
+        log.info("company profile %s removed by %s", profile_id, user.id)
+    elif profile_id in profile_folder_names(settings.profiles_dir):
+        raise HTTPException(status_code=409, detail=NOT_A_MADE_COMPANY)
+    else:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    _forget_profile(profile_id)
+    try:
+        return developer_settings(models, spending, settings, user, companies)
+    except Exception:  # removed already: never answer as if nothing was (#418 review)
+        log.exception("the developer settings can't be read after removing %s", profile_id)
+        return {"settings_unavailable": True}
+
+
+def _forget_profile(profile_id: str) -> None:
+    """Drop what this process keeps under a removed company's id (#418), so the caches don't grow
+    with removals; the id is never used again."""
+    _paper_requirements.pop(profile_id, None)
+    company_profiles.read_stored_once.forget(profile_id)
 
 
 @router.get("/access")

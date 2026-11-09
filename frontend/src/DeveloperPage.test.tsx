@@ -5,20 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import type { DeveloperSettings } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
+import { DEVELOPER_SETTINGS, NO_RUNS } from './developerFixtures.ts'
+import { setOnSignedOut } from './session.ts'
 
-const NO_RUNS = { assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0 }
-
-const SETTINGS: DeveloperSettings = {
-  model: 'anthropic/claude-haiku-5.5',
-  runs_on: 'openrouter',
-  fake_reason: null,
-  prompt_version: '1',
-  usage_url: 'https://openrouter.ai/activity',
-  kept_in: 'database',
-  daily_limit: 30,
-  usage: { openrouter: NO_RUNS, fake: NO_RUNS },
-  broken_profiles: [],
-}
+const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
 
 /** The developer page with SETTINGS and no-op handlers, but for those given. */
 function renderPage(props: Partial<ComponentProps<typeof DeveloperPage>> = {}) {
@@ -45,6 +35,8 @@ afterEach(() => {
   cleanup()
   window.history.replaceState(null, '', '/')
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  setOnSignedOut(null)
 })
 
 describe('the developer page', () => {
@@ -174,6 +166,147 @@ describe('the developer page', () => {
     expect((field as HTMLInputElement).value).toBe('x/y')
     expect(field.getAttribute('aria-invalid')).toBe('true')
     expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('the companies made in setup, issue 418', () => {
+  const MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', created_at: '2026-11-09T10:15:00+00:00' }
+  const WITH_ONE: DeveloperSettings = { ...SETTINGS, companies: [MUSTERFIRMA] }
+  const QUESTION = 'Remove Musterfirma Süd GmbH? It leaves the profile switcher for everyone and can\'t be opened again. '
+    + 'Its audit trail is kept.'
+
+  /** The API answering the DELETE with `status` and `body`, or held until the returned function answers it. */
+  function deleting(status?: number, body: unknown = WITH_ONE) {
+    let release: (answer: Response) => void = () => {}
+    const fetch = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method !== 'DELETE') return new Promise<Response>(() => {})
+      if (status === undefined) return new Promise<Response>((resolve) => { release = resolve })
+      return Promise.resolve(new Response(JSON.stringify(body), { status }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    return { fetch, release: (answer: Response) => release(answer) }
+  }
+
+  const sheet = () => screen.getByRole('region', { name: 'Company setup' })
+  const removeButton = () => within(sheet()).getByRole('button', { name: 'Remove Musterfirma Süd GmbH' })
+
+  it('lists each company with its id and the date it was made, under Set up a company', () => {
+    renderPage({ settings: WITH_ONE })
+    const item = within(sheet()).getByRole('listitem')
+    expect(within(item).getByText('Musterfirma Süd GmbH')).toBeTruthy()
+    expect(within(item).getByText('musterfirma-sud-gmbh').className).toContain('mono')
+    expect(item.querySelector('time')?.getAttribute('dateTime')).toBe('2026-11-09T10:15:00+00:00')
+    expect(removeButton().className).toContain('btn')
+  })
+
+  it('says when none was made, and when they cannot be read', () => {
+    renderPage()
+    expect(within(sheet()).getByText('No companies made in setup yet.')).toBeTruthy()
+    cleanup()
+    renderPage({ settings: { ...SETTINGS, companies: null } })
+    expect(within(sheet()).getByText("The companies made in setup can't be read just now.")).toBeTruthy()
+  })
+
+  it('asks first, and Cancel sends nothing and keeps the company listed', async () => {
+    const { fetch } = deleting(200)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(removeButton())
+    expect(confirm).toHaveBeenCalledWith(QUESTION)
+    expect(fetch).not.toHaveBeenCalled()
+    expect(removeButton()).toBeTruthy()
+  })
+
+  it('removes once on a double press, saying Removing… while the request is out', async () => {
+    const { fetch, release } = deleting()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onRemoved })
+    await userEvent.dblClick(removeButton())
+    const busy = within(sheet()).getByRole('button', { name: 'Removing…' })
+    expect((busy as HTMLButtonElement).disabled).toBe(true)
+    expect(fetch).toHaveBeenCalledOnce()
+    release(new Response(JSON.stringify(SETTINGS), { status: 200 }))
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh'))
+    expect(onChange).toHaveBeenCalledWith(SETTINGS)
+    expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
+  })
+
+  it.each([
+    [409, { detail: 'Only a company made in company setup can be removed.' },
+      'Vouch could not remove this company: Only a company made in company setup can be removed.'],
+    [503, { detail: 'The database is unavailable just now.', unavailable: 'database' },
+      'The database is unavailable just now. Nothing was removed; try again in a moment.'],
+    [500, { detail: 'Internal Server Error' }, 'The company could not be removed. Nothing changed.'],
+  ])('on a %i, says why under the list, keeps it, and Remove can be pressed again', async (status, body, message) => {
+    deleting(status, body)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onRemoved })
+    await userEvent.click(removeButton())
+    expect((await within(sheet()).findByRole('alert')).textContent).toBe(message)
+    expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('on a 404, removed already elsewhere: reads the settings again, says so, and has the list read again', async () => {
+    const fetch = vi.fn((url: string, init?: RequestInit) => init?.method === 'DELETE'
+      ? Promise.resolve(Response.json({ detail: 'There is no such compliance profile.' }, { status: 404 }))
+      : url === '/api/developer/settings' ? Promise.resolve(Response.json(SETTINGS))
+      : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onRemoved })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(SETTINGS))
+    expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh')
+    expect(within(sheet()).getByRole('status').textContent).toBe('Musterfirma Süd GmbH was already removed.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("on a 404 whose settings can't be read again, drops the company from the list held", async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE'
+      ? Response.json({ detail: 'There is no such compliance profile.' }, { status: 404 })
+      : new Response(null, { status: 500 }))))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [] }))
+  })
+
+  it("on a 200 whose settings couldn't be read after, says removed and drops it from the list held", async () => {
+    deleting(200, { settings_unavailable: true })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = vi.fn()
+    const onRemoved = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onRemoved })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh'))
+    expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [] })
+    expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('opened afresh after removing the company shown, says what was removed, once', () => {
+    const onRemovedShown = vi.fn()
+    renderPage({ removedCompany: 'Musterfirma Süd GmbH', onRemovedShown })
+    expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
+    expect(onRemovedShown).toHaveBeenCalledOnce()
+  })
+
+  it('on a 401, signs out with no alert', async () => {
+    deleting(401, { detail: 'Sign in to use Vouch.' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const signedOut = vi.fn()
+    setOnSignedOut(signedOut)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(removeButton())
+    await waitFor(() => expect(signedOut).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 

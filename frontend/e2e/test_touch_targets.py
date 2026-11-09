@@ -66,6 +66,25 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
     assert small_targets(page) == []
 
 
+def test_the_developer_page_s_remove_buttons_are_at_least_44px(page: Page, profiles_url):
+    """#418: a company made in setup listed with its Remove button; the settings answered with
+    one added, so no company is made on the profiles server."""
+    made = {
+        "id": "musterfirma-sud-gmbh",
+        "company": "Musterfirma Süd GmbH",
+        "created_at": "2026-11-09T10:15:00+00:00",
+    }
+
+    def with_a_company(route) -> None:
+        answer = route.fetch()
+        route.fulfill(response=answer, json=answer.json() | {"companies": [made]})
+
+    page.route("**/api/developer/settings", with_a_company)
+    at_phone_width(page, f"{profiles_url}/developer")
+    expect(page.get_by_role("button", name="Remove Musterfirma Süd GmbH")).to_be_visible()
+    assert small_targets(page) == []
+
+
 @pytest.mark.parametrize(
     "step", ["company", "levels", "levels failed", "not applicable", "evidence", "finish"]
 )

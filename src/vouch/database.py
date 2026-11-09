@@ -28,11 +28,12 @@ the usage, a review, a remediation decision or a new company is DatabaseUnavaila
 
 import hashlib
 import logging
+import re
 import sys
 import threading
 import time
 import urllib.parse
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Any, Literal, Protocol, Self, get_args
@@ -211,12 +212,22 @@ CREATE_REMEDIATION_TRIGGERS = (
 a truncate, whoever asks."""
 COMPANY_PROFILES_TABLE = "vouch_company_profiles"
 """Each company made in the app (#385): its id, the fields its compliance profile is rebuilt and
-checked from on load (vouch.company_profiles), never a server path, who made it and when."""
+checked from on load (vouch.company_profiles), never a server path, who made it and when; and,
+once a developer removed it (#418), by whom and when. A removed row is kept, never read back,
+so its id is never used again."""
 COMPANY_PROFILE_COLUMNS = ("id", "profile", "created_by", "created_at")
 CREATE_COMPANY_PROFILES = (
     f"CREATE TABLE IF NOT EXISTS {COMPANY_PROFILES_TABLE} (id text PRIMARY KEY, "
     "profile jsonb NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL)"
 )
+ADD_COMPANY_PROFILE_REMOVAL = (
+    f"ALTER TABLE {COMPANY_PROFILES_TABLE} ADD COLUMN IF NOT EXISTS removed_at timestamptz, "
+    "ADD COLUMN IF NOT EXISTS removed_by text"
+)
+"""#418's columns, on a table made before them: a company already stored stays live (null)."""
+LIVE_COMPANY = "removed_at IS NULL"
+REMOVAL_COLUMNS = ("removed_at", "removed_by")
+"""The columns ADD_COMPANY_PROFILE_REMOVAL adds: missing, vouch-db-setup hasn't run since #418."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -238,10 +249,17 @@ SETUP_TABLES = (
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
+SETUP_COLUMNS = tuple((COMPANY_PROFILES_TABLE, column) for column in REMOVAL_COLUMNS)
+"""The columns vouch-db-setup adds to a table made before them (#418): health checks them too, so
+code deployed before the setup ran shows as needs-setup."""
 SETUP_CHECK = (
-    "SELECT count(*) AS missing FROM unnest(%s::text[]) AS t(name) WHERE to_regclass(name) IS NULL"
+    "SELECT (SELECT count(*) FROM unnest(%s::text[]) AS t(name) WHERE to_regclass(name) IS NULL)"
+    " + (SELECT count(*) FROM unnest(%s::text[], %s::text[]) AS c(tbl, col) WHERE NOT EXISTS ("
+    "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass(c.tbl) AND attname = c.col"
+    " AND NOT attisdropped)) AS missing"
 )
-"""How many of SETUP_TABLES are missing, in one query on the catalogue (no table is read)."""
+"""How many of SETUP_TABLES, and of SETUP_COLUMNS, are missing, in one query on the catalogue
+(no table is read)."""
 
 Health = Literal["reachable", "needs-setup", "unavailable"]
 """The database as health reports it: answering with its tables, answering without them
@@ -320,6 +338,21 @@ class Connect(Protocol):
     """psycopg's `Connection.connect`: the seam a test swaps for a flaky fake."""
 
     def __call__(self, conninfo: str, **kwargs: Any) -> Connection: ...
+
+
+def _setup_check_params() -> tuple[list[str], list[str], list[str]]:
+    """SETUP_CHECK's parameters: SETUP_TABLES, then SETUP_COLUMNS as tables and column names."""
+    return (
+        list(SETUP_TABLES),
+        [table for table, _ in SETUP_COLUMNS],
+        [column for _, column in SETUP_COLUMNS],
+    )
+
+
+def _names_a_column(error: psycopg.errors.UndefinedColumn, columns: Collection[str]) -> bool:
+    """Whether Postgres's "column ... does not exist" names one of `columns`."""
+    message = error.diag.message_primary or str(error)
+    return any(re.search(rf"\b{re.escape(column)}\b", message) for column in columns)
 
 
 class DatabaseUnavailable(RuntimeError):
@@ -407,12 +440,14 @@ class Database:
                 self.connection(timeout=HEALTH_TIMEOUT_SECONDS) as conn,
                 waiting_at_most(conn, HEALTH_TIMEOUT_SECONDS),
             ):
-                row = conn.execute(SETUP_CHECK, (list(SETUP_TABLES),)).fetchone()
+                row = conn.execute(SETUP_CHECK, _setup_check_params()).fetchone()
             answer = "reachable" if row and row["missing"] == 0 else "needs-setup"
         except DatabaseUnavailable:
             answer = "unavailable"
         if answer == "needs-setup":
-            log.error("vouch-db-setup's tables are missing: run vouch-db-setup on this database")
+            log.error(
+                "vouch-db-setup's tables or columns are missing: run vouch-db-setup on this database"
+            )
         self._health = (now, answer)
         return answer
 
@@ -565,13 +600,22 @@ class Database:
             raise DatabaseUnavailable(f"a write to {table} failed") from None
 
     @contextmanager
-    def _needs_setup(self, table: str) -> Iterator[None]:
-        """A table vouch-db-setup makes: missing, it's DatabaseUnavailable, and the log says so."""
+    def _needs_setup(self, table: str, columns: Collection[str] = ()) -> Iterator[None]:
+        """A table vouch-db-setup makes: missing, or missing one of `columns` it adds to it,
+        it's DatabaseUnavailable, and the log says so. Any other missing column is raised as
+        itself: a bug, not a setup to run."""
         try:
             yield
         except psycopg.errors.UndefinedTable:
             log.error("no %s table: run vouch-db-setup on this database", table)
             raise DatabaseUnavailable(f"no {table} table: run vouch-db-setup") from None
+        except psycopg.errors.UndefinedColumn as error:
+            if not _names_a_column(error, columns):
+                raise
+            log.error("a column of %s is missing: run vouch-db-setup on this database", table)
+            raise DatabaseUnavailable(
+                f"a column of {table} is missing: run vouch-db-setup"
+            ) from None
 
     @contextmanager
     def checkpointer(self, serde: SerializerProtocol | None = None) -> Iterator[PostgresSaver]:
@@ -702,14 +746,18 @@ class Database:
                     return str(row["id"])
 
     def company_profiles(self) -> list[dict[str, Any]]:
-        """Every company profile, oldest first: mappings of COMPANY_PROFILE_COLUMNS; none before
-        vouch-db-setup made the table (logged). Raises DatabaseUnavailable."""
-        return self._read_company_profiles("ORDER BY created_at, id", {})
+        """Every live company profile (not removed), oldest first: mappings of
+        COMPANY_PROFILE_COLUMNS; none before vouch-db-setup made the table or its removal
+        columns (logged). Raises DatabaseUnavailable."""
+        return self._read_company_profiles(f"WHERE {LIVE_COMPANY} ORDER BY created_at, id", {})
 
     def company_profile(self, profile_id: str) -> dict[str, Any] | None:
-        """The company profile `profile_id`, as company_profiles gives it; None when there is
-        none, also before vouch-db-setup made the table (logged). Raises DatabaseUnavailable."""
-        rows = self._read_company_profiles("WHERE id = %(id)s", {"id": profile_id})
+        """The live company profile `profile_id`, as company_profiles gives it; None when there
+        is none (or it was removed), also before vouch-db-setup made the table or its removal
+        columns (logged). Raises DatabaseUnavailable."""
+        rows = self._read_company_profiles(
+            f"WHERE id = %(id)s AND {LIVE_COMPANY}", {"id": profile_id}
+        )
         return rows[0] if rows else None
 
     def _read_company_profiles(self, rest: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -717,11 +765,35 @@ class Database:
         with self.connection() as conn:
             try:
                 return conn.execute(query, params).fetchall()
-            except psycopg.errors.UndefinedTable:
+            except (psycopg.errors.UndefinedTable, psycopg.errors.UndefinedColumn) as error:
+                if isinstance(error, psycopg.errors.UndefinedColumn) and not _names_a_column(
+                    error, REMOVAL_COLUMNS
+                ):
+                    raise
                 log.error(
-                    "no %s table: run vouch-db-setup on this database", COMPANY_PROFILES_TABLE
+                    "no %s table, or not its removal columns: run vouch-db-setup on this database",
+                    COMPANY_PROFILES_TABLE,
                 )
                 return []
+
+    def remove_company_profile(
+        self, profile_id: str, removed_by: str, removed_at: datetime
+    ) -> bool:
+        """Mark the live company profile `profile_id` removed, by whom and when; the row is
+        kept. One update, so two at once mark it once: True for the one that did, False when
+        there is no live row of that id. Raises DatabaseUnavailable, also before vouch-db-setup
+        made the table or its removal columns."""
+        with (
+            self.connection() as conn,
+            self._failed(COMPANY_PROFILES_TABLE),
+            self._needs_setup(COMPANY_PROFILES_TABLE, columns=REMOVAL_COLUMNS),
+        ):
+            row = conn.execute(
+                f"UPDATE {COMPANY_PROFILES_TABLE} SET removed_at = %s, removed_by = %s "
+                f"WHERE id = %s AND {LIVE_COMPANY} RETURNING id",
+                (removed_at, removed_by, profile_id),
+            ).fetchone()
+        return row is not None
 
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
@@ -771,6 +843,7 @@ class Database:
                 for trigger in CREATE_REMEDIATION_TRIGGERS:
                     conn.execute(trigger)
                 conn.execute(CREATE_COMPANY_PROFILES)
+                conn.execute(ADD_COMPANY_PROFILE_REMOVAL)
         finally:
             conn.close()
 
