@@ -72,34 +72,51 @@ def assessment_events(
     """The run up to the review interrupt, as (event, data): a `step` per agent step (and per
     refused tool call), a `requirement` per judged requirement, then one `result`, the proposed
     Assessment itself. The run's meter sees every model call. Without a `note`, the lead's note
-    from the control's last rejection is carried in (#42), wherever the run was started."""
-    note = note or rejection_note(memory, run.saver, control.id)
-    chosen = run.models.for_assessment(
-        run.chosen,
-        callbacks=[run.meter],
-        answer_language=profile.answer_language,
-        control_id=control.id,
-    )
-    model = ToolAllowList(chosen, run.tools)
-    # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
-    steps = assess_steps(
-        control,
-        profile,
-        cast(BaseChatModel, model),
-        run.saver,
-        note=note,
-        thread_id=thread_id,
-        scope=run.scope,
-    )
-    for item in steps:
-        if isinstance(item, Assessment):
-            yield "result", item
-        elif isinstance(item, RequirementVerdict):
-            yield "requirement", {"requirement": asdict(item)}
-        else:
-            yield "step", item.to_dict()
-        for refusal in model.take_refusals():
-            yield "step", {"node": GUARD, "text": refusal}
+    from the control's last rejection is carried in (#42), wherever the run was started. A run
+    that ends before its result (a failure, a refusal, or left part way) is taken out of the
+    index (#137)."""
+    reviewed = False
+    try:  # setup too: the note, the model and the graph can each fail (#137)
+        note = note or rejection_note(memory, run.saver, control.id)
+        chosen = run.models.for_assessment(
+            run.chosen,
+            callbacks=[run.meter],
+            answer_language=profile.answer_language,
+            control_id=control.id,
+        )
+        model = ToolAllowList(chosen, run.tools)
+        # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
+        steps = assess_steps(
+            control,
+            profile,
+            cast(BaseChatModel, model),
+            run.saver,
+            note=note,
+            thread_id=thread_id,
+            scope=run.scope,
+        )
+        for item in steps:
+            if isinstance(item, Assessment):
+                reviewed = True
+                yield "result", item
+            elif isinstance(item, RequirementVerdict):
+                yield "requirement", {"requirement": asdict(item)}
+            else:
+                yield "step", item.to_dict()
+            for refusal in model.take_refusals():
+                yield "step", {"node": GUARD, "text": refusal}
+    finally:
+        if not reviewed:  # failed, refused or left part way: never listed, so not kept (#137)
+            _forget(memory, thread_id)
+
+
+def _forget(memory: Memory, thread_id: str) -> None:
+    """Remove a run that never reached the review from the index; a store that fails leaves it,
+    unlisted (vouch.memory), and the run's own error is the one raised."""
+    try:
+        memory.forget_assessment(thread_id)
+    except Exception:
+        log.exception("an assessment that never reached the review stays in the index")
 
 
 class RunningAssessments:
@@ -141,10 +158,7 @@ def begin_run(
         try:
             count()
         except Exception:
-            try:
-                memory.forget_assessment(thread_id)
-            except Exception:  # left in the index, it's never listed: its run never started
-                log.exception("a refused assessment stays in the index")
+            _forget(memory, thread_id)
             raise
     except Exception:
         running.release(memory.scope)

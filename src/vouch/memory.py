@@ -105,7 +105,8 @@ class Memory:
         self.store.put(self._namespace(ASSESSMENTS), thread_id, value)
 
     def forget_assessment(self, thread_id: str) -> None:
-        """Remove `thread_id` from the index: its run never started."""
+        """Remove `thread_id` from the index: its run never started, or ended before the
+        review (vouch.runs, #137)."""
         self.store.delete(self._namespace(ASSESSMENTS), thread_id)
 
     def current_chat(self) -> str | None:
