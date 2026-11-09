@@ -1,6 +1,7 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, the lead's remediation decisions, the
-user's assessments, the Dossier overview, and the developer page's settings.
+compliance lead's review, a profile pass over every applicable control not yet accepted (#371),
+the review that resumes an assessment, the lead's remediation decisions, the user's assessments,
+the Dossier overview, and the developer page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -85,6 +86,12 @@ from vouch.profile import (
     ProfileScan,
     scan_profiles,
 )
+from vouch.profile_pass import (
+    FALLBACK,
+    PROFILE_PASS_FAILED,
+    ProfilePassRefused,
+    run_profile_pass,
+)
 from vouch.redaction import (
     install_log_redaction,
     redact,
@@ -114,8 +121,10 @@ from vouch.settings import (
 from vouch.spending import (
     CHAT,
     MAX_DAILY_LIMIT,
+    PROFILE_PASS,
     DailyLimitReached,
     NoSharedCounter,
+    ProfilePassLimitReached,
     SpendingGuard,
     Usage,
     UsageMeter,
@@ -551,11 +560,12 @@ def record_off_the_event_loop(
 
 
 def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
-    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's."""
+    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's, and
+    `"profile-pass"` the profile passes' own limit (#371)."""
     assert isinstance(error, DailyLimitReached)
     content = {
         "detail": error.message(),
-        "limit": "daily",
+        "limit": "profile-pass" if isinstance(error, ProfilePassLimitReached) else "daily",
         "resets_at": error.resets_at.isoformat(),
     }
     headers = {"Retry-After": str(error.retry_after)}
@@ -607,6 +617,84 @@ def create_assessment(
         yield ServerSentEvent(event="error", data={"message": ASSESSMENT_FAILED})
     finally:
         record_off_the_event_loop(spending, user.id, control.id, run.meter.usage())
+
+
+@router.post("/profile-pass")
+def create_profile_pass(
+    profile: Profile,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+    models: AppModels,
+    settings: AppSettings,
+    user: CurrentUser,
+    spending: AppSpending,
+    memory: UserMemory,
+    saver: Checkpointer,
+    running: Running,
+) -> Any:
+    """A profile pass (vouch.profile_pass, #371): every applicable control of the user's
+    compliance profile not yet accepted, assessed in one guarded model run, each new assessment
+    waiting for review. It holds
+    the lead's one run, as an assessment does: another of theirs going is a 409.
+
+    200: each new assessment's thread id, control, status and verdict, the controls skipped as
+    accepted, and the pass's usage, redacted. With every applicable control accepted, nothing is
+    counted or called. A prompt over the token threshold (VOUCH_PROFILE_PASS_TOKENS), or an
+    allowed source that can't be read, is a 422 with `"fallback": "per-control"`, nothing
+    counted. Then the pass is counted against its own daily limit (a 429 with `"limit":
+    "profile-pass"` over it; a 503 for a paid model with only memory to count in, or a counter
+    that can't be read). A model run that fails, or a reply claiming an audit result twice, is a
+    502 with one sentence and nothing kept; the pass stays counted, as its calls were made. A
+    counted pass's usage is recorded once, under PROFILE_PASS, however it ends."""
+    if not running.try_hold(memory.scope):
+        raise HTTPException(status_code=409, detail=RUNNING_ALREADY)
+    meter = UsageMeter(chosen)
+    counted = False
+
+    def count() -> None:
+        nonlocal counted
+        try:
+            spending.start_profile_pass(user.id, paid=chosen is not None)
+        except NoSharedCounter as error:
+            log.error("profile passes on OpenRouter need %s for their limit", DATABASE_URL_ENV)
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        counted = True
+
+    try:
+        model = models.for_profile_pass(chosen, callbacks=[meter])
+        result = run_profile_pass(
+            profile,
+            memory,
+            saver,
+            model,
+            max_tokens=settings.profile_pass_tokens,
+            count=count,
+        )
+    except ProfilePassRefused as refusal:
+        return JSONResponse(status_code=422, content={"detail": str(refusal), "fallback": FALLBACK})
+    except Exception:
+        if not counted:  # refused before any call: the limit's 429, the counter's 503
+            raise
+        log.exception("a profile pass of %s failed", profile.id)
+        raise HTTPException(status_code=502, detail=PROFILE_PASS_FAILED) from None
+    finally:
+        if counted:
+            spending.record(user.id, PROFILE_PASS, meter.usage())
+        running.release(memory.scope)
+    answer = {
+        "assessments": [
+            {
+                "thread_id": a.thread_id,
+                "control_id": a.control_id,
+                "status": a.status,
+                "verdict": a.verdict,
+            }
+            for a in result.assessments
+        ],
+        "skipped": result.skipped,
+        "usage": meter.usage().to_dict(),
+    }
+    clean, _ = redact_data(answer)
+    return clean
 
 
 @router.get("/assessments")

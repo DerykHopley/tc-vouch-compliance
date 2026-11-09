@@ -584,11 +584,11 @@ class AssessState(TypedDict, total=False):
     answer_language: str  # the profile's, ISO 639-1
 
 
-def _format_requirements(requirements: Iterable[Requirement]) -> str:
+def format_requirements(requirements: Iterable[Requirement]) -> str:
     return "\n".join(f"- {r.id} ({r.column}): {r.text}" for r in requirements)
 
 
-def _never_claim(profile: ComplianceProfile) -> str:
+def never_claim(profile: ComplianceProfile) -> str:
     """The rule against claiming an audit result, naming the words in the answer language."""
     words = audit_words_in(profile.answer_language) if profile.answer_language != "en" else ""
     in_language = f" ({words})" if words else ""
@@ -637,11 +637,11 @@ def _prompt(
             f"company's own evidence. {search} When you are "
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
             f"{language_name(profile.answer_language)}; quote a document only unchanged, in its "
-            f"own language. Say what the evidence shows; {_never_claim(profile)} {DATA_RULE}"
+            f"own language. Say what the evidence shows; {never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
-            f"Requirements:\n{_format_requirements(control_requirements.applicable)}"
+            f"Requirements:\n{format_requirements(control_requirements.applicable)}"
             f"{_note_text(note)}"
         ),
     ]
@@ -676,11 +676,11 @@ def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMes
             "about_doing and say so in the reason: it is evidenced only with implemented "
             "evidence. Stale evidence shows a requirement partly at most. Write each reason in "
             f"{language_name(profile.answer_language)}; copy each quote unchanged, in its "
-            f"document's language, never translated. {_never_claim(profile)} {DATA_RULE}"
+            f"document's language, never translated. {never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
-            f"Requirements:\n{_format_requirements(state['control_requirements'].applicable)}\n\n"
+            f"Requirements:\n{format_requirements(state['control_requirements'].applicable)}\n\n"
             f"Evidence:\n{evidence}\n\n"
             f"The earlier model's draft answer:\n{draft_as_data(state.get('answer') or '')}"
             f"{_note_text(state.get('note', ''))}"
@@ -693,7 +693,7 @@ TO_FIX: frozenset[Verdict] = frozenset({"not-evidenced", "partly-evidenced"})
 evidenced, partly evidenced too (#212, the owner's decision 2026-11-06)."""
 
 
-def _to_remediate(
+def to_remediate(
     requirements: list[RequirementVerdict], pending_ids: Iterable[str]
 ) -> list[RequirementVerdict]:
     """The requirements a remediation item is for, not or partly evidenced: not those whose
@@ -718,13 +718,13 @@ def _remediation_prompt(
             "For a partly evidenced requirement, say what is still missing for it to be fully "
             "evidenced, such as a stale document to review and approve again, or implemented "
             "records for steps that are only documented. "
-            f"Say what is missing; {_never_claim(profile)} {DATA_RULE}"
+            f"Say what is missing; {never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(f"Control {control.id}: {control.question}\nNot fully evidenced:\n{to_fix}"),
     ]
 
 
-def _drafts(
+def remediation_drafts(
     to_fix: list[RequirementVerdict], plan: RemediationPlan | None, today: date
 ) -> tuple[list[RemediationItem], list[str]]:
     """One remediation item per requirement to fix, in the requirements' order, and the
@@ -777,7 +777,7 @@ def _reviewed_remediation(
     by_id = {item.requirement_id: item for item in drafted}
     return [
         by_id.get(r.id) or RemediationItem.not_drafted(r.id, today)
-        for r in _to_remediate(requirements, pending_ids)
+        for r in to_remediate(requirements, pending_ids)
     ]
 
 
@@ -824,7 +824,7 @@ class JudgedRequirements(NamedTuple):
     about_doing: list[str]  # ids the model said ask for something to be done
 
 
-def _judged_requirements(
+def judged_requirements(
     control_requirements: ControlRequirements,
     judgement: Judgement | None,
     unjudged_reason: str = NOT_JUDGED,
@@ -874,7 +874,7 @@ def _gathered(state: AssessState) -> list[str]:
     return [p["text"] for p in state.get("evidence", [])]
 
 
-def _ask_until_clean[T](
+def ask_until_clean[T](
     model: Runnable,
     prompt: list[AnyMessage],
     read: Callable[[Any], tuple[T, list[str]]],
@@ -1103,14 +1103,14 @@ def build_graph(
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
         if reason is not None:  # nothing could be read, so nothing is shown
-            results = _judged_requirements(control_requirements, None, reason).results
+            results = judged_requirements(control_requirements, None, reason).results
             return {"requirements": results, "not_judged": [], "claims": {}, "about_doing": []}
 
         def read(judgement: Judgement | None) -> tuple[JudgedRequirements, list[str]]:
-            judged = _judged_requirements(control_requirements, judgement)
+            judged = judged_requirements(control_requirements, judgement)
             return judged, [r.reason for r in judged.results if r.verdict != NOT_APPLICABLE]
 
-        judged, usage, rejected = _ask_until_clean(
+        judged, usage, rejected = ask_until_clean(
             judge_model,
             _judge_prompt(state, profile),
             read,
@@ -1138,40 +1138,16 @@ def build_graph(
         judge's rules (`_apply_rules`) cap what the checked citations can show. Each document
         is read once.
         """
-        today = date.fromisoformat(state["today"])
-        claims = state.get("claims", {})
-        checker = QuoteChecker(state["document_folders"], today=today)
-        doing = set(state.get("about_doing", []))
-        results, dropped = [], []
-        for requirement in state["requirements"]:
-            kept: list[Citation] = []
-            given = claims.get(requirement.id, [])
-            for claim in given:
-                checked = checker.check(claim)
-                if isinstance(checked, Citation):
-                    if checked not in kept:
-                        kept.append(checked)
-                    continue
-                log.warning(
-                    "dropped a citation for %s from %s (%s): %r",
-                    requirement.id,
-                    claim.doc_id,
-                    checked,
-                    claim.quote,
-                )
-                dropped.append(DroppedCitation(requirement.id, claim.doc_id, checked))
-            if not kept and requirement.verdict in SHOWN_VERDICTS:
-                reason = CITATIONS_DROPPED if given else NO_CITATION
-                requirement = replace(requirement, verdict="not-evidenced", reason=reason)
-            requirement = replace(requirement, citations=tuple(kept))
-            results.append(
-                _apply_rules(requirement, requirement.id in doing, profile.answer_language)
-            )
+        checker = QuoteChecker(state["document_folders"], today=date.fromisoformat(state["today"]))
+        results, dropped = checked_requirements(
+            state["requirements"],
+            state.get("claims", {}),
+            checker,
+            state.get("about_doing", []),
+            profile.answer_language,
+        )
         results, pending_ids = _noted_pending(results, state["pending"])
-        judged = {r.id: r.verdict for r in state["requirements"]}
-        changes = [
-            f"{r.id} to {verdict_words(r.verdict)}" for r in results if r.verdict != judged[r.id]
-        ]
+        changes = verdict_changes(state["requirements"], results)
         return {
             "requirements": results,
             "dropped_citations": dropped,
@@ -1183,7 +1159,7 @@ def build_graph(
         """The model drafts one remediation item per requirement not or partly evidenced (#212);
         none of those, no call. A draft claiming an audit result gets the plan asked for again
         once, then an error. Before the interrupt, so it only reads and asks the model."""
-        to_fix = _to_remediate(state["requirements"], state["pending_ids"])
+        to_fix = to_remediate(state["requirements"], state["pending_ids"])
         if not to_fix:
             return {
                 "remediation": [],
@@ -1195,10 +1171,10 @@ def build_graph(
         today = date.fromisoformat(state["today"])
 
         def read(plan: RemediationPlan | None) -> tuple[Any, list[str]]:
-            drafts, not_drafted = _drafts(to_fix, plan, today)
+            drafts, not_drafted = remediation_drafts(to_fix, plan, today)
             return (drafts, not_drafted), [f"{d.missing} {d.owner_role}" for d in drafts]
 
-        (drafts, not_drafted), usage, rejected = _ask_until_clean(
+        (drafts, not_drafted), usage, rejected = ask_until_clean(
             remediation_model,
             _remediation_prompt(state["control"], to_fix, profile),
             read,
@@ -1255,7 +1231,7 @@ def build_graph(
 
         def run_and_describe(state: AssessState) -> dict[str, Any]:
             update = run(state)
-            steps = [Step(node, update, profile), *_guard_steps(update)]
+            steps = [Step(node, update, profile), *guard_steps(update)]
             return {**update, "steps": [step.to_dict() for step in steps]}
 
         return run_and_describe
@@ -1443,7 +1419,7 @@ class Step:
         return {"node": self.node, "text": self.describe(), **({"quote": quote} if quote else {})}
 
 
-def _loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
+def loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
     """The first step: the control, loaded before the graph runs, and what applies of it."""
     update = {"control": control, "control_requirements": profile.requirements_for(control)}
     return Step("load_control", update, profile)
@@ -1454,7 +1430,7 @@ def _waiting_step() -> Step:
     return Step("review", {})
 
 
-def _guard_steps(update: dict[str, Any]) -> list[Step]:
+def guard_steps(update: dict[str, Any]) -> list[Step]:
     """The guard steps a node's update made, after its own step: one per refused tool call or
     flagged passage, then one per citation the quote check dropped."""
     return [Step(GUARD, {"text": text}) for text in update.get("guards", [])] + [
@@ -1491,6 +1467,56 @@ def _apply_rules(
     return replace(requirement, verdict="partly-evidenced", reason=f"{requirement.reason} {note}")
 
 
+def checked_requirements(
+    requirements: Iterable[RequirementVerdict],
+    claims: dict[str, list[CitationClaim]],
+    checker: QuoteChecker,
+    about_doing: Iterable[str],
+    language: str,
+) -> tuple[list[RequirementVerdict], list[DroppedCitation]]:
+    """The quote check and the judge's rules on judged requirements, for the graph's
+    check_quotes step and the profile pass (vouch.profile_pass) alike.
+
+    Each citation whose quote is in the document it cites is kept; the rest are dropped and
+    logged. A requirement judged evidenced or partly evidenced with no citation left (none
+    given, or every one dropped) becomes not-evidenced: nothing checked shows it. Then the
+    judge's rules (`_apply_rules`) cap what the checked citations can show, the cap note in
+    `language`."""
+    doing = set(about_doing)
+    results, dropped = [], []
+    for requirement in requirements:
+        kept: list[Citation] = []
+        given = claims.get(requirement.id, [])
+        for claim in given:
+            checked = checker.check(claim)
+            if isinstance(checked, Citation):
+                if checked not in kept:
+                    kept.append(checked)
+                continue
+            log.warning(
+                "dropped a citation for %s from %s (%s): %r",
+                requirement.id,
+                claim.doc_id,
+                checked,
+                claim.quote,
+            )
+            dropped.append(DroppedCitation(requirement.id, claim.doc_id, checked))
+        if not kept and requirement.verdict in SHOWN_VERDICTS:
+            reason = CITATIONS_DROPPED if given else NO_CITATION
+            requirement = replace(requirement, verdict="not-evidenced", reason=reason)
+        requirement = replace(requirement, citations=tuple(kept))
+        results.append(_apply_rules(requirement, requirement.id in doing, language))
+    return results, dropped
+
+
+def verdict_changes(
+    judged: Iterable[RequirementVerdict], checked: Iterable[RequirementVerdict]
+) -> list[str]:
+    """ "M1 to partly evidenced": each verdict the checks changed from the judged one."""
+    before = {r.id: r.verdict for r in judged}
+    return [f"{r.id} to {verdict_words(r.verdict)}" for r in checked if r.verdict != before[r.id]]
+
+
 def plural(count: int, noun: str) -> str:
     """The count and the noun agreeing with it: plural(2, "passage") is "2 passages"."""
     return f"{count} {noun}" + ("" if count == 1 else "s")
@@ -1506,7 +1532,7 @@ def _verb(count: int, one: str, many: str) -> str:
     return one if count == 1 else many
 
 
-def _model_name(model: BaseChatModel) -> str:
+def model_name_of(model: BaseChatModel) -> str:
     return getattr(model, "model_name", None) or model._llm_type
 
 
@@ -1550,7 +1576,7 @@ def thread_key(thread_id: str, scope: str = "") -> str:
     return scope + thread_id
 
 
-def _config(thread_id: str, scope: str = "") -> dict[str, Any]:
+def thread_config(thread_id: str, scope: str = "") -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_key(thread_id, scope)}}
 
 
@@ -1616,18 +1642,18 @@ def assess_steps(
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
     again; `today` (default: the date now) is what due dates count from and what staleness is
     judged on. `thread_id` (default: a new one) must name a new thread; `scope` says whose
-    thread it is (see `_config`).
+    thread it is (see `thread_config`).
 
     The control is assessed as given: a caller picks its ISA edition, normally the profile's
     (`ComplianceProfile.isa_control`)."""
     if thread_id is None:
         thread_id = new_thread_id()
     graph = build_graph(model, profile, checkpointer or memory_checkpointer())
-    loaded = _loaded_step(control, profile)
+    loaded = loaded_step(control, profile)
     initial = {
         "control": control,
         "profile_id": profile.id,
-        "model": _model_name(model),
+        "model": model_name_of(model),
         "prompt_version": PROMPT_VERSION,
         "answer_language": profile.answer_language,
         "evidence": [],
@@ -1643,7 +1669,7 @@ def assess_steps(
         "note": note,
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
     }
-    config = _config(thread_id, scope)
+    config = thread_config(thread_id, scope)
     yield loaded
     for node, update in (
         (node, update)
@@ -1655,7 +1681,7 @@ def assess_steps(
             continue
         update = update or {}
         yield Step(node, update, profile)
-        yield from _guard_steps(update)
+        yield from guard_steps(update)
         if node == "check_quotes":
             yield from update["requirements"]
     yield _assessment(graph.get_state(config).values, thread_id)
@@ -1703,7 +1729,7 @@ def assessment_loader(
     graph = build_graph(None, checkpointer=checkpointer)
 
     def load(thread_id: str) -> Assessment | None:
-        snapshot = graph.get_state(_config(thread_id, scope))
+        snapshot = graph.get_state(thread_config(thread_id, scope))
         return _assessment(snapshot.values, thread_id) if _reached_review(snapshot) else None
 
     return load
@@ -1745,13 +1771,13 @@ def resume(
     Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
     review), NotWaitingForReviewError for one not waiting (reviewed already), and
     InvalidReviewError for an override `_check_overrides` refuses. Nothing is resumed when any
-    is raised. `scope` says whose thread it is (see `_config`): another user's thread id is
+    is raised. `scope` says whose thread it is (see `thread_config`): another user's thread id is
     unknown.
 
     It doesn't keep two reviews of one thread apart: the caller does (the API through
     vouch.audit, whose trail holds a lock on the thread while it reviews and records)."""
     graph = build_graph(None, checkpointer=checkpointer)
-    config = _config(thread_id, scope)
+    config = thread_config(thread_id, scope)
     snapshot = graph.get_state(config)
     if not _reached_review(snapshot):
         raise UnknownAssessmentError(f"no assessment {thread_id}")

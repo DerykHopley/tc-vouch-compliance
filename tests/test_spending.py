@@ -27,6 +27,7 @@ from test_model_choice import (
     FakeChat,
     app_with_key,
 )
+from test_profile_pass import new_user, pass_app
 
 from vouch import database
 from vouch.api import create_app, record_off_the_event_loop
@@ -39,6 +40,9 @@ from vouch.spending import (
     CHAT,
     DAILY_LIMIT,
     PRICES,
+    PROFILE_PASS,
+    PROFILE_PASS_DAILY_LIMIT,
+    PROFILE_PASS_LIMIT_SETTING,
     SONNET,
     DailyLimitReached,
     DatabaseSpendingStore,
@@ -765,3 +769,147 @@ def test_in_the_database_the_chat_check_takes_nothing_and_chat_usage_isnt_an_ass
 
     fake = chat_and_assessment_usage(store).fake
     assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 12, 7)
+
+
+# --- The profile pass's own daily limit (#371) ---------------------------------------------------
+
+
+def pass_app_at(now: datetime):
+    """The profile pass's test app (a user per request header), its spending clock fixed."""
+    app = pass_app()
+    clock = FixedClock(now)
+    app.state.spending.clock = clock
+    return app, clock
+
+
+def run_pass(client: TestClient, user: dict[str, str]):
+    return client.post("/api/profile-pass", headers=user)
+
+
+def test_the_4th_pass_of_a_day_is_a_429_naming_the_pass_limit_and_another_users_are_their_own():
+    app, clock = pass_app_at(NOV_4_AFTERNOON)
+    client, alice, bob = TestClient(app), new_user(), new_user()
+
+    allowed = [run_pass(client, alice).status_code for _ in range(PROFILE_PASS_DAILY_LIMIT)]
+    refused = run_pass(client, alice)
+    others = run_pass(client, bob)
+    clock.now = datetime(2026, 11, 5, 0, 0, 1, tzinfo=UTC)
+    next_day = run_pass(client, alice)
+
+    assert PROFILE_PASS_DAILY_LIMIT == 3
+    assert allowed == [200] * 3
+    assert refused.status_code == 429
+    assert refused.json() == {
+        "detail": "You have reached today's limit of 3 profile passes. "
+        "It resets at 00:00 UTC on 5 November 2026.",
+        "limit": "profile-pass",
+        "resets_at": "2026-11-05T00:00:00+00:00",
+    }
+    assert refused.headers["retry-after"] == str(8 * 3600 + 30 * 60)
+    assert others.status_code == 200
+    assert next_day.status_code == 200
+
+
+def test_passes_dont_use_the_assessments_limit_nor_are_stopped_by_it():
+    app, _ = pass_app_at(NOV_4_AFTERNOON)
+    app.state.spending.set_daily_limit(1)
+    client, lead = TestClient(app), new_user()
+
+    passes = [run_pass(client, lead).status_code for _ in range(PROFILE_PASS_DAILY_LIMIT)]
+    assessed = client.post("/api/assessments", json={"control_id": CONTROL}, headers=lead)
+    over = client.post("/api/assessments", json={"control_id": CONTROL}, headers=lead)
+    store = app.state.spending.store
+
+    assert passes == [200] * 3
+    assert assessed.status_code == 200 and "event: result" in assessed.text  # the day's one
+    assert over.status_code == 429 and over.json()["limit"] == "daily"
+    assert store.take_profile_pass(lead["X-Test-User"], NOV_4_AFTERNOON.date()) == (False, 3)
+
+
+def test_a_lead_at_the_assessments_limit_can_still_run_a_pass():
+    app, _ = pass_app_at(NOV_4_AFTERNOON)
+    app.state.spending.set_daily_limit(1)
+    client, lead = TestClient(app), new_user()
+    client.post("/api/assessments", json={"control_id": CONTROL}, headers=lead)
+
+    assert run_pass(client, lead).status_code == 200
+
+
+def test_a_paid_pass_needs_a_shared_counter_as_a_paid_assessment_does():
+    guard = SpendingGuard(MemorySpendingStore(), clock=FixedClock(NOV_4_AFTERNOON))
+
+    with pytest.raises(NoSharedCounter):
+        guard.start_profile_pass("alice", paid=True)
+
+
+def test_with_the_counter_store_down_a_pass_is_a_503_and_nothing_is_called(monkeypatch):
+    app, _ = pass_app_at(NOV_4_AFTERNOON)
+    calls: list[type] = []
+    real = ScriptedChatModel.next_reply
+    monkeypatch.setattr(
+        ScriptedChatModel,
+        "next_reply",
+        lambda s, schema, m: calls.append(schema) or real(s, schema, m),
+    )
+
+    def down(*_: Any) -> Any:
+        raise database.DatabaseUnavailable("down")
+
+    monkeypatch.setattr(app.state.spending.store, "take_profile_pass", down)
+    client, lead = TestClient(app), new_user()
+
+    response = run_pass(client, lead)
+
+    assert response.status_code == 503
+    assert calls == []
+    assert client.get("/api/assessments", headers=lead).json()["assessments"] == []
+
+
+def pass_chat_and_assessment_usage(store) -> UsageTotals:
+    """A chat message's and an assessment's usage (chat_and_assessment_usage), and a pass's."""
+    guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
+    guard.record("alice", PROFILE_PASS, Usage("fake", 9000, 4000, 0.0, 0.05, True, True))
+    return chat_and_assessment_usage(store)
+
+
+def test_a_pass_usage_is_kept_once_under_profile_pass():
+    store = MemorySpendingStore()
+    guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
+
+    guard.record("alice", PROFILE_PASS, Usage("fake", 9000, 4000, 0.0, 0.05, True, True))
+
+    assert [(r.control_id, r.usage.input_tokens) for r in store.records()] == [(PROFILE_PASS, 9000)]
+
+
+def test_a_pass_usage_counts_in_the_tokens_and_cost_but_not_as_an_assessment():
+    fake = pass_chat_and_assessment_usage(MemorySpendingStore()).fake
+
+    assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 9012, 4007)
+    assert fake.estimated_cost_usd == pytest.approx(0.0502)
+
+
+@needs_postgres
+def test_in_the_database_a_pass_usage_counts_in_the_tokens_and_cost_but_not_as_an_assessment(
+    empty_database,  # noqa: F811
+):
+    empty_database.setup()
+
+    fake = pass_chat_and_assessment_usage(DatabaseSpendingStore(empty_database)).fake
+
+    assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 9012, 4007)
+    assert fake.estimated_cost_usd == pytest.approx(0.0502)
+
+
+@needs_postgres
+def test_in_the_database_the_pass_count_is_its_own_and_reads_its_own_limit(empty_database):  # noqa: F811
+    empty_database.setup()
+    store = DatabaseSpendingStore(empty_database)
+    today = NOV_4_AFTERNOON.date()
+
+    taken = [store.take_profile_pass("alice", today) for _ in range(4)]
+    empty_database.set_setting(PROFILE_PASS_LIMIT_SETTING, "4")
+
+    assert taken == [(True, 3)] * 3 + [(False, 3)]
+    assert store.take_profile_pass("alice", today) == (True, 4)  # changed without a deploy
+    assert store.take("alice", today) == (True, DAILY_LIMIT)  # the assessments' count untouched
+    assert database.PROFILE_PASS_COUNTS_TABLE in tables(empty_database)
