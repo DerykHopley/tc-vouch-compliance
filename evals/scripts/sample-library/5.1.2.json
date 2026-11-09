@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "information protected transfer during"}},
+    {"tool": "search_records", "args": {"query": "information protected transfer during"}},
+    {"answer": "Draft answer for 5.1.2, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The standard lists each network service with what it carries.", "citations": [{"doc_id": "data-transfer-standard", "quote": "IT keeps this table current and adds a service before it is used."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Rules for each classification say which channels may carry it.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Remote access to our network is possible only through the VPN, with a personal account and a second factor."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Transport encryption, personal logins and file encryption for confidential data.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Secure file exchange | Drawings and data for customers and suppliers | HTTPS, a personal login per external user"}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Senders check the address against the order; shares go to one named person.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Before sending confidential information, the sender checks the recipient's address against the contract or the order."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Confidential data is encrypted as a file as well as in transit.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Confidential information goes only through the file exchange, or by email in an encrypted attachment with the password sent another way."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Remote access only by VPN with a second factor, granted and removed on request.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Remote access to our network is possible only through the VPN, with a personal account and a second factor."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Everything leaving the network is at least transport-encrypted.", "citations": [{"doc_id": "data-transfer-standard", "quote": "All information that leaves our network is encrypted in transit at least by the connection; confidential information is also encrypted as a file."}]}
+    ]
+  }
+}

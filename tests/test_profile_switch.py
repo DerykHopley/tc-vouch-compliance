@@ -18,7 +18,14 @@ from vouch.api import PROFILE_HEADER, create_app, current_user
 from vouch.chat_fake import CannedChatModel
 from vouch.isa import BaseFrameworkError
 from vouch.model_choice import ModelChoice
-from vouch.profile import ProfileError, load_problem, read_profile_once, scan_profiles
+from vouch.paths import FIXTURES_DIR
+from vouch.profile import (
+    SAMPLE_LIBRARY,
+    ProfileError,
+    load_problem,
+    read_profile_once,
+    scan_profiles,
+)
 from vouch.settings import PROFILES_DIR_ENV, Settings
 
 users = test_memory.users
@@ -201,6 +208,30 @@ def test_an_unknown_profile_is_404_before_any_stream(profiles, users):
 
     assert response.status_code == 404
     assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_the_default_profiles_folder_lists_both_companies_and_not_the_sample_library(users):
+    """The sample library's reference profile is no company (#370)."""
+    alice, _ = users
+    with app_with(FIXTURES_DIR) as client:
+        listed = client.get("/api/profiles", headers=alice).json()
+
+    assert [p["id"] for p in listed["profiles"]] == ["alpenwerk", "nordlicht"]
+
+
+def test_the_sample_library_is_404_before_any_stream(users):
+    alice, _ = users
+    with app_with(FIXTURES_DIR) as client:
+        response = client.post(
+            "/api/assessments", json={"control_id": "4.1.2"}, headers=under(alice, SAMPLE_LIBRARY)
+        )
+
+    assert response.status_code == 404
+    assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_the_eval_can_still_load_the_sample_library():
+    assert scan_profiles(FIXTURES_DIR).find(SAMPLE_LIBRARY) is not None
 
 
 def test_an_over_long_profile_name_is_404_not_500(profiles, users):

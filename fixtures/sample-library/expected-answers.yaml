@@ -1,0 +1,451 @@
+# Expected answers for the sample library's reference profile: DRAFT, for the owner's review (#370).
+#
+# Per applicable requirement of the 12 ISA questions (high protection: must, should and high):
+# the verdict a good assessment gives, and the library documents a good answer cites (ids from
+# policies/ and records/). `why` is our own one-line reasoning, never ISA text.
+#
+# Rules applied (spec #2): a requirement about doing something needs implemented evidence
+# to be evidenced; stale evidence caps a requirement at partly-evidenced.
+#
+# Deliberate gaps, so a first profile pass finds things to fix:
+#   1. Stale policy: backup-policy (approved 2024-02-12, yearly) is past its review on as_of and
+#      on 2027-06-30; every answer citing it is partly-evidenced (5.2.9, 1.1.1 S4).
+#   2. Policy nobody can show is done: access-rights-policy sets a six-monthly access review and
+#      no record shows one, so 4.2.1 M2, 4.1.3 M5 and S9 are partly-evidenced.
+#   3. Missing procedure: no document says how staff pass on a security event, so every 1.6.1
+#      requirement is not-evidenced (and 2.1.3 S1 is partly-evidenced).
+profile: sample-library
+as_of: 2026-11-04 # the date staleness is judged on
+status: draft
+controls:
+  - id: "1.1.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy says the security requirements are collected each January from strategy, contracts and law, and listed on the intranet.
+      - id: M2
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy exists and records the managing directors' approval of 16 February 2026.
+      - id: M3
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy states its objectives and why security matters to the business.
+      - id: M4
+        verdict: partly-evidenced
+        cites: [information-security-policy]
+        why: The policy says it is published on the intranet, but no record shows it was.
+      - id: M5
+        verdict: partly-evidenced
+        cites: [information-security-policy]
+        why: Change summaries to staff and suppliers are promised, but no record shows one was sent.
+      - id: S1
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: Requirements come from the business strategy, customer contracts and data protection law.
+      - id: S2
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy names consequences under employment law and the end of a supplier's contract.
+      - id: S3
+        verdict: evidenced
+        cites: [information-security-policy]
+        why: The policy lists ten supporting standards, each with its own owner.
+      - id: S4
+        verdict: partly-evidenced
+        cites: [information-security-policy, backup-policy]
+        why: A review cycle is set for every document, but the backup policy has missed its yearly review since February 2025.
+
+  - id: "1.6.1"
+    requirements:
+      - id: M1
+        verdict: not-evidenced
+        cites: []
+        why: No document defines what counts as a security event that staff must pass on.
+      - id: M2
+        verdict: not-evidenced
+        cites: []
+        why: No document sets out how staff pass on a security event.
+      - id: M3
+        verdict: not-evidenced
+        cites: []
+        why: No channel for talking with the people who raise an event is described.
+      - id: S1
+        verdict: not-evidenced
+        cites: []
+        why: No common point of contact for security events is named.
+      - id: S2
+        verdict: not-evidenced
+        cites: []
+        why: No channels by severity are described.
+      - id: S3
+        verdict: not-evidenced
+        cites: []
+        why: No document obliges staff to pass on events, and the training topics leave it out.
+      - id: S4
+        verdict: not-evidenced
+        cites: []
+        why: No channel for outside parties is described.
+      - id: S5
+        verdict: not-evidenced
+        cites: []
+        why: There is no information for staff on how to pass on an event.
+      - id: S6
+        verdict: not-evidenced
+        cites: []
+        why: No feedback to the people who raise an event is described.
+
+  - id: "1.6.2"
+    requirements:
+      - id: M1
+        verdict: partly-evidenced
+        cites: [incident-management-procedure, log-check-record]
+        why: The procedure sets a first look within one working day; one event in the log checks was handled, but there is no incident log to show the rest.
+      - id: M2
+        verdict: partly-evidenced
+        cites: [incident-management-procedure]
+        why: The procedure says how to contain and resolve an event, but no record shows a response.
+      - id: M3
+        verdict: partly-evidenced
+        cites: [incident-management-procedure]
+        why: Lessons-learned meetings are planned after severe incidents, but none is recorded.
+      - id: S1
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: Each event gets a category, a class and a priority from defined lists.
+      - id: S2
+        verdict: partly-evidenced
+        cites: [incident-management-procedure]
+        why: Handlers by category, coordination, deputies and phone for critical events are set; qualification and resources are not.
+      - id: S3
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: The managing directors decide whether to involve the police where a crime may be involved.
+      - id: H1
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: A table sets start and resolution times for each priority.
+      - id: H2
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: Late events go to the information security officer, and open critical or severe ones to the managing directors.
+      - id: H3
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: The duties to notify the data protection authority and customers, with contact details, are listed.
+      - id: H4
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: Who approves, who prepares, templates, legal checks and channels for outside communication are set.
+      - id: H5
+        verdict: evidenced
+        cites: [incident-management-procedure]
+        why: A supplier's incident is judged for its effect on us and checked against our notification duties.
+
+  - id: "2.1.3"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [awareness-training-concept, training-record]
+        why: The 2026 courses are recorded, with 205 of 212 staff trained.
+      - id: S1
+        verdict: partly-evidenced
+        cites: [awareness-training-concept]
+        why: The concept covers the policy, malware, passwords, compliance, NDAs and outside services, but not security events.
+      - id: S2
+        verdict: evidenced
+        cites: [awareness-training-concept]
+        why: Managers, administrators, staff in customers' networks and production staff get their own modules.
+      - id: S3
+        verdict: evidenced
+        cites: [awareness-training-concept]
+        why: The managing directors approved the concept on 31 August 2026.
+      - id: S4
+        verdict: evidenced
+        cites: [awareness-training-concept, training-record]
+        why: A yearly course, plus an extra session after the fake invoice emails in August.
+      - id: S5
+        verdict: evidenced
+        cites: [training-record]
+        why: The record lists each course with how many were expected and took part.
+      - id: S6
+        verdict: partly-evidenced
+        cites: [information-security-policy]
+        why: The security officer is named as the contact on the intranet, but nothing shows staff know it.
+
+  - id: "4.1.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [authentication-standard]
+        why: The login method per system follows a risk assessment that weighs internet access.
+      - id: M2
+        verdict: evidenced
+        cites: [authentication-standard]
+        why: The rules follow national guidance on passwords and multi-factor sign-in.
+      - id: S1
+        verdict: evidenced
+        cites: [authentication-standard]
+        why: Passwords, second factors and tokens are set per kind of system and account.
+      - id: S2
+        verdict: evidenced
+        cites: [authentication-standard]
+        why: Passwords of at least 12 characters, checked against leaked password lists.
+      - id: S3
+        verdict: evidenced
+        cites: [authentication-standard]
+        why: Administrator accounts sign in with a hardware token through the administration server.
+      - id: H1
+        verdict: evidenced
+        cites: [authentication-standard]
+        why: Lockout after failed logins, screen locks, session limits and alerts on unusual sign-ins.
+
+  - id: "4.1.3"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [user-account-standard, account-changes-record]
+        why: The standard sets how accounts are created, changed and removed; the third-quarter record shows it done.
+      - id: M2
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: Every user has a personal account of their own.
+      - id: M3
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: Shared accounts only on read-only shop floor terminals, each listed with its purpose.
+      - id: M4
+        verdict: evidenced
+        cites: [user-account-standard, account-changes-record]
+        why: Accounts are disabled on the last working day; each leaver in the record was.
+      - id: M5
+        verdict: partly-evidenced
+        cites: [user-account-standard, access-rights-policy]
+        why: A six-monthly review is set, but no record shows one took place.
+      - id: M6
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: First passwords are handed over in person or sent to the work phone.
+      - id: M7
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: The password rules cover secrecy, no writing down, changes on suspicion, no private reuse, first-login change and length.
+      - id: S1
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: A new account starts with the basic employee role.
+      - id: S2
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: Manufacturer accounts are disabled or given a new password before go-live.
+      - id: S3
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: HR asks and the line manager confirms before IT creates an account.
+      - id: S4
+        verdict: evidenced
+        cites: [user-account-standard, account-changes-record]
+        why: Each new account in the record has HR's request and the manager's confirmation.
+      - id: S5
+        verdict: evidenced
+        cites: [user-account-standard, account-changes-record]
+        why: The service provider's account was disabled the day the job ended.
+      - id: S6
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: Disable on the last working day and delete 90 days later.
+      - id: S7
+        verdict: partly-evidenced
+        cites: [user-account-standard]
+        why: First passwords must be changed, but nothing says the systems enforce it.
+      - id: S8
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: Users keep their tokens with them and have lost ones blocked.
+      - id: S9
+        verdict: partly-evidenced
+        cites: [user-account-standard, access-rights-policy]
+        why: A review that includes accounts in customers' systems is set, but none is recorded.
+      - id: S10
+        verdict: evidenced
+        cites: [user-account-standard]
+        why: Technical accounts cannot log in interactively.
+
+  - id: "4.2.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [access-rights-policy, account-changes-record]
+        why: Requests, approvals, least privilege and removal are set; the record shows an old role removed on a change.
+      - id: M2
+        verdict: partly-evidenced
+        cites: [access-rights-policy]
+        why: The policy sets a six-monthly access review, but no record shows one was done.
+      - id: S1
+        verdict: evidenced
+        cites: [access-rights-policy]
+        why: The policy sets how access to information is authorized, starting from the person's tasks.
+      - id: S2
+        verdict: evidenced
+        cites: [access-rights-policy]
+        why: Rights are grouped into roles with role owners.
+      - id: S3
+        verdict: evidenced
+        cites: [access-rights-policy]
+        why: Each person gets the access their current tasks need, and no more.
+      - id: S4
+        verdict: evidenced
+        cites: [access-rights-policy]
+        why: Administrator rights go only to separate administrator accounts.
+      - id: S5
+        verdict: evidenced
+        cites: [access-rights-policy, account-changes-record]
+        why: The old role is removed the day the new one is granted, as the record shows.
+      - id: H1
+        verdict: evidenced
+        cites: [access-rights-policy]
+        why: The information security officer approves every request for access to confidential information.
+
+  - id: "5.1.1"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [cryptography-standard]
+        why: Methods and strengths follow national technical guidelines, and old methods are switched off.
+      - id: S1
+        verdict: evidenced
+        cites: [cryptography-standard]
+        why: Methods, key strengths and the whole key lifecycle are set.
+      - id: H1
+        verdict: partly-evidenced
+        cites: [cryptography-standard]
+        why: The standard says we keep the keys for confidential data that providers process, but nothing shows which providers this applies to.
+
+  - id: "5.1.2"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: The standard lists each network service with what it carries.
+      - id: M2
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: Rules for each classification say which channels may carry it.
+      - id: M3
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: Transport encryption, personal logins and file encryption for confidential data.
+      - id: S1
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: Senders check the address against the order; shares go to one named person.
+      - id: S2
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: Confidential data is encrypted as a file as well as in transit.
+      - id: S3
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: Remote access only by VPN with a second factor, granted and removed on request.
+      - id: H1
+        verdict: evidenced
+        cites: [data-transfer-standard]
+        why: Everything leaving the network is at least transport-encrypted.
+
+  - id: "5.2.4"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [logging-standard]
+        why: The standard sets what is logged, where, for how long and who may read it.
+      - id: M2
+        verdict: evidenced
+        cites: [logging-standard]
+        why: Everything administrators do, sign-ins and account changes are logged.
+      - id: M3
+        verdict: partly-evidenced
+        cites: [logging-standard]
+        why: Each system is to be assessed for logging, but the assessments are not in the evidence.
+      - id: M4
+        verdict: partly-evidenced
+        cites: [logging-standard]
+        why: IT is to find out each provider's monitoring options, but nothing shows it did.
+      - id: M5
+        verdict: evidenced
+        cites: [logging-standard, log-check-record]
+        why: Weekly checks are set, and all 13 of the third quarter are recorded.
+      - id: S1
+        verdict: evidenced
+        cites: [logging-standard, log-check-record]
+        why: Alerts pointing to an incident go to the incident team, as the open VPN session did.
+      - id: S2
+        verdict: evidenced
+        cites: [logging-standard]
+        why: Logs sit on a central server where nobody can change entries.
+      - id: S3
+        verdict: evidenced
+        cites: [logging-standard]
+        why: The firewall and intrusion detection record traffic between zones and to the internet.
+      - id: H1
+        verdict: evidenced
+        cites: [logging-standard]
+        why: Contract requirements for logs are listed and built into the log server's settings.
+      - id: H2
+        verdict: evidenced
+        cites: [logging-standard]
+        why: The VPN logs the start and end of each remote session, remote maintenance included.
+
+  - id: "5.2.5"
+    requirements:
+      - id: M1
+        verdict: evidenced
+        cites: [vulnerability-management-standard, patch-status-record]
+        why: Advisories and scans are followed and scored with CVSS; the record counts those checked each month.
+      - id: M2
+        verdict: evidenced
+        cites: [vulnerability-management-standard, patch-status-record]
+        why: Affected systems are found and rated; the record lists those on our systems.
+      - id: M3
+        verdict: evidenced
+        cites: [vulnerability-management-standard, patch-status-record]
+        why: Fix times by rating, and the record shows them met or the risk reduced.
+      - id: S1
+        verdict: evidenced
+        cites: [vulnerability-management-standard]
+        why: Patches are tested on a small group first, then installed everywhere.
+      - id: S2
+        verdict: evidenced
+        cites: [vulnerability-management-standard, patch-status-record]
+        why: A server that could not be patched in time had the service blocked at the firewall.
+      - id: S3
+        verdict: evidenced
+        cites: [vulnerability-management-standard, patch-status-record]
+        why: The next scan checks each patch round, as the record shows for each month.
+
+  - id: "5.2.9"
+    requirements:
+      - id: M1
+        verdict: partly-evidenced
+        cites: [backup-policy]
+        why: Backups are encrypted and kept in two places, but the backup policy is past its yearly review.
+      - id: M2
+        verdict: partly-evidenced
+        cites: [backup-policy]
+        why: Each service has a recovery guide, but the backup policy is past its yearly review.
+      - id: S1
+        verdict: partly-evidenced
+        cites: [backup-policy]
+        why: Backups and restore order are set per service, but the backup policy is past its yearly review.
+      - id: H1
+        verdict: partly-evidenced
+        cites: [backup-policy]
+        why: A yearly review is set, and missed since February 2025.
+      - id: H2
+        verdict: partly-evidenced
+        cites: [backup-policy]
+        why: A yearly restore test is set, but no record shows one, and the policy is past its review.
+      - id: H3
+        verdict: partly-evidenced
+        cites: [backup-policy]
+        why: RPO, RTO, resources, one-at-a-time restores and a second fire section are set, but the policy is past its review.

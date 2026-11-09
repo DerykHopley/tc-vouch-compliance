@@ -42,6 +42,9 @@ log = logging.getLogger(__name__)
 PROFILE_FILE = "profile.yaml"
 DEFAULT_PROFILE = "nordlicht"  # a request naming no profile is under this one (#47)
 NORDLICHT_PROFILE = FIXTURES_DIR / "nordlicht" / PROFILE_FILE
+# The sample library's reference profile (#370): the eval judges the library under it, and it is
+# no company, so no user sees it (vouch.api.user_profiles).
+SAMPLE_LIBRARY = "sample-library"
 
 ProtectionLevel = Literal["normal", "high", "very high"]
 EvidenceSourceName = Literal["policies", "records", "patch"]

@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "services secured systems access"}},
+    {"tool": "search_records", "args": {"query": "services secured systems access"}},
+    {"answer": "Draft answer for 4.1.2, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The login method per system follows a risk assessment that weighs internet access.", "citations": [{"doc_id": "authentication-standard", "quote": "For each system, IT and the information security officer weigh the risk before deciding how users sign in: what information the system holds, who uses it, and whether it can be reached from the internet."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "The rules follow national guidance on passwords and multi-factor sign-in.", "citations": [{"doc_id": "authentication-standard", "quote": "The login methods follow recognised good practice, such as the national guidance on secure passwords and multi-factor sign-in."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Passwords, second factors and tokens are set per kind of system and account.", "citations": [{"doc_id": "authentication-standard", "quote": "For each system, IT and the information security officer weigh the risk before deciding how users sign in: what information the system holds, who uses it, and whether it can be reached from the internet."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Passwords of at least 12 characters, checked against leaked password lists.", "citations": [{"doc_id": "authentication-standard", "quote": "Every user signs in with a personal password of at least 12 characters, checked against lists of known leaked passwords."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Administrator accounts sign in with a hardware token through the administration server.", "citations": [{"doc_id": "authentication-standard", "quote": "Administrator accounts always sign in with a hardware token, through the administration server."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Lockout after failed logins, screen locks, session limits and alerts on unusual sign-ins.", "citations": [{"doc_id": "authentication-standard", "quote": "After ten failed logins an account is locked for 15 minutes."}]}
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+# The sample library's reference profile (#370): not a company, and never listed in the
+# profile switcher (vouch.api.user_profiles leaves it out). It exists so the eval, the
+# fake model's scripts and the evidence tests can judge the library's invented documents.
+# High protection, so its expected answers judge every must, should and high requirement:
+# that covers a company set up at normal or at high protection.
+# Validated on load by vouch.profile; folders are relative to this file.
+id: sample-library
+company: Sample library (reference)
+country: Germany
+answer_language: en
+protection_level: high  # normal, high or very high
+base_framework: VDA ISA 2027.1
+overlays: []
+not_applicable: []
+evidence_sources:
+  policies:
+    folder: policies
+  records:
+    folder: records
+# Room for risk management later (docs/requirements.md, 2026-11-03); unused for now.
+asset_register: []
+risks: []

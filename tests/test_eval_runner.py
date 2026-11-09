@@ -564,11 +564,12 @@ def test_the_model_list_is_printed(capsys):
     assert eval_models.JUDGE.source in out
 
 
-def test_both_profiles_have_twelve_cases_that_fit_them_about_24_in_all():
-    """Alpenwerk's cases come from its expected answers (approved in #50); on a model
-    that fails every case they are failed cases, never bad ones."""
+def test_every_profile_has_twelve_cases_that_fit_it_36_in_all():
+    """Alpenwerk's cases come from its expected answers (approved in #50), the sample library's
+    from its draft (#370); on a model that fails every case they are failed cases, never bad
+    ones."""
     total = 0
-    for name in ("nordlicht", "alpenwerk"):
+    for name in ("nordlicht", "alpenwerk", "sample-library"):
         profile = load_named_profile(name)
         cases = load_cases(FIXTURES_DIR / name / "expected-answers.yaml", name)
         everything = frozenset(c.control_id for c in cases.cases)
@@ -580,7 +581,7 @@ def test_both_profiles_have_twelve_cases_that_fit_them_about_24_in_all():
         assert report.bad_cases == []
         assert len(report.scores) == 12
         total += len(report.scores)
-    assert total == 24
+    assert total == 36
 
 
 def test_the_ollama_timeout_flag_reaches_the_local_model(tmp_path, monkeypatch):

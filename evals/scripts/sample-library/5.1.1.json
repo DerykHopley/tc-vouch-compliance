@@ -1,0 +1,14 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "cryptographic procedures managed extent"}},
+    {"tool": "search_records", "args": {"query": "cryptographic procedures managed extent"}},
+    {"answer": "Draft answer for 5.1.1, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Methods and strengths follow national technical guidelines, and old methods are switched off.", "citations": [{"doc_id": "cryptography-standard", "quote": "We use only methods that current national technical guidelines recommend:"}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Methods, key strengths and the whole key lifecycle are set.", "citations": [{"doc_id": "cryptography-standard", "quote": "We use only methods that current national technical guidelines recommend:"}]},
+      {"requirement_id": "H1", "verdict": "partly-evidenced", "reason": "The standard says we keep the keys for confidential data that providers process, but nothing shows which providers this applies to.", "citations": [{"doc_id": "cryptography-standard", "quote": "Where a service provider processes our confidential information, we keep the keys that protect it ourselves, in our key vault, unless the information security officer approves an exception in writing."}]}
+    ]
+  }
+}

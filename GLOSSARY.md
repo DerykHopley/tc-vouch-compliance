@@ -42,6 +42,14 @@ _Avoid_: Regional rules, local law
 The stack of layers (base framework, overlays, language) that defines what one company must show and how answers are written.
 _Avoid_: Config, settings, project
 
+**Sample library**:
+A set of invented evidence documents (policies and records, with a few deliberate gaps) that ships with Vouch, from which a company made in company setup picks its evidence. Its documents name no company.
+_Avoid_: Document pool, template documents
+
+**Reference profile**:
+The compliance profile over the whole sample library that the eval scores; it is no company, so no user sees it.
+_Avoid_: Sample company, test profile
+
 ### Assessment
 
 **Assessment**:
