@@ -22,6 +22,7 @@ from vouch import company_profiles
 from vouch.api import PROFILE_HEADER, app_company_profiles, create_app, current_user
 from vouch.audit import now
 from vouch.company_profiles import (
+    MAX_COMPANY_LENGTH,
     CompanySetup,
     PostgresCompanyProfiles,
     ProcessCompanyProfiles,
@@ -507,3 +508,15 @@ def test_an_id_no_profile_has_is_still_404(users):
             client.get("/api/overview", headers=alice | {PROFILE_HEADER: "nobody"}).status_code
             == 404
         )
+
+
+def test_the_company_name_limit_counts_the_trimmed_name():
+    name = "A" * MAX_COMPANY_LENGTH
+    setup = CompanySetup.model_validate(MUSTERFIRMA | {"company": f" {name} "})
+
+    assert setup.company == name
+
+
+def test_a_company_name_over_the_limit_says_characters():
+    with pytest.raises(ValueError, match="at most 100 characters"):
+        CompanySetup.model_validate(MUSTERFIRMA | {"company": "A" * (MAX_COMPANY_LENGTH + 1)})
