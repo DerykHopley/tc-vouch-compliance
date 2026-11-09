@@ -112,8 +112,8 @@ controls:
         why: Lessons-learned meetings are planned after severe incidents, but none is recorded.
       - id: S1
         verdict: evidenced
-        cites: [incident-management-procedure]
-        why: Each event gets a category, a class and a priority from defined lists.
+        cites: [incident-management-procedure, log-check-record]
+        why: The procedure sets category, class and priority, and the log check record shows an event the incident team classed as a low-priority vulnerability.
       - id: S2
         verdict: partly-evidenced
         cites: [incident-management-procedure]
@@ -127,9 +127,9 @@ controls:
         cites: [incident-management-procedure]
         why: A table sets start and resolution times for each priority.
       - id: H2
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [incident-management-procedure]
-        why: Late events go to the information security officer, and open critical or severe ones to the managing directors.
+        why: Escalation to the information security officer and the managing directors is set out, but no record shows an event escalated.
       - id: H3
         verdict: evidenced
         cites: [incident-management-procedure]
@@ -186,20 +186,20 @@ controls:
         why: The rules follow national guidance on passwords and multi-factor sign-in.
       - id: S1
         verdict: evidenced
-        cites: [authentication-standard]
-        why: Passwords, second factors and tokens are set per kind of system and account.
+        cites: [authentication-standard, sign-in-settings-record]
+        why: The standard defines the login methods and the settings check shows them in force on the directory, the VPN and the internet-facing systems.
       - id: S2
         verdict: evidenced
-        cites: [authentication-standard]
-        why: Passwords of at least 12 characters, checked against leaked password lists.
+        cites: [authentication-standard, sign-in-settings-record]
+        why: Passwords of 12 characters checked against leaked lists are required, and the settings check found a leaked password refused.
       - id: S3
         verdict: evidenced
-        cites: [authentication-standard]
-        why: Administrator accounts sign in with a hardware token through the administration server.
+        cites: [authentication-standard, sign-in-settings-record]
+        why: Administrators sign in with a hardware token through the administration server, and the settings check found other sign-ins refused.
       - id: H1
         verdict: evidenced
-        cites: [authentication-standard]
-        why: Lockout after failed logins, screen locks, session limits and alerts on unusual sign-ins.
+        cites: [authentication-standard, sign-in-settings-record]
+        why: Lockout, screen locks and alerts on unusual sign-ins are set out, and the settings check found them on, with three alerts followed up.
 
   - id: "4.1.3"
     requirements:
@@ -209,8 +209,8 @@ controls:
         why: The standard sets how accounts are created, changed and removed; the third-quarter record shows it done.
       - id: M2
         verdict: evidenced
-        cites: [user-account-standard]
-        why: Every user has a personal account of their own.
+        cites: [user-account-standard, sign-in-settings-record]
+        why: Every user has a personal account, and the settings check found no shared sign-in accounts beyond the listed shop floor displays.
       - id: M3
         verdict: evidenced
         cites: [user-account-standard]
@@ -224,25 +224,25 @@ controls:
         cites: [user-account-standard, access-rights-policy]
         why: A six-monthly review is set, but no record shows one took place.
       - id: M6
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [user-account-standard]
-        why: First passwords are handed over in person or sent to the work phone.
+        why: First passwords are handed over in person or by text message to the work phone, but no record shows it done.
       - id: M7
         verdict: evidenced
-        cites: [user-account-standard]
-        why: The password rules cover secrecy, no writing down, changes on suspicion, no private reuse, first-login change and length.
+        cites: [user-account-standard, sign-in-settings-record]
+        why: The password rules are set out, and the settings check found the length rule enforced and the password manager on every laptop.
       - id: S1
         verdict: evidenced
-        cites: [user-account-standard]
-        why: A new account starts with the basic employee role.
+        cites: [user-account-standard, account-changes-record]
+        why: New accounts start with a basic role for email and the intranet, and the account changes record shows each new account given it.
       - id: S2
         verdict: evidenced
-        cites: [user-account-standard]
-        why: Manufacturer accounts are disabled or given a new password before go-live.
+        cites: [user-account-standard, sign-in-settings-record]
+        why: Manufacturer accounts are disabled before go-live, and the settings check found them disabled on the four new systems.
       - id: S3
         verdict: evidenced
-        cites: [user-account-standard]
-        why: HR asks and the line manager confirms before IT creates an account.
+        cites: [user-account-standard, account-changes-record]
+        why: Accounts are created only after HR and the line manager sign off, and the account changes record shows both dates for each new account.
       - id: S4
         verdict: evidenced
         cites: [user-account-standard, account-changes-record]
@@ -260,17 +260,17 @@ controls:
         cites: [user-account-standard]
         why: First passwords must be changed, but nothing says the systems enforce it.
       - id: S8
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [user-account-standard]
-        why: Users keep their tokens with them and have lost ones blocked.
+        why: Users keep tokens with them and block a lost one themselves, but no record shows tokens handled that way.
       - id: S9
         verdict: partly-evidenced
         cites: [user-account-standard, access-rights-policy]
         why: A review that includes accounts in customers' systems is set, but none is recorded.
       - id: S10
         verdict: evidenced
-        cites: [user-account-standard]
-        why: Technical accounts cannot log in interactively.
+        cites: [user-account-standard, sign-in-settings-record]
+        why: Technical accounts cannot sign in interactively, and the settings check found it refused for two of them.
 
   - id: "4.2.1"
     requirements:
@@ -288,35 +288,35 @@ controls:
         why: The policy sets how access to information is authorized, starting from the person's tasks.
       - id: S2
         verdict: evidenced
-        cites: [access-rights-policy]
-        why: Rights are grouped into roles with role owners.
+        cites: [access-rights-policy, account-changes-record]
+        why: Rights are grouped into roles per function, and the account changes record shows accounts given and moved between roles.
       - id: S3
         verdict: evidenced
-        cites: [access-rights-policy]
-        why: Each person gets the access their current tasks need, and no more.
+        cites: [access-rights-policy, account-changes-record]
+        why: Rights follow current tasks, and the account changes record shows an old role removed the day the new one was granted.
       - id: S4
         verdict: evidenced
-        cites: [access-rights-policy]
-        why: Administrator rights go only to separate administrator accounts.
+        cites: [access-rights-policy, sign-in-settings-record]
+        why: Administrator rights go only to separate accounts, and the settings check found the directory refusing an everyday account in an administrator group.
       - id: S5
         verdict: evidenced
         cites: [access-rights-policy, account-changes-record]
         why: The old role is removed the day the new one is granted, as the record shows.
       - id: H1
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [access-rights-policy]
-        why: The information security officer approves every request for access to confidential information.
+        why: The information security officer approves access to confidential information, but no record shows such an approval.
 
   - id: "5.1.1"
     requirements:
       - id: M1
         verdict: evidenced
-        cites: [cryptography-standard]
-        why: Methods and strengths follow national technical guidelines, and old methods are switched off.
+        cites: [cryptography-standard, encryption-check-record]
+        why: Only recommended methods are allowed, and the encryption check found an old protocol on one server and switched it off.
       - id: S1
         verdict: evidenced
-        cites: [cryptography-standard]
-        why: Methods, key strengths and the whole key lifecycle are set.
+        cites: [cryptography-standard, encryption-check-record]
+        why: Methods, key strengths and the key lifecycle are set out, and the encryption check shows disks encrypted and keys renewed within two years.
       - id: H1
         verdict: partly-evidenced
         cites: [cryptography-standard]
@@ -330,39 +330,39 @@ controls:
         why: The standard lists each network service with what it carries.
       - id: M2
         verdict: evidenced
-        cites: [data-transfer-standard]
-        why: Rules for each classification say which channels may carry it.
+        cites: [data-transfer-standard, encryption-check-record]
+        why: Channels are set per classification, and the encryption check found every sampled confidential email attachment encrypted.
       - id: M3
         verdict: evidenced
-        cites: [data-transfer-standard]
-        why: Transport encryption, personal logins and file encryption for confidential data.
+        cites: [data-transfer-standard, encryption-check-record]
+        why: Transfers are protected per service, and the encryption check found each internet-facing service passing a scan.
       - id: S1
         verdict: evidenced
-        cites: [data-transfer-standard]
-        why: Senders check the address against the order; shares go to one named person.
+        cites: [data-transfer-standard, encryption-check-record]
+        why: Senders check addresses and shares go to one named person, and the encryption check's sample of shares bears this out.
       - id: S2
         verdict: evidenced
-        cites: [data-transfer-standard]
-        why: Confidential data is encrypted as a file as well as in transit.
+        cites: [data-transfer-standard, encryption-check-record]
+        why: Connections are encrypted and confidential files encrypted too, and the encryption check found both in place.
       - id: S3
         verdict: evidenced
-        cites: [data-transfer-standard]
-        why: Remote access only by VPN with a second factor, granted and removed on request.
+        cites: [data-transfer-standard, encryption-check-record]
+        why: Remote access is only through the VPN with a second factor, and the encryption check found every VPN account using one.
       - id: H1
         verdict: evidenced
-        cites: [data-transfer-standard]
-        why: Everything leaving the network is at least transport-encrypted.
+        cites: [data-transfer-standard, encryption-check-record]
+        why: Everything leaving the network is encrypted in transit, and the encryption check found outgoing mail and the file exchange using TLS.
 
   - id: "5.2.4"
     requirements:
       - id: M1
         verdict: evidenced
-        cites: [logging-standard]
-        why: The standard sets what is logged, where, for how long and who may read it.
+        cites: [logging-standard, log-check-record]
+        why: Where logs are kept, for how long and who reads them is set out, and the log check record shows the logs checked every week.
       - id: M2
         verdict: evidenced
-        cites: [logging-standard]
-        why: Everything administrators do, sign-ins and account changes are logged.
+        cites: [logging-standard, log-check-record]
+        why: Sign-ins and administrators' actions are logged, and the log check record shows each administrator's actions checked by the other.
       - id: M3
         verdict: partly-evidenced
         cites: [logging-standard]
@@ -385,16 +385,16 @@ controls:
         why: Logs sit on a central server where nobody can change entries.
       - id: S3
         verdict: evidenced
-        cites: [logging-standard]
-        why: The firewall and intrusion detection record traffic between zones and to the internet.
+        cites: [logging-standard, log-check-record]
+        why: The firewall and intrusion detection watch the network, and the log check record shows their alerts checked.
       - id: H1
-        verdict: evidenced
+        verdict: partly-evidenced
         cites: [logging-standard]
-        why: Contract requirements for logs are listed and built into the log server's settings.
+        why: Customer contract requirements for logs are built into the log server's settings, but no record shows it.
       - id: H2
         verdict: evidenced
-        cites: [logging-standard]
-        why: The VPN logs the start and end of each remote session, remote maintenance included.
+        cites: [logging-standard, log-check-record]
+        why: The VPN logs each session's start and end, and the log check record shows a supplier's session found open overnight.
 
   - id: "5.2.5"
     requirements:
@@ -412,8 +412,8 @@ controls:
         why: Fix times by rating, and the record shows them met or the risk reduced.
       - id: S1
         verdict: evidenced
-        cites: [vulnerability-management-standard]
-        why: Patches are tested on a small group first, then installed everywhere.
+        cites: [vulnerability-management-standard, patch-status-record]
+        why: Patch testing and installation are set out, and the patch record shows monthly rounds installed and verified.
       - id: S2
         verdict: evidenced
         cites: [vulnerability-management-standard, patch-status-record]

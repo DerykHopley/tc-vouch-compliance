@@ -25,21 +25,26 @@ DEMO_HORIZON = datetime.date(2027, 6, 30)  # the demo runs on today's date (#22)
 STALE = "backup-policy"
 COMPANY = r"Nordlicht|Alpenwerk|\bGmbH\b|\bAG\b|\bLtd\b|\bInc\b"
 ACCESS_REVIEW = r"access review|review(ed|s)? (of )?(the )?(access|rights)|rights review|recertif"
-# Any sentence pairing a report with a security event, either way round.
+# Any sentence pairing a report with a security event, either way round, or telling of one.
 REPORTING = (
     r"\breport\w*\b[^.\n]{0,60}\b(event|incident|observation|suspicion)s?\b"
     r"|\b(event|incident|observation)s?\b[^.\n]{0,30}\breport\w*"
+    # Telling someone at once, or being told of an incident (verify round 1 of #370).
+    r"|\btell\w*\b[^.\n]{0,20}\b(at once|immediately|straight away)"
+    r"|\btell\w*\b[^.\n]{0,20}\bof an? (event|incident|observation)"
 )
 # The requirements of the twelve that ask for something to be done, not only written down.
 ABOUT_DOING = {
     "1.1.1": ["M4", "M5"],
-    "1.6.2": ["M1", "M2", "M3"],
+    "1.6.2": ["M1", "M2", "M3", "S1", "H2"],
     "2.1.3": ["M1", "S4", "S5", "S6"],
-    "4.1.3": ["M1", "M4", "M5", "S4", "S5", "S9"],
-    "4.2.1": ["M2", "S5"],
-    "5.1.1": ["H1"],
-    "5.2.4": ["M3", "M4", "M5"],
-    "5.2.5": ["M1", "M2", "M3", "S3"],
+    "4.1.2": ["S1", "S2", "S3", "H1"],
+    "4.1.3": ["M1", "M2", "M4", "M5", "M6", "M7", "S1", "S2", "S3", "S4", "S5", "S8", "S9", "S10"],
+    "4.2.1": ["M1", "M2", "S2", "S3", "S4", "S5", "H1"],
+    "5.1.1": ["M1", "S1", "H1"],
+    "5.1.2": ["M2", "M3", "S1", "S2", "S3", "H1"],
+    "5.2.4": ["M1", "M2", "M3", "M4", "M5", "S1", "S3", "H1", "H2"],
+    "5.2.5": ["M1", "M2", "M3", "S1", "S2", "S3"],
     "5.2.9": ["H2"],
 }
 REVIEWING_ACCESS = ["M2"]  # 4.2.1's requirements about reviewing access
@@ -154,6 +159,8 @@ def test_4_2_1_rolls_up_below_evidenced_and_its_review_rests_on_policies_alone()
         "Report any security event to the service desk.",
         "Staff report suspicious incidents by phone.",
         "Incidents are reported through the portal.",
+        "Tell IT at once if you lose your token.",
+        "When a supplier tells us of an incident, we act.",
     ],
 )
 def test_the_reporting_pattern_catches_each_way_of_saying_it(text):
