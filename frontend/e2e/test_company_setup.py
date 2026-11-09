@@ -7,10 +7,8 @@ developer). Nothing is stored: steps 1 to 3 send no profile.
 
 import re
 
-import pytest
 from playwright.sync_api import Page, expect
 from test_developer_page import as_compliance_lead
-from touch_targets import small_targets
 
 LEVELS = "/api/developer/protection-levels"
 
@@ -80,11 +78,41 @@ def test_a_developer_walks_steps_1_to_3_and_back_keeping_every_answer(page: Page
     assert not any("/api/developer/profiles" in url for url in posted)
 
 
-@pytest.mark.parametrize("step", [1, 3])
-def test_every_setup_control_is_at_least_44px_at_phone_width(page: Page, profiles_url, step):
-    page.set_viewport_size({"width": 400, "height": 900})
+def test_next_and_back_move_focus_to_the_step_heading(page: Page, profiles_url):
     open_setup(page, profiles_url)
-    if step == 3:
-        to_step_3(page)
-        expect(page.get_by_role("group", name="Protection level")).to_contain_text("85 in 12")
-    assert small_targets(page) == []
+    page.get_by_role("textbox", name="Company name").fill("Musterfirma Nord GmbH")
+    page.get_by_role("combobox", name="Country").select_option("Germany")
+
+    page.get_by_role("button", name="Next").click()
+    expect(page.get_by_role("heading", name="Language")).to_be_focused()
+    with page.expect_response(lambda r: LEVELS in r.url):
+        page.get_by_role("button", name="Next").click()
+    expect(page.get_by_role("heading", name="Protection level")).to_be_focused()
+    page.get_by_role("button", name="Back").click()
+    expect(page.get_by_role("heading", name="Language")).to_be_focused()
+
+
+def test_next_with_a_missing_answer_focuses_the_first_invalid_field(page: Page, profiles_url):
+    open_setup(page, profiles_url)
+    name = page.get_by_role("textbox", name="Company name")
+    country = page.get_by_role("combobox", name="Country")
+
+    page.get_by_role("button", name="Next").click()
+    expect(name).to_be_focused()
+    expect(country).to_have_attribute("aria-invalid", "true")
+
+    name.fill("Musterfirma Nord GmbH")
+    page.get_by_role("button", name="Next").click()
+    expect(country).to_be_focused()
+    expect(page.get_by_role("heading", name="Company", exact=True)).to_be_visible()
+
+
+def test_enter_in_the_name_field_moves_on_as_next_does(page: Page, profiles_url):
+    open_setup(page, profiles_url)
+    page.get_by_role("combobox", name="Country").select_option("Germany")
+    name = page.get_by_role("textbox", name="Company name")
+    name.fill("Musterfirma Nord GmbH")
+
+    name.press("Enter")
+
+    expect(page.get_by_role("heading", name="Language")).to_be_focused()

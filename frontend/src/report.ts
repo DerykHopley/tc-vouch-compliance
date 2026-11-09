@@ -1,4 +1,4 @@
-import type { Citation, Verdict } from './assessment.ts'
+import type { Citation, ProtectionLevel, Verdict } from './assessment.ts'
 import type { Readiness } from './overview.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
@@ -9,7 +9,7 @@ export type ReportHead = {
   company: string
   country: string
   base_framework: string
-  protection_level: 'normal' | 'high' | 'very high'
+  protection_level: ProtectionLevel
   /** The country overlays' names. */
   overlays: string[]
   /** ISO 639-1: the profile's answer language (the quotes and the model's text). */

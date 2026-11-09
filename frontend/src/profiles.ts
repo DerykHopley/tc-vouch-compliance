@@ -49,8 +49,13 @@ export function startingProfile(
 // The interface is English (docs/design.md, Language), so the answer language is named in English.
 const languages = new Intl.DisplayNames(['en'], { type: 'language' })
 
-/** The ISO 3166 code of a country named in English ("Germany": "DE"), found through Intl; null when none matches. */
 const regions = new Intl.DisplayNames(['en'], { type: 'region' })
+
+/** A country's English name from its ISO 3166 code ("DE": "Germany"), as a profile stores it; the code where Intl
+ * names none. countryCode finds the code again. */
+export const regionName = (code: string): string => regions.of(code) ?? code
+
+/** The ISO 3166 code of a country named in English ("Germany": "DE"), found through Intl; null when none matches. */
 const codes = new Map<string, string | null>()
 function countryCode(country: string): string | null {
   if (!codes.has(country)) {
@@ -61,7 +66,7 @@ function countryCode(country: string): string | null {
         try {
           // A code current today only: an old one (DD, East Germany) is canonicalised to its successor (DE).
           const current = Intl.getCanonicalLocales(`und-${code}`)[0].split('-')[1] === code
-          if (current && regions.of(code) === country) found = code
+          if (current && regionName(code) === country) found = code
         } catch {
           // not a region code
         }

@@ -1,3 +1,5 @@
+import { type Column, plural, type ProtectionLevel } from './assessment.ts'
+import { regionName } from './profiles.ts'
 import { authHeaders, sessionEnded } from './session.ts'
 
 /** Company setup's data (#403): the countries a company may be in, and what each protection level brings into scope. */
@@ -11,21 +13,24 @@ const COUNTRY_CODES = [
   'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO', 'CH', 'GB',
 ]
 
-const regions = new Intl.DisplayNames(['en'], { type: 'region' })
-
-/** The countries step 1 offers, each named as Intl names its code (so the profile switcher's tag finds the code
- * again), in alphabetical order. */
+/** The countries step 1 offers, each named as a profile stores it (regionName, so the profile switcher's tag finds the
+ * code again), in alphabetical order. */
 export const COUNTRIES: { code: string; name: string }[] = COUNTRY_CODES
-  .map((code) => ({ code, name: regions.of(code) ?? code }))
+  .map((code) => ({ code, name: regionName(code) }))
   .sort((a, b) => a.name.localeCompare(b.name, 'en'))
 
-export type ProtectionLevel = 'normal' | 'high' | 'very high'
+/** Each protection level, lowest first: its name in the step, and the kind of requirement it adds over the one below. */
+export const PROTECTION_LEVELS: Record<ProtectionLevel, { name: string; kind: string }> = {
+  normal: { name: 'Normal', kind: 'must and should' },
+  high: { name: 'High', kind: 'high-protection' },
+  'very high': { name: 'Very high', kind: 'very-high-protection' },
+}
 
 /** One level's scope, as vouch.profile.ProtectionScope sends it. */
 export type ProtectionScope = {
   level: ProtectionLevel
   /** The base requirements in each column it brings in, in the framework's order. */
-  requirements: Record<string, number>
+  requirements: Partial<Record<Column, number>>
   total: number
   /** The controls with a requirement in scope. */
   controls: number
@@ -49,8 +54,8 @@ export async function protectionLevels(): Promise<ProtectionScope[] | null> {
 /** The words a level's option shows: what it brings in, and for a higher level what it adds and the total. */
 export function scopeWords(scope: ProtectionScope): string {
   if (scope.added === 0)
-    return `Must and should requirements: ${scope.total} in ${scope.controls} controls.`
-  const kind = scope.level === 'high' ? 'high-protection' : 'very-high-protection'
+    return `Must and should requirements: ${scope.total} in ${plural(scope.controls, 'control')}.`
   const where = scope.added_controls
-  return `Adds ${scope.added} ${kind} requirements, in ${where.length} controls (${where.join(', ')}): ${scope.total} in all.`
+  const added = plural(scope.added, `${PROTECTION_LEVELS[scope.level].kind} requirement`)
+  return `Adds ${added}, in ${plural(where.length, 'control')} (${where.join(', ')}): ${scope.total} in all.`
 }

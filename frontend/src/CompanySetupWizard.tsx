@@ -1,28 +1,31 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { COUNTRIES, MAX_COMPANY_LENGTH, protectionLevels, type ProtectionLevel, type ProtectionScope, scopeWords } from './setup.ts'
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
+import type { ProtectionLevel } from './assessment.ts'
+import { COUNTRIES, MAX_COMPANY_LENGTH, PROTECTION_LEVELS, protectionLevels, type ProtectionScope, scopeWords } from './setup.ts'
 
 /** Every step of company setup, by name; steps after BUILT are later slices of #351. */
 const STEPS = ['Company', 'Language', 'Protection level', 'Goal', 'Not applicable', 'Evidence', 'Finish']
-const BUILT = 3
+const COMPANY = 1
+const LANGUAGE = 2
+const LEVEL = 3
+const BUILT = LEVEL
 
 type Answers = { company: string; country: string; language: 'en' | 'de'; level: ProtectionLevel | null }
 type Problems = { company: boolean; country: boolean }
 type Scope = { status: 'loading' } | { status: 'ready'; levels: ProtectionScope[] } | { status: 'failed' }
 
 const LANGUAGES = [{ code: 'en', name: 'English' }, { code: 'de', name: 'German' }] as const
-const LEVELS: { level: ProtectionLevel; name: string }[] = [
-  { level: 'normal', name: 'Normal' }, { level: 'high', name: 'High' }, { level: 'very high', name: 'Very high' },
-]
+const LEVELS = Object.keys(PROTECTION_LEVELS) as ProtectionLevel[]
 
-type Props = { onDeveloper: () => void }
+/** `developerPath`: the developer page's address, for the breadcrumb's link; `onDeveloper` opens it. */
+type Props = { developerPath: string; onDeveloper: () => void }
 
 /**
  * Company setup (#403, M8 #351): a developer walks the steps that make a company, going back and forward without
  * losing an answer. The answers live here only: leaving or reloading starts afresh, and nothing is sent yet. Steps 1
  * to 3 are built (company and country, answer language, protection level with what each brings into scope).
  */
-export default function CompanySetupWizard({ onDeveloper }: Props) {
-  const [step, setStep] = useState(1)
+export default function CompanySetupWizard({ developerPath, onDeveloper }: Props) {
+  const [step, setStep] = useState(COMPANY)
   const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null })
   const [problems, setProblems] = useState<Problems>({ company: false, country: false })
   const [scope, setScope] = useState<Scope | null>(null) // read when step 3 first opens
@@ -34,30 +37,48 @@ export default function CompanySetupWizard({ onDeveloper }: Props) {
     if (moved.current) headingRef.current?.focus() // on each step change, not on opening
   }, [step])
 
+  // Only the latest scope read's answer lands, and none after the wizard has closed.
+  const reads = useRef(0)
+  useEffect(() => () => { reads.current += 1 }, [])
   const readScope = () => {
+    const read = ++reads.current
     setScope({ status: 'loading' })
-    void protectionLevels().then((levels) => setScope(levels ? { status: 'ready', levels } : { status: 'failed' }))
+    void protectionLevels().then((levels) => {
+      if (read === reads.current) setScope(levels ? { status: 'ready', levels } : { status: 'failed' })
+    })
   }
   const go = (to: number) => {
     moved.current = true
     setStep(to)
-    if (to === 3 && scope === null) readScope()
+    if (to === LEVEL && scope === null) readScope()
   }
-  const next = () => {
-    if (step === 1) {
+  const next = (e: FormEvent) => {
+    e.preventDefault()
+    if (step >= BUILT) return
+    if (step === COMPANY) {
       const found = { company: answers.company.trim() === '', country: answers.country === '' }
       setProblems(found)
-      if (found.company) return nameRef.current?.focus()
-      if (found.country) return countryRef.current?.focus()
+      if (found.company) {
+        nameRef.current?.focus()
+        return
+      }
+      if (found.country) {
+        countryRef.current?.focus()
+        return
+      }
     }
     go(step + 1)
   }
-  const answer = (change: Partial<Answers>) => setAnswers((now) => ({ ...now, ...change }))
+  // A changed field's problem clears at once; Next checks again.
+  const answer = (change: Partial<Answers>) => {
+    setAnswers((now) => ({ ...now, ...change }))
+    setProblems((now) => ({ company: now.company && !('company' in change), country: now.country && !('country' in change) }))
+  }
 
   return (
     <section className="paper wrap" aria-label="Company setup">
       <nav className="crumbs" aria-label="Breadcrumb">
-        <a href="/developer" onClick={(e) => { e.preventDefault(); onDeveloper() }}>Developer</a>
+        <a href={developerPath} onClick={(e) => { e.preventDefault(); onDeveloper() }}>Developer</a>
         <span aria-hidden="true">›</span>
         <span aria-current="page">Company setup</span>
       </nav>
@@ -73,22 +94,24 @@ export default function CompanySetupWizard({ onDeveloper }: Props) {
           </li>
         ))}
       </ol>
-      <div className="sheet setup-step">
+      <form className="sheet setup-step" noValidate onSubmit={next}>
         <span className="lbl">Step {step} of {STEPS.length}</span>
         <h3 ref={headingRef} tabIndex={-1}>{STEPS[step - 1]}</h3>
-        {step === 1 ? <CompanyStep answers={answers} problems={problems} answer={answer} nameRef={nameRef} countryRef={countryRef} />
-          : step === 2 ? <LanguageStep answers={answers} answer={answer} />
-          : <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} />}
+        {step === COMPANY && (
+          <CompanyStep answers={answers} problems={problems} answer={answer} nameRef={nameRef} countryRef={countryRef} />
+        )}
+        {step === LANGUAGE && <LanguageStep answers={answers} answer={answer} />}
+        {step === LEVEL && <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} />}
         <div className="setup-nav">
-          {step > 1 && <button type="button" className="btn btn-ghost" onClick={() => go(step - 1)}>Back</button>}
-          {step < BUILT && <button type="button" className="btn btn-primary" onClick={next}>Next</button>}
+          {step > COMPANY && <button type="button" className="btn btn-ghost" onClick={() => go(step - 1)}>Back</button>}
+          {step < BUILT && <button type="submit" className="btn btn-primary">Next</button>}
         </div>
         {step === BUILT && (
           <p className="field-note">
             The next steps (Goal, not applicable, evidence, finish) are not built yet. Nothing has been saved.
           </p>
         )}
-      </div>
+      </form>
     </section>
   )
 }
@@ -155,7 +178,8 @@ function LevelStep({ answers, answer, scope, onRetry }: StepProps & { scope: Sco
   return (
     <fieldset className="setup-choices">
       <legend>Protection level</legend>
-      {LEVELS.map(({ level, name }) => {
+      {LEVELS.map((level) => {
+        const { name } = PROTECTION_LEVELS[level]
         const words = brings(level)
         return (
           <label key={level} className="setup-choice setup-option">

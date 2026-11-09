@@ -43,7 +43,7 @@ async function stepOne(company = 'Musterfirma GmbH', country = 'Germany') {
 describe('company setup', () => {
   it('lists all seven steps, marks the current one, and starts on step 1 with no Back', () => {
     api()
-    render(<CompanySetupWizard onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
     expect(steps.map((s) => s.textContent)).toEqual([
       '1Company', '2Language', '3Protection level', '4Goal (not yet available)', '5Not applicable (not yet available)',
@@ -63,7 +63,7 @@ describe('company setup', () => {
     ['neither', '', '', ['Give the company a name.', "Choose the company's country."], 'Company name'],
   ])('Next with %s stays on step 1, marks each missing field and focuses the first', async (_, company, country, messages, first) => {
     api()
-    render(<CompanySetupWizard onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     await stepOne(company, country)
     await next()
     expect(heading('Company')).toBeTruthy()
@@ -73,9 +73,31 @@ describe('company setup', () => {
     expect(document.activeElement).toBe(first === 'Country' ? countryField() : nameField())
   })
 
+  it('clears a marked field as soon as it is fixed, before Next', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await next()
+    expect(nameField().getAttribute('aria-invalid')).toBe('true')
+    expect(countryField().getAttribute('aria-invalid')).toBe('true')
+    await userEvent.type(nameField(), 'M')
+    expect(nameField().getAttribute('aria-invalid')).toBeNull()
+    expect(screen.queryByText('Give the company a name.')).toBeNull()
+    expect(countryField().getAttribute('aria-invalid')).toBe('true') // the other field keeps its problem
+    await userEvent.selectOptions(countryField(), 'Germany')
+    expect(screen.queryByText("Choose the company's country.")).toBeNull()
+  })
+
+  it('moves on with Enter, as Next does', async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await stepOne('Musterfirma GmbH')
+    await userEvent.type(nameField(), '{Enter}')
+    expect(heading('Language')).toBeTruthy()
+  })
+
   it('moves focus to each new step heading, and marks it current in the step list', async () => {
     api()
-    render(<CompanySetupWizard onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     await stepOne()
     await next()
     expect(document.activeElement).toBe(heading('Language'))
@@ -91,7 +113,7 @@ describe('company setup', () => {
 
   it('keeps every answer going back and forward', async () => {
     api()
-    render(<CompanySetupWizard onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     await stepOne('Musterfirma GmbH', 'Austria')
     await next()
     const english = screen.getByRole('radio', { name: 'English' }) as HTMLInputElement
@@ -113,7 +135,7 @@ describe('company setup', () => {
 
   it("step 3 shows each level's scope from the route, offers no Next, and never posts a profile", async () => {
     const fetch = api()
-    render(<CompanySetupWizard onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     await stepOne()
     await next()
     await next()
@@ -121,7 +143,7 @@ describe('company setup', () => {
     expect(within(levels).getAllByRole('radio').map((r) => (r as HTMLInputElement).checked)).toEqual([false, false, false])
     await waitFor(() => expect(levels.textContent).toContain('Must and should requirements: 85 in 12 controls.'))
     expect(levels.textContent).toContain('Adds 14 high-protection requirements, in 2 controls (1.6.2, 4.1.2): 99 in all.')
-    expect(levels.textContent).toContain('Adds 10 very-high-protection requirements, in 1 controls (1.6.1): 109 in all.')
+    expect(levels.textContent).toContain('Adds 10 very-high-protection requirements, in 1 control (1.6.1): 109 in all.')
     expect(screen.queryByRole('button', { name: 'Next' })).toBeNull()
     expect(screen.getByText('The next steps (Goal, not applicable, evidence, finish) are not built yet. Nothing has been saved.'))
       .toBeTruthy()
@@ -137,7 +159,7 @@ describe('company setup', () => {
       .mockImplementationOnce(() => Promise.reject(new TypeError('offline')))
       .mockImplementationOnce(() => Promise.resolve(levelsAnswer()))
     vi.stubGlobal('fetch', fetch)
-    render(<CompanySetupWizard onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
     await stepOne()
     await next()
     await next()
@@ -159,9 +181,10 @@ describe('company setup', () => {
   it('the breadcrumb leads back to the developer page', async () => {
     api()
     const onDeveloper = vi.fn()
-    render(<CompanySetupWizard onDeveloper={onDeveloper} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={onDeveloper} />)
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
     expect(crumbs.textContent).toBe('Developer›Company setup')
+    expect(within(crumbs).getByRole('link', { name: 'Developer' }).getAttribute('href')).toBe('/developer')
     await userEvent.click(within(crumbs).getByRole('link', { name: 'Developer' }))
     expect(onDeveloper).toHaveBeenCalled()
   })

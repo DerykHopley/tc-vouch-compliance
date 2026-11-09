@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
-import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
+import { developerSettings, type DeveloperSettings, UNAVAILABLE } from './developer.ts'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
 import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
@@ -238,7 +238,14 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
             <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
           </main>
         )
-        : shown === 'setup' ? <main><CompanySetupWizard onDeveloper={() => showView({ name: 'developer' })} /></main>
+        : shown === 'setup' && developer ? (
+          <main>
+            {/* settings unreadable just now: the developer page's notice, not the wizard */}
+            {developer === UNAVAILABLE
+              ? <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
+              : <CompanySetupWizard developerPath={DEVELOPER_PATH} onDeveloper={() => showView({ name: 'developer' })} />}
+          </main>
+        )
         : control && overview.state.status === 'ready' ? (
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}

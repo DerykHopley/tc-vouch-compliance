@@ -47,5 +47,8 @@ describe('the protection levels', () => {
     expect(scopeWords(HIGH)).toBe('Adds 14 high-protection requirements, in 2 controls (1.6.2, 4.1.2): 99 in all.')
     expect(scopeWords({ ...HIGH, level: 'very high', added: 10, total: 109 }))
       .toBe('Adds 10 very-high-protection requirements, in 2 controls (1.6.2, 4.1.2): 109 in all.')
+    expect(scopeWords({ ...HIGH, added: 1, added_controls: ['1.6.2'] }))
+      .toBe('Adds 1 high-protection requirement, in 1 control (1.6.2): 99 in all.')
+    expect(scopeWords({ ...normal, controls: 1 })).toBe('Must and should requirements: 85 in 1 control.')
   })
 })
