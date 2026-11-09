@@ -139,7 +139,9 @@ class EvidenceSource(_Strict):
             if doc_id in seen:
                 raise ValueError(f"{doc_id} is named twice")
             seen.add(doc_id)
-            if document_path(folder, doc_id) is None:
+            # An id stripped of one .md must not end in another: document_path would strip it
+            # again and find the file, while every reader compares the stored id (#384).
+            if doc_id.endswith(SUFFIX) or document_path(folder, doc_id) is None:
                 raise ValueError(f"no document {doc_id} in the folder {folder.name}")
         return ids
 
