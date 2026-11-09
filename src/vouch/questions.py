@@ -132,7 +132,9 @@ def lead_statements(questions: Iterable[OpenQuestion]) -> list[LeadStatement]:
     """The answered ones of the questions, as the lead's statements on their controls (#422):
     lead-supplied evidence, dated by the day each was answered in UTC."""
     return [
-        LeadStatement(q.id, q.control_id, q.answer, q.answered_at.astimezone(UTC).date())
+        LeadStatement(
+            q.id, q.control_id, q.answer, q.answered_at.astimezone(UTC).date(), q.question
+        )
         for q in questions
         if q.answer is not None and q.answered_at is not None
     ]

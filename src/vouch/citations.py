@@ -89,12 +89,14 @@ class Citation:
 @dataclass(frozen=True)
 class LeadStatement:
     """The lead's answer to an open question on a control, as evidence (#422): the question's
-    id, its control, the answer, and the day it was answered in UTC."""
+    id, its control, the answer, the day it was answered in UTC, and the question it answers
+    (for the judge to read; only the answer can be quoted)."""
 
     id: int
     control_id: str
     answer: str
     answered_on: datetime.date
+    question: str
 
     @property
     def doc_id(self) -> str:

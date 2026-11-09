@@ -130,10 +130,18 @@ LEAD_SOURCE = "lead"
 """The source a lead statement's passage gives (#422): the lead's answer, not a document."""
 LEAD_RULE = (
     f"Passages from {LEAD_SOURCE} are the compliance lead's own statements, answers to open "
-    "questions on this control: cite one only where no document shows the requirement; a "
-    "statement shows a requirement partly at most."
+    "questions on this control, each headed by the question it answers: cite one only where "
+    "no document shows the requirement, quoting the answer; a statement shows a requirement "
+    "partly at most."
 )
 """What the prompts say of the lead's statements, only when there are some (#422)."""
+
+
+def lead_rule(statements: object) -> str:
+    """LEAD_RULE to follow a system prompt's rules when there are lead statements; nothing when
+    there are none, so such a prompt is as it was before #422."""
+    return f" {LEAD_RULE}" if statements else ""
+
 
 log = logging.getLogger(__name__)
 
@@ -249,12 +257,13 @@ class EvidencePassage(Passage):
 
 def statement_passages(statements: Iterable[LeadStatement], language: str) -> list[EvidencePassage]:
     """Each lead statement as one evidence passage (#422): its "Q<id>", headed by the label in
-    the answer `language`, the answer as its text, from LEAD_SOURCE, documented, never stale."""
+    the answer `language` and the question it answers, the answer as its text (only that is
+    quoted), from LEAD_SOURCE, documented, never stale."""
     label = lead_statement_label(language)
     return [
         EvidencePassage(
             doc_id=s.doc_id,
-            heading=label,
+            heading=f"{label}: {s.question}",
             text=s.answer,
             source=LEAD_SOURCE,
             kind=DOCUMENTED,
@@ -624,13 +633,19 @@ class AssessState(TypedDict, total=False):
     profile_id: str
     evidence: Annotated[list[EvidencePassage], operator.add]
     warnings: Annotated[list[str], operator.add]
-    guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
+    # The last step's guard sentences: the tools step's refusals and flagged passages, or the
+    # apply_overlays step's flagged lead statements (#422).
+    guards: list[str]
     searched: list[str]  # the last tools step's searches that ran, one sentence each
     # The tools pending in this run, by label: EVIDENCE_PENDING or TIMED_OUT. An update of ""
     # clears one (it answered later).
     pending: Annotated[dict[str, str], _merge_pending]
     pending_said: list[str]  # the last tools step's sentences about pending sources
     pending_ids: list[str]  # requirements left not evidenced while a source was pending
+    # Judged on the lead's statements though no source could be read (#422): that reason, and the
+    # requirements citing no statement, left not evidenced with it and no remediation item.
+    unread_reason: str | None
+    unread_ids: list[str]
     unreadable: list[str]  # the last tools step's sources that couldn't be read, by label
     searches_run: Annotated[int, operator.add]
     searches_refused: Annotated[int, operator.add]
@@ -708,7 +723,6 @@ def _prompt(
     statements: list[EvidencePassage] | None = None,
 ) -> list[AnyMessage]:
     offered = [t["function"]["name"] for t in _offered_tools(profile)]
-    lead_rule = f" {LEAD_RULE}" if statements else ""
     search = (
         f"Use {' and '.join(offered)} to find evidence."
         if offered
@@ -721,7 +735,7 @@ def _prompt(
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
             f"{language_name(profile.answer_language)}; quote a document only unchanged, in its "
             f"own language. Say what the evidence shows; {never_claim(profile)} {DATA_RULE}"
-            f"{lead_rule}"
+            f"{lead_rule(statements)}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -752,7 +766,6 @@ def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMes
     ]
     passages = [*state["evidence"], *_statements_of(state, profile)]
     evidence = as_data(passages, pending) if passages or pending else "(none)"
-    lead_rule = f" {LEAD_RULE}" if state.get("lead_statements") else ""
     return [
         SystemMessage(
             "Judge each requirement listed from the evidence alone, not the draft answer. "
@@ -769,7 +782,7 @@ def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMes
             "evidence. Stale evidence shows a requirement partly at most. Write each reason in "
             f"{language_name(profile.answer_language)}; copy each quote unchanged, in its "
             f"document's language, never translated. {never_claim(profile)} {DATA_RULE}"
-            f"{lead_rule}"
+            f"{lead_rule(state.get('lead_statements'))}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -890,6 +903,30 @@ def apply_overrides(
         reviewed.append(replace(req, verdict=change.verdict, reason=change.reason))
         kept.append(Override(req.id, change.verdict, change.reason, req.verdict, req.reason))
     return reviewed, kept
+
+
+UNREAD_REASONS = frozenset({NO_SOURCE, NO_ALLOWED_SEARCH})
+"""The reasons no allowed source could be read, which a requirement citing no lead statement
+keeps when the control is judged on the statements alone (#422)."""
+
+
+def _kept_unread(
+    requirements: list[RequirementVerdict], reason: str | None
+) -> tuple[list[RequirementVerdict], list[str]]:
+    """With no source read (`reason`, one of UNREAD_REASONS), each applicable requirement that
+    cites no lead statement is not evidenced for that reason, its citations gone, and the ids of
+    those requirements: the source may hold what they lack, so no remediation item is drafted
+    for them, as for pending ones (#422). Nothing changes without a reason."""
+    if reason is None:
+        return requirements, []
+    kept, ids = [], []
+    for r in requirements:
+        if r.verdict == NOT_APPLICABLE or any(c.lead_statement for c in r.citations):
+            kept.append(r)
+            continue
+        kept.append(replace(r, verdict="not-evidenced", reason=reason, citations=()))
+        ids.append(r.id)
+    return kept, ids
 
 
 def _noted_pending(
@@ -1130,11 +1167,8 @@ def build_graph(
         an allowed source that couldn't be read (missing, or its folder now points outside)
         comes first: no source read; then a source whose evidence is pending: every
         requirement pending on it; then searches only of sources not allowed: none of the
-        allowed ones searched. With the lead's statements on the control there is always
-        something to judge on (#422), whatever the sources.
+        allowed ones searched.
         """
-        if state.get("lead_statements"):
-            return None
         if not _offered_tools(profile):
             return NO_SOURCES_ALLOWED
         if state["searches_run"]:
@@ -1200,9 +1234,18 @@ def build_graph(
         """
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
-        if reason is not None:  # nothing could be read, so nothing is shown
+        # With the lead's statements there is always something to judge on (#422); where no
+        # source could be read, only what a statement shows counts (check_quotes).
+        if reason is not None and not state.get("lead_statements"):  # nothing read, none shown
             results = judged_requirements(control_requirements, None, reason).results
-            return {"requirements": results, "not_judged": [], "claims": {}, "about_doing": []}
+            return {
+                "requirements": results,
+                "not_judged": [],
+                "claims": {},
+                "about_doing": [],
+                "unread_reason": None,
+            }
+        unread = reason if reason in UNREAD_REASONS else None
 
         def read(judgement: Judgement | None) -> tuple[JudgedRequirements, list[str]]:
             judged = judged_requirements(control_requirements, judgement)
@@ -1226,6 +1269,7 @@ def build_graph(
             "about_doing": judged.about_doing,
             "judge_rejected_word": rejected,
             "usage": usage,
+            "unread_reason": unread,
         }
 
     def check_quotes(state: AssessState) -> dict[str, Any]:
@@ -1249,12 +1293,14 @@ def build_graph(
             state.get("about_doing", []),
             profile.answer_language,
         )
+        results, unread_ids = _kept_unread(results, state.get("unread_reason"))
         results, pending_ids = _noted_pending(results, state["pending"])
         changes = verdict_changes(state["requirements"], results)
         return {
             "requirements": results,
             "dropped_citations": dropped,
             "pending_ids": pending_ids,
+            "unread_ids": unread_ids,
             "verdict_changes": changes,
         }
 
@@ -1262,7 +1308,9 @@ def build_graph(
         """The model drafts one remediation item per requirement not or partly evidenced (#212);
         none of those, no call. A draft claiming an audit result gets the plan asked for again
         once, then an error. Before the interrupt, so it only reads and asks the model."""
-        to_fix = to_remediate(state["requirements"], state["pending_ids"])
+        unread = state.get("unread_ids", [])
+        to_fix = to_remediate(state["requirements"], [*state["pending_ids"], *unread])
+        said_unread = {"unread_ids": unread, "unread_reason": state.get("unread_reason")}
         if not to_fix:
             return {
                 "remediation": [],
@@ -1270,6 +1318,7 @@ def build_graph(
                 "remediate_rejected_word": None,
                 "partly_drafted": 0,
                 "pending_ids": state["pending_ids"],
+                **said_unread,
             }
         today = date.fromisoformat(state["today"])
 
@@ -1296,6 +1345,7 @@ def build_graph(
             "partly_drafted": len(partly - set(not_drafted)),
             "usage": usage,
             "pending_ids": state["pending_ids"],
+            **said_unread,
         }
 
     def review(state: AssessState) -> dict[str, Any]:
@@ -1313,7 +1363,8 @@ def build_graph(
         requirements, overrides = apply_overrides(state["requirements"], findings.overrides)
         today = date.fromisoformat(state["today"])
         overridden = {o.requirement_id for o in overrides}
-        still_pending = [i for i in state["pending_ids"] if i not in overridden]
+        left_out = [*state["pending_ids"], *state.get("unread_ids", [])]
+        still_pending = [i for i in left_out if i not in overridden]
         remediation = _reviewed_remediation(
             requirements, state["remediation"], today, still_pending
         )
@@ -1478,8 +1529,11 @@ class Step:
         if self.node == "remediate":
             drafts, pending = update["remediation"], update.get("pending_ids", [])
             waiting = f"the evidence for {', '.join(pending)} is pending"
-            if not drafts and pending:
-                return f"No remediation item drafted: {waiting}."
+            unread = update.get("unread_ids", [])
+            unread_said = f" None for {', '.join(unread)}: {update.get('unread_reason')}."
+            if not drafts and (pending or unread):
+                text = f"No remediation item drafted: {waiting}." if pending else ""
+                return (text + (unread_said if unread else "")).strip()
             if not drafts:
                 return (
                     "Every requirement that applies is evidenced, so no remediation item was "
@@ -1496,6 +1550,8 @@ class Step:
             )
             if pending:
                 text += f" None for {', '.join(pending)}: {waiting}."
+            if unread:
+                text += unread_said
             word = update.get("remediate_rejected_word")
             if word:
                 text = (

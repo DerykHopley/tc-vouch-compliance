@@ -37,7 +37,6 @@ from vouch.documents import document_path, escaped, facts_of
 from vouch.front_matter import split_front_matter
 from vouch.graph import (
     GUARD,
-    LEAD_RULE,
     MAX_DUE_DAYS,
     Assessment,
     EvidencePassage,
@@ -53,6 +52,7 @@ from vouch.graph import (
     format_requirements,
     guard_steps,
     judged_requirements,
+    lead_rule,
     loaded_step,
     model_name_of,
     never_claim,
@@ -179,7 +179,7 @@ def _prompt(
         for i in included
     )
     evidence = as_data(documents) if documents else "(none)"
-    lead_rule = f" {LEAD_RULE}" if any(i.passages for i in included) else ""
+    rule = lead_rule(any(i.passages for i in included))
     return [
         SystemMessage(
             f"You assess every {included[0].control.source} control listed for {profile.company} "
@@ -201,7 +201,7 @@ def _prompt(
             f"the fix (a role, never a person's name), and how many days from today (1 to "
             f"{MAX_DUE_DAYS}) until it is due. Write every answer, reason and item in {language}; "
             "copy each quote unchanged, in its document's language, never translated. "
-            f"{never_claim(profile)} {DATA_RULE}{lead_rule}"
+            f"{never_claim(profile)} {DATA_RULE}{rule}"
         ),
         HumanMessage(f"Controls:\n\n{controls}\n\nEvidence:\n{evidence}"),
     ]

@@ -169,7 +169,7 @@ CAP_WORDS = {
             "die Anforderung verlangt, dass etwas getan wird, und nur dokumentierte Nachweise "
             "zeigen es"
         ),
-        lead_statement="{doc} ist eine Aussage der Compliance-Leitung, kein Dokument",
+        lead_statement=f"{{doc}} ist eine {LEAD_STATEMENT_WORDS['de']}, kein Dokument",
     ),
 }
 """The cap's words per answer language; any other language gets English's."""
