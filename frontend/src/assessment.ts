@@ -181,9 +181,17 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
   }
 }
 
+/** The API's own sentence on its database 503 (`"unavailable": "database"`); undefined for any other answer. */
+async function databaseDown(response: Response): Promise<string | undefined> {
+  if (response.status !== 503) return undefined
+  const answer = await response.json().catch(() => undefined) as { detail?: unknown; unavailable?: unknown } | undefined
+  return answer?.unavailable === 'database' && typeof answer.detail === 'string' ? answer.detail : undefined
+}
+
 /**
  * POSTs `body` as JSON to a server-sent event stream and yields its events until one named in `last` (the `error`
- * event always ends it). A refusal is one `error`: the session ended, a limit's 429 with its own detail, or
+ * event always ends it). A refusal is one `error`: the session ended, a 409, 413 or limit's 429 with its own detail,
+ * the database's 503 with its own, or
  * `refused` for any other. Throws when the service can't be reached, or the stream breaks off before its last event.
  */
 export async function* postEvents<E extends { event: string; data: unknown }>(
@@ -194,6 +202,12 @@ export async function* postEvents<E extends { event: string; data: unknown }>(
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(await authHeaders()) },
     body: JSON.stringify(body),
   })
+  const down = await databaseDown(response)
+  if (down !== undefined) {
+    // The database's 503 says so in the API's own words (issue 116); any other 5xx is the service unreachable.
+    yield { event: 'error', data: { message: down } }
+    return
+  }
   if (response.status >= 500 || !response.body) throw new Error(`service answered ${response.status}`)
   if (sessionEnded(response)) {
     // No valid session (expired, or signed out elsewhere): back to the sign-in (session.ts).
@@ -201,9 +215,9 @@ export async function* postEvents<E extends { event: string; data: unknown }>(
     return
   }
   if (!response.ok) {
-    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why, as does a 409 (another of the
-    // lead's assessments is running); any other refusal doesn't.
-    const detail = response.status === 429 || response.status === 409
+    // A limit's 429 (the daily limit, with its reset time, or the request rate) says why, as do a 409 (another of the
+    // lead's assessments is running) and a 413 (the message is too long, issue 116); any other refusal doesn't.
+    const detail = [409, 413, 429].includes(response.status)
       ? await response.json().then((answer: { detail?: unknown }) => answer.detail, () => undefined)
       : undefined
     yield { event: 'error', data: { message: typeof detail === 'string' ? detail : refused } }
