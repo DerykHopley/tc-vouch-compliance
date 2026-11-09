@@ -17,9 +17,10 @@ differently.
 For a small profile, Vouch can also run a **profile pass**: one model run over every applicable
 control with all the profile's evidence in front of it, each result waiting for the lead's review.
 The same guards hold as for the per-control agent (the quote check, the staleness rule, the output
-guard). It runs only while the evidence fits under a token threshold (50,000 tokens by default;
-above it, Vouch offers the per-control agent) and has its own daily limit of 3 passes, apart from
-the assessments'.
+guard). It runs only while its prompt and expected reply fit under a token threshold (100,000
+tokens by default; above it, Vouch offers the per-control agent) and has its own daily limit of 3
+passes, apart from the assessments'. On Sonnet 5.5, a pass over 12 controls costs about
+$0.30–0.50.
 
 ## Who it's for
 

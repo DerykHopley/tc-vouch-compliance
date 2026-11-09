@@ -211,7 +211,7 @@ describe('the Dossier overview', () => {
 })
 
 describe('the profile pass on the Dossier (ticket 390)', () => {
-  const NOTE = 'Assesses every open control in one run. Accepted controls are skipped.'
+  const NOTE = 'Assesses every open control in one run. Accepted controls are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'
   const passButton = () => screen.getByRole('button', { name: /profile pass/i })
   const panel = () => screen.getByRole('region', { name: 'Profile pass' })
   const row = (id: string) => within(panel()).getByRole('listitem', { name: `Control ${id}` })

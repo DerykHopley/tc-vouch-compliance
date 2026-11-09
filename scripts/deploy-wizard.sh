@@ -389,8 +389,12 @@ else
 fi
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on OpenRouter, signed in"
 say "through Clerk. Each secret's version is pinned; sign-in accepts $SHARE_URL alone."
+# A request may take 660 s (#432): a profile pass's model call takes up to 600 s
+# (vouch.model_choice.PROFILE_PASS_TIMEOUT_SECONDS), plus a margin; Cloud Run's default of 300 s
+# would cut a pass first. Cloud Run takes up to 60 minutes.
 run "Deploy the service" gcloud run deploy "$SERVICE" --image="$IMAGE:$TAG" --region="$REGION" \
   --project="$PROJECT_ID" --allow-unauthenticated --min-instances=0 --max-instances=1 --max=1 \
+  --timeout=660 \
   --set-secrets="$SECRETS_ARG" \
   --set-env-vars="$ENV_VARS" \
   --add-cloudsql-instances="$SQL_INSTANCE" --quiet

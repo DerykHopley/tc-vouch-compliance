@@ -426,6 +426,16 @@ def test_the_deploy_pins_each_secret_s_version_and_carries_the_settings_and_inst
     assert args["--min-instances"] == "0"
 
 
+def test_cloud_runs_request_timeout_outlasts_a_profile_pass_within_its_maximum(tmp_path):
+    from vouch.model_choice import PROFILE_PASS_TIMEOUT_SECONDS
+
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    timeout = int(deploy_args(calls)["--timeout"])  # seconds; Cloud Run's default is 300
+    assert PROFILE_PASS_TIMEOUT_SECONDS + 60 <= timeout < 3600  # Cloud Run: under 60 minutes
+
+
 def test_a_rerun_adds_a_version_only_for_a_changed_secret_and_pins_it(tmp_path):
     deployed(tmp_path)
     plant(tmp_path, openrouter="sk-or-v1-plantedRotatedKey000")

@@ -703,13 +703,14 @@ def create_profile_pass(
 
     200: each new assessment's thread id, control, status and verdict, the controls skipped as
     accepted, and the pass's usage, redacted. With every applicable control accepted, nothing is
-    counted or called. A prompt over the token threshold (VOUCH_PROFILE_PASS_TOKENS), or an
-    allowed source that can't be read, is a 422 with `"fallback": "per-control"`, nothing
-    counted. Then the pass is counted against its own daily limit (a 429 with `"limit":
-    "profile-pass"` over it; a 503 for a paid model with only memory to count in, or a counter
-    that can't be read). A model run that fails, or a reply claiming an audit result twice, is a
-    502 with one sentence and nothing kept; the pass stays counted, as its calls were made. A
-    counted pass's usage is recorded once, under PROFILE_PASS, however it ends."""
+    counted or called. A prompt and expected reply estimated over the token threshold
+    (VOUCH_PROFILE_PASS_TOKENS), or an allowed source that can't be read, is a 422 with
+    `"fallback": "per-control"`, nothing counted. Then the pass is counted against its own daily
+    limit (a 429 with `"limit": "profile-pass"` over it; a 503 for a paid model with only memory to
+    count in, or a counter that can't be read). A model run that fails, or a reply claiming an
+    audit result twice, is a 502 with one sentence and nothing kept; the pass stays counted, as its
+    calls were made. A counted pass's usage is recorded once, under PROFILE_PASS, however it
+    ends."""
     if not running.try_hold(memory.scope):
         raise HTTPException(status_code=409, detail=RUNNING_ALREADY)
     meter = UsageMeter(chosen)

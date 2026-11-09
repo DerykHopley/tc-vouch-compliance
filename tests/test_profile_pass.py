@@ -9,6 +9,7 @@ test_spending's; its counts table test_database's.
 
 import copy
 import json
+import re
 import shutil
 import uuid
 from datetime import date
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
 from reviewing import reviewed
 from test_memory import as_user
@@ -48,6 +50,7 @@ from vouch.profile_pass import (
     PROFILE_PASS_PROMPT_VERSION,
     ProfilePassRefused,
     ProfilePassReply,
+    estimate_output_tokens,
     estimate_tokens,
     run_profile_pass,
 )
@@ -55,6 +58,7 @@ from vouch.settings import PROFILE_PASS_SCRIPT, Settings
 from vouch.spending import PROFILE_PASS
 
 NORDLICHT = load_named_profile("nordlicht")
+ALPENWERK = load_named_profile("alpenwerk")
 TODAY = date(2026, 11, 4)
 CONTROLS = [
     "1.1.1",
@@ -330,7 +334,7 @@ def test_a_statement_is_listed_under_its_control_and_counted_in_the_estimate():
     assert f'"heading": "Lead\'s statement: {QUESTION}"' in under_1_1_1
     assert text.count(ANSWER) == 1
     assert "cite one only where no document shows the requirement" in text
-    grown = estimate_tokens(with_one.prompts[0]) - estimate_tokens(without.prompts[0])
+    grown = estimate_tokens(with_one.prompts[0], "en") - estimate_tokens(without.prompts[0], "en")
     assert grown >= len(ANSWER) // 4
 
 
@@ -415,11 +419,90 @@ def test_a_prompt_over_the_threshold_is_refused_before_anything_is_counted_or_ca
     assert lead.memory.entries() == []
 
 
-def test_nordlichts_prompt_is_under_the_default_threshold():
-    model = fake()
-    Lead().run(model)
+@pytest.mark.parametrize(
+    ("language", "characters", "tokens"),
+    [("en", 1000, 400), ("en", 1001, 401), ("de", 1900, 1000), ("de", 1901, 1001)]
+    + [("fr", 1900, 1000)],  # a language without rates of its own takes German's
+)
+def test_the_input_estimate_counts_characters_at_the_answer_languages_rate(
+    language, characters, tokens
+):
+    prompt: list = [SystemMessage("x" * (characters - 1)), HumanMessage("y")]
 
-    assert 5_000 < estimate_tokens(model.prompts[0]) < 50_000
+    assert estimate_tokens(prompt, language) == tokens
+
+
+@pytest.mark.parametrize(
+    ("requirements", "language", "tokens"),
+    [(84, "en", 26_880), (100, "de", 42_000), (10, "fr", 4_200)],
+)
+def test_the_output_estimate_counts_requirements_at_the_answer_languages_rate(
+    requirements, language, tokens
+):
+    assert estimate_output_tokens(requirements, language) == tokens
+
+
+def refused_estimates(profile) -> tuple[int, int]:
+    """The in and out figures a first pass over `profile` is refused with at a threshold of 1."""
+    with pytest.raises(ProfilePassRefused) as refused:
+        Lead(profile).run(fake(), max_tokens=1)
+    found = re.search(r"\(([\d,]+) in, ([\d,]+) out\)", str(refused.value))
+    assert found, str(refused.value)
+    return int(found[1].replace(",", "")), int(found[2].replace(",", ""))
+
+
+# Measured on #430 (evals/profile-pass/README.md: Sonnet 5.5, one first pass each, no retry).
+MEASURED = {"nordlicht": (16_839, 26_097), "alpenwerk": (30_640, 41_531)}
+
+
+@pytest.mark.parametrize("profile", [NORDLICHT, ALPENWERK], ids=["nordlicht", "alpenwerk"])
+def test_a_first_pass_estimate_covers_the_measured_tokens_within_a_quarter(profile):
+    real_in, real_out = MEASURED[profile.id]
+
+    estimated_in, estimated_out = refused_estimates(profile)
+
+    assert real_in <= estimated_in <= 1.25 * real_in
+    assert real_out <= estimated_out <= 1.25 * real_out
+
+
+@pytest.mark.parametrize("profile", [NORDLICHT, ALPENWERK], ids=["nordlicht", "alpenwerk"])
+def test_both_demo_profiles_run_a_full_pass_at_the_default_threshold(profile):
+    model, lead = fake(), Lead(profile)
+
+    result = lead.run(model)
+
+    assert len(model.prompts) == 1
+    assert len(result.assessments) == len(CONTROLS)
+    assert lead.counted == 1
+
+
+def test_at_the_old_threshold_of_50_000_alpenwerks_pass_is_refused():
+    model, lead = fake(), Lead(ALPENWERK)
+
+    with pytest.raises(ProfilePassRefused, match="over the threshold of 50,000"):
+        lead.run(model, max_tokens=50_000)
+
+    assert model.prompts == []
+
+
+def test_a_prompt_under_the_threshold_with_its_reply_over_it_is_refused_with_the_figures():
+    estimated_in, estimated_out = refused_estimates(NORDLICHT)
+    total = estimated_in + estimated_out
+    threshold = total - 1  # the prompt alone is well under it
+    model, lead = fake(), Lead()
+
+    with pytest.raises(ProfilePassRefused) as refused:
+        lead.run(model, max_tokens=threshold)
+
+    assert str(refused.value) == (
+        f"The profile pass can't run: its prompt and reply are about {total:,} tokens "
+        f"({estimated_in:,} in, {estimated_out:,} out), over the threshold of {threshold:,}. "
+        "Assess the controls one at a time instead."
+    )
+    assert estimated_in < threshold
+    assert model.prompts == []
+    assert lead.counted == 0
+    assert lead.memory.entries() == []
 
 
 def test_an_allowed_source_whose_folder_is_gone_refuses_the_pass(tmp_path):
@@ -599,7 +682,8 @@ def test_a_prompt_over_the_threshold_is_a_422_offering_the_agent_with_nothing_co
     assert [r.status_code for r in refused] == [422] * 4  # never the limit's 429: none counted
     body = refused[0].json()
     assert body["fallback"] == "per-control"
-    assert "over the threshold of 1,000" in body["detail"]
+    assert body["detail"].startswith("The profile pass can't run: its prompt and reply are about ")
+    assert "out), over the threshold of 1,000. Assess the controls" in body["detail"]
     assert pass_calls == []
     assert records_of(app, lead) == []
     assert client.get("/api/assessments", headers=lead).json()["assessments"] == []

@@ -4,7 +4,8 @@ accepted, assessed in one guarded model run, with all the profile's evidence in 
 Which controls: each control of the profile's ISA edition with an applicable requirement, unless
 its newest assessment is accepted. The prompt holds the rules, those controls' applicable
 requirements and every document of every evidence source the profile allows, each passed as data
-(vouch.guards) with its kind and whether it is stale. A prompt estimated over the threshold, or an
+(vouch.guards) with its kind and whether it is stale. A prompt and expected reply estimated over
+the threshold (estimate_tokens, estimate_output_tokens, by the profile's answer language), or an
 allowed source that can't be read, refuses the pass before anything is counted or called
 (ProfilePassRefused): the per-control agent is the way on.
 
@@ -22,7 +23,7 @@ data, and checked against that control's citations only: one cited for another c
 
 import logging
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -79,8 +80,15 @@ log = logging.getLogger(__name__)
 
 PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-2"  # the lead's statements (#422)
 """The version of the pass's prompt: change it whenever the prompt changes."""
-CHARS_PER_TOKEN = 4
-"""A prompt's size is estimated at about four characters a token, as for English text."""
+INPUT_CHARS_PER_TOKEN: dict[str, float] = {"en": 2.5, "de": 1.9}
+"""Characters a prompt token, by the profile's answer language (#432): rounded down from the
+2.68 (Nordlicht, English) and 1.92 (Alpenwerk, German) measured on Sonnet 5.5 (#430), so the
+estimate doesn't undercount. A language without its own rate takes German's (OTHER_LANGUAGE)."""
+OUTPUT_TOKENS_PER_REQUIREMENT: dict[str, int] = {"en": 320, "de": 420}
+"""Reply tokens an applicable requirement, by the profile's answer language, which the reply is
+written in (#432): rounded up from the 311 (Nordlicht) and 415 (Alpenwerk) measured on #430."""
+OTHER_LANGUAGE = "de"
+"""Whose rates a language without its own takes: German's, the higher estimate of the two."""
 PROFILE_PASS_FAILED = "The profile pass could not be completed. Please try again later."
 """The one sentence for a pass whose model run failed, or whose reply claimed an audit result
 twice."""
@@ -207,9 +215,21 @@ def _prompt(
     ]
 
 
-def estimate_tokens(prompt: list[AnyMessage]) -> int:
-    """The prompt's size in tokens, estimated at CHARS_PER_TOKEN characters a token."""
-    return math.ceil(sum(len(str(m.content)) for m in prompt) / CHARS_PER_TOKEN)
+def _rate[T](rates: Mapping[str, T], answer_language: str) -> T:
+    return rates.get(answer_language, rates[OTHER_LANGUAGE])
+
+
+def estimate_tokens(prompt: list[AnyMessage], answer_language: str) -> int:
+    """The prompt's size in tokens: its characters at the answer language's
+    INPUT_CHARS_PER_TOKEN, rounded up."""
+    characters = sum(len(str(m.content)) for m in prompt)
+    return math.ceil(characters / _rate(INPUT_CHARS_PER_TOKEN, answer_language))
+
+
+def estimate_output_tokens(requirements: int, answer_language: str) -> int:
+    """The reply's expected size in tokens, for `requirements` applicable requirements (overlay
+    ones included): the answer language's OUTPUT_TOKENS_PER_REQUIREMENT each."""
+    return requirements * _rate(OUTPUT_TOKENS_PER_REQUIREMENT, answer_language)
 
 
 @dataclass(frozen=True)
@@ -354,7 +374,8 @@ def run_profile_pass(
     the module's doc).
 
     With every applicable control accepted, nothing is counted or called. Otherwise the sources
-    are read and the prompt estimated: an unreadable source or a prompt over `max_tokens` raises
+    are read and the prompt and reply estimated: an unreadable source, or a prompt and expected
+    reply over `max_tokens`, raises
     ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
     daily limit), then the model, once (twice when the output guard asks again). A second audit
     claim raises OutputCheckError; a failed model call raises its error. Either way, nothing is
@@ -380,10 +401,14 @@ def run_profile_pass(
         return ProfilePassResult([], skipped)
     documents = _documents(profile, today)
     prompt = _prompt(profile, included, documents)
-    estimate = estimate_tokens(prompt)
-    if estimate > max_tokens:
+    tokens_in = estimate_tokens(prompt, profile.answer_language)
+    tokens_out = estimate_output_tokens(
+        sum(len(i.requirements.applicable) for i in included), profile.answer_language
+    )
+    if tokens_in + tokens_out > max_tokens:
         raise ProfilePassRefused(
-            f"The profile pass can't run: its prompt is about {estimate:,} tokens, over the "
+            f"The profile pass can't run: its prompt and reply are about "
+            f"{tokens_in + tokens_out:,} tokens ({tokens_in:,} in, {tokens_out:,} out), over the "
             f"threshold of {max_tokens:,}. Assess the controls one at a time instead."
         )
     count()

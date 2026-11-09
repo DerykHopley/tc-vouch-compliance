@@ -41,9 +41,10 @@ PROFILES_DIR_ENV = "VOUCH_PROFILES_DIR"
 LOCAL_USER_NAME_ENV = "VOUCH_LOCAL_USER_NAME"
 RATE_REQUESTS_ENV = "VOUCH_RATE_REQUESTS"
 PROFILE_PASS_TOKENS_ENV = "VOUCH_PROFILE_PASS_TOKENS"
-PROFILE_PASS_TOKENS = 50_000
-"""The profile pass's token threshold (#371): a prompt estimated over it is refused, and the
-per-control agent is the way on (docs/requirements.md, 2026-11-09)."""
+PROFILE_PASS_TOKENS = 100_000
+"""The profile pass's token threshold (#371, #432): a pass whose prompt and expected reply are
+estimated over it is refused, and the per-control agent is the way on (docs/requirements.md,
+2026-11-09)."""
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
@@ -149,7 +150,7 @@ class Settings:
     rate_requests: int = RATE_REQUESTS
     """A user's requests a minute before 429: VOUCH_RATE_REQUESTS, else vouch.limits's 60."""
     profile_pass_tokens: int = PROFILE_PASS_TOKENS
-    """The profile pass's token threshold: VOUCH_PROFILE_PASS_TOKENS, else 50,000 (#371)."""
+    """The profile pass's token threshold: VOUCH_PROFILE_PASS_TOKENS, else 100,000 (#432)."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
