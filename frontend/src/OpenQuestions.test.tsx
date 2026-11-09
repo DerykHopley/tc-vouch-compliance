@@ -168,7 +168,8 @@ describe('the open questions on an assessed control (ticket 414)', () => {
     render(<WorkingPaper overview={{ company: 'Nordlicht', protection_level: 'normal', answer_language: 'en',
       requirements: {}, controls: [CARD], goal: 'audit-readiness' }} card={{ ...CARD, status: 'accepted' }}
       running={null} run={{ status: 'done', steps: [], assessment: accepted }} onAssess={() => {}} onOpen={() => {}}
-      onOverview={() => {}} onReviewed={() => {}} onRefresh={() => Promise.resolve(true)} onItemDecided={() => {}} />)
+      onOverview={() => {}} onReviewed={() => {}} onRefresh={() => Promise.resolve(true)} onItemDecided={() => {}}
+      onQuestionsChanged={() => {}} />)
     const review = screen.getByRole('region', { name: 'Review' })
     expect(review.compareDocumentPosition(section()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })

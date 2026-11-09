@@ -88,7 +88,7 @@ type PaperProps = {
   /** Reads the assessment again (another tab reviewed it first); false when it couldn't be. */
   onRefresh: () => Promise<boolean>
   /** An open question was logged or answered (#414): the overview is read again, for the list and the card's flags. */
-  onQuestionsChanged?: () => void
+  onQuestionsChanged: () => void
 }
 
 /**
@@ -98,7 +98,7 @@ type PaperProps = {
  */
 export default function WorkingPaper(props: PaperProps) {
   const { overview, card, running, passing = false, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
-    onItemDecided, onQuestionsChanged = () => {} } = props
+    onItemDecided, onQuestionsChanged } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown

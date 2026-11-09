@@ -403,8 +403,8 @@ def _flags(
 ) -> CardFlags | None:
     """One control's flags from its assessments, oldest first: the latest accepted plan whose
     approved items are all done, then the first assessment accepted after its last done mark
-    decides. None accepted since: a re-assessment is suggested (a waiting or rejected run
-    keeps the suggestion); one with no gap: Closed; one with a gap: neither (its items start
+    decides. None accepted since: a re-assessment is suggested (a rejected run keeps the
+    suggestion), hidden while the newest run waits for review, which is the next step then; one with no gap: Closed; one with a gap: neither (its items start
     the plan again)."""
     done_by: datetime | None = None
     for run in runs:
@@ -417,6 +417,8 @@ def _flags(
         return None
     after = next((r for r in runs if (at := accepted_at(r)) is not None and at > done_by), None)
     if after is None:
+        if runs[-1].status == "waiting-for-review":
+            return None
         return CardFlags(reassess_suggested=True, closed=False, reasons=("fixes-done",))
     return None if _has_gap(after) else CardFlags(reassess_suggested=False, closed=True)
 

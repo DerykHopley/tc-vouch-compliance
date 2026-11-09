@@ -393,6 +393,20 @@ def test_the_lead_records_an_answer_once_with_one_entry(database_url, users):
     assert listed == [kept]
 
 
+def test_a_refused_answer_names_the_kept_answer_redacted(database_url, users):
+    """The 409's detail is redacted as every answer is: the kept answer as the 200 showed it."""
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        asked = log(client, alice).json()["question"]
+        kept = answer(client, alice, asked["id"], {"answer": "Ask jane.doe@example.com"})
+        other = answer(client, alice, asked["id"], {"answer": "Nobody."})
+
+    shown = kept.json()["question"]["answer"]
+    assert "jane.doe@example.com" not in shown
+    assert other.status_code == 409
+    assert other.json()["detail"] == f"This question was answered already: {shown}"
+
+
 def test_an_answer_of_2000_characters_is_kept(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:

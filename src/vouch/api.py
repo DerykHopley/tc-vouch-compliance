@@ -146,6 +146,10 @@ UNKNOWN_PROFILE = "There is no such compliance profile."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
 EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
+QUESTION_FAILED = "The question could not be logged just now. Please try again."
+MAX_QUESTION_ID = 2**63 - 1
+"""The highest open question id: the ceiling of vouch_open_questions' bigserial `id`. A larger
+one in the path is a 422, never sent to Postgres (whose refusal would be a 503)."""
 RUNNING_NO_FRESH_START = "An assessment is running: start afresh once it has finished."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
@@ -1195,14 +1199,14 @@ def close_round(
     return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
 
 
-def _control_of(profile: ComplianceProfile, control_id: str) -> IsaControl:
-    """The profile's control, else a 404; an unreadable edition a plain 500."""
+def _control_of(profile: ComplianceProfile, control_id: str, failed: str) -> IsaControl:
+    """The profile's control, else a 404; an unreadable edition a plain 500 with `failed`."""
     try:
         return profile.isa_control(control_id)
     except UnknownControlError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BaseFrameworkError:
-        raise _unreadable_edition(profile, OVERVIEW_FAILED) from None
+        raise _unreadable_edition(profile, failed) from None
 
 
 @router.post("/controls/{control_id}/questions")
@@ -1221,7 +1225,7 @@ def log_question(
     404 for a control that isn't one of the profile's; 422 for a blank, longer or NUL-holding
     question or `asked_of`, a missing field or no body, or a due date that isn't a date or is
     past everywhere or beyond the horizon (the hint in `detail`)."""
-    control = _control_of(profile, control_id)
+    control = _control_of(profile, control_id, QUESTION_FAILED)
     try:
         kept = questions.log(
             asked,
@@ -1239,7 +1243,7 @@ def log_question(
 @router.post("/controls/{control_id}/questions/{question_id}/answer")
 def answer_question(
     control_id: str,
-    question_id: Annotated[int, Path(ge=1, le=2**63 - 1)],
+    question_id: Annotated[int, Path(ge=1, le=MAX_QUESTION_ID)],
     request: Annotated[questions.AnswerRequest, Body()],
     asked: OpenQuestions,
     profile: Profile,
@@ -1264,8 +1268,8 @@ def answer_question(
         )
     except questions.UnknownQuestionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    except questions.AnsweredAlreadyError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+    except questions.AnsweredAlreadyError as error:  # it names the kept answer: redacted
+        raise HTTPException(status_code=409, detail=redact(str(error))[0]) from error
     clean, _ = redact_data({"question": questions.shown(kept, audit.now())})
     return clean
 

@@ -71,7 +71,7 @@ function paper({ run = { status: 'idle', steps: [] }, running = null, checking =
   const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION, ...flags }
   return <WorkingPaper overview={{ ...OVERVIEW, answer_language: language, goal }} card={card} running={running} run={run} checking={checking}
     onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} onReviewed={onReviewed} onRefresh={onRefresh}
-    onItemDecided={onItemDecided} />
+    onItemDecided={onItemDecided} onQuestionsChanged={() => {}} />
 }
 
 /** Shows the paper; the function returned shows it again with other props, as App does when they change. */
@@ -815,7 +815,7 @@ describe("a German profile's verdicts (ticket 200)", () => {
     render(<WorkingPaper overview={overview} card={card} running={null}
       run={{ status: 'done', steps: [], assessment: { ...ASSESSED, answer_language } }} onAssess={() => {}}
       onOpen={() => {}} onOverview={() => {}} onReviewed={() => {}} onRefresh={() => Promise.resolve(true)}
-      onItemDecided={() => {}} />)
+      onItemDecided={() => {}} onQuestionsChanged={() => {}} />)
   }
 
   it('shows each requirement row\'s verdict in German, marked lang="de"', () => {
