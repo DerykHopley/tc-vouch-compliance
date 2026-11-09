@@ -947,6 +947,7 @@ def pdf_pages(data: bytes) -> list[str]:
     pages = []
     for lines in _page_lines(data):
         assert lines[0].startswith("VOUCH"), lines[0]  # the letterhead, drawn first
+        assert re.search(r"\d+ (of|von) \d+$", lines[-1]), lines[-1]  # the footer, drawn last
         pages.append(" ".join(" ".join(lines[1:-1]).split()))
     return pages
 

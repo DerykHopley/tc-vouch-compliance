@@ -5,8 +5,7 @@ order, so the two downloads never disagree.
 
 Black on white, on A4, under a letterhead on every page (#352: Vouch and the company over a thin
 brass rule; the date and "Page x of y" in the footer): the title, the head as label and value
-lines, readiness, the
-controls table and each accepted control's quotes, the remediation items under their control,
+lines, readiness, the controls table and each accepted control's quotes, the remediation items under their control,
 the not-applicable list, the audit trail table (on landscape A4 pages, for its 11 columns) and
 the disclaimer at the foot. Each table's header row repeats on every page it runs onto, its
 cells wrap, and fpdf2 never splits a row across pages.
@@ -29,7 +28,7 @@ fpdf2 is imported here only, keeping it out of vouch.report.
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from fpdf import FPDF
 from fpdf.enums import MethodReturnValue
@@ -70,21 +69,38 @@ HEAD_TOP = 8  # mm: the letterhead's line, from the page's top edge
 FOOT_FROM_BOTTOM = 10  # mm: the footer's line, from the page's bottom edge
 TOP = 24  # mm: where a page's text starts, under the letterhead
 BOTTOM = 18  # mm: where it stops, over the footer
-LETTERHEAD = 7.5  # pt
+LETTERHEAD = 7.5  # pt: the company and the footer
+BRAND = 11  # pt: VOUCH, as the top bar's brand
+BRAND_GAP = 1.8  # mm: VOUCH to its diamond's centre
+DIAMOND = 0.9  # mm: half the brass diamond's width
+RULE_BELOW = 6  # mm: the brass rule, under the letterhead's line
+FOOT_RULE_ABOVE = 1.5  # mm: the footer's hairline, over its line
+
+
+class Letterhead(NamedTuple):
+    """What the letterhead and footer say: the company, the "Page x of y" words with {page} and
+    {pages} to fill, and the report's date with its label."""
+
+    company: str
+    page_of: str
+    date: str
 
 
 class _Sheet(FPDF):
-    """An A4 page in DejaVu Sans that draws only the characters the font has."""
+    """An A4 page in the app's type, under a letterhead when it has one (a bare sheet measures
+    text for tests), drawing only the characters a font has."""
 
-    def __init__(self, letterhead: tuple[str, str, str] | None = None) -> None:
+    def __init__(self, letterhead: Letterhead | None = None) -> None:
         super().__init__(orientation="portrait", unit="mm", format="A4")
-        self.letterhead = letterhead  # the company, the page words, the date; None: no letterhead
+        self.letterhead = letterhead
         top, bottom = (TOP, BOTTOM) if letterhead else (MARGIN, MARGIN)
         self.set_margins(MARGIN, top, MARGIN)
         self.set_auto_page_break(auto=True, margin=bottom)
         for (family, style), file in _FILES.items():
             self.add_font(family, style, FONTS / file)
-        self.set_fallback_fonts([FALLBACK])
+        # Any style: DejaVu has no italic, and a quote's character Plex Serif lacks still draws.
+        self.set_fallback_fonts([FALLBACK], exact_match=False)
+        self.alias_nb_pages(align="R")  # "Page 2 of 5" ends at the right margin
         # Drawn: what every app font has, or what DejaVu has in either weight (the fallback).
         maps = {key: font.cmap for key, font in self.fonts.items() if isinstance(font, TTFFont)}
         fallback = set(maps[FALLBACK]) & set(maps[f"{FALLBACK}B"])
@@ -98,23 +114,27 @@ class _Sheet(FPDF):
         rule."""
         if not self.letterhead:
             return
-        width = self.w - self.l_margin - self.r_margin
         self.set_xy(self.l_margin, HEAD_TOP)
-        self.font(LETTERHEAD + 3.5, family=DISPLAY)
+        self.font(BRAND, family=DISPLAY)
         self.set_char_spacing(1)
         self.set_text_color(INK)
         self.cell(text="VOUCH")
         self.set_char_spacing(0)
-        x, y = self.get_x() + 1.8, HEAD_TOP + 1.6  # the diamond, as the app's .brand has it
+        brand_end = self.get_x()
+        x, y = brand_end + BRAND_GAP, HEAD_TOP + 1.6  # the diamond, as the app's .brand has it
         self.set_fill_color(BRASS)
-        self.polygon([(x, y - 0.9), (x + 0.9, y), (x, y + 0.9), (x - 0.9, y)], style="F")
-        self.set_xy(self.l_margin + width / 2, HEAD_TOP)
+        d = DIAMOND
+        self.polygon([(x, y - d), (x + d, y), (x, y + d), (x - d, y)], style="F")
         self.font(LETTERHEAD)
+        room = self.w - self.r_margin - (x + d + 4)  # clear of the brand mark
+        company = self._clipped(self.letterhead.company, room)
+        self.set_xy(self.w - self.r_margin - room, HEAD_TOP)
         self.set_text_color(MUTED)
-        self.cell(width / 2, 4, self.drawable(self.letterhead[0]), align="R")
+        self.cell(room, 4, company, align="R")
         self.set_draw_color(BRASS)
         self.set_line_width(0.5)
-        self.line(self.l_margin, HEAD_TOP + 6, self.w - self.r_margin, HEAD_TOP + 6)
+        below = HEAD_TOP + RULE_BELOW
+        self.line(self.l_margin, below, self.w - self.r_margin, below)
         self._reset()
         self.set_xy(self.l_margin, self.t_margin)  # the page's text starts under it
 
@@ -126,7 +146,7 @@ class _Sheet(FPDF):
         y = self.h - FOOT_FROM_BOTTOM
         self.set_draw_color(RULE)
         self.set_line_width(0.2)
-        self.line(self.l_margin, y - 1.5, self.w - self.r_margin, y - 1.5)
+        self.line(self.l_margin, y - FOOT_RULE_ABOVE, self.w - self.r_margin, y - FOOT_RULE_ABOVE)
         pages = page_of.format(page=self.page_no(), pages=self.str_alias_nb_pages)
         width = self.w - self.l_margin - self.r_margin
         self.set_xy(self.l_margin, y)
@@ -136,6 +156,20 @@ class _Sheet(FPDF):
         self.set_text_color(MUTED)
         self.cell(width / 2, 4, self.drawable(pages), align="R")
         self._reset()
+
+    def _clipped(self, text: str, width: float) -> str:
+        """`text` in the current font, cut to `width` mm with "…" when longer: one line."""
+        text = self.drawable(text)
+        room = width - 2 * self.c_margin
+        if self.get_string_width(text) <= room:
+            return text
+        fits, over = 0, len(text)  # the longest start of it that fits with "…": halving
+        while over - fits > 1:
+            mid = (fits + over) // 2
+            fits, over = (
+                (mid, over) if self.get_string_width(text[:mid] + "…") <= room else (fits, mid)
+            )
+        return text[:fits].rstrip() + "…"
 
     def _reset(self) -> None:
         self.set_text_color(0)
@@ -148,9 +182,10 @@ class _Sheet(FPDF):
         return "".join(c for c in str(text) if c == "\n" or ord(c) in self._glyphs)
 
     def font(self, size: float, bold: bool = False, family: str = SANS) -> None:
-        """`family` in `size`: Manrope by default; its bold where it has one; quotes italic."""
-        style = "I" if family == QUOTE else "B" if bold and (family, "B") in _FILES else ""
-        self.set_font(family, style, size)
+        """`family` in `size`, Manrope by default: its bold when asked for and it has one, else
+        the one style it has (Plex Serif: italic)."""
+        styles = [style for fam, style in _FILES if fam == family]
+        self.set_font(family, "B" if bold and "B" in styles else styles[0], size)
 
     def paragraph(
         self,
@@ -258,9 +293,10 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     its place. No model, no database."""
     labels, sentences = words["labels"], words["sentences"]
     head = report["head"]
-    sheet = _Sheet((head["company"], sentences["page_of"], f"{labels['date']} {head['date']}"))
+    date = f"{labels['date']} {head['date']}"
+    sheet = _Sheet(Letterhead(head["company"], sentences["page_of"], date))
     sheet.set_title(sheet.drawable(words["title"]))
-    sheet.set_lang(report["head"]["words_language"])
+    sheet.set_lang(head["words_language"])
     sheet.set_creator("Vouch")
     sheet.add_page()
 
@@ -380,11 +416,13 @@ def _width(sheet: _Sheet, text: str, family: str, bold: bool) -> float:
     return sheet.get_string_width(sheet.drawable(text)) + 2 * CELL_PADDING + CELL_SLACK + 0.1
 
 
-def _columns(head: list[str], rows: list[list[str]]) -> list[list[tuple[str, str, bool]]]:
+def _columns(
+    head: list[str], rows: list[list[str]], ids: Collection[int] = ()
+) -> list[list[tuple[str, str, bool]]]:
     """The table by column: each column's header (bold Manrope) and then its cells, as (text,
     family, bold), an id column's in Plex Mono."""
     return [
-        [(c, SANS, True)] + [(r[i], MONO if i in TRAIL_IDS else SANS, False) for r in rows]
+        [(c, SANS, True)] + [(r[i], MONO if i in ids else SANS, False) for r in rows]
         for i, c in enumerate(head)
     ]
 
@@ -398,7 +436,7 @@ def _least(
             [_width(sheet, p, f, bold) for text, f, bold in col for p in parts(text) if p],
             default=0,
         )
-        for col in _columns(head, rows)
+        for col in _columns(head, rows, TRAIL_IDS)
     ]
 
 
@@ -410,7 +448,7 @@ def _shared(
     spare = max(sheet.epw - sum(least), 0)
     whole = [
         max(_width(sheet, " ".join(t.replace(BREAK, "").split()), f, b) for t, f, b in col)
-        for col in _columns(head, rows)
+        for col in _columns(head, rows, TRAIL_IDS)
     ]
     wants = [max(w - m, 0) for w, m in zip(whole, least, strict=True)]
     share = spare / (sum(wants) or 1)

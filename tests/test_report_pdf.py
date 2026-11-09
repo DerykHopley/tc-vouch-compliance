@@ -394,3 +394,17 @@ def test_the_pdf_is_set_in_the_apps_type():
 
     for family in ("LibreCaslonDisplay", "Manrope", "IBMPlexMono", "IBMPlexSerif"):
         assert any(family in name for name in used), (family, used)
+
+
+def test_a_quote_keeps_a_character_its_italic_lacks_and_a_long_company_stays_clear_of_vouch():
+    # #352's review: Plex Serif italic has no α or ✗; DejaVu draws them, in its upright style.
+    built = alpenwerk_report()
+    accepted(built, 0, "Die Rolle α ist gesperrt ✗ und wird jährlich überprüft.")
+    company = "Alpenwerk Präzisions- und Sondermaschinenbau GmbH, " * 4  # wider than the line
+    built["head"] = built["head"] | {"company": company}
+
+    data = report_pdf.pdf(built, report.words_for("de"))
+
+    assert "Die Rolle α ist gesperrt ✗ und wird jährlich überprüft." in text(data)
+    head, _ = letterheads(data)[0]
+    assert head.startswith("VOUCH Alpenwerk") and head.endswith("…")  # clipped, one line
