@@ -536,6 +536,38 @@ describe('the working paper', () => {
   })
 })
 
+describe('the profile pass (ticket 390)', () => {
+  it('carries on while the lead opens a working paper, and its result shows on the Dossier on return', async () => {
+    let answer: (response: Response) => void = () => {}
+    let passed = false
+    const proposed = IDS.map((id) => ({ ...STORED, control_id: id, thread_id: `t-${id}` }))
+    const fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/overview' ? Promise.resolve(Response.json(passed ? overviewWith(proposed) : OVERVIEW))
+        : url === '/api/profile-pass' && init?.method === 'POST'
+          ? new Promise<Response>((resolve) => { answer = resolve })
+          : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    expect(screen.getByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: 'Open 4.1.2' }))
+    expect(await screen.findByRole('region', { name: 'Working paper' })).toBeTruthy()
+    passed = true
+    await act(async () => answer(Response.json({
+      assessments: proposed.map(({ thread_id, control_id }) =>
+        ({ thread_id, control_id, status: 'waiting-for-review', verdict: 'partly-evidenced' })),
+      skipped: [], usage: {},
+    })))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
+    const panel = await screen.findByRole('region', { name: 'Profile pass' })
+    expect(panel.textContent).toContain('12 assessments waiting for your review.')
+    await waitFor(() => expect(within(screen.getByRole('article', { name: 'Control 5.2.9' })).getByText('Proposed'))
+      .toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')).toHaveLength(1)
+  })
+})
+
 describe('theme', () => {
   it('starts dark when the system prefers dark', () => {
     systemPrefers(true)

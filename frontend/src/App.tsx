@@ -6,6 +6,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, useOverview } from './overview.ts'
+import { useProfilePass } from './profilePass.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
@@ -150,6 +151,10 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   }, [load, noteAssessed])
   const { run, controlId: runFor, start } = useAssessment(finished)
   const running = run.status === 'running' ? runFor : null
+  // The profile pass sits above the views too (#390): its result waits on the Dossier, and a finished pass reads the
+  // overview afresh, so the cards (the working paper's index too) show what it proposed.
+  const passed = useCallback(() => void load(), [load])
+  const { pass, start: startPass } = useProfilePass(passed)
   // A control's working paper needs its question from the overview; an overview not read shows the Dossier, and a
   // control the overview doesn't list says it isn't found.
   const control = view.name === 'paper' && overview.state.status === 'ready'
@@ -240,7 +245,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
           </main>
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
-          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
+          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running}
+            pass={pass} onPass={() => void startPass()} />}
       {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
           readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
           readiness), and its paper's newest if open. */}

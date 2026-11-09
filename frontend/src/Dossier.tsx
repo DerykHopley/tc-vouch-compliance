@@ -2,6 +2,7 @@ import type { MouseEvent } from 'react'
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness,
   SEGMENTS } from './overview.ts'
+import type { PassState } from './profilePass.ts'
 import VerdictChip from './VerdictChip.tsx'
 
 /** The Dossier overview (`docs/design.md`, Decisions: Screens): the headline with the next step, the readiness band,
@@ -14,9 +15,15 @@ type Props = {
   onOpen: (controlId: string, assess: boolean) => void
   /** The control being assessed just now, if any: its card says so, and the hero offers no second run. */
   running: string | null
+  /** The page's profile pass (#390): held above the views, so its result waits here. */
+  pass?: PassState
+  /** Starts a profile pass. */
+  onPass?: () => void
 }
 
-export default function Dossier({ state, onRetry, onOpen, running }: Props) {
+const IDLE: PassState = { kind: 'idle' }
+
+export default function Dossier({ state, onRetry, onOpen, running, pass = IDLE, onPass = () => {} }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -33,7 +40,8 @@ export default function Dossier({ state, onRetry, onOpen, running }: Props) {
   const { overview } = state
   return (
     <main className="dossier wrap">
-      <Hero overview={overview} onOpen={onOpen} running={running} />
+      <Hero overview={overview} onOpen={onOpen} running={running} pass={pass} onPass={onPass} />
+      <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} />
       <Band readiness={overview.readiness} />
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
@@ -58,7 +66,10 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
   assess: (id) => `Assess ${id}`,
 }
 
-function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props['onOpen']; running: string | null }) {
+type HeroProps = { overview: Overview; onOpen: Props['onOpen']; running: string | null; pass: PassState;
+  onPass: () => void }
+
+function Hero({ overview, onOpen, running, pass, onPass }: HeroProps) {
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
@@ -70,24 +81,119 @@ function Hero({ overview, onOpen, running }: { overview: Overview; onOpen: Props
     detail = `${plural(count['waiting-for-review'], 'verdict')} waiting for your review, ${count.rejected} rejected.`
       + (next ? ` Next: ${NEXT_WORDS[next.action](next.control_id).toLowerCase()}.` : ' Every control is accepted.')
   }
-  // While a run is in progress (one at a time), the next step opens its paper rather than starting another.
-  const assess = next !== null && next.action !== 'review' && running === null
+  // While a run is in progress (one at a time, a profile pass included), the next step opens its paper rather than
+  // starting another.
+  const passing = pass.kind === 'running'
+  const assess = next !== null && next.action !== 'review' && running === null && !passing
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
       <h1>Prepared for audit. One piece of evidence at a time.</h1>
       <p><b>{headline}</b> {detail}</p>
-      {next && (
+      {(next || readiness.open > 0) && (
         <div className="next">
-          <button className="btn btn-primary" onClick={() => onOpen(next.control_id, assess)}>
-            {next.action === 'review' || assess ? NEXT_WORDS[next.action](next.control_id) : `Open ${next.control_id}`}
-          </button>
+          {next && (
+            <button className="btn btn-primary" onClick={() => onOpen(next.control_id, assess)}>
+              {next.action === 'review' || assess ? NEXT_WORDS[next.action](next.control_id) : `Open ${next.control_id}`}
+            </button>
+          )}
+          {readiness.open > 0 && (
+            <button className="btn btn-ghost" onClick={onPass} disabled={passing || running !== null}
+              aria-busy={passing || undefined} aria-describedby="pass-note">
+              {passing ? 'Running the profile pass…' : 'Run a profile pass'}
+            </button>
+          )}
         </div>
       )}
+      {readiness.open > 0 && (passing
+        ? <p id="pass-note" className="field-note" role="status">
+          Vouch is assessing every open control in one run. This can take a few minutes.
+        </p>
+        : <p id="pass-note" className="field-note">
+          {running !== null ? `Vouch is assessing ${running}. One run at a time.`
+            : 'Assesses every open control in one run. Accepted controls are skipped.'}
+        </p>)}
     </section>
   )
 }
 
+/** Whether a verdict leaves something to evidence, so the control may be worth assessing again on its own. */
+const shortOf = (verdict: Verdict | null) => verdict === 'not-evidenced' || verdict === 'partly-evidenced'
+
+/**
+ * The profile pass's result (`docs/design.md`, Components: Profile pass): what waits for review, with a row per new
+ * assessment read from its card as it stands now (a review since shows), or why the pass didn't run and the way on.
+ * Nothing while the pass is idle or running.
+ */
+function PassPanel({ overview, pass, onOpen, onPass }:
+  { overview: Overview; pass: PassState; onOpen: Props['onOpen']; onPass: () => void }) {
+  if (pass.kind === 'idle' || pass.kind === 'running') return null
+  const cards = new Map(overview.controls.map((c) => [c.id, c]))
+  let body
+  if (pass.kind === 'done') {
+    const skipped = pass.skipped.length > 0 && (
+      <p className="field-note">
+        {plural(pass.skipped.length, 'accepted control')} skipped: {pass.skipped.join(', ')}.
+      </p>)
+    body = pass.assessments.length === 0 ? (
+      <>
+        <p>Every applicable control is accepted already. Nothing was assessed.</p>
+        {skipped}
+      </>
+    ) : (
+      <>
+        <p>{plural(pass.assessments.length, 'assessment')} waiting for your review.</p>
+        {skipped}
+        <ul className="pass-rows">
+          {pass.assessments.map((a) => {
+            const card = cards.get(a.control_id)
+            const status = card?.status ?? a.status
+            const verdict = card ? card.verdict : a.verdict
+            return (
+              <li key={a.thread_id} className="pass-row" aria-label={`Control ${a.control_id}`}>
+                <b className="mono">{a.control_id}</b>
+                <VerdictChip verdict={verdict} language={overview.answer_language} />
+                {status !== 'not-assessed' && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
+                <span className="pass-actions">
+                  <button className="btn" onClick={() => onOpen(a.control_id, false)}>Open {a.control_id}</button>
+                  {shortOf(verdict) && (
+                    <button className="btn btn-ghost" onClick={() => onOpen(a.control_id, true)}>
+                      Assess {a.control_id} again
+                    </button>
+                  )}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      </>
+    )
+  } else if (pass.kind === 'refused' || pass.kind === 'limit') {
+    // The per-control agent is the way on, with its own limit: from the first control not assessed or rejected.
+    const first = overview.controls.find((c) => c.status === 'not-assessed' || c.status === 'rejected')
+    body = (
+      <>
+        <p role="alert">{pass.message}</p>
+        {first && (
+          <button className="btn btn-primary" onClick={() => onOpen(first.id, true)}>Assess {first.id} on its own</button>
+        )}
+      </>
+    )
+  } else {
+    body = (
+      <>
+        <p role="alert">{pass.message}</p>
+        <button className="btn" onClick={onPass}>Try again</button>
+      </>
+    )
+  }
+  return (
+    <section className="sheet pass" aria-labelledby="pass-title">
+      <h2 id="pass-title">Profile pass</h2>
+      {body}
+    </section>
+  )
+}
 
 /** A verdict as the band says it, from VERDICT_WORDS: the one place verdict words live (M4's verdictWord later). */
 const bandWord = (verdict: Verdict) => VERDICT_WORDS[verdict].toLowerCase()

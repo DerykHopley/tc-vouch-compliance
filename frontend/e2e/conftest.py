@@ -52,6 +52,13 @@ def afresh_url() -> str:
 
 
 @pytest.fixture
+def pass_url() -> str:
+    """An eighth Vouch like vouch_url, for the profile pass's checks (#390): a pass assesses all
+    12 controls, which would change the counts other checks read."""
+    return os.environ["PASS_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]
