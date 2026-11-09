@@ -14,7 +14,6 @@ overview counts an accepted control's items only, so those cases accept it once 
 """
 
 import threading
-from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -24,7 +23,7 @@ import test_memory
 from fastapi.testclient import TestClient
 from langgraph.store.memory import InMemoryStore
 from profiles_dir import SECOND, make_profiles
-from reviewing import confirm, reviewed
+from reviewing import accept_as_before_three_steps, confirm, reviewed
 from test_auth import api_routes
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
@@ -38,11 +37,9 @@ from vouch.graph import (
     NO_OWNER,
     NOT_DRAFTED,
     ReviewDecision,
-    build_graph,
-    thread_config,
     thread_key,
 )
-from vouch.memory import Memory, process_checkpointer
+from vouch.memory import Memory
 from vouch.profile import DEFAULT_PROFILE
 
 database_url = test_memory.database_url
@@ -449,25 +446,9 @@ def test_a_rejected_controls_items_wait_for_it_to_be_assessed_again(database_url
 def test_a_review_kept_before_the_three_steps_reads_as_one_and_its_drafts_are_decidable(users):
     """An accept from before #372: no `three_step` in its checkpoint, its drafts undecided."""
     alice, _ = users
-
-    @dataclass(frozen=True)
-    class Review:  # graph.Review as it was before #372, written under its name
-        decision: str
-        note: str
-        overrides: list
-        reviewer_id: str = ""
-        reviewer_name: str = ""
-        reviewed_at: str = ""
-
-    Review.__module__, Review.__qualname__ = graph.Review.__module__, "Review"
     with TestClient(app_on(None)) as client:
         thread_id = assess(client, alice)
-        scope = Memory(InMemoryStore(), alice["X-Test-User"], DEFAULT_PROFILE).scope
-        build_graph(None, checkpointer=process_checkpointer()).update_state(
-            thread_config(thread_id, scope),
-            {"review": Review("accept", "Accepted before.", [])},
-            as_node="review",
-        )
+        accept_as_before_three_steps(alice, thread_id, "Accepted before.")
         opened = client.get(f"/api/assessments/{thread_id}", headers=alice).json()["assessment"]
         kept = decide(client, alice, thread_id, "M1", decision="approve")
         after = items(client, alice, thread_id)

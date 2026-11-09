@@ -219,7 +219,8 @@ export default function WorkingPaper(props: PaperProps) {
             ) : <Requirements requirements={requirements} language={overview.answer_language} />}
             {assessed?.status && assessed.thread_id && (
               <ReviewBar key={`${assessed.thread_id}:${reads}`} status={assessed.status} threadId={assessed.thread_id}
-                review={assessed.review} step={step} overrides={overrides} editing={editing} onReviewed={onReviewed}
+                review={assessed.review} beforeThreeStep={assessed.before_three_step_review} step={step}
+                overrides={overrides} editing={editing} onReviewed={onReviewed}
                 items={{ decided: remediation.filter((i) => i.status !== 'draft').length, total: remediation.length }}
                 onRefresh={onRefresh} assessAgain={<>
                   <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />

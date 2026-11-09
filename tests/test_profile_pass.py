@@ -172,7 +172,7 @@ def test_a_pass_assessment_of_an_overlaid_control_holds_its_overlay_and_the_agen
     nodes = [s["node"] for s in overlaid.steps]
     assert nodes[:3] == ["load_control", "apply_overlays", PASS_NODE]
     assert overlaid.steps[1]["text"] == (
-        "Applied the country overlays: AT NIS2 (illustrative) adds O1."
+        "Applied the country overlays: AT NIS2 (illustrativ) adds O1."
     )
     assert "overlay_branch" not in nodes
 

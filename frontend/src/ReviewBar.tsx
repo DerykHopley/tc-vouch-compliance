@@ -69,6 +69,8 @@ type ReviewBarProps = {
   threadId: string
   /** The recorded decision, on a reviewed control. */
   review: Review | null | undefined
+  /** Reviewed before the three-step review (#373): an accepted one is marked so. */
+  beforeThreeStep?: boolean
   /** The step a proposed control's review waits at (`review.ts`'s `reviewStep`). */
   step: ReviewStep | null
   /** The overrides saved on the rows and not yet recorded: they go with Confirm findings. */
@@ -109,11 +111,13 @@ function Steps({ step, items }: { step: ReviewStep; items: ReviewBarProps['items
  * bar counts them, and Accept verdict waits, saying why. Accept: Accept verdict. The note goes with Reject (at any
  * step) or Accept. A failure shows the step as not recorded, with Retry; a refused one (422) says why, with nothing to
  * retry; a 409 shows the review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
- * a rejected one Assess again. Shown afresh (a new key) whenever its assessment is read again, so a message about an
+ * a rejected one Assess again; an accepted one reviewed before the three steps is marked "before the three-step review"
+ * (#373). Shown afresh (a new key) whenever its assessment is read again, so a message about an
  * older read never lingers.
  */
 export default function ReviewBar(props: ReviewBarProps) {
-  const { status, threadId, review, step, overrides, editing, items, onReviewed, onRefresh, assessAgain } = props
+  const { status, threadId, review, beforeThreeStep, step, overrides, editing, items, onReviewed, onRefresh,
+    assessAgain } = props
   const [note, setNote] = useState('')
   const [sending, setSending] = useState<Action | null>(null)
   const [refused, setRefused] = useState<{ action: Action; refusal: Refusal; message: string } | null>(null)
@@ -143,6 +147,7 @@ export default function ReviewBar(props: ReviewBarProps) {
           {review?.reviewer_name && review.reviewed_at && (
             <span>by {review.reviewer_name} on {decidedAtLabel(review.reviewed_at)}</span>
           )}
+          {status === 'accepted' && beforeThreeStep && <span className="field-note">before the three-step review</span>}
         </p>
         {review?.note && <blockquote className="note">{review.note}</blockquote>}
         {status === 'rejected' && <div className="review-actions">{assessAgain}</div>}

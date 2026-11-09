@@ -88,6 +88,8 @@ export type Assessment = {
   /** The step of the review it waits at (#372), from the server; null once reviewed. `review.ts`'s `reviewStep` reads
    * it with the items as the page holds them. */
   review_step?: ReviewStep | null
+  /** Reviewed before the three-step review (#373): it still counts as reviewed. */
+  before_three_step_review?: boolean
   /** The overrides recorded with Confirm findings, once the findings are confirmed (#372). */
   confirmed?: KeptOverride[] | null
   /** One per requirement not or partly evidenced (#212), each with the lead's decision (#43). */

@@ -1,10 +1,18 @@
 """The three-step review through the API (#372), for tests that need a reviewed assessment:
-Confirm findings, then each remediation item decided (Plan fixes), then Accept or Reject."""
+Confirm findings, then each remediation item decided (Plan fixes), then Accept or Reject. And an
+assessment accepted before the three-step review, as a checkpoint kept before #372 holds it."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from fastapi.testclient import TestClient
+from langgraph.store.memory import InMemoryStore
+
+from vouch import graph
+from vouch.graph import build_graph, thread_config
+from vouch.memory import Memory, process_checkpointer
+from vouch.profile import DEFAULT_PROFILE
 
 OWNER = "IT security officer"
 """The owner role an approval names, so a "not drafted" item (no owner) can be approved too."""
@@ -93,3 +101,37 @@ def reviewed(
 def accepted(client: TestClient, thread_id: str, **kwargs: Any) -> dict[str, Any]:
     """The assessment through all three steps and accepted (`reviewed`'s options)."""
     return reviewed(client, thread_id, "accept", **kwargs)
+
+
+@dataclass(frozen=True)
+class ReviewBeforeThreeSteps:
+    """graph.Review as it was kept before the three-step review (#372): no `three_step`.
+    Named as graph.Review, so a checkpoint holds it as an old one did."""
+
+    decision: str
+    note: str
+    overrides: list
+    reviewer_id: str = ""
+    reviewer_name: str = ""
+    reviewed_at: str = ""
+
+
+ReviewBeforeThreeSteps.__module__ = graph.Review.__module__
+ReviewBeforeThreeSteps.__name__ = ReviewBeforeThreeSteps.__qualname__ = "Review"
+
+
+def thread_graph(user: dict[str, str], thread_id: str) -> tuple[Any, dict[str, Any]]:
+    """The assessment graph on the process's checkpointer (an app with no database URL), and
+    the config of the user's thread under the default profile."""
+    scope = Memory(InMemoryStore(), user["X-Test-User"], DEFAULT_PROFILE).scope
+    return build_graph(None, checkpointer=process_checkpointer()), thread_config(thread_id, scope)
+
+
+def accept_as_before_three_steps(
+    user: dict[str, str], thread_id: str, note: str = "Accepted before."
+) -> None:
+    """The waiting assessment accepted before the three-step review: its checkpoint written by
+    the review node as one kept before #372 was, with no `three_step`."""
+    built, config = thread_graph(user, thread_id)
+    review = ReviewBeforeThreeSteps("accept", note, [])
+    built.update_state(config, {"review": review}, as_node="review")

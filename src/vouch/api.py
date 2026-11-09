@@ -419,10 +419,14 @@ def assessment_data(
     """The assessment as the API sends it, each remediation item with its status (#43): a draft,
     or as the lead decided it (`decided`, none for a run just made, its findings just confirmed,
     or just reviewed: nothing is decided before the findings are), and `review_step`, the step
-    of the review it waits at (#372; null once reviewed)."""
+    of the review it waits at (#372; null once reviewed), and `before_three_step_review`, true
+    for one reviewed before the three-step review (#373): it still counts as reviewed, and
+    nothing stored is rewritten."""
+    review = assessment.review
     return assessment.to_dict() | {
         "remediation": remediation.shown_items(assessment, decided or {}),
         "review_step": remediation.review_step(assessment, decided or {}),
+        "before_three_step_review": review is not None and not review.three_step,
     }
 
 
