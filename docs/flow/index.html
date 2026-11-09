@@ -96,6 +96,37 @@ svg .head { fill: var(--muted); }
 svg .lane { fill: color-mix(in srgb, var(--c-state) 5%, var(--sheet)); stroke: var(--c-state); stroke-dasharray: 2 4; }
 svg .lane-t { fill: var(--c-state); font: 600 16px var(--f-body); }
 svg .lane-s { fill: var(--muted); font: 400 11px var(--f-mono); }
+
+/* Overview, open stages and the played run. */
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; }
+.btn { font: 500 13px var(--f-body); color: var(--ink); background: var(--sheet); border: 1px solid var(--rule);
+  border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+.btn:hover { border-color: var(--navy); }
+.btn[aria-pressed="true"] { background: var(--navy); color: var(--sheet); border-color: var(--navy); }
+.btn:focus-visible, svg .sum:focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
+.hint { color: var(--muted); font-size: 13px; }
+.player { display: none; position: sticky; top: 0; z-index: 2; margin: 0 0 10px; padding: 10px 14px;
+  background: var(--sheet); border: 1px solid var(--navy); border-radius: 12px;
+  grid-template-columns: auto 1fr auto; gap: 6px 14px; align-items: center; }
+.player.on { display: grid; }
+.player .n { font: 12px var(--f-mono); color: var(--muted); white-space: nowrap; }
+.player .cap { font-size: 15px; }
+.player .meter { font: 12px var(--f-mono); color: var(--c-external); white-space: nowrap; }
+.player .nav { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 640px) { .player { grid-template-columns: 1fr; } }
+svg .sum { cursor: pointer; }
+svg .sum .card { fill: var(--sheet); stroke: var(--navy); stroke-width: 1.4; }
+svg .sum:hover .card { stroke-width: 2.4; }
+svg .open-t { fill: var(--navy); font: 500 11px var(--f-mono); }
+svg .colhead { cursor: pointer; }
+svg .cg, svg .wg { transition: opacity .35s ease; }
+svg.playing .cg:not(.hot) { opacity: .32; }
+svg.playing .wg { opacity: .32; }
+svg .cg.hot .card { stroke-width: 3.2; filter: drop-shadow(0 0 6px var(--c)); }
+svg .enter { animation: enter .45s ease backwards; }
+@keyframes enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
+@media (prefers-reduced-motion: reduce) { svg .enter { animation: none; } svg .cg, svg .wg { transition: none; } }
 </style>
 </head>
 <body>
@@ -110,9 +141,25 @@ svg .lane-s { fill: var(--muted); font: 400 11px var(--f-mono); }
 </header>
 
 <h2>1 · One assessment, end to end</h2>
+<div class="controls">
+  <button class="btn" type="button" id="b-overview">Overview</button>
+  <button class="btn" type="button" id="b-all">Open every stage</button>
+  <button class="btn" type="button" id="b-play">▶ Play a run</button>
+  <span class="hint">Click a stage to open it; click its header to close it.</span>
+</div>
+<div class="player" id="player" aria-live="polite">
+  <span class="n" id="p-n"></span><span class="cap" id="p-cap"></span><span class="meter" id="p-meter"></span>
+  <div class="nav">
+    <button class="btn" type="button" id="p-prev">◀ Back</button>
+    <button class="btn" type="button" id="p-pause">Pause</button>
+    <button class="btn" type="button" id="p-next">Next ▶</button>
+    <button class="btn" type="button" id="p-stop">Stop</button>
+  </div>
+</div>
 <p class="note">Read left to right. Cards marked <span class="chip" style="--c: var(--c-external)">⇡ model</span>
 call the model through LangChain; an orange <code style="color: var(--c-state)">▾ writes</code> line names the table a step writes;
-the lane at the foot says what each store holds and when it is written.</p>
+the lane at the foot says what each store holds and when it is written. A diamond starts a conditional edge:
+the graph takes one of its edges, by the state.</p>
 <div class="scroll"><svg id="main" role="img" aria-label="Process flow of one Vouch assessment"></svg></div>
 
 <h2>2 · Ask Vouch, the chat</h2>
@@ -132,7 +179,10 @@ asked to sign off, it links the working paper. Its <code>start_assessment</code>
 
 <script>
 // The diagrams as data, drawn into inline SVG once the fonts have loaded (text is wrapped by
-// measuring it). Card ids are what arrows name.
+// measuring it). Card ids are what arrows and the played run name.
+//
+// Diagram 1 opens on an overview: each stage, and the state lane, is one summary card. A stage
+// opens in place to its cards; arrows between stages land on the summary of a closed one.
 const TYPES = [
   ["browser", "Browser (React)"], ["api", "FastAPI"], ["lead", "Compliance lead"],
   ["external", "External service", true], ["graph", "LangGraph node"], ["guard", "Guard (code, not the model)"],
@@ -154,7 +204,9 @@ const MAIN = {
       tech: "vouch.limits · vouch.allow_list · vouch.guards · vouch.redaction" } },
   ],
   cols: [
-    { title: "Request", sub: "React · FastAPI", cards: [
+    { title: "Request", sub: "React · FastAPI",
+      summary: "The lead starts one control's assessment in the browser; FastAPI answers as a stream.",
+      chips: "React · Clerk · FastAPI · SSE", cards: [
       { id: "browser", type: "browser", tag: "Browser", title: "Working paper",
         body: "The compliance lead signs in and starts one control's assessment.",
         tech: "React 19 · Vite · @clerk/react" },
@@ -162,7 +214,9 @@ const MAIN = {
         body: "Each check runs as a FastAPI dependency, before the stream starts; the answer comes back as server-sent events.",
         tech: "vouch.api" },
     ] },
-    { title: "Admit", sub: "before the stream starts", cards: [
+    { title: "Admit", sub: "before the stream starts",
+      summary: "Who is asking, the input limits, the compliance profile and its allowed tools, and the daily limit: all before anything runs.",
+      chips: "Clerk · Discord · profile.yaml · Postgres", cards: [
       { id: "clerk", type: "external", tag: "Clerk · Discord", title: "Who is asking",
         body: "Session token checked locally against Clerk's key; role and name from Clerk; membership of the course's Discord server.",
         tech: "vouch.auth · 401 / 403" },
@@ -177,22 +231,29 @@ const MAIN = {
         tech: "vouch.runs · vouch.spending",
         writes: "store index · vouch_assessment_counts" },
     ] },
-    { title: "Gather", sub: "LangGraph · vouch.graph", cards: [
+    { title: "Gather", sub: "LangGraph · vouch.graph",
+      summary: "LangGraph's agent loop: the model asks for searches, guarded tools answer, until it submits a draft answer.",
+      chips: "LangGraph · LangChain · OpenRouter", cards: [
       { id: "overlays", type: "graph", tag: "LangGraph node", title: "apply_overlays", mono: true,
         body: "The control's requirements under the profile, country overlays added; writes the first prompt." },
       { id: "branch", type: "graph", tag: "LangGraph node", title: "overlay_branch", mono: true, dashed: true,
         body: "Only when an overlay adds a requirement: asks for its evidence too." },
       { id: "gather", type: "graph", tag: "LangGraph node", title: "gather", mono: true, model: true,
-        body: "ReAct: the model asks for a search, or calls submit_answer with its draft answer.",
+        body: "ReAct: the model asks for one or more searches, or calls submit_answer with its draft. Loops until it submits.",
         tech: "model.bind_tools" },
       { id: "tools", type: "guard", tag: "Node · guards", title: "tools", mono: true,
-        body: "Each call checked against the allow-list and its folder first; passages go to the model as <evidence> data.",
+        body: "Runs each call the model asked for, one by one, each checked against the allow-list and its folder; passages go to the model as <evidence> data.",
         tech: "vouch.guards · layers 2, 3" },
-      { id: "evtools", type: "tool", tag: "Tools", title: "search_policies · search_records · vulnerability_status", mono: true,
-        body: "Keyword search over the profile's allowed folders; the recorded Patch response as implemented evidence.",
-        tech: "vouch.search · vouch.patch" },
+      { id: "t-policies", type: "tool", tag: "Tool", title: "search_policies", mono: true,
+        body: "Keyword search over the policies folder the profile allows.", tech: "vouch.search" },
+      { id: "t-records", type: "tool", tag: "Tool", title: "search_records", mono: true,
+        body: "The same over the records folder.", tech: "vouch.search" },
+      { id: "t-patch", type: "tool", tag: "Tool", title: "vulnerability_status", mono: true,
+        body: "The recorded Patch response, as implemented evidence.", tech: "vouch.patch" },
     ] },
-    { title: "Judge", sub: "LangGraph · vouch.graph", cards: [
+    { title: "Judge", sub: "LangGraph · vouch.graph",
+      summary: "The model judges each requirement with quotes; code checks every quote, then the model drafts remediation.",
+      chips: "LangGraph · LangChain · quote check", cards: [
       { id: "check", type: "guard", tag: "Node · guard", title: "check_answer", mono: true,
         body: "No audit-result claim (“compliant”, “certified”) and the profile's language; else back to gather, once." },
       { id: "judge", type: "graph", tag: "LangGraph node", title: "judge", mono: true, model: true,
@@ -205,7 +266,9 @@ const MAIN = {
         body: "One remediation item for each requirement not or partly evidenced.",
         tech: "with_structured_output · RemediationPlan" },
     ] },
-    { title: "Review", sub: "interrupt · vouch.audit", cards: [
+    { title: "Review", sub: "interrupt · vouch.audit",
+      summary: "The graph pauses for the compliance lead; their decision resumes it and goes into the audit trail.",
+      chips: "LangGraph interrupt · FastAPI · Postgres", cards: [
       { id: "review", type: "graph", tag: "LangGraph node", title: "review · interrupt()", mono: true,
         body: "The run pauses; its thread waits in the checkpointer. On resume the node runs again and applies the decision." },
       { id: "lead", type: "lead", tag: "Compliance lead", title: "Reviews on the working paper",
@@ -218,7 +281,9 @@ const MAIN = {
         tech: "vouch.remediation",
         writes: "vouch_remediation_items · vouch_audit_trail" },
     ] },
-    { title: "Outputs", sub: "what the lead sees", cards: [
+    { title: "Outputs", sub: "what the lead sees",
+      summary: "The streamed steps, the Dossier overview and the readiness report; the chat has its own diagram below.",
+      chips: "SSE · fpdf2 · no model call", cards: [
       { id: "stream", type: "browser", tag: "Browser · SSE", title: "Streamed steps",
         body: "A step event as each node finishes, each requirement once its quotes are checked, then the result with its usage. All redacted.",
         tech: "vouch.redaction · layer 4",
@@ -236,6 +301,7 @@ const MAIN = {
   lane: {
     title: "State · Postgres on Cloud SQL",
     sub: "vouch.database: one psycopg pool; vouch-db-setup creates every table at deploy. With no database, the same in process memory.",
+    summary: "LangGraph's checkpointer (every thread) and store (long-term memory), and five Vouch tables: counts, usage, the append-only audit trail, remediation items, settings.",
     cards: [
       { id: "s-ckpt", type: "state", tag: "LangGraph checkpointer", title: "Threads",
         body: "Each assessment and chat thread. A checkpoint after every node; the review resumes from it.", tech: "PostgresSaver" },
@@ -253,6 +319,7 @@ const MAIN = {
         body: "The developer's model choice and the daily limit." },
     ],
   },
+  // `ids`: what a drawn route needs open. Arrows between stages land on a closed stage's summary.
   arrows: [
     { from: "browser", to: "api", label: "control id\nBearer token" },
     { from: "api", fs: "r", to: "clerk", ts: "l", label: "request" },
@@ -260,27 +327,32 @@ const MAIN = {
     { from: "limits", to: "profile", label: "X-Vouch-Profile" },
     { from: "profile", to: "daily", label: "allow-list" },
     { from: "daily", fs: "r", to: "overlays", ts: "l", label: "control\nprofile\nthread id" },
-    { from: "overlays", to: "branch", label: "overlay adds\na requirement", dashed: true },
+    { from: "overlays", to: "branch", label: "overlay adds\na requirement", dashed: true, cond: true },
     { from: "branch", to: "gather" },
-    { route: (g) => { const a = g.overlays, b = g.gather, x = a.x - 13;
+    { ids: ["overlays", "gather", "branch"], route: (g) => { const a = g.overlays, b = g.gather, x = a.x - 13;
         return [[a.x, a.cy + 8], [x, a.cy + 8], [x, b.cy - 8], [b.x, b.cy - 8]]; },
-      label: "no\noverlay", lp: (g) => [g.overlays.x - 13, (g.branch.y + g.branch.h + g.gather.y) / 2], dashed: true },
-    { from: "gather", to: "tools", label: "tool calls" },
-    { route: (g) => { const a = g.tools, b = g.gather, x = a.x + a.w + 13;
+      label: "no\noverlay", lp: (g) => [g.overlays.x - 13, (g.branch.y + g.branch.h + g.gather.y) / 2], dashed: true, cond: true },
+    { from: "gather", to: "tools", label: "tool calls", cond: true },
+    { ids: ["tools", "gather"], route: (g) => { const a = g.tools, b = g.gather, x = a.x + a.w + 13;
         return [[a.x + a.w, a.cy], [x, a.cy], [x, b.cy + 14], [b.x + b.w, b.cy + 14]]; },
       label: "passages", dashed: true },
-    { from: "tools", to: "evtools", label: "query ⇄ passages", both: true },
-    { from: "gather", fs: "r", fo: -14, to: "check", ts: "l", label: "draft\nanswer" },
-    { from: "check", to: "judge", label: "answer" },
+    // The fan-out: one bus from tools to each tool, labelled once.
+    ...["t-policies", "t-records", "t-patch"].map((t, k) => ({
+      ids: ["tools", t], route: (g) => { const a = g.tools, b = g[t], x = a.x - 13;
+        return [[a.x, a.cy + 10], [x, a.cy + 10], [x, b.cy], [b.x, b.cy]]; },
+      label: k === 0 ? "each call,\none by one" : null,
+      lp: (g) => [g.tools.cx, (g.tools.y + g.tools.h + g["t-policies"].y) / 2] })),
+    { from: "gather", fs: "r", fo: -14, to: "check", ts: "l", label: "submit_\nanswer", cond: true },
+    { from: "check", to: "judge", label: "answer kept", cond: true },
     { from: "judge", to: "quotes", label: "verdicts + quotes" },
     { from: "quotes", to: "remediate", label: "checked verdicts" },
     { from: "remediate", fs: "r", to: "review", ts: "l", label: "proposed\nassessment" },
     { from: "review", to: "lead", label: "waiting for review" },
     { from: "lead", to: "areview", label: "ReviewDecision" },
-    { route: (g) => { const a = g.areview, b = g.review, x = a.x + a.w + 13;
+    { ids: ["areview", "review", "lead"], route: (g) => { const a = g.areview, b = g.review, x = a.x + a.w + 13;
         return [[a.x + a.w, a.cy], [x, a.cy], [x, b.cy], [b.x + b.w, b.cy]]; },
       label: "resume", lp: (g) => [g.areview.x + g.areview.w + 13, (g.lead.y + g.lead.h + g.areview.y) / 2], dashed: true },
-    { route: (g) => { const a = g.lead, b = g.rdecide, x = a.x - 13;
+    { ids: ["lead", "rdecide", "areview"], route: (g) => { const a = g.lead, b = g.rdecide, x = a.x - 13;
         return [[a.x, a.cy + 10], [x, a.cy + 10], [x, b.cy], [b.x, b.cy]]; },
       label: "item", lp: (g) => [g.lead.x - 13, (g.areview.y + g.areview.h + g.rdecide.y) / 2] },
     { from: "review", fs: "r", fo: -16, to: "stream", ts: "l", label: "steps" },
@@ -288,6 +360,32 @@ const MAIN = {
     { from: "overview", to: "report", label: "same readiness" },
   ],
 };
+
+// One real run, step by step: the bundled demo script for control 1.1.1 in English
+// (src/vouch/demo/1.1.1.json), which plays when no model key is set. `open`: the stages it opens
+// (numbers; "lane" for state); `hot`: the cards lit; `calls`: model calls so far.
+const RUN = [
+  { open: [0], hot: ["browser"], cap: "The compliance lead starts control 1.1.1 on the working paper." },
+  { open: [0], hot: ["api"], cap: "POST /api/assessments: the control id, with a Clerk session token." },
+  { open: [1], hot: ["clerk", "limits"], cap: "Clerk's token checks out; the input limits pass." },
+  { open: [1], hot: ["profile"], cap: "The lead's compliance profile loads: which evidence folders the tools may read." },
+  { open: [1, "lane"], hot: ["daily", "s-store", "s-counts"], cap: "Within the daily limit: the run is remembered in the store, then counted." },
+  { open: [2, "lane"], hot: ["overlays", "s-ckpt"], cap: "LangGraph starts: apply_overlays. From here a checkpoint is saved after every node." },
+  { open: [2], hot: ["gather", "model"], calls: 1, cap: "gather, model call 1: the model asks for search_policies." },
+  { open: [2], hot: ["tools", "t-policies"], calls: 1, cap: "tools: the call passes the allow-list; search_policies returns passages, as data. A turn may ask for several tools: each runs and is checked on its own." },
+  { open: [2], hot: ["gather", "model"], calls: 2, cap: "gather, model call 2: it asks for search_records." },
+  { open: [2], hot: ["tools", "t-records"], calls: 2, cap: "tools: search_records returns the publication notices." },
+  { open: [2], hot: ["gather", "model"], calls: 3, cap: "gather, model call 3: enough evidence, so it calls submit_answer with its draft answer." },
+  { open: [3], hot: ["check"], calls: 3, cap: "check_answer: no audit-result claim, and in the profile's language." },
+  { open: [3], hot: ["judge", "model"], calls: 4, cap: "judge, model call 4: a verdict for each of the 9 requirements, with the quotes it relies on." },
+  { open: [3], hot: ["quotes"], calls: 4, cap: "check_quotes: each quote is looked up in the document it cites; one not found would be dropped." },
+  { open: [3], hot: ["remediate", "model"], calls: 5, cap: "remediate, model call 5: items for S2 (not evidenced) and S4 (partly evidenced)." },
+  { open: [4, 5, "lane"], hot: ["review", "stream", "s-usage"], calls: 5, cap: "review: interrupt(). The stream ends with the proposed assessment; its usage is written." },
+  { open: [4], hot: ["lead"], calls: 5, cap: "The lead reviews: accepts, perhaps overriding a verdict with a reason." },
+  { open: [4, "lane"], hot: ["areview", "s-ckpt", "s-audit"], calls: 5, cap: "The decision resumes the thread; it and its audit entries are written in one transaction." },
+  { open: [4, "lane"], hot: ["rdecide", "s-rem", "s-audit"], calls: 5, cap: "The lead approves the remediation items, each with its audit entry." },
+  { open: [5], hot: ["overview", "report"], calls: 5, cap: "Readiness counts the accepted verdicts; the report is ready as a page, Markdown or PDF." },
+];
 
 const CHAT = {
   cols: [
@@ -300,7 +398,7 @@ const CHAT = {
     ] },
     { title: "Chat graph", sub: "LangGraph · vouch.chat_agent", cards: [
       { id: "c-agent", type: "graph", tag: "LangGraph node", title: "agent", mono: true, model: true,
-        body: "The model reads the prompt and at most the last 20 messages of the thread; answers, or calls tools.",
+        body: "The model reads the prompt and at most the last 20 messages of the thread; answers, or calls one or more tools.",
         tech: "model.bind_tools(CHAT_TOOLS)" },
       { id: "c-tools", type: "graph", tag: "LangGraph node", title: "tools", mono: true,
         body: "Runs each call; its reply is redacted before the model reads it." },
@@ -334,16 +432,16 @@ const CHAT = {
   arrows: [
     { from: "c-browser", to: "c-api", label: "message + page" },
     { from: "c-api", fs: "r", to: "c-agent", ts: "l", label: "message\nthread id", lp: (g) => [(g["c-api"].x + g["c-api"].w + g["c-agent"].x) / 2, g["c-api"].cy] },
-    { from: "c-agent", to: "c-tools", label: "tool calls" },
+    { from: "c-agent", to: "c-tools", label: "tool calls", cond: true },
     { route: (g) => { const a = g["c-tools"], b = g["c-agent"], x = a.x - 13;
         return [[a.x, a.cy], [x, a.cy], [x, b.cy + 10], [b.x, b.cy + 10]]; },
       label: "results", lp: (g) => [g["c-tools"].x - 13, (g["c-agent"].y + g["c-agent"].h + g["c-tools"].y) / 2], dashed: true },
     { route: (g) => { const a = g["c-agent"], b = g["c-answer"], x = a.x + a.w + 13;
         return [[a.x + a.w, a.cy + 16], [x, a.cy + 16], [x, b.cy], [b.x + b.w, b.cy]]; },
-      label: "reply text", at: 0.62 },
+      label: "reply text", at: 0.62, cond: true },
     { route: (g) => { const a = g["c-answer"], b = g["c-agent"], x = a.x - 26;
         return [[a.x, a.cy], [x, a.cy], [x, b.cy - 12], [b.x, b.cy - 12]]; },
-      label: "refused", at: 0.3, dashed: true },
+      label: "refused", at: 0.3, dashed: true, cond: true },
     { route: (g) => { const a = g["c-tools"], c = g.col2;
         return [[a.x + a.w, a.cy - 10], [c.x, a.cy - 10]]; }, label: "call", both: true },
     { route: (g) => { const a = g["c-answer"], b = g["c-out"], y = g.col0.y + g.col0.h + 16;
@@ -382,23 +480,27 @@ const F = {
 function measure(card, w) {
   const inner = w - 26;
   const m = {
-    title: wrap(card.title, card.mono ? F.mono : F.title, inner),
+    title: card.title ? wrap(card.title, card.mono ? F.mono : F.title, inner) : [],
     body: card.body ? wrap(card.body, F.body, inner) : [],
     tech: card.tech ? wrap(card.tech, F.tech, inner) : [],
     writes: card.writes ? wrap("▾ writes " + card.writes, F.tech, inner) : [],
+    open: card.open ? [card.open] : [],
   };
   m.h = 26 + m.title.length * 19 + (m.body.length ? 6 + m.body.length * 17 : 0)
-    + (m.tech.length ? 7 + m.tech.length * 15 : 0) + (m.writes.length ? 5 + m.writes.length * 15 : 0) + 14;
+    + (m.tech.length ? 7 + m.tech.length * 15 : 0) + (m.writes.length ? 5 + m.writes.length * 15 : 0)
+    + (m.open.length ? 12 + 15 : 0) + 14;
   return m;
 }
 
-function drawCard(svg, card, x, y, w, m) {
-  const g = el(svg, "g", { class: "t-" + card.type });
+function drawCard(svg, card, x, y, w, m, cls = "") {
+  const g = el(svg, "g", { class: "cg t-" + card.type + (cls ? " " + cls : ""), "data-id": card.id });
   el(g, "rect", { class: "card" + (card.dashed ? " dashed" : ""), x, y, width: w, height: m.h, rx: 10 });
-  const tag = (card.tag || card.type).toUpperCase();
-  const tw = width(tag, F.tag) * 1.0 + tag.length * 0.84 + 16;
-  el(g, "rect", { class: "tag", x: x + 14, y: y - 10, width: tw, height: 20, rx: 4 });
-  el(g, "text", { class: "tag-t", x: x + 22, y: y + 4 }, tag);
+  if (card.tag !== null) {
+    const tag = (card.tag || card.type).toUpperCase();
+    const tw = width(tag, F.tag) + tag.length * 0.84 + 16;
+    el(g, "rect", { class: "tag", x: x + 14, y: y - 10, width: tw, height: 20, rx: 4 });
+    el(g, "text", { class: "tag-t", x: x + 22, y: y + 4 }, tag);
+  }
   if (card.model) {
     const bt = "⇡ model", bw = width(bt, F.badge) + bt.length * 0.4 + 14;
     el(g, "rect", { class: "badge", x: x + w - 14 - bw, y: y - 10, width: bw, height: 20, rx: 10 });
@@ -413,7 +515,8 @@ function drawCard(svg, card, x, y, w, m) {
   for (const line of m.tech) { el(g, "text", { class: "tech", x: cx, y: ty, "text-anchor": "middle" }, line); ty += 15; }
   if (m.writes.length) ty += 3;
   for (const line of m.writes) { el(g, "text", { class: "writes", x: cx, y: ty, "text-anchor": "middle" }, line); ty += 15; }
-  return { x, y, w, h: m.h, cx, cy: y + m.h / 2 };
+  if (m.open.length) el(g, "text", { class: "open-t", x: cx, y: y + m.h - 16, "text-anchor": "middle" }, m.open[0]);
+  return { g, box: { x, y, w, h: m.h, cx, cy: y + m.h / 2 } };
 }
 
 function port(box, side, off = 0) {
@@ -423,14 +526,13 @@ function port(box, side, off = 0) {
   return [box.x + box.w, box.cy + off];
 }
 
-function drawArrow(layer, labels, a, geo) {
+function drawArrow(layer, labels, a, geo, from, to) {
   let pts;
   if (a.route) pts = a.route(geo);
   else {
     const fs = a.fs || "b", ts = a.ts || "t";
-    const p = port(geo[a.from], fs, a.fo || 0);
-    const to = geo[a.to];
-    let q = port(to, ts, a.to_off || 0);
+    const p = port(from, fs, a.fo || 0);
+    let q = port(to, ts, 0);
     if (fs === "r" && ts === "l") {
       // Arrive level when the target is tall enough; else elbow at the middle of the gap.
       if (p[1] > to.y + 12 && p[1] < to.y + to.h - 12) q = [q[0], p[1]];
@@ -444,8 +546,9 @@ function drawArrow(layer, labels, a, geo) {
   const d = pts.map((pt, i) => (i ? "L" : "M") + pt[0] + " " + pt[1]).join(" ");
   const attrs = { class: "wire" + (a.dashed ? " dashed" : ""), d, "marker-end": "url(#head)" };
   if (a.both) attrs["marker-start"] = "url(#tail)";
+  if (a.cond) attrs["marker-start"] = "url(#cond)";
   el(layer, "path", attrs);
-  if (!a.label) return;
+  if (!a.label || a.lpSkip) return;
   // The label sits where the arrow says (lp), else at a fraction of the path's length.
   const segs = pts.slice(1).map((pt, i) => Math.hypot(pt[0] - pts[i][0], pt[1] - pts[i][1]));
   let at = (a.at ?? 0.5) * segs.reduce((s, v) => s + v, 0), i = 0;
@@ -465,67 +568,114 @@ function defs(svg) {
   el(head, "path", { class: "head", d: "M0 0 L10 5 L0 10 z" });
   const tail = el(d, "marker", { id: "tail", viewBox: "0 0 10 10", refX: 1, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto" });
   el(tail, "path", { class: "head", d: "M10 0 L0 5 L10 10 z" });
+  const cond = el(d, "marker", { id: "cond", viewBox: "0 0 12 12", refX: 6, refY: 6, markerWidth: 11, markerHeight: 11, orient: "auto", markerUnits: "userSpaceOnUse" });
+  el(cond, "path", { class: "cond", d: "M6 1 L11 6 L6 11 L1 6 z" });
 }
 
-function draw(svg, spec) {
+// view: { open: Set of stage numbers and "lane" } for a diagram with summaries; null draws
+// every card. `fresh`: stages just opened, whose cards fade in.
+function draw(svg, spec, view = null, fresh = new Set()) {
   svg.replaceChildren();
   defs(svg);
-  const back = el(svg, "g"), wires = el(svg, "g"), cards = el(svg, "g"), labels = el(svg, "g");
-  const geo = {};
+  const back = el(svg, "g"), wires = el(svg, "g", { class: "wg" }), cards = el(svg, "g"), labels = el(svg, "g", { class: "wg" });
+  const geo = {}, home = {};  // home: a card's stage, for landing on its summary
+  const isOpen = (k) => !view || view.open.has(k);
   const cols = spec.cols.length;
   const colX = (i) => TOP + i * (CW + GAP);
   const cardW = CW - 2 * PAD;
   let y = TOP;
 
-  // A band of wide cards above the columns: what surrounds every run.
   if (spec.band) {
     const ms = spec.band.map((b) => measure(b.card, (b.span[1] - b.span[0] + 1) * (CW + GAP) - GAP - 2 * PAD));
     const bh = Math.max(...ms.map((m) => m.h));
     spec.band.forEach((b, k) => {
       const x = colX(b.span[0]) + PAD, w = (b.span[1] - b.span[0] + 1) * (CW + GAP) - GAP - 2 * PAD;
       ms[k].h = bh;
-      geo[b.card.id] = drawCard(cards, b.card, x, y + 12, w, ms[k]);
+      geo[b.card.id] = drawCard(cards, b.card, x, y + 12, w, ms[k]).box;
     });
     y += bh + 12 + 30;
   }
 
-  // The stage columns: number, title, parts, technology; then the cards, stacked.
+  // Stage columns. A closed one shows its summary card; an open one its cards, stacked.
   const colTop = y, headH = 68;
+  const summary = (col, i) => ({ id: "sum" + i, type: "sum", tag: null, title: "",
+    body: col.summary, tech: col.chips, open: col.cards.length + " parts · open ›" });
+  const sumMs = view ? spec.cols.map((c, i) => measure(summary(c, i), cardW)) : [];
+  const sumH = view ? Math.max(...sumMs.map((m) => m.h)) : 0;
   const measured = spec.cols.map((c) => c.cards.map((card) => measure(card, cardW)));
-  const colH = Math.max(...measured.map((ms) => ms.reduce((s, m) => s + m.h, 0) + (ms.length - 1) * CARD_GAP)) + headH + 30;
+  const heightOf = (i) => isOpen(i)
+    ? measured[i].reduce((s, m) => s + m.h, 0) + (measured[i].length - 1) * CARD_GAP : sumH;
+  const colH = Math.max(...spec.cols.map((_, i) => heightOf(i))) + headH + 30;
   spec.cols.forEach((col, i) => {
     const x = colX(i);
     el(back, "rect", { class: "col", x, y: colTop, width: CW, height: colH, rx: 12 });
     geo["col" + i] = { x, y: colTop, w: CW, h: colH, cx: x + CW / 2, cy: colTop + colH / 2 };
-    el(back, "circle", { class: "num", cx: x + 30, cy: colTop + 28, r: 12 });
-    el(back, "text", { class: "num-t", x: x + 30, y: colTop + 32.5, "text-anchor": "middle" }, String(i + 1));
-    const t = el(back, "text", { class: "col-t", x: x + 52, y: colTop + 33 }, col.title);
-    el(back, "text", { class: "col-n", x: x + 58 + width(col.title, '600 16px Manrope'), y: colTop + 33 },
-      col.cards.length + (col.cards.length === 1 ? " part" : " parts"));
-    el(back, "text", { class: "col-s", x: x + 52, y: colTop + 51 }, col.sub);
+    const head = el(back, "g", view && isOpen(i) ? { class: "colhead", "data-stage": i, tabindex: 0, role: "button", "aria-label": "Close " + col.title } : {});
+    el(head, "circle", { class: "num", cx: x + 30, cy: colTop + 28, r: 12 });
+    el(head, "text", { class: "num-t", x: x + 30, y: colTop + 32.5, "text-anchor": "middle" }, String(i + 1));
+    el(head, "text", { class: "col-t", x: x + 52, y: colTop + 33 }, col.title);
+    const shut = view && isOpen(i) ? "  · close ×" : "";
+    el(head, "text", { class: "col-n", x: x + 58 + width(col.title, '600 16px Manrope'), y: colTop + 33 },
+      col.cards.length + (col.cards.length === 1 ? " part" : " parts") + shut);
+    el(head, "text", { class: "col-s", x: x + 52, y: colTop + 51 }, col.sub);
     let cy = colTop + headH + 12;
+    col.cards.forEach((card) => { home[card.id] = i; });
+    if (!isOpen(i)) {
+      sumMs[i].h = sumH;
+      const s = drawCard(cards, summary(col, i), x + PAD, cy, cardW, sumMs[i], "sum");
+      s.g.setAttribute("data-stage", i); s.g.setAttribute("tabindex", 0); s.g.setAttribute("role", "button");
+      s.g.setAttribute("aria-label", "Open " + col.title);
+      geo["sum" + i] = s.box;
+      return;
+    }
     col.cards.forEach((card, k) => {
-      geo[card.id] = drawCard(cards, card, x + PAD, cy, cardW, measured[i][k]);
+      geo[card.id] = drawCard(cards, card, x + PAD, cy, cardW, measured[i][k], fresh.has(i) ? "enter" : "").box;
       cy += measured[i][k].h + CARD_GAP;
     });
   });
   y = colTop + colH;
 
-  // The state lane: every store, and when it is written.
   if (spec.lane) {
     y += 28;
     const total = cols * (CW + GAP) - GAP, n = spec.lane.cards.length, g = 16;
-    const w = (total - 2 * PAD - (n - 1) * g) / n;
-    const ms = spec.lane.cards.map((c) => measure(c, w));
-    const lh = Math.max(...ms.map((m) => m.h));
+    spec.lane.cards.forEach((c) => { home[c.id] = "lane"; });
+    let lh;
+    if (isOpen("lane")) {
+      const w = (total - 2 * PAD - (n - 1) * g) / n;
+      const ms = spec.lane.cards.map((c) => measure(c, w));
+      lh = Math.max(...ms.map((m) => m.h));
+      spec.lane.cards.forEach((c, k) => { ms[k].h = lh; geo[c.id] = drawCard(cards, c, TOP + PAD + k * (w + g), y + 70, w, ms[k], fresh.has("lane") ? "enter" : "").box; });
+    } else {
+      const card = { id: "sum-lane", type: "state", tag: null, title: "What is kept, and when it is written", body: spec.lane.summary, open: n + " stores · open ›" };
+      const m = measure(card, total - 2 * PAD);
+      lh = m.h;
+      const s = drawCard(cards, card, TOP + PAD, y + 70, total - 2 * PAD, m, "sum");
+      s.g.setAttribute("data-stage", "lane"); s.g.setAttribute("tabindex", 0); s.g.setAttribute("role", "button");
+      s.g.setAttribute("aria-label", "Open the state lane");
+    }
+    const laneHead = el(back, "g", view && isOpen("lane") ? { class: "colhead", "data-stage": "lane", tabindex: 0, role: "button", "aria-label": "Close the state lane" } : {});
     el(back, "rect", { class: "lane", x: TOP, y, width: total, height: lh + 92, rx: 12 });
-    el(back, "text", { class: "lane-t", x: TOP + PAD, y: y + 30 }, spec.lane.title);
-    el(back, "text", { class: "lane-s", x: TOP + PAD, y: y + 49 }, spec.lane.sub);
-    spec.lane.cards.forEach((c, k) => { ms[k].h = lh; geo[c.id] = drawCard(cards, c, TOP + PAD + k * (w + g), y + 70, w, ms[k]); });
+    back.appendChild(laneHead);
+    el(laneHead, "text", { class: "lane-t", x: TOP + PAD, y: y + 30 }, spec.lane.title + (view && isOpen("lane") ? "  · close ×" : ""));
+    el(laneHead, "text", { class: "lane-s", x: TOP + PAD, y: y + 49 }, spec.lane.sub);
     y += lh + 92;
   }
 
-  for (const a of spec.arrows) drawArrow(wires, labels, a, geo);
+  // Arrows: inside a stage only when it is open; between stages, landing on a closed one's
+  // summary, each pair of summaries joined once.
+  const seen = new Set();
+  const where = (id) => geo[id] ? [geo[id], id] : home[id] !== undefined && geo["sum" + home[id]] ? [geo["sum" + home[id]], "sum" + home[id]] : [null, null];
+  for (const a of spec.arrows) {
+    if (a.route) {
+      if ((a.ids || []).every((id) => geo[id])) drawArrow(wires, labels, a, geo);
+      continue;
+    }
+    const [f, fk] = where(a.from), [t, tk] = where(a.to);
+    if (!f || !t || fk === tk) continue;
+    const key = fk + ">" + tk;
+    if (fk !== a.from || tk !== a.to) { if (seen.has(key)) continue; seen.add(key); }
+    drawArrow(wires, labels, fk !== a.from || tk !== a.to ? { ...a, fo: 0, lp: null } : a, geo, f, t);
+  }
   const W = TOP * 2 + cols * (CW + GAP) - GAP;
   const H = y + TOP + (spec.lane ? 0 : 24);  // room for a route under the columns
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -542,10 +692,79 @@ function legend() {
   }
   ul.insertAdjacentHTML("beforeend",
     `<li><span class="chip" style="--c: var(--c-external)">⇡ model</span>a LangChain model call</li>` +
-    `<li><span class="line"></span>flow</li><li><span class="line dashed"></span>loop back, or only sometimes</li>`);
+    `<li><span class="line"></span>flow</li><li><span class="line dashed"></span>loop back, or only sometimes</li>` +
+    `<li><svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 L11 6 L6 11 L1 6 z" fill="var(--sheet)" stroke="var(--muted)" stroke-width="1.4"/></svg>conditional edge</li>`);
 }
 
-function render() { draw(document.getElementById("main"), MAIN); draw(document.getElementById("chat"), CHAT); }
+// Diagram 1's state: which stages are open, and the played run.
+const mainSvg = document.getElementById("main");
+const state = { open: new Set(), step: -1, timer: null };
+const ALL = new Set([...MAIN.cols.keys(), "lane"]);
+function show(open) {
+  const fresh = new Set([...open].filter((k) => !state.open.has(k)));
+  state.open = new Set(open);
+  draw(mainSvg, MAIN, { open: state.open }, fresh);
+  light();
+}
+function toggle(k) {
+  const open = new Set(state.open);
+  open.has(k) ? open.delete(k) : open.add(k);
+  show(open);
+}
+mainSvg.addEventListener("click", (e) => {
+  const hit = e.target.closest("[data-stage]");
+  if (!hit) return;
+  const k = hit.dataset.stage === "lane" ? "lane" : Number(hit.dataset.stage);
+  toggle(k);
+  const again = mainSvg.querySelector(`[data-stage="${k}"]`);
+  if (again) again.focus({ preventScroll: true });
+});
+mainSvg.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.closest("[data-stage]")) { e.preventDefault(); e.target.closest("[data-stage]").dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+});
+
+// The played run: each step opens what it needs, lights its cards, dims the rest.
+const player = document.getElementById("player");
+function light() {
+  const step = RUN[state.step];
+  mainSvg.classList.toggle("playing", !!step);
+  for (const g of mainSvg.querySelectorAll(".cg")) g.classList.toggle("hot", !!step && step.hot.includes(g.dataset.id));
+}
+function go(i) {
+  state.step = Math.max(0, Math.min(RUN.length - 1, i));
+  const step = RUN[state.step];
+  const want = new Set([...state.open, ...step.open]);
+  if (want.size !== state.open.size) show(want); else light();
+  document.getElementById("p-n").textContent = `step ${state.step + 1} of ${RUN.length}`;
+  document.getElementById("p-cap").textContent = step.cap;
+  document.getElementById("p-meter").textContent = `model calls ${step.calls || 0} of 12`;
+  const first = mainSvg.querySelector(`.cg[data-id="${step.hot[0]}"]`);
+  if (first) first.scrollIntoView({ block: "nearest", inline: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+function tick() {
+  if (state.step >= RUN.length - 1) { pause(); return; }
+  go(state.step + 1);
+}
+function play() { clearInterval(state.timer); state.timer = setInterval(tick, 3200); document.getElementById("p-pause").textContent = "Pause"; }
+function pause() { clearInterval(state.timer); state.timer = null; document.getElementById("p-pause").textContent = "Play"; }
+function stop() { pause(); state.step = -1; player.classList.remove("on"); document.getElementById("b-play").setAttribute("aria-pressed", "false"); light(); }
+document.getElementById("b-play").addEventListener("click", () => {
+  player.classList.add("on");
+  document.getElementById("b-play").setAttribute("aria-pressed", "true");
+  show(new Set());
+  go(0); play();
+});
+document.getElementById("p-prev").addEventListener("click", () => { pause(); go(state.step - 1); });
+document.getElementById("p-next").addEventListener("click", () => { pause(); go(state.step + 1); });
+document.getElementById("p-pause").addEventListener("click", () => (state.timer ? pause() : play()));
+document.getElementById("p-stop").addEventListener("click", stop);
+document.getElementById("b-overview").addEventListener("click", () => { stop(); show(new Set()); });
+document.getElementById("b-all").addEventListener("click", () => { stop(); show(ALL); });
+
+function render() {
+  show(state.open);
+  draw(document.getElementById("chat"), CHAT);
+}
 legend();
 Promise.all(Object.values(F).map((f) => document.fonts.load(f))).catch(() => {}).then(render);
 
