@@ -22,7 +22,8 @@ Markdown, nothing in a PDF's text can turn into a heading or live HTML, so nothi
 fpdf2 is imported here only, keeping it out of vouch.report.
 """
 
-from collections.abc import Iterable, Mapping, Sequence
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,7 @@ TRAIL = 7  # pt: the trail's 11 columns, on landscape pages
 KEEP_WITH_NEXT = 25  # mm: a heading with less room than this below it starts a new page
 MAX_CELL_LINES = 12  # a row of 12 lines is well under a page, in any column and font size
 CELL_PADDING = 1  # mm
+CELL_SLACK = 0.5  # mm: a cell's lines are measured this much narrower, for its border
 HEADINGS = FontFace(emphasis="BOLD", fill_color=None)
 
 
@@ -88,17 +90,28 @@ class _Sheet(FPDF):
         self.paragraph(text, size, bold=True)
         self.ln(1.5)
 
+    def wrapped(self, text: object, width: float) -> list[str]:
+        """The lines a table cell `width` mm wide draws `text` in, in the current font: the
+        table's own padding (with it, fpdf2 leaves out its cell margin). The one measure of a
+        cell's lines, for the line cap and for the trail's widths and their test."""
+        lines = self.multi_cell(
+            width - CELL_SLACK,
+            1,
+            self.drawable(text),
+            dry_run=True,
+            output=MethodReturnValue.LINES,
+            padding=CELL_PADDING,
+        )
+        assert isinstance(lines, list)  # output=LINES: the wrapped lines
+        return lines
+
     def cell_text(self, text: object, width: float, notes: list[tuple[int, str]]) -> str:
         """A cell's text in the current font: on one line of text (each line break a space),
         cut to MAX_CELL_LINES lines of `width` mm ending in `… [n]` when longer, its whole text
         then added to `notes` as note n."""
         whole = self.drawable(text)
         flat = " ".join(whole.split())
-        inner = width - 2 * CELL_PADDING - 0.5  # the border's width, and some slack
-        lines = self.multi_cell(
-            inner, 1, flat, dry_run=True, output=MethodReturnValue.LINES, padding=0
-        )
-        assert isinstance(lines, list)  # output=LINES: the wrapped lines
+        lines = self.wrapped(flat, width)
         if len(lines) <= MAX_CELL_LINES:
             return flat
         self._notes += 1
@@ -187,8 +200,10 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
         # Its 11 columns need the width: the trail starts a landscape A4 page.
         sheet.add_page(orientation="landscape")
         sheet.heading(labels["trail"], SECTION)
-        widths = (22, 22, 16, 20, 20, 26, 26, 44, 29, 20, 22)  # 267 mm: landscape A4's width
-        sheet.grid(rows.trail_columns(words), rows.trail_rows(entries, words), widths, TRAIL)
+        head, body, widths = trail_table(
+            sheet, rows.trail_columns(words), rows.trail_rows(entries, words)
+        )
+        sheet.grid(head, body, widths, TRAIL)
     else:
         sheet.heading(labels["trail"], SECTION)
         sheet.paragraph(sentences["no_trail"])
@@ -198,6 +213,98 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     sheet.ln(2)
     sheet.paragraph(report["disclaimer"])
     return bytes(sheet.output())
+
+
+_PIECE = re.compile(r"[^\s/-]*[/-]?")  # a piece of an id: up to and with a "-" or "/"
+# A zero-width space after an id's "-" or "/": where fpdf2 may break a line inside it. Only when
+# whole ids don't fit (it stays in the PDF's text where no line breaks; the Markdown never has it).
+BREAK = "\u200b"
+
+
+def trail_table(
+    sheet: _Sheet, columns: Sequence[str], body: Sequence[Sequence[object]]
+) -> tuple[list[str], list[list[str]], tuple[float, ...]]:
+    """The audit trail's header, rows and column widths across the page (#353), so no line
+    breaks inside a word. Each column is at least as wide as its widest word or id (a header's
+    in bold); the rest of the page is shared out by how much more each column's longest cell
+    wants. When the words can't all fit, the widest columns give way first, down to their
+    widest piece: an id may then break after a "-" or "/" (a BREAK there). Only a column whose
+    piece is wider than any column can be breaks inside a word, and only there."""
+    head = [str(c) for c in columns]
+    rows = [[str(v) for v in r] for r in body]
+    words = _least(sheet, head, rows, str.split)
+    if sum(words) <= sheet.epw:
+        return head, rows, _shared(sheet, head, rows, words)
+    head = [_breakable(c) for c in head]
+    rows = [[_breakable(v) for v in r] for r in rows]
+    pieces = _least(sheet, head, rows, _pieces)
+    if sum(pieces) <= sheet.epw:  # whole words where they fit, pieces in the widest columns
+        least = _capped(words, pieces, sheet.epw)
+    else:  # a piece too wide for the page: its column alone breaks inside a word
+        least = _capped(pieces, [0.0] * len(pieces), sheet.epw)
+    return head, rows, _shared(sheet, head, rows, least)
+
+
+def _capped(widths: list[float], floors: list[float], total: float) -> list[float]:
+    """`widths` with the widest cut to one cap, never under their `floors`, so they sum to
+    `total`: the narrow columns keep their width and the widest give way."""
+    low, high = 0.0, max(widths)
+    for _ in range(60):  # halving: well under a hundredth of a millimetre
+        cap = (low + high) / 2
+        if sum(max(f, min(w, cap)) for w, f in zip(widths, floors, strict=True)) > total:
+            high = cap
+        else:
+            low = cap
+    return [max(f, min(w, low)) for w, f in zip(widths, floors, strict=True)]
+
+
+def _breakable(text: str) -> str:
+    """`text` with a BREAK after each "-" or "/" that something follows."""
+    return re.sub(r"(?<=[/-])(?=\S)", BREAK, text)
+
+
+def _pieces(text: str) -> list[str]:
+    """The pieces of `text` no line breaks inside once BREAKs are in: words cut after "-", "/"."""
+    return _PIECE.findall(text.replace(BREAK, ""))
+
+
+def _width(sheet: _Sheet, text: str, bold: bool) -> float:
+    """The cell width `text` fits on one line of, in the trail's font: the measure
+    `_Sheet.wrapped` makes, plus a hair for rounding."""
+    sheet.font(TRAIL, bold)
+    return sheet.get_string_width(sheet.drawable(text)) + 2 * CELL_PADDING + CELL_SLACK + 0.1
+
+
+def _columns(head: list[str], rows: list[list[str]]) -> list[list[tuple[str, bool]]]:
+    """The table by column: each column's header (bold) and then its cells."""
+    return [[(c, True)] + [(r[i], False) for r in rows] for i, c in enumerate(head)]
+
+
+def _least(
+    sheet: _Sheet, head: list[str], rows: list[list[str]], parts: Callable[[str], list[str]]
+) -> list[float]:
+    """Each column's least width: its widest part."""
+    return [
+        max([_width(sheet, p, bold) for text, bold in col for p in parts(text) if p], default=0)
+        for col in _columns(head, rows)
+    ]
+
+
+def _shared(
+    sheet: _Sheet, head: list[str], rows: list[list[str]], least: list[float]
+) -> tuple[float, ...]:
+    """The `least` widths with the rest of the page shared by what each column's longest cell
+    wants on one line, and anything left after that evenly."""
+    spare = max(sheet.epw - sum(least), 0)
+    whole = [
+        max(_width(sheet, " ".join(t.replace(BREAK, "").split()), b) for t, b in col)
+        for col in _columns(head, rows)
+    ]
+    wants = [max(w - m, 0) for w, m in zip(whole, least, strict=True)]
+    share = spare / (sum(wants) or 1)
+    given = [m + min(want, want * share) for m, want in zip(least, wants, strict=True)]
+    left = (sheet.epw - sum(given)) / len(given)  # every cell on one line: the rest evenly
+    return tuple(g + left for g in given)
 
 
 def _head(sheet: _Sheet, head: Mapping[str, Any], words: Mapping[str, Any]) -> None:

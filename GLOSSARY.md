@@ -42,6 +42,14 @@ _Avoid_: Regional rules, local law
 The stack of layers (base framework, overlays, language) that defines what one company must show and how answers are written.
 _Avoid_: Config, settings, project
 
+**Goal**:
+What a compliance profile is used for: **Audit readiness** (preparing for an external audit; the flow before M7) or **Internal improvement** (improving the company's own security with no audit planned). The lead can change it; each change is an audit trail entry.
+_Avoid_: Purpose, mode, use case
+
+**Company setup**:
+Creating a new compliance profile in Vouch for a company (in the demo, an invented one): its name, language, protection level and the controls that are not applicable, then its evidence. A demo/prototype process; a real SaaS product would do it differently.
+_Avoid_: Onboarding (that word is on Audit prep's avoid list), sign-up, registration
+
 **Sample library**:
 A set of invented evidence documents (policies and records, with a few deliberate gaps) that ships with Vouch, from which a company made in company setup picks its evidence. Its documents name no company.
 _Avoid_: Document pool, template documents
@@ -120,16 +128,48 @@ _Avoid_: Status, result, score, found / partial / gap
 A step in an assessment (node `guard`) saying a guard, in code outside the model, refused, flagged or removed something: a tool call refused (not on the compliance profile's allow-list, or its folder now outside where the profile allowed it), instruction-like text flagged in a passage and treated as data, a citation the quote check dropped, an answer asked for again (it claimed an audit result, or was written in another language than the profile's) or kept in another language after its one retry, or a secret or personal data removed from what is shown.
 _Avoid_: Alert, block, filter step (a warning is something else: a source that could not be read)
 
+**Confirm findings**:
+The first step of reviewing a control: the lead confirms or overrides each requirement's verdict.
+_Avoid_: Approve requirements, check findings
+
+**Plan fixes**:
+The second step of reviewing a control: the lead approves or discards each remediation item. Skipped when nothing is missing.
+_Avoid_: Remediation review, action plan approval
+
+**Accept**:
+The third and last step of reviewing a control, after Confirm findings and Plan fixes: the lead accepts the control's verdict, which makes it a reviewed verdict. Only accepted controls count towards readiness and the report. An assessment accepted before the three-step review counts as accepted and is marked "before the three-step review".
+_Avoid_: Sign off, approve, finalise
+
+**Closed**:
+In the Internal improvement goal, a control whose approved remediation items are all done (each with a note) and whose re-assessment after them was accepted with no requirement left not evidenced or partly evidenced. Done fixes alone don't close a control.
+_Avoid_: Resolved, fixed, complete
+
+**Review round**:
+A period the lead names and opens (such as "Q4 2026"; the first opens on its own) and later closes, which freezes its results. The overview compares the current round with the last closed one. Used in both goals.
+_Avoid_: Snapshot, cycle, sprint, audit period
+
+**Open question**:
+A question the lead logs on a control for someone else to answer: what is asked, who it is for, a due date, and the answer. Once answered or overdue, Vouch suggests re-assessing the control.
+_Avoid_: Task, query, follow-up, ticket
+
+**Lead-supplied evidence**:
+An open question's answer used as citable evidence, labelled as the lead's statement. Like stale evidence, it can make a requirement partly evidenced at best.
+_Avoid_: Testimony, self-declaration, manual evidence
+
+**Profile pass**:
+One model run over every applicable control of a compliance profile with all its evidence in context, producing one assessment per control, each waiting for review. Controls already accepted are skipped. Used only when the evidence fits under a token threshold, and counted against its own daily limit, apart from the assessments'.
+_Avoid_: Batch run, bulk assessment, full scan
+
 **Reviewed verdict**:
-A verdict the compliance lead has accepted or rejected, with an optional note; only accepted ones count towards readiness.
+A verdict the compliance lead has accepted (the last step of the review, after Confirm findings and Plan fixes) or rejected, with an optional note; only accepted ones count towards readiness.
 _Avoid_: Approval, sign-off, final verdict
 
 **Audit trail**:
-The append-only record of every action of the compliance lead, one entry each: a control accepted or rejected, a requirement overridden, a remediation item approved or discarded. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
+The append-only record of every action of the compliance lead, one entry each: a control accepted or rejected, a requirement overridden, a remediation item approved or discarded, the goal changed. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
 _Avoid_: History, log, changelog
 
 **Override**:
-A requirement's verdict changed by the compliance lead before signing off a control, with a reason; the agent's original verdict is kept.
+A requirement's verdict changed by the compliance lead while confirming findings, before accepting a control, with a reason; the agent's original verdict is kept.
 _Avoid_: Correction, manual verdict, edit
 
 **Remediation item**:
@@ -145,7 +185,7 @@ How much of a compliance profile's controls are backed by accepted verdicts, sho
 _Avoid_: Compliance score, maturity
 
 **Progress**:
-Where a user stands under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with. On screen, an assessment waiting for review is **Proposed** (its review state tag, `docs/design.md`); `waiting-for-review` is the same state in code and the API.
+Where a user stands now under a compliance profile: each assessed control's latest assessment, accepted, rejected or waiting for review, and when they last worked. Unlike readiness, it counts every status, not only accepted verdicts; it's what Vouch greets the lead with. Change between review rounds is a comparison, not progress. On screen, an assessment waiting for review is **Proposed** (its review state tag, `docs/design.md`); `waiting-for-review` is the same state in code and the API.
 _Avoid_: Status, history
 
 **Fresh start**:
