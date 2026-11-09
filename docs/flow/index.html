@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Vouch runs</title>
+<meta name="description" content="One assessment through Vouch end to end: FastAPI, the LangGraph graphs, the LangChain model calls, the guards, and what is written to Postgres when.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), as the evals page
+   has them, plus one colour per card type for this diagram, in each mode. */
+:root {
+  --paper: #E8E7E3; --sheet: #F7F7F5; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
+  --navy: #1F3B6E; --brass: #A8834A;
+  --c-browser: #1F7A80; --c-api: #1F3B6E; --c-lead: #A6366F; --c-external: #6B4BB0;
+  --c-graph: #2F7A4E; --c-guard: #A93A36; --c-rules: #85710E; --c-tool: #5A5D63;
+  --c-state: #B4561A;
+  --f-display: "Libre Caslon Display", Georgia, serif;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  --c-browser: #6FC6CB; --c-api: #A9BEE6; --c-lead: #EE9AC6; --c-external: #BBA6F0;
+  --c-graph: #7DBE93; --c-guard: #EE8A82; --c-rules: #E0CC62; --c-tool: #A8A49C;
+  --c-state: #F2A15C;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  --c-browser: #6FC6CB; --c-api: #A9BEE6; --c-lead: #EE9AC6; --c-external: #BBA6F0;
+  --c-graph: #7DBE93; --c-guard: #EE8A82; --c-rules: #E0CC62; --c-tool: #A8A49C;
+  --c-state: #F2A15C;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 var(--f-body); }
+a { color: var(--navy); }
+.page { max-width: 1880px; margin: 0 auto; padding: 32px 16px 48px; }
+header { display: grid; gap: 10px; margin-bottom: 22px; max-width: 900px; }
+.eyebrow { font: 12px/1.4 var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+h1 { font: 400 clamp(32px, 6vw, 48px)/1.1 var(--f-display); margin: 0; text-wrap: balance; }
+h2 { font: 400 26px/1.2 var(--f-display); margin: 34px 0 6px; }
+.lede { margin: 0; font-size: 17px; max-width: 70ch; }
+.note { margin: 0 0 12px; color: var(--muted); font-size: 14px; max-width: 80ch; }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--rule);
+  border-radius: 14px; background: var(--sheet); }
+.scroll svg { display: block; width: 100%; min-width: 1180px; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; padding: 0; list-style: none;
+  font-size: 13px; color: var(--muted); }
+.legend li { display: flex; align-items: center; gap: 7px; }
+.sw { width: 18px; height: 13px; border-radius: 4px; border: 2px solid var(--c);
+  background: color-mix(in srgb, var(--c) 12%, var(--sheet)); }
+.sw.dashed { border-style: dashed; }
+.chip { font: 500 10.5px/1 var(--f-mono); padding: 3px 6px; border-radius: 999px; border: 1px solid var(--c);
+  color: var(--c); letter-spacing: .04em; }
+.line { width: 26px; border-top: 2px solid var(--muted); }
+.line.dashed { border-top-style: dashed; }
+footer { margin-top: 30px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--rule); padding-top: 14px; }
+code { font: 13px var(--f-mono); }
+.theme { justify-self: start; font: 12px var(--f-mono); background: none; color: var(--muted);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+
+/* The diagram's own classes. Each card group sets --c from its type. */
+.t-browser { --c: var(--c-browser); } .t-api { --c: var(--c-api); } .t-lead { --c: var(--c-lead); }
+.t-external { --c: var(--c-external); } .t-graph { --c: var(--c-graph); } .t-guard { --c: var(--c-guard); }
+.t-rules { --c: var(--c-rules); } .t-tool { --c: var(--c-tool); } .t-state { --c: var(--c-state); }
+svg .col { fill: color-mix(in srgb, var(--ink) 3%, var(--sheet)); stroke: var(--rule); }
+svg .num { fill: var(--navy); }
+svg .num-t { fill: var(--sheet); font: 600 13px var(--f-body); }
+svg .col-t { fill: var(--ink); font: 600 16px var(--f-body); }
+svg .col-n { fill: var(--muted); font: 400 14px var(--f-body); }
+svg .col-s { fill: var(--muted); font: 400 11px var(--f-mono); }
+svg .card { fill: color-mix(in srgb, var(--c) 9%, var(--sheet)); stroke: var(--c); stroke-width: 1.6; }
+svg .card.dashed { stroke-dasharray: 6 4; }
+svg .tag { fill: var(--c); }
+svg .tag-t { fill: var(--sheet); font: 500 10.5px var(--f-mono); letter-spacing: .08em; }
+svg .badge { fill: var(--sheet); stroke: var(--c-external); }
+svg .badge-t { fill: var(--c-external); font: 500 10px var(--f-mono); letter-spacing: .04em; }
+svg .title { fill: var(--ink); font: 600 15px var(--f-body); }
+svg .title.mono { font: 500 14px var(--f-mono); }
+svg .body { fill: var(--muted); font: 400 12.5px var(--f-body); }
+svg .tech { fill: var(--muted); font: 400 10.5px var(--f-mono); opacity: .9; }
+svg .writes { fill: var(--c-state); font: 500 10.5px var(--f-mono); }
+svg .wire { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+svg .wire.dashed { stroke-dasharray: 5 4; }
+svg .lbl { fill: var(--sheet); stroke: var(--rule); }
+svg .lbl-t { fill: var(--muted); font: 400 10.5px var(--f-mono); }
+svg .head { fill: var(--muted); }
+svg .lane { fill: color-mix(in srgb, var(--c-state) 5%, var(--sheet)); stroke: var(--c-state); stroke-dasharray: 2 4; }
+svg .lane-t { fill: var(--c-state); font: 600 16px var(--f-body); }
+svg .lane-s { fill: var(--muted); font: 400 11px var(--f-mono); }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+  <p class="eyebrow">Vouch · runtime process flow</p>
+  <h1>How Vouch runs an assessment</h1>
+  <p class="lede">One VDA ISA control, from the lead's click to a reviewed verdict and the readiness report:
+  each step, the technology it runs on, where LangGraph and LangChain come in, which guard checks what,
+  and when Postgres is written.</p>
+  <button class="theme" type="button" id="theme">switch light / dark</button>
+</header>
+
+<h2>1 · One assessment, end to end</h2>
+<p class="note">Read left to right. Cards marked <span class="chip" style="--c: var(--c-external)">⇡ model</span>
+call the model through LangChain; an orange <code style="color: var(--c-state)">▾ writes</code> line names the table a step writes;
+the lane at the foot says what each store holds and when it is written.</p>
+<div class="scroll"><svg id="main" role="img" aria-label="Process flow of one Vouch assessment"></svg></div>
+
+<h2>2 · Ask Vouch, the chat</h2>
+<p class="note">The chat is a second, smaller LangGraph graph with its own tools. It never writes or reviews a verdict:
+asked to sign off, it links the working paper. Its <code>start_assessment</code> tool runs diagram 1's graph.</p>
+<div class="scroll"><svg id="chat" role="img" aria-label="Process flow of one Ask Vouch chat turn"></svg></div>
+
+<ul class="legend" id="legend"></ul>
+
+<footer>
+  As of main <code>fafa7a1</code> (2026-11-09), read from <code>src/vouch/</code>.
+  M7 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/350">#350</a>) changes the review into three steps and adds a profile pass; this page draws today's main only.
+  The domain words are <a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/GLOSSARY.md">GLOSSARY.md</a>'s.
+  · <a href="../evals/">Model evals</a>
+</footer>
+</div>
+
+<script>
+// The diagrams as data, drawn into inline SVG once the fonts have loaded (text is wrapped by
+// measuring it). Card ids are what arrows name.
+const TYPES = [
+  ["browser", "Browser (React)"], ["api", "FastAPI"], ["lead", "Compliance lead"],
+  ["external", "External service", true], ["graph", "LangGraph node"], ["guard", "Guard (code, not the model)"],
+  ["rules", "Rules"], ["tool", "Tool"], ["state", "State (Postgres)"],
+];
+
+const CW = 270, GAP = 40, PAD = 22, CARD_GAP = 58, TOP = 24;
+
+const MAIN = {
+  band: [
+    { span: [0, 1], card: { id: "run", type: "api", tag: "Cloud Run", title: "One container on Cloud Run",
+      body: "FastAPI serves the API under /api and the built React page on the same origin. Scales to zero, at most one instance.",
+      tech: "Docker · uvicorn · Secret Manager · europe-west1" } },
+    { span: [2, 3], card: { id: "model", type: "external", tag: "LangChain → OpenRouter", title: "The model",
+      body: "ChatOpenAI (langchain-openai) on OpenRouter's API. BudgetedChatOpenAI stops a run past 12 calls, one retry each; the UsageMeter callback counts tokens and cost on every call. No key set: a scripted fake model, offline.",
+      tech: "vouch.model_choice · vouch.spending" } },
+    { span: [4, 5], card: { id: "sec", type: "guard", tag: "Security", title: "Four layers, in code outside the model",
+      body: "1 input limits · 2 every tool call checked against the profile's allow-list · 3 evidence reaches the model as data, instruction-like text flagged · 4 secrets and personal data redacted from every event and log line",
+      tech: "vouch.limits · vouch.allow_list · vouch.guards · vouch.redaction" } },
+  ],
+  cols: [
+    { title: "Request", sub: "React · FastAPI", cards: [
+      { id: "browser", type: "browser", tag: "Browser", title: "Working paper",
+        body: "The compliance lead signs in and starts one control's assessment.",
+        tech: "React 19 · Vite · @clerk/react" },
+      { id: "api", type: "api", tag: "FastAPI", title: "POST /api/assessments", mono: true,
+        body: "Each check runs as a FastAPI dependency, before the stream starts; the answer comes back as server-sent events.",
+        tech: "vouch.api" },
+    ] },
+    { title: "Admit", sub: "before the stream starts", cards: [
+      { id: "clerk", type: "external", tag: "Clerk · Discord", title: "Who is asking",
+        body: "Session token checked locally against Clerk's key; role and name from Clerk; membership of the course's Discord server.",
+        tech: "vouch.auth · 401 / 403" },
+      { id: "limits", type: "guard", tag: "Guard · layer 1", title: "Input limits",
+        body: "A body over the size limit is a 413 before any route; too many requests from one user a 429.",
+        tech: "vouch.limits" },
+      { id: "profile", type: "rules", tag: "Rules", title: "Compliance profile",
+        body: "fixtures/<id>/profile.yaml: ISA edition, protection level, country overlays, not-applicable requirements, allowed evidence sources.",
+        tech: "vouch.profile · vouch.allow_list" },
+      { id: "daily", type: "guard", tag: "Guard", title: "Daily limit",
+        body: "One run per lead at a time (409); past the day's limit a 429. The run is remembered, then counted.",
+        tech: "vouch.runs · vouch.spending",
+        writes: "store index · vouch_assessment_counts" },
+    ] },
+    { title: "Gather", sub: "LangGraph · vouch.graph", cards: [
+      { id: "overlays", type: "graph", tag: "LangGraph node", title: "apply_overlays", mono: true,
+        body: "The control's requirements under the profile, country overlays added; writes the first prompt." },
+      { id: "branch", type: "graph", tag: "LangGraph node", title: "overlay_branch", mono: true, dashed: true,
+        body: "Only when an overlay adds a requirement: asks for its evidence too." },
+      { id: "gather", type: "graph", tag: "LangGraph node", title: "gather", mono: true, model: true,
+        body: "ReAct: the model asks for a search, or calls submit_answer with its draft answer.",
+        tech: "model.bind_tools" },
+      { id: "tools", type: "guard", tag: "Node · guards", title: "tools", mono: true,
+        body: "Each call checked against the allow-list and its folder first; passages go to the model as <evidence> data.",
+        tech: "vouch.guards · layers 2, 3" },
+      { id: "evtools", type: "tool", tag: "Tools", title: "search_policies · search_records · vulnerability_status", mono: true,
+        body: "Keyword search over the profile's allowed folders; the recorded Patch response as implemented evidence.",
+        tech: "vouch.search · vouch.patch" },
+    ] },
+    { title: "Judge", sub: "LangGraph · vouch.graph", cards: [
+      { id: "check", type: "guard", tag: "Node · guard", title: "check_answer", mono: true,
+        body: "No audit-result claim (“compliant”, “certified”) and the profile's language; else back to gather, once." },
+      { id: "judge", type: "graph", tag: "LangGraph node", title: "judge", mono: true, model: true,
+        body: "A verdict and its quotes for each requirement. Nothing could be read: not evidenced, with no call.",
+        tech: "with_structured_output · Judgement" },
+      { id: "quotes", type: "guard", tag: "Node · guard", title: "check_quotes", mono: true,
+        body: "A quote not found in the document it cites (4+ words) is dropped. Stale evidence caps a verdict at partly; so does documented-only evidence for a requirement about doing.",
+        tech: "vouch.citations · vouch.documents" },
+      { id: "remediate", type: "graph", tag: "LangGraph node", title: "remediate", mono: true, model: true,
+        body: "One remediation item for each requirement not or partly evidenced.",
+        tech: "with_structured_output · RemediationPlan" },
+    ] },
+    { title: "Review", sub: "interrupt · vouch.audit", cards: [
+      { id: "review", type: "graph", tag: "LangGraph node", title: "review · interrupt()", mono: true,
+        body: "The run pauses; its thread waits in the checkpointer. On resume the node runs again and applies the decision." },
+      { id: "lead", type: "lead", tag: "Compliance lead", title: "Reviews on the working paper",
+        body: "Accepts or rejects, overrides a verdict with a reason, adds a note; then approves or discards each remediation item." },
+      { id: "areview", type: "api", tag: "FastAPI", title: "POST …/{id}/review", mono: true,
+        body: "vouch.audit.review resumes the thread with Command(resume=…); the decision and its audit entries go in one transaction.",
+        writes: "checkpoint · vouch_audit_trail" },
+      { id: "rdecide", type: "api", tag: "FastAPI", title: "POST …/remediation/{req}", mono: true,
+        body: "An accepted assessment's item approved (owner role, due date) or discarded, with its audit entry.",
+        tech: "vouch.remediation",
+        writes: "vouch_remediation_items · vouch_audit_trail" },
+    ] },
+    { title: "Outputs", sub: "what the lead sees", cards: [
+      { id: "stream", type: "browser", tag: "Browser · SSE", title: "Streamed steps",
+        body: "A step event as each node finishes, each requirement once its quotes are checked, then the result with its usage. All redacted.",
+        tech: "vouch.redaction · layer 4",
+        writes: "vouch_usage, when the stream ends" },
+      { id: "overview", type: "api", tag: "FastAPI", title: "Dossier overview",
+        body: "Readiness from each control's newest assessment; accepted verdicts only.",
+        tech: "GET /overview · vouch.dossier" },
+      { id: "report", type: "api", tag: "FastAPI", title: "Readiness report",
+        body: "One profile's standing for management or an auditor, as a page, Markdown or PDF. No model call.",
+        tech: "/report · /report/markdown · /report/pdf (fpdf2)" },
+      { id: "chatlink", type: "browser", tag: "Browser", title: "Ask Vouch chat",
+        body: "Its own LangGraph agent, in diagram 2 below." },
+    ] },
+  ],
+  lane: {
+    title: "State · Postgres on Cloud SQL",
+    sub: "vouch.database: one psycopg pool; vouch-db-setup creates every table at deploy. With no database, the same in process memory.",
+    cards: [
+      { id: "s-ckpt", type: "state", tag: "LangGraph checkpointer", title: "Threads",
+        body: "Each assessment and chat thread. A checkpoint after every node; the review resumes from it.", tech: "PostgresSaver" },
+      { id: "s-store", type: "state", tag: "LangGraph store", title: "Long-term memory",
+        body: "Per lead and profile: assessments started, last review, fresh start, current chat, chat lines.", tech: "PostgresStore · vouch.memory" },
+      { id: "s-counts", type: "state", tag: "Table", title: "vouch_assessment_counts", mono: true,
+        body: "+1 for the lead's day when an assessment is admitted." },
+      { id: "s-usage", type: "state", tag: "Table", title: "vouch_usage", mono: true,
+        body: "Tokens and cost of each assessment and chat turn, from the UsageMeter." },
+      { id: "s-audit", type: "state", tag: "Table · append-only", title: "vouch_audit_trail", mono: true,
+        body: "Each review, override and remediation decision. A trigger refuses update and delete." },
+      { id: "s-rem", type: "state", tag: "Table", title: "vouch_remediation_items", mono: true,
+        body: "The lead's approval or discard of each remediation item." },
+      { id: "s-set", type: "state", tag: "Table", title: "vouch_settings", mono: true,
+        body: "The developer's model choice and the daily limit." },
+    ],
+  },
+  arrows: [
+    { from: "browser", to: "api", label: "control id\nBearer token" },
+    { from: "api", fs: "r", to: "clerk", ts: "l", label: "request" },
+    { from: "clerk", to: "limits", label: "user id" },
+    { from: "limits", to: "profile", label: "X-Vouch-Profile" },
+    { from: "profile", to: "daily", label: "allow-list" },
+    { from: "daily", fs: "r", to: "overlays", ts: "l", label: "control\nprofile\nthread id" },
+    { from: "overlays", to: "branch", label: "overlay adds\na requirement", dashed: true },
+    { from: "branch", to: "gather" },
+    { route: (g) => { const a = g.overlays, b = g.gather, x = a.x - 13;
+        return [[a.x, a.cy + 8], [x, a.cy + 8], [x, b.cy - 8], [b.x, b.cy - 8]]; },
+      label: "no\noverlay", lp: (g) => [g.overlays.x - 13, (g.branch.y + g.branch.h + g.gather.y) / 2], dashed: true },
+    { from: "gather", to: "tools", label: "tool calls" },
+    { route: (g) => { const a = g.tools, b = g.gather, x = a.x + a.w + 13;
+        return [[a.x + a.w, a.cy], [x, a.cy], [x, b.cy + 14], [b.x + b.w, b.cy + 14]]; },
+      label: "passages", dashed: true },
+    { from: "tools", to: "evtools", label: "query ⇄ passages", both: true },
+    { from: "gather", fs: "r", fo: -14, to: "check", ts: "l", label: "draft\nanswer" },
+    { from: "check", to: "judge", label: "answer" },
+    { from: "judge", to: "quotes", label: "verdicts + quotes" },
+    { from: "quotes", to: "remediate", label: "checked verdicts" },
+    { from: "remediate", fs: "r", to: "review", ts: "l", label: "proposed\nassessment" },
+    { from: "review", to: "lead", label: "waiting for review" },
+    { from: "lead", to: "areview", label: "ReviewDecision" },
+    { route: (g) => { const a = g.areview, b = g.review, x = a.x + a.w + 13;
+        return [[a.x + a.w, a.cy], [x, a.cy], [x, b.cy], [b.x + b.w, b.cy]]; },
+      label: "resume", lp: (g) => [g.areview.x + g.areview.w + 13, (g.lead.y + g.lead.h + g.areview.y) / 2], dashed: true },
+    { route: (g) => { const a = g.lead, b = g.rdecide, x = a.x - 13;
+        return [[a.x, a.cy + 10], [x, a.cy + 10], [x, b.cy], [b.x, b.cy]]; },
+      label: "item", lp: (g) => [g.lead.x - 13, (g.areview.y + g.areview.h + g.rdecide.y) / 2] },
+    { from: "review", fs: "r", fo: -16, to: "stream", ts: "l", label: "steps" },
+    { from: "rdecide", fs: "r", to: "overview", ts: "l", label: "reviewed\nverdicts" },
+    { from: "overview", to: "report", label: "same readiness" },
+  ],
+};
+
+const CHAT = {
+  cols: [
+    { title: "Ask", sub: "React · FastAPI", cards: [
+      { id: "c-browser", type: "browser", tag: "Browser", title: "Ask Vouch panel",
+        body: "The lead's message, and the page and control they are on. No message: the greeting." },
+      { id: "c-api", type: "api", tag: "FastAPI", title: "POST /api/chat", mono: true,
+        body: "Sign-in, limits and the spending check as for an assessment; a chat message isn't counted as one.",
+        writes: "store: current chat" },
+    ] },
+    { title: "Chat graph", sub: "LangGraph · vouch.chat_agent", cards: [
+      { id: "c-agent", type: "graph", tag: "LangGraph node", title: "agent", mono: true, model: true,
+        body: "The model reads the prompt and at most the last 20 messages of the thread; answers, or calls tools.",
+        tech: "model.bind_tools(CHAT_TOOLS)" },
+      { id: "c-tools", type: "graph", tag: "LangGraph node", title: "tools", mono: true,
+        body: "Runs each call; its reply is redacted before the model reads it." },
+      { id: "c-answer", type: "guard", tag: "Node · guard", title: "answer", mono: true,
+        body: "Every quote checked against its document, no audit-result claim, the profile's language; refused: back to agent, once.",
+        tech: "vouch.chat_citations" },
+    ] },
+    { title: "Chat tools", sub: "five, in ChatTools", cards: [
+      { id: "t-progress", type: "tool", tag: "Tool", title: "progress", mono: true,
+        body: "Where the lead stands and the next step, from the store.", tech: "vouch.memory · vouch.dossier" },
+      { id: "t-start", type: "tool", tag: "Tool", title: "start_assessment", mono: true,
+        body: "Runs diagram 1's graph and streams its steps into the chat; counted and metered as one.", tech: "vouch.runs" },
+      { id: "t-explain", type: "tool", tag: "Tool", title: "explain_control", mono: true,
+        body: "What a control's newest assessment found, with the quotes it kept." },
+      { id: "t-assessed", type: "tool", tag: "Tool", title: "assessed_controls", mono: true,
+        body: "Every control's newest assessment at once." },
+      { id: "t-search", type: "tool", tag: "Tool", title: "search_evidence", mono: true,
+        body: "Searches the allowed policies and records, behind the assessment's guards.", tech: "vouch.search" },
+    ] },
+    { title: "Out and kept", sub: "SSE · Postgres", cards: [
+      { id: "c-ckpt", type: "state", tag: "LangGraph checkpointer", title: "Chat thread",
+        body: "Every turn's messages, as checked; the next turn reads them back.", tech: "PostgresSaver" },
+      { id: "c-kept", type: "state", tag: "Store · table", title: "Chat lines · usage",
+        body: "The turn's lines as the chat showed them, for reopening it; its tokens and cost.",
+        tech: "PostgresStore · vouch_usage" },
+      { id: "c-out", type: "browser", tag: "Browser · SSE", title: "Streamed reply",
+        body: "thread, step, token, suggestion, assessment, done events. All redacted.",
+        tech: "vouch.redaction" },
+    ] },
+  ],
+  arrows: [
+    { from: "c-browser", to: "c-api", label: "message + page" },
+    { from: "c-api", fs: "r", to: "c-agent", ts: "l", label: "message\nthread id", lp: (g) => [(g["c-api"].x + g["c-api"].w + g["c-agent"].x) / 2, g["c-api"].cy] },
+    { from: "c-agent", to: "c-tools", label: "tool calls" },
+    { route: (g) => { const a = g["c-tools"], b = g["c-agent"], x = a.x - 13;
+        return [[a.x, a.cy], [x, a.cy], [x, b.cy + 10], [b.x, b.cy + 10]]; },
+      label: "results", lp: (g) => [g["c-tools"].x - 13, (g["c-agent"].y + g["c-agent"].h + g["c-tools"].y) / 2], dashed: true },
+    { route: (g) => { const a = g["c-agent"], b = g["c-answer"], x = a.x + a.w + 13;
+        return [[a.x + a.w, a.cy + 16], [x, a.cy + 16], [x, b.cy], [b.x + b.w, b.cy]]; },
+      label: "reply text", at: 0.62 },
+    { route: (g) => { const a = g["c-answer"], b = g["c-agent"], x = a.x - 26;
+        return [[a.x, a.cy], [x, a.cy], [x, b.cy - 12], [b.x, b.cy - 12]]; },
+      label: "refused", at: 0.3, dashed: true },
+    { route: (g) => { const a = g["c-tools"], c = g.col2;
+        return [[a.x + a.w, a.cy - 10], [c.x, a.cy - 10]]; }, label: "call", both: true },
+    { route: (g) => { const a = g["c-answer"], b = g["c-out"], y = g.col0.y + g.col0.h + 16;
+        return [[a.cx, a.y + a.h], [a.cx, y], [b.cx, y], [b.cx, b.y + b.h]]; },
+      label: "checked answer", at: 0.5 },
+  ],
+};
+
+const NS = "http://www.w3.org/2000/svg";
+const ctx = document.createElement("canvas").getContext("2d");
+function el(parent, name, attrs = {}, text) {
+  const node = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  parent.appendChild(node);
+  return node;
+}
+function width(text, font) { ctx.font = font; return ctx.measureText(text).width; }
+function wrap(text, font, max) {
+  const lines = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    const next = line ? line + " " + word : word;
+    if (line && width(next, font) > max) { lines.push(line); line = word; } else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+const F = {
+  title: '600 15px Manrope', mono: '500 14px "IBM Plex Mono"', body: '400 12.5px Manrope',
+  tech: '400 10.5px "IBM Plex Mono"', tag: '500 10.5px "IBM Plex Mono"', badge: '500 10px "IBM Plex Mono"',
+  lbl: '400 10.5px "IBM Plex Mono"',
+};
+
+// The card's lines and height at this width, before it is drawn.
+function measure(card, w) {
+  const inner = w - 26;
+  const m = {
+    title: wrap(card.title, card.mono ? F.mono : F.title, inner),
+    body: card.body ? wrap(card.body, F.body, inner) : [],
+    tech: card.tech ? wrap(card.tech, F.tech, inner) : [],
+    writes: card.writes ? wrap("▾ writes " + card.writes, F.tech, inner) : [],
+  };
+  m.h = 26 + m.title.length * 19 + (m.body.length ? 6 + m.body.length * 17 : 0)
+    + (m.tech.length ? 7 + m.tech.length * 15 : 0) + (m.writes.length ? 5 + m.writes.length * 15 : 0) + 14;
+  return m;
+}
+
+function drawCard(svg, card, x, y, w, m) {
+  const g = el(svg, "g", { class: "t-" + card.type });
+  el(g, "rect", { class: "card" + (card.dashed ? " dashed" : ""), x, y, width: w, height: m.h, rx: 10 });
+  const tag = (card.tag || card.type).toUpperCase();
+  const tw = width(tag, F.tag) * 1.0 + tag.length * 0.84 + 16;
+  el(g, "rect", { class: "tag", x: x + 14, y: y - 10, width: tw, height: 20, rx: 4 });
+  el(g, "text", { class: "tag-t", x: x + 22, y: y + 4 }, tag);
+  if (card.model) {
+    const bt = "⇡ model", bw = width(bt, F.badge) + bt.length * 0.4 + 14;
+    el(g, "rect", { class: "badge", x: x + w - 14 - bw, y: y - 10, width: bw, height: 20, rx: 10 });
+    el(g, "text", { class: "badge-t", x: x + w - 14 - bw / 2, y: y + 4, "text-anchor": "middle" }, bt);
+  }
+  const cx = x + w / 2;
+  let ty = y + 30;
+  for (const line of m.title) { el(g, "text", { class: "title" + (card.mono ? " mono" : ""), x: cx, y: ty, "text-anchor": "middle" }, line); ty += 19; }
+  if (m.body.length) ty += 4;
+  for (const line of m.body) { el(g, "text", { class: "body", x: cx, y: ty, "text-anchor": "middle" }, line); ty += 17; }
+  if (m.tech.length) ty += 5;
+  for (const line of m.tech) { el(g, "text", { class: "tech", x: cx, y: ty, "text-anchor": "middle" }, line); ty += 15; }
+  if (m.writes.length) ty += 3;
+  for (const line of m.writes) { el(g, "text", { class: "writes", x: cx, y: ty, "text-anchor": "middle" }, line); ty += 15; }
+  return { x, y, w, h: m.h, cx, cy: y + m.h / 2 };
+}
+
+function port(box, side, off = 0) {
+  if (side === "t") return [box.cx + off, box.y];
+  if (side === "b") return [box.cx + off, box.y + box.h];
+  if (side === "l") return [box.x, box.cy + off];
+  return [box.x + box.w, box.cy + off];
+}
+
+function drawArrow(layer, labels, a, geo) {
+  let pts;
+  if (a.route) pts = a.route(geo);
+  else {
+    const fs = a.fs || "b", ts = a.ts || "t";
+    const p = port(geo[a.from], fs, a.fo || 0);
+    const to = geo[a.to];
+    let q = port(to, ts, a.to_off || 0);
+    if (fs === "r" && ts === "l") {
+      // Arrive level when the target is tall enough; else elbow at the middle of the gap.
+      if (p[1] > to.y + 12 && p[1] < to.y + to.h - 12) q = [q[0], p[1]];
+      const mx = (p[0] + q[0]) / 2;
+      pts = p[1] === q[1] ? [p, q] : [p, [mx, p[1]], [mx, q[1]], q];
+    } else {
+      const my = (p[1] + q[1]) / 2;
+      pts = p[0] === q[0] ? [p, q] : [p, [p[0], my], [q[0], my], q];
+    }
+  }
+  const d = pts.map((pt, i) => (i ? "L" : "M") + pt[0] + " " + pt[1]).join(" ");
+  const attrs = { class: "wire" + (a.dashed ? " dashed" : ""), d, "marker-end": "url(#head)" };
+  if (a.both) attrs["marker-start"] = "url(#tail)";
+  el(layer, "path", attrs);
+  if (!a.label) return;
+  // The label sits where the arrow says (lp), else at a fraction of the path's length.
+  const segs = pts.slice(1).map((pt, i) => Math.hypot(pt[0] - pts[i][0], pt[1] - pts[i][1]));
+  let at = (a.at ?? 0.5) * segs.reduce((s, v) => s + v, 0), i = 0;
+  while (i < segs.length - 1 && at > segs[i]) { at -= segs[i]; i++; }
+  const t = segs[i] ? at / segs[i] : 0;
+  let lx = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, ly = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t;
+  if (a.lp) [lx, ly] = a.lp(geo);
+  const lines = a.label.split("\n");
+  const lw = Math.max(...lines.map((l) => width(l, F.lbl))) + 14, lh = lines.length * 13 + 8;
+  el(labels, "rect", { class: "lbl", x: lx - lw / 2, y: ly - lh / 2, width: lw, height: lh, rx: 6 });
+  lines.forEach((l, k) => el(labels, "text", { class: "lbl-t", x: lx, y: ly - lh / 2 + 15 + k * 13, "text-anchor": "middle" }, l));
+}
+
+function defs(svg) {
+  const d = el(svg, "defs");
+  const head = el(d, "marker", { id: "head", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto" });
+  el(head, "path", { class: "head", d: "M0 0 L10 5 L0 10 z" });
+  const tail = el(d, "marker", { id: "tail", viewBox: "0 0 10 10", refX: 1, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto" });
+  el(tail, "path", { class: "head", d: "M10 0 L0 5 L10 10 z" });
+}
+
+function draw(svg, spec) {
+  svg.replaceChildren();
+  defs(svg);
+  const back = el(svg, "g"), wires = el(svg, "g"), cards = el(svg, "g"), labels = el(svg, "g");
+  const geo = {};
+  const cols = spec.cols.length;
+  const colX = (i) => TOP + i * (CW + GAP);
+  const cardW = CW - 2 * PAD;
+  let y = TOP;
+
+  // A band of wide cards above the columns: what surrounds every run.
+  if (spec.band) {
+    const ms = spec.band.map((b) => measure(b.card, (b.span[1] - b.span[0] + 1) * (CW + GAP) - GAP - 2 * PAD));
+    const bh = Math.max(...ms.map((m) => m.h));
+    spec.band.forEach((b, k) => {
+      const x = colX(b.span[0]) + PAD, w = (b.span[1] - b.span[0] + 1) * (CW + GAP) - GAP - 2 * PAD;
+      ms[k].h = bh;
+      geo[b.card.id] = drawCard(cards, b.card, x, y + 12, w, ms[k]);
+    });
+    y += bh + 12 + 30;
+  }
+
+  // The stage columns: number, title, parts, technology; then the cards, stacked.
+  const colTop = y, headH = 68;
+  const measured = spec.cols.map((c) => c.cards.map((card) => measure(card, cardW)));
+  const colH = Math.max(...measured.map((ms) => ms.reduce((s, m) => s + m.h, 0) + (ms.length - 1) * CARD_GAP)) + headH + 30;
+  spec.cols.forEach((col, i) => {
+    const x = colX(i);
+    el(back, "rect", { class: "col", x, y: colTop, width: CW, height: colH, rx: 12 });
+    geo["col" + i] = { x, y: colTop, w: CW, h: colH, cx: x + CW / 2, cy: colTop + colH / 2 };
+    el(back, "circle", { class: "num", cx: x + 30, cy: colTop + 28, r: 12 });
+    el(back, "text", { class: "num-t", x: x + 30, y: colTop + 32.5, "text-anchor": "middle" }, String(i + 1));
+    const t = el(back, "text", { class: "col-t", x: x + 52, y: colTop + 33 }, col.title);
+    el(back, "text", { class: "col-n", x: x + 58 + width(col.title, '600 16px Manrope'), y: colTop + 33 },
+      col.cards.length + (col.cards.length === 1 ? " part" : " parts"));
+    el(back, "text", { class: "col-s", x: x + 52, y: colTop + 51 }, col.sub);
+    let cy = colTop + headH + 12;
+    col.cards.forEach((card, k) => {
+      geo[card.id] = drawCard(cards, card, x + PAD, cy, cardW, measured[i][k]);
+      cy += measured[i][k].h + CARD_GAP;
+    });
+  });
+  y = colTop + colH;
+
+  // The state lane: every store, and when it is written.
+  if (spec.lane) {
+    y += 28;
+    const total = cols * (CW + GAP) - GAP, n = spec.lane.cards.length, g = 16;
+    const w = (total - 2 * PAD - (n - 1) * g) / n;
+    const ms = spec.lane.cards.map((c) => measure(c, w));
+    const lh = Math.max(...ms.map((m) => m.h));
+    el(back, "rect", { class: "lane", x: TOP, y, width: total, height: lh + 92, rx: 12 });
+    el(back, "text", { class: "lane-t", x: TOP + PAD, y: y + 30 }, spec.lane.title);
+    el(back, "text", { class: "lane-s", x: TOP + PAD, y: y + 49 }, spec.lane.sub);
+    spec.lane.cards.forEach((c, k) => { ms[k].h = lh; geo[c.id] = drawCard(cards, c, TOP + PAD + k * (w + g), y + 70, w, ms[k]); });
+    y += lh + 92;
+  }
+
+  for (const a of spec.arrows) drawArrow(wires, labels, a, geo);
+  const W = TOP * 2 + cols * (CW + GAP) - GAP;
+  const H = y + TOP + (spec.lane ? 0 : 24);  // room for a route under the columns
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.maxWidth = W + "px";
+  svg.style.minWidth = Math.round(W * 0.68) + "px";
+}
+
+function legend() {
+  const ul = document.getElementById("legend");
+  for (const [type, name, dashed] of TYPES) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="sw${dashed ? " dashed" : ""}" style="--c: var(--c-${type})"></span>${name}`;
+    ul.appendChild(li);
+  }
+  ul.insertAdjacentHTML("beforeend",
+    `<li><span class="chip" style="--c: var(--c-external)">⇡ model</span>a LangChain model call</li>` +
+    `<li><span class="line"></span>flow</li><li><span class="line dashed"></span>loop back, or only sometimes</li>`);
+}
+
+function render() { draw(document.getElementById("main"), MAIN); draw(document.getElementById("chat"), CHAT); }
+legend();
+Promise.all(Object.values(F).map((f) => document.fonts.load(f))).catch(() => {}).then(render);
+
+document.getElementById("theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+});
+</script>
+</body>
+</html>
