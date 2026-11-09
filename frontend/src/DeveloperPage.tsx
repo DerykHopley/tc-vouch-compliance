@@ -2,7 +2,12 @@ import { type FormEvent, useId, useState } from 'react'
 import { count, dollars, plural } from './assessment.ts'
 import { changeDailyLimit, changeModel, type DeveloperSettings, type RunTotals, type SettingChange, UNAVAILABLE } from './developer.ts'
 
-type Props = { settings: DeveloperSettings | typeof UNAVAILABLE; onChange: (settings: DeveloperSettings) => void }
+type Props = {
+  settings: DeveloperSettings | typeof UNAVAILABLE
+  onChange: (settings: DeveloperSettings) => void
+  /** Opens company setup (#403). */
+  onSetup: () => void
+}
 
 const FAKE_BECAUSE: Record<NonNullable<DeveloperSettings['fake_reason']>, string> = {
   no_key: 'No OpenRouter key is set: assessments run on the fake model.',
@@ -13,10 +18,10 @@ type Saving = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; set
 
 /**
  * The developer page (#34): the model assessments run on, and a form to change it; the prompt version; each user's
- * daily limit, and a form to change it; every assessment's usage totalled, and a link to OpenRouter's (#35). Only a
- * developer reaches it (App.tsx); the compliance lead never sees it.
+ * daily limit, and a form to change it; every assessment's usage totalled, and a link to OpenRouter's (#35); the way into
+ * company setup (#403). Only a developer reaches it (App.tsx); the compliance lead never sees it.
  */
-export default function DeveloperPage({ settings, onChange }: Props) {
+export default function DeveloperPage({ settings, onChange, onSetup }: Props) {
   return (
     <section className="paper wrap" aria-label="Developer settings">
       <div className="paper-head">
@@ -27,7 +32,15 @@ export default function DeveloperPage({ settings, onChange }: Props) {
         <p className="sheet notice" role="alert">
           The developer settings are unavailable just now. Please try again shortly.
         </p>
-      ) : <Settings settings={settings} onChange={onChange} />}
+      ) : (
+        <>
+          <section className="sheet" aria-label="Company setup">
+            <span className="lbl">Company setup</span>
+            <button type="button" className="btn btn-primary" onClick={onSetup}>Set up a company</button>
+          </section>
+          <Settings settings={settings} onChange={onChange} />
+        </>
+      )}
     </section>
   )
 }

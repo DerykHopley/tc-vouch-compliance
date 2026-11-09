@@ -39,6 +39,9 @@ export const verdictLang = (language?: string): string | undefined => wordsIn(la
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 
+/** A company's protection level (`vouch.profile.ProtectionLevel`). */
+export type ProtectionLevel = 'normal' | 'high' | 'very high'
+
 export type Control = { id: string; title: string }
 
 /** `quote`: the ISA edition's words the text quotes, marked in the profile's language (#244). */

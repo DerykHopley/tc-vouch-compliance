@@ -8,9 +8,10 @@ and risks.
 
 import logging
 import re
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
@@ -28,6 +29,7 @@ from pydantic import (
 
 from vouch.documents import SUFFIX, DocumentChoice, document_path, escaped, is_chosen
 from vouch.isa import (
+    COLUMN_PREFIX,
     SOURCE,
     BaseFramework,
     BaseFrameworkError,
@@ -61,6 +63,51 @@ PROTECTION_COLUMNS: dict[ProtectionLevel, frozenset[Column]] = {
     "high": frozenset({"must", "should", "high"}),
     "very high": frozenset({"must", "should", "high", "very high"}),
 }
+
+
+@dataclass(frozen=True)
+class ProtectionScope:
+    """What one protection level brings into scope from the base framework (#403)."""
+
+    level: ProtectionLevel
+    requirements: Mapping[Column, int]  # the base requirements in each column it brings in
+    total: int
+    controls: int  # the controls with a requirement in scope
+    added: int  # the requirements it adds over the level below; 0 for normal
+    added_controls: tuple[str, ...]  # the controls where it adds them, in the framework's order
+
+
+def in_scope(requirement: Requirement, level: ProtectionLevel) -> bool:
+    """Whether the protection level brings this base requirement into scope (its column)."""
+    return requirement.column in PROTECTION_COLUMNS[level]
+
+
+@cache
+def protection_scope() -> tuple[ProtectionScope, ...]:
+    """Each protection level in order, normal to very high, and what it brings in, counted in
+    the English edition (the German one carries the same requirements); or BaseFrameworkError.
+    PROTECTION_COLUMNS lists the levels lowest first, each including the one before, so the
+    level below is the previous entry."""
+    controls = load_base_framework().controls
+    scopes: list[ProtectionScope] = []
+    below: ProtectionLevel | None = None
+    for level, columns in PROTECTION_COLUMNS.items():
+        brought = [[r for r in c.requirements if in_scope(r, level)] for c in controls]
+        added = [[r for r in rs if below is not None and not in_scope(r, below)] for rs in brought]
+        counts = Counter(r.column for rs in brought for r in rs)
+        requirements = {column: counts[column] for column in COLUMN_PREFIX if column in columns}
+        scopes.append(
+            ProtectionScope(
+                level=level,
+                requirements=requirements,  # the base framework's columns, in its order
+                total=sum(requirements.values()),
+                controls=sum(bool(rs) for rs in brought),
+                added=sum(len(rs) for rs in added),
+                added_controls=tuple(c.id for c, rs in zip(controls, added, strict=True) if rs),
+            )
+        )
+        below = level
+    return tuple(scopes)
 
 
 @dataclass(frozen=True)
@@ -292,8 +339,7 @@ class ComplianceProfile(_Strict):
 
     def _brought_in(self, control: IsaControl) -> tuple[Requirement, ...]:
         """The base requirements in the protection level's columns, then the overlays' ones."""
-        columns = PROTECTION_COLUMNS[self.protection_level]
-        base = tuple(r for r in control.requirements if r.column in columns)
+        base = tuple(r for r in control.requirements if in_scope(r, self.protection_level))
         return base + self._overlay_requirements(control.id)
 
     def _overlay_requirements(self, control_id: str) -> tuple[Requirement, ...]:

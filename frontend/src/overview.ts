@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { Assessment, Citation, ReviewStatus, Verdict } from './assessment.ts'
+import type { Assessment, Citation, ProtectionLevel, ReviewStatus, Verdict } from './assessment.ts'
 import type { PaperRequirement } from './paper.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
@@ -36,7 +36,7 @@ export type Overview = {
   company: string
   country: string
   /** The working paper's head shows both (#41). */
-  protection_level: 'normal' | 'high' | 'very high'
+  protection_level: ProtectionLevel
   /** ISO 639-1: the language the answers are written in; the interface stays English. */
   answer_language: string
   /** Each control's requirements under the profile, by control id: the working paper lists them before an

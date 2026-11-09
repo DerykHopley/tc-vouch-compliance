@@ -90,6 +90,7 @@ from vouch.profile import (
     ProfileScan,
     load_problem,
     profile_folder_names,
+    protection_scope,
     scan_profiles,
 )
 from vouch.profile_pass import (
@@ -143,6 +144,7 @@ log = logging.getLogger(__name__)
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
+PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
 NOT_A_MEMBER = (
     "Vouch is open to members of the course's Discord server. This Discord account is not in it."
 )
@@ -1324,6 +1326,18 @@ def change_model(request: ModelRequest, models: AppModels, spending: AppSpending
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
     return _developer_page(models, spending, model)
+
+
+@router.get("/developer/protection-levels", dependencies=DEVELOPERS)
+def protection_levels() -> dict[str, Any]:
+    """What each protection level brings into scope (#403), for company setup's step 3; the
+    base framework unreadable, a plain 500 naming no file."""
+    try:
+        levels = protection_scope()
+    except BaseFrameworkError:
+        log.exception("the base framework could not be read")
+        raise HTTPException(status_code=500, detail=PROTECTION_LEVELS_FAILED) from None
+    return {"levels": [asdict(scope) for scope in levels]}
 
 
 @router.post("/developer/profiles", dependencies=DEVELOPERS, status_code=201)
