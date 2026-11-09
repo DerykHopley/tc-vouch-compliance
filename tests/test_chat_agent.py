@@ -491,6 +491,23 @@ def test_a_start_assessment_call_without_a_control_id_says_its_arguments_are_inv
     assert written == [("step", {"node": "guard", "text": said})]
 
 
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [("delete_everything", {}), ("search_evidence", {"query": "x" * 201}), ("search_evidence", {})],
+    ids=["not-a-tool", "invalid-query", "no-query"],
+)
+def test_a_refused_chat_tool_call_writes_its_guard_step_and_no_search_step(name, args):
+    # #115: a refused call once read as followed by "Found 0 passages", as if a search ran.
+    tools, _ = chat_tools()
+    written = []
+
+    said = tools.call(name, args, written.append, threading.Event())
+
+    assert said.startswith("Refused")
+    assert written == [("step", {"node": "guard", "text": said})]
+    assert "Found" not in said and "Searched" not in said
+
+
 def test_a_chat_thread_under_one_profile_names_nothing_under_another(tmp_path, lead, fake):
     read_profile_once.cache_clear()
     restart()

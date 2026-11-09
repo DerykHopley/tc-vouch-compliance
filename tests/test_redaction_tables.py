@@ -45,15 +45,28 @@ CASES: dict[str, tuple[list[tuple[str, str, str]], list[str]]] = {
         r"(?<![A-Za-z0-9])(?:"
         r"(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]*"
         r"|(?:sk|pk)[-_][A-Za-z0-9_-]{16,}"
+        r"|sk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{6,}"
+        r"|gh[pousr]_[A-Za-z0-9]{20,}"
+        r"|github_pat_[A-Za-z0-9_]{20,}"
         r"|whsec_[A-Za-z0-9+/=_-]+"
         r")"
     ): (
         [
             ("key sk_live_abc123", "sk_live_abc123", KEY),
             (f"key {SECRET}", SECRET, KEY),
+            ("key sk-abc123 here", "sk-abc123", KEY),  # #115
+            ("token ghp_a1B2c3D4e5F6g7H8i9J0k1L2", "ghp_a1B2c3D4e5F6g7H8i9J0k1L2", KEY),
+            ("pat github_pat_11ABCDEFG0123456789_ab", "github_pat_11ABCDEFG0123456789_ab", KEY),
             ("hook whsec_abcDEF123=", "whsec_abcDEF123=", KEY),
         ],
-        ["The policy covers the risk-assessment-for-desk-work process."],
+        [
+            "The policy covers the risk-assessment-for-desk-work process.",
+            "The sk-learning module and control sk-12 stay; so does ghp_short.",
+        ],
+    ),
+    r"(?i)(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])": (
+        [("aws AKIAIOSFODNN7EXAMPLE now", "AKIAIOSFODNN7EXAMPLE", KEY)],  # #115
+        ["AKIA alone is no key, nor is AKIAIOSFODNN7 or AKIAIOSFODNN7EXAMPLE2X."],
     ),
     r"[\w.%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}": (
         [("Write to anna.schmidt@example.com today.", "anna.schmidt@example.com", EMAIL)],

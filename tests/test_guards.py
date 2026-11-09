@@ -514,3 +514,16 @@ def test_the_gather_step_says_in_plain_words_what_is_about_to_be_searched(
 
     assert described == text
     assert "search_" not in described  # no tool name reaches the compliance lead
+
+
+def test_a_refused_tool_call_is_followed_by_no_step_saying_a_search_ran(tmp_path):
+    # #115: after a refused call the next step once read "Found 0 passages", as if a search ran.
+    profile = load_profile(copy_profile(tmp_path, policies="policies"))
+    model = recording([{"tool": "search_records", "args": {"query": "password"}}, {"answer": "D."}])
+
+    result = assess("5.2.4", profile, model)
+
+    after = [s for s in result.steps if s["node"] == "tools"]
+    assert guard_steps(result)[0].startswith("Refused search_records")
+    assert [s["text"] for s in after] == ["No search ran."]
+    assert not any("Found" in s["text"] or "Searched" in s["text"] for s in result.steps)

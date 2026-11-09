@@ -84,10 +84,15 @@ REDACTIONS = (
             r"(?<![A-Za-z0-9])(?:"
             r"(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]*"  # Stripe and Clerk shapes, any length
             r"|(?:sk|pk)[-_][A-Za-z0-9_-]{16,}"  # OpenRouter, OpenAI, Anthropic and the like
+            r"|sk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{6,}"  # a shorter sk- key, with a digit (#115)
+            r"|gh[pousr]_[A-Za-z0-9]{20,}"  # GitHub tokens: classic, OAuth, user, server, refresh
+            r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained tokens
             r"|whsec_[A-Za-z0-9+/=_-]+"  # webhook signing secrets
             r")"
         ),
     ),
+    # AWS access key ids: upper case as issued, matched in any case like the other non-key rows.
+    Redaction(KEY, re.compile(r"(?i)(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")),
     Redaction(
         EMAIL,
         re.compile(r"[\w.%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"),
