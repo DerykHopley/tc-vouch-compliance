@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { Assessment, Citation, ReviewStatus, Verdict } from './assessment.ts'
+import type { OpenQuestion } from './questions.ts'
 import type { PaperRequirement } from './paper.ts'
 import type { Goal } from './report.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
@@ -9,8 +10,13 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected. */
 export type ReviewState = 'not-assessed' | ReviewStatus
 
-/** `reassess_suggested` and `closed` are the improvement plan's (#410): false under Audit readiness. A Closed control
- * is still accepted: the status and every count stay as they were. */
+/** Why a re-assessment is suggested (`vouch.plan.ReassessReason`), in this order: every fix done (#410, Internal
+ * improvement only), an open question answered or overdue (#414, both goals). */
+export type ReassessReason = 'fixes-done' | 'question-answered' | 'question-overdue'
+
+/** `closed` is the improvement plan's (#410): false under Audit readiness. `reassess_suggested` is true exactly when
+ * `reassess_reasons` isn't empty (#414). A Closed control is still accepted, and no reason changes the status or a
+ * count. */
 export type ControlCard = {
   id: string
   question: string
@@ -18,6 +24,7 @@ export type ControlCard = {
   status: ReviewState
   verdict: Verdict | null
   reassess_suggested?: boolean
+  reassess_reasons?: ReassessReason[]
   closed?: boolean
 }
 
@@ -63,6 +70,9 @@ export type Overview = {
   quotes: Quote[]
   /** The lead's review rounds under the profile (#402). */
   rounds: Rounds
+  /** The open questions asked since the fresh start, by control id, oldest first (#414); a control with none isn't
+   * named. Optional, as the cards' flags are, so a page built before them still reads. */
+  questions?: Record<string, OpenQuestion[]>
 }
 
 /** The open review round: `opened_at` null for the first one, open since the start. */
@@ -195,10 +205,11 @@ export function useOverview() {
       status: 'ready',
       overview: {
         ...now.overview,
-        // The improvement plan's flags (#410) are the server's to work out: off until the overview is read again.
+        // The improvement plan's flags (#410) and the questions' reasons (#414) are the server's to work out: off until
+        // the overview is read again (a new run or review clears every question reason anyway).
         controls: now.overview.controls.map((c) => c.id !== assessment.control_id ? c
           : { ...c, verdict: assessment.verdict, status: assessment.status ?? 'waiting-for-review',
-            reassess_suggested: false, closed: false }),
+            reassess_suggested: false, reassess_reasons: [], closed: false }),
       },
     })
   }, [])
@@ -212,7 +223,7 @@ export function useOverview() {
   }, [])
   // Reads the overview again after a change the page has shown already, keeping the overview shown when the read
   // fails (only the first read shows the failure): a review round started or closed (#402), a review or a done mark
-  // in the improvement goal (#410).
+  // in the improvement goal (#410), an open question logged or answered (#414).
   const refresh = useCallback(async () => {
     const asked = ++latest.current
     const answer = await fetchOverview()

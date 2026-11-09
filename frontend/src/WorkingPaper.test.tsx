@@ -62,7 +62,7 @@ type Shown = {
   /** The profile's goal (#369): the improvement plan shows in Internal improvement only (#410). */
   goal?: Goal
   /** The open card's improvement plan flags (#410). */
-  flags?: Pick<ControlCard, 'reassess_suggested' | 'closed'>
+  flags?: Pick<ControlCard, 'reassess_suggested' | 'reassess_reasons' | 'closed'>
 }
 
 function paper({ run = { status: 'idle', steps: [] }, running = null, checking = false, onAssess = () => {},
@@ -987,5 +987,35 @@ describe('the improvement plan (issue 410)', () => {
   it('reads Accepted under Audit readiness, whatever the card says', () => {
     review({ assessment: { ...ACCEPTED, remediation: [] }, flags: { reassess_suggested: false, closed: true } })
     expect(within(headVerdict()).getByText('Accepted')).toBeTruthy()
+  })
+
+  describe("the open questions' reasons (ticket 414)", () => {
+    const ANSWERED = 'An open question was answered. Assess 5.1.2 again so its verdict takes the answer into account.'
+    const OVERDUE = 'An open question is overdue. Assess 5.1.2 again with what is known now.'
+    const assessNotes = () => [...document.querySelectorAll('.assess .field-note')].map((p) => p.textContent)
+
+    it('says the answered-question sentence above Assess again under Audit readiness', () => {
+      review({ assessment: { ...ACCEPTED, remediation: [] },
+        flags: { reassess_suggested: true, reassess_reasons: ['question-answered'], closed: false } })
+      expect(assessNotes()).toEqual([ANSWERED])
+      const sentence = screen.getByText(ANSWERED)
+      const assess = screen.getByRole('button', { name: 'Assess again 5.1.2' })
+      expect(sentence.compareDocumentPosition(assess) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it("says each reason's sentence beside the done fixes' under Internal improvement", () => {
+      improving({ ...ACCEPTED, remediation: [DONE] }, { flags: { reassess_suggested: true,
+        reassess_reasons: ['fixes-done', 'question-answered', 'question-overdue'], closed: false } })
+      expect(assessNotes()).toEqual([
+        'Every approved remediation item is done. Assess 5.1.2 again: the control is Closed once that assessment is '
+          + 'accepted with no gaps.',
+        ANSWERED, OVERDUE])
+    })
+
+    it('says neither while the newest assessment waits for review', () => {
+      review({ assessment: { ...PROPOSED, review_step: 'accept', confirmed: [] },
+        flags: { reassess_suggested: true, reassess_reasons: ['question-overdue'], closed: false } })
+      expect(screen.queryByText(OVERDUE)).toBeNull()
+    })
   })
 })

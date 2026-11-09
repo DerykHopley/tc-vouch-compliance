@@ -73,6 +73,14 @@ def plan_url() -> str:
 
 
 @pytest.fixture
+def questions_url() -> str:
+    """An eleventh Vouch like vouch_url, for the open questions' checks (#414): its control is
+    accepted, questioned and assessed again, which would change the counts and cards other checks
+    read."""
+    return os.environ["QUESTIONS_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

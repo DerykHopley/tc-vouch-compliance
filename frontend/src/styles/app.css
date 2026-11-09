@@ -251,6 +251,14 @@ textarea.field { resize: vertical; font-family: inherit; }
 .item-plan > label { font-weight: 500; }
 .item-plan > .field { flex: none; width: 100%; max-width: 16ch; }
 .remediation .done-note { overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Open questions (#414, design.md Components: Open question): one per row, ruled apart as remediation items are; the
+   lead's question and answer as written; the forms take the override editor's grid at the sheet's width. */
+.questions .question-list { list-style: none; margin: 0; padding: 0; display: grid; width: 100%; }
+.question { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--rule); }
+.question:first-child { border-top: 0; padding-top: 0; }
+.question p { margin: 0; }
+.question-text, .question .done-note { overflow-wrap: anywhere; white-space: pre-wrap; }
+.questions .override { width: 100%; }
 
 /* Developer page (#34, pending design pass): working-paper sheets, one form row. The field's edge is --muted:
    --rule on --sheet is 1.47:1, under the 3:1 a control's edge needs (--muted: 5.45:1 light, 6.17:1 dark). */

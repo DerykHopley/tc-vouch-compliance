@@ -2,6 +2,7 @@
 floor). The pages on the profiles server, which reaches the developer page; the chat on its own."""
 
 import re
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -9,6 +10,7 @@ from reviewing import reviewed
 from test_guided_chat import assess_in_the_chat
 from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
+from test_questions import readiness_afresh
 from test_remediation import ITEM, confirmed_with_an_item
 from test_review import assessed, open_paper, row
 from touch_targets import small_targets
@@ -58,6 +60,25 @@ def test_the_improvement_plan_s_priority_and_mark_done_are_at_least_44px(page: P
     assert small_targets(page) == []
     item.get_by_role("button", name="Mark M1 done").click()
     expect(item.get_by_label("What was done")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_open_questions_forms_are_at_least_44px(page: Page, questions_url):
+    # #414: a listed question's Record answer, then the answer form and the log form open, on a
+    # control not assessed; on the questions' own server.
+    readiness_afresh(page.request, questions_url)
+    due = (datetime.now(UTC).date() + timedelta(days=7)).isoformat()
+    asked = page.request.post(
+        f"{questions_url}/api/controls/1.1.1/questions",
+        data={"question": "Who owns the policy?", "asked_of": "CISO", "due_date": due},
+    )
+    assert asked.ok, asked.status
+    at_phone_width(page, f"{questions_url}/controls/1.1.1")
+    questions = page.get_by_role("region", name="Open questions")
+    questions.get_by_role("button", name="Record answer").click()
+    expect(questions.get_by_role("textbox", name="Answer", exact=True)).to_be_visible()
+    questions.get_by_role("button", name="Log a question").click()
+    expect(questions.get_by_role("form", name="Log a question on 1.1.1")).to_be_visible()
     assert small_targets(page) == []
 
 

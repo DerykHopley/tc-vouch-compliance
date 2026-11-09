@@ -1,7 +1,7 @@
 import { type MouseEvent, useId, useState } from 'react'
 import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, type NextStep, type Overview,
-  type OverviewState, type Readiness, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
+  type OverviewState, type Readiness, type ReassessReason, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
   from './overview.ts'
 import type { PassState } from './profilePass.ts'
 import type { Goal } from './report.ts'
@@ -456,13 +456,23 @@ function openInPlace(e: MouseEvent, open: () => void) {
   open()
 }
 
+/** A card's line for each reason a re-assessment is suggested (#410, #414). */
+const REASON_WORDS: Record<ReassessReason, string> = {
+  'fixes-done': 'Fixes done: assess again',
+  'question-answered': 'Question answered: assess again',
+  'question-overdue': 'Question overdue: assess again',
+}
+
 /** A control's card; `language`, the profile's answer language, is its verdict's (#200). */
 function Card({ card, onOpen, assessing, language, improving }:
   { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean; language: string; improving: boolean }) {
   const edge = card.verdict ?? 'none'
   // The improvement plan (#410): a Closed card reads Closed in the accepted tag's style (the word is the cue), and a
-  // card whose fixes are all done suggests assessing it again.
+  // card whose fixes are all done suggests assessing it again; so does one whose open question was answered or is
+  // overdue (#414), in both goals.
   const closed = improving && card.status === 'accepted' && card.closed === true
+  const reasons = (card.reassess_reasons ?? (card.reassess_suggested ? ['fixes-done' as const] : []))
+    .filter((r) => improving || r !== 'fixes-done')
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
@@ -473,7 +483,7 @@ function Card({ card, onOpen, assessing, language, improving }:
         )}
       </a>
       <div className="control-title" lang={language}>{card.question}</div>
-      {improving && card.reassess_suggested && <p className="field-note">Fixes done: assess again</p>}
+      {reasons.map((r) => <p key={r} className="field-note">{REASON_WORDS[r]}</p>)}
       <div className="card-meta">
         <span className="mono">{isoLabel(card.iso_27001)}</span>
         <VerdictChip verdict={card.verdict} assessing={assessing} language={language} />

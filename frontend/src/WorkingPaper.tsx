@@ -7,6 +7,7 @@ import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } 
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { setUnsaved } from './leaving.ts'
+import OpenQuestions from './OpenQuestions.tsx'
 import Prose from './Prose.tsx'
 import Remediation, { type Plan } from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
@@ -64,8 +65,8 @@ function ToOverview({ onOverview }: { onOverview: () => void }) {
 type PaperProps = {
   /** The overview: the company; the profile's protection level, answer language and requirements; the cards (the
    * control index). */
-  overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'>
-    & { goal?: Goal }
+  overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'
+    | 'questions'> & { goal?: Goal }
   /** The open control's card. */
   card: ControlCard
   /** The control being assessed just now, if any (one run at a time, maybe of another control). */
@@ -86,6 +87,8 @@ type PaperProps = {
   onItemDecided: (threadId: string, item: RemediationItem) => void
   /** Reads the assessment again (another tab reviewed it first); false when it couldn't be. */
   onRefresh: () => Promise<boolean>
+  /** An open question was logged or answered (#414): the overview is read again, for the list and the card's flags. */
+  onQuestionsChanged?: () => void
 }
 
 /**
@@ -95,7 +98,7 @@ type PaperProps = {
  */
 export default function WorkingPaper(props: PaperProps) {
   const { overview, card, running, passing = false, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
-    onItemDecided } = props
+    onItemDecided, onQuestionsChanged = () => {} } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
@@ -151,6 +154,8 @@ export default function WorkingPaper(props: PaperProps) {
   const approvedItems = remediation.filter((i) => i.status === 'approved')
   const reassess = improving && review === 'accepted' && approvedItems.length > 0 && approvedItems.every((i) => i.done)
   const closed = improving && review === 'accepted' && card.closed === true
+  // The open questions' reasons (#414), in both goals, while the control's newest assessment is accepted.
+  const questionReasons = review === 'accepted' ? card.reassess_reasons ?? [] : []
   return (
     <div className="wp">
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
@@ -219,6 +224,14 @@ export default function WorkingPaper(props: PaperProps) {
                   assessment is accepted with no gaps.
                 </p>
               )}
+              {questionReasons.includes('question-answered') && (
+                <p className="field-note">
+                  An open question was answered. Assess {card.id} again so its verdict takes the answer into account.
+                </p>
+              )}
+              {questionReasons.includes('question-overdue') && (
+                <p className="field-note">An open question is overdue. Assess {card.id} again with what is known now.</p>
+              )}
               <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />
               {assessingElsewhere}
             </div>}
@@ -243,6 +256,8 @@ export default function WorkingPaper(props: PaperProps) {
                   {assessingElsewhere}
                 </>} />
             )}
+            <OpenQuestions key={card.id} controlId={card.id} questions={overview.questions?.[card.id] ?? []}
+              onChanged={onQuestionsChanged} />
           </>
         )}
       </section>

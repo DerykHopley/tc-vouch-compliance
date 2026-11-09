@@ -20,13 +20,13 @@ from importlib.metadata import version
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, goal, plan, remediation, report, report_pdf, rounds
+from vouch import audit, goal, plan, questions, remediation, report, report_pdf, rounds
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -438,6 +438,15 @@ def review_rounds(db: AppDatabase) -> rounds.ReviewRounds:
 
 
 ReviewRounds = Annotated[rounds.ReviewRounds, Depends(review_rounds)]
+
+
+def open_questions(db: AppDatabase) -> questions.OpenQuestions:
+    """Where each user's open questions under each profile are kept, with their audit entries
+    (#414): Postgres with a database URL, else this process."""
+    return questions.process_questions() if db is None else questions.PostgresQuestions(db)
+
+
+OpenQuestions = Annotated[questions.OpenQuestions, Depends(open_questions)]
 
 
 def assessment_data(
@@ -1065,6 +1074,7 @@ def dossier_overview(
     marks: RemediationPlan,
     goals: ProfileGoals,
     review: ReviewRounds,
+    asked: OpenQuestions,
 ) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
@@ -1072,14 +1082,21 @@ def dossier_overview(
     edition (#199), an unreadable edition a plain 500; the user's Goal under the profile
     (#369); and their review rounds (#402): the open one, and the comparison with the last one
     closed since the fresh start; in the Internal improvement goal, each card's improvement plan
-    flags (#410). Redacted as the stream's events are."""
+    flags (#410); the open questions asked since the fresh start, by control id, oldest first,
+    and the reasons they suggest a re-assessment for, in both goals (#414). Redacted as the
+    stream's events are."""
     controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
     approved = {key for key, item in decided.items() if item.status == "approved"}
     current = goals.goal(memory.user_id, memory.profile_id)
-    flags = _plan_flags(current, memory, saver, items, marks)
-    clean, _ = redact_data(overview(profile, controls, latest, discarded, approved, flags))
+    listed = questions.since(asked.listed(memory.user_id, memory.profile_id), memory.fresh_start())
+    at = audit.now()
+    flags = plan.with_reasons(
+        _plan_flags(current, memory, saver, items, marks), questions.reasons(latest, listed, at)
+    )
+    shown = dict(overview(profile, controls, latest, discarded, approved, flags))
+    clean, _ = redact_data(shown | {"questions": questions.by_control(listed, at)})
     return clean | {
         "requirements": paper_requirements(profile, controls),
         "goal": current,
@@ -1176,6 +1193,81 @@ def close_round(
         raise HTTPException(status_code=409, detail=str(error)) from None
     assert closed.closed_at is not None
     return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
+
+
+def _control_of(profile: ComplianceProfile, control_id: str) -> IsaControl:
+    """The profile's control, else a 404; an unreadable edition a plain 500."""
+    try:
+        return profile.isa_control(control_id)
+    except UnknownControlError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, OVERVIEW_FAILED) from None
+
+
+@router.post("/controls/{control_id}/questions")
+def log_question(
+    control_id: str,
+    request: Annotated[questions.QuestionRequest, Body()],
+    asked: OpenQuestions,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead logs an open question on one of the profile's controls, assessed or not (#414):
+    what, for whom, due when; kept with its audit entry, together (when the entry can't be
+    written, neither is: a 503). The question as kept, redacted.
+
+    404 for a control that isn't one of the profile's; 422 for a blank, longer or NUL-holding
+    question or `asked_of`, a missing field or no body, or a due date that isn't a date or is
+    past everywhere or beyond the horizon (the hint in `detail`)."""
+    control = _control_of(profile, control_id)
+    try:
+        kept = questions.log(
+            asked,
+            control.id,
+            request,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+        )
+    except remediation.DueDateError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    clean, _ = redact_data({"question": questions.shown(kept, audit.now())})
+    return clean
+
+
+@router.post("/controls/{control_id}/questions/{question_id}/answer")
+def answer_question(
+    control_id: str,
+    question_id: Annotated[int, Path(ge=1, le=2**63 - 1)],
+    request: Annotated[questions.AnswerRequest, Body()],
+    asked: OpenQuestions,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead records the answer to their open question on the control (#414), with its audit
+    entry, together (when the entry can't be written, neither is: a 503); the question as kept,
+    redacted. An answer is final: the same answer again writes nothing.
+
+    404 for an unknown question, another user's or profile's, or one on another control; 409
+    for a question answered already with another answer (`detail` names it); 422 for a blank,
+    longer or missing answer."""
+    try:
+        kept = questions.answer(
+            asked,
+            control_id,
+            question_id,
+            request.answer,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+        )
+    except questions.UnknownQuestionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except questions.AnsweredAlreadyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    clean, _ = redact_data({"question": questions.shown(kept, audit.now())})
+    return clean
 
 
 @router.put("/goal")

@@ -34,7 +34,7 @@ const ENGLISH: ReportWords = {
   actions: { accept: 'Accepted', reject: 'Rejected', override: 'Overridden',
     confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded', goal: 'Goal changed from {before} to {after}',
     'round-start': 'Review round started: {round}', 'round-close': 'Review round closed: {round}',
-    priority: 'Priority changed', done: 'Marked done' },
+    priority: 'Priority changed', done: 'Marked done', question: 'Open question logged', answer: 'Question answered' },
   goals: { 'audit-readiness': 'Audit readiness', 'internal-improvement': 'Internal improvement' },
   protection_levels: { normal: 'Normal', high: 'High', 'very high': 'Very high' },
   languages: { en: 'English', de: 'German' },
