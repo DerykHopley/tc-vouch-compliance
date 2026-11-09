@@ -75,26 +75,26 @@ def assessment_events(
     from the control's last rejection is carried in (#42), wherever the run was started. A run
     that ends before its result (a failure, a refusal, or left part way) is taken out of the
     index (#137)."""
-    note = note or rejection_note(memory, run.saver, control.id)
-    chosen = run.models.for_assessment(
-        run.chosen,
-        callbacks=[run.meter],
-        answer_language=profile.answer_language,
-        control_id=control.id,
-    )
-    model = ToolAllowList(chosen, run.tools)
-    # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
-    steps = assess_steps(
-        control,
-        profile,
-        cast(BaseChatModel, model),
-        run.saver,
-        note=note,
-        thread_id=thread_id,
-        scope=run.scope,
-    )
     reviewed = False
-    try:
+    try:  # setup too: the note, the model and the graph can each fail (#137)
+        note = note or rejection_note(memory, run.saver, control.id)
+        chosen = run.models.for_assessment(
+            run.chosen,
+            callbacks=[run.meter],
+            answer_language=profile.answer_language,
+            control_id=control.id,
+        )
+        model = ToolAllowList(chosen, run.tools)
+        # assess_steps takes a BaseChatModel; ToolAllowList offers the part the graph uses.
+        steps = assess_steps(
+            control,
+            profile,
+            cast(BaseChatModel, model),
+            run.saver,
+            note=note,
+            thread_id=thread_id,
+            scope=run.scope,
+        )
         for item in steps:
             if isinstance(item, Assessment):
                 reviewed = True
