@@ -380,6 +380,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 /* Export (#57): its button and any failure message above the report, outside the report's language. */
 .report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .report-actions .field-note { margin: 0; }
+/* The export error on a line of its own, under both buttons, at every width (#355, #308): the full
+   row, past .field-note's 72ch cap, which left it room beside the buttons at desktop width. */
+.report-actions [role="alert"] { flex-basis: 100%; max-width: none; }
 
 /* Shown only in print: the older entries sentence stands in for Show older entries (#57). */
 .print-only { display: none; }

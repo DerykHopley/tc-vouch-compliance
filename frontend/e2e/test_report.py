@@ -268,6 +268,33 @@ def test_a_pdf_export_answered_503_says_so_and_downloads_nothing(page: Page, rep
     assert small_targets(page) == []
 
 
+@pytest.mark.parametrize(
+    ("width", "scheme"),
+    [(w, s) for w in (1280, 800, 400) for s in ("light", "dark")],
+)
+def test_the_export_error_sits_under_both_buttons_at_every_width(
+    page: Page, report_url, width, scheme
+):
+    """#355: at 1280px the alert sat beside the buttons, as the row wrapped only when it had to;
+    docs/design.md and #308 put it under them at every width."""
+    page.set_viewport_size({"width": width, "height": 900})
+    page.emulate_media(color_scheme=scheme)
+    page.route("**/api/report/pdf", lambda route: route.fulfill(status=503, json={"detail": "x"}))
+    open_report(page, report_url)
+
+    with page.expect_response("**/api/report/pdf"):
+        page.get_by_role("button", name="Export PDF").click()
+
+    alert = page.get_by_role("alert")
+    expect(alert).to_have_text(EXPORT_FAILED)
+    alert_box = alert.bounding_box()
+    assert alert_box is not None
+    for name in ("Export Markdown", "Export PDF"):
+        button_box = page.get_by_role("button", name=name).bounding_box()
+        assert button_box is not None
+        assert alert_box["y"] >= button_box["y"] + button_box["height"], (name, width)
+
+
 # --- Print (#57, story 10) ----------------------------------------------------------------------
 
 OLDER_ENTRIES = "Older entries are in the audit trail."
