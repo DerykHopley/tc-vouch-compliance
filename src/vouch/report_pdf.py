@@ -79,11 +79,12 @@ FOOT_RULE_ABOVE = 1.5  # mm: the footer's hairline, over its line
 
 class Letterhead(NamedTuple):
     """What the letterhead and footer say: the company, the "Page x of y" words with {page} and
-    {pages} to fill, and the report's date with its label."""
+    {pages} to fill, the report's date with its label, and its page count."""
 
     company: str
     page_of: str
     date: str
+    pages: int  # the document's page count, for "of y"
 
 
 class _Sheet(FPDF):
@@ -100,7 +101,6 @@ class _Sheet(FPDF):
             self.add_font(family, style, FONTS / file)
         # Any style: DejaVu has no italic, and a quote's character Plex Serif lacks still draws.
         self.set_fallback_fonts([FALLBACK], exact_match=False)
-        self.alias_nb_pages(align="R")  # "Page 2 of 5" ends at the right margin
         # Drawn: what every app font has, or what DejaVu has in either weight (the fallback).
         maps = {key: font.cmap for key, font in self.fonts.items() if isinstance(font, TTFFont)}
         fallback = set(maps[FALLBACK]) & set(maps[f"{FALLBACK}B"])
@@ -142,12 +142,12 @@ class _Sheet(FPDF):
         """Page x of y on the right, the report's date on the left, over a hairline rule."""
         if not self.letterhead:
             return
-        _, page_of, date = self.letterhead
+        _, page_of, date, total = self.letterhead
         y = self.h - FOOT_FROM_BOTTOM
         self.set_draw_color(RULE)
         self.set_line_width(0.2)
         self.line(self.l_margin, y - FOOT_RULE_ABOVE, self.w - self.r_margin, y - FOOT_RULE_ABOVE)
-        pages = page_of.format(page=self.page_no(), pages=self.str_alias_nb_pages)
+        pages = page_of.format(page=self.page_no(), pages=total)
         width = self.w - self.l_margin - self.r_margin
         self.set_xy(self.l_margin, y)
         self.font(LETTERHEAD)
@@ -290,11 +290,18 @@ class _Sheet(FPDF):
 def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     """The served report (`vouch.report.readiness_report`, redacted) as a PDF, in its `words`
     (`vouch.report.words_for`): the page's parts in the page's order, an empty list's sentence in
-    its place. No model, no database."""
+    its place. No model, no database. Laid out twice: the first count of pages fills each
+    footer's "of y" (the footer changes no layout), as fpdf2's own page-count alias keeps room
+    for three digits and so leaves a gap before a short number."""
+    pages = _sheet(report, words, pages=0).page_no()
+    return bytes(_sheet(report, words, pages).output())
+
+
+def _sheet(report: Mapping[str, Any], words: Mapping[str, Any], pages: int) -> _Sheet:
     labels, sentences = words["labels"], words["sentences"]
     head = report["head"]
     date = f"{labels['date']} {head['date']}"
-    sheet = _Sheet(Letterhead(head["company"], sentences["page_of"], date))
+    sheet = _Sheet(Letterhead(head["company"], sentences["page_of"], date, pages))
     sheet.set_title(sheet.drawable(words["title"]))
     sheet.set_lang(head["words_language"])
     sheet.set_creator("Vouch")
@@ -352,7 +359,7 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     sheet.line(sheet.l_margin, sheet.y, sheet.w - sheet.r_margin, sheet.y)
     sheet.ln(2)
     sheet.paragraph(report["disclaimer"])
-    return bytes(sheet.output())
+    return sheet
 
 
 TRAIL_IDS = (2, 3, 8, 9, 10)  # the trail's control, requirement, evidence, model, prompt version
