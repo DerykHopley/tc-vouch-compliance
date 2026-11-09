@@ -50,8 +50,10 @@ from vouch.guards import (
 )
 from vouch.isa import Column, IsaControl, Requirement
 from vouch.language import (
+    CAP_WORDS,
     audit_claim,
     audit_words_in,
+    cap_note,
     kept_in_other_language,
     language_name,
     language_refusal,
@@ -109,8 +111,8 @@ CITATIONS_DROPPED = (
 )
 SHOWN_VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced")  # need a citation
 # What the judge's rules add to a reason when they cap a verdict at partly-evidenced (#22).
-CAPPED = "At most partly evidenced:"
-DOCUMENTED_ONLY = "it asks for something to be done, and only documented evidence shows it"
+CAPPED = CAP_WORDS["en"].capped  # the cap's English words, kept in vouch.language (#354)
+DOCUMENTED_ONLY = CAP_WORDS["en"].documented_only
 # The columns the roll-up counts: should requirements only give the should score.
 ROLL_UP_COLUMNS: frozenset[Column] = frozenset({"must", "high", "very high", "overlay"})
 OUTPUT_RETRIES = 1  # an answer or a judgement claiming an audit result is asked for once more
@@ -1162,7 +1164,9 @@ def build_graph(
                 reason = CITATIONS_DROPPED if given else NO_CITATION
                 requirement = replace(requirement, verdict="not-evidenced", reason=reason)
             requirement = replace(requirement, citations=tuple(kept))
-            results.append(_apply_rules(requirement, requirement.id in doing))
+            results.append(
+                _apply_rules(requirement, requirement.id in doing, profile.answer_language)
+            )
         results, pending_ids = _noted_pending(results, state["pending"])
         judged = {r.id: r.verdict for r in state["requirements"]}
         changes = [
@@ -1466,7 +1470,9 @@ def _by_overlay(requirements: Iterable[Requirement]) -> dict[str, list[str]]:
     return added
 
 
-def _apply_rules(requirement: RequirementVerdict, about_doing: bool) -> RequirementVerdict:
+def _apply_rules(
+    requirement: RequirementVerdict, about_doing: bool, language: str = "en"
+) -> RequirementVerdict:
     """The judge's rules on a requirement whose citations are checked (spec #2, ticket #22).
 
     Stale evidence caps it at partly-evidenced, and the reason names each stale document and
@@ -1476,14 +1482,13 @@ def _apply_rules(requirement: RequirementVerdict, about_doing: bool) -> Requirem
     if requirement.verdict not in SHOWN_VERDICTS:
         return requirement
     stale = {c.doc_id: c.stale_because for c in requirement.citations if c.stale}
-    why = [f"{doc} is stale ({because})" for doc, because in stale.items()]
     documented_only = all(c.kind == DOCUMENTED for c in requirement.citations)
-    if about_doing and documented_only and requirement.verdict == "evidenced":
-        why.append(DOCUMENTED_ONLY)
-    if not why:
+    doing_unshown = about_doing and documented_only and requirement.verdict == "evidenced"
+    # In the profile's answer language, as the rest of the reason is (#354).
+    note = cap_note(stale, doing_unshown, language)
+    if note is None:
         return requirement
-    reason = f"{requirement.reason} {CAPPED} {'; '.join(why)}."
-    return replace(requirement, verdict="partly-evidenced", reason=reason)
+    return replace(requirement, verdict="partly-evidenced", reason=f"{requirement.reason} {note}")
 
 
 def plural(count: int, noun: str) -> str:

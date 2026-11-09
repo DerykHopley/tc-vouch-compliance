@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vouch.citations import occurs
+from vouch.documents import CYCLE_MONTHS, NO_REVIEW_DATE
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,74 @@ def language_refusal(found: str, expected: str) -> str:
         f"it is written in {found}, but the answer must be in {expected}. Write it in "
         f"{expected}, quoting documents unchanged in their own language"
     )
+
+
+@dataclass(frozen=True)
+class CapWords:
+    """The stale-evidence cap's note in one answer language (#354): its lead-in, a stale
+    document, why it is stale, and the documented-only clause."""
+
+    capped: str
+    stale: str  # {doc} and {because}
+    because: str  # {approved}, {cycle} and {due}
+    cycles: dict[str, str]
+    no_review_date: str
+    documented_only: str
+
+
+CAP_WORDS = {
+    "en": CapWords(
+        capped="At most partly evidenced:",
+        stale="{doc} is stale ({because})",
+        because="approved {approved} with a {cycle} review, due {due}",
+        cycles={cycle: cycle for cycle in CYCLE_MONTHS},
+        no_review_date=NO_REVIEW_DATE,
+        documented_only="it asks for something to be done, and only documented evidence shows it",
+    ),
+    "de": CapWords(
+        capped="Höchstens teilweise nachgewiesen:",
+        stale="{doc}: Prüfung überfällig ({because})",  # as the report's stale label says
+        because="freigegeben am {approved}, {cycle} zu prüfen, fällig am {due}",
+        cycles={
+            "quarterly": "vierteljährlich",
+            "half-yearly": "halbjährlich",
+            "yearly": "jährlich",
+            "two-yearly": "alle zwei Jahre",
+        },
+        no_review_date="kein Prüfdatum",
+        documented_only=(
+            "die Anforderung verlangt, dass etwas getan wird, und nur dokumentierte Nachweise "
+            "zeigen es"
+        ),
+    ),
+}
+"""The cap's words per answer language; any other language gets English's."""
+
+_STALE_BECAUSE = re.compile(
+    r"approved (?P<approved>\S+) with a (?P<cycle>\S+) review, due (?P<due>\S+)"
+)
+
+
+def cap_note(stale: dict[str, str | None], documented_only: bool, code: str) -> str | None:
+    """The cap's note in the answer language `code`: each stale document and why (`stale`, its
+    reason as vouch.documents gives it, in English), then the documented-only clause; None when
+    nothing caps it. A reason vouch.documents didn't write stays as it is."""
+    words = CAP_WORDS.get(code, CAP_WORDS["en"])
+    english = CAP_WORDS["en"]
+
+    def because(text: str | None) -> str:
+        if text in (None, english.no_review_date):
+            return words.no_review_date
+        found = _STALE_BECAUSE.fullmatch(text)
+        if not found:
+            return text
+        cycle = words.cycles.get(found["cycle"], found["cycle"])
+        return words.because.format(approved=found["approved"], cycle=cycle, due=found["due"])
+
+    why = [words.stale.format(doc=doc, because=because(text)) for doc, text in stale.items()]
+    if documented_only:
+        why.append(words.documented_only)
+    return f"{words.capped} {'; '.join(why)}." if why else None
 
 
 def audit_words_in(code: str) -> str:
