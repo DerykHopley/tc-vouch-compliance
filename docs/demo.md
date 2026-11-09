@@ -87,9 +87,9 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
 
 #### 3. Review in three steps (1:15)
 
-1. **Confirm findings.** In M1's row, select **Change**. Pick **Not evidenced** as the "Verdict", type a reason under
-   "Reason (required)" (**Save** stays disabled until you do), and select **Save**: "1 override,
-   recorded with the findings." Then select **Confirm findings**.
+1. **Confirm findings.** In M1's row, select **Change**. Pick **Not evidenced** as the "Verdict",
+   type a reason under "Reason (required)" (**Save** stays disabled until you do), and select
+   **Save**: "1 override, recorded with the findings." Then select **Confirm findings**.
 2. **Plan fixes.** The foot counts the remediation items decided (on the local run, "0 of 2
    remediation items decided."), and **Accept verdict** waits: "Approve or discard each
    remediation item to accept the verdict." On each remediation item, select **Approve** (or
@@ -150,10 +150,10 @@ live app, with one difference:
   ([features](features.md#3-ask-a-question)): ask "What's missing for 5.1.1?" or "Is there
   evidence of key management?", then type "Accept 5.1.1".
 
-Step 2 shows 5.1.1's stale encryption standard as on the live app, step 3 (with M1 set to Not evidenced) drafts two remediation
-items (M1 and S1), and step 5 runs 1.6.2 under Alpenwerk, overlay branch and all, without a
-restart. Export PDF downloads `readiness-report-nordlicht-<date>.pdf`, and Export Markdown the
-`.md`.
+Step 2 shows 5.1.1's stale encryption standard as on the live app, step 3 (with M1 set to Not
+evidenced) drafts two remediation items (M1 and S1), and step 5 runs 1.6.2 under Alpenwerk, overlay
+branch and all, without a restart. Export PDF downloads `readiness-report-nordlicht-<date>.pdf`, and
+Export Markdown the `.md`.
 
 ## Part 2, Keep improving
 
@@ -198,9 +198,9 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 
 > One model run assessed every open control, with all of Nordlicht's evidence in front of it. The
 > same guards as the per-control agent hold: every quote checked word for word, stale evidence
-> capped, the output guard on every answer. Vouch uses the pass only while its prompt and
-> expected reply fit under a token threshold, and it has its own daily limit; above the threshold, Vouch offers the
-> per-control agent instead.
+> capped, the output guard on every answer. Vouch uses the pass only while its prompt and expected
+> reply fit under a token threshold, and it has its own daily limit; above the threshold, Vouch
+> offers the per-control agent instead.
 
 #### 3. Three-step review of 4.1.2 (1:00)
 

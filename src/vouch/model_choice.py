@@ -15,14 +15,13 @@ OpenRouter, a chosen id is checked against its model list before it is kept, so 
 refused, not stored. When the stored choice can't be read, no assessment starts: a different
 paid model never runs in its place.
 
-Paid calls are bounded per assessment: at most CALL_BUDGET model calls (the graph's gather loop
-has no limit of its own), each retried at most MAX_RETRIES times. The openai SDK retries a
-timeout, a dropped connection, 408, 409, 429 and 5xx, after its backoff (0.5 s less up to 25%
-jitter, or the server's Retry-After). A request that timed out may still have been generated and
-billed by OpenRouter, so its retry may be billed again: TIMEOUT_SECONDS is long enough for a slow
-but valid answer, and one retry the most. A profile pass request is never retried
-(PROFILE_PASS_MAX_RETRIES). What still fails raises, and the API turns it into one
-`error` event.
+Paid calls are bounded per assessment: at most CALL_BUDGET model calls (the graph's gather loop has
+no limit of its own), each retried at most MAX_RETRIES times. The openai SDK retries a timeout, a
+dropped connection, 408, 409, 429 and 5xx, after its backoff (0.5 s less up to 25% jitter, or the
+server's Retry-After). A request that timed out may still have been generated and billed by
+OpenRouter, so its retry may be billed again: TIMEOUT_SECONDS is long enough for a slow but valid
+answer, and one retry the most. A profile pass request is never retried (PROFILE_PASS_MAX_RETRIES).
+What still fails raises, and the API turns it into one `error` event.
 """
 
 import logging

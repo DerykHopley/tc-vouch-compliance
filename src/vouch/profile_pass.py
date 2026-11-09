@@ -23,7 +23,7 @@ data, and checked against that control's citations only: one cited for another c
 
 import logging
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -80,11 +80,11 @@ log = logging.getLogger(__name__)
 
 PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-2"  # the lead's statements (#422)
 """The version of the pass's prompt: change it whenever the prompt changes."""
-INPUT_CHARS_PER_TOKEN = {"en": 2.5, "de": 1.9}
+INPUT_CHARS_PER_TOKEN: dict[str, float] = {"en": 2.5, "de": 1.9}
 """Characters a prompt token, by the profile's answer language (#432): rounded down from the
 2.68 (Nordlicht, English) and 1.92 (Alpenwerk, German) measured on Sonnet 5.5 (#430), so the
 estimate doesn't undercount. A language without its own rate takes German's (OTHER_LANGUAGE)."""
-OUTPUT_TOKENS_PER_REQUIREMENT = {"en": 320, "de": 420}
+OUTPUT_TOKENS_PER_REQUIREMENT: dict[str, int] = {"en": 320, "de": 420}
 """Reply tokens an applicable requirement, by the profile's answer language, which the reply is
 written in (#432): rounded up from the 311 (Nordlicht) and 415 (Alpenwerk) measured on #430."""
 OTHER_LANGUAGE = "de"
@@ -215,7 +215,7 @@ def _prompt(
     ]
 
 
-def _rate(rates: dict[str, Any], answer_language: str) -> Any:
+def _rate[T](rates: Mapping[str, T], answer_language: str) -> T:
     return rates.get(answer_language, rates[OTHER_LANGUAGE])
 
 
