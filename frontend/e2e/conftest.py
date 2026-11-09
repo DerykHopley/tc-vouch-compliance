@@ -66,6 +66,13 @@ def rounds_url() -> str:
 
 
 @pytest.fixture
+def plan_url() -> str:
+    """A tenth Vouch like vouch_url, for the improvement plan's checks (#410): its goal is Internal
+    improvement and its control ends Closed, which other checks would read."""
+    return os.environ["PLAN_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]
