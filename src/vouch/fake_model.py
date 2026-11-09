@@ -14,6 +14,7 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
 
 from vouch.graph import SUBMIT_ANSWER, Judgement, RemediationPlan, SubmitAnswer
+from vouch.profile_pass import CHARS_PER_TOKEN, ProfilePassReply
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -57,28 +58,42 @@ class Script(BaseModel):
     graph asks for a judgement again; the last one repeats. Its verdicts are any strings, as a
     real model's can be; the graph decides what an unknown one means. Keys the format doesn't
     name are ignored, as they always were. `remediate` works as `judge` does, for the drafts of
-    remediation items.
+    remediation items. `profile_pass` works as `judge` does too, for a profile pass's replies
+    (vouch.profile_pass); a script holding one may leave `gather` out, as a pass gathers nothing.
     """
 
-    gather: list[Turn] = Field(min_length=1)
+    gather: list[Turn] = Field(default_factory=list)
     judge: Judgement | list[Judgement] = Field(default_factory=Judgement)
     remediate: RemediationPlan | list[RemediationPlan] = Field(default_factory=RemediationPlan)
+    profile_pass: ProfilePassReply | list[ProfilePassReply] = Field(
+        default_factory=ProfilePassReply
+    )
 
     def replies_for(self, schema: type[BaseModel]) -> list[BaseModel]:
         """The structured replies scripted for a schema: the plans for a RemediationPlan, the
-        judgements for anything else (the judge's)."""
-        replies = self.remediate if schema is RemediationPlan else self.judge
+        pass's replies for a ProfilePassReply, the judgements for anything else (the judge's)."""
+        replies: BaseModel | list[Any]
+        if schema is RemediationPlan:
+            replies = self.remediate
+        elif schema is ProfilePassReply:
+            replies = self.profile_pass
+        else:
+            replies = self.judge
         return replies if isinstance(replies, list) else [replies]
 
     @model_validator(mode="after")
     def _answer_comes_last(self) -> "Script":
-        ends_with_answer = isinstance(self.gather[-1], AnswerTurn)
-        if not ends_with_answer:  # a ValueError, so pydantic reports it as a validation error
+        if not self.gather and "profile_pass" not in self.model_fields_set:
+            raise ValueError("gather: a script needs gather turns, or a profile_pass reply")
+        if self.gather and not isinstance(self.gather[-1], AnswerTurn):
+            # a ValueError, so pydantic reports it as a validation error
             raise ValueError("the last gather turn must be an answer")
         if not self.replies_for(Judgement):
             raise ValueError("judge: a list of judgements needs at least one")
         if not self.replies_for(RemediationPlan):
             raise ValueError("remediate: a list of plans needs at least one")
+        if not self.replies_for(ProfilePassReply):
+            raise ValueError("profile_pass: a list of replies needs at least one")
         return self
 
 
@@ -97,11 +112,9 @@ def _load_script(path: Path) -> Script:
         raise ScriptError(path, f"{where}: {first['msg']}") from error
 
 
-CHARS_PER_TOKEN = 4
-"""The fake's token counts: about four characters a token, as for English text."""
-
-
 def _tokens(text: str) -> int:
+    """The fake's token count for `text`: CHARS_PER_TOKEN, about four characters a token, as
+    the profile pass estimates its prompt (vouch.profile_pass)."""
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 

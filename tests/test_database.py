@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -600,6 +601,36 @@ def test_a_setting_is_kept_and_read_back_once_the_setup_has_run(empty_database):
 
     assert empty_database.setting("model") == "openai/gpt-5.5"
     assert database.SETTINGS_TABLE in tables(empty_database)
+
+
+@needs_postgres
+def test_profile_passes_taken_at_once_at_the_limit_are_never_counted_past_it(empty_database):
+    """The profile pass's count (#371), like take_assessment's: the limit read and the count taken
+    in one statement in its own table, so passes started together can't all slip under it."""
+    empty_database.setup()
+    day, limit, tries = date(2026, 11, 4), 3, 8
+    start = threading.Barrier(tries)
+    taken: list[bool] = []
+
+    def take() -> None:
+        start.wait()
+        counted, _ = empty_database.take_profile_pass("alice", day, "profile_pass_limit", limit)
+        taken.append(counted)
+
+    workers = [threading.Thread(target=take) for _ in range(tries)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=30)
+
+    assert sorted(taken) == [False] * (tries - limit) + [True] * limit
+    with empty_database.connection() as conn:
+        row = conn.execute(
+            f"SELECT count FROM {database.PROFILE_PASS_COUNTS_TABLE} WHERE user_id = 'alice'"
+        ).fetchone()
+        assessments = conn.execute(f"SELECT count(*) AS n FROM {database.COUNTS_TABLE}").fetchone()
+    assert row is not None and row["count"] == limit
+    assert assessments is not None and assessments["n"] == 0
 
 
 @needs_postgres

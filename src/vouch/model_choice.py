@@ -39,7 +39,7 @@ from pydantic import PrivateAttr, SecretStr
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
-from vouch.settings import Settings, demo_script, fake_model
+from vouch.settings import PROFILE_PASS_SCRIPT, Settings, demo_script, fake_model
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ MAX_RETRIES = 1
 """Retries of one call after the first try: each may be billed (a timeout too)."""
 TIMEOUT_SECONDS = 120.0
 """One request's limit: long enough that a slow but valid answer isn't cut off and paid twice."""
+PROFILE_PASS_TIMEOUT_SECONDS = 300.0
+"""One profile pass request's limit (#371): one reply holds every control's answer, verdicts and
+drafts, several times an assessment call's output."""
 CATALOGUE_TIMEOUT_SECONDS = 10.0
 CATALOGUE_TTL_SECONDS = 600.0
 """How long one reading of OpenRouter's model list answers id checks."""
@@ -335,6 +338,19 @@ class ModelChoice:
             fake.callbacks = callbacks
             return fake
         return self.openrouter.chat_model(chosen, callbacks)
+
+    def for_profile_pass(
+        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+    ) -> BaseChatModel:
+        """A fresh model for one profile pass (#371), on `chosen` (from `chosen()`), within
+        CALL_BUDGET calls and PROFILE_PASS_TIMEOUT_SECONDS a request; on the fake,
+        ASSESS_FAKE_SCRIPT when set, else the bundled pass script (PROFILE_PASS_SCRIPT, written
+        for Nordlicht). `callbacks` see every call (the usage meter)."""
+        if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
+            fake = fake_model(self._settings, PROFILE_PASS_SCRIPT)
+            fake.callbacks = callbacks
+            return fake
+        return self.openrouter.chat_model(chosen, callbacks, timeout=PROFILE_PASS_TIMEOUT_SECONDS)
 
     def for_chat(
         self,
