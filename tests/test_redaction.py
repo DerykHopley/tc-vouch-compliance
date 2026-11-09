@@ -27,6 +27,10 @@ JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyXzEifQ.c2lnbmF0dXJl"
         ("key sk_test_x", ["a key"]),
         ("key pk_test_Y2xlcmsuZXhhbXBsZS5jb20k", ["a key"]),
         ("signing secret whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", ["a key"]),
+        ("key sk-abc123", ["a key"]),  # an OpenAI-style key under 16 characters (#115)
+        ("token ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8", ["a key"]),  # GitHub classic
+        ("token github_pat_" + "11ABCDEFG0123456789_abcdefghijklmnop", ["a key"]),  # fine-grained
+        ("aws AKIA" + "IOSFODNN7EXAMPLE", ["a key"]),  # an AWS access key id
         ("Authorization: Bearer abcd", ["a token"]),  # any bearer token
         (f"Authorization: Bearer {JWT}", ["a token"]),
         ("authorization: bearer abcd", ["a token"]),  # the scheme name is case-insensitive
@@ -66,6 +70,8 @@ def test_a_password_in_a_url_is_removed_and_the_rest_kept():
         "The bearer token is checked offline.",
         "Valid 01/2024-12/2024, see doc 0815/2023, staffed 0800-1700.",
         "Call +49 30 12345678.",  # phone numbers aren't redacted (the owner, #36 review)
+        "The sk-learning module and the risk-based sk-12 control stay.",  # no key shape (#115)
+        "AKIA is not a key on its own; nor is ghp_ or github_pat_ alone.",
     ],
 )
 def test_redact_keeps_ordinary_compliance_text(text):
