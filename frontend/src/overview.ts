@@ -141,6 +141,9 @@ async function changeRound(path: string, body?: object): Promise<RoundChange> {
   }
 }
 
+/** A round's name is at most this many characters, as the API takes it (`vouch.rounds.NAME_LENGTH`). */
+export const ROUND_NAME_LENGTH = 60
+
 /** Starts the next review round by name (`POST /api/rounds`, #402); the start is an audit trail entry. */
 export const startRound = (name: string) => changeRound('/api/rounds', { name })
 

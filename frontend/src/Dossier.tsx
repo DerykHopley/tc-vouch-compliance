@@ -1,7 +1,8 @@
-import { type MouseEvent, useState } from 'react'
+import { type MouseEvent, useId, useState } from 'react'
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { changeGoal, closeRound, type ControlCard, controlPath, GOAL_WORDS, isoLabel, type NextStep, type Overview,
-  type OverviewState, type Readiness, type RoundChange, type RoundComparison, SEGMENTS, startRound } from './overview.ts'
+  type OverviewState, type Readiness, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
+  from './overview.ts'
 import type { PassState } from './profilePass.ts'
 import type { Goal } from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
@@ -194,6 +195,9 @@ function RoundRow({ overview, onChanged }: { overview: Overview; onChanged: Prop
   const [message, setMessage] = useState<string | null>(null)
   // The change was kept but the overview wasn't read again: Retry reads it again.
   const [stale, setStale] = useState(false)
+  // A blank name refused in the browser marks the field, described by the message (as DeveloperPage's fields).
+  const messageId = useId()
+  const unnamed = message === NAME_FIRST
   const reread = async () => setStale(!await onChanged())
   const send = async (request: () => Promise<RoundChange>) => {
     setBusy(true)
@@ -246,13 +250,14 @@ function RoundRow({ overview, onChanged }: { overview: Overview; onChanged: Prop
         <form className="round" onSubmit={(e) => { e.preventDefault(); start() }}>
           <span>No review round open.</span>
           <input className="field" type="text" aria-label="Name of the next round" placeholder="Name of the next round"
-            value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
+            value={name} onChange={(e) => setName(e.target.value)} maxLength={ROUND_NAME_LENGTH}
+            aria-invalid={unnamed || undefined} aria-describedby={unnamed ? messageId : undefined} />
           <button className="btn btn-ghost" type="submit" disabled={busy} aria-busy={busy || undefined}>
             Start round
           </button>
         </form>
       )}
-      {message !== null && <p role="alert" className="field-note notice">{message}</p>}
+      {message !== null && <p id={messageId} role="alert" className="field-note notice">{message}</p>}
       {stale && (
         <div className="next">
           <p role="alert" className="field-note notice">{ROUND_STALE}</p>
@@ -284,7 +289,13 @@ function Comparison({ overview, onOpen }: { overview: Overview; onOpen: Props['o
           <span className="pill">Review rounds</span>
           <h2 id="compare-title">Compared with the last round</h2>
         </div>
-        <p className="sheet empty">No closed review round yet. Close this one to compare the next with it.</p>
+        <p className="sheet empty">
+          {overview.rounds.current === null
+            // None open and none closed since the fresh start: the last one closed before it.
+            ? 'No review round has been closed since the fresh start. Start the next round, and once it is closed the '
+              + 'overview compares later work with it.'
+            : 'No closed review round yet. Close this one to compare the next with it.'}
+        </p>
       </section>
     )
   }
@@ -305,7 +316,7 @@ function Comparison({ overview, onOpen }: { overview: Overview; onOpen: Props['o
         </ul>
         {changed.length === 0 ? <p>Nothing has changed since {against.name} closed.</p> : (
           <>
-            <h3>Changed controls</h3>
+            <h3 className="prose-h">Changed controls</h3>
             <ul className="compare-rows">
               {changed.map((c) => (
                 <li key={c.control_id}>

@@ -53,7 +53,9 @@ class NoRoundOpen(Exception):
 class RoundRequest(BaseModel):
     """The name of the round the lead starts."""
 
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+    name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=NAME_LENGTH)
+    ]
 
 
 @dataclass(frozen=True)
@@ -163,10 +165,14 @@ class ProcessRounds:
             kept = self._rounds.setdefault((user_id, profile_id), [])
             if kept and kept[-1].closed_at is not None:
                 raise NoRoundOpen(NO_ROUND_OPEN)
-            open_round = kept.pop() if kept else FIRST
+            open_round = kept[-1] if kept else FIRST
             closed = replace(open_round, closed_at=at, results=tuple(results))
+            # The entry first: when it can't be written, the open round stays as it was.
             self._trail().keep([entry(closed.name)])
-            kept.append(closed)
+            if kept:
+                kept[-1] = closed
+            else:
+                kept.append(closed)
         return closed
 
 
@@ -333,10 +339,13 @@ def compare(
     against a closed round's `frozen` results (then), counted the same way: accepted verdicts
     only. `changed` lists, in the controls' order (the base framework's), each listed control
     whose accepted verdict differs (None when not accepted); a control frozen but no longer
-    listed is left out, one new to the profile reads None then."""
+    listed is left out, of the counts too, and one new to the profile reads None then."""
     controls = list(controls)
+    listed = {c.id for c in controls}
     standing = readiness(controls, latest)
-    then_accepted = {f.control_id: f.verdict for f in frozen if f.status == "accepted"}
+    then_accepted = {
+        f.control_id: f.verdict for f in frozen if f.status == "accepted" and f.control_id in listed
+    }
     then_verdicts = Counter(then_accepted.values())
     changed: list[Change] = []
     for control in controls:

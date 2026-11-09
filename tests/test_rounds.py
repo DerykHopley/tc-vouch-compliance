@@ -122,6 +122,9 @@ def test_a_control_frozen_but_no_longer_listed_is_left_out_and_a_new_one_reads_n
     shown = compare(frozen, listed, latest)
 
     assert shown["changed"] == [{"control_id": new, "before": None, "after": "evidenced"}]
+    # Counted as `changed` lists: the control no longer listed counts neither then nor now.
+    assert shown["accepted"] == {"now": 1, "then": 0}
+    assert shown["by_verdict"]["evidenced"] == {"now": 1, "then": 0}
 
 
 def test_nothing_changed_lists_nothing():
@@ -194,6 +197,43 @@ def test_a_closed_round_is_read_back_frozen_and_a_started_one_is_current(store, 
     assert back is not None
     assert (back.name, back.closed_at, list(back.results)) == ("First round", AT, frozen)
     assert store.current(bob["X-Test-User"], DEFAULT_PROFILE) == rounds.FIRST
+
+
+class FailingTrail(ProcessTrail):
+    """A trail whose write fails, to show a round is kept only with its entry."""
+
+    def keep(self, entries: list[AuditEntry]) -> None:
+        raise RuntimeError("the trail could not be written")
+
+
+def test_in_process_a_failing_entry_leaves_the_round_open_and_no_round_started(users):
+    alice, _ = users
+    a = alice["X-Test-User"]
+    working = ProcessTrail()
+    failing = FailingTrail()
+    trail = working
+    store = rounds.ProcessRounds(lambda: trail)
+    who = {"reviewer": reviewer(alice), "profile_id": DEFAULT_PROFILE}
+
+    trail = failing
+    with pytest.raises(RuntimeError):
+        rounds.close(store, [], clock=lambda: AT, **who)
+    assert store.current(a, DEFAULT_PROFILE) == rounds.FIRST  # still open
+    trail = working
+    rounds.close(store, [], clock=lambda: AT, **who)
+    rounds.start(store, "Q4 2026", clock=lambda: AT + timedelta(hours=1), **who)
+    trail = failing
+    with pytest.raises(RuntimeError):
+        rounds.close(store, [], clock=lambda: AT + timedelta(hours=2), **who)
+    assert store.current(a, DEFAULT_PROFILE) == rounds.Round(
+        "Q4 2026", AT + timedelta(hours=1), None
+    )
+    trail = working
+    rounds.close(store, [], clock=lambda: AT + timedelta(hours=3), **who)
+    trail = failing
+    with pytest.raises(RuntimeError):
+        rounds.start(store, "Q1 2027", **who)
+    assert store.current(a, DEFAULT_PROFILE) is None
 
 
 def test_start_while_one_is_open_and_close_with_none_open_are_refused(store, users):

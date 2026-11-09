@@ -583,9 +583,19 @@ describe('the review round on the Dossier (ticket 402)', () => {
     const { onRoundChanged } = shown(closed)
     await userEvent.type(nameField(), '   ')
     await userEvent.click(startButton())
-    expect((await screen.findByRole('alert')).textContent).toBe('Name the round first.')
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('Name the round first.')
+    expect(nameField().getAttribute('aria-invalid')).toBe('true')
+    expect(nameField().getAttribute('aria-describedby')).toBe(alert.id)
+    expect(alert.id).not.toBe('')
     expect(fetch).not.toHaveBeenCalled()
     expect(onRoundChanged).not.toHaveBeenCalled()
+  })
+
+  it('caps the name at the API\'s 60 characters', () => {
+    shown(closed)
+    expect(nameField().maxLength).toBe(60)
+    expect(nameField().getAttribute('aria-invalid')).toBeNull()
   })
 
   it('starts the round by its trimmed name, then reads the overview again', async () => {
@@ -675,5 +685,13 @@ describe('the round comparison on the Dossier (ticket 402)', () => {
     render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}}
       running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(screen.getByText('No closed review round yet. Close this one to compare the next with it.')).toBeTruthy()
+  })
+
+  it('with no round open and none closed since the fresh start says to start the next round', () => {
+    render(<Dossier state={{ status: 'ready', overview: { ...seeded(), rounds: { current: null, comparison: null } } }}
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
+    expect(screen.getByText('No review round has been closed since the fresh start. Start the next round, and once it '
+      + 'is closed the overview compares later work with it.')).toBeTruthy()
+    expect(screen.queryByText(/Close this one/)).toBeNull()
   })
 })
