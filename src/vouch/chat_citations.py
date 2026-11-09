@@ -21,6 +21,8 @@ replaces each dropped one with QUOTE_REMOVED, logs it once and says why in a gua
 
 import logging
 import re
+import sys
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -81,19 +83,46 @@ PAIRS: dict[str, tuple[str, ...]] = {
     "《": ("》",),
     "【": ("】",),
     "<q>": ("</q>",),
+    # #181: half-width, full-width and vertical forms, lookalike brackets, and primes.
+    "｢": ("｣",),
+    "＇": ("＇",),
+    "﹁": ("﹂",),
+    "﹃": ("﹄",),
+    "⹂": ("“", "”"),
+    "❛": ("❜",),
+    "❠": ("❞", "“", "”"),
+    "〈": ("〉",),
+    "〖": ("〗",),
+    "″": ("″",),
+    "‵": ("′",),
+    "<blockquote>": ("</blockquote>",),
 }
 """Each opening quotation mark and its own closing marks. Any other mark closes it too, when
-none of its own does in its paragraph (a model mixing “ and ")."""
+none of its own does in its paragraph (a model mixing “ and "). A tag (`<q>`, `<blockquote>`)
+matches in any case and with attributes; every other Unicode initial or final quotation mark
+(Pi, Pf) is added below, closed by itself."""
+for _code in range(sys.maxunicode + 1):
+    if unicodedata.category(chr(_code)) in ("Pi", "Pf"):
+        PAIRS.setdefault(chr(_code), (chr(_code),))
 _APOSTROPHES = "'’"
 """Marks that are also apostrophes: inside a word (company’s, don't) or before a digit (’90s)
 they neither open nor close a quotation, and they close only a quotation opened by a single
 mark."""
 _SINGLE = "‘’‚‛'"
+_INCHES = '"″＂'
+"""Marks that are also inch marks: right after a digit (a 15" screen) they open nothing."""
+_TAG_MARK = re.compile(r"</?([a-z]+)>")
 _PARAGRAPH_END = re.compile(r"\n[ \t]*\n")
 
 
 def _mark(mark: str, *, opening: bool) -> str:
+    if tag := _TAG_MARK.fullmatch(mark):  # any case; an opening tag with attributes too
+        if mark.startswith("</"):
+            return rf"(?i:</{tag.group(1)}\s*>)"
+        return rf"(?i:<{tag.group(1)}(?:\s[^<>]*)?>)"
     escaped = re.escape(mark)
+    if mark in _INCHES and opening:
+        return rf"(?<!\d){escaped}"
     if mark not in _APOSTROPHES:
         return escaped
     return rf"(?<!\w){escaped}(?!\d)" if opening else rf"{escaped}(?!\w)"
@@ -115,6 +144,12 @@ _OPENING = re.compile(
 )
 
 
+def _pair_of(found: str) -> str:
+    """The PAIRS key of an opening mark as written: a tag in its plain form."""
+    tag = re.match(r"<\s*(\w+)", found)
+    return f"<{tag.group(1).lower()}>" if tag else found
+
+
 def _quoted(text: str, opening: re.Match[str]) -> tuple[int, int, bool]:
     """Where the quotation `opening` starts ends: its words' end, its end, and whether a mark
     closed it. It ends at its own closing mark in its paragraph, else at any other quotation
@@ -122,7 +157,7 @@ def _quoted(text: str, opening: re.Match[str]) -> tuple[int, int, bool]:
     quotation), else, never closed, at its paragraph's end. Own marks first, so a quotation
     nested in it ("‘laptops’") doesn't end it. An apostrophe's quotation stays in its
     paragraph: a stray one far apart from its pair is likelier an apostrophe."""
-    mark, start = opening.group(), opening.end()
+    mark, start = _pair_of(opening.group()), opening.end()
     blank = _PARAGRAPH_END.search(text, start)
     paragraph_end = blank.start() if blank else len(text)
     tries = [(_OWN[mark], paragraph_end), (_ANY[mark], paragraph_end)]
@@ -135,8 +170,11 @@ def _quoted(text: str, opening: re.Match[str]) -> tuple[int, int, bool]:
     return words_end, words_end, False
 
 
-_BLOCKQUOTE = re.compile(r"^[ \t]*>[^\n]*(?:\n[ \t]*>[^\n]*)*", re.MULTILINE)
-_BLOCKQUOTE_MARK = re.compile(r"^[ \t]*>[ \t]?", re.MULTILINE)
+_ITEM = r"[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*"
+"""Indentation and list markers at any depth (`- `, `1. `, `- 2) `) before a blockquote's `>`."""
+_BLOCKQUOTE = re.compile(rf"^{_ITEM}(>[^\n]*(?:\n{_ITEM}>[^\n]*)*)", re.MULTILINE)
+"""A blockquote; group 1 starts at its `>`, so a dropped one leaves its list item."""
+_BLOCKQUOTE_MARK = re.compile(rf"^{_ITEM}>[ \t]?", re.MULTILINE)
 _CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]")
 
 CheckQuote = Callable[[str, str | None], str | None]
@@ -264,7 +302,7 @@ def _quotations(masked: str, citations: list[_Citation]) -> list[_Quotation]:
         if closed:
             closers.update(range(words_end, end))
         found.append((opening.start(), end, opening.end(), words_end))
-    found += [(*b.span(), *b.span()) for b in _BLOCKQUOTE.finditer(masked)]
+    found += [(*b.span(1), *b.span(1)) for b in _BLOCKQUOTE.finditer(masked)]
 
     def within_citation(start: int, end: int) -> bool:
         return any(c.inner <= start and end <= c.inner_end for c in citations)
