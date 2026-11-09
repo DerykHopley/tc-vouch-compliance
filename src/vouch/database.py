@@ -87,11 +87,17 @@ CREATE_SETTINGS = (
 
 COUNTS_TABLE = "vouch_assessment_counts"
 """How many assessments each user started on each UTC day (the daily limit, vouch.spending)."""
+PROFILE_PASS_COUNTS_TABLE = "vouch_profile_pass_counts"
+"""How many profile passes each user ran on each UTC day (their own daily limit, #371)."""
 USAGE_TABLE = "vouch_usage"
 """Each assessment's tokens and cost (vouch.spending)."""
 CREATE_COUNTS = (
     f"CREATE TABLE IF NOT EXISTS {COUNTS_TABLE} (user_id text NOT NULL, day date NOT NULL, "
     "count integer NOT NULL, PRIMARY KEY (user_id, day))"
+)
+CREATE_PROFILE_PASS_COUNTS = (
+    f"CREATE TABLE IF NOT EXISTS {PROFILE_PASS_COUNTS_TABLE} (user_id text NOT NULL, "
+    "day date NOT NULL, count integer NOT NULL, PRIMARY KEY (user_id, day))"
 )
 CREATE_USAGE = (
     f"CREATE TABLE IF NOT EXISTS {USAGE_TABLE} (id bigserial PRIMARY KEY, "
@@ -216,6 +222,7 @@ SETUP_TABLES = (
     "store_migrations",
     SETTINGS_TABLE,
     COUNTS_TABLE,
+    PROFILE_PASS_COUNTS_TABLE,
     USAGE_TABLE,
     AUDIT_TABLE,
     REMEDIATION_TABLE,
@@ -428,11 +435,25 @@ class Database:
         `limit_setting`, else `default_limit`): the limit read and the count taken in one
         statement, so nothing changes between them and two at once can't both slip under it.
         (counted, the limit). Raises DatabaseUnavailable."""
-        with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
+        return self._take(COUNTS_TABLE, user_id, day, limit_setting, default_limit)
+
+    def take_profile_pass(
+        self, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Count one profile pass for the user's day, as take_assessment counts an assessment,
+        in the passes' own table (#371). (counted, the limit). Raises DatabaseUnavailable."""
+        return self._take(PROFILE_PASS_COUNTS_TABLE, user_id, day, limit_setting, default_limit)
+
+    def _take(
+        self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """One more for the user's day in the counts `table`, if under the limit: the limit
+        read and the count taken in one statement."""
+        with self.connection() as conn, self._needs_setup(table):
             row = conn.execute(
                 "WITH lim AS (SELECT coalesce((SELECT value::integer FROM "
                 f"{SETTINGS_TABLE} WHERE name = %(setting)s), %(default)s) AS n), "
-                f"taken AS (INSERT INTO {COUNTS_TABLE} AS c (user_id, day, count) "
+                f"taken AS (INSERT INTO {table} AS c (user_id, day, count) "
                 "SELECT %(user_id)s, %(day)s, 1 FROM lim WHERE lim.n >= 1 "
                 "ON CONFLICT (user_id, day) DO UPDATE SET count = c.count + 1 "
                 "WHERE c.count < (SELECT n FROM lim) RETURNING c.count) "
@@ -679,6 +700,7 @@ class Database:
                 PostgresStore(conn).setup()
                 conn.execute(CREATE_SETTINGS)
                 conn.execute(CREATE_COUNTS)
+                conn.execute(CREATE_PROFILE_PASS_COUNTS)
                 conn.execute(CREATE_USAGE)
                 conn.execute(CREATE_AUDIT)
                 conn.execute(CREATE_AUDIT_INDEX)

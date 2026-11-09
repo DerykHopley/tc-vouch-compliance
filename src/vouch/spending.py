@@ -44,6 +44,13 @@ MAX_DAILY_LIMIT = 10_000
 DAILY_LIMIT_SETTING = "daily_limit"
 FAKE = "fake"
 """The model a usage names when the scripted fake ran."""
+PROFILE_PASS_DAILY_LIMIT = 3
+"""Profile passes a user may run in a UTC day (#371), apart from the assessments' limit. A
+developer may change it in the settings table, under PROFILE_PASS_LIMIT_SETTING, with no
+deploy."""
+PROFILE_PASS_LIMIT_SETTING = "profile_pass_daily_limit"
+PROFILE_PASS = "profile-pass"
+"""The control a usage record names for a profile pass (#371): one record for its one run."""
 CHAT = "chat"
 """The control a usage record names for a chat message (#44): no control was assessed, so the
 totals count its tokens and cost, but not as an assessment."""
@@ -289,6 +296,11 @@ class SpendingStore(Protocol):
         nothing: (under it, the limit)."""
         ...
 
+    def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
+        """Count one profile pass for the user's day if they're under the passes' own limit, the
+        limit read in the same step: (counted, the limit)."""
+        ...
+
     def record(self, record: UsageRecord) -> None: ...
 
     def totals(self) -> UsageTotals: ...
@@ -304,6 +316,8 @@ class MemorySpendingStore:
         self._limit = DAILY_LIMIT
         self._day: date | None = None
         self._counts: dict[str, int] = {}
+        self._pass_day: date | None = None
+        self._pass_counts: dict[str, int] = {}
         self._records: list[UsageRecord] = []
 
     def daily_limit(self) -> int:
@@ -326,6 +340,16 @@ class MemorySpendingStore:
         with self._lock:
             count = self._counts.get(user_id, 0) if day == self._day else 0
             return count < self._limit, self._limit
+
+    def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
+        with self._lock:
+            if day != self._pass_day:  # a new day: yesterday's counts go
+                self._pass_day, self._pass_counts = day, {}
+            count = self._pass_counts.get(user_id, 0)
+            if count >= PROFILE_PASS_DAILY_LIMIT:
+                return False, PROFILE_PASS_DAILY_LIMIT
+            self._pass_counts[user_id] = count + 1
+            return True, PROFILE_PASS_DAILY_LIMIT
 
     def record(self, record: UsageRecord) -> None:
         with self._lock:
@@ -366,6 +390,11 @@ class DatabaseSpendingStore:
 
     def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.under_assessment_limit(user_id, day, DAILY_LIMIT_SETTING, DAILY_LIMIT)
+
+    def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
+        return self.db.take_profile_pass(
+            user_id, day, PROFILE_PASS_LIMIT_SETTING, PROFILE_PASS_DAILY_LIMIT
+        )
 
     def record(self, record: UsageRecord) -> None:
         usage = record.usage
@@ -409,14 +438,25 @@ class DailyLimitReached(Exception):
         return f"You have reached today's limit of {self.limit} {noun}. It resets at {when}."
 
 
+class ProfilePassLimitReached(DailyLimitReached):
+    """The user has run `limit` profile passes today (#371); the count resets at `resets_at`."""
+
+    def message(self) -> str:
+        noun = "profile pass" if self.limit == 1 else "profile passes"
+        when = f"{self.resets_at:%H:%M} UTC on {self.resets_at.day} {self.resets_at:%B %Y}"
+        return f"You have reached today's limit of {self.limit} {noun}. It resets at {when}."
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _reached(limit: int, now: datetime) -> DailyLimitReached:
+def _reached(
+    limit: int, now: datetime, kind: type[DailyLimitReached] = DailyLimitReached
+) -> DailyLimitReached:
     """The limit reached at `now`; it resets at the next UTC midnight."""
     resets_at = datetime.combine(now.date() + timedelta(days=1), time(), tzinfo=UTC)
-    return DailyLimitReached(limit, resets_at, now)
+    return kind(limit, resets_at, now)
 
 
 class SpendingGuard:
@@ -438,6 +478,18 @@ class SpendingGuard:
             log.info("a user reached the daily limit of %d assessments", limit)
             raise _reached(limit, now)
 
+    def start_profile_pass(self, user_id: str, paid: bool) -> None:
+        """Count one profile pass for the user against the passes' own daily limit (#371), never
+        against the assessments'; `paid`: it runs on OpenRouter. Raises NoSharedCounter,
+        ProfilePassLimitReached, or DatabaseUnavailable: then the pass doesn't run."""
+        if paid and self.store.kept_in == "memory":
+            raise NoSharedCounter(NO_SHARED_COUNTER)
+        now = self.clock().astimezone(UTC)
+        taken, limit = self.store.take_profile_pass(user_id, now.date())
+        if not taken:
+            log.info("a user reached the daily limit of %d profile passes", limit)
+            raise _reached(limit, now, ProfilePassLimitReached)
+
     def check(self, user_id: str, paid: bool) -> None:
         """Before a chat message (#44), whose model calls go through the spending guard too:
         refused as an assessment would be, but nothing counted, as chat isn't an assessment.
@@ -456,8 +508,9 @@ class SpendingGuard:
         log.info("the daily limit is now %d assessments", limit)
 
     def record(self, user_id: str, control_id: str, usage: Usage) -> None:
-        """Keep the assessment's usage, or a chat message's (`control_id` CHAT); when the
-        database can't take it, the log says so and the answer still stands."""
+        """Keep the assessment's usage, a chat message's (`control_id` CHAT), or a profile
+        pass's (PROFILE_PASS); when the database can't take it, the log says so and the answer
+        still stands."""
         try:
             self.store.record(UsageRecord(user_id, control_id, usage, self.clock()))
         except DatabaseUnavailable:

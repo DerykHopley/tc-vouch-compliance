@@ -1138,40 +1138,16 @@ def build_graph(
         judge's rules (`_apply_rules`) cap what the checked citations can show. Each document
         is read once.
         """
-        today = date.fromisoformat(state["today"])
-        claims = state.get("claims", {})
-        checker = QuoteChecker(state["document_folders"], today=today)
-        doing = set(state.get("about_doing", []))
-        results, dropped = [], []
-        for requirement in state["requirements"]:
-            kept: list[Citation] = []
-            given = claims.get(requirement.id, [])
-            for claim in given:
-                checked = checker.check(claim)
-                if isinstance(checked, Citation):
-                    if checked not in kept:
-                        kept.append(checked)
-                    continue
-                log.warning(
-                    "dropped a citation for %s from %s (%s): %r",
-                    requirement.id,
-                    claim.doc_id,
-                    checked,
-                    claim.quote,
-                )
-                dropped.append(DroppedCitation(requirement.id, claim.doc_id, checked))
-            if not kept and requirement.verdict in SHOWN_VERDICTS:
-                reason = CITATIONS_DROPPED if given else NO_CITATION
-                requirement = replace(requirement, verdict="not-evidenced", reason=reason)
-            requirement = replace(requirement, citations=tuple(kept))
-            results.append(
-                _apply_rules(requirement, requirement.id in doing, profile.answer_language)
-            )
+        checker = QuoteChecker(state["document_folders"], today=date.fromisoformat(state["today"]))
+        results, dropped = checked_requirements(
+            state["requirements"],
+            state.get("claims", {}),
+            checker,
+            state.get("about_doing", []),
+            profile.answer_language,
+        )
         results, pending_ids = _noted_pending(results, state["pending"])
-        judged = {r.id: r.verdict for r in state["requirements"]}
-        changes = [
-            f"{r.id} to {verdict_words(r.verdict)}" for r in results if r.verdict != judged[r.id]
-        ]
+        changes = verdict_changes(state["requirements"], results)
         return {
             "requirements": results,
             "dropped_citations": dropped,
@@ -1489,6 +1465,56 @@ def _apply_rules(
     if note is None:
         return requirement
     return replace(requirement, verdict="partly-evidenced", reason=f"{requirement.reason} {note}")
+
+
+def checked_requirements(
+    requirements: Iterable[RequirementVerdict],
+    claims: dict[str, list[CitationClaim]],
+    checker: QuoteChecker,
+    about_doing: Iterable[str],
+    language: str,
+) -> tuple[list[RequirementVerdict], list[DroppedCitation]]:
+    """The quote check and the judge's rules on judged requirements, for the graph's
+    check_quotes step and the profile pass (vouch.profile_pass) alike.
+
+    Each citation whose quote is in the document it cites is kept; the rest are dropped and
+    logged. A requirement judged evidenced or partly evidenced with no citation left (none
+    given, or every one dropped) becomes not-evidenced: nothing checked shows it. Then the
+    judge's rules (`_apply_rules`) cap what the checked citations can show, the cap note in
+    `language`."""
+    doing = set(about_doing)
+    results, dropped = [], []
+    for requirement in requirements:
+        kept: list[Citation] = []
+        given = claims.get(requirement.id, [])
+        for claim in given:
+            checked = checker.check(claim)
+            if isinstance(checked, Citation):
+                if checked not in kept:
+                    kept.append(checked)
+                continue
+            log.warning(
+                "dropped a citation for %s from %s (%s): %r",
+                requirement.id,
+                claim.doc_id,
+                checked,
+                claim.quote,
+            )
+            dropped.append(DroppedCitation(requirement.id, claim.doc_id, checked))
+        if not kept and requirement.verdict in SHOWN_VERDICTS:
+            reason = CITATIONS_DROPPED if given else NO_CITATION
+            requirement = replace(requirement, verdict="not-evidenced", reason=reason)
+        requirement = replace(requirement, citations=tuple(kept))
+        results.append(_apply_rules(requirement, requirement.id in doing, language))
+    return results, dropped
+
+
+def verdict_changes(
+    judged: Iterable[RequirementVerdict], checked: Iterable[RequirementVerdict]
+) -> list[str]:
+    """ "M1 to partly evidenced": each verdict the checks changed from the judged one."""
+    before = {r.id: r.verdict for r in judged}
+    return [f"{r.id} to {verdict_words(r.verdict)}" for r in checked if r.verdict != before[r.id]]
 
 
 def plural(count: int, noun: str) -> str:
