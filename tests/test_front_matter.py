@@ -39,3 +39,7 @@ def test_without_a_closed_block_the_whole_text_is_body(text):
 )
 def test_a_block_that_isnt_a_mapping_gives_no_data_but_is_still_cut_from_the_body(head):
     assert split_front_matter(f"---\n{head}\n---\n# Top\n") == (None, "# Top\n")
+
+
+def test_an_impossible_unquoted_date_reads_as_no_front_matter():
+    assert split_front_matter("---\napproval_date: 2026-13-01\n---\nbody\n") == (None, "body\n")
