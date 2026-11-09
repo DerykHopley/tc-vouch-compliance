@@ -20,10 +20,10 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
-limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
-the remediation items the lead decided on (#43); nothing else does. Before it has run, a setting
-reads as unset, and a write, a count, the usage, a review or a remediation decision is
-DatabaseUnavailable (a 503).
+limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39), the
+remediation items the lead decided on (#43) and the companies made in the app (#385); nothing else
+does. Before it has run, a setting reads as unset and no company is found, and a write, a count,
+the usage, a review, a remediation decision or a new company is DatabaseUnavailable (a 503).
 """
 
 import hashlib
@@ -209,6 +209,14 @@ CREATE_REMEDIATION_TRIGGERS = (
 )
 """A decision is kept as made, as its audit entry is: the table refuses an update, a delete or
 a truncate, whoever asks."""
+COMPANY_PROFILES_TABLE = "vouch_company_profiles"
+"""Each company made in the app (#385): its id, the fields its compliance profile is rebuilt and
+checked from on load (vouch.company_profiles), never a server path, who made it and when."""
+COMPANY_PROFILE_COLUMNS = ("id", "profile", "created_by", "created_at")
+CREATE_COMPANY_PROFILES = (
+    f"CREATE TABLE IF NOT EXISTS {COMPANY_PROFILES_TABLE} (id text PRIMARY KEY, "
+    "profile jsonb NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL)"
+)
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -226,6 +234,7 @@ SETUP_TABLES = (
     USAGE_TABLE,
     AUDIT_TABLE,
     REMEDIATION_TABLE,
+    COMPANY_PROFILES_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -667,6 +676,53 @@ class Database:
                 log.error("no %s table: run vouch-db-setup on this database", REMEDIATION_TABLE)
                 return []
 
+    def create_company_profile(
+        self,
+        ids: Iterator[str],
+        profile: Mapping[str, Any],
+        created_by: str,
+        created_at: datetime,
+    ) -> str:
+        """Keep a company profile under the first of `ids` (endless) no row holds yet; that id.
+        Each try is one insert that takes the id or finds it taken, so two at once get different
+        ids. Raises DatabaseUnavailable, also before vouch-db-setup ran."""
+        with (
+            self.connection() as conn,
+            self._failed(COMPANY_PROFILES_TABLE),
+            self._needs_setup(COMPANY_PROFILES_TABLE),
+        ):
+            while True:
+                profile_id = next(ids)
+                row = conn.execute(
+                    f"INSERT INTO {COMPANY_PROFILES_TABLE} ({', '.join(COMPANY_PROFILE_COLUMNS)}) "
+                    "VALUES (%s, %s, %s, %s) ON CONFLICT (id) DO NOTHING RETURNING id",
+                    (profile_id, Jsonb(dict(profile)), created_by, created_at),
+                ).fetchone()
+                if row is not None:
+                    return str(row["id"])
+
+    def company_profiles(self) -> list[dict[str, Any]]:
+        """Every company profile, oldest first: mappings of COMPANY_PROFILE_COLUMNS; none before
+        vouch-db-setup made the table (logged). Raises DatabaseUnavailable."""
+        return self._read_company_profiles("ORDER BY created_at, id", {})
+
+    def company_profile(self, profile_id: str) -> dict[str, Any] | None:
+        """The company profile `profile_id`, as company_profiles gives it; None when there is
+        none, also before vouch-db-setup made the table (logged). Raises DatabaseUnavailable."""
+        rows = self._read_company_profiles("WHERE id = %(id)s", {"id": profile_id})
+        return rows[0] if rows else None
+
+    def _read_company_profiles(self, rest: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+        query = f"SELECT {', '.join(COMPANY_PROFILE_COLUMNS)} FROM {COMPANY_PROFILES_TABLE} {rest}"
+        with self.connection() as conn:
+            try:
+                return conn.execute(query, params).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error(
+                    "no %s table: run vouch-db-setup on this database", COMPANY_PROFILES_TABLE
+                )
+                return []
+
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[dict[str, Any]]:
@@ -714,6 +770,7 @@ class Database:
                 conn.execute(CREATE_REMEDIATION_GUARD)
                 for trigger in CREATE_REMEDIATION_TRIGGERS:
                     conn.execute(trigger)
+                conn.execute(CREATE_COMPANY_PROFILES)
         finally:
             conn.close()
 

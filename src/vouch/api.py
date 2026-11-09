@@ -8,6 +8,7 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import asyncio
+import json
 import logging
 import re
 import threading
@@ -21,12 +22,14 @@ from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, remediation, report, report_pdf
+from vouch import audit, company_profiles, remediation, report, report_pdf
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -83,7 +86,10 @@ from vouch.profile import (
     SAMPLE_LIBRARY,
     BrokenProfile,
     ComplianceProfile,
+    ProfileError,
     ProfileScan,
+    load_problem,
+    profile_folder_names,
     scan_profiles,
 )
 from vouch.profile_pass import (
@@ -314,6 +320,14 @@ def _refused(detail: str, reason: str) -> HTTPException:
     return _Refused(status_code=403, detail={"detail": detail, "reason": reason})
 
 
+def request_refused(request: Request, error: Exception) -> Response:
+    """FastAPI's own 422 for a request its checks refuse, written as ASCII JSON: the input it
+    echoes may hold a lone surrogate, which no UTF-8 body can carry (#385)."""
+    assert isinstance(error, RequestValidationError)
+    body = json.dumps({"detail": jsonable_encoder(error.errors())}, ensure_ascii=True)
+    return Response(body, status_code=422, media_type="application/json")
+
+
 def refused(request: Request, error: Exception) -> JSONResponse:
     """A _Refused 403 as `{"detail": ..., "reason": ...}`, beside FastAPI's own `detail`."""
     assert isinstance(error, _Refused)
@@ -328,11 +342,20 @@ def rate_limit(request: Request, user: CurrentUser) -> None:
         raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS, headers=headers)
 
 
-def user_profiles(settings: Settings, user: User) -> ProfileScan:
-    """The one place that decides which compliance profiles a user may see and use (#47): for
-    now every profile in the profiles folder, for every user, each read once. A broken one is
-    left out (and listed for the developer page), never a failure. The sample library's
-    reference profile is no company, so it is left out too (#370)."""
+def app_company_profiles(db: AppDatabase) -> company_profiles.CompanyProfiles:
+    """Where companies made in the app are kept (#385): Postgres with a database URL, else this
+    process."""
+    if db is None:
+        return company_profiles.process_company_profiles()
+    return company_profiles.PostgresCompanyProfiles(db)
+
+
+CompanyProfiles = Annotated[company_profiles.CompanyProfiles, Depends(app_company_profiles)]
+
+
+def file_profiles(settings: Settings) -> ProfileScan:
+    """Every profile in the profiles folder, each read once, except the sample library's
+    reference profile, which is no company (#370)."""
     scan = scan_profiles(settings.profiles_dir)
     return ProfileScan(
         tuple(p for p in scan.loaded if p.id != SAMPLE_LIBRARY),
@@ -340,15 +363,52 @@ def user_profiles(settings: Settings, user: User) -> ProfileScan:
     )
 
 
+SHADOWED = "its id is now a file profile's"
+"""Why a company made in the app is left out when a profile folder of its id was added since."""
+
+
+def user_profiles(settings: Settings, user: User, companies: CompanyProfiles) -> ProfileScan:
+    """The compliance profiles a user is shown (#47), the profile switcher's and the developer
+    page's: for now, for every user, the profiles folder's (file_profiles), then the companies
+    made in the app, oldest first (#385), each read once. A broken one is left out (and listed
+    for the developer page), never a failure; so is a stored one whose id a file profile has
+    taken since, as the file profile is the one opened. When the stored ones can't be read, the
+    file ones (logged). Which profile a request is under is compliance_profile's to decide,
+    with the same file-first rule; a per-user choice must change both (#163)."""
+    files = file_profiles(settings)
+    try:
+        rows = companies.all()
+    except DatabaseUnavailable:
+        log.warning("the companies made in the app can't be read: listing the file profiles only")
+        return files
+    file_ids = {p.id for p in files.loaded} | {p.id for p in files.broken}
+    stored: list[ComplianceProfile | BrokenProfile] = [
+        BrokenProfile(row.id, SHADOWED)
+        if row.id in file_ids
+        else company_profiles.read_stored_once(row)
+        for row in rows
+    ]
+    return ProfileScan(
+        (*files.loaded, *(p for p in stored if isinstance(p, ComplianceProfile))),
+        (*files.broken, *(p for p in stored if isinstance(p, BrokenProfile))),
+    )
+
+
 def compliance_profile(
     settings: AppSettings,
     user: CurrentUser,
+    companies: CompanyProfiles,
     chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
 ) -> ComplianceProfile:
-    """The profile the request names, else the default, from the user's profiles. Settled
-    before the stream starts: one the user doesn't have is a 404; a broken one a plain 500."""
+    """The profile the request names, else the default: a file profile first, so a request
+    under one never reads the database, else a company made in the app (the file-first rule
+    user_profiles lists by). Settled before the stream starts: one there is none of is a 404; a
+    broken one a plain 500; a stored company's that can't be read a 503."""
     name = chosen or DEFAULT_PROFILE
-    found = user_profiles(settings, user).find(name)
+    found = file_profiles(settings).find(name)
+    if found is None and company_profiles.is_profile_name(name):
+        row = companies.one(name)
+        found = None if row is None else company_profiles.read_stored_once(row)
     if found is None:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
     if isinstance(found, BrokenProfile):
@@ -824,23 +884,27 @@ def read_audit_trail(
 
 
 @router.get("/profiles")
-def list_profiles(settings: AppSettings, user: CurrentUser) -> dict[str, Any]:
+def list_profiles(
+    settings: AppSettings, user: CurrentUser, companies: CompanyProfiles
+) -> dict[str, Any]:
     """The compliance profiles the user may switch between (#47): each one's id, company,
     country and answer language. A profile that can't be loaded is left out (the developer page
     names it). `default` is the profile a request without X-Vouch-Profile is under; null when
     that one is left out."""
-    scan = user_profiles(settings, user)
-    listed = [
-        {
-            "id": p.id,
-            "company": p.company,
-            "country": p.country,
-            "answer_language": p.answer_language,
-        }
-        for p in scan.loaded
-    ]
+    scan = user_profiles(settings, user, companies)
+    listed = [listed_profile(p) for p in scan.loaded]
     default = scan.find(DEFAULT_PROFILE)
     return {"profiles": listed, "default": default.id if default in scan.loaded else None}
+
+
+def listed_profile(profile: ComplianceProfile) -> dict[str, str]:
+    """A profile as the profile switcher lists it."""
+    return {
+        "id": profile.id,
+        "company": profile.company,
+        "country": profile.country,
+        "answer_language": profile.answer_language,
+    }
 
 
 _paper_requirements: dict[str, tuple[ComplianceProfile, Any]] = {}
@@ -1225,12 +1289,16 @@ def _developer_page(
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
 def developer_settings(
-    models: AppModels, spending: AppSpending, settings: AppSettings, user: CurrentUser
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
 ) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
     limit, every assessment's usage totalled, and the compliance profiles left out of the
     profile switcher because they can't be loaded (#47), each with its problem."""
-    broken = user_profiles(settings, user).broken
+    broken = user_profiles(settings, user, companies).broken
     return _developer_page(models, spending) | {"broken_profiles": [asdict(b) for b in broken]}
 
 
@@ -1256,6 +1324,33 @@ def change_model(request: ModelRequest, models: AppModels, spending: AppSpending
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
     return _developer_page(models, spending, model)
+
+
+@router.post("/developer/profiles", dependencies=DEVELOPERS, status_code=201)
+def create_company_profile(
+    setup: company_profiles.CompanySetup,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
+) -> dict[str, str]:
+    """A company made in the app (company setup, #385), its evidence chosen documents of the
+    sample library, kept and listed beside the file profiles; answers it as GET /api/profiles
+    lists it. A profile the checks refuse is a 422 naming the field, with nothing kept; the
+    database down, a 503."""
+    # Checked before it is kept, so a refused one keeps nothing. Its id is known only once
+    # kept (the store takes the first free one, racing creates included), and a stored
+    # profile's checks don't depend on its id, so it is checked under the id its name gives.
+    try:
+        profile = company_profiles.compliance_profile_of(
+            company_profiles.company_id(setup.company), setup
+        )
+    except ProfileError as error:
+        raise HTTPException(status_code=422, detail=load_problem(error)) from None
+    taken = profile_folder_names(settings.profiles_dir)
+    fields = setup.model_dump(mode="json")
+    profile_id = companies.create(setup.company, fields, user.id, taken)
+    log.info("company profile %s created by %s", profile_id, user.id)
+    return listed_profile(profile) | {"id": profile_id}
 
 
 @router.get("/access")
@@ -1328,6 +1423,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.add_exception_handler(DatabaseUnavailable, database_unavailable)
     app.add_exception_handler(_Refused, refused)
+    app.add_exception_handler(RequestValidationError, request_refused)
     app.add_exception_handler(DailyLimitReached, daily_limit_reached)
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
