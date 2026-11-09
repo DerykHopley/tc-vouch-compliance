@@ -41,9 +41,14 @@ export type ProtectionScope = {
 
 /** What each protection level brings into scope, normal to very high; null when it could not be read. */
 export async function protectionLevels(): Promise<ProtectionScope[] | null> {
+  return (await read<{ levels: ProtectionScope[] }>('/api/developer/protection-levels'))?.levels ?? null
+}
+
+/** A developer route's JSON answer; null when it is refused or unreachable. */
+async function read<T>(path: string): Promise<T | null> {
   try {
-    const response = await fetch('/api/developer/protection-levels', { headers: await authHeaders() })
-    if (response.ok) return ((await response.json()) as { levels: ProtectionScope[] }).levels
+    const response = await fetch(path, { headers: await authHeaders() })
+    if (response.ok) return (await response.json()) as T
     sessionEnded(response) // a 401 signs out, as every API call's does
     return null
   } catch {
@@ -58,4 +63,26 @@ export function scopeWords(scope: ProtectionScope): string {
   const where = scope.added_controls
   const added = plural(scope.added, `${PROTECTION_LEVELS[scope.level].kind} requirement`)
   return `Adds ${added}, in ${plural(where.length, 'control')} (${where.join(', ')}): ${scope.total} in all.`
+}
+
+/** One control of the base framework, as GET /api/developer/controls sends it (#407). */
+export type FrameworkControl = { id: string; question: string }
+
+/** Every control of the base framework's English edition, in its order; null when it could not be read. */
+export async function frameworkControls(): Promise<FrameworkControl[] | null> {
+  return (await read<{ controls: FrameworkControl[] }>('/api/developer/controls'))?.controls ?? null
+}
+
+/** A control marked not applicable on step 5 (#407), as CompanySetup.not_applicable takes it: whole controls only, so
+ * no requirement. The reason is kept as typed; it is trimmed where the create request is built (#409). */
+export type NotApplicable = { control: string; reason: string }
+
+/** Step 5's checks (#407): the marked controls whose reason is empty or only spaces, in the framework's order, and
+ * whether every control is marked (at least one must apply). Nothing is found while `controls` is empty (unread). */
+export function notApplicableProblems(marked: readonly NotApplicable[], controls: readonly FrameworkControl[]) {
+  const ids = new Set(marked.map((m) => m.control))
+  return {
+    blank: controls.filter((c) => marked.some((m) => m.control === c.id && m.reason.trim() === '')).map((c) => c.id),
+    allMarked: controls.length > 0 && controls.every((c) => ids.has(c.id)),
+  }
 }

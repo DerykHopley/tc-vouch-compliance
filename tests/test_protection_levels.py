@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_auth import FakeClerk, bearer, clerk_app, token
 
-from vouch import profile
+from vouch import api, profile
 from vouch.api import create_app
 from vouch.isa import BaseFrameworkError, load_base_framework
 from vouch.profile import in_scope, protection_scope
@@ -100,6 +100,46 @@ def test_an_unreadable_base_framework_is_a_500_naming_no_server_path(monkeypatch
     client = TestClient(create_app(Settings()), raise_server_exceptions=False)
 
     response = client.get(PATH)
+
+    assert response.status_code == 500
+    assert "/srv" not in response.text
+    assert "controls.yaml" not in response.text
+
+
+CONTROLS_PATH = "/api/developer/controls"
+
+
+def test_a_developer_gets_every_base_control_in_the_frameworks_order():
+    client = TestClient(create_app(Settings()), raise_server_exceptions=False)
+
+    response = client.get(CONTROLS_PATH)
+
+    assert response.status_code == 200
+    expected = [{"id": c.id, "question": c.question} for c in load_base_framework().controls]
+    assert response.json() == {"controls": expected}
+    assert len(expected) == 12
+
+
+def test_the_controls_to_a_compliance_lead_403_and_signed_out_401(clerk):
+    client = TestClient(clerk_app(clerk), raise_server_exceptions=False)
+
+    lead = client.get(CONTROLS_PATH, headers=bearer(token("user_alice")))
+    signed_out = client.get(CONTROLS_PATH)
+
+    assert lead.status_code == 403
+    assert signed_out.status_code == 401
+
+
+def test_the_controls_from_an_unreadable_framework_are_a_500_naming_no_server_path(monkeypatch):
+    where = Path("/srv/app/src/vouch/data/vda-isa-2027.1/controls.yaml")
+
+    def unreadable(*args, **kwargs):
+        raise BaseFrameworkError(where, "not valid YAML")
+
+    monkeypatch.setattr(api, "load_base_framework", unreadable)
+    client = TestClient(create_app(Settings()), raise_server_exceptions=False)
+
+    response = client.get(CONTROLS_PATH)
 
     assert response.status_code == 500
     assert "/srv" not in response.text

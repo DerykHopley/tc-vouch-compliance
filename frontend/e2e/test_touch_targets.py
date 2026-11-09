@@ -5,7 +5,7 @@ import re
 
 import pytest
 from playwright.sync_api import Page, expect
-from test_company_setup import LEVELS, open_setup, to_step_3
+from test_company_setup import LEVELS, control, open_setup, press, to_step_3, to_step_5
 from test_guided_chat import assess_in_the_chat
 from test_profiles import assessed as assessed_in
 from test_remediation import ITEM, accepted_with_an_item
@@ -56,11 +56,12 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
     assert small_targets(page) == []
 
 
-@pytest.mark.parametrize("step", ["company", "levels", "levels failed"])
+@pytest.mark.parametrize("step", ["company", "levels", "levels failed", "not applicable"])
 def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     page: Page, profiles_url, step
 ):
-    # #403: steps 1 and 3, and step 3 when the scope can't be read (its Try again).
+    # #403: steps 1 and 3, and step 3 when the scope can't be read (its Try again); #407: step 5,
+    # a control ticked with its reason field open.
     page.set_viewport_size({"width": 400, "height": 900})
     if step == "levels failed":
         page.route(f"**{LEVELS}", lambda route: route.fulfill(status=500, body="{}"))
@@ -71,10 +72,13 @@ def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     if step == "levels failed":
         page.get_by_role("textbox", name="Company name").fill("Musterfirma Nord GmbH")
         page.get_by_role("combobox", name="Country").select_option("Germany")
-        page.get_by_role("button", name="Next").click()
+        press(page, "Next")
         with page.expect_response(lambda r: LEVELS in r.url):
-            page.get_by_role("button", name="Next").click()
+            press(page, "Next")
         expect(page.get_by_role("button", name="Try again")).to_be_visible()
+    if step == "not applicable":
+        to_step_5(page)
+        control(page, "1.6.1").check()
     assert small_targets(page) == []
 
 

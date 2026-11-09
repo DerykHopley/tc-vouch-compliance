@@ -454,6 +454,24 @@ textarea.field { resize: vertical; font-family: inherit; }
 .setup-option input { margin-left: -8px; }
 .setup-option-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .setup-option-name { font-weight: 600; }
+/* Step 5 (#407): a control's checkbox is drawn as the radio is, a 44px target holding an 18px box (--muted edge on
+   --sheet; ticked, --ink with a --sheet tick drawn from two strokes); its reason field sits under the question. */
+.setup-na { display: grid; gap: 4px; }
+.setup-check { align-items: flex-start; }
+.setup-check .setup-option-text { display: block; padding-top: 11px; }
+.setup-check input { border-radius: 4px; background:
+  linear-gradient(var(--sheet), var(--sheet)) center / 14px 14px no-repeat,
+  linear-gradient(var(--muted), var(--muted)) center / 18px 18px no-repeat; }
+.setup-check input:checked { background:
+  linear-gradient(45deg, transparent 32%, var(--sheet) 32% 68%, transparent 68%) 16px 21px / 5px 5px no-repeat,
+  linear-gradient(135deg, transparent 40%, var(--sheet) 40% 60%, transparent 60%) 19px 16px / 10px 10px no-repeat,
+  linear-gradient(var(--ink), var(--ink)) center / 18px 18px no-repeat; }
+.setup-reason { margin-left: 32px; }
+/* Forced colours (Windows High Contrast) drop the drawn ring and box above, leaving an empty target: give the radio
+   and the checkbox back the system's own, which draws in the system colours. */
+@media (forced-colors: active) {
+  .setup-choice input { appearance: auto; width: 18px; height: 18px; margin: 13px 13px 13px 1px; }
+}
 .setup-alert { display: grid; gap: 8px; justify-items: start; }
 .setup-alert p { margin: 0; }
 .setup-nav { display: flex; gap: 8px; }

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { profileTag } from './profiles.ts'
-import { COUNTRIES, protectionLevels, type ProtectionScope, scopeWords } from './setup.ts'
+import {
+  COUNTRIES, frameworkControls, notApplicableProblems, protectionLevels, type ProtectionScope, scopeWords,
+} from './setup.ts'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -50,5 +52,48 @@ describe('the protection levels', () => {
     expect(scopeWords({ ...HIGH, added: 1, added_controls: ['1.6.2'] }))
       .toBe('Adds 1 high-protection requirement, in 1 control (1.6.2): 99 in all.')
     expect(scopeWords({ ...normal, controls: 1 })).toBe('Must and should requirements: 85 in 1 control.')
+  })
+})
+
+describe("the framework's controls", () => {
+  const CONTROLS = [{ id: '1.1.1', question: 'To what extent are policies available?' }]
+
+  it("read the route's controls", async () => {
+    const fetch = vi.fn((_url: string) => Promise.resolve(new Response(JSON.stringify({ controls: CONTROLS }))))
+    vi.stubGlobal('fetch', fetch)
+    expect(await frameworkControls()).toEqual(CONTROLS)
+    expect(fetch.mock.calls[0][0]).toBe('/api/developer/controls')
+  })
+
+  it('are null when refused or unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))))
+    expect(await frameworkControls()).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    expect(await frameworkControls()).toBeNull()
+  })
+})
+
+describe("step 5's checks on the controls marked not applicable", () => {
+  const CONTROLS = ['1.1.1', '1.6.1', '5.1.1'].map((id) => ({ id, question: `${id}?` }))
+
+  it('find nothing wrong with none marked, or with each marked one given a reason', () => {
+    expect(notApplicableProblems([], CONTROLS)).toEqual({ blank: [], allMarked: false })
+    expect(notApplicableProblems([{ control: '5.1.1', reason: ' No crypto ' }], CONTROLS))
+      .toEqual({ blank: [], allMarked: false })
+  })
+
+  it("name each marked control whose reason is empty or only spaces, in the framework's order", () => {
+    const marked = [{ control: '5.1.1', reason: '  ' }, { control: '1.6.1', reason: 'Fine' }, { control: '1.1.1', reason: '' }]
+    expect(notApplicableProblems(marked, CONTROLS).blank).toEqual(['1.1.1', '5.1.1'])
+  })
+
+  it('say when every control is marked, so none would apply', () => {
+    const marked = CONTROLS.map((c) => ({ control: c.id, reason: 'Not here' }))
+    expect(notApplicableProblems(marked, CONTROLS)).toEqual({ blank: [], allMarked: true })
+    expect(notApplicableProblems(marked.slice(1), CONTROLS).allMarked).toBe(false)
+  })
+
+  it('find nothing to check while the controls are unknown', () => {
+    expect(notApplicableProblems([{ control: '1.1.1', reason: '' }], [])).toEqual({ blank: [], allMarked: false })
   })
 })
