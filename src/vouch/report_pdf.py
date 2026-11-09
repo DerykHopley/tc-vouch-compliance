@@ -22,7 +22,8 @@ Markdown, nothing in a PDF's text can turn into a heading or live HTML, so nothi
 fpdf2 is imported here only, keeping it out of vouch.report.
 """
 
-from collections.abc import Iterable, Mapping, Sequence
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,20 @@ class _Sheet(FPDF):
         self.ln(size * 0.4)
         self.paragraph(text, size, bold=True)
         self.ln(1.5)
+
+    def wrapped(self, text: object, width: float, size: float, bold: bool = False) -> list[str]:
+        """The lines a table cell `width` mm wide draws `text` in, in this font size and weight."""
+        self.font(size, bold)
+        lines = self.multi_cell(
+            width,
+            1,
+            self.drawable(text),
+            dry_run=True,
+            output=MethodReturnValue.LINES,
+            padding=CELL_PADDING,
+        )
+        assert isinstance(lines, list)  # output=LINES: the wrapped lines
+        return lines
 
     def cell_text(self, text: object, width: float, notes: list[tuple[int, str]]) -> str:
         """A cell's text in the current font: on one line of text (each line break a space),
@@ -187,8 +202,10 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
         # Its 11 columns need the width: the trail starts a landscape A4 page.
         sheet.add_page(orientation="landscape")
         sheet.heading(labels["trail"], SECTION)
-        widths = (22, 22, 16, 20, 20, 26, 26, 44, 29, 20, 22)  # 267 mm: landscape A4's width
-        sheet.grid(rows.trail_columns(words), rows.trail_rows(entries, words), widths, TRAIL)
+        head, body, widths = trail_table(
+            sheet, rows.trail_columns(words), rows.trail_rows(entries, words)
+        )
+        sheet.grid(head, body, widths, TRAIL)
     else:
         sheet.heading(labels["trail"], SECTION)
         sheet.paragraph(sentences["no_trail"])
@@ -198,6 +215,75 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     sheet.ln(2)
     sheet.paragraph(report["disclaimer"])
     return bytes(sheet.output())
+
+
+_PIECE = re.compile(r"[^\s/-]*[/-]?")
+"""A piece of an id a line may break after: up to and with a "-" or "/"."""
+BREAK = "\u200b"
+"""A zero-width space: where a line may break inside an id, after its "-" or "/"."""
+
+
+def trail_table(
+    sheet: _Sheet, columns: Sequence[str], body: Sequence[Sequence[object]]
+) -> tuple[list[str], list[list[str]], tuple[float, ...]]:
+    """The audit trail's header, rows and column widths across the page (#353), so no line
+    breaks inside a word. Each column is at least as wide as its widest word or id (a header's
+    in bold); the rest of the page is shared out by how much more each column's longest cell
+    wants. When the words can't all fit, an id may break after a "-" or "/" instead (a BREAK
+    there), each column then as wide as its widest piece; past that, the page is shared."""
+    head = [str(c) for c in columns]
+    rows = [[str(v) for v in r] for r in body]
+    widths = _fitted(sheet, head, rows, str.split)
+    if widths is None:
+        head = [_breakable(c) for c in head]
+        rows = [[_breakable(v) for v in r] for r in rows]
+        widths = _fitted(sheet, head, rows, lambda text: _PIECE.findall(text.replace(BREAK, "")))
+    if widths is None:  # pieces too wide for the page: scaled to it
+        least = _least(sheet, head, rows, lambda text: _PIECE.findall(text.replace(BREAK, "")))
+        widths = tuple(w * sheet.epw / sum(least) for w in least)
+    return head, rows, widths
+
+
+def _breakable(text: str) -> str:
+    return re.sub(r"(?<=[/-])(?=\S)", BREAK, text)
+
+
+def _width(sheet: _Sheet, text: str, bold: bool) -> float:
+    sheet.font(TRAIL, bold)
+    return sheet.get_string_width(sheet.drawable(text)) + 2 * CELL_PADDING + 2 * sheet.c_margin
+
+
+def _columns(head: list[str], rows: list[list[str]]) -> list[list[tuple[str, bool]]]:
+    return [[(c, True)] + [(r[i], False) for r in rows] for i, c in enumerate(head)]
+
+
+def _least(
+    sheet: _Sheet, head: list[str], rows: list[list[str]], parts: Callable[[str], list[str]]
+) -> list[float]:
+    return [
+        max([_width(sheet, p, bold) for text, bold in col for p in parts(text) if p], default=0)
+        for col in _columns(head, rows)
+    ]
+
+
+def _fitted(
+    sheet: _Sheet, head: list[str], rows: list[list[str]], parts: Callable[[str], list[str]]
+) -> tuple[float, ...] | None:
+    """Widths at least the widest of each column's `parts`, the rest of the page shared by
+    what each column's longest cell wants on one line; None when the parts don't fit."""
+    least = _least(sheet, head, rows, parts)
+    spare = sheet.epw - sum(least)
+    if spare < 0:
+        return None
+    whole = [
+        max(_width(sheet, " ".join(t.replace(BREAK, "").split()), b) for t, b in col)
+        for col in _columns(head, rows)
+    ]
+    wants = [max(w - m, 0) for w, m in zip(whole, least, strict=True)]
+    share = spare / (sum(wants) or 1)
+    given = [m + min(want, want * share) for m, want in zip(least, wants, strict=True)]
+    left = (sheet.epw - sum(given)) / len(given)  # every cell on one line: the rest evenly
+    return tuple(g + left for g in given)
 
 
 def _head(sheet: _Sheet, head: Mapping[str, Any], words: Mapping[str, Any]) -> None:
