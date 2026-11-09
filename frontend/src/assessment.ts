@@ -73,6 +73,10 @@ export const REVIEW_WORDS: Record<ReviewStatus, string> = {
   rejected: 'Rejected',
 }
 
+/** A Closed control's review state tag (#410, Internal improvement only): the accepted tag's style, this word in place
+ * of "Accepted". A Closed control is still accepted. */
+export const CLOSED_WORD = 'Closed'
+
 // The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
 export type Assessment = {
   control_id: string

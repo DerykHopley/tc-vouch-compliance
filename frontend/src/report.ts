@@ -42,7 +42,7 @@ export type ReportItem = { requirement_id: string; missing: string; owner_role: 
 export type NotApplicable = { control_id: string; requirement_id: string; text: string; reason: string }
 
 export type TrailAction = 'accept' | 'reject' | 'override' | 'confirm' | 'approve' | 'discard' | 'goal'
-  | 'round-start' | 'round-close'
+  | 'round-start' | 'round-close' | 'priority' | 'done'
 
 /** A compliance profile's Goal (#369), on the wire. */
 export type Goal = 'audit-readiness' | 'internal-improvement'

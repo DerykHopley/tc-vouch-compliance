@@ -119,6 +119,8 @@ def test_confirmed_findings_show_their_items_as_drafts(database_url, users):
         "owner_role": NO_OWNER,
         "due_date": "",
         "status": "draft",
+        "priority": "high",  # the improvement plan's (#410): S1 is not evidenced
+        "done": None,
     }
 
 
@@ -142,6 +144,8 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
         "owner_role": OWNER,
         "due_date": due,
         "status": "approved",
+        "priority": "high",  # the improvement plan's (#410)
+        "done": None,
     }
     assert response.status_code == 200, response.text
     assert response.json() == {"item": approved}
@@ -559,7 +563,12 @@ def test_a_failing_trail_write_keeps_no_item(postgres, users):
 def test_no_route_lists_changes_or_removes_a_decision_but_the_decision_route(users):
     alice, _ = users
     app = app_on(None)
-    routes = {(method, path) for method, path in api_routes(app) if "remediation" in path}
+    # The improvement plan's routes (#410, below the item's path) mark an item, not its decision.
+    routes = {
+        (method, path)
+        for method, path in api_routes(app)
+        if path.endswith("/remediation/{requirement_id}")
+    }
     with TestClient(app) as client:
         thread_id = confirmed_with_an_item(client, alice)
         url = f"/api/assessments/{thread_id}/remediation/{ITEM}"

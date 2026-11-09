@@ -26,7 +26,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, goal, remediation, report, report_pdf, rounds
+from vouch import audit, goal, plan, remediation, report, report_pdf, rounds
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -46,7 +46,7 @@ from vouch.chat_agent import (
     chat_prompt,
     chat_turn,
 )
-from vouch.database import Connection, Database, DatabaseUnavailable
+from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
@@ -413,6 +413,15 @@ def remediation_items(db: AppDatabase) -> remediation.RemediationItems:
 RemediationItems = Annotated[remediation.RemediationItems, Depends(remediation_items)]
 
 
+def remediation_plan(db: AppDatabase) -> plan.RemediationPlan:
+    """Where the improvement plan's marks are kept, with their audit entries (#410): Postgres
+    with a database URL, else this process."""
+    return plan.process_plan() if db is None else plan.PostgresPlan(db)
+
+
+RemediationPlan = Annotated[plan.RemediationPlan, Depends(remediation_plan)]
+
+
 def profile_goals(db: AppDatabase) -> goal.ProfileGoals:
     """Where each user's Goal under each profile is kept, with its audit entries (#369):
     Postgres with a database URL, else this process."""
@@ -432,17 +441,20 @@ ReviewRounds = Annotated[rounds.ReviewRounds, Depends(review_rounds)]
 
 
 def assessment_data(
-    assessment: Assessment, decided: dict[remediation.Key, remediation.DecidedItem] | None = None
+    assessment: Assessment,
+    decided: dict[remediation.Key, remediation.DecidedItem] | None = None,
+    marks: dict[remediation.Key, remediation.Mark] | None = None,
 ) -> dict[str, Any]:
     """The assessment as the API sends it, each remediation item with its status (#43): a draft,
     or as the lead decided it (`decided`, none for a run just made, its findings just confirmed,
     or just reviewed: nothing is decided before the findings are), and `review_step`, the step
     of the review it waits at (#372; null once reviewed), and `before_three_step_review`, true
     for one reviewed before the three-step review (#373): it still counts as reviewed, and
-    nothing stored is rewritten."""
+    nothing stored is rewritten. Each item carries its priority and done mark in the improvement
+    plan (`marks`, #410), in both goals."""
     review = assessment.review
     return assessment.to_dict() | {
-        "remediation": remediation.shown_items(assessment, decided or {}),
+        "remediation": remediation.shown_items(assessment, decided or {}, marks),
         "review_step": remediation.review_step(assessment, decided or {}),
         "before_three_step_review": review is not None and not review.three_step,
     }
@@ -735,7 +747,11 @@ def list_assessments(memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
 
 @router.get("/assessments/{thread_id}")
 def open_assessment(
-    thread_id: str, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+    thread_id: str,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    marks: RemediationPlan,
 ) -> dict[str, Any]:
     """One of the user's assessments, proposed or reviewed, redacted as the stream's events are.
     404 for an unknown thread, another user's included."""
@@ -744,7 +760,8 @@ def open_assessment(
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
-    clean, _ = redact_data({"assessment": assessment_data(assessment, decided)})
+    marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
+    clean, _ = redact_data({"assessment": assessment_data(assessment, decided, marked)})
     return clean
 
 
@@ -795,6 +812,7 @@ def review_assessment(
     decision: Annotated[ReviewDecision, Body()],
     trail: AuditTrail,
     items: RemediationItems,
+    marks: RemediationPlan,
     memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
@@ -832,7 +850,11 @@ def review_assessment(
     except NotWaitingForReviewError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     _noting_work(memory)
-    clean, _ = redact_data({"assessment": assessment_data(reviewed)})
+    # Its items as they stand now (#410): read again, as a decision may have landed between the
+    # read above and the review taking the thread's lock.
+    now_decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
+    marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
+    clean, _ = redact_data({"assessment": assessment_data(reviewed, now_decided, marked)})
     return clean
 
 
@@ -842,6 +864,8 @@ def decide_remediation(
     requirement_id: str,
     request: Annotated[remediation.DecisionRequest, Body()],
     items: RemediationItems,
+    marks: RemediationPlan,
+    saver: Checkpointer,
     memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
@@ -875,8 +899,91 @@ def decide_remediation(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except (remediation.DueDateError, remediation.OwnerNeededError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    clean, _ = redact_data({"item": kept.shown()})
+    # As the assessment shows it, with its priority and done mark (#410).
+    assessment = load_assessment(thread_id, saver, scope=memory.scope)
+    marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
+    shown = remediation.shown_items(assessment, {(thread_id, requirement_id): kept}, marked)
+    item = next(i for i in shown if i["requirement_id"] == requirement_id)
+    clean, _ = redact_data({"item": item})
     return clean
+
+
+def _planned(mark: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    """A plan route's answer (#410): the item as marked, redacted; its refusals as HTTP."""
+    try:
+        item = mark()
+    except (UnknownAssessmentError, remediation.UnknownItemError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (plan.NotInImprovementGoal, plan.NotPlannable) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    clean, _ = redact_data({"item": item})
+    return clean
+
+
+@router.put("/assessments/{thread_id}/remediation/{requirement_id}/priority")
+def set_remediation_priority(
+    thread_id: str,
+    requirement_id: str,
+    request: Annotated[plan.PriorityRequest, Body()],
+    marks: RemediationPlan,
+    goals: ProfileGoals,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead sets an approved, not done remediation item's priority in the improvement plan
+    (#410), with its audit entry, together (when the entry can't be written, neither is: a 503);
+    the item as kept. The priority it has already writes nothing.
+
+    404 for an unknown thread (another user's or profile's too) or a requirement with no item;
+    409 under Audit readiness, for a draft, discarded or done item, or a rejected assessment;
+    422 for any other value or no body."""
+    current = goals.goal(memory.user_id, memory.profile_id)
+    return _planned(
+        lambda: plan.set_priority(
+            marks,
+            thread_id,
+            requirement_id,
+            request.priority,
+            goal=current,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=memory.profile_id,
+            scope=memory.scope,
+        )
+    )
+
+
+@router.post("/assessments/{thread_id}/remediation/{requirement_id}/done")
+def mark_remediation_done(
+    thread_id: str,
+    requirement_id: str,
+    request: Annotated[plan.DoneRequest, Body()],
+    marks: RemediationPlan,
+    goals: ProfileGoals,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead marks an approved remediation item of an accepted control done, with what was
+    done (#410), and its audit entry, together (when the entry can't be written, neither is: a
+    503); the item as kept. Done is final: the same note again writes nothing.
+
+    404 for an unknown thread (another user's or profile's too) or a requirement with no item;
+    409 under Audit readiness, for a draft or discarded item, an assessment not accepted, or one
+    done with another note (`detail` names it); 422 for a blank, longer or missing note."""
+    current = goals.goal(memory.user_id, memory.profile_id)
+    return _planned(
+        lambda: plan.mark_done(
+            marks,
+            thread_id,
+            requirement_id,
+            request.note,
+            goal=current,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=memory.profile_id,
+            scope=memory.scope,
+        )
+    )
 
 
 @router.get("/audit-trail")
@@ -955,6 +1062,7 @@ def dossier_overview(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    marks: RemediationPlan,
     goals: ProfileGoals,
     review: ReviewRounds,
 ) -> dict[str, Any]:
@@ -963,17 +1071,38 @@ def dossier_overview(
     each control's requirements, for its working paper (#41); its ISA text in the profile's
     edition (#199), an unreadable edition a plain 500; the user's Goal under the profile
     (#369); and their review rounds (#402): the open one, and the comparison with the last one
-    closed since the fresh start. Redacted as the stream's events are."""
+    closed since the fresh start; in the Internal improvement goal, each card's improvement plan
+    flags (#410). Redacted as the stream's events are."""
     controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
     approved = {key for key, item in decided.items() if item.status == "approved"}
-    clean, _ = redact_data(overview(profile, controls, latest, discarded, approved))
+    current = goals.goal(memory.user_id, memory.profile_id)
+    flags = _plan_flags(current, memory, saver, items, marks)
+    clean, _ = redact_data(overview(profile, controls, latest, discarded, approved, flags))
     return clean | {
         "requirements": paper_requirements(profile, controls),
-        "goal": goals.goal(memory.user_id, memory.profile_id),
+        "goal": current,
         "rounds": _rounds(review, memory, controls, latest),
     }
+
+
+def _plan_flags(
+    current: Goal,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    marks: plan.RemediationPlan,
+) -> dict[str, plan.CardFlags]:
+    """The cards' improvement plan flags (#410): from every assessment listed since the fresh
+    start, with the user's decisions and marks on them; none read under Audit readiness."""
+    if current != plan.IMPROVEMENT:
+        return {}
+    history = memory.assessments(saver)
+    threads = [a.thread_id for a in history]
+    decided = items.decided(memory.user_id, memory.profile_id, threads)
+    marked = marks.marks(memory.user_id, memory.profile_id, threads)
+    return plan.card_flags(history, decided, marked, current)
 
 
 def _rounds(

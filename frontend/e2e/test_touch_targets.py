@@ -5,7 +5,9 @@ import re
 
 import pytest
 from playwright.sync_api import Page, expect
+from reviewing import reviewed
 from test_guided_chat import assess_in_the_chat
+from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
 from test_remediation import ITEM, confirmed_with_an_item
 from test_review import assessed, open_paper, row
@@ -40,6 +42,22 @@ def test_the_review_round_s_name_field_and_start_round_are_at_least_44px(page: P
     assert closed.status in (200, 409), closed.status  # 409: none was open
     at_phone_width(page, rounds_url)
     expect(page.get_by_role("button", name="Start round")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_improvement_plan_s_priority_and_mark_done_are_at_least_44px(page: Page, plan_url):
+    # #410: an approved item of an accepted control, its Priority select, Mark done and the done
+    # form open, in the Internal improvement goal; on the plan's own server.
+    improving_afresh(page.request, plan_url)
+    thread_id = assessed(page.request, plan_url)["assessment"]["thread_id"]
+    reviewed(page.request, plan_url, thread_id, items="approve")
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
+        at_phone_width(page, f"{plan_url}/controls/4.1.2")
+    item = page.get_by_role("region", name="Remediation item M1")
+    expect(item.get_by_label("Priority")).to_be_visible()
+    assert small_targets(page) == []
+    item.get_by_role("button", name="Mark M1 done").click()
+    expect(item.get_by_label("What was done")).to_be_visible()
     assert small_targets(page) == []
 
 

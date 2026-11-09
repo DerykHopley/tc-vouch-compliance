@@ -9,7 +9,17 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected. */
 export type ReviewState = 'not-assessed' | ReviewStatus
 
-export type ControlCard = { id: string; question: string; iso_27001: string; status: ReviewState; verdict: Verdict | null }
+/** `reassess_suggested` and `closed` are the improvement plan's (#410): false under Audit readiness. A Closed control
+ * is still accepted: the status and every count stay as they were. */
+export type ControlCard = {
+  id: string
+  question: string
+  iso_27001: string
+  status: ReviewState
+  verdict: Verdict | null
+  reassess_suggested?: boolean
+  closed?: boolean
+}
 
 /** Counted from accepted verdicts only; `open` is every control not accepted. */
 export type Readiness = {
@@ -75,6 +85,10 @@ export type Rounds = { current: OpenRound | null; comparison: RoundComparison | 
 
 /** A control's ISO 27001 reference as the screens show it: "ISO A.5.15, A.8.5" (ISA writes "ISO 27001:2022: …"). */
 export const isoLabel = (iso: string) => iso.replace(/^ISO 27001:2022:? /, 'ISO ')
+
+/** A date as the screens say it: "9 November 2026" (English, as the rest of the interface). */
+export const dateWords = (at: string) =>
+  new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
 /** A control's working paper's address. */
 export const controlPath = (id: string) => `/controls/${encodeURIComponent(id)}`
@@ -181,8 +195,10 @@ export function useOverview() {
       status: 'ready',
       overview: {
         ...now.overview,
+        // The improvement plan's flags (#410) are the server's to work out: off until the overview is read again.
         controls: now.overview.controls.map((c) => c.id !== assessment.control_id ? c
-          : { ...c, verdict: assessment.verdict, status: assessment.status ?? 'waiting-for-review' }),
+          : { ...c, verdict: assessment.verdict, status: assessment.status ?? 'waiting-for-review',
+            reassess_suggested: false, closed: false }),
       },
     })
   }, [])
@@ -194,12 +210,15 @@ export function useOverview() {
       : now.status === 'ready' ? { status: 'ready', overview: { ...now.overview, goal } } : now)
     return answer.ok
   }, [])
-  const roundChanged = useCallback(async () => {
+  // Reads the overview again after a change the page has shown already, keeping the overview shown when the read
+  // fails (only the first read shows the failure): a review round started or closed (#402), a review or a done mark
+  // in the improvement goal (#410).
+  const refresh = useCallback(async () => {
     const asked = ++latest.current
     const answer = await fetchOverview()
     if (asked !== latest.current) return true
     if (answer.ok) setState({ status: 'ready', overview: answer.overview })
     return answer.ok
   }, [])
-  return { state, load, retry, noteAssessed, goalChanged, roundChanged }
+  return { state, load, retry, noteAssessed, goalChanged, roundChanged: refresh, refresh }
 }

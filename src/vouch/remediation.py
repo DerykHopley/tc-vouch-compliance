@@ -32,7 +32,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
 
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, now, process_trail
-from vouch.database import Database, RemediationWrites
+from vouch.database import Database, Priority, RemediationWrites
 from vouch.graph import (
     MAX_DUE_DAYS,
     NO_NUL_PATTERN,
@@ -85,6 +85,17 @@ class DecisionRequest(BaseModel):
 
 
 @dataclass(frozen=True)
+class Mark:
+    """The lead's marks on an approved item in the improvement plan (#410, vouch.plan): the
+    priority they chose (None: the default), and when it was marked done, with the note (None:
+    not done)."""
+
+    priority: Priority | None
+    done_at: datetime | None
+    done_note: str | None
+
+
+@dataclass(frozen=True)
 class DecidedItem:
     """A remediation item as the lead decided it."""
 
@@ -95,10 +106,6 @@ class DecidedItem:
     owner_role: str
     due_date: date
     decided_at: datetime
-
-    def shown(self) -> dict[str, Any]:
-        """What the API shows of it, as of a draft."""
-        return item_data(self, self.status)
 
 
 Key = tuple[str, str]
@@ -135,23 +142,60 @@ class DecidedAlreadyError(RuntimeError):
     """The item was decided already, the other way or with other values (a 409)."""
 
 
-def item_data(item: RemediationItem | DecidedItem, status: ItemStatus) -> dict[str, Any]:
+def default_priority(assessment: Assessment, requirement_id: str) -> Priority:
+    """An item's priority until the lead sets one (#410): high for a requirement not evidenced,
+    medium for one partly evidenced, by its verdict as the assessment holds it (after Confirm
+    findings, its overrides applied)."""
+    requirement = next((r for r in assessment.requirements if r.id == requirement_id), None)
+    return (
+        "high" if requirement is not None and requirement.verdict == "not-evidenced" else "medium"
+    )
+
+
+def item_data(
+    item: RemediationItem | DecidedItem,
+    status: ItemStatus,
+    priority: Priority | None,
+    mark: Mark | None = None,
+) -> dict[str, Any]:
+    """An item as the API shows it: with its priority (None for a discarded one) and, once an
+    approved one is marked done, `done` (when and the lead's note; else None)."""
     due = item.due_date
+    done = None
+    if status == "approved" and mark is not None and mark.done_at is not None:
+        done = {"at": mark.done_at.isoformat(), "note": mark.done_note}
     return {
         "requirement_id": item.requirement_id,
         "missing": item.missing,
         "owner_role": item.owner_role,
         "due_date": due.isoformat() if isinstance(due, date) else due,
         "status": status,
+        "priority": None if status == "discarded" else priority,
+        "done": done,
     }
 
 
-def shown_items(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> list[dict[str, Any]]:
-    """The assessment's remediation items as the API shows them: each draft, or as decided."""
+def shown_items(
+    assessment: Assessment,
+    decided: Mapping[Key, DecidedItem],
+    marks: Mapping[Key, Mark] | None = None,
+) -> list[dict[str, Any]]:
+    """The assessment's remediation items as the API shows them: each draft, or as decided, with
+    its priority (the lead's, else `default_priority`) and done mark (`item_data`), in both goals
+    (#410)."""
     shown = []
     for item in assessment.remediation:
-        kept = decided.get((assessment.thread_id, item.requirement_id))
-        shown.append(kept.shown() if kept else item_data(item, "draft"))
+        key = (assessment.thread_id, item.requirement_id)
+        kept = decided.get(key)
+        mark = (marks or {}).get(key) if kept is not None else None
+        priority = (mark.priority if mark else None) or default_priority(
+            assessment, item.requirement_id
+        )
+        shown.append(
+            item_data(kept, kept.status, priority, mark)
+            if kept
+            else item_data(item, "draft", priority)
+        )
     return shown
 
 
@@ -267,7 +311,7 @@ class ProcessItems:
         return {(i.thread_id, i.requirement_id): i for i in mine}
 
 
-def _from_row(row: Mapping[str, Any]) -> DecidedItem:
+def decided_from_row(row: Mapping[str, Any]) -> DecidedItem:
     return DecidedItem(
         thread_id=row["thread_id"],
         requirement_id=row["requirement_id"],
@@ -291,7 +335,7 @@ class PostgresItems:
 
             def kept(item_key: ItemKey) -> DecidedItem | None:
                 row = writes.kept(item_key._asdict())
-                return _from_row(row) if row is not None else None
+                return decided_from_row(row) if row is not None else None
 
             yield Deciding(saver, kept, _writing(writes))
 
@@ -301,7 +345,7 @@ class PostgresItems:
         if not thread_ids:
             return {}
         rows = self.db.remediation_items(user_id, profile_id, list(thread_ids))
-        items = [_from_row(row) for row in rows]
+        items = [decided_from_row(row) for row in rows]
         return {(i.thread_id, i.requirement_id): i for i in items}
 
 
@@ -312,7 +356,7 @@ def _writing(writes: RemediationWrites) -> DecideWrite:
         row = asdict(item) | {"user_id": user_id, "profile_id": profile_id}
         audit_row = {k: v for k, v in asdict(entry).items() if k != "id"}
         kept, new = writes.decide(row, [audit_row])
-        return _from_row(kept), new
+        return decided_from_row(kept), new
 
     return decide
 

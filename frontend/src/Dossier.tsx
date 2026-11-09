@@ -1,6 +1,6 @@
 import { type MouseEvent, useId, useState } from 'react'
-import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { changeGoal, closeRound, type ControlCard, controlPath, GOAL_WORDS, isoLabel, type NextStep, type Overview,
+import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
+import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, type NextStep, type Overview,
   type OverviewState, type Readiness, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
   from './overview.ts'
 import type { PassState } from './profilePass.ts'
@@ -59,7 +59,8 @@ export default function Dossier({ state, onRetry, onOpen, running, pass, onPass,
         </div>
         <div className="cards">
           {overview.controls.map((c) => (
-            <Card key={c.id} card={c} onOpen={onOpen} assessing={c.id === running} language={overview.answer_language} />
+            <Card key={c.id} card={c} onOpen={onOpen} assessing={c.id === running} language={overview.answer_language}
+              improving={overview.goal === 'internal-improvement'} />
           ))}
         </div>
       </section>
@@ -179,9 +180,6 @@ function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props
 const ROUND_FAILED = 'The review round could not be changed just now. Please try again.'
 const ROUND_STALE = 'The review round was changed, but the overview could not be read again just now.'
 const NAME_FIRST = 'Name the round first.'
-
-/** A date as the Dossier says it: "9 November 2026" (English, as the rest of the interface). */
-const dateWords = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
 /**
  * The review round on the hero (`docs/design.md`, Components: Review round, #402), under the goal: the open round
@@ -459,17 +457,23 @@ function openInPlace(e: MouseEvent, open: () => void) {
 }
 
 /** A control's card; `language`, the profile's answer language, is its verdict's (#200). */
-function Card({ card, onOpen, assessing, language }:
-  { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean; language: string }) {
+function Card({ card, onOpen, assessing, language, improving }:
+  { card: ControlCard; onOpen: Props['onOpen']; assessing: boolean; language: string; improving: boolean }) {
   const edge = card.verdict ?? 'none'
+  // The improvement plan (#410): a Closed card reads Closed in the accepted tag's style (the word is the cue), and a
+  // card whose fixes are all done suggests assessing it again.
+  const closed = improving && card.status === 'accepted' && card.closed === true
   return (
     <article className="card" aria-label={`Control ${card.id}`}>
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
         onClick={(e) => openInPlace(e, () => onOpen(card.id, false))}>
         <b>{card.id}</b>
-        {card.status !== 'not-assessed' && <span className={`tag tag-${card.status}`}>{REVIEW_WORDS[card.status]}</span>}
+        {card.status !== 'not-assessed' && (
+          <span className={`tag tag-${card.status}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[card.status]}</span>
+        )}
       </a>
       <div className="control-title" lang={language}>{card.question}</div>
+      {improving && card.reassess_suggested && <p className="field-note">Fixes done: assess again</p>}
       <div className="card-meta">
         <span className="mono">{isoLabel(card.iso_27001)}</span>
         <VerdictChip verdict={card.verdict} assessing={assessing} language={language} />

@@ -100,6 +100,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "goal": "Goal changed from {before} to {after}",
             "round-start": "Review round started: {round}",
             "round-close": "Review round closed: {round}",
+            "priority": "Priority changed",
+            "done": "Marked done",
         },
         "goals": {
             "audit-readiness": "Audit readiness",
@@ -182,6 +184,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "goal": "Ziel geändert von {before} zu {after}",
             "round-start": "Prüfrunde begonnen: {round}",
             "round-close": "Prüfrunde abgeschlossen: {round}",
+            "priority": "Priorität geändert",
+            "done": "Als erledigt markiert",
         },
         # As `actions.goal` reads them, after "von" and "zu" (dative): "Interner Verbesserung".
         "goals": {
