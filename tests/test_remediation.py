@@ -33,7 +33,15 @@ from test_profile_switch import app_with
 from vouch import api, graph, remediation
 from vouch.api import PROFILE_HEADER
 from vouch.database import AUDIT_TABLE, REMEDIATION_TABLE
-from vouch.graph import MAX_DUE_DAYS, NO_OWNER, NOT_DRAFTED, build_graph, thread_config
+from vouch.graph import (
+    MAX_DUE_DAYS,
+    NO_OWNER,
+    NOT_DRAFTED,
+    ReviewDecision,
+    build_graph,
+    thread_config,
+    thread_key,
+)
 from vouch.memory import Memory, process_checkpointer
 from vouch.profile import DEFAULT_PROFILE
 
@@ -663,3 +671,35 @@ def test_the_overview_asks_only_for_the_counted_threads_decided_items(database_u
             (approved, ITEM): "approved",
         }  # `other`'s, not named, isn't read
         assert store.decided(user, profile, []) == {}
+
+
+def test_a_decision_waits_for_a_reject_holding_the_thread_then_reads_it_rejected(
+    database_url, users
+):
+    """#372: items are decided while the assessment waits, so a decision takes the thread's
+    review lock: a Reject recorded meanwhile can't land between its read and its write."""
+    alice, _ = users
+    app = app_on(database_url)
+    with TestClient(app) as client:
+        thread_id = confirmed_with_an_item(client, alice)
+        scope = Memory(InMemoryStore(), alice["X-Test-User"], DEFAULT_PROFILE).scope
+        trail = api.audit_trail(app.state.database)
+        answers: list[Any] = []
+        deciding = threading.Thread(
+            target=lambda: answers.append(
+                decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+            )
+        )
+        with trail.recording(thread_key(thread_id, scope)) as (saver, _):
+            deciding.start()
+            deciding.join(timeout=0.5)
+            waited = deciding.is_alive()
+            graph.resume(thread_id, ReviewDecision(decision="reject"), saver, scope=scope)
+        deciding.join(timeout=10)
+        shown = items(client, alice, thread_id)
+
+    assert waited  # held while the Reject held the thread
+    (refused,) = answers
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == remediation.REJECTED
+    assert [i["status"] for i in shown] == ["draft"]

@@ -229,6 +229,9 @@ a truncate, whoever asks."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
+DECIDE_LOCK = "SELECT pg_advisory_xact_lock(%s)"
+"""A remediation decision takes the same lock (#372): it waits for a step of the review that
+holds it (bounded by the statement timeout), so it reads the assessment as that step left it."""
 
 SETUP_TABLES = (
     "checkpoints",
@@ -626,40 +629,24 @@ class Database:
 
             yield PostgresSaver(conn, serde=serde), append
 
-    def decide_remediation(
-        self, item: Mapping[str, Any], entries: list[Mapping[str, Any]]
-    ) -> tuple[dict[str, Any], bool]:
-        """Keep the lead's decision on a remediation item (a mapping of REMEDIATION_COLUMNS) and
-        its audit entries, in one transaction: both, or neither. When the item was decided
-        already, nothing is written: (the kept item, False); else (the item, True). Two at once
-        take turns on the item's key, so one decides. Raises DatabaseUnavailable, also before
-        vouch-db-setup ran."""
-        columns = ", ".join(REMEDIATION_COLUMNS)
-        tables = f"{REMEDIATION_TABLE} or {AUDIT_TABLE}"
+    @contextmanager
+    def deciding(
+        self, lock_key: str, serde: SerializerProtocol | None = None
+    ) -> Iterator[tuple[PostgresSaver, "RemediationWrites"]]:
+        """One transaction for a remediation decision (vouch.remediation): it first takes the
+        review lock on `lock_key` (vouch.graph's thread key), waiting while a step of the
+        review holds it, so no Reject or Accept lands between the assessment read and the
+        decision. A checkpointer and the decision's reads and writes, all on its connection.
+        Raises DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
+        tables = f"checkpoints, {REMEDIATION_TABLE} or {AUDIT_TABLE}"
         with (
             self.connection() as conn,
             self._failed(tables),
             self._needs_setup(tables),
             conn.transaction(),
         ):
-            values = ", ".join(f"%({c})s" for c in REMEDIATION_COLUMNS)
-            kept = conn.execute(
-                f"INSERT INTO {REMEDIATION_TABLE} ({columns}) VALUES ({values}) "
-                f"ON CONFLICT DO NOTHING RETURNING {columns}",
-                item,
-            ).fetchone()
-            if kept is not None:
-                _insert_audit(conn, entries)
-                return kept, True
-            existing = conn.execute(
-                f"SELECT {columns} FROM {REMEDIATION_TABLE} WHERE user_id = %(user_id)s "
-                "AND profile_id = %(profile_id)s AND thread_id = %(thread_id)s "
-                "AND requirement_id = %(requirement_id)s",
-                item,
-            ).fetchone()
-            if existing is None:  # the insert met it, and the guard lets nothing delete one
-                raise DatabaseUnavailable(f"a decision in {REMEDIATION_TABLE} vanished")
-            return existing, False
+            conn.execute(DECIDE_LOCK, (lock_id(lock_key),))
+            yield PostgresSaver(conn, serde=serde), RemediationWrites(conn)
 
     def remediation_items(
         self, user_id: str, profile_id: str, thread_ids: list[str]
@@ -792,6 +779,47 @@ class Database:
         for secret in self._secrets:
             message = message.replace(secret, "**********")
         return message.strip()
+
+
+class RemediationWrites:
+    """A remediation decision's reads and writes, on the connection of its transaction
+    (`Database.deciding`)."""
+
+    COLUMNS = ", ".join(REMEDIATION_COLUMNS)
+
+    def __init__(self, conn: Connection) -> None:
+        self.conn = conn
+
+    def kept(self, key: Mapping[str, Any]) -> dict[str, Any] | None:
+        """The item decided under `key` (user_id, profile_id, thread_id, requirement_id), if
+        any: a mapping of REMEDIATION_COLUMNS."""
+        return self.conn.execute(
+            f"SELECT {self.COLUMNS} FROM {REMEDIATION_TABLE} WHERE user_id = %(user_id)s "
+            "AND profile_id = %(profile_id)s AND thread_id = %(thread_id)s "
+            "AND requirement_id = %(requirement_id)s",
+            key,
+        ).fetchone()
+
+    def decide(
+        self, item: Mapping[str, Any], entries: list[Mapping[str, Any]]
+    ) -> tuple[dict[str, Any], bool]:
+        """Keep the lead's decision on a remediation item (a mapping of REMEDIATION_COLUMNS)
+        and its audit entries: when the item was decided already, nothing is written: (the
+        kept item, False); else (the item, True). Two at once take turns on the item's key, so
+        one decides."""
+        values = ", ".join(f"%({c})s" for c in REMEDIATION_COLUMNS)
+        kept = self.conn.execute(
+            f"INSERT INTO {REMEDIATION_TABLE} ({self.COLUMNS}) VALUES ({values}) "
+            f"ON CONFLICT DO NOTHING RETURNING {self.COLUMNS}",
+            item,
+        ).fetchone()
+        if kept is not None:
+            _insert_audit(self.conn, entries)
+            return kept, True
+        existing = self.kept(item)
+        if existing is None:  # the insert met it, and the guard lets nothing delete one
+            raise DatabaseUnavailable(f"a decision in {REMEDIATION_TABLE} vanished")
+        return existing, False
 
 
 def _insert_audit(conn: Connection, entries: list[Mapping[str, Any]]) -> None:

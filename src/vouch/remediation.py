@@ -21,7 +21,8 @@ graph's horizon from the latest calendar day current anywhere (today in UTC+14).
 """
 
 import threading
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -31,7 +32,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
 
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, now, process_trail
-from vouch.database import Database
+from vouch.database import Database, RemediationWrites
 from vouch.graph import (
     MAX_DUE_DAYS,
     NO_NUL_PATTERN,
@@ -40,6 +41,8 @@ from vouch.graph import (
     Assessment,
     RemediationItem,
     load_assessment,
+    state_serializer,
+    thread_key,
 )
 
 ItemStatus = Literal["draft", "approved", "discarded"]
@@ -184,14 +187,30 @@ def check_due(due: date, at: datetime) -> None:
         raise DueDateError(TOO_FAR.format(due=due.isoformat(), days=MAX_DUE_DAYS))
 
 
+DecideWrite = Callable[[str, str, DecidedItem, AuditEntry], tuple[DecidedItem, bool]]
+
+
+class Deciding(NamedTuple):
+    """One decision, under its thread's lock (`RemediationItems.deciding`)."""
+
+    saver: BaseCheckpointSaver
+    """Where the assessment is read, as the review's steps left it."""
+    kept: Callable[[ItemKey], "DecidedItem | None"]
+    """The item decided already under the key, if any."""
+    decide: DecideWrite
+    """Keep the item and its entry together (user id, profile id, item, entry), unless the item
+    was decided already: then nothing is written. (The kept item, whether this call decided
+    it.)"""
+
+
 class RemediationItems(Protocol):
     """Where the lead's decisions are kept, each with its audit entry."""
 
-    def decide(
-        self, user_id: str, profile_id: str, item: DecidedItem, entry: AuditEntry
-    ) -> tuple[DecidedItem, bool]:
-        """Keep the item and its entry together, unless the item was decided already: then
-        nothing is written. (The kept item, whether this call decided it.)"""
+    def deciding(self, key: str) -> AbstractContextManager[Deciding]:
+        """A decision on the thread `key` (graph.thread_key): the thread's review lock held for
+        the block, waiting while a step of the review holds it (#372), so no Reject or Accept
+        lands between the assessment read and the decision. Its reads and writes on one
+        connection (Postgres: one transaction)."""
         ...
 
     def decided(
@@ -210,7 +229,16 @@ class ProcessItems:
         self._items: dict[ItemKey, DecidedItem] = {}
         self._guard = threading.Lock()
 
-    def decide(
+    @contextmanager
+    def deciding(self, key: str) -> Iterator[Deciding]:
+        with self._trail().holding(key, wait=True) as saver:
+            yield Deciding(saver, self._kept, self._decide)
+
+    def _kept(self, key: ItemKey) -> DecidedItem | None:
+        with self._guard:
+            return self._items.get(key)
+
+    def _decide(
         self, user_id: str, profile_id: str, item: DecidedItem, entry: AuditEntry
     ) -> tuple[DecidedItem, bool]:
         key = ItemKey(user_id, profile_id, item.thread_id, item.requirement_id)
@@ -257,13 +285,15 @@ class PostgresItems:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def decide(
-        self, user_id: str, profile_id: str, item: DecidedItem, entry: AuditEntry
-    ) -> tuple[DecidedItem, bool]:
-        row = asdict(item) | {"user_id": user_id, "profile_id": profile_id}
-        audit_row = {k: v for k, v in asdict(entry).items() if k != "id"}
-        kept, new = self.db.decide_remediation(row, [audit_row])
-        return _from_row(kept), new
+    @contextmanager
+    def deciding(self, key: str) -> Iterator[Deciding]:
+        with self.db.deciding(key, state_serializer()) as (saver, writes):
+
+            def kept(item_key: ItemKey) -> DecidedItem | None:
+                row = writes.kept(item_key._asdict())
+                return _from_row(row) if row is not None else None
+
+            yield Deciding(saver, kept, _writing(writes))
 
     def decided(
         self, user_id: str, profile_id: str, thread_ids: Collection[str]
@@ -273,6 +303,18 @@ class PostgresItems:
         rows = self.db.remediation_items(user_id, profile_id, list(thread_ids))
         items = [_from_row(row) for row in rows]
         return {(i.thread_id, i.requirement_id): i for i in items}
+
+
+def _writing(writes: RemediationWrites) -> DecideWrite:
+    def decide(
+        user_id: str, profile_id: str, item: DecidedItem, entry: AuditEntry
+    ) -> tuple[DecidedItem, bool]:
+        row = asdict(item) | {"user_id": user_id, "profile_id": profile_id}
+        audit_row = {k: v for k, v in asdict(entry).items() if k != "id"}
+        kept, new = writes.decide(row, [audit_row])
+        return _from_row(kept), new
+
+    return decide
 
 
 @cache
@@ -326,7 +368,6 @@ def _as_kept(kept: DecidedItem, request: DecisionRequest) -> DecidedItem:
 
 def decide(
     items: RemediationItems,
-    saver: BaseCheckpointSaver,
     thread_id: str,
     requirement_id: str,
     request: DecisionRequest,
@@ -338,12 +379,31 @@ def decide(
 ) -> DecidedItem:
     """The lead's decision on the assessment's item for the requirement, kept with its audit
     entry; the kept item. A decision made already is looked up first: the same one again
-    returns it, writing nothing, whatever the date.
+    returns it, writing nothing, whatever the date. All of it under the thread's review lock
+    (`RemediationItems.deciding`), so a Reject or Accept can't land between the read and the
+    decision.
 
     Raises UnknownAssessmentError (another user's or profile's thread too), NotDecidableError,
     UnknownItemError, DecidedAlreadyError, OwnerNeededError and DueDateError (an approval), and
     DatabaseUnavailable (Postgres). `clock` defaults to vouch.audit's `now`."""
-    assessment = load_assessment(thread_id, saver, scope=scope)
+    with items.deciding(thread_key(thread_id, scope)) as deciding:
+        return _decide(
+            deciding, thread_id, requirement_id, request, reviewer, profile_id, scope, clock
+        )
+
+
+def _decide(
+    deciding: Deciding,
+    thread_id: str,
+    requirement_id: str,
+    request: DecisionRequest,
+    reviewer: Reviewer,
+    profile_id: str,
+    scope: str,
+    clock: Callable[[], datetime] | None,
+) -> DecidedItem:
+    """`decide`, under the thread's lock."""
+    assessment = load_assessment(thread_id, deciding.saver, scope=scope)
     if assessment.status == "rejected":
         raise NotDecidableError(REJECTED)
     if assessment.status == WAITING and assessment.confirmed is None:
@@ -351,7 +411,7 @@ def decide(
     draft = next((i for i in assessment.remediation if i.requirement_id == requirement_id), None)
     if draft is None:
         raise UnknownItemError(NO_ITEM.format(requirement_id=requirement_id))
-    kept = items.decided(reviewer.id, profile_id, [thread_id]).get((thread_id, requirement_id))
+    kept = deciding.kept(ItemKey(reviewer.id, profile_id, thread_id, requirement_id))
     if kept is not None:
         return _as_kept(kept, request)
     at = (clock or now)()
@@ -370,7 +430,7 @@ def decide(
         due_date=due,
         decided_at=at,
     )
-    kept, new = items.decide(
+    kept, new = deciding.decide(
         reviewer.id, profile_id, item, _entry(assessment, item, request.decision, reviewer)
     )
     return kept if new else _as_kept(kept, request)

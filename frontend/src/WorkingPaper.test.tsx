@@ -418,7 +418,7 @@ describe('the review of a proposed control', () => {
     review({ onReviewed })
     await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
     expect((await within(bar()).findByRole('alert')).textContent).toBe(
-      'Your decision could not be recorded just now. Nothing was changed; please try again.')
+      'This step could not be recorded just now. Nothing was changed; please try again.')
     expect(onReviewed).not.toHaveBeenCalled()
     expect(within(headVerdict()).getByText('Proposed')).toBeTruthy()
     await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
@@ -522,7 +522,7 @@ describe('the review in three steps (issue 372)', () => {
     review()
     await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
     expect((await within(bar()).findByRole('alert')).textContent).toBe(
-      'Your decision could not be recorded just now. Nothing was changed; please try again.')
+      'This step could not be recorded just now. Nothing was changed; please try again.')
     await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
     expect(sent.map((s) => s.url)).toEqual(['/api/assessments/t1/findings', '/api/assessments/t1/findings'])
   })

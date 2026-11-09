@@ -33,8 +33,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from vouch import graph
 from vouch.database import AuditAction, Database, ReviewInProgress
 from vouch.graph import (
-    CONFIRM_FIRST,
-    CONFIRMED_ALREADY,
+    NO_DRAFTS,
     WAITING,
     Assessment,
     ConfirmFindings,
@@ -42,7 +41,6 @@ from vouch.graph import (
     RequirementVerdict,
     ReviewDecision,
     Verdict,
-    WrongStepError,
     apply_overrides,
     counts_towards_roll_up,
     load_assessment,
@@ -240,21 +238,33 @@ class ProcessTrail:
         self._checkpointer = checkpointer
         self._entries: list[AuditEntry] = []
         self._guard = threading.Lock()
-        self._reviewing: set[str] = set()
+        self._released = threading.Condition(self._guard)
+        self._held: set[str] = set()
+
+    @contextmanager
+    def holding(self, key: str, *, wait: bool = False) -> Iterator[BaseCheckpointSaver]:
+        """The thread's lock (`key`, graph.thread_key) held for the block, and the checkpointer
+        to read and write the thread on. A step of the review is refused at once while another
+        holds it (`wait` False: NotWaitingForReviewError); a remediation decision waits for it
+        (vouch.remediation, #372)."""
+        with self._guard:
+            if key in self._held and not wait:
+                raise _busy(key)
+            self._released.wait_for(lambda: key not in self._held)
+            self._held.add(key)
+        try:
+            yield self._checkpointer()
+        finally:
+            with self._guard:
+                self._held.discard(key)
+                self._released.notify_all()
 
     @contextmanager
     def recording(self, key: str) -> Iterator[tuple[BaseCheckpointSaver, Record]]:
-        with self._guard:
-            if key in self._reviewing:
-                raise _busy(key)
-            self._reviewing.add(key)
-        try:
+        with self.holding(key) as saver:
             staged: list[AuditEntry] = []
-            yield self._checkpointer(), staged.extend
+            yield saver, staged.extend
             self.keep(staged)
-        finally:
-            with self._guard:
-                self._reviewing.discard(key)
 
     def keep(self, entries: list[AuditEntry]) -> None:
         """Append entries, each given the trail's next id: a list append, which can't fail."""
@@ -337,9 +347,11 @@ def read_all(trail: AuditTrail, user_id: str, profile_id: str) -> list[AuditEntr
         before = page.next
 
 
-def _waiting(trail_saver: BaseCheckpointSaver, thread_id: str, scope: str) -> Assessment:
-    """The thread's assessment, waiting for review; NotWaitingForReviewError when reviewed."""
-    waiting = load_assessment(thread_id, trail_saver, scope=scope)
+def _waiting_assessment(saver: BaseCheckpointSaver, thread_id: str, scope: str) -> Assessment:
+    """The thread's assessment, waiting for review, which a step's entries are built from;
+    NotWaitingForReviewError when reviewed. Which step it waits at is graph's to check
+    (`confirm_findings`, `resume`): a step refused there writes no entry either."""
+    waiting = load_assessment(thread_id, saver, scope=scope)
     if waiting.status != WAITING:
         raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
     return waiting
@@ -356,18 +368,13 @@ def confirm_findings(
 ) -> Assessment:
     """The review's first step (#372): `graph.confirm_findings` on the thread with the lead's
     findings, and its entries recorded, together, as `review` does. Raises what
-    graph.confirm_findings raises (NotWaitingForReviewError also while another step of the
-    thread's review runs), and DatabaseUnavailable (Postgres)."""
+    graph.confirm_findings raises (WrongStepError for findings confirmed already;
+    NotWaitingForReviewError also while another step of the thread's review runs), and
+    DatabaseUnavailable (Postgres)."""
     with trail.recording(thread_key(thread_id, scope)) as (saver, record):
-        waiting = _waiting(saver, thread_id, scope)
-        if waiting.confirmed is not None:
-            raise WrongStepError(CONFIRMED_ALREADY)
+        waiting = _waiting_assessment(saver, thread_id, scope)
         record(confirm_entries(waiting, findings, reviewer, clock()))
         return graph.confirm_findings(thread_id, findings, saver, scope=scope)
-
-
-NO_DRAFTS: Callable[[Assessment], Sequence[str]] = lambda _: ()
-DRAFTS_LEFT = "Approve or discard the remediation items of {ids} first."
 
 
 def review(
@@ -381,20 +388,13 @@ def review(
     drafts: Callable[[Assessment], Sequence[str]] = NO_DRAFTS,
 ) -> Assessment:
     """`resume` the thread with the lead's decision and record its entry, together: the entry
-    is built first, and when it can't be built or written, the decision isn't written either.
-    Accept waits for the findings confirmed, and for no remediation item left a draft: `drafts`
-    names the requirements whose items still are (vouch.remediation keeps the decisions).
+    is built first, and when it can't be built or written, or `resume` refuses the step, the
+    decision isn't written either. `drafts` is `resume`'s: the requirements whose remediation
+    items are still drafts, which hold an Accept back (vouch.remediation keeps the decisions).
     Raises what `resume` raises (NotWaitingForReviewError also while another step of the
-    thread's review runs), WrongStepError for an Accept with drafts left, and
-    DatabaseUnavailable (Postgres)."""
+    thread's review runs), and DatabaseUnavailable (Postgres)."""
     with trail.recording(thread_key(thread_id, scope)) as (saver, record):
-        waiting = _waiting(saver, thread_id, scope)
-        if decision.decision == "accept":
-            if waiting.confirmed is None:
-                raise WrongStepError(CONFIRM_FIRST)
-            left = drafts(waiting)
-            if left:
-                raise WrongStepError(DRAFTS_LEFT.format(ids=", ".join(left)))
+        waiting = _waiting_assessment(saver, thread_id, scope)
         at = clock()
         record(review_entries(waiting, decision, reviewer, at))
         return resume(
@@ -405,4 +405,5 @@ def review(
             reviewer_id=reviewer.id,
             reviewer_name=reviewer.name,
             reviewed_at=at,
+            drafts=drafts,
         )

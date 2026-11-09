@@ -14,7 +14,7 @@ import logging
 import operator
 import textwrap
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -472,6 +472,10 @@ class WrongStepError(NotWaitingForReviewError):
 
 CONFIRM_FIRST = "Confirm the findings first."
 CONFIRMED_ALREADY = "The findings of this assessment were confirmed already."
+DRAFTS_LEFT = "Approve or discard the remediation items of {ids} first."
+NO_DRAFTS: "Callable[[Assessment], Sequence[str]]" = lambda _: ()
+"""No remediation item left a draft: what `resume` assumes unless told (vouch.remediation keeps
+the decisions)."""
 
 
 class InvalidReviewError(ValueError):
@@ -1242,10 +1246,8 @@ def build_graph(
         items recalculated, the overrides kept for the review. Or a rejection, which ends the
         review here."""
         answer = interrupt({"control_id": state["control"].id})
-        if DECISION in answer:  # Reject: the review ends at its first step
+        if DECISION in answer:  # Reject (`resume` lets no Accept through here)
             decision = ReviewDecision.model_validate(_fields(answer))
-            if decision.decision != "reject":
-                raise WrongStepError(CONFIRM_FIRST)
             return {"review": _recorded(decision, [], answer)}
         findings = ConfirmFindings.model_validate(_fields(answer))
         requirements, overrides = apply_overrides(state["requirements"], findings.overrides)
@@ -1881,6 +1883,7 @@ def resume(
     reviewer_id: str = "",
     reviewer_name: str = "",
     reviewed_at: datetime | None = None,
+    drafts: Callable[[Assessment], Sequence[str]] = NO_DRAFTS,
 ) -> Assessment:
     """Resume a waiting thread with the lead's decision and return the reviewed Assessment: the
     decision recorded with who made it and when (the review's `reviewer_*` and `reviewed_at`),
@@ -1889,17 +1892,21 @@ def resume(
 
     Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
     review), NotWaitingForReviewError for one not waiting (reviewed already), and WrongStepError
-    for an Accept before the findings are confirmed. Nothing is resumed when any is raised.
+    for an Accept before the findings are confirmed, or while `drafts` names requirements whose
+    remediation items are still drafts. Nothing is resumed when any is raised.
     `scope` says whose thread it is (see `thread_config`): another user's thread id is unknown.
 
-    It doesn't keep two reviews of one thread apart, nor check the remediation items are
-    decided: the caller does (the API through vouch.audit, whose trail holds a lock on the
-    thread while it reviews and records)."""
+    It doesn't keep two reviews of one thread apart: the caller does (the API through
+    vouch.audit, whose trail holds a lock on the thread while it reviews and records)."""
     graph = build_graph(None, checkpointer=checkpointer)
     config = thread_config(thread_id, scope)
     snapshot = _waiting(graph, config, thread_id)
-    if decision.decision == "accept" and "confirmed" not in snapshot.values:
-        raise WrongStepError(CONFIRM_FIRST)
+    if decision.decision == "accept":
+        if "confirmed" not in snapshot.values:
+            raise WrongStepError(CONFIRM_FIRST)
+        left = drafts(_assessment(snapshot.values, thread_id))
+        if left:
+            raise WrongStepError(DRAFTS_LEFT.format(ids=", ".join(left)))
     answer = decision.model_dump() | {
         REVIEWED_BY: {"id": reviewer_id, "name": reviewer_name},
         REVIEWED_AT: reviewed_at.isoformat() if reviewed_at else "",

@@ -296,12 +296,21 @@ def test_accept_before_the_findings_are_confirmed_is_refused_and_resumes_nothing
 
     with pytest.raises(WrongStepError, match="Confirm the findings first"):
         resume(result.thread_id, ReviewDecision(decision="accept"), saver)
-    with pytest.raises(WrongStepError, match="Confirm the findings first"):
-        build_graph(None, checkpointer=saver).invoke(
-            Command(resume={"decision": "accept"}),
-            {"configurable": {"thread_id": result.thread_id}},
-        )
     assert load_assessment(result.thread_id, saver).confirmed is None
+
+
+def test_accept_with_drafts_left_is_refused_naming_them_and_resumes_nothing():
+    result, _, saver = proposed("4.1.2", mixed_4_1_2())
+    confirmed(result, saver)
+
+    with pytest.raises(WrongStepError, match="remediation items of M2, S2 first"):
+        resume(
+            result.thread_id,
+            ReviewDecision(decision="accept"),
+            saver,
+            drafts=lambda waiting: [d.requirement_id for d in waiting.remediation],
+        )
+    assert load_assessment(result.thread_id, saver).status == "waiting-for-review"
 
 
 def test_a_second_confirm_findings_is_refused():

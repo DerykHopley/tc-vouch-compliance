@@ -788,8 +788,12 @@ def review_assessment(
     drafts (`detail` names their requirements); 422 for a decision that doesn't validate, one
     carrying overrides included (they go with Confirm findings)."""
 
+    # Read before the review's transaction, so it holds one connection: a draft decided
+    # meanwhile only makes fewer drafts, and the remediation route can't decide one while the
+    # review holds the thread's lock.
+    decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
+
     def drafts(waiting: Assessment) -> list[str]:
-        decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
         return remediation.drafts_left(waiting, decided)
 
     try:
@@ -817,7 +821,6 @@ def decide_remediation(
     request: Annotated[remediation.DecisionRequest, Body()],
     items: RemediationItems,
     memory: UserMemory,
-    saver: Checkpointer,
     user: CurrentUser,
     name: ReviewerName,
 ) -> dict[str, Any]:
@@ -837,7 +840,6 @@ def decide_remediation(
     try:
         kept = remediation.decide(
             items,
-            saver,
             thread_id,
             requirement_id,
             request,

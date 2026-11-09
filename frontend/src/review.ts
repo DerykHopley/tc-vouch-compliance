@@ -159,8 +159,8 @@ export function withOverrides(requirements: RequirementVerdict[], overrides: Ove
 }
 
 export const MOVED_ON = "This control's review has moved on, perhaps in another tab. Refresh to see where it stands."
-export const REVIEW_FAILED = 'Your decision could not be recorded just now. Nothing was changed; please try again.'
-export const REVIEW_REFUSED = 'Vouch refused this decision, and nothing was changed:'
+export const REVIEW_FAILED = 'This step could not be recorded just now. Nothing was changed; please try again.'
+export const REVIEW_REFUSED = 'Vouch refused this step, and nothing was changed:'
 
 /**
  * Why a step wasn't recorded: `conflict`, the review moved on (409: reviewed, or confirmed, already, perhaps in
