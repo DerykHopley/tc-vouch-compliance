@@ -424,3 +424,36 @@ textarea.field { resize: vertical; font-family: inherit; }
   .report-doc h2, .report-quotes h3 { break-after: avoid; }
   .report-doc a[href]::after { content: " (" attr(href) ")"; overflow-wrap: anywhere; }
 }
+
+/* Company setup (#403, pending design pass): the step list, each step's sheet, its fields and choice cards, from the
+   existing tokens. The current step is ink with an ink number; later steps are muted and say so to a screen reader. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.setup-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink); }
+.setup-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.setup-steps li.later { color: var(--muted); }
+.setup-steps li[aria-current="step"] { color: var(--ink); font-weight: 700; }
+.setup-step-n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; }
+.setup-steps li[aria-current="step"] .setup-step-n { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.setup-step { justify-items: stretch; gap: 12px; }
+.setup-step h3 { margin: 0; font-size: 18px; }
+.setup-field { display: grid; gap: 6px; }
+.setup-field label { font-weight: 500; }
+.setup-field .field { flex: none; width: 100%; max-width: 480px; }
+.setup-choices { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.setup-choices legend { font-weight: 500; padding: 0; margin-bottom: 8px; }
+/* A radio is its own 44px target (the touch floor measures the input), drawn as an 18px ring: --muted on --sheet as a
+   field's edge, an --ink dot when chosen. */
+.setup-choice { display: flex; align-items: center; gap: 4px; min-height: 44px; cursor: pointer; }
+.setup-choice input { appearance: none; flex: none; width: 44px; height: 44px; margin: 0 0 0 -12px; border-radius: 999px; cursor: pointer;
+  background: radial-gradient(circle, var(--sheet) 0 7px, var(--muted) 7.5px 9px, transparent 9.5px); }
+.setup-choice input:checked { background: radial-gradient(circle, var(--ink) 0 5px, var(--sheet) 5.5px 7px, var(--ink) 7.5px 9px, transparent 9.5px); }
+.setup-option { padding: 4px 12px; border: 1px solid var(--rule); border-radius: 4px; }
+.setup-option:hover { border-color: var(--navy); }
+.setup-option:has(input:checked) { border-color: var(--ink); }
+.setup-option input { margin-left: -8px; }
+.setup-option-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.setup-option-name { font-weight: 600; }
+.setup-alert { display: grid; gap: 8px; justify-items: start; }
+.setup-alert p { margin: 0; }
+.setup-nav { display: flex; gap: 8px; }
+.setup-nav .btn-primary { margin-left: auto; }

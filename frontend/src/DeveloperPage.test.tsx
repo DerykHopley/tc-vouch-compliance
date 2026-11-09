@@ -45,7 +45,7 @@ describe('the developer page', () => {
   const page = () => screen.queryByRole('region', { name: 'Developer settings' })
 
   it('shows the model, the prompt version and the usage link', () => {
-    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} onSetup={() => {}} />)
     const region = page()!
     expect(within(region).getByText('anthropic/claude-haiku-5.5')).toBeTruthy()
     expect(within(region).getByText('1')).toBeTruthy()
@@ -57,7 +57,7 @@ describe('the developer page', () => {
   it("totals OpenRouter's tokens and cost, reported and estimated apart, and keeps the fake's apart", () => {
     const openrouter = { ...NO_RUNS, assessments: 3, input_tokens: 12_345, output_tokens: 678, reported_cost_usd: 0.0016, estimated_cost_usd: 0.0002 }
     const fake = { ...NO_RUNS, assessments: 1, input_tokens: 900, output_tokens: 40, estimated_cost_usd: 0.0001 }
-    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake } }} onChange={() => {}} />)
+    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake } }} onChange={() => {}} onSetup={() => {}} />)
     const totals = screen.getByRole('region', { name: 'Usage' })
     expect(within(totals).getByText(
       'OpenRouter: 3 assessments · 12,345 tokens in · 678 tokens out · $0.0016 reported · $0.0002 estimated',
@@ -70,7 +70,7 @@ describe('the developer page', () => {
 
   it('says how many assessments have an incomplete cost, and shows no fake line without fake runs', () => {
     const openrouter = { ...NO_RUNS, assessments: 2, input_tokens: 10, output_tokens: 2, reported_cost_usd: 0.5, incomplete: 1 }
-    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake: NO_RUNS } }} onChange={() => {}} />)
+    render(<DeveloperPage settings={{ ...SETTINGS, usage: { openrouter, fake: NO_RUNS } }} onChange={() => {}} onSetup={() => {}} />)
     expect(screen.getByText("1 of them has an incomplete cost: some calls' cost could not be known.")).toBeTruthy()
     expect(screen.queryByText(/Fake model:/)).toBeNull()
   })
@@ -79,7 +79,7 @@ describe('the developer page', () => {
     const put = vi.fn((body: Record<string, unknown>) => [200, { ...SETTINGS, daily_limit: body.daily_limit }] as [number, unknown])
     api(200, put)
     const onChange = vi.fn()
-    render(<DeveloperPage settings={SETTINGS} onChange={onChange} />)
+    render(<DeveloperPage settings={SETTINGS} onChange={onChange} onSetup={() => {}} />)
     expect(screen.getByText('30 assessments per user per day (UTC)')).toBeTruthy()
     const field = screen.getByRole('textbox', { name: 'Assessments per day' })
     await userEvent.clear(field)
@@ -92,7 +92,7 @@ describe('the developer page', () => {
 
   it('shows a refused daily limit in place', async () => {
     api(200, () => [422, { detail: [{ msg: 'Input should be greater than or equal to 1' }] }])
-    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} onSetup={() => {}} />)
     const field = screen.getByRole('textbox', { name: 'Assessments per day' })
     await userEvent.clear(field)
     await userEvent.type(field, '0')
@@ -105,40 +105,49 @@ describe('the developer page', () => {
 
   it('says when no key makes assessments run on the fake model, and when the choice lasts only until a restart', () => {
     render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', fake_reason: 'no_key', kept_in: 'memory' }}
-      onChange={() => {}} />)
+      onChange={() => {}} onSetup={() => {}} />)
     expect(screen.getByText('No OpenRouter key is set: assessments run on the fake model.')).toBeTruthy()
     expect(screen.getByText(/until the server restarts/i)).toBeTruthy()
   })
 
   it('names each compliance profile left out because it could not be loaded, with its problem (#47)', () => {
-    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} />)
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} onSetup={() => {}} />)
     expect(screen.queryByRole('region', { name: 'Profiles left out' })).toBeNull()
     cleanup()
     const broken_profiles = [{ id: 'broken', problem: 'not valid YAML (ParserError)' }]
-    render(<DeveloperPage settings={{ ...SETTINGS, broken_profiles }} onChange={() => {}} />)
+    render(<DeveloperPage settings={{ ...SETTINGS, broken_profiles }} onChange={() => {}} onSetup={() => {}} />)
     const note = screen.getByRole('region', { name: 'Profiles left out' })
     expect(within(note).getByText('broken')).toBeTruthy()
     expect(within(note).getByText('not valid YAML (ParserError)')).toBeTruthy()
   })
 
   it('says a fake script, not a missing key, makes assessments run on the fake model', () => {
-    render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', fake_reason: 'fake_script' }} onChange={() => {}} />)
+    render(<DeveloperPage settings={{ ...SETTINGS, runs_on: 'fake', fake_reason: 'fake_script' }} onChange={() => {}} onSetup={() => {}} />)
     expect(screen.getByText('ASSESS_FAKE_SCRIPT is set: assessments run on the scripted fake model.')).toBeTruthy()
     expect(screen.queryByText(/no OpenRouter key/i)).toBeNull()
   })
 
   it('says when the settings are unavailable, with nothing else to act on', () => {
-    render(<DeveloperPage settings="unavailable" onChange={() => {}} />)
+    render(<DeveloperPage settings="unavailable" onChange={() => {}} onSetup={() => {}} />)
     expect(within(page()!).getByRole('alert').textContent).toBe(
       'The developer settings are unavailable just now. Please try again shortly.',
     )
     expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set up a company' })).toBeNull()
+  })
+
+  it('opens company setup from its sheet', async () => {
+    const onSetup = vi.fn()
+    render(<DeveloperPage settings={SETTINGS} onChange={() => {}} onSetup={onSetup} />)
+    const sheet = screen.getByRole('region', { name: 'Company setup' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Set up a company' }))
+    expect(onSetup).toHaveBeenCalledOnce()
   })
 
   it('changes the model, and says the next assessment runs on it', async () => {
     api(200, ({ model }) => [200, { ...SETTINGS, model }])
     const onChange = vi.fn()
-    render(<DeveloperPage settings={SETTINGS} onChange={onChange} />)
+    render(<DeveloperPage settings={SETTINGS} onChange={onChange} onSetup={() => {}} />)
     const field = screen.getByRole('textbox', { name: 'Model id' })
     await userEvent.clear(field)
     await userEvent.type(field, 'openai/gpt-5.5')
@@ -151,7 +160,7 @@ describe('the developer page', () => {
     const detail = 'OpenRouter has no model “x/y”. Check the id on openrouter.ai/models.'
     api(200, () => [422, { detail }])
     const onChange = vi.fn()
-    render(<DeveloperPage settings={SETTINGS} onChange={onChange} />)
+    render(<DeveloperPage settings={SETTINGS} onChange={onChange} onSetup={() => {}} />)
     const field = screen.getByRole('textbox', { name: 'Model id' })
     await userEvent.clear(field)
     await userEvent.type(field, 'x/y')

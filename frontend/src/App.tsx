@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import AskVouch from './AskVouch.tsx'
 import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
+import CompanySetupWizard from './CompanySetupWizard.tsx'
 import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
@@ -22,22 +23,25 @@ function startingTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-type View = { name: 'dossier' } | { name: 'report' } | { name: 'developer' } | { name: 'paper'; controlId: string }
+type View = { name: 'dossier' } | { name: 'report' } | { name: 'developer' } | { name: 'setup' }
+  | { name: 'paper'; controlId: string }
 
 const DEVELOPER_PATH = '/developer'
+const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
 /** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the developer
- * page at /developer, the Dossier at /. */
+ * page at /developer and its company setup at /developer/setup (#403), the Dossier at /. */
 const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
-    : view.name === 'developer' ? DEVELOPER_PATH : '/'
+    : view.name === 'developer' ? DEVELOPER_PATH : view.name === 'setup' ? SETUP_PATH : '/'
 
 /** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
  * so its paper says not found. */
 function viewAt(path: string): View {
   if (path === DEVELOPER_PATH) return { name: 'developer' }
+  if (path === SETUP_PATH) return { name: 'setup' }
   if (path === REPORT_PATH) return { name: 'report' }
   const control = CONTROL_PATH.exec(path)
   if (!control) return { name: 'dossier' }
@@ -122,8 +126,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     setView(next)
     return true
   }
-  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
-  // shows the Dossier.
+  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer and
+  // /developer/setup show the Dossier.
   const [developer, setDeveloper] = useState<DeveloperSettings | typeof UNAVAILABLE | null>(null)
   useEffect(() => {
     let current = true
@@ -157,7 +161,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     : undefined
   const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
   const shown: View['name'] | null = view.name === 'report' ? 'report'
-    : view.name === 'developer' && developer ? 'developer' : control ? 'paper'
+    : (view.name === 'developer' || view.name === 'setup') && developer ? view.name : control ? 'paper'
     : notFound !== null ? null : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
   // is read for a control its card says is not assessed (a run in this page puts its result on the card), nor for the
@@ -219,7 +223,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
             <a href={REPORT_PATH} aria-current={shown === 'report' ? 'page' : undefined}
               onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'report' }) }}>Report</a>
             {developer && (
-              <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
+              <a href={DEVELOPER_PATH} aria-current={shown === 'developer' || shown === 'setup' ? 'page' : undefined}
                 onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'developer' }) }}>Developer</a>
             )}
           </nav>
@@ -229,7 +233,12 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         </div>
       </TopBar>
       {shown === 'report' ? <Report />
-        : shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
+        : shown === 'developer' && developer ? (
+          <main>
+            <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
+          </main>
+        )
+        : shown === 'setup' ? <main><CompanySetupWizard onDeveloper={() => showView({ name: 'developer' })} /></main>
         : control && overview.state.status === 'ready' ? (
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
@@ -244,7 +253,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
       {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
           readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
           readiness), and its paper's newest if open. */}
-      <AskVouch context={{ page: shown ?? 'dossier',
+      <AskVouch context={{ page: shown === 'setup' ? 'developer' : shown ?? 'dossier',
         controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}

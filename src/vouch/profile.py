@@ -28,6 +28,7 @@ from pydantic import (
 
 from vouch.documents import SUFFIX, DocumentChoice, document_path, escaped, is_chosen
 from vouch.isa import (
+    COLUMN_PREFIX,
     SOURCE,
     BaseFramework,
     BaseFrameworkError,
@@ -61,6 +62,44 @@ PROTECTION_COLUMNS: dict[ProtectionLevel, frozenset[Column]] = {
     "high": frozenset({"must", "should", "high"}),
     "very high": frozenset({"must", "should", "high", "very high"}),
 }
+
+
+@dataclass(frozen=True)
+class ProtectionScope:
+    """What one protection level brings into scope from the base framework (#403)."""
+
+    level: ProtectionLevel
+    requirements: Mapping[Column, int]  # the base requirements in each column it brings in
+    total: int
+    controls: int  # the controls with a requirement in scope
+    added: int  # the requirements it adds over the level below; 0 for normal
+    added_controls: tuple[str, ...]  # the controls where it adds them, in the framework's order
+
+
+def protection_scope() -> tuple[ProtectionScope, ...]:
+    """Each protection level in order, normal to very high, and what it brings in, counted in
+    the English edition (the German one carries the same requirements); or BaseFrameworkError."""
+    controls = load_base_framework().controls
+    scopes, below = [], frozenset[Column]()
+    for level, columns in PROTECTION_COLUMNS.items():
+        counts: dict[Column, int] = {
+            column: sum(r.column == column for c in controls for r in c.requirements)
+            for column in COLUMN_PREFIX  # the base framework's columns, in its order
+            if column in columns
+        }
+        new = columns - below if below else frozenset[Column]()
+        scopes.append(
+            ProtectionScope(
+                level,
+                counts,
+                sum(counts.values()),
+                sum(any(r.column in columns for r in c.requirements) for c in controls),
+                sum(r.column in new for c in controls for r in c.requirements),
+                tuple(c.id for c in controls if any(r.column in new for r in c.requirements)),
+            )
+        )
+        below = columns
+    return tuple(scopes)
 
 
 @dataclass(frozen=True)
