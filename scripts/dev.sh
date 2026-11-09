@@ -10,9 +10,9 @@
 # --detach <name> runs it as its own systemd user unit, vouch-preview-<name>, so it outlives the
 # shell and the agent session that started it (an agent's process group and scope are stopped
 # when its turn ends). It returns once both servers answer, printing the log file and how to stop
-# it. The unit gets PATH and HOME, and ASSESS_FAKE_SCRIPT and VOUCH_RATE_REQUESTS when set; no
-# other variable of the starting shell, so no key it holds, and none of the user manager's own
-# database URL or keys either: a preview never reaches the live database. Needs systemd-run.
+# it. The servers get PATH and HOME, and ASSESS_FAKE_SCRIPT and VOUCH_RATE_REQUESTS when set, and
+# nothing else (env -i): no key or database URL of the starting shell or of the user manager, so
+# a preview never reaches the paid model or the live database. Needs systemd-run.
 #
 # A port already in use stops the run before anything starts. The API runs only the scripted fake
 # model: the bundled demo script, or the one ASSESS_FAKE_SCRIPT names. It drops
@@ -33,6 +33,7 @@ WEB_PORT=5173
 STARTUP_BUDGET=60 # seconds for both servers to answer
 DETACH=""
 STOP=""
+PORT_GIVEN=""
 
 usage() {
   echo "Usage: scripts/dev.sh [--api-port <port>] [--web-port <port>] [--detach <name>]" >&2
@@ -44,8 +45,8 @@ is_name() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,40}$ ]]; }
 
 while (($#)); do
   case "$1" in
-    --api-port) [ $# -ge 2 ] && is_port "$2" || usage; API_PORT=$((10#$2)); shift 2 ;;
-    --web-port) [ $# -ge 2 ] && is_port "$2" || usage; WEB_PORT=$((10#$2)); shift 2 ;;
+    --api-port) [ $# -ge 2 ] && is_port "$2" || usage; API_PORT=$((10#$2)); PORT_GIVEN=1; shift 2 ;;
+    --web-port) [ $# -ge 2 ] && is_port "$2" || usage; WEB_PORT=$((10#$2)); PORT_GIVEN=1; shift 2 ;;
     --detach) [ $# -ge 2 ] && is_name "$2" || usage; DETACH=$2; shift 2 ;;
     --stop) [ $# -ge 2 ] && is_name "$2" || usage; STOP=$2; shift 2 ;;
     -h | --help) usage ;;
@@ -53,7 +54,7 @@ while (($#)); do
   esac
 done
 if [ -n "$STOP" ]; then
-  [ -z "$DETACH" ] || usage
+  [ -z "$DETACH$PORT_GIVEN" ] || usage # --stop takes nothing else
   systemctl --user stop "vouch-preview-$STOP" || exit 1
   echo "Stopped the preview vouch-preview-$STOP; its ports are free."
   exit 0
@@ -99,18 +100,22 @@ fi
 if [ -n "$DETACH" ]; then
   command -v systemd-run >/dev/null || { echo "--detach needs systemd-run (Linux)." >&2; exit 1; }
   UNIT="vouch-preview-$DETACH"
+  if systemctl --user is-active --quiet "$UNIT"; then
+    echo "A preview named $DETACH is already running. Stop it first: scripts/dev.sh --stop $DETACH" >&2
+    exit 1
+  fi
   LOG="${XDG_STATE_HOME:-$HOME/.local/state}/vouch/$UNIT.log"
   mkdir -p "$(dirname "$LOG")"
   : >"$LOG"
-  setenv=(--setenv=PATH="$PATH" --setenv=HOME="$HOME")
+  kept=(PATH="$PATH" HOME="$HOME") # an allow-list: the unit would get the user manager's own
   for name in ASSESS_FAKE_SCRIPT VOUCH_RATE_REQUESTS; do
-    [ -z "${!name:-}" ] || setenv+=(--setenv="$name=${!name}")
+    [ -z "${!name:-}" ] || kept+=("$name=${!name}")
   done
   # --collect: a unit that stopped or failed is removed, so the name can be used again.
-  systemd-run --user --quiet --collect --unit="$UNIT" --working-directory="$ROOT" "${setenv[@]}" \
+  systemd-run --user --quiet --collect --unit="$UNIT" --working-directory="$ROOT" \
     --property=StandardOutput="append:$LOG" --property=StandardError="append:$LOG" \
-    env -u VOUCH_DATABASE_URL -u OPENROUTER_API_KEY -u CLERK_SECRET_KEY -u CLERK_JWT_KEY \
-    bash "$ROOT/scripts/dev.sh" --api-port "$API_PORT" --web-port "$WEB_PORT" || exit 1
+    env -i "${kept[@]}" bash "$ROOT/scripts/dev.sh" --api-port "$API_PORT" --web-port "$WEB_PORT" ||
+    exit 1
   DEADLINE=$((SECONDS + STARTUP_BUDGET))
   for url in "http://127.0.0.1:$API_PORT/api/health" "http://127.0.0.1:$WEB_PORT/api/health"; do
     until curl -fsS --max-time 2 "$url" >/dev/null 2>&1; do
