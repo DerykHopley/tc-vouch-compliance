@@ -625,6 +625,61 @@ def test_before_the_setup_made_the_company_profiles_table_files_are_listed_and_a
     assert database.COMPANY_PROFILES_TABLE not in tables(empty_database)
 
 
+OLD_COMPANY_ROW = (
+    f"INSERT INTO {database.COMPANY_PROFILES_TABLE} (id, profile, created_by, created_at) "
+    "VALUES ('musterfirma-sud-gmbh', %s, 'user_dev', now())"
+)
+"""A company kept before #418's removal columns."""
+
+
+def made_before_removal(db: Database) -> None:
+    """The company profiles table as #385 made it, holding one company."""
+    with db.connection() as conn:
+        conn.execute(database.CREATE_COMPANY_PROFILES)
+        conn.execute(OLD_COMPANY_ROW, (psycopg.types.json.Jsonb(MUSTERFIRMA),))
+
+
+@needs_postgres
+def test_the_setup_adds_the_removal_columns_to_a_table_made_before_them_and_runs_twice(
+    empty_database,
+):
+    """#418: a company already stored stays live (both columns null)."""
+    made_before_removal(empty_database)
+    url = empty_database.url.get_secret_value()
+
+    assert database.main([], env={DATABASE_URL_ENV: url}) == 0
+    assert database.main([], env={DATABASE_URL_ENV: url}) == 0
+
+    with empty_database.connection() as conn:
+        columns = {
+            row["column_name"]: row["data_type"]
+            for row in conn.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = %s AND column_name LIKE 'removed_%%'",
+                (database.COMPANY_PROFILES_TABLE,),
+            )
+        }
+    assert columns == {"removed_at": "timestamp with time zone", "removed_by": "text"}
+    assert [row["id"] for row in empty_database.company_profiles()] == ["musterfirma-sud-gmbh"]
+
+
+@needs_postgres
+def test_before_the_setup_added_the_removal_columns_files_are_listed_and_a_remove_is_503(
+    empty_database, caplog
+):
+    made_before_removal(empty_database)
+    app = create_app(Settings(database_url=empty_database.url))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        listed = client.get("/api/profiles")
+        removed = client.delete("/api/developer/profiles/musterfirma-sud-gmbh")
+
+    assert listed.status_code == 200
+    assert [p["id"] for p in listed.json()["profiles"]] == ["alpenwerk", "nordlicht"]
+    assert "run vouch-db-setup" in caplog.text
+    assert removed.status_code == 503
+    assert removed.json()["unavailable"] == "database"
+
+
 @needs_postgres
 def test_a_setting_is_kept_and_read_back_once_the_setup_has_run(empty_database):
     """Vouch's own settings table (#34, the model choice), made by the setup command alone."""

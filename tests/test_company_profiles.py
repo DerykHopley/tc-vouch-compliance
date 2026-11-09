@@ -32,7 +32,7 @@ from vouch.company_profiles import (
     compliance_profile_of,
     read_stored_once,
 )
-from vouch.database import Database, DatabaseUnavailable
+from vouch.database import AUDIT_TABLE, COMPANY_PROFILES_TABLE, Database, DatabaseUnavailable
 from vouch.graph import build_graph, state_serializer, thread_config
 from vouch.memory import process_checkpointer
 from vouch.paths import SAMPLE_LIBRARY_DIR
@@ -470,6 +470,9 @@ class UnreadableStore:
     def one(self, profile_id: str) -> StoredProfile | None:
         return self._read()
 
+    def remove(self, profile_id: str, removed_by: str) -> bool:
+        return self._read()
+
 
 def app_with_store(store: UnreadableStore) -> TestClient:
     app = app_on(None)
@@ -520,3 +523,225 @@ def test_the_company_name_limit_counts_the_trimmed_name():
 def test_a_company_name_over_the_limit_says_characters():
     with pytest.raises(ValueError, match="at most 100 characters"):
         CompanySetup.model_validate(MUSTERFIRMA | {"company": "A" * (MAX_COMPANY_LENGTH + 1)})
+
+
+# --- A developer removes a company made in setup (#418) ---------------------------------------
+
+
+def remove(client: TestClient, headers: dict[str, str], profile_id: str = MUSTERFIRMA_ID):
+    return client.delete(f"/api/developer/profiles/{profile_id}", headers=headers)
+
+
+def test_a_removed_company_leaves_all_and_one_and_its_id_is_never_used_again(store):
+    profile_id = store.create(FIELDS["company"], FIELDS, "user_dev", taken=set())
+
+    assert store.remove(profile_id, "user_dev") is True
+    assert store.remove(profile_id, "user_dev") is False
+    assert store.remove("nobody", "user_dev") is False
+    assert store.all() == []
+    assert store.one(profile_id) is None
+    assert store.create(FIELDS["company"], FIELDS, "user_dev", taken=set()) == f"{MUSTERFIRMA_ID}-2"
+    assert [row.id for row in store.all()] == [f"{MUSTERFIRMA_ID}-2"]
+
+
+def test_two_removes_of_one_company_at_once_mark_it_once(store):
+    profile_id = store.create(FIELDS["company"], FIELDS, "user_dev", taken=set())
+    removed: list[bool] = []
+    start = threading.Barrier(2)
+
+    def take() -> None:
+        start.wait()
+        removed.append(store.remove(profile_id, "user_dev"))
+
+    threads = [threading.Thread(target=take) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(removed) == [False, True]
+
+
+def test_a_developer_removes_a_company_it_leaves_every_list_and_its_id_is_never_reused(
+    database_url, users, caplog
+):
+    alice, _ = users
+    with caplog.at_level(logging.INFO), TestClient(app_on(database_url)) as client:
+        assert create(client, alice).status_code == 201
+        before = client.get("/api/developer/settings", headers=alice).json()["companies"]
+        removed = remove(client, alice)
+        listed = listed_ids(client, alice)
+        again = remove(client, alice)
+        made = create(client, alice).json()["id"]
+
+    [company] = before
+    assert (company["id"], company["company"]) == (MUSTERFIRMA_ID, "Musterfirma Süd GmbH")
+    assert company["created_at"]
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["companies"] == []
+    assert "broken_profiles" in removed.json()
+    assert f"company profile {MUSTERFIRMA_ID} removed by {alice['X-Test-User']}" in caplog.text
+    assert listed == ["alpenwerk", "nordlicht"]
+    assert again.status_code == 404
+    assert again.json()["detail"] == "There is no such compliance profile."
+    assert made == f"{MUSTERFIRMA_ID}-2"
+
+
+PROFILE_ROUTES = [
+    ("GET", "/api/overview", None),
+    ("GET", "/api/report", None),
+    ("GET", "/api/report/markdown", None),
+    ("GET", "/api/report/pdf", None),
+    ("GET", "/api/documents", None),
+    ("GET", "/api/audit-trail", None),
+    ("POST", "/api/assessments", {"control_id": "4.1.2"}),
+    ("POST", "/api/profile-pass", {}),
+    ("POST", "/api/chat", {"message": "Hello?", "page": "dossier"}),
+]
+
+
+def test_after_a_removal_every_route_under_it_is_404_and_no_list_names_it(users):
+    alice, _ = users
+    under = alice | {PROFILE_HEADER: MUSTERFIRMA_ID}
+    with TestClient(app_on(None), raise_server_exceptions=False) as client:
+        create(client, alice)
+        assert client.get("/api/overview", headers=under).status_code == 200
+        assert remove(client, alice).status_code == 200
+        answers = {
+            path: client.request(method, path, headers=under, json=body)
+            for method, path, body in PROFILE_ROUTES
+        }
+        listed = client.get("/api/profiles", headers=alice).json()
+        settings = client.get("/api/developer/settings", headers=alice).json()
+
+    assert {path: a.status_code for path, a in answers.items()} == {
+        path: 404 for _, path, _ in PROFILE_ROUTES
+    }
+    assert {a.json()["detail"] for a in answers.values()} == {
+        "There is no such compliance profile."
+    }
+    assert MUSTERFIRMA_ID not in [p["id"] for p in listed["profiles"]]
+    assert listed["default"] == "nordlicht"
+    assert settings["broken_profiles"] == []
+    assert settings["companies"] == []
+
+
+def test_a_broken_company_is_listed_for_the_developer_and_can_be_removed(users):
+    alice, _ = users
+    stale = FIELDS | {"evidence": {"policies": ["retired-policy"]}}
+    company_profiles.process_company_profiles().create("Stale GmbH", stale, "user_dev", set())
+    with TestClient(app_on(None)) as client:
+        before = client.get("/api/developer/settings", headers=alice).json()
+        removed = remove(client, alice, "stale-gmbh").json()
+
+    assert [c["id"] for c in before["companies"]] == ["stale-gmbh"]
+    assert [b["id"] for b in before["broken_profiles"]] == ["stale-gmbh"]
+    assert (removed["companies"], removed["broken_profiles"]) == ([], [])
+
+
+@pytest.mark.parametrize("profile_id", ["nordlicht", "alpenwerk", "sample-library"])
+def test_a_file_profile_cannot_be_removed_and_stays_listed(profile_id, users):
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        refused = remove(client, alice, profile_id)
+        listed = listed_ids(client, alice)
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "Only a company made in company setup can be removed."
+    assert listed == ["alpenwerk", "nordlicht"]
+
+
+def test_a_broken_profiles_folder_cannot_be_removed(tmp_path, users):
+    alice, _ = users
+    app = create_app(Settings(profiles_dir=make_profiles(tmp_path)))
+    app.dependency_overrides[current_user] = as_user
+    with TestClient(app) as client:
+        refused = remove(client, alice, BROKEN)
+
+    assert refused.status_code == 409
+
+
+@pytest.mark.parametrize("profile_id", ["nobody", "Not A Name", "a" * 80])
+def test_an_id_no_company_has_is_404(profile_id, users):
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        assert remove(client, alice, profile_id).status_code == 404
+
+
+def test_a_stored_company_shadowed_by_a_profile_folder_is_removed_and_the_file_profile_stays(
+    users,
+):
+    alice, _ = users
+    kept = company_profiles.process_company_profiles()
+    assert kept.create("Nordlicht", MUSTERFIRMA, "user_dev", taken=set()) == "nordlicht"
+    with TestClient(app_on(None)) as client:
+        removed = remove(client, alice, "nordlicht")
+        opened = client.get("/api/overview", headers=alice | {PROFILE_HEADER: "nordlicht"})
+        listed = listed_ids(client, alice)
+
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["broken_profiles"] == []
+    assert kept.all() == []
+    assert opened.status_code == 200
+    assert opened.json()["company"] != MUSTERFIRMA["company"]
+    assert listed == ["alpenwerk", "nordlicht"]
+
+
+def test_a_compliance_leads_remove_is_403_and_signed_out_401_changing_nothing(clerk):
+    kept = company_profiles.process_company_profiles()
+    kept.create(MUSTERFIRMA["company"], MUSTERFIRMA, "user_dev", taken=set())
+    client = TestClient(clerk_app(clerk), raise_server_exceptions=False)
+
+    lead = remove(client, bearer(token("user_alice")))
+    signed_out = remove(client, {})
+
+    assert lead.status_code == 403
+    assert signed_out.status_code == 401
+    assert [row.id for row in kept.all()] == [MUSTERFIRMA_ID]
+
+
+def test_with_the_database_down_a_remove_is_503_and_the_settings_have_no_companies(users, caplog):
+    alice, _ = users
+    down = UnreadableStore(DatabaseUnavailable("the database is unavailable: test"))
+    with caplog.at_level(logging.WARNING), app_with_store(down) as client:
+        removed = remove(client, alice)
+        settings = client.get("/api/developer/settings", headers=alice)
+
+    assert removed.status_code == 503
+    assert removed.json()["unavailable"] == "database"
+    assert settings.status_code == 200
+    assert settings.json()["companies"] is None
+    assert settings.json()["broken_profiles"] == []
+    assert "can't be read" in caplog.text
+
+
+@needs_postgres
+def test_a_removed_companys_audit_trail_and_row_are_kept(postgres, users):
+    alice, _ = users
+    under = alice | {PROFILE_HEADER: MUSTERFIRMA_ID}
+    with TestClient(app_on(postgres.url)) as client:
+        create(client, alice)
+        thread_id = assess(client, under)
+        reviewed = client.post(
+            f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=under
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        with postgres.connection() as conn:
+            before = conn.execute(
+                f"SELECT * FROM {AUDIT_TABLE} WHERE profile_id = %s ORDER BY id", (MUSTERFIRMA_ID,)
+            ).fetchall()
+        assert remove(client, alice).status_code == 200
+
+    with postgres.connection() as conn:
+        after = conn.execute(
+            f"SELECT * FROM {AUDIT_TABLE} WHERE profile_id = %s ORDER BY id", (MUSTERFIRMA_ID,)
+        ).fetchall()
+        row = conn.execute(
+            f"SELECT removed_at, removed_by FROM {COMPANY_PROFILES_TABLE} WHERE id = %s",
+            (MUSTERFIRMA_ID,),
+        ).fetchone()
+    assert before
+    assert after == before
+    assert row is not None
+    assert row["removed_at"] is not None
+    assert row["removed_by"] == alice["X-Test-User"]
