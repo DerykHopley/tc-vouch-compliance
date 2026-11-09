@@ -178,7 +178,8 @@ describe('ProfileSwitcher', () => {
 
 /** An overview with nothing assessed, for `company`. */
 const overviewOf = (company: string): Overview => ({
-  company, country: 'Somewhere', protection_level: 'normal', answer_language: 'en', requirements: {},
+  company, country: 'Somewhere', protection_level: 'normal', answer_language: 'en', goal: 'audit-readiness',
+  requirements: {},
   readiness: { controls: 1, accepted: 0, by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0,
     'not-applicable': 0 }, open: 1, remediation_items: 0, remediation_approved: 0 },
   by_status: { 'not-assessed': 1, 'waiting-for-review': 0, accepted: 0, rejected: 0 },

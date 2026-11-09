@@ -97,6 +97,11 @@ WORDS: dict[str, dict[str, Any]] = {
             "confirm": "Findings confirmed",
             "approve": "Approved",
             "discard": "Discarded",
+            "goal": "Goal changed from {before} to {after}",
+        },
+        "goals": {
+            "audit-readiness": "Audit readiness",
+            "internal-improvement": "Internal improvement",
         },
         "protection_levels": {"normal": "Normal", "high": "High", "very high": "Very high"},
         "languages": {"en": "English", "de": "German"},
@@ -172,6 +177,12 @@ WORDS: dict[str, dict[str, Any]] = {
             "confirm": "Befunde bestätigt",
             "approve": "Freigegeben",
             "discard": "Verworfen",
+            "goal": "Ziel geändert von {before} zu {after}",
+        },
+        # As `actions.goal` reads them, after "von" and "zu" (dative): "Interner Verbesserung".
+        "goals": {
+            "audit-readiness": "Audit-Bereitschaft",
+            "internal-improvement": "Interner Verbesserung",
         },
         "protection_levels": {"normal": "Normal", "high": "Hoch", "very high": "Sehr hoch"},
         "languages": {"en": "Englisch", "de": "Deutsch"},
@@ -580,6 +591,16 @@ def trail_columns(words: Mapping[str, Any]) -> list[str]:
     return [words["labels"][k] for k in TRAIL_COLUMNS]
 
 
+def action_word(e: Mapping[str, Any], words: Mapping[str, Any]) -> str:
+    """An entry's action in the report's words; a goal change's (#369) with its goals before and
+    after filled in."""
+    word: str = words["actions"][e["action"]]
+    if e["action"] != "goal":
+        return word
+    goals = words["goals"]
+    return word.format(before=goals[e["goal_before"]], after=goals[e["goal_after"]])
+
+
 def trail_rows(entries: list[Mapping[str, Any]], words: Mapping[str, Any]) -> list[list[str]]:
     """The audit trail table's rows, newest first as given, in TRAIL_COLUMNS' order."""
     verdicts = words["verdicts"]
@@ -589,7 +610,7 @@ def trail_rows(entries: list[Mapping[str, Any]], words: Mapping[str, Any]) -> li
             e["reviewer_name"],
             e["control_id"],
             e["requirement_id"] or "",
-            words["actions"][e["action"]],
+            action_word(e, words),
             verdicts[e["verdict_before"]] if e["verdict_before"] else "",
             verdicts[e["verdict_after"]] if e["verdict_after"] else "",
             e["note"],

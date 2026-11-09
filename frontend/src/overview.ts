@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { Assessment, Citation, ReviewStatus, Verdict } from './assessment.ts'
 import type { PaperRequirement } from './paper.ts'
+import type { Goal } from './report.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The Dossier overview from `GET /api/overview` (#40), as `vouch.dossier.overview` sends it. */
@@ -39,6 +40,8 @@ export type Overview = {
   protection_level: 'normal' | 'high' | 'very high'
   /** ISO 639-1: the language the answers are written in; the interface stays English. */
   answer_language: string
+  /** What the profile is used for (#369): the user's goal under it, Audit readiness until they change it. */
+  goal: Goal
   /** Each control's requirements under the profile, by control id: the working paper lists them before an
    * assessment, at no request of its own (#41). */
   requirements: Record<string, PaperRequirement[]>
@@ -66,6 +69,31 @@ export async function fetchOverview(): Promise<{ ok: true; overview: Overview } 
     return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : OVERVIEW_FAILED }
   } catch {
     return { ok: false, message: OVERVIEW_FAILED }
+  }
+}
+
+/** The goals as the interface names them (English, as the rest of the interface: `docs/design.md`, Language). */
+export const GOAL_WORDS: Record<Goal, string> = {
+  'audit-readiness': 'Audit readiness',
+  'internal-improvement': 'Internal improvement',
+}
+
+/** How a goal change went: changed, the session ended (a 401: signed out already, so nothing more to say), or failed
+ * any other way. */
+export type GoalChange = 'changed' | 'signed-out' | 'failed'
+
+/** Changes the user's goal under the chosen profile (`PUT /api/goal`, #369); the change is an audit trail entry. */
+export async function changeGoal(goal: Goal): Promise<GoalChange> {
+  try {
+    const response = await fetch('/api/goal', {
+      method: 'PUT',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal }),
+    })
+    if (response.ok) return 'changed'
+    return sessionEnded(response) ? 'signed-out' : 'failed'
+  } catch {
+    return 'failed'
   }
 }
 

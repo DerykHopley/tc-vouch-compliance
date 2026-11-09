@@ -26,7 +26,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, remediation, report, report_pdf
+from vouch import audit, goal, remediation, report, report_pdf
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -411,6 +411,15 @@ def remediation_items(db: AppDatabase) -> remediation.RemediationItems:
 
 
 RemediationItems = Annotated[remediation.RemediationItems, Depends(remediation_items)]
+
+
+def profile_goals(db: AppDatabase) -> goal.ProfileGoals:
+    """Where each user's Goal under each profile is kept, with its audit entries (#369):
+    Postgres with a database URL, else this process."""
+    return goal.process_goals() if db is None else goal.PostgresGoals(db)
+
+
+ProfileGoals = Annotated[goal.ProfileGoals, Depends(profile_goals)]
 
 
 def assessment_data(
@@ -933,18 +942,41 @@ def _standing(
 
 @router.get("/overview")
 def dossier_overview(
-    profile: Profile, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    goals: ProfileGoals,
 ) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
     each control's requirements, for its working paper (#41); its ISA text in the profile's
-    edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
+    edition (#199), an unreadable edition a plain 500; and the user's Goal under the profile
+    (#369). Redacted as the stream's events are."""
     controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
     approved = {key for key, item in decided.items() if item.status == "approved"}
     clean, _ = redact_data(overview(profile, controls, latest, discarded, approved))
-    return clean | {"requirements": paper_requirements(profile, controls)}
+    return clean | {
+        "requirements": paper_requirements(profile, controls),
+        "goal": goals.goal(memory.user_id, memory.profile_id),
+    }
+
+
+@router.put("/goal")
+def change_goal(
+    request: Annotated[goal.GoalRequest, Body()],
+    goals: ProfileGoals,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead changes their Goal under the compliance profile (#369): another goal than the
+    one kept is kept with its audit entry, together (when the entry can't be written, neither
+    is: a 503); the goal kept already again writes nothing. Any other value is a 422."""
+    goal.change(goals, request.goal, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id)
+    return {"goal": request.goal}
 
 
 def _report(

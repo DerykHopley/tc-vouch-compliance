@@ -30,7 +30,7 @@ from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noq
 from test_dossier import seeded
 from test_memory import app_on, restart
 
-from vouch import api, audit, isa, report
+from vouch import api, audit, goal, isa, report
 from vouch.database import Database
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import Review
@@ -784,6 +784,66 @@ def test_a_note_with_a_bar_and_a_line_break_keeps_the_trail_tables_shape():
     assert rows[0][7] == "Checked \\| twice by phone."
     header = next(line for line in trail.splitlines() if line.startswith("|"))
     assert len(_CELL_EDGE.split(header)) - 2 == 11
+
+
+GOAL_SENTENCES = {
+    "en": "Goal changed from Audit readiness to Internal improvement",
+    "de": "Ziel geändert von Audit-Bereitschaft zu Interner Verbesserung",
+}
+
+
+def goal_change(n: int = 1) -> audit.AuditEntry:
+    """A goal change's entry (#369), as vouch.goal writes it."""
+    return goal.goal_entry(
+        audit.Reviewer("u", "Dana Lead"),
+        "nordlicht",
+        "audit-readiness",
+        "internal-improvement",
+        datetime(2026, 11, 9, 10, 30, tzinfo=UTC) + timedelta(minutes=n),
+    )
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_a_goal_changes_trail_row_says_the_change_in_the_reports_words(language):
+    built = built_report(entries=[replace(goal_change(), id=1)])
+
+    rows = report.trail_rows(built["trail"]["entries"], report.words_for(language))
+
+    assert rows == [
+        [
+            "2026-11-09 10:31 UTC",
+            "Dana Lead",
+            "",
+            "",
+            GOAL_SENTENCES[language],
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]
+    ]
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_markdown_export_shows_a_goal_change_with_its_control_cells_empty(language):
+    built = built_report(entries=[replace(goal_change(), id=2), replace(entry("u", 0), id=1)])
+
+    md = report.markdown(built, report.words_for(language))
+
+    goal_row, accept_row = table_rows(section(md, report.words_for(language)["labels"]["trail"]))
+    assert goal_row[4] == GOAL_SENTENCES[language]
+    assert [goal_row[i] for i in (2, 3, 5, 6, 7, 8, 9, 10)] == [""] * 8
+    assert accept_row[4] == report.words_for(language)["actions"]["accept"]
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_reports_words_name_both_goals(language):
+    words = report.words_for(language)
+
+    assert set(words["goals"]) == {"audit-readiness", "internal-improvement"}
+    assert "{before}" in words["actions"]["goal"] and "{after}" in words["actions"]["goal"]
 
 
 @pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])

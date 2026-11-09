@@ -1,7 +1,7 @@
-import type { MouseEvent } from 'react'
+import { type MouseEvent, useState } from 'react'
 import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { type ControlCard, controlPath, isoLabel, type NextStep, type Overview, type OverviewState, type Readiness,
-  SEGMENTS } from './overview.ts'
+import { changeGoal, type ControlCard, controlPath, GOAL_WORDS, isoLabel, type NextStep, type Overview,
+  type OverviewState, type Readiness, SEGMENTS } from './overview.ts'
 import type { PassState } from './profilePass.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -19,9 +19,11 @@ type Props = {
   pass: PassState
   /** Starts a profile pass. */
   onPass: () => void
+  /** The goal was changed (#369): reads the overview again, so the hero shows the new one. */
+  onGoalChanged?: () => Promise<void> | void
 }
 
-export default function Dossier({ state, onRetry, onOpen, running, pass, onPass }: Props) {
+export default function Dossier({ state, onRetry, onOpen, running, pass, onPass, onGoalChanged }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -38,7 +40,8 @@ export default function Dossier({ state, onRetry, onOpen, running, pass, onPass 
   const { overview } = state
   return (
     <main className="dossier wrap">
-      <Hero overview={overview} onOpen={onOpen} running={running} pass={pass} onPass={onPass} />
+      <Hero overview={overview} onOpen={onOpen} running={running} pass={pass} onPass={onPass}
+        onGoalChanged={onGoalChanged} />
       <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} running={running} />
       <Band readiness={overview.readiness} />
       <section className="controls" aria-labelledby="controls-title">
@@ -65,9 +68,9 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
 }
 
 type HeroProps = { overview: Overview; onOpen: Props['onOpen']; running: string | null; pass: PassState;
-  onPass: () => void }
+  onPass: () => void; onGoalChanged: Props['onGoalChanged'] }
 
-function Hero({ overview, onOpen, running, pass, onPass }: HeroProps) {
+function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged }: HeroProps) {
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
@@ -86,6 +89,7 @@ function Hero({ overview, onOpen, running, pass, onPass }: HeroProps) {
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
+      <GoalRow overview={overview} onChanged={onGoalChanged} />
       <h1>Prepared for audit. One piece of evidence at a time.</h1>
       <p><b>{headline}</b> {detail}</p>
       {(next || readiness.open > 0) && (
@@ -112,6 +116,44 @@ function Hero({ overview, onOpen, running, pass, onPass }: HeroProps) {
             : 'Assesses every open control in one run. Accepted controls are skipped.'}
         </p>)}
     </section>
+  )
+}
+
+const GOAL_FAILED = 'The goal could not be changed just now. Please try again.'
+
+/**
+ * The profile's goal on the hero (`docs/design.md`, Components: Goal, #369): "Goal: <goal>" and a ghost Change goal,
+ * which asks first (the browser's own confirm, as the fresh start does) and changes it to the other goal. The change
+ * starts no run, so it stays usable while one goes on. A failure says so, and the line keeps the old goal.
+ */
+function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props['onGoalChanged'] }) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const other = overview.goal === 'audit-readiness' ? 'internal-improvement' : 'audit-readiness'
+  const change = async () => {
+    if (busy) return
+    const question = `Change this profile's goal to ${GOAL_WORDS[other]}? The change is recorded in the audit trail.`
+    if (!window.confirm(question)) return
+    setBusy(true)
+    setFailed(false)
+    try {
+      const result = await changeGoal(other)
+      if (result === 'changed') await onChanged?.()
+      else if (result === 'failed') setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <div className="goal">
+        <span>Goal: {GOAL_WORDS[overview.goal]}</span>
+        <button className="btn btn-ghost" onClick={() => void change()} disabled={busy} aria-busy={busy || undefined}>
+          Change goal
+        </button>
+      </div>
+      {failed && <p role="alert" className="field-note notice">{GOAL_FAILED}</p>}
+    </>
   )
 }
 

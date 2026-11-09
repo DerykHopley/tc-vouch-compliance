@@ -1,11 +1,15 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Dossier from './Dossier.tsx'
 import type { ControlCard, Overview } from './overview.ts'
 import type { PassAssessment, PassState } from './profilePass.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 /** No profile pass: idle, and starting one does nothing. */
 const NO_PASS = { pass: { kind: 'idle' } as const, onPass: () => {} }
@@ -20,7 +24,7 @@ function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verd
   const assessed = Object.keys(cards).length > 0
   return {
     company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
-    requirements: {},
+    goal: 'audit-readiness', requirements: {},
     readiness: { controls: 12, accepted: 2,
       by_verdict: { evidenced: 1, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 10,
       remediation_items: 3, remediation_approved: 0 },
@@ -367,5 +371,100 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
       expect(within(row('4.1.2')).getByRole('button', { name: 'Open 4.1.2' })).toBeTruthy()
       expect(within(panel()).getByText(HELD)).toBeTruthy()
     })
+  })
+})
+
+describe('the goal on the Dossier (ticket 369)', () => {
+  const FAILED = 'The goal could not be changed just now. Please try again.'
+  const goalLine = () => screen.getByText(/^Goal: /)
+  const changeButton = () => screen.getByRole('button', { name: 'Change goal' }) as HTMLButtonElement
+
+  /** The API: PUT /api/goal answers `answer`; nothing else is asked. */
+  function serve(answer: () => Promise<Response>) {
+    const fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/goal' && init?.method === 'PUT' ? answer() : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  function shown(overview = seeded(), { running = null as string | null, pass = NO_PASS.pass as PassState } = {}) {
+    const onGoalChanged = vi.fn(() => Promise.resolve())
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={running}
+      pass={pass} onPass={() => {}} onGoalChanged={onGoalChanged} />)
+    return { onGoalChanged }
+  }
+
+  it('shows the goal under the company pill, with Change goal beside it', () => {
+    shown()
+    expect(goalLine().textContent).toBe('Goal: Audit readiness')
+    expect(changeButton().className).toBe('btn btn-ghost')
+    const hero = screen.getByRole('heading', { level: 1 }).parentElement!
+    const order = [...hero.children].map((el) => el.className || el.tagName)
+    expect(order.indexOf('goal')).toBe(order.indexOf('pill') + 1)
+  })
+
+  it('names Internal improvement when that is the goal', () => {
+    shown({ ...seeded(), goal: 'internal-improvement' })
+    expect(goalLine().textContent).toBe('Goal: Internal improvement')
+  })
+
+  it('asks first, and on Cancel sends nothing', async () => {
+    const fetch = serve(() => Promise.resolve(new Response('{}')))
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { onGoalChanged } = shown()
+    await userEvent.click(changeButton())
+    expect(ask).toHaveBeenCalledWith(
+      "Change this profile's goal to Internal improvement? The change is recorded in the audit trail.")
+    expect(fetch).not.toHaveBeenCalled()
+    expect(onGoalChanged).not.toHaveBeenCalled()
+  })
+
+  it('on OK sends the other goal, then reads the overview again', async () => {
+    const fetch = serve(() => Promise.resolve(new Response(JSON.stringify({ goal: 'audit-readiness' }))))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { onGoalChanged } = shown({ ...seeded(), goal: 'internal-improvement' })
+    await userEvent.click(changeButton())
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const [url, init] = fetch.mock.calls[0]
+    expect(url).toBe('/api/goal')
+    expect(init?.method).toBe('PUT')
+    expect(JSON.parse(String(init?.body))).toEqual({ goal: 'audit-readiness' })
+    expect(onGoalChanged).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('is busy and disabled while the change runs', async () => {
+    let answer: (r: Response) => void = () => {}
+    serve(() => new Promise<Response>((resolve) => { answer = resolve }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    shown()
+    await userEvent.click(changeButton())
+    expect(changeButton().disabled).toBe(true)
+    expect(changeButton().getAttribute('aria-busy')).toBe('true')
+    answer(new Response(JSON.stringify({ goal: 'internal-improvement' })))
+    await waitFor(() => expect(changeButton().disabled).toBe(false))
+    expect(changeButton().getAttribute('aria-busy')).toBeNull()
+  })
+
+  it.each([
+    ['a 503', () => Promise.resolve(new Response('{}', { status: 503 }))],
+    ['no answer', () => Promise.reject(new TypeError('offline'))],
+  ])('on %s says so and keeps the old goal', async (_, answer) => {
+    serve(answer)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { onGoalChanged } = shown()
+    await userEvent.click(changeButton())
+    expect((await screen.findByRole('alert')).textContent).toBe(FAILED)
+    expect(goalLine().textContent).toBe('Goal: Audit readiness')
+    expect(onGoalChanged).not.toHaveBeenCalled()
+    expect(changeButton().disabled).toBe(false)
+  })
+
+  it('stays usable while an assessment or a profile pass runs', () => {
+    shown(seeded(), { running: '4.1.3' })
+    expect(changeButton().disabled).toBe(false)
+    cleanup()
+    shown(seeded(), { pass: { kind: 'running' } })
+    expect(changeButton().disabled).toBe(false)
   })
 })

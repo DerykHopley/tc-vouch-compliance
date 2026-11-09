@@ -17,8 +17,10 @@ from fastapi.testclient import TestClient
 from pypdf import PdfReader
 from test_memory import app_on
 from test_report import (
+    GOAL_SENTENCES,
     built_report,
     entry,
+    goal_change,
     report_of,
     section,
     seed_nordlicht,
@@ -172,6 +174,15 @@ def test_a_quote_with_a_character_the_font_lacks_still_gives_the_pdf_without_it(
 # --- Long carried text (#308 review): a row taller than a page would stop fpdf2 ---------------
 
 LONG_NOTE = " ".join(f"Prüfschritt {n} mit dem ISB besprochen." for n in range(80))  # ~3000
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_pdf_builds_with_a_goal_change_saying_it_in_the_reports_words(language):
+    built = built_report(entries=[replace(goal_change(), id=1)])
+
+    read = text(report_pdf.pdf(built, report.words_for(language)))
+
+    assert " ".join(GOAL_SENTENCES[language].split()) in " ".join(read.split())
 
 
 def test_a_trail_note_of_60_lines_still_gives_the_pdf_with_every_line():
