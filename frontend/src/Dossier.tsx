@@ -3,6 +3,7 @@ import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.
 import { changeGoal, type ControlCard, controlPath, GOAL_WORDS, isoLabel, type NextStep, type Overview,
   type OverviewState, type Readiness, SEGMENTS } from './overview.ts'
 import type { PassState } from './profilePass.ts'
+import type { Goal } from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
 /** The Dossier overview (`docs/design.md`, Decisions: Screens): the headline with the next step, the readiness band,
@@ -19,8 +20,9 @@ type Props = {
   pass: PassState
   /** Starts a profile pass. */
   onPass: () => void
-  /** The goal was changed (#369): reads the overview again, so the hero shows the new one. */
-  onGoalChanged?: () => Promise<void> | void
+  /** The goal was changed to `goal` (#369): reads the overview again, so the hero shows the new one; whether it was
+   * read. */
+  onGoalChanged: (goal: Goal) => Promise<boolean>
 }
 
 export default function Dossier({ state, onRetry, onOpen, running, pass, onPass, onGoalChanged }: Props) {
@@ -120,6 +122,7 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged }: HeroPr
 }
 
 const GOAL_FAILED = 'The goal could not be changed just now. Please try again.'
+const GOAL_STALE = 'The goal was changed, but the overview could not be read again just now.'
 
 /**
  * The profile's goal on the hero (`docs/design.md`, Components: Goal, #369): "Goal: <goal>" and a ghost Change goal,
@@ -129,6 +132,9 @@ const GOAL_FAILED = 'The goal could not be changed just now. Please try again.'
 function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props['onGoalChanged'] }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  // The change was kept but the overview wasn't read again: the line shows the new goal; Retry reads it again.
+  const [stale, setStale] = useState<Goal | null>(null)
+  const reread = async (goal: Goal) => setStale(await onChanged(goal) ? null : goal)
   const other = overview.goal === 'audit-readiness' ? 'internal-improvement' : 'audit-readiness'
   const change = async () => {
     if (busy) return
@@ -136,9 +142,10 @@ function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props
     if (!window.confirm(question)) return
     setBusy(true)
     setFailed(false)
+    setStale(null)
     try {
       const result = await changeGoal(other)
-      if (result === 'changed') await onChanged?.()
+      if (result === 'changed') await reread(other)
       else if (result === 'failed') setFailed(true)
     } finally {
       setBusy(false)
@@ -153,6 +160,12 @@ function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props
         </button>
       </div>
       {failed && <p role="alert" className="field-note notice">{GOAL_FAILED}</p>}
+      {stale !== null && (
+        <div className="next">
+          <p role="alert" className="field-note notice">{GOAL_STALE}</p>
+          <button className="btn" onClick={() => void reread(stale)}>Retry</button>
+        </div>
+      )}
     </>
   )
 }

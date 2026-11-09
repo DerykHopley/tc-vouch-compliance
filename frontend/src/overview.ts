@@ -103,7 +103,9 @@ export type OverviewState =
   | { status: 'failed'; message: string }
 
 /**
- * The overview as the page shows it; `load` reads it again (only the latest answer is shown). `noteAssessed` puts a
+ * The overview as the page shows it; `load` reads it again (only the latest answer is shown). `goalChanged` reads it
+ * again after a goal change (#369) without failing the page: the change was kept, so when the read fails the overview
+ * stays, showing the new goal, and it answers false for the hero to say so. `noteAssessed` puts a
  * finished run's verdict and review state on its control's card without a read (each counts to the rate limit), so
  * the working paper's index stays current; the Dossier reads the overview afresh anyway.
  */
@@ -130,5 +132,13 @@ export function useOverview() {
       },
     })
   }, [])
-  return { state, load, retry, noteAssessed }
+  const goalChanged = useCallback(async (goal: Goal) => {
+    const asked = ++latest.current
+    const answer = await fetchOverview()
+    if (asked !== latest.current) return true
+    setState((now) => answer.ok ? { status: 'ready', overview: answer.overview }
+      : now.status === 'ready' ? { status: 'ready', overview: { ...now.overview, goal } } : now)
+    return answer.ok
+  }, [])
+  return { state, load, retry, noteAssessed, goalChanged }
 }

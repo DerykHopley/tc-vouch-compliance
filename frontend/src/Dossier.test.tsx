@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Dossier from './Dossier.tsx'
 import type { ControlCard, Overview } from './overview.ts'
+import type { Goal } from './report.ts'
 import type { PassAssessment, PassState } from './profilePass.ts'
 
 afterEach(() => {
@@ -13,6 +14,9 @@ afterEach(() => {
 
 /** No profile pass: idle, and starting one does nothing. */
 const NO_PASS = { pass: { kind: 'idle' } as const, onPass: () => {} }
+
+/** No goal change: one would read the overview again, and say it did. */
+const NO_GOAL = { onGoalChanged: () => Promise.resolve(true) }
 
 const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
 
@@ -53,7 +57,7 @@ const cardChip = (id: string) =>
 describe('the Dossier overview', () => {
   it('shows the readiness band from the overview, in figures and words', () => {
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
-      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     const band = screen.getByRole('region', { name: 'Readiness' })
     expect(within(band).getByText('accepted of 12')).toBeTruthy()
     expect(tile('accepted of 12')).toBe('2')
@@ -73,18 +77,18 @@ describe('the Dossier overview', () => {
   ])('labels the remediation count with %i approved as "%s"', (approved, label) => {
     const overview = seeded()
     overview.readiness = { ...overview.readiness, remediation_items: 3, remediation_approved: approved }
-    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(tile(label)).toBe('3')
   })
 
   it('names the controls by their count, from the data', () => {
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(screen.getByRole('heading', { name: '12 controls' })).toBeTruthy()
   })
 
   it("shows Assessing on the card of the control being assessed, and doesn't offer to assess it again", async () => {
     const onOpen = vi.fn()
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running="1.1.1" {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running="1.1.1" {...NO_PASS} {...NO_GOAL} />)
     const card = screen.getByRole('article', { name: 'Control 1.1.1' })
     expect(within(card).getByText('Assessing').className).toBe('chip v-assessing')
     expect(screen.queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
@@ -96,7 +100,7 @@ describe('the Dossier overview', () => {
     const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } })
     overview.quotes = [overview.quotes[0], { ...overview.quotes[0] }]
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     expect(within(quotes).getAllByRole('article')).toHaveLength(2)
     expect(errors.mock.calls.flat().join(' ')).not.toMatch(/same key/)
@@ -108,7 +112,7 @@ describe('the Dossier overview', () => {
       '1.1.1': { status: 'accepted', verdict: 'evidenced' },
       '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' },
       '4.1.3': { status: 'rejected', verdict: 'not-evidenced' },
-    }) }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+    }) }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     const cards = screen.getAllByRole('article', { name: /^Control / })
     expect(cards).toHaveLength(12)
     const card = (id: string) => screen.getByRole('article', { name: `Control ${id}` })
@@ -122,7 +126,7 @@ describe('the Dossier overview', () => {
   it("shows a German profile's card verdicts in German, marked lang=\"de\" (ticket 200)", () => {
     const overview = { ...seeded(ALL_VERDICTS), company: 'Alpenwerk Präzision GmbH', country: 'Austria',
       answer_language: 'de' }
-    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(['1.1.1', '4.1.2', '4.1.3', '5.2.9'].map(cardChip).map((c) => [c.textContent, c.lang])).toEqual([
       ['Nachgewiesen', 'de'], ['Teilweise nachgewiesen', 'de'], ['Nicht nachgewiesen', 'de'], ['Nicht anwendbar', 'de']])
     // The interface stays English: the review state and Not assessed.
@@ -133,28 +137,28 @@ describe('the Dossier overview', () => {
 
   it("shows an English profile's card verdicts in English, with no lang (ticket 200)", () => {
     render(<Dossier state={{ status: 'ready', overview: seeded(ALL_VERDICTS) }} onRetry={() => {}} onOpen={() => {}}
-      running={null} {...NO_PASS} />)
+      running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(['1.1.1', '4.1.2', '4.1.3', '5.2.9'].map(cardChip).map((c) => [c.textContent, c.hasAttribute('lang')]))
       .toEqual([['Evidenced', false], ['Partly evidenced', false], ['Not evidenced', false], ['Not applicable', false]])
   })
 
   it('opens a control from its card', async () => {
     const onOpen = vi.fn()
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} {...NO_GOAL} />)
     await userEvent.click(screen.getByRole('link', { name: 'Open 5.2.9' }))
     expect(onOpen).toHaveBeenCalledWith('5.2.9', false)
   })
 
   it('offers the next step, which assesses a control not yet assessed', async () => {
     const onOpen = vi.fn()
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} {...NO_GOAL} />)
     await userEvent.click(screen.getByRole('button', { name: 'Assess 1.1.1' }))
     expect(onOpen).toHaveBeenCalledWith('1.1.1', true)
   })
 
   it('shows the evidence quotes with their document, version and section', () => {
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
-      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     const card = within(quotes).getByRole('article')
     expect(within(card).getByText('The ISMS covers every site.')).toBeTruthy()
@@ -163,7 +167,7 @@ describe('the Dossier overview', () => {
   })
 
   it('with nothing assessed names the first step instead of quotes', () => {
-    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+    render(<Dossier state={{ status: 'ready', overview: seeded() }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(screen.getByRole('heading', { level: 1 }).parentElement!.textContent)
       .toContain('Nothing is assessed yet. Start with 1.1.1')
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
@@ -175,7 +179,7 @@ describe('the Dossier overview', () => {
   it("opens a quote's control from the quote card's link, in place and without assessing (ticket 311)", async () => {
     const onOpen = vi.fn()
     render(<Dossier state={{ status: 'ready', overview: seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } }) }}
-      onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} />)
+      onRetry={() => {}} onOpen={onOpen} running={null} {...NO_PASS} {...NO_GOAL} />)
     const quotes = screen.getByRole('region', { name: 'What the evidence says' })
     const link = within(quotes).getByRole('link', { name: 'for 1.1.1 M1' })
     expect(link.getAttribute('href')).toBe('/controls/1.1.1')
@@ -187,7 +191,7 @@ describe('the Dossier overview', () => {
     () => {
       const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' } })
       overview.quotes = [overview.quotes[0], { ...overview.quotes[0], requirement_id: 'M2', quote: 'Every site.' }]
-      render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} />)
+      render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
       const quotes = screen.getByRole('region', { name: 'What the evidence says' })
       const links = within(quotes).getAllByRole('link')
       expect(links.map((a) => a.getAttribute('href'))).toEqual(['/controls/1.1.1', '/controls/1.1.1'])
@@ -197,7 +201,7 @@ describe('the Dossier overview', () => {
   it('says when the overview could not be loaded, and retries', async () => {
     const onRetry = vi.fn()
     render(<Dossier state={{ status: 'failed', message: 'The overview could not be loaded just now. Please try again.' }}
-      onRetry={onRetry} onOpen={() => {}} running={null} {...NO_PASS} />)
+      onRetry={onRetry} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
     expect(screen.getByRole('alert').textContent).toBe('The overview could not be loaded just now. Please try again.')
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalled()
@@ -216,7 +220,7 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
     const onOpen = vi.fn()
     const onPass = vi.fn()
     render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={onOpen} running={running}
-      pass={pass} onPass={onPass} />)
+      pass={pass} onPass={onPass} {...NO_GOAL} />)
     return { onOpen, onPass }
   }
 
@@ -376,6 +380,7 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
 
 describe('the goal on the Dossier (ticket 369)', () => {
   const FAILED = 'The goal could not be changed just now. Please try again.'
+  const STALE = 'The goal was changed, but the overview could not be read again just now.'
   const goalLine = () => screen.getByText(/^Goal: /)
   const changeButton = () => screen.getByRole('button', { name: 'Change goal' }) as HTMLButtonElement
 
@@ -387,8 +392,9 @@ describe('the goal on the Dossier (ticket 369)', () => {
     return fetch
   }
 
-  function shown(overview = seeded(), { running = null as string | null, pass = NO_PASS.pass as PassState } = {}) {
-    const onGoalChanged = vi.fn(() => Promise.resolve())
+  function shown(overview = seeded(),
+    { running = null as string | null, pass = NO_PASS.pass as PassState, read = true } = {}) {
+    const onGoalChanged = vi.fn((_goal: Goal) => Promise.resolve(read))
     render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={running}
       pass={pass} onPass={() => {}} onGoalChanged={onGoalChanged} />)
     return { onGoalChanged }
@@ -430,8 +436,24 @@ describe('the goal on the Dossier (ticket 369)', () => {
     expect(init?.method).toBe('PUT')
     expect(JSON.parse(String(init?.body))).toEqual({ goal: 'audit-readiness' })
     expect(onGoalChanged).toHaveBeenCalledTimes(1)
+    expect(onGoalChanged).toHaveBeenCalledWith('audit-readiness')
     expect(screen.queryByRole('alert')).toBeNull()
   })
+
+  it("when the change is kept but the overview can't be read again, says so with Retry, which reads it again",
+    async () => {
+      serve(() => Promise.resolve(new Response(JSON.stringify({ goal: 'internal-improvement' }))))
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const { onGoalChanged } = shown(seeded(), { read: false })
+      await userEvent.click(changeButton())
+      expect((await screen.findByRole('alert')).textContent).toBe(STALE)
+      expect(onGoalChanged).toHaveBeenCalledWith('internal-improvement')
+      onGoalChanged.mockResolvedValue(true)
+      await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      expect(onGoalChanged).toHaveBeenCalledTimes(2)
+      expect(onGoalChanged).toHaveBeenLastCalledWith('internal-improvement')
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    })
 
   it('is busy and disabled while the change runs', async () => {
     let answer: (r: Response) => void = () => {}
