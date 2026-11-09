@@ -18,7 +18,7 @@ from vouch.api import PROFILE_HEADER, create_app, current_user
 from vouch.chat_fake import CannedChatModel
 from vouch.isa import BaseFrameworkError
 from vouch.model_choice import ModelChoice
-from vouch.profile import ProfileError, load_problem, read_profile_once
+from vouch.profile import ProfileError, load_problem, read_profile_once, scan_profiles
 from vouch.settings import PROFILES_DIR_ENV, Settings
 
 users = test_memory.users
@@ -372,3 +372,25 @@ def test_a_broken_profile_fixed_while_the_app_runs_comes_back_warned_once_per_ve
     assert fixed == ["nordlicht", SECOND]
     warned = [r for r in caplog.records if r.levelno == logging.WARNING and SECOND in r.message]
     assert len(warned) == 2  # once per broken version
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its permissions")
+def test_a_profile_fixed_only_by_its_permissions_comes_back_on_the_next_scan(profiles, caplog):
+    # #167: the cache was keyed on the file's time and size, which chmod changes neither of.
+    read_profile_once.cache_clear()
+    second = profiles / SECOND / "profile.yaml"
+    mode = second.stat().st_mode
+
+    with caplog.at_level(logging.WARNING, "vouch.profile"):
+        second.chmod(0)
+        try:
+            unreadable = scan_profiles(profiles)
+        finally:
+            second.chmod(mode)
+        readable = scan_profiles(profiles)
+        again = scan_profiles(profiles)
+
+    assert SECOND in [p.id for p in unreadable.broken]
+    assert SECOND in [p.id for p in readable.loaded] == [p.id for p in again.loaded]
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING and SECOND in r.message]
+    assert len(warned) == 1  # warned once, for the unreadable version
