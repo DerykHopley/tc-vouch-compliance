@@ -1,6 +1,6 @@
 import { type Column, type EvidenceKind, plural, type ProtectionLevel } from './assessment.ts'
-import { regionName } from './profiles.ts'
-import { authHeaders, sessionEnded } from './session.ts'
+import { type ProfileSummary, regionName } from './profiles.ts'
+import { authHeaders, refusedBecause, sessionEnded } from './session.ts'
 
 /** Company setup's data (#403): the countries a company may be in, and what each protection level brings into scope. */
 
@@ -120,4 +120,46 @@ export function readyToCite(chosen: readonly LibraryDocument[]): string {
   const stale = chosen.filter((d) => d.stale).length
   return `Ready to cite: ${plural(chosen.length, 'document')} (${countOf('documented')} documented, `
     + `${countOf('implemented')} implemented${stale > 0 ? `, ${stale} stale` : ''}).`
+}
+
+/** A company to make, as POST /api/developer/profiles takes it (vouch.company_profiles.CompanySetup, #385). */
+export type CompanySetup = {
+  company: string
+  country: string
+  answer_language: 'en' | 'de'
+  protection_level: ProtectionLevel
+  not_applicable: NotApplicable[]
+  evidence: ChosenEvidence
+}
+
+/** How creating a company went (#409): created, with the profile as GET /api/profiles lists it; refused by the
+ * profile's checks (a 422), with the problem in words; the database unavailable (a 503); the session ended (a 401:
+ * signed out already); or failed any other way, unreachable included. */
+export type CompanyCreated =
+  | { status: 'created'; profile: ProfileSummary }
+  | { status: 'refused'; problem: string }
+  | { status: 'unavailable' }
+  | { status: 'signed-out' }
+  | { status: 'failed' }
+
+/** Creates the company `setup` describes (developers only), each not-applicable reason trimmed: step 5 keeps them as
+ * typed (#407's review). */
+export async function createCompany(setup: CompanySetup): Promise<CompanyCreated> {
+  const body: CompanySetup = {
+    ...setup,
+    not_applicable: setup.not_applicable.map(({ control, reason }) => ({ control, reason: reason.trim() })),
+  }
+  try {
+    const response = await fetch('/api/developer/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+      body: JSON.stringify(body),
+    })
+    if (response.ok) return { status: 'created', profile: (await response.json()) as ProfileSummary }
+    if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
+    if (response.status === 422) return { status: 'refused', problem: await refusedBecause(response) }
+    return response.status === 503 ? { status: 'unavailable' } : { status: 'failed' }
+  } catch {
+    return { status: 'failed' }
+  }
 }

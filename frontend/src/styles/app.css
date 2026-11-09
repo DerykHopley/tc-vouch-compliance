@@ -340,10 +340,10 @@ textarea.field { resize: vertical; font-family: inherit; }
 .report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
 .report-doc h2 { font-size: 20px; margin-bottom: 8px; }
 .report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
-.report-head { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
-.report-head dt, .report-reason dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+.report-head, .setup-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
+.report-head dt, .report-reason dt, .setup-summary dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
   font-weight: 600; padding-top: 2px; }
-.report-head dd, .report-reason dd { margin: 0; overflow-wrap: anywhere; }
+.report-head dd, .report-reason dd, .setup-summary dd { margin: 0; overflow-wrap: anywhere; }
 .report-part { --report-part-gap: 10px; display: grid; gap: var(--report-part-gap); min-width: 0; }
 .report-lead { margin: 0; font-weight: 600; }
 .report .report-bar { box-shadow: inset 0 0 0 1px var(--rule); background: var(--paper); }
@@ -494,3 +494,5 @@ textarea.field { resize: vertical; font-family: inherit; }
   .doc-table .doc-choose .setup-choice input { margin: 13px; }
 }
 .setup-ready { font-variant-numeric: tabular-nums; }
+/* Step 7's summary (#409): the report head's label and value grid; a marked control per line. */
+.setup-summary-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

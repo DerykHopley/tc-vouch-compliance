@@ -3,6 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
+
+// Company setup stands in as one button that reports the company made (#409): its steps are tested on their own.
+vi.mock('./CompanySetupWizard.tsx', () => ({
+  default: ({ onCreated }: { onCreated: (profile: ProfileSummary) => void }) => (
+    <button type="button" onClick={() => onCreated({ id: 'musterfirma-gmbh', company: 'Musterfirma GmbH',
+      country: 'Germany', answer_language: 'de' })}>Created</button>
+  ),
+}))
 import { fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import {
@@ -11,6 +19,8 @@ import {
 
 const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany',
   answer_language: 'en' }
+const MUSTERFIRMA: ProfileSummary = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany',
+  answer_language: 'de' }
 const TESTWERK: ProfileSummary = { id: 'testwerk', company: 'Testwerk Prüfstand GmbH', country: 'Austria',
   answer_language: 'de' }
 
@@ -371,5 +381,57 @@ describe('switching profile on a working paper', () => {
     await screen.findByText(/Working paper · Testwerk/)
     expect(within(await row()).queryByText(/Overridden from/)).toBeNull()
     expect(within(await row()).queryByText('The rollout record shows it.')).toBeNull()
+  })
+})
+
+describe('a company made in company setup, issue 409', () => {
+  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
+    kept_in: 'memory', daily_limit: 10 }
+
+  /** The API as `serve` answers it, for a developer, the list read again answering `relisted` (null: a 500). */
+  function serveDeveloper(relisted: ProfileSummary[] | null) {
+    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/profiles' && ++listings > 1)
+        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
+          : new Response(null, { status: 500 }))
+      if (url === '/api/profiles') return Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
+      return answered(url, init)
+    })
+    return fetch
+  }
+
+  it('reads the list again and opens under the new company, on the Dossier, remembered for the next reload', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/profiles')).toHaveLength(2)
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    expect(screen.getByRole('button', { name: /^Profile: Musterfirma GmbH/ })).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    expect(screen.getAllByRole('menuitemradio').map((m) => m.getAttribute('aria-checked')))
+      .toEqual(['false', 'false', 'true'])
+  })
+
+  it('when the list can\'t be read again, still opens under the new company, which the switcher names', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper(null)
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: Musterfirma/ }))
+    expect(screen.getAllByRole('menuitemradio').map((m) => m.textContent?.startsWith('Musterfirma GmbH')))
+      .toEqual([false, false, true])
   })
 })

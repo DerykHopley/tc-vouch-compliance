@@ -1,9 +1,10 @@
-"""Company setup (#403, #407, #408, M8 #351), steps 1 to 3, 5 and 6: a developer opens it from the
-developer page and walks it, going back and forward without losing an answer; a compliance lead
-never reaches it.
+"""Company setup (#403, #407, #408, #409, M8 #351), steps 1 to 3 and 5 to 7: a developer opens it
+from the developer page and walks it, going back and forward without losing an answer, then creates
+the company and lands on it; a compliance lead never reaches it.
 
 On the profiles server, as the developer page's checks are (local mode: its one user is a
-developer). Nothing is stored: no step sends a profile yet.
+developer), except the one check that creates a company: that runs on a server of its own
+(setup_url), as the company stays in that process and would join the other checks' switchers.
 """
 
 import re
@@ -15,6 +16,7 @@ from test_developer_page import as_compliance_lead
 LEVELS = "/api/developer/protection-levels"
 CONTROLS = "/api/developer/controls"
 LIBRARY = "/api/developer/sample-library"
+PROFILES = "/api/developer/profiles"
 # The wizard ignores a move within 400 ms of the last (a double-click's second press); a person's
 # separate presses come further apart, so each helper move waits this long first.
 SETTLE_MS = 450
@@ -448,3 +450,178 @@ def test_in_forced_colours_a_document_checkbox_keeps_its_44px_target(page: Page,
     assert target is not None and target["width"] >= 44 and target["height"] >= 44
     page.mouse.click(target["x"] + 2, target["y"] + 2)  # the target's corner, outside the box
     expect(box).to_be_checked()
+
+
+def to_step_7(page: Page) -> None:
+    """Steps 1 to 6 answered (5.1.1's reason typed with spaces around it), then Next to step 7."""
+    to_step_6(page)
+    document(page, "Backup policy").check()
+    press(page, "Next")
+    expect(page.get_by_role("heading", name="Finish")).to_be_focused()
+
+
+def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
+    """Stories 1 to 4 end to end: every answer summed up on step 7, Create company, then the new
+    company on the Dossier, in the top bar and the switcher, its marked controls' reasons kept
+    trimmed in its profile."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    open_setup(page, setup_url)
+    to_step_5(page)
+    control(page, "1.6.1").check()
+    reason(page, "1.6.1").fill("We build no prototype vehicles.")
+    control(page, "5.1.1").check()
+    reason(page, "5.1.1").fill("  No cryptography in our own products  ")
+    with page.expect_response(lambda r: LIBRARY in r.url):
+        press(page, "Next")
+    document(page, "Backup policy").check()
+    document(page, "Access rights policy").check()
+    document(page, "Security training record 2026").check()
+    press(page, "Next")
+
+    expect(page.get_by_text("Step 7 of 7")).to_be_visible()
+    summary = page.locator("dl.setup-summary")
+    expect(summary).to_contain_text("Musterfirma Nord GmbH")
+    expect(summary).to_contain_text("Germany")
+    expect(summary).to_contain_text("German")
+    expect(summary).to_contain_text("Normal")
+    expect(summary.get_by_role("listitem")).to_have_text(
+        ["1.6.1: We build no prototype vehicles.", "5.1.1: No cryptography in our own products"]
+    )
+    expect(summary).to_contain_text(
+        "Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale)."
+    )
+    expect(page.get_by_role("table", name="Policies").get_by_role("row")).to_have_count(3)
+    expect(page.get_by_role("table", name="Records").get_by_role("row")).to_have_count(2)
+    expect(page.get_by_role("checkbox")).to_have_count(0)
+
+    with (
+        page.expect_response(lambda r: PROFILES in r.url) as created,
+        page.expect_response(lambda r: r.url.endswith("/api/overview")),
+    ):
+        press(page, "Create company")
+    assert created.value.status == 201
+    profile = created.value.json()
+    assert profile["company"] == "Musterfirma Nord GmbH"
+
+    expect(page).to_have_url(f"{setup_url}/")
+    banner = page.get_by_role("banner")
+    expect(
+        banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
+    ).to_be_visible()
+    expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+    expect(page.get_by_text("Not assessed", exact=True)).to_have_count(12)
+    banner.get_by_role("button", name=re.compile(r"^Profile: ")).click()
+    expect(
+        banner.get_by_role("menuitemradio", name=re.compile(r"^Musterfirma Nord GmbH"))
+    ).to_be_checked()
+
+    overview = page.request.get(
+        f"{setup_url}/api/overview", headers={"X-Vouch-Profile": profile["id"]}
+    )
+    assert overview.ok, overview.status
+    requirements = overview.json()["requirements"]
+    for control_id, typed in (
+        ("1.6.1", "We build no prototype vehicles."),
+        ("5.1.1", "No cryptography in our own products"),
+    ):
+        assert requirements[control_id]
+        assert {r["not_applicable"] for r in requirements[control_id]} == {typed}
+    assert all(r["not_applicable"] is None for r in requirements["1.1.1"])
+
+    page.reload()
+    expect(
+        banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
+    ).to_be_visible()
+
+
+def test_a_double_click_on_step_6s_next_lands_on_step_7_and_creates_nothing(
+    page: Page, profiles_url
+):
+    posted: list[str] = []
+    page.on("request", lambda r: posted.append(r.url) if r.method == "POST" else None)
+    open_setup(page, profiles_url)
+    to_step_6(page)
+    document(page, "Backup policy").check()
+
+    page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Next").dblclick()
+
+    expect(page.get_by_text("Step 7 of 7")).to_be_visible()
+    expect(page.get_by_role("heading", name="Finish")).to_be_focused()
+    page.wait_for_timeout(SETTLE_MS)
+    expect(page.get_by_role("button", name="Create company")).to_have_text("Create company")
+    assert not any(PROFILES in url for url in posted)
+
+
+def test_a_double_click_on_a_next_that_moves_leaves_focus_on_the_new_heading(
+    page: Page, profiles_url
+):
+    """From #408's verifier: on 3 to 5, 5 to 6 and 6 to 7, the second press left focus on BODY."""
+    open_setup(page, profiles_url)
+    to_step_3(page)
+    page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+
+    page.wait_for_timeout(SETTLE_MS)
+    with page.expect_response(lambda r: CONTROLS in r.url):
+        page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_role("heading", name="Not applicable")).to_be_focused()
+    expect(page.get_by_role("checkbox")).to_have_count(12)
+    expect(page.get_by_role("heading", name="Not applicable")).to_be_focused()
+
+    page.wait_for_timeout(SETTLE_MS)
+    with page.expect_response(lambda r: LIBRARY in r.url):
+        page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_role("checkbox")).to_have_count(17)
+    expect(page.get_by_role("heading", name="Evidence")).to_be_focused()
+
+    document(page, "Backup policy").check()
+    page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_role("heading", name="Finish")).to_be_focused()
+
+
+RING = "el => getComputedStyle(el).outlineStyle"
+
+
+def test_step_7_is_walked_by_keyboard_and_a_failed_create_keeps_focus_on_create_company(
+    page: Page, profiles_url
+):
+    """Back and Create company by Tab, each with a visible focus ring; a 503 (routed: nothing is
+    kept) says so, and focus is back on Create company to press again."""
+    page.route(
+        f"**{PROFILES}",
+        lambda route: route.fulfill(status=503, json={"detail": "down", "unavailable": "database"}),
+    )
+    open_setup(page, profiles_url)
+    to_step_7(page)
+
+    back = page.get_by_role("button", name="Back")
+    create = page.get_by_role("button", name="Create company")
+    page.keyboard.press("Tab")  # from the heading: the tables hold nothing to focus
+    expect(back).to_be_focused()
+    assert back.evaluate(RING) != "none"
+    page.keyboard.press("Tab")
+    expect(create).to_be_focused()
+    assert create.evaluate(RING) != "none"
+
+    page.wait_for_timeout(SETTLE_MS)  # a press of its own, not the move's landing again
+    with page.expect_response(lambda r: PROFILES in r.url):
+        page.keyboard.press("Enter")
+    expect(page.get_by_role("alert")).to_have_text(
+        "The database is unavailable just now. Nothing was saved; try again in a moment."
+    )
+    expect(create).to_be_focused()
+    expect(create).to_be_enabled()
+    expect(page.locator("dl.setup-summary")).to_contain_text("Musterfirma Nord GmbH")
+
+
+@pytest.mark.parametrize("width", [400, 900, 1400])
+def test_step_7_scrolls_sideways_only_inside_its_tables(page: Page, profiles_url, width):
+    page.set_viewport_size({"width": width, "height": 900})
+    open_setup(page, profiles_url)
+    to_step_7(page)
+
+    page_overflow = page.evaluate(
+        "document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth"
+    )
+    assert page_overflow <= 0

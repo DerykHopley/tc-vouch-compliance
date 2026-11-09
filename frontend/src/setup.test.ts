@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
 import { profileTag } from './profiles.ts'
+import { setOnSignedOut } from './session.ts'
 import {
-  COUNTRIES, frameworkControls, type LibraryDocument, notApplicableProblems, protectionLevels, type ProtectionScope,
+  COUNTRIES, type CompanySetup, createCompany, frameworkControls, type LibraryDocument, notApplicableProblems, protectionLevels, type ProtectionScope,
   readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  setOnSignedOut(null)
+})
 
 describe('the countries company setup offers', () => {
   it('are the EU, Iceland, Liechtenstein, Norway, Switzerland and the UK', () => {
@@ -129,5 +133,53 @@ describe("step 6's ready-to-cite line", () => {
   it('counts the chosen documents by kind, and the stale ones only when there are some', () => {
     expect(readyToCite([DOCUMENT, current, record])).toBe('Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale).')
     expect(readyToCite([current])).toBe('Ready to cite: 1 document (1 documented, 0 implemented).')
+  })
+})
+
+const SETUP: CompanySetup = {
+  company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de', protection_level: 'high',
+  not_applicable: [{ control: '1.6.1', reason: '  Remote only  ' }],
+  evidence: { policies: ['backup-policy'], records: [] },
+}
+const CREATED = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de' }
+
+describe('creating a company, issue 409', () => {
+  it('posts the setup to the developer route, each reason trimmed, and answers the created profile', async () => {
+    const fetch = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(Response.json(CREATED, { status: 201 })))
+    vi.stubGlobal('fetch', fetch)
+    expect(await createCompany(SETUP)).toEqual({ status: 'created', profile: CREATED })
+    const [url, init] = fetch.mock.calls[0]
+    expect(url).toBe('/api/developer/profiles')
+    expect(init?.method).toBe('POST')
+    expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      ...SETUP, not_applicable: [{ control: '1.6.1', reason: 'Remote only' }],
+    })
+  })
+
+  it('says why a refused setup was refused, from a string detail or a list', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ detail: 'evidence: no document x' }, { status: 422 })))
+    expect(await createCompany(SETUP)).toEqual({ status: 'refused', problem: 'evidence: no document x' })
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json(
+      { detail: [{ loc: ['body', 'company'], msg: 'too long' }, { loc: ['body', 'country'], msg: 'empty' }] },
+      { status: 422 })))
+    expect(await createCompany(SETUP)).toEqual({ status: 'refused', problem: 'too long; empty' })
+  })
+
+  it('is unavailable on a 503, and failed on any other answer or offline', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ detail: 'x', unavailable: 'database' }, { status: 503 })))
+    expect(await createCompany(SETUP)).toEqual({ status: 'unavailable' })
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 500 })))
+    expect(await createCompany(SETUP)).toEqual({ status: 'failed' })
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
+    expect(await createCompany(SETUP)).toEqual({ status: 'failed' })
+  })
+
+  it('signs out on a 401', async () => {
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
+    expect(await createCompany(SETUP)).toEqual({ status: 'signed-out' })
+    expect(signOut).toHaveBeenCalledOnce()
   })
 })

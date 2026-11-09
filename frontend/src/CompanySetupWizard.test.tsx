@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
+import type { ProfileSummary } from './profiles.ts'
+import { setOnSignedOut } from './session.ts'
 import type { LibraryDocument, ProtectionScope } from './setup.ts'
 
 const LEVELS: ProtectionScope[] = [
@@ -33,16 +35,22 @@ const controlsAnswer = () => new Response(JSON.stringify({ controls: CONTROLS })
 const libraryAnswer = () => new Response(JSON.stringify({ documents: LIBRARY }))
 const CONTROLS_PATH = '/api/developer/controls'
 const LIBRARY_PATH = '/api/developer/sample-library'
+const PROFILES_PATH = '/api/developer/profiles'
+const CREATED: ProfileSummary = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany',
+  answer_language: 'de' }
+const createdAnswer = () => Response.json(CREATED, { status: 201 })
 
 type Answer = Response | 'offline'
 
-/** fetch answering the scope read with `levels` in turn, the controls read with `controls` in turn and the library
- * read with `library` in turn (a Response, or 'offline' to reject), then with the full answer. */
-function api(levels: Answer[] = [], controls: Answer[] = [], library: Answer[] = []) {
-  const fetch = vi.fn((url: string) => {
+/** fetch answering the scope read with `levels` in turn, the controls read with `controls` in turn, the library
+ * read with `library` in turn and the create with `created` in turn (a Response, or 'offline' to reject), then with
+ * the full answer (a create: 201). */
+function api(levels: Answer[] = [], controls: Answer[] = [], library: Answer[] = [], created: Answer[] = []) {
+  const fetch = vi.fn((url: string, _init?: RequestInit) => {
     const next = url === CONTROLS_PATH ? controls.shift() ?? controlsAnswer()
       : url === LIBRARY_PATH ? library.shift() ?? libraryAnswer()
-        : levels.shift() ?? levelsAnswer()
+        : url === PROFILES_PATH ? created.shift() ?? createdAnswer()
+          : levels.shift() ?? levelsAnswer()
     return next === 'offline' ? Promise.reject(new TypeError('offline')) : Promise.resolve(next)
   })
   vi.stubGlobal('fetch', fetch)
@@ -59,6 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  setOnSignedOut(null)
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -102,16 +111,45 @@ async function toStep6() {
 
 const choose = (title: string) => screen.getByRole('checkbox', { name: `Choose ${title}` })
 const findChoose = (title: string) => screen.findByRole('checkbox', { name: `Choose ${title}` })
-const NOT_BUILT = 'The finish is not built yet. Nothing has been saved.'
+
+/** Steps 1 to 6 answered: Musterfirma GmbH in Germany, answers in German, protection level High, 5.1.1 then 1.6.1
+ * marked not applicable (1.6.1's reason typed with spaces around it), the backup policy and the training record
+ * chosen; then Next to step 7. */
+async function toStep7() {
+  await stepOne()
+  await next()
+  await userEvent.click(screen.getByRole('radio', { name: 'German' }))
+  await next()
+  await userEvent.click(await screen.findByRole('radio', { name: /^High/ }))
+  await next()
+  await userEvent.click(await findControl('5.1.1'))
+  await userEvent.type(reason('5.1.1'), 'No cryptography')
+  await userEvent.click(control('1.6.1'))
+  await userEvent.type(reason('1.6.1'), '  Remote only  ')
+  await next()
+  await userEvent.click(await findChoose('Backup policy'))
+  await userEvent.click(choose('Security training record 2026'))
+  await next()
+}
+
+const createButton = () => screen.getByRole('button', { name: 'Create company' })
+const create = () => { clock += 1000; return userEvent.click(createButton()) }
+const posts = (fetch: ReturnType<typeof api>) => fetch.mock.calls.filter((c) => c[0] === PROFILES_PATH)
+/** The wizard on its own, `onCreated` spied. */
+function wizard() {
+  const onCreated = vi.fn()
+  render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={onCreated} />)
+  return onCreated
+}
 
 describe('company setup', () => {
   it('lists all seven steps, marks the current one, and starts on step 1 with no Back', () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
     expect(steps.map((s) => s.textContent)).toEqual([
       '1Company', '2Language', '3Protection level', '4Goal (not yet available)', '5Not applicable',
-      '6Evidence', '7Finish (not yet available)'])
+      '6Evidence', '7Finish'])
     expect(steps[0].getAttribute('aria-current')).toBe('step')
     expect(screen.getByText('Step 1 of 7')).toBeTruthy()
     expect(heading('Company')).toBeTruthy()
@@ -127,7 +165,7 @@ describe('company setup', () => {
     ['neither', '', '', ['Give the company a name.', "Choose the company's country."], 'Company name'],
   ])('Next with %s stays on step 1, marks each missing field and focuses the first', async (_, company, country, messages, first) => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne(company, country)
     await next()
     expect(heading('Company')).toBeTruthy()
@@ -139,7 +177,7 @@ describe('company setup', () => {
 
   it('clears a marked field as soon as it is fixed, before Next', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await next()
     expect(nameField().getAttribute('aria-invalid')).toBe('true')
     expect(countryField().getAttribute('aria-invalid')).toBe('true')
@@ -153,7 +191,7 @@ describe('company setup', () => {
 
   it('moves on with Enter, as Next does', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne('Musterfirma GmbH')
     await userEvent.type(nameField(), '{Enter}')
     expect(heading('Language')).toBeTruthy()
@@ -161,7 +199,7 @@ describe('company setup', () => {
 
   it('moves focus to each new step heading, and marks it current in the step list', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne()
     await next()
     expect(document.activeElement).toBe(heading('Language'))
@@ -177,7 +215,7 @@ describe('company setup', () => {
 
   it('keeps every answer going back and forward', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne('Musterfirma GmbH', 'Austria')
     await next()
     const english = screen.getByRole('radio', { name: 'English' }) as HTMLInputElement
@@ -199,7 +237,7 @@ describe('company setup', () => {
 
   it("step 3 shows each level's scope from the route, read once", async () => {
     const fetch = api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne()
     await next()
     await next()
@@ -221,7 +259,7 @@ describe('company setup', () => {
       .mockImplementationOnce(() => Promise.reject(new TypeError('offline')))
       .mockImplementationOnce(() => Promise.resolve(levelsAnswer()))
     vi.stubGlobal('fetch', fetch)
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne()
     await next()
     await next()
@@ -242,7 +280,7 @@ describe('company setup', () => {
 
   it('Next on step 3 with no level stays, marks the levels and focuses the first; choosing one clears it', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep3()
     await next()
     const levels = screen.getByRole('group', { name: 'Protection level' })
@@ -258,7 +296,7 @@ describe('company setup', () => {
 
   it('Next on step 3 with a level skips the Goal to step 5, and Back returns to step 3', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     expect(screen.getByText('Step 5 of 7')).toBeTruthy()
     expect(document.activeElement).toBe(heading('Not applicable'))
@@ -273,7 +311,7 @@ describe('company setup', () => {
 
   it('step 5 lists every control unticked, under the sentence that says what not applicable means', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     expect(screen.getByText('Mark a control not applicable only when it doesn\'t apply to the company at all; the '
       + 'assessment leaves it out and the readiness report lists it with your reason.')).toBeTruthy()
@@ -286,7 +324,7 @@ describe('company setup', () => {
 
   it('ticking a control asks why; unticking drops the reason, and ticking again starts empty', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     await userEvent.click(await findControl('5.1.1'))
     await userEvent.type(reason('5.1.1'), 'No cryptography in use')
@@ -298,7 +336,7 @@ describe('company setup', () => {
 
   it('Next with a blank reason stays on step 5, marks each blank one and focuses the first; typing clears it', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     await userEvent.click(await findControl('1.6.1'))
     await userEvent.click(control('4.1.2'))
@@ -323,7 +361,7 @@ describe('company setup', () => {
 
   it('Next with every control ticked stays on step 5 and says one must apply', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     await findControl(CONTROLS[0].id)
     for (const c of CONTROLS) {
@@ -343,7 +381,7 @@ describe('company setup', () => {
 
   it('keeps the ticked controls and their reasons as typed through Back and Next', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     await userEvent.click(await findControl('1.6.1'))
     await userEvent.type(reason('1.6.1'), 'No prototype vehicles ')
@@ -363,7 +401,7 @@ describe('company setup', () => {
       const reads = fetch.mock.calls.filter((c) => c[0] === url).length
       return reads === 1 ? pending : Promise.resolve(controlsAnswer())
     })
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     expect(screen.getByText('Loading the controls…')).toBeTruthy()
     answer(new Response('{}', { status: 503 }))
@@ -377,14 +415,14 @@ describe('company setup', () => {
 
   it('a control read that fails while offline shows the alert too', async () => {
     api([], ['offline'])
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     expect((await screen.findByRole('alert')).textContent).toContain('The controls could not be loaded.')
   })
 
   it('reads the controls once, and posts no profile at any step', async () => {
     const fetch = api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     await userEvent.click(await findControl('1.6.1'))
     await userEvent.type(reason('1.6.1'), 'No prototype vehicles')
@@ -396,7 +434,7 @@ describe('company setup', () => {
 
   it('a second press within 400 ms of a move is ignored, on Next and on Back, so each press moves one step', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await stepOne()
     await next()
     await userEvent.click(nextButton()) // the same moment: a double-click's second press
@@ -417,7 +455,7 @@ describe('company setup', () => {
 
   it("leaving a step clears its problems: they don't show again on return before Next", async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep3()
     await next()
     expect(screen.getByText('Choose a protection level.')).toBeTruthy()
@@ -438,7 +476,7 @@ describe('company setup', () => {
 
   it('Next on step 5 with good answers goes to step 6, focus on its heading, and keeps the reasons as typed', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep5()
     await userEvent.click(await findControl('1.6.1'))
     await userEvent.type(reason('1.6.1'), ' No prototype vehicles ')
@@ -455,7 +493,7 @@ describe('company setup', () => {
 
   it('step 6 lists the library under Policies and Records, none chosen, under the sentence that says what it is for', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     expect(screen.getByText("Choose the documents that are this company's evidence. Vouch searches and cites only these."))
       .toBeTruthy()
@@ -467,12 +505,11 @@ describe('company setup', () => {
       .toEqual(['Choose Security training record 2026'])
     expect(screen.getAllByRole('checkbox').every((b) => !(b as HTMLInputElement).checked)).toBe(true)
     expect(screen.getByRole('status').textContent).toBe('No documents chosen yet.')
-    expect(screen.queryByText(NOT_BUILT)).toBeTruthy()
   })
 
   it('the ready-to-cite line follows each tick', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     await userEvent.click(await findChoose('Backup policy'))
     expect(screen.getByRole('status').textContent).toBe('Ready to cite: 1 document (1 documented, 0 implemented, 1 stale).')
@@ -485,7 +522,7 @@ describe('company setup', () => {
 
   it('Next on step 6 with no document stays, says so and focuses the first checkbox; ticking one clears it', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     await findChoose('Access rights policy')
     await next()
@@ -502,7 +539,7 @@ describe('company setup', () => {
 
   it('Next on step 6 with no policies in the library focuses the first record', async () => {
     api([], [], [new Response(JSON.stringify({ documents: LIBRARY.filter((d) => d.source === 'records') }))])
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     await findChoose('Security training record 2026')
     await next()
@@ -514,7 +551,7 @@ describe('company setup', () => {
     const fetch = api()
     fetch.mockImplementation((url: string) => url === LIBRARY_PATH ? new Promise<Response>((resolve) => { land = resolve })
       : Promise.resolve(url === CONTROLS_PATH ? controlsAnswer() : levelsAnswer()))
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     await next()
     expect(screen.getByText('Choose at least one document.')).toBeTruthy()
@@ -529,7 +566,7 @@ describe('company setup', () => {
     ['6', async () => { await toStep6(); await findChoose('Backup policy') }, 'Choose at least one document.'],
   ])("step %s's problem shows below Back and Next, so a refused Next moves neither", async (_, to, words) => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await to()
     await next()
     const notice = screen.getByText(words)
@@ -539,9 +576,10 @@ describe('company setup', () => {
 
   it("while a problem shows, only a double-click's second press off a control is kept from moving focus", async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     const cell = (await screen.findAllByText('Current'))[0]
+    clock += 1000 // settled since the move to step 6
     expect(fireEvent.mouseDown(cell, { detail: 2 })).toBe(true) // no problem showing
     await next()
     expect(fireEvent.mouseDown(cell, { detail: 1 })).toBe(true) // a single press
@@ -549,38 +587,45 @@ describe('company setup', () => {
     expect(fireEvent.mouseDown(cell, { detail: 2 })).toBe(false)
   })
 
-  it('Next on step 6 with a document chosen stays and focuses the note that the finish is not built yet', async () => {
+  it("a double-click's second press within 400 ms of a move neither moves focus nor ticks a box", async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
-    await toStep6()
-    await userEvent.click(await findChoose('Backup policy'))
-    await next()
-    expect(heading('Evidence')).toBeTruthy()
-    expect(screen.queryByText('Choose at least one document.')).toBeNull()
-    expect(document.activeElement).toBe(screen.getByText(NOT_BUILT))
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
+    await toStep5()
+    const box = await findControl('1.6.1')
+    expect(fireEvent.mouseDown(document.body, { detail: 2 })).toBe(false)
+    expect(fireEvent.mouseDown(box, { detail: 2 })).toBe(false)
+    fireEvent.click(box, { detail: 2 })
+    expect((box as HTMLInputElement).checked).toBe(false)
+    expect(fireEvent.mouseDown(box, { detail: 1 })).toBe(true) // a press of its own
+    clock += 400
+    expect(fireEvent.mouseDown(document.body, { detail: 2 })).toBe(true) // settled: a double-click of its own
+    fireEvent.click(box, { detail: 2 })
+    expect((box as HTMLInputElement).checked).toBe(true)
   })
 
-  it('the note that the finish is not built yet shows on no other step', async () => {
-    api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
-    const seen = [screen.queryByText(NOT_BUILT)]
-    await stepOne()
-    await next()
-    seen.push(screen.queryByText(NOT_BUILT))
-    await next()
-    seen.push(screen.queryByText(NOT_BUILT))
-    await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
-    await next()
-    seen.push(screen.queryByText(NOT_BUILT))
-    expect(seen).toEqual([null, null, null, null])
-    await findControl('1.1.1')
-    await next()
-    expect(screen.getByText(NOT_BUILT)).toBeTruthy()
-  })
+  it('Next on step 6 with a document chosen goes to step 7, focus on its heading; Back returns with the choices kept',
+    async () => {
+      api()
+      render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
+      await toStep6()
+      await userEvent.click(await findChoose('Backup policy'))
+      await next()
+      expect(screen.getByText('Step 7 of 7')).toBeTruthy()
+      expect(document.activeElement).toBe(heading('Finish'))
+      const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
+      expect(steps.map((s) => s.className)).toEqual(['', '', '', 'later', '', '', ''])
+      expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, null, null, null, 'step'])
+      expect(screen.queryByRole('button', { name: 'Next' })).toBeNull()
+      expect(screen.queryByText(/not built yet/)).toBeNull()
+      await back()
+      expect(document.activeElement).toBe(heading('Evidence'))
+      expect((choose('Backup policy') as HTMLInputElement).checked).toBe(true)
+      expect((choose('Access rights policy') as HTMLInputElement).checked).toBe(false)
+    })
 
   it('keeps the chosen documents through Back and Next', async () => {
     api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     await userEvent.click(await findChoose('Backup policy'))
     await userEvent.click(choose('Security training record 2026'))
@@ -596,7 +641,7 @@ describe('company setup', () => {
     ['offline', 'offline' as Answer],
   ])('when the library read fails (%s) it says so with Try again, which reads once more and lists it', async (_, failure) => {
     const fetch = api([], [], [failure])
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('The sample library could not be loaded.')
@@ -614,14 +659,14 @@ describe('company setup', () => {
     const fetch = api()
     fetch.mockImplementation((url: string) => url === LIBRARY_PATH ? new Promise<Response>(() => {})
       : Promise.resolve(url === CONTROLS_PATH ? controlsAnswer() : levelsAnswer()))
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     expect(screen.getByText('Loading the sample library…')).toBeTruthy()
   })
 
   it('reads the library once across Back and Next, and posts no profile at any step', async () => {
     const fetch = api()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} onCreated={() => {}} />)
     await toStep6()
     await userEvent.click(await findChoose('Backup policy'))
     await next()
@@ -638,11 +683,184 @@ describe('company setup', () => {
   it('the breadcrumb leads back to the developer page', async () => {
     api()
     const onDeveloper = vi.fn()
-    render(<CompanySetupWizard developerPath="/developer" onDeveloper={onDeveloper} />)
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={onDeveloper} onCreated={() => {}} />)
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
     expect(crumbs.textContent).toBe('Developer›Company setup')
     expect(within(crumbs).getByRole('link', { name: 'Developer' }).getAttribute('href')).toBe('/developer')
     await userEvent.click(within(crumbs).getByRole('link', { name: 'Developer' }))
     expect(onDeveloper).toHaveBeenCalled()
+  })
+
+  it('step 7 sums up every answer, the reasons trimmed in the framework\'s order, the documents with no checkboxes',
+    async () => {
+      api()
+      wizard()
+      await toStep7()
+      const summary = heading('Finish').parentElement?.querySelector('dl')
+      expect(summary).toBeTruthy()
+      const terms = within(summary as HTMLElement).getAllByRole('term').map((t) => t.textContent)
+      const values = within(summary as HTMLElement).getAllByRole('definition').map((d) => d.textContent)
+      expect(terms).toEqual(['Company', 'Country', 'Answer language', 'Protection level', 'Not applicable',
+        'Ready to cite'])
+      expect(values.slice(0, 4)).toEqual(['Musterfirma GmbH', 'Germany', 'German', 'High'])
+      expect(within(summary as HTMLElement).getAllByRole('listitem').map((i) => i.textContent))
+        .toEqual(['1.6.1: Remote only', '5.1.1: No cryptography'])
+      expect(values[5]).toContain('Ready to cite: 2 documents (1 documented, 1 implemented, 1 stale).')
+      const policies = screen.getByRole('table', { name: 'Policies' })
+      expect(within(policies).getAllByRole('rowheader').map((r) => r.querySelector('.doc-title')?.textContent))
+        .toEqual(['Backup policy'])
+      const records = screen.getByRole('table', { name: 'Records' })
+      expect(within(records).getAllByRole('rowheader')).toHaveLength(1)
+      expect(screen.queryAllByRole('checkbox')).toEqual([])
+      expect(screen.getByText('Creating the company adds it to the profile switcher. Its first assessment comes in a '
+        + 'later step.')).toBeTruthy()
+      expect(createButton().getAttribute('type')).toBe('submit')
+    })
+
+  it('step 7 says None with no control marked, and leaves out a folder with nothing chosen', async () => {
+    api()
+    wizard()
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    await next()
+    const summary = heading('Finish').parentElement?.querySelector('dl') as HTMLElement
+    expect(within(summary).getAllByRole('definition')[4].textContent).toBe('None')
+    expect(within(summary).getAllByRole('definition')[2].textContent).toBe('English')
+    expect(screen.getByRole('table', { name: 'Policies' })).toBeTruthy()
+    expect(screen.queryByRole('table', { name: 'Records' })).toBeNull()
+  })
+
+  it('Create company sends the answers in the CompanySetup shape, each reason trimmed, nothing more', async () => {
+    const fetch = api()
+    wizard()
+    await toStep7()
+    await create()
+    const [sent] = posts(fetch)
+    expect(sent[1]?.method).toBe('POST')
+    expect(JSON.parse(String(sent[1]?.body))).toEqual({
+      company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de', protection_level: 'high',
+      not_applicable: [{ control: '5.1.1', reason: 'No cryptography' }, { control: '1.6.1', reason: 'Remote only' }],
+      evidence: { policies: ['backup-policy'], records: ['training-record'] },
+    })
+  })
+
+  it('a folder with nothing chosen is sent as an empty list', async () => {
+    const fetch = api()
+    wizard()
+    await toStep6()
+    await userEvent.click(await findChoose('Security training record 2026'))
+    await next()
+    await create()
+    const body = JSON.parse(String(posts(fetch)[0][1]?.body)) as { evidence: unknown; not_applicable: unknown }
+    expect(body.evidence).toEqual({ policies: [], records: ['training-record'] })
+    expect(body.not_applicable).toEqual([])
+  })
+
+  it('a 201 hands the created profile to onCreated', async () => {
+    api()
+    const onCreated = wizard()
+    await toStep7()
+    await create()
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    expect(onCreated).toHaveBeenCalledOnce()
+  })
+
+  it('while the create is out, Create company says Creating… and it and Back are disabled; a double press sends one',
+    async () => {
+      const fetch = api()
+      let answer: (r: Response) => void = () => {}
+      fetch.mockImplementation((url: string) => url === PROFILES_PATH
+        ? new Promise<Response>((resolve) => { answer = resolve })
+        : Promise.resolve(url === CONTROLS_PATH ? controlsAnswer() : url === LIBRARY_PATH ? libraryAnswer() : levelsAnswer()))
+      const onCreated = wizard()
+      await toStep7()
+      clock += 1000
+      const button = createButton()
+      await userEvent.dblClick(button)
+      expect(button.textContent).toBe('Creating…')
+      expect((button as HTMLButtonElement).disabled).toBe(true)
+      expect(button.getAttribute('aria-busy')).toBe('true')
+      expect((backButton() as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.submit(button.closest('form') as HTMLFormElement) // Enter in the form while it is out
+      expect(posts(fetch)).toHaveLength(1)
+      answer(createdAnswer())
+      await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    })
+
+  it('a press within 400 ms of the move to step 7 sends nothing: a double-click on step 6\'s Next', async () => {
+    const fetch = api()
+    wizard()
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    await next()
+    await userEvent.click(createButton()) // the same moment: the double-click's second press
+    clock += 399
+    await userEvent.click(createButton())
+    expect(posts(fetch)).toHaveLength(0)
+    expect(createButton().textContent).toBe('Create company')
+    clock += 1
+    await userEvent.click(createButton())
+    expect(posts(fetch)).toHaveLength(1)
+  })
+
+  it.each([
+    ['a string detail', Response.json({ detail: 'evidence.policies: no document "x"' }, { status: 422 }),
+      'evidence.policies: no document "x"'],
+    ['a list', Response.json({ detail: [{ loc: ['body', 'company'], msg: 'String should have at most 100 characters' }] },
+      { status: 422 }), 'String should have at most 100 characters'],
+  ])('a 422 with %s stays on step 7 and says what was refused, every answer kept', async (_, refusal, problem) => {
+    const fetch = api([], [], [], [refusal])
+    const onCreated = wizard()
+    await toStep7()
+    await create()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(`Vouch could not create this company: ${problem}.`)
+    expect(alert.className).toContain('setup-alert')
+    expect(heading('Finish')).toBeTruthy()
+    expect(screen.getByText('Musterfirma GmbH')).toBeTruthy()
+    expect(createButton().textContent).toBe('Create company')
+    expect((createButton() as HTMLButtonElement).disabled).toBe(false)
+    expect((backButton() as HTMLButtonElement).disabled).toBe(false)
+    expect(onCreated).not.toHaveBeenCalled()
+    await back()
+    expect((choose('Backup policy') as HTMLInputElement).checked).toBe(true)
+    await back()
+    expect((reason('1.6.1') as HTMLTextAreaElement).value).toBe('  Remote only  ')
+    await next()
+    await next()
+    expect(screen.queryByRole('alert')).toBeNull() // leaving the step drops it
+    await create()
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    expect(posts(fetch)).toHaveLength(2)
+  })
+
+  it.each([
+    ['a 503', Response.json({ detail: 'down', unavailable: 'database' }, { status: 503 }) as Answer,
+      'The database is unavailable just now. Nothing was saved; try again in a moment.'],
+    ['a 500', new Response('{}', { status: 500 }) as Answer, 'The company could not be created. Nothing was saved.'],
+    ['an unreachable server', 'offline' as Answer, 'The company could not be created. Nothing was saved.'],
+  ])('%s says so, and Create company can be pressed again and succeeds', async (_, failure, words) => {
+    const fetch = api([], [], [], [failure])
+    const onCreated = wizard()
+    await toStep7()
+    await create()
+    expect((await screen.findByRole('alert')).textContent).toBe(words)
+    expect(onCreated).not.toHaveBeenCalled()
+    await create()
+    expect(screen.queryByRole('alert')).toBeNull() // a new press clears the last alert
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    expect(posts(fetch)).toHaveLength(2)
+  })
+
+  it('a 401 signs out and shows no alert', async () => {
+    api([], [], [], [new Response(null, { status: 401 })])
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    const onCreated = wizard()
+    await toStep7()
+    await create()
+    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(onCreated).not.toHaveBeenCalled()
   })
 })

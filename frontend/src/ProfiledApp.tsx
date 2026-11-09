@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import App from './App.tsx'
 import { mayLeave } from './leaving.ts'
-import { fetchProfiles, type Profiles, startingProfile } from './profiles.ts'
+import { fetchProfiles, type Profiles, type ProfileSummary, startingProfile } from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import { rememberedProfile, rememberProfile, setProfile } from './session.ts'
 import TopBar from './TopBar.tsx'
@@ -16,7 +16,8 @@ type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | nu
  * working paper, run, chat) carries over from the profile before. Without a list, calls name none and the API's
  * default answers. The browser remembers the last switch, so a reload or a pasted link opens that profile while it is
  * still listed; otherwise the default, and the top bar says so (#201). A fresh start from the user menu (#285) opens
- * the app afresh the same way, on the Overview.
+ * the app afresh the same way, on the Overview. A company made in company setup (#409) opens the same way, under it,
+ * the list read again so the switcher names it.
  */
 export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () => void; userName?: string }) {
   const [listing, setListing] = useState<Listing>({ status: 'reading' })
@@ -43,6 +44,23 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     if (window.location.pathname !== '/') window.history.pushState(null, '', '/')
     setFreshStarts((n) => n + 1)
   }
+  // A developer made a company in company setup (#409): remembered as a switch is, and the app opens afresh under it on
+  // the Dossier, the list read again so the switcher names it. A list that can't be read again gains it, so the
+  // switcher names it still.
+  const created = (profile: ProfileSummary) => {
+    rememberProfile(profile.id)
+    if (window.location.pathname !== '/') window.history.pushState(null, '', '/')
+    void fetchProfiles().then((found) => {
+      setListing((was) => {
+        const held = found ?? (was.status === 'read' ? was.profiles : null) ?? { profiles: [], default: null }
+        const listed = held.profiles.some((p) => p.id === profile.id) ? held
+          : { ...held, profiles: [...held.profiles, profile] }
+        return { status: 'read', profiles: listed }
+      })
+      setFellBack(false)
+      choose(profile.id)
+    })
+  }
   useEffect(() => {
     let current = true
     void fetchProfiles().then((found) => {
@@ -66,5 +84,5 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     : undefined
   const company = listing.profiles?.profiles.find((p) => p.id === chosen)?.company
   return <App key={`${chosen ?? ''}:${freshStarts}`} onSignOut={onSignOut} profileSwitcher={switcher}
-    userName={userName} company={company} onStartedAfresh={startedAfresh} />
+    userName={userName} company={company} onStartedAfresh={startedAfresh} onCompanyCreated={created} />
 }

@@ -7,6 +7,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, useOverview } from './overview.ts'
+import type { ProfileSummary } from './profiles.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
@@ -63,11 +64,13 @@ type AppProps = {
   company?: string
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
+  /** Company setup made a company (#409): ProfiledApp opens the app afresh under it. */
+  onCompanyCreated?: (profile: ProfileSummary) => void
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
-export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh }: AppProps = {}) {
+export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh, onCompanyCreated }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -243,7 +246,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
             {/* settings unreadable just now: the developer page's notice, not the wizard */}
             {developer === UNAVAILABLE
               ? <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
-              : <CompanySetupWizard developerPath={DEVELOPER_PATH} onDeveloper={() => showView({ name: 'developer' })} />}
+              : <CompanySetupWizard developerPath={DEVELOPER_PATH} onDeveloper={() => showView({ name: 'developer' })}
+                onCreated={(profile) => onCompanyCreated?.(profile)} />}
           </main>
         )
         : control && overview.state.status === 'ready' ? (

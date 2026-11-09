@@ -1,13 +1,14 @@
 import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ProtectionLevel } from './assessment.ts'
 import DocumentTable from './DocumentTable.tsx'
+import type { ProfileSummary } from './profiles.ts'
 import {
-  type ChosenEvidence, COUNTRIES, type FrameworkControl, frameworkControls, type LibraryDocument, type LibrarySource,
-  MAX_COMPANY_LENGTH, type NotApplicable, notApplicableProblems, PROTECTION_LEVELS, protectionLevels,
-  type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
+  type ChosenEvidence, type CompanyCreated, COUNTRIES, createCompany, type FrameworkControl, frameworkControls,
+  type LibraryDocument, type LibrarySource, MAX_COMPANY_LENGTH, type NotApplicable, notApplicableProblems,
+  PROTECTION_LEVELS, protectionLevels, type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
-/** Every step of company setup, by name; steps after BUILT, and those NOT_BUILT, are later slices of #351. */
+/** Every step of company setup, by name; those NOT_BUILT are a later slice of #351. */
 const STEPS = ['Company', 'Language', 'Protection level', 'Goal', 'Not applicable', 'Evidence', 'Finish']
 const COMPANY = 1
 const LANGUAGE = 2
@@ -15,12 +16,13 @@ const LEVEL = 3
 const GOAL = 4
 const NOT_APPLICABLE = 5
 const EVIDENCE = 6
-const BUILT = EVIDENCE
+const FINISH = 7
 const NOT_BUILT = [GOAL] // skipped by Next and Back until slice 5 of #351 builds it
-const later = (n: number) => n > BUILT || NOT_BUILT.includes(n)
+const later = (n: number) => NOT_BUILT.includes(n)
 
 /** A press within this long of the last move is that move's press landing again (a double-click, a double-tap, two
- * quick clicks) on the new step's Next or Back: it is ignored, so each press moves one step. From #403's verifier. */
+ * quick clicks) on the new step's Next, Back or Create company: it is ignored, so each press moves one step and none
+ * creates the company. From #403's verifier. */
 const SETTLE_MS = 400
 
 type Answers = {
@@ -54,17 +56,25 @@ type Library = Read<LibraryDocument[]>
 const LANGUAGES = [{ code: 'en', name: 'English' }, { code: 'de', name: 'German' }] as const
 const LEVELS = Object.keys(PROTECTION_LEVELS) as ProtectionLevel[]
 
-/** `developerPath`: the developer page's address, for the breadcrumb's link; `onDeveloper` opens it. */
-type Props = { developerPath: string; onDeveloper: () => void }
+/** What step 7 says when Create company didn't make the company: the problem a refusal names, or why it failed. */
+function failureWords(created: Exclude<CompanyCreated, { status: 'created' | 'signed-out' }>): string {
+  if (created.status === 'refused') return `Vouch could not create this company: ${created.problem}.`
+  if (created.status === 'unavailable') return 'The database is unavailable just now. Nothing was saved; try again in a moment.'
+  return 'The company could not be created. Nothing was saved.'
+}
+
+/** `developerPath`: the developer page's address, for the breadcrumb's link; `onDeveloper` opens it. `onCreated`: the
+ * company was created, as GET /api/profiles lists it; the app then opens under it. */
+type Props = { developerPath: string; onDeveloper: () => void; onCreated: (profile: ProfileSummary) => void }
 
 /**
  * Company setup (#403, M8 #351): a developer walks the steps that make a company, going back and forward without
- * losing an answer. The answers live here only: leaving or reloading starts afresh, and nothing is sent yet. Steps 1
- * to 3 are built (company and country, answer language, protection level with what each brings into scope), step 5
- * (#407, controls marked not applicable, each with a reason) and step 6 (#408, the evidence chosen from the sample
- * library); step 4 is skipped until it is built.
+ * losing an answer. The answers live here only: leaving or reloading starts afresh. Steps 1 to 3 (company and
+ * country, answer language, protection level with what each brings into scope), step 5 (#407, controls marked not
+ * applicable, each with a reason), step 6 (#408, the evidence chosen from the sample library) and step 7 (#409, a
+ * summary and Create company, which sends them) are built; step 4 is skipped until it is built.
  */
-export default function CompanySetupWizard({ developerPath, onDeveloper }: Props) {
+export default function CompanySetupWizard({ developerPath, onDeveloper, onCreated }: Props) {
   const [step, setStep] = useState(COMPANY)
   const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, notApplicable: [],
     evidence: { policies: [], records: [] } })
@@ -74,7 +84,13 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
   const [library, setLibrary] = useState<Library | null>(null) // read when step 6 first opens
   const formRef = useRef<HTMLFormElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const notBuiltRef = useRef<HTMLParagraphElement>(null)
+  const [creating, setCreating] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null) // why the last Create company made no company
+  const createRef = useRef<HTMLButtonElement>(null)
+  // Disabled while the create was out, Create company lost focus: it takes it back with the alert, to press again.
+  useEffect(() => {
+    if (failure) createRef.current?.focus()
+  }, [failure])
   const lastMove = useRef(-Infinity)
   const noticeId = useId()
   const notice = problems.map((p) => STEP_NOTICES[p]).find((words) => words !== undefined)
@@ -88,6 +104,20 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
   const readControls = useReader(frameworkControls, setControls)
   const readLibrary = useReader(sampleLibrary, setLibrary)
   const settling = () => performance.now() - lastMove.current < SETTLE_MS
+  // A double-click's second press after a move lands on whatever the new step put under the pointer, anywhere on the
+  // page (the step is taller or shorter): it would take focus off the new heading to the page's body, and on a label
+  // tick a box. Within SETTLE_MS of a move, that press (detail 2 or more) does neither. From #408's verifier.
+  useEffect(() => {
+    const landing = (e: globalThis.MouseEvent) => {
+      if (e.detail > 1 && performance.now() - lastMove.current < SETTLE_MS) e.preventDefault()
+    }
+    window.addEventListener('mousedown', landing, true)
+    window.addEventListener('click', landing, true)
+    return () => {
+      window.removeEventListener('mousedown', landing, true)
+      window.removeEventListener('click', landing, true)
+    }
+  }, [])
   // Leaving a step drops its problems: they show again only when Next checks it again.
   const go = (to: number) => {
     if (settling()) return
@@ -97,6 +127,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
     moved.current = true
     setStep(to)
     setProblems(NO_PROBLEMS)
+    setFailure(null)
     if (to === LEVEL && scope === null) readScope()
     if (to === NOT_APPLICABLE && controls === null) readControls()
     if (to === EVIDENCE && library === null) readLibrary()
@@ -114,15 +145,35 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
   }
   const next = (e: FormEvent) => {
     e.preventDefault()
-    if (settling()) return // the last move's press landing on this step's Next: not a check of this step
+    if (settling() || creating) return // the last move's press landing on this step's Next: not a check of this step
+    if (step === FINISH) {
+      void create()
+      return
+    }
     const found = check()
     setProblems(found)
     if (found.length > 0) {
       focusProblem(found[0])
       return
     }
-    if (step < BUILT) go(step + 1)
-    else notBuiltRef.current?.focus() // nowhere to go yet (#409): say so, so Next doesn't look dead
+    go(step + 1)
+  }
+  // Step 7's Create company: one press makes one company (`creating` disables it, and Back, while it is out). A
+  // created company opens the app under it, which closes the wizard, so nothing here changes after that.
+  const create = async () => {
+    if (answers.level === null) return // step 3 never lets it through
+    setCreating(true)
+    setFailure(null)
+    const created = await createCompany({
+      company: answers.company, country: answers.country, answer_language: answers.language,
+      protection_level: answers.level, not_applicable: answers.notApplicable, evidence: answers.evidence,
+    })
+    if (created.status === 'created') {
+      onCreated(created.profile)
+      return
+    }
+    setCreating(false)
+    if (created.status !== 'signed-out') setFailure(failureWords(created)) // signed out: the sign-in says so
   }
   // Next focuses the field a problem names (its `data-problem`), or a group's first field. With no field to take it (a
   // list still loading, or one that failed), the step's heading: it stays when the list lands or Try again goes.
@@ -198,16 +249,19 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
           <EvidenceStep chosen={answers.evidence} choose={choose} library={library} onRetry={readLibrary}
             problem={problems.includes(NO_EVIDENCE)} problemId={noticeId} />
         )}
+        {step === FINISH && <FinishStep answers={answers} controls={controls} library={library} />}
         <div className="setup-nav">
-          {step > COMPANY && <button type="button" className="btn btn-ghost" onClick={() => go(step - 1)}>Back</button>}
-          <button type="submit" className="btn btn-primary">Next</button>
+          {step > COMPANY && (
+            <button type="button" className="btn btn-ghost" disabled={creating} onClick={() => go(step - 1)}>Back</button>
+          )}
+          {step === FINISH
+            ? <button ref={createRef} type="submit" className="btn btn-primary" disabled={creating} aria-busy={creating}>
+              {creating ? 'Creating…' : 'Create company'}
+            </button>
+            : <button type="submit" className="btn btn-primary">Next</button>}
         </div>
         {notice && <p id={noticeId} className="notice field-note">{notice}</p>}
-        {step === BUILT && (
-          <p ref={notBuiltRef} tabIndex={-1} className="field-note">
-            The finish is not built yet. Nothing has been saved.
-          </p>
-        )}
+        {failure && <p className="notice field-note setup-alert" role="alert">{failure}</p>}
       </form>
     </section>
   )
@@ -402,5 +456,41 @@ function EvidenceStep({ chosen, choose, library, onRetry, problem, problemId }: 
         </div>
       )}
     </fieldset>
+  )
+}
+
+/** Step 7 (#409): every answer, as Create company will send it (each reason trimmed), and the documents chosen. */
+function FinishStep({ answers, controls, library }: { answers: Answers; controls: Controls | null; library: Library | null }) {
+  const order = controls?.status === 'ready' ? controls.data.map((c) => c.id) : []
+  const marked = [...answers.notApplicable].sort((a, b) => order.indexOf(a.control) - order.indexOf(b.control))
+  const documents = library?.status === 'ready' ? library.data : []
+  const picked = documents.filter((d) => answers.evidence[d.source].includes(d.id))
+  const folders: { source: LibrarySource; caption: string }[] = [
+    { source: 'policies', caption: 'Policies' }, { source: 'records', caption: 'Records' }]
+  return (
+    <>
+      <dl className="setup-summary">
+        <dt>Company</dt><dd>{answers.company.trim()}</dd>
+        <dt>Country</dt><dd>{answers.country}</dd>
+        <dt>Answer language</dt><dd>{LANGUAGES.find((l) => l.code === answers.language)?.name}</dd>
+        <dt>Protection level</dt><dd>{answers.level && PROTECTION_LEVELS[answers.level].name}</dd>
+        <dt>Not applicable</dt>
+        <dd>
+          {marked.length === 0 ? 'None' : (
+            <ul className="setup-summary-list">
+              {marked.map((m) => <li key={m.control}><span className="mono">{m.control}</span>: {m.reason.trim()}</li>)}
+            </ul>
+          )}
+        </dd>
+        <dt>Ready to cite</dt><dd>{readyToCite(picked)}</dd>
+      </dl>
+      {folders.map(({ source, caption }) => {
+        const chosen = picked.filter((d) => d.source === source)
+        return chosen.length > 0 && <DocumentTable key={source} caption={caption} documents={chosen} />
+      })}
+      <p className="field-note">
+        Creating the company adds it to the profile switcher. Its first assessment comes in a later step.
+      </p>
+    </>
   )
 }
