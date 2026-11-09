@@ -40,7 +40,7 @@ Accounts and passwords that a manufacturer sets in advance are disabled or given
 
 ## Hardware tokens
 
-Users keep their hardware token with them, never leave it in their laptop and tell IT at once if they lose it, so it can be blocked.
+Users keep their hardware token with them and never leave it in their laptop. A lost token is blocked by the user in the self-service portal with their recovery code, and a new one is collected from IT.
 
 ## Reviewing accounts
 

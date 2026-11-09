@@ -12,7 +12,7 @@ language: en
 
 ## Checks done
 
-All 13 weekly checks of the quarter were done, by one of the two administrators, each within its week.
+All 13 weekly checks of the quarter were done, by one of the two administrators, each within its week. Each administrator's own actions in the logs are checked by the other one. The checks covered the alerts from the central log server, the firewall and the intrusion detection system, and the VPN's start and end times of each remote session.
 
 | Week | Checked by | Alerts | Findings |
 |---|---|---|---|

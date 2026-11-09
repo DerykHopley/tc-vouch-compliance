@@ -51,7 +51,7 @@ The handler contains the damage first, then removes the cause and restores norma
 
 ## Suppliers' incidents
 
-When a supplier or service provider tells us of an incident on their side, the information security officer judges what it means for our own systems and data, starts our own handling for anything affected, and checks whether any of our notification duties apply.
+For an incident at a supplier or service provider that touches the work they do for us, the information security officer judges what it means for our own systems and data, starts our own handling for anything affected, and checks whether any of our notification duties apply.
 
 ## Notification duties
 
