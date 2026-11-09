@@ -1,6 +1,6 @@
 import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
-  type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
+  type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
@@ -24,9 +24,6 @@ const ACTION: Record<Run['status'], string> = {
   failed: 'Assess again',
   unreachable: 'Retry',
 }
-
-/** A Closed control's review state tag (#410): the accepted tag's style, this word in place of "Accepted". */
-const CLOSED = 'Closed'
 
 /** The steps the trace marks apart (#232): a guard step and an overlay branch step, by their chip's border. */
 // The class that marks a step's chip apart, by node name (docs/design.md, Agent steps).
@@ -175,7 +172,7 @@ export default function WorkingPaper(props: PaperProps) {
           {!checking && (
             <div className="paper-meta">
               <span>Verdict</span><RunChip run={run} />
-              {review && <span className={`tag tag-${review}`}>{closed ? CLOSED : REVIEW_WORDS[review]}</span>}
+              {review && <span className={`tag tag-${review}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[review]}</span>}
             </div>
           )}
           {!checking && explained && (
@@ -303,7 +300,7 @@ function ControlIndex({ controls, openId, running, run, onOpen, language, improv
                 <span className="wp-state">
                   <VerdictChip verdict={verdict} assessing={assessing} language={language} />
                   {!assessing && status && <span className={`tag tag-${status}`}>
-                    {improving && status === 'accepted' && card.closed ? CLOSED : REVIEW_WORDS[status]}</span>}
+                    {improving && status === 'accepted' && card.closed ? CLOSED_WORD : REVIEW_WORDS[status]}</span>}
                 </span>
                 <span className="wp-q" lang={language}>{card.question}</span>
               </PaperLink>

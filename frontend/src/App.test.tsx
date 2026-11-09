@@ -537,6 +537,38 @@ describe('the working paper', () => {
   })
 })
 
+describe('the improvement plan (ticket 410)', () => {
+  const ITEM = { requirement_id: 'M1', missing: 'A record.', owner_role: 'CISO', due_date: '2027-02-01',
+    status: 'approved', priority: 'medium', done: null }
+  const ACCEPTED = { ...STORED, status: 'accepted', requirements: [{ id: 'M1', column: 'must', text: 'Keys.',
+    verdict: 'partly-evidenced', reason: 'Policy only.', citations: [] }],
+  review: { decision: 'accept', note: '', overrides: [] }, review_step: null, remediation: [ITEM] }
+  const DONE = { ...ITEM, done: { at: '2026-11-09T10:00:00+00:00', note: 'Recorded.' } }
+
+  it('keeps the working paper when the overview read after a done mark fails', async () => {
+    let overviews = 0
+    const improving: Overview = { ...overviewWith([STORED]), goal: 'internal-improvement',
+      controls: overviewWith([STORED]).controls.map((c) => c.id === '4.1.2' ? { ...c, status: 'accepted' } : c) }
+    vi.stubGlobal('fetch', vi.fn((url: string) =>
+      url === '/api/overview' ? Promise.resolve(++overviews === 1 ? Response.json(improving)
+        : new Response('{}', { status: 503 }))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [ACCEPTED] }))
+        : url === '/api/assessments/t1' ? Promise.resolve(Response.json({ assessment: ACCEPTED }))
+          : url === '/api/assessments/t1/remediation/M1/done' ? Promise.resolve(Response.json({ item: DONE }))
+            : new Promise<Response>(() => {})))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const item = await screen.findByRole('region', { name: 'Remediation item M1' })
+    await userEvent.click(within(item).getByRole('button', { name: 'Mark M1 done' }))
+    await userEvent.type(within(item).getByLabelText('What was done'), 'Recorded.')
+    await userEvent.click(within(item).getByRole('button', { name: 'Mark done' }))
+    await waitFor(() => expect(overviews).toBe(2))
+    expect(await screen.findByText(/^Done on 9 November 2026: Recorded\.$/)).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Working paper' })).toBeTruthy()
+    expect(screen.queryByText(OVERVIEW_FAILED)).toBeNull()
+  })
+})
+
 describe('the profile pass (ticket 390)', () => {
   it('carries on while the lead opens a working paper, and its result shows on the Dossier on return', async () => {
     let answer: (response: Response) => void = () => {}

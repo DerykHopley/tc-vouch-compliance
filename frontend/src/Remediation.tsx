@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import { dateWords } from './overview.ts'
 import {
-  decideItem, type ItemDecision, ITEM_WORDS, markDone, NO_OWNER, type Priority, PRIORITY_WORDS, type RemediationItem,
+  decideItem, DONE_NOTE_LENGTH, type ItemDecision, ITEM_WORDS, markDone, NO_OWNER, type Priority, PRIORITY_WORDS, type RemediationItem,
   setPriority,
 } from './remediation.ts'
 
@@ -168,11 +168,11 @@ function ItemPlan({ item, threadId, accepted, onMarked }:
         <form className="override" aria-label={`Mark the remediation item of ${req} done`} noValidate
           onSubmit={(e) => { e.preventDefault(); void send() }}>
           <label htmlFor={`${id}-note`}>What was done</label>
-          <textarea id={`${id}-note`} className="field" required value={note} maxLength={2000}
+          <textarea id={`${id}-note`} className="field" required value={note} maxLength={DONE_NOTE_LENGTH}
             aria-invalid={refused === SAY_WHAT} aria-describedby={refused ? `${id}-why` : undefined}
             onChange={(e) => setNote(e.target.value)} />
           <div className="review-actions">
-            <button className="btn btn-sign" type="submit" disabled={sendingDone} aria-busy={sendingDone}>Mark done</button>
+            <button className="btn btn-primary" type="submit" disabled={sendingDone} aria-busy={sendingDone}>Mark done</button>
             <button className="btn" type="button" disabled={sendingDone}
               onClick={() => { setMarking(false); setNote(''); setRefused(null) }}>Cancel</button>
           </div>

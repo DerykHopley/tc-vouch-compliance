@@ -30,7 +30,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
 
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, now, process_trail
-from vouch.database import Database, Goal, PlanWrites, Priority, RemediationWrites
+from vouch.database import AuditAction, Database, Goal, PlanWrites, Priority, RemediationWrites
 from vouch.graph import NO_NUL_PATTERN, Assessment, load_assessment, state_serializer, thread_key
 from vouch.remediation import (
     NO_ITEM,
@@ -212,7 +212,7 @@ def process_plan() -> ProcessPlan:
 def _entry(
     assessment: Assessment,
     requirement_id: str,
-    action: str,
+    action: AuditAction,
     note: str,
     reviewer: Reviewer,
     at: datetime,
@@ -229,7 +229,7 @@ def _entry(
         profile_id=assessment.profile_id,
         control_id=assessment.control_id,
         thread_id=assessment.thread_id,
-        action=action,  # type: ignore[arg-type]
+        action=action,
         requirement_id=requirement_id,
         note=note,
         verdict_before=verdict,
@@ -336,8 +336,9 @@ def mark_done(
             if kept.done_note == note:
                 return _shown(item, kept)
             raise NotPlannable(DONE_WITH.format(note=kept.done_note))
-        mark = Mark(priority=kept.priority, done_at=clock(), done_note=note)
-        entry = _entry(item.assessment, requirement_id, "done", note, reviewer, mark.done_at)  # type: ignore[arg-type]
+        at = clock()
+        mark = Mark(priority=kept.priority, done_at=at, done_note=note)
+        entry = _entry(item.assessment, requirement_id, "done", note, reviewer, at)
         marking.write(item.key, item.assessment.control_id, mark, entry)
         return _shown(item, mark)
 
@@ -347,10 +348,11 @@ class CardFlags:
     """What the improvement plan adds to a control's card (#410)."""
 
     reassess_suggested: bool
-    """The newest assessment is accepted, and every one of its approved items is done."""
+    """Every approved item of the control's latest accepted plan is done, and no assessment of
+    it was accepted after the last done mark."""
     closed: bool
-    """The newest assessment is accepted with no gap, after the last done mark of the latest
-    earlier assessment with a plan, all of whose approved items are done."""
+    """The first assessment accepted after that last done mark has no requirement not or partly
+    evidenced."""
 
 
 def _approved(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> list[Key]:
@@ -358,15 +360,21 @@ def _approved(assessment: Assessment, decided: Mapping[Key, DecidedItem]) -> lis
     return [k for k in keys if (d := decided.get(k)) is not None and d.status == "approved"]
 
 
-def _done_at(keys: Iterable[Key], marks: Mapping[Key, Mark]) -> list[datetime] | None:
-    """When each item was marked done; None while any isn't."""
-    times = [m.done_at if (m := marks.get(k)) is not None else None for k in keys]
-    return None if any(t is None for t in times) else times  # type: ignore[return-value]
+def _last_done(keys: Iterable[Key], marks: Mapping[Key, Mark]) -> datetime | None:
+    """When the last of the items was marked done; None while any isn't (or there are none)."""
+    times: list[datetime] = []
+    for key in keys:
+        mark = marks.get(key)
+        if mark is None or mark.done_at is None:
+            return None
+        times.append(mark.done_at)
+    return max(times, default=None)
 
 
 def _accepted_at(assessment: Assessment) -> datetime | None:
+    """When an accepted assessment was accepted; None for any other, or one with no time kept."""
     review = assessment.review
-    if review is None or not review.reviewed_at:
+    if assessment.status != "accepted" or review is None or not review.reviewed_at:
         return None
     at = datetime.fromisoformat(review.reviewed_at)
     return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
@@ -374,6 +382,29 @@ def _accepted_at(assessment: Assessment) -> datetime | None:
 
 def _has_gap(assessment: Assessment) -> bool:
     return any(r.verdict in ("not-evidenced", "partly-evidenced") for r in assessment.requirements)
+
+
+def _flags(
+    runs: Sequence[Assessment], decided: Mapping[Key, DecidedItem], marks: Mapping[Key, Mark]
+) -> CardFlags | None:
+    """One control's flags from its assessments, oldest first: the latest accepted plan whose
+    approved items are all done, then the first assessment accepted after its last done mark
+    decides. None accepted since: a re-assessment is suggested (a waiting or rejected run
+    keeps the suggestion); one with no gap: Closed; one with a gap: neither (its items start
+    the plan again)."""
+    done_by: datetime | None = None
+    for run in runs:
+        if _accepted_at(run) is None:
+            continue
+        last = _last_done(_approved(run, decided), marks)
+        if last is not None:
+            done_by = last
+    if done_by is None:
+        return None
+    after = next((r for r in runs if (at := _accepted_at(r)) is not None and at > done_by), None)
+    if after is None:
+        return CardFlags(reassess_suggested=True, closed=False)
+    return None if _has_gap(after) else CardFlags(reassess_suggested=False, closed=True)
 
 
 def card_flags(
@@ -388,24 +419,7 @@ def card_flags(
     if goal != IMPROVEMENT:
         return {}
     runs: dict[str, list[Assessment]] = {}
-    for assessment in history:
+    for assessment in reversed(history):  # oldest first
         runs.setdefault(assessment.control_id, []).append(assessment)
-    flags: dict[str, CardFlags] = {}
-    for control_id, (newest, *earlier) in runs.items():
-        if newest.status != "accepted":
-            continue
-        approved = _approved(newest, decided)
-        if approved:
-            if _done_at(approved, marks) is not None:
-                flags[control_id] = CardFlags(reassess_suggested=True, closed=False)
-            continue
-        if _has_gap(newest):
-            continue
-        planned = next((a for a in earlier if _approved(a, decided)), None)
-        if planned is None:
-            continue
-        done = _done_at(_approved(planned, decided), marks)
-        accepted_at = _accepted_at(newest)
-        if done is not None and accepted_at is not None and accepted_at > max(done):
-            flags[control_id] = CardFlags(reassess_suggested=False, closed=True)
-    return flags
+    flags = {control_id: _flags(mine, decided, marks) for control_id, mine in runs.items()}
+    return {control_id: f for control_id, f in flags.items() if f is not None}

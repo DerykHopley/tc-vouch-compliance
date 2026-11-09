@@ -1,5 +1,5 @@
 import { type MouseEvent, useId, useState } from 'react'
-import { plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
+import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, type NextStep, type Overview,
   type OverviewState, type Readiness, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
   from './overview.ts'
@@ -469,7 +469,7 @@ function Card({ card, onOpen, assessing, language, improving }:
         onClick={(e) => openInPlace(e, () => onOpen(card.id, false))}>
         <b>{card.id}</b>
         {card.status !== 'not-assessed' && (
-          <span className={`tag tag-${card.status}`}>{closed ? 'Closed' : REVIEW_WORDS[card.status]}</span>
+          <span className={`tag tag-${card.status}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[card.status]}</span>
         )}
       </a>
       <div className="control-title" lang={language}>{card.question}</div>

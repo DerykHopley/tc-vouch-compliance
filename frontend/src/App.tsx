@@ -132,7 +132,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     return () => { current = false }
   }, [])
   const overview = useOverview()
-  const { load, noteAssessed } = overview
+  const { load, noteAssessed, refresh: refreshOverview } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
   // The report shows none of it (#56): it is read on leaving the report for a view that does.
@@ -194,12 +194,12 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   // The lead's decisions made in this page (#42), by thread: newer than the run's result or the stored read.
   const [reviewed, setReviewed] = useState<Record<string, Assessment>>({})
   // In the Internal improvement goal a review or a plan mark can change a card's flags (#410: re-assessment
-  // suggested, Closed), which the server works out: the overview is read again, the page kept meanwhile.
+  // suggested, Closed), which the server works out: the overview is read again, kept as it is when that read fails.
   const improving = overview.state.status === 'ready' && overview.state.overview.goal === 'internal-improvement'
   const noteReviewed = (assessment: Assessment) => {
     if (assessment.thread_id) setReviewed((now) => ({ ...now, [assessment.thread_id!]: assessment }))
     noteAssessed(assessment)
-    if (improving && assessment.status !== 'waiting-for-review') void load()
+    if (improving && assessment.status !== 'waiting-for-review') void refreshOverview()
   }
   const idle: Run = { status: 'idle', steps: [] }
   const shownRun: Run | null = ownRun && run.status !== 'idle' ? run
@@ -217,7 +217,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
       const base = now[threadId] ?? (shown?.thread_id === threadId ? shown : undefined)
       return base ? { ...now, [threadId]: withItem(base, item) } : now
     })
-    if (improving && item.done) void load()
+    if (improving && item.done) void refreshOverview()
   }
   /** Reads the paper's assessment again (another tab reviewed it first) and shows it as it now stands; false when it
    * couldn't be read. */

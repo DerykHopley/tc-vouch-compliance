@@ -850,10 +850,11 @@ def review_assessment(
     except NotWaitingForReviewError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     _noting_work(memory)
-    # Its items as decided (#410): the decisions read before, which no decision changed while
-    # the review held the thread's lock.
+    # Its items as they stand now (#410): read again, as a decision may have landed between the
+    # read above and the review taking the thread's lock.
+    now_decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
     marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
-    clean, _ = redact_data({"assessment": assessment_data(reviewed, decided, marked)})
+    clean, _ = redact_data({"assessment": assessment_data(reviewed, now_decided, marked)})
     return clean
 
 

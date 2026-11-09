@@ -65,6 +65,9 @@ export async function decideItem(threadId: string, requirementId: string, decisi
   }
 }
 
+/** A done mark's note is at most this many characters, as the API takes it (`vouch.plan.MAX_NOTE`). */
+export const DONE_NOTE_LENGTH = 2000
+
 export const PRIORITY_FAILED = 'The priority could not be changed just now. Please try again.'
 export const DONE_FAILED = 'The item could not be marked done just now. Please try again.'
 

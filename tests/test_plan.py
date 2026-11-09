@@ -23,7 +23,7 @@ from test_memory import app_on, assess
 from test_report import built_report
 from test_report_pdf import text
 
-from vouch import goal, report, report_pdf, rounds
+from vouch import api, goal, report, report_pdf, rounds
 from vouch.audit import AuditEntry, Reviewer
 from vouch.database import (
     AUDIT_TABLE,
@@ -235,16 +235,52 @@ def test_a_reassessment_is_not_closed_while_an_earlier_approved_item_is_not_done
     assert flags([reassessed, planned()], plan_of(), one_done) == NEITHER
 
 
-def test_a_reassessment_accepted_before_the_last_done_mark_is_not_closed():
+def test_an_assessment_accepted_before_the_last_done_mark_is_no_reassessment():
+    """It still suggests one: the done marks came after it."""
     reassessed = assessment("n", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(hours=12))
 
-    assert flags([reassessed, planned()], plan_of(), all_done()) == NEITHER
+    assert flags([reassessed, planned()], plan_of(), all_done()) == (True, False)
 
 
-def test_a_waiting_reassessment_is_not_closed():
+def test_a_waiting_reassessment_keeps_the_suggestion_and_is_not_closed():
     waiting = assessment("n", {"M1": "evidenced"}, status="waiting-for-review")
 
-    assert flags([waiting, planned()], plan_of(), all_done()) == NEITHER
+    assert flags([waiting, planned()], plan_of(), all_done()) == (True, False)
+
+
+def test_a_rejected_reassessment_keeps_the_suggestion():
+    rejected = assessment(
+        "r", {"M1": "not-evidenced"}, status="rejected", reviewed_at=T0 + timedelta(days=2)
+    )
+
+    assert flags([rejected, planned()], plan_of(), all_done()) == (True, False)
+
+
+def test_a_rejected_run_between_the_plan_and_the_reassessment_doesnt_stop_closed():
+    rejected = assessment(
+        "r", {"M1": "not-evidenced"}, status="rejected", reviewed_at=T0 + timedelta(days=2)
+    )
+    reassessed = assessment("n", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(days=3))
+    decided = plan_of() | {("r", "M1"): approved("r", "M1")}
+
+    assert flags([reassessed, rejected, planned()], decided, all_done()) == (False, True)
+
+
+def test_a_waiting_run_with_an_approved_item_between_doesnt_stop_closed():
+    waiting = assessment("w", {"M1": "not-evidenced"}, status="waiting-for-review")
+    reassessed = assessment("n", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(days=3))
+    decided = plan_of() | {("w", "M1"): approved("w", "M1")}
+
+    assert flags([reassessed, waiting, planned()], decided, all_done()) == (False, True)
+
+
+def test_the_first_reassessment_after_the_fixes_decides_a_gap_there_is_not_closed_later():
+    """A gap found after the fixes (its item discarded) isn't closed by a later clean run."""
+    with_gap = assessment("b", {"M1": "partly-evidenced"}, reviewed_at=T0 + timedelta(days=2))
+    clean = assessment("c", {"M1": "evidenced"}, reviewed_at=T0 + timedelta(days=3))
+    decided = plan_of() | {("b", "M1"): approved("b", "M1", "discarded")}
+
+    assert flags([clean, with_gap, planned()], decided, all_done()) == NEITHER
 
 
 def test_nothing_is_suggested_or_closed_under_audit_readiness():
@@ -399,6 +435,41 @@ def test_accept_answers_the_items_as_decided_with_their_priority(database_url, u
 
     (item,) = response.json()["assessment"]["remediation"]
     assert (item["status"], item["priority"]) == ("approved", "low")
+
+
+class _ReadFirstBeforeTheDecision:
+    """The decisions' store, its first read made before a decision that lands meanwhile: it
+    answers none; every later read, the store's own."""
+
+    def __init__(self, store: Any) -> None:
+        self.store = store
+        self.reads = 0
+
+    def deciding(self, key: str) -> Any:
+        return self.store.deciding(key)
+
+    def decided(self, user_id: str, profile_id: str, thread_ids: Any) -> Any:
+        self.reads += 1
+        return {} if self.reads == 1 else self.store.decided(user_id, profile_id, thread_ids)
+
+
+def test_a_review_answers_the_items_as_they_stand_after_it(database_url, users):
+    """A decision landing between the review route's first read and its lock shows in its answer."""
+    alice, _ = users
+    app = app_on(database_url)
+    with TestClient(app) as client:
+        improve(client, alice)
+        thread_id = at_plan_fixes(client, alice)
+        decide(client, alice, thread_id)  # lands after the review's first read, below
+        late = _ReadFirstBeforeTheDecision(api.remediation_items(app.state.database))
+        app.dependency_overrides[api.remediation_items] = lambda: late
+        response = client.post(
+            f"/api/assessments/{thread_id}/review", json={"decision": "reject"}, headers=alice
+        )
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["assessment"]["remediation"]
+    assert item["status"] == "approved"
 
 
 def test_the_priority_can_be_set_while_the_assessment_waits_at_accept(database_url, users):
@@ -596,7 +667,7 @@ def test_the_card_suggests_a_reassessment_then_reads_closed_after_one_with_no_ga
 
     assert flagged(planned_card) == ("accepted", False, False)
     assert flagged(suggested) == ("accepted", True, False)
-    assert flagged(waiting) == ("waiting-for-review", False, False)
+    assert flagged(waiting) == ("waiting-for-review", True, False)  # kept until one is accepted
     assert flagged(closed) == ("accepted", False, True)
     assert flagged(under_readiness) == ("accepted", False, False)
 

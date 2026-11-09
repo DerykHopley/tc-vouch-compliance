@@ -210,12 +210,15 @@ export function useOverview() {
       : now.status === 'ready' ? { status: 'ready', overview: { ...now.overview, goal } } : now)
     return answer.ok
   }, [])
-  const roundChanged = useCallback(async () => {
+  // Reads the overview again after a change the page has shown already, keeping the overview shown when the read
+  // fails (only the first read shows the failure): a review round started or closed (#402), a review or a done mark
+  // in the improvement goal (#410).
+  const refresh = useCallback(async () => {
     const asked = ++latest.current
     const answer = await fetchOverview()
     if (asked !== latest.current) return true
     if (answer.ok) setState({ status: 'ready', overview: answer.overview })
     return answer.ok
   }, [])
-  return { state, load, retry, noteAssessed, goalChanged, roundChanged }
+  return { state, load, retry, noteAssessed, goalChanged, roundChanged: refresh, refresh }
 }
