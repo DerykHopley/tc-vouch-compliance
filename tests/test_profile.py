@@ -364,6 +364,10 @@ BAD_CHOICES = {
         ["backup-policy", "no-such-policy"],
         "evidence_sources.policies.documents: no document no-such-policy in the folder",
     ),
+    "an id with .md twice": (
+        ["backup-policy.md.md"],
+        "evidence_sources.policies.documents: no document backup-policy.md in the folder",
+    ),
     "a path out of the folder": (
         ["../nordlicht/policies/x"],
         "evidence_sources.policies.documents: no document ../nordlicht/policies/x in the folder",
