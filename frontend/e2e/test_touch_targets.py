@@ -5,7 +5,16 @@ import re
 
 import pytest
 from playwright.sync_api import Page, expect
-from test_company_setup import LEVELS, control, open_setup, press, to_step_3, to_step_5
+from test_company_setup import (
+    LEVELS,
+    control,
+    document,
+    open_setup,
+    press,
+    to_step_3,
+    to_step_5,
+    to_step_6,
+)
 from test_guided_chat import assess_in_the_chat
 from test_profiles import assessed as assessed_in
 from test_remediation import ITEM, accepted_with_an_item
@@ -56,12 +65,14 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
     assert small_targets(page) == []
 
 
-@pytest.mark.parametrize("step", ["company", "levels", "levels failed", "not applicable"])
+@pytest.mark.parametrize(
+    "step", ["company", "levels", "levels failed", "not applicable", "evidence"]
+)
 def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     page: Page, profiles_url, step
 ):
     # #403: steps 1 and 3, and step 3 when the scope can't be read (its Try again); #407: step 5,
-    # a control ticked with its reason field open.
+    # a control ticked with its reason field open; #408: step 6, a document ticked.
     page.set_viewport_size({"width": 400, "height": 900})
     if step == "levels failed":
         page.route(f"**{LEVELS}", lambda route: route.fulfill(status=500, body="{}"))
@@ -79,6 +90,9 @@ def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     if step == "not applicable":
         to_step_5(page)
         control(page, "1.6.1").check()
+    if step == "evidence":
+        to_step_6(page)
+        document(page, "Backup policy").check()
     assert small_targets(page) == []
 
 

@@ -476,3 +476,21 @@ textarea.field { resize: vertical; font-family: inherit; }
 .setup-alert p { margin: 0; }
 .setup-nav { display: flex; gap: 8px; }
 .setup-nav .btn-primary { margin-left: auto; }
+/* Step 6 (#408): the sample library in DocumentTable, the report's ruled table under a caption per folder; wide, it
+   scrolls inside its own .table-wrap (design.md, Layout). A row leads with step 5's 44px checkbox. */
+.doc-table { min-width: 640px; }
+/* The container may shrink below the table in a grid, so the table scrolls in it, not the page; and it holds the
+   rows' screen-reader text (.sr-only, positioned), which would otherwise widen the page from outside it. */
+.doc-table-wrap { position: relative; min-width: 0; }
+.doc-table caption { text-align: left; font-weight: 600; padding: 4px 0 6px; }
+.doc-table .doc-title { display: block; overflow-wrap: anywhere; }
+.doc-table .doc-id { display: block; font-size: 12px; color: var(--muted); }
+.doc-table .doc-current { color: var(--muted); }
+.doc-table td.doc-choose { width: 44px; padding: 0 4px 0 0; vertical-align: middle; }
+.doc-table .doc-choose .setup-choice input { margin: 0; }
+/* Forced colours draw the system's 18px box (above); its margin makes the 44px target again, the label around it taking
+   the press, as on step 5. */
+@media (forced-colors: active) {
+  .doc-table .doc-choose .setup-choice input { margin: 13px; }
+}
+.setup-ready { font-variant-numeric: tabular-nums; }

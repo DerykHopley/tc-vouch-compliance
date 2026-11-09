@@ -1,4 +1,4 @@
-import { type Column, plural, type ProtectionLevel } from './assessment.ts'
+import { type Column, type EvidenceKind, plural, type ProtectionLevel } from './assessment.ts'
 import { regionName } from './profiles.ts'
 import { authHeaders, sessionEnded } from './session.ts'
 
@@ -85,4 +85,39 @@ export function notApplicableProblems(marked: readonly NotApplicable[], controls
     blank: controls.filter((c) => marked.some((m) => m.control === c.id && m.reason.trim() === '')).map((c) => c.id),
     allMarked: controls.length > 0 && controls.every((c) => ids.has(c.id)),
   }
+}
+
+/** The sample library's folders a company's evidence chooses from, as CompanySetup.evidence takes them. */
+export type LibrarySource = 'policies' | 'records'
+
+/** One document of the sample library with what Vouch has read from it, as GET /api/developer/sample-library sends it
+ * (vouch.documents.DocumentSummary, #408). */
+export type LibraryDocument = {
+  id: string
+  source: LibrarySource
+  title: string
+  kind: EvidenceKind
+  version: string | null
+  approval_date: string | null
+  review_cycle: string | null
+  /** Why it is stale on the server's today, or null when it is current. */
+  stale_because: string | null
+  stale: boolean
+}
+
+/** Every document of the sample library, policies then records, each by title; null when it could not be read. */
+export async function sampleLibrary(): Promise<LibraryDocument[] | null> {
+  return (await read<{ documents: LibraryDocument[] }>('/api/developer/sample-library'))?.documents ?? null
+}
+
+/** The documents chosen on step 6, by folder: the shape CompanySetup.evidence takes. */
+export type ChosenEvidence = Record<LibrarySource, string[]>
+
+/** Step 6's live line: how many chosen documents Vouch can cite, by kind, and how many of them are stale. */
+export function readyToCite(chosen: readonly LibraryDocument[]): string {
+  if (chosen.length === 0) return 'No documents chosen yet.'
+  const countOf = (kind: EvidenceKind) => chosen.filter((d) => d.kind === kind).length
+  const stale = chosen.filter((d) => d.stale).length
+  return `Ready to cite: ${plural(chosen.length, 'document')} (${countOf('documented')} documented, `
+    + `${countOf('implemented')} implemented${stale > 0 ? `, ${stale} stale` : ''}).`
 }
