@@ -1,0 +1,21 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "analysed recorded extent event"}},
+    {"tool": "search_records", "args": {"query": "analysed recorded extent event"}},
+    {"answer": "Draft answer for 5.2.4, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The standard sets what is logged, where, for how long and who may read it.", "citations": [{"doc_id": "logging-standard", "quote": "Requirements that customer contracts set for logs, such as how long to keep them or who may read them, are listed with the contract and built into the settings of the log server."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Everything administrators do, sign-ins and account changes are logged.", "citations": [{"doc_id": "logging-standard", "quote": "Sign-ins and failed sign-ins, changes to accounts and rights, everything administrators do, and changes to security settings."}]},
+      {"requirement_id": "M3", "verdict": "partly-evidenced", "reason": "Each system is to be assessed for logging, but the assessments are not in the evidence.", "citations": [{"doc_id": "logging-standard", "quote": "IT assesses each system on the IT system list for whether it needs logging, and records the answer there."}]},
+      {"requirement_id": "M4", "verdict": "partly-evidenced", "reason": "IT is to find out each provider's monitoring options, but nothing shows it did.", "citations": [{"doc_id": "logging-standard", "quote": "The VPN logs when each remote session, including remote maintenance, starts and ends."}]},
+      {"requirement_id": "M5", "verdict": "evidenced", "reason": "Weekly checks are set, and all 13 of the third quarter are recorded.", "citations": [{"doc_id": "log-check-record", "quote": "All 13 weekly checks of the quarter were done, by one of the two administrators, each within its week."}, {"doc_id": "logging-standard", "quote": "Each week an administrator checks the alerts and a sample of the logs for breaches of policy and anything unusual."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Alerts pointing to an incident go to the incident team, as the open VPN session did.", "citations": [{"doc_id": "log-check-record", "quote": "The open VPN session was passed to the incident team, which classed it as a low-priority vulnerability."}, {"doc_id": "logging-standard", "quote": "Alerts that point to a security incident go to the incident team, which handles them under the incident management procedure."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Logs sit on a central server where nobody can change entries.", "citations": [{"doc_id": "logging-standard", "quote": "Logs are sent to a central log server that only two administrators can manage, and that nobody can change entries on."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "The firewall and intrusion detection record traffic between zones and to the internet.", "citations": [{"doc_id": "logging-standard", "quote": "The firewall and the intrusion detection system watch traffic between our network zones and to the internet, and record connections that break the firewall rules."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Contract requirements for logs are listed and built into the log server's settings.", "citations": [{"doc_id": "logging-standard", "quote": "Requirements that customer contracts set for logs, such as how long to keep them or who may read them, are listed with the contract and built into the settings of the log server."}]},
+      {"requirement_id": "H2", "verdict": "evidenced", "reason": "The VPN logs the start and end of each remote session, remote maintenance included.", "citations": [{"doc_id": "logging-standard", "quote": "The VPN logs when each remote session, including remote maintenance, starts and ends."}]}
+    ]
+  }
+}

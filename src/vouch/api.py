@@ -79,6 +79,7 @@ from vouch.model_choice import (
 )
 from vouch.profile import (
     DEFAULT_PROFILE,
+    SAMPLE_LIBRARY,
     BrokenProfile,
     ComplianceProfile,
     ProfileScan,
@@ -321,8 +322,13 @@ def rate_limit(request: Request, user: CurrentUser) -> None:
 def user_profiles(settings: Settings, user: User) -> ProfileScan:
     """The one place that decides which compliance profiles a user may see and use (#47): for
     now every profile in the profiles folder, for every user, each read once. A broken one is
-    left out (and listed for the developer page), never a failure."""
-    return scan_profiles(settings.profiles_dir)
+    left out (and listed for the developer page), never a failure. The sample library's
+    reference profile is no company, so it is left out too (#370)."""
+    scan = scan_profiles(settings.profiles_dir)
+    return ProfileScan(
+        tuple(p for p in scan.loaded if p.id != SAMPLE_LIBRARY),
+        tuple(p for p in scan.broken if p.id != SAMPLE_LIBRARY),
+    )
 
 
 def compliance_profile(

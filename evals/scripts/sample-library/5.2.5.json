@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "vulnerabilities identified addressed extent"}},
+    {"tool": "search_records", "args": {"query": "vulnerabilities identified addressed extent"}},
+    {"answer": "Draft answer for 5.2.5, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Advisories and scans are followed and scored with CVSS; the record counts those checked each month.", "citations": [{"doc_id": "patch-status-record", "quote": "One high-rated vulnerability in August, on the machine control server, could not be patched until the manufacturer approved the patch."}, {"doc_id": "vulnerability-management-standard", "quote": "For each vulnerability, IT finds the systems it affects and scores it with CVSS, adjusted for how exposed the system is."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Affected systems are found and rated; the record lists those on our systems.", "citations": [{"doc_id": "patch-status-record", "quote": "One high-rated vulnerability in August, on the machine control server, could not be patched until the manufacturer approved the patch."}, {"doc_id": "vulnerability-management-standard", "quote": "For each vulnerability, IT finds the systems it affects and scores it with CVSS, adjusted for how exposed the system is."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Fix times by rating, and the record shows them met or the risk reduced.", "citations": [{"doc_id": "patch-status-record", "quote": "July | 64 | 19 | 19 | Yes"}, {"doc_id": "vulnerability-management-standard", "quote": "After each patch round, the next scan shows whether the patches were installed; systems still missing them are patched again."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Patches are tested on a small group first, then installed everywhere.", "citations": [{"doc_id": "vulnerability-management-standard", "quote": "Patches are first installed on a test system or a small group of computers, then everywhere."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "A server that could not be patched in time had the service blocked at the firewall.", "citations": [{"doc_id": "patch-status-record", "quote": "One high-rated vulnerability in August, on the machine control server, could not be patched until the manufacturer approved the patch."}, {"doc_id": "vulnerability-management-standard", "quote": "Where a patch cannot be installed in time, IT reduces the risk another way, for example by switching off the affected function or blocking it at the firewall, and the information security officer agrees the delay."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "The next scan checks each patch round, as the record shows for each month.", "citations": [{"doc_id": "patch-status-record", "quote": "One high-rated vulnerability in August, on the machine control server, could not be patched until the manufacturer approved the patch."}, {"doc_id": "vulnerability-management-standard", "quote": "After each patch round, the next scan shows whether the patches were installed; systems still missing them are patched again."}]}
+    ]
+  }
+}

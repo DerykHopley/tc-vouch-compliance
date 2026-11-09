@@ -1,0 +1,20 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "information available policies security"}},
+    {"tool": "search_records", "args": {"query": "information available policies security"}},
+    {"answer": "Draft answer for 1.1.1, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The policy says the security requirements are collected each January from strategy, contracts and law, and listed on the intranet.", "citations": [{"doc_id": "information-security-policy", "quote": "Every January the information security officer collects the security requirements that apply to us: from the business strategy, from customer contracts and their security annexes, and from the laws that bind us, such as data protection law."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "The policy exists and records the managing directors' approval of 16 February 2026.", "citations": [{"doc_id": "information-security-policy", "quote": "The managing directors approved this version on 16 February 2026."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "The policy states its objectives and why security matters to the business.", "citations": [{"doc_id": "information-security-policy", "quote": "Every January the information security officer collects the security requirements that apply to us: from the business strategy, from customer contracts and their security annexes, and from the laws that bind us, such as data protection law."}]},
+      {"requirement_id": "M4", "verdict": "partly-evidenced", "reason": "The policy says it is published on the intranet, but no record shows it was.", "citations": [{"doc_id": "information-security-policy", "quote": "This policy and the standards below it are published on the intranet, where every employee can read them."}]},
+      {"requirement_id": "M5", "verdict": "partly-evidenced", "reason": "Change summaries to staff and suppliers are promised, but no record shows one was sent.", "citations": [{"doc_id": "information-security-policy", "quote": "When a change affects staff, the information security officer sends a short summary of it to all employees; when a change affects suppliers or service providers, purchasing sends them the summary with the next order."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Requirements come from the business strategy, customer contracts and data protection law.", "citations": [{"doc_id": "information-security-policy", "quote": "Every January the information security officer collects the security requirements that apply to us: from the business strategy, from customer contracts and their security annexes, and from the laws that bind us, such as data protection law."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "The policy names consequences under employment law and the end of a supplier's contract.", "citations": [{"doc_id": "information-security-policy", "quote": "Breaking this policy or a standard below it can lead to measures under employment law, up to dismissal, and for suppliers to the end of the contract."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "The policy lists ten supporting standards, each with its own owner.", "citations": [{"doc_id": "information-security-policy", "quote": "This policy is made concrete by these documents, each with its own owner:"}]},
+      {"requirement_id": "S4", "verdict": "partly-evidenced", "reason": "A review cycle is set for every document, but the backup policy has missed its yearly review since February 2025.", "citations": [{"doc_id": "backup-policy", "quote": "IT reviews this policy and the recovery guides every year."}, {"doc_id": "information-security-policy", "quote": "Each policy and standard names a review cycle."}]}
+    ]
+  }
+}

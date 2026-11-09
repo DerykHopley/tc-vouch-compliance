@@ -274,7 +274,7 @@ def test_a_broken_roll_up_in_the_graph_lowers_control_accuracy(monkeypatch):
     assert report.verdict_accuracy == 1  # the requirements were still judged right
 
 
-@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk", "sample-library"])
 def test_the_fake_model_scores_every_case_right_and_prints_it(profile, tmp_path, capsys):
     """The fake scripts are drafted from the expected answers, so anything short of all right
     is a harness regression (or expected answers changed without regenerating the scripts)."""
@@ -407,7 +407,7 @@ def test_the_script_generator_gives_the_same_scripts_whatever_the_hash_seed(tmp_
     assert generate("2") == first
 
 
-@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk", "sample-library"])
 def test_the_committed_scripts_are_what_the_generator_writes(profile, tmp_path):
     """Scripts edited by hand, or left behind after the expected answers changed, show here."""
     subprocess.run(
