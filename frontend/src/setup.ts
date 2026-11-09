@@ -1,6 +1,6 @@
 import { type Column, type EvidenceKind, plural, type ProtectionLevel } from './assessment.ts'
-import { regionName } from './profiles.ts'
-import { authHeaders, sessionEnded } from './session.ts'
+import { fetchProfiles, type Profiles, type ProfileSummary, regionName } from './profiles.ts'
+import { authHeaders, refusedBecause, sessionEnded } from './session.ts'
 
 /** Company setup's data (#403): the countries a company may be in, and what each protection level brings into scope. */
 
@@ -18,6 +18,12 @@ const COUNTRY_CODES = [
 export const COUNTRIES: { code: string; name: string }[] = COUNTRY_CODES
   .map((code) => ({ code, name: regionName(code) }))
   .sort((a, b) => a.name.localeCompare(b.name, 'en'))
+
+/** The languages a company's answers may be in (step 2), by code, each named in English: the interface is English. */
+export const LANGUAGES = [{ code: 'en', name: 'English' }, { code: 'de', name: 'German' }] as const
+
+/** A company's answer language, as CompanySetup.answer_language takes it. */
+export type AnswerLanguage = (typeof LANGUAGES)[number]['code']
 
 /** Each protection level, lowest first: its name in the step, and the kind of requirement it adds over the one below. */
 export const PROTECTION_LEVELS: Record<ProtectionLevel, { name: string; kind: string }> = {
@@ -120,4 +126,72 @@ export function readyToCite(chosen: readonly LibraryDocument[]): string {
   const stale = chosen.filter((d) => d.stale).length
   return `Ready to cite: ${plural(chosen.length, 'document')} (${countOf('documented')} documented, `
     + `${countOf('implemented')} implemented${stale > 0 ? `, ${stale} stale` : ''}).`
+}
+
+/** A company to make, as POST /api/developer/profiles takes it (vouch.company_profiles.CompanySetup, #385). */
+export type CompanySetup = {
+  company: string
+  country: string
+  answer_language: AnswerLanguage
+  protection_level: ProtectionLevel
+  not_applicable: NotApplicable[]
+  evidence: ChosenEvidence
+}
+
+/** How creating a company went (#409): created, with the profile as GET /api/profiles lists it; refused by the
+ * profile's checks (a 422), with the problem in words; the database unavailable (a 503); the session ended (a 401:
+ * signed out already); failed with nothing made (any other 4xx); or unknown: the answer was lost (unreachable, another
+ * 5xx, or a 201 that won't parse) and the list read again doesn't show the company, so it may have been made or not. */
+export type CompanyCreated =
+  | { status: 'created'; profile: ProfileSummary }
+  | { status: 'refused'; problem: string }
+  | { status: 'unavailable' }
+  | { status: 'signed-out' }
+  | { status: 'failed' }
+  | { status: 'unknown' }
+
+/** Creates the company `setup` describes (developers only), its name and each not-applicable reason trimmed: steps 1
+ * and 5 keep them as typed (#407's review), step 7 shows them trimmed. The profile list is read before the create, so
+ * that when the create's answer is lost, the list read again shows whether the company was made after all. */
+export async function createCompany(setup: CompanySetup): Promise<CompanyCreated> {
+  const body: CompanySetup = {
+    ...setup,
+    company: setup.company.trim(),
+    not_applicable: setup.not_applicable.map(({ control, reason }) => ({ control, reason: reason.trim() })),
+  }
+  const before = await fetchProfiles()
+  const sent = await post(body)
+  if (sent !== 'lost') return sent
+  const made = newlyListed(before, await fetchProfiles(), body.company)
+  return made ? { status: 'created', profile: made } : { status: 'unknown' }
+}
+
+/** POSTs a company; 'lost' when the server may have made it but its answer didn't arrive whole. */
+async function post(body: CompanySetup): Promise<CompanyCreated | 'lost'> {
+  let response: Response
+  try {
+    response = await fetch('/api/developer/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    return 'lost'
+  }
+  if (response.ok) {
+    const profile = (await response.json().catch(() => null)) as ProfileSummary | null
+    return profile?.id ? { status: 'created', profile } : 'lost'
+  }
+  if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
+  if (response.status === 422) return { status: 'refused', problem: await refusedBecause(response) }
+  if (response.status === 503) return { status: 'unavailable' }
+  return response.status >= 500 ? 'lost' : { status: 'failed' }
+}
+
+/** The profile named `company` that `after` lists and `before` didn't: the company a lost answer made. None when
+ * either list is missing (no way to tell a new one from one already there). */
+export function newlyListed(before: Profiles | null, after: Profiles | null, company: string): ProfileSummary | null {
+  if (!before || !after) return null
+  const known = new Set(before.profiles.map((p) => p.id))
+  return after.profiles.find((p) => p.company === company && !known.has(p.id)) ?? null
 }

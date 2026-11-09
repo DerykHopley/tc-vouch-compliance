@@ -7,6 +7,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, useOverview } from './overview.ts'
+import type { ProfileSummary } from './profiles.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
 import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
@@ -63,11 +64,16 @@ type AppProps = {
   company?: string
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
+  /** Company setup made a company (#409): ProfiledApp opens the app afresh under it. */
+  onCompanyCreated?: (profile: ProfileSummary) => void
+  /** The app opens on a company just made (#409): the Dossier's heading takes focus, until the first move elsewhere. */
+  focusHeading?: boolean
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
-export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh }: AppProps = {}) {
+export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh, onCompanyCreated,
+  focusHeading: arriving = false }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -93,6 +99,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     }
   }, [barOpen])
   const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  const [focusHeading, setFocusHeading] = useState(arriving) // ends with the first move to another view
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
@@ -104,6 +111,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         window.history.pushState(null, '', shownPath.current)
         return
       }
+      setFocusHeading(false)
       setView(viewAt(window.location.pathname))
     }
     // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
@@ -123,6 +131,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     const path = pathOf(next)
     if (path !== shownPath.current && !mayLeave()) return false // the view shown again asks nothing
     if (window.location.pathname !== path) window.history.pushState(null, '', path)
+    setFocusHeading(false)
     setView(next)
     return true
   }
@@ -243,7 +252,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
             {/* settings unreadable just now: the developer page's notice, not the wizard */}
             {developer === UNAVAILABLE
               ? <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
-              : <CompanySetupWizard developerPath={DEVELOPER_PATH} onDeveloper={() => showView({ name: 'developer' })} />}
+              : <CompanySetupWizard developerPath={DEVELOPER_PATH} onDeveloper={() => showView({ name: 'developer' })}
+                onCreated={onCompanyCreated} />}
           </main>
         )
         : control && overview.state.status === 'ready' ? (
@@ -256,7 +266,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
           </main>
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
-          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running} />}
+          : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running}
+            focusHeading={focusHeading} />}
       {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
           readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
           readiness), and its paper's newest if open. */}

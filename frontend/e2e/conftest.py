@@ -52,6 +52,13 @@ def afresh_url() -> str:
 
 
 @pytest.fixture
+def setup_url() -> str:
+    """An eighth Vouch like vouch_url, for company setup's create (#409): the company it makes
+    stays in that process (local mode), so no other check's profile switcher lists it."""
+    return os.environ["SETUP_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

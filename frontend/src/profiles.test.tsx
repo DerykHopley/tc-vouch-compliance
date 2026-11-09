@@ -3,7 +3,17 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
-import { fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile } from './profiles.ts'
+
+// Company setup stands in as one button that reports the company made (#409): its steps are tested on their own.
+vi.mock('./CompanySetupWizard.tsx', () => ({
+  default: ({ onCreated }: { onCreated: (profile: ProfileSummary) => void }) => (
+    <button type="button" onClick={() => onCreated({ id: 'musterfirma-gmbh', company: 'Musterfirma GmbH',
+      country: 'Germany', answer_language: 'de' })}>Created</button>
+  ),
+}))
+import {
+  fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile, withProfile,
+} from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import {
   authHeaders, rememberedProfile, rememberProfile, setOnSignedOut, setProfile, setTokenSource,
@@ -11,6 +21,8 @@ import {
 
 const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany',
   answer_language: 'en' }
+const MUSTERFIRMA: ProfileSummary = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany',
+  answer_language: 'de' }
 const TESTWERK: ProfileSummary = { id: 'testwerk', company: 'Testwerk Prüfstand GmbH', country: 'Austria',
   answer_language: 'de' }
 
@@ -89,6 +101,19 @@ describe('startingProfile', () => {
 
   it("is none without a list: the API's default answers", () => {
     expect(startingProfile(null, 'testwerk')).toEqual({ id: null, fellBack: false })
+  })
+})
+
+describe('withProfile, issue 409', () => {
+  it('adds the profile to the list held, unless it is listed already', () => {
+    const held = { profiles: [NORDLICHT], default: 'nordlicht' }
+    expect(withProfile(held, MUSTERFIRMA)).toEqual({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' })
+    expect(withProfile({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }, MUSTERFIRMA))
+      .toEqual({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' })
+  })
+
+  it('with no list held, is a list of that profile alone, with no default', () => {
+    expect(withProfile(null, MUSTERFIRMA)).toEqual({ profiles: [MUSTERFIRMA], default: null })
   })
 })
 
@@ -371,5 +396,108 @@ describe('switching profile on a working paper', () => {
     await screen.findByText(/Working paper · Testwerk/)
     expect(within(await row()).queryByText(/Overridden from/)).toBeNull()
     expect(within(await row()).queryByText('The rollout record shows it.')).toBeNull()
+  })
+})
+
+describe('a company made in company setup, issue 409', () => {
+  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
+    kept_in: 'memory', daily_limit: 10 }
+
+  /** The API as `serve` answers it, for a developer, the list read again answering `relisted` (null: a 500). */
+  function serveDeveloper(relisted: ProfileSummary[] | null) {
+    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/profiles' && ++listings > 1)
+        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
+          : new Response(null, { status: 500 }))
+      if (url === '/api/profiles') return Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
+      return answered(url, init)
+    })
+    return fetch
+  }
+
+  it('reads the list again and opens under the new company, on the Dossier, remembered for the next reload', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/profiles')).toHaveLength(2)
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    expect(screen.getByRole('button', { name: /^Profile: Musterfirma GmbH/ })).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    expect(screen.getAllByRole('menuitemradio').map((m) => m.getAttribute('aria-checked')))
+      .toEqual(['false', 'false', 'true'])
+  })
+
+  it('when the list can\'t be read again, still opens under the new company, which the switcher names', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper(null)
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: Musterfirma/ }))
+    expect(screen.getAllByRole('menuitemradio').map((m) => m.textContent?.startsWith('Musterfirma GmbH')))
+      .toEqual([false, false, true])
+  })
+
+  it('lands focus on the Dossier\'s main heading, not the profile dropdown', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 })))
+  })
+
+  /** serveDeveloper, the list read again held until the returned function answers it. */
+  function heldRelisting() {
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let release: (answer: Response) => void = () => {}
+    let listings = 0
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/profiles' && ++listings > 1
+      ? new Promise<Response>((resolve) => { release = resolve })
+      : answered(url, init))
+    return (answer: Response) => release(answer)
+  }
+
+  it('stays on the setup address until the list answers again, and after closing neither opens nor remembers it',
+    async () => {
+      window.history.replaceState(null, '', '/developer/setup')
+      const release = heldRelisting()
+      const { unmount } = render(<ProfiledApp />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+      expect(window.location.pathname).toBe('/developer/setup')
+      unmount()
+      release(Response.json({ profiles: [NORDLICHT, TESTWERK, MUSTERFIRMA], default: 'nordlicht' }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(rememberedProfile()).toBeNull()
+      expect(await authHeaders()).toEqual({})
+      expect(window.location.pathname).toBe('/developer/setup')
+    })
+
+  it('a 401 on the list read again signs out, and neither opens nor remembers the new company', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const release = heldRelisting()
+    const signOut = vi.fn()
+    setOnSignedOut(signOut) // as ClerkApp's: the sign-in replaces the app on its next render, after this answer
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+    release(new Response(null, { status: 401 }))
+    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(rememberedProfile()).toBeNull()
+    expect(window.location.pathname).toBe('/developer/setup')
+    expect(screen.queryByRole('button', { name: /^Profile: Musterfirma/ })).toBeNull()
   })
 })

@@ -14,6 +14,7 @@ from test_company_setup import (
     to_step_3,
     to_step_5,
     to_step_6,
+    to_step_7,
 )
 from test_guided_chat import assess_in_the_chat
 from test_profiles import assessed as assessed_in
@@ -66,13 +67,13 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
 
 
 @pytest.mark.parametrize(
-    "step", ["company", "levels", "levels failed", "not applicable", "evidence"]
+    "step", ["company", "levels", "levels failed", "not applicable", "evidence", "finish"]
 )
 def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     page: Page, profiles_url, step
 ):
     # #403: steps 1 and 3, and step 3 when the scope can't be read (its Try again); #407: step 5,
-    # a control ticked with its reason field open; #408: step 6, a document ticked.
+    # a control ticked with its reason field open; #408: step 6, a document ticked; #409: step 7.
     page.set_viewport_size({"width": 400, "height": 900})
     if step == "levels failed":
         page.route(f"**{LEVELS}", lambda route: route.fulfill(status=500, body="{}"))
@@ -93,6 +94,8 @@ def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     if step == "evidence":
         to_step_6(page)
         document(page, "Backup policy").check()
+    if step == "finish":
+        to_step_7(page)
     assert small_targets(page) == []
 
 

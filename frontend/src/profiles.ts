@@ -19,6 +19,13 @@ export async function fetchProfiles(): Promise<Profiles | null> {
   }
 }
 
+/** `held` with `profile` added at its end, unless it is listed already; with nothing held, that profile alone. A
+ * company made in company setup (#409) is named by the switcher even when the list can't be read again. */
+export function withProfile(held: Profiles | null, profile: ProfileSummary): Profiles {
+  const list = held ?? { profiles: [], default: null }
+  return list.profiles.some((p) => p.id === profile.id) ? list : { ...list, profiles: [...list.profiles, profile] }
+}
+
 /** How a fresh start went: started, refused while an assessment runs (the 409), the session ended (a 401: signed out
  * already, so nothing more to say), or failed any other way. */
 export type FreshStart = 'started' | 'running' | 'signed-out' | 'failed'

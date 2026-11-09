@@ -13,6 +13,8 @@
 #   - a sixth, for the readiness report's checks (#234), for the same reason;
 #   - a seventh, for the fresh start's check (#285): starting Nordlicht afresh would hide the other
 #     servers' seeded progress from their checks;
+#   - an eighth, for company setup's create (#409): the company it makes stays in that process,
+#     and would add a profile to the other servers' switchers;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 # Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):
@@ -35,11 +37,18 @@ LOG_DIR="${E2E_LOG_DIR:-$(mktemp -d)}"
 CONTAINER="${CONTAINER:-docker}"
 NAME="vouch-e2e-$$"
 PIDS=()
+CONTAINERS=()
 RATE="${VOUCH_RATE_REQUESTS:-100000}"
+# The Vouch servers above, in order, each as its name (for its log and container) and the variable
+# its URL goes in. A new server is one more entry here.
+SERVERS=(
+  vouch:VOUCH_URL dossier:DOSSIER_URL profiles:PROFILES_URL paper:PAPER_URL chat:CHAT_URL
+  report:REPORT_URL afresh:AFRESH_URL setup:SETUP_URL
+)
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
-  if [ -n "${VOUCH_IMAGE:-}" ]; then
-    "$CONTAINER" rm -f "$NAME" "$NAME-dossier" "$NAME-profiles" "$NAME-paper" "$NAME-chat" "$NAME-report" "$NAME-afresh" >/dev/null 2>&1 || true
+  if [ ${#CONTAINERS[@]} -gt 0 ]; then
+    "$CONTAINER" rm -f "${CONTAINERS[@]}" >/dev/null 2>&1 || true
   fi
   wait 2>/dev/null || true
   rm -rf "$PROFILES_DIR"
@@ -47,11 +56,13 @@ cleanup() {
 PROFILES_DIR="$(mktemp -d)"
 trap cleanup EXIT
 
-read -r VOUCH_PORT DOSSIER_PORT PROFILES_PORT PAPER_PORT CHAT_PORT REPORT_PORT AFRESH_PORT FAILING_PORT < <(python3 -c '
-import socket
-socks = [socket.socket() for _ in range(8)]
+# A free port for each server, then one for the failing API.
+read -r -a PORTS < <(python3 -c '
+import socket, sys
+socks = [socket.socket() for _ in range(int(sys.argv[1]))]
 for s in socks: s.bind(("127.0.0.1", 0))
-print(*(s.getsockname()[1] for s in socks))')
+print(*(s.getsockname()[1] for s in socks))' $((${#SERVERS[@]} + 1)))
+FAILING_PORT=${PORTS[${#SERVERS[@]}]}
 
 if [ -z "${VOUCH_IMAGE:-}" ]; then
   (cd "$ROOT/frontend" && npm run build) >"$LOG_DIR/build.log" 2>&1 \
@@ -61,6 +72,7 @@ start_vouch() { # port, log name, container name, then a profiles folder if not 
   if [ -n "${VOUCH_IMAGE:-}" ]; then
     local profiles=()
     if [ -n "${4:-}" ]; then profiles=(-v "$4:/profiles:ro,Z" -e VOUCH_PROFILES_DIR=/profiles); fi
+    CONTAINERS+=("$3")
     "$CONTAINER" run --rm --name "$3" -p "127.0.0.1:$1:8080" -e VOUCH_AUTH_MODE=local -e VOUCH_RATE_REQUESTS="$RATE" \
       "${profiles[@]}" "$VOUCH_IMAGE" >"$LOG_DIR/$2.log" 2>&1 &
   else
@@ -72,24 +84,17 @@ start_vouch() { # port, log name, container name, then a profiles folder if not 
 (cd "$ROOT" && uv run python tests/profiles_dir.py "$PROFILES_DIR/profiles") >"$LOG_DIR/profiles.log" 2>&1 \
   || { echo "The profile switcher's profiles could not be made:" >&2; tail -n 30 "$LOG_DIR/profiles.log" >&2; exit 1; }
 chmod -R a+rX "$PROFILES_DIR" # the container runs as nobody
-start_vouch "$VOUCH_PORT" vouch "$NAME"
-start_vouch "$DOSSIER_PORT" dossier "$NAME-dossier"
-start_vouch "$PROFILES_PORT" profiles "$NAME-profiles" "$PROFILES_DIR/profiles"
-start_vouch "$PAPER_PORT" paper "$NAME-paper"
-start_vouch "$CHAT_PORT" chat "$NAME-chat"
-start_vouch "$REPORT_PORT" report "$NAME-report"
-start_vouch "$AFRESH_PORT" afresh "$NAME-afresh"
+for i in "${!SERVERS[@]}"; do
+  server=${SERVERS[$i]%%:*}
+  folder=()
+  if [ "$server" = profiles ]; then folder=("$PROFILES_DIR/profiles"); fi
+  start_vouch "${PORTS[$i]}" "$server" "$NAME-$server" "${folder[@]+"${folder[@]}"}"
+  export "${SERVERS[$i]#*:}=http://localhost:${PORTS[$i]}"
+done
 (cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
   uv run uvicorn vouch.api:app --port "$FAILING_PORT") >"$LOG_DIR/failing-api.log" 2>&1 &
 PIDS+=($!)
 
-export VOUCH_URL="http://localhost:$VOUCH_PORT"
-export DOSSIER_URL="http://localhost:$DOSSIER_PORT"
-export PROFILES_URL="http://localhost:$PROFILES_PORT"
-export PAPER_URL="http://localhost:$PAPER_PORT"
-export CHAT_URL="http://localhost:$CHAT_PORT"
-export REPORT_URL="http://localhost:$REPORT_PORT"
-export AFRESH_URL="http://localhost:$AFRESH_PORT"
 export FAILING_API_URL="http://127.0.0.1:$FAILING_PORT"
 
 wait_for() {
@@ -101,14 +106,11 @@ wait_for() {
   tail -n 30 "$LOG_DIR"/*.log >&2
   return 1
 }
-wait_for "$VOUCH_URL/api/health"
+for server in "${SERVERS[@]}"; do
+  url_var=${server#*:}
+  wait_for "${!url_var}/api/health"
+done
 wait_for "$VOUCH_URL/"
-wait_for "$DOSSIER_URL/api/health"
-wait_for "$PROFILES_URL/api/health"
-wait_for "$PAPER_URL/api/health"
-wait_for "$CHAT_URL/api/health"
-wait_for "$REPORT_URL/api/health"
-wait_for "$AFRESH_URL/api/health"
 wait_for "$FAILING_API_URL/api/health"
 
 # Test paths work from the repo's root too (frontend/e2e/test_x.py), not only from here (#246).

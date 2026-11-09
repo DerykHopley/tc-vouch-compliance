@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
-import { profileTag } from './profiles.ts'
+import { profileTag, type ProfileSummary } from './profiles.ts'
+import { setOnSignedOut } from './session.ts'
 import {
-  COUNTRIES, frameworkControls, type LibraryDocument, notApplicableProblems, protectionLevels, type ProtectionScope,
-  readyToCite, sampleLibrary, scopeWords,
+  type AnswerLanguage, COUNTRIES, type CompanySetup, createCompany, frameworkControls, LANGUAGES, type LibraryDocument,
+  newlyListed, notApplicableProblems, protectionLevels, type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  setOnSignedOut(null)
+})
 
 describe('the countries company setup offers', () => {
   it('are the EU, Iceland, Liechtenstein, Norway, Switzerland and the UK', () => {
@@ -129,5 +133,109 @@ describe("step 6's ready-to-cite line", () => {
   it('counts the chosen documents by kind, and the stale ones only when there are some', () => {
     expect(readyToCite([DOCUMENT, current, record])).toBe('Ready to cite: 3 documents (2 documented, 1 implemented, 1 stale).')
     expect(readyToCite([current])).toBe('Ready to cite: 1 document (1 documented, 0 implemented).')
+  })
+})
+
+const SETUP: CompanySetup = {
+  company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de', protection_level: 'high',
+  not_applicable: [{ control: '1.6.1', reason: '  Remote only  ' }],
+  evidence: { policies: ['backup-policy'], records: [] },
+}
+const CREATED = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de' }
+
+/** fetch for a create: GET /api/profiles answers `listings` in turn (null: a 500), the POST answers `post`. */
+function createApi(post: Response | 'offline', ...listings: (ProfileSummary[] | null)[]) {
+  const fetch = vi.fn((url: string, _init?: RequestInit) => {
+    if (url === '/api/developer/profiles')
+      return post === 'offline' ? Promise.reject(new TypeError('offline')) : Promise.resolve(post)
+    const listed = listings.shift()
+    return Promise.resolve(listed ? Response.json({ profiles: listed, default: 'nordlicht' })
+      : new Response(null, { status: 500 }))
+  })
+  vi.stubGlobal('fetch', fetch)
+  return fetch
+}
+const NORDLICHT = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' }
+
+describe('creating a company, issue 409', () => {
+  it('posts the setup to the developer route, the name and each reason trimmed, and answers the created profile',
+    async () => {
+      const fetch = createApi(Response.json(CREATED, { status: 201 }), [NORDLICHT])
+      expect(await createCompany({ ...SETUP, company: '  Musterfirma GmbH ' })).toEqual({ status: 'created', profile: CREATED })
+      const [url, init] = fetch.mock.calls.find(([u]) => u === '/api/developer/profiles')!
+      expect(url).toBe('/api/developer/profiles')
+      expect(init?.method).toBe('POST')
+      expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json')
+      expect(JSON.parse(String(init?.body))).toEqual({
+        ...SETUP, not_applicable: [{ control: '1.6.1', reason: 'Remote only' }],
+      })
+    })
+
+  it('says why a refused setup was refused, from a string detail or a list', async () => {
+    createApi(Response.json({ detail: 'evidence: no document x' }, { status: 422 }))
+    expect(await createCompany(SETUP)).toEqual({ status: 'refused', problem: 'evidence: no document x' })
+    createApi(Response.json(
+      { detail: [{ loc: ['body', 'company'], msg: 'too long' }, { loc: ['body', 'country'], msg: 'empty' }] },
+      { status: 422 }))
+    expect(await createCompany(SETUP)).toEqual({ status: 'refused', problem: 'too long; empty' })
+  })
+
+  it('is unavailable on a 503, and failed on a 4xx: nothing was made', async () => {
+    createApi(Response.json({ detail: 'x', unavailable: 'database' }, { status: 503 }), [NORDLICHT], [NORDLICHT, CREATED])
+    expect(await createCompany(SETUP)).toEqual({ status: 'unavailable' })
+    createApi(new Response('{}', { status: 403 }), [NORDLICHT], [NORDLICHT, CREATED])
+    expect(await createCompany(SETUP)).toEqual({ status: 'failed' })
+  })
+
+  it.each([
+    ['a 500', new Response('{}', { status: 500 }) as Response | 'offline'],
+    ['a 502', new Response('{}', { status: 502 }) as Response | 'offline'],
+    ['an unreachable server', 'offline' as const],
+    ['a 201 whose body won\'t parse', new Response('<html>', { status: 201 }) as Response | 'offline'],
+  ])('after %s, reads the list again: a new company of that name listed now was created', async (_, post) => {
+    const fetch = createApi(post, [NORDLICHT], [NORDLICHT, CREATED])
+    expect(await createCompany({ ...SETUP, company: ' Musterfirma GmbH ' })).toEqual({ status: 'created', profile: CREATED })
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/profiles', '/api/developer/profiles', '/api/profiles'])
+  })
+
+  it.each([
+    ['nothing new is listed', [NORDLICHT, CREATED], [NORDLICHT, CREATED]],
+    ['the list could not be read before', null, [NORDLICHT, CREATED]],
+    ['the list could not be read after', [NORDLICHT], null],
+    ['only another name is new', [NORDLICHT], [NORDLICHT, { ...CREATED, id: 'x', company: 'Other GmbH' }]],
+  ])('after a lost answer, it may not have been created when %s', async (_, before, after) => {
+    createApi(new Response('{}', { status: 500 }), before, after)
+    expect(await createCompany(SETUP)).toEqual({ status: 'unknown' })
+  })
+
+  it('signs out on a 401', async () => {
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    createApi(new Response(null, { status: 401 }), [NORDLICHT])
+    expect(await createCompany(SETUP)).toEqual({ status: 'signed-out' })
+    expect(signOut).toHaveBeenCalledOnce()
+  })
+})
+
+describe('newlyListed', () => {
+  const before = { profiles: [NORDLICHT, CREATED], default: 'nordlicht' }
+  const twin = { ...CREATED, id: 'musterfirma-gmbh-2' }
+
+  it('is the profile of that name whose id was not listed before', () => {
+    expect(newlyListed(before, { ...before, profiles: [...before.profiles, twin] }, 'Musterfirma GmbH')).toEqual(twin)
+  })
+
+  it('is none when either list is missing or nothing of that name is new', () => {
+    expect(newlyListed(null, before, 'Musterfirma GmbH')).toBeNull()
+    expect(newlyListed(before, null, 'Musterfirma GmbH')).toBeNull()
+    expect(newlyListed(before, before, 'Musterfirma GmbH')).toBeNull()
+  })
+})
+
+describe('the answer languages, issue 409', () => {
+  it('are English and German, by code', () => {
+    const codes: AnswerLanguage[] = LANGUAGES.map((l) => l.code)
+    expect(codes).toEqual(['en', 'de'])
+    expect(LANGUAGES.map((l) => l.name)).toEqual(['English', 'German'])
   })
 })
