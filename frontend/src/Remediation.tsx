@@ -4,7 +4,8 @@ import { decideItem, type ItemDecision, ITEM_WORDS, NO_OWNER, type RemediationIt
 type Props = {
   item: RemediationItem
   threadId: string
-  /** The control's verdict is accepted: its drafts can be approved or discarded. */
+  /** The control's findings are confirmed (Plan fixes, #372), or it was accepted: its drafts can be approved or
+   * discarded. */
   decidable: boolean
   /** The decision is recorded: the item as kept. */
   onDecided: (item: RemediationItem) => void
@@ -14,7 +15,7 @@ type Props = {
 
 /**
  * The remediation item of a requirement not or partly evidenced (#212) (`docs/design.md`, Components: Remediation item): draft (approve,
- * discard), approved, discarded. On an accepted control a draft's owner role and due date can be changed before
+ * discard), approved, discarded. Once the findings are confirmed a draft's owner role and due date can be changed before
  * Approve; a refusal (a past due date, an item decided in another tab) shows the server's reason. One decision is
  * sent at a time, so a double click approves once. Where Vouch suggested no owner, the field starts empty and Approve
  * waits for one. Its fields start from the item: the paper gives it a new key whenever the item changes.
@@ -75,7 +76,7 @@ export default function Remediation({ item, threadId, decidable, onDecided, lang
       ) : (
         <>
           <p className="why">Owner: {item.owner_role} · Due {item.due_date}</p>
-          {item.status === 'draft' && <p className="why">Approve or discard it once the verdict is accepted.</p>}
+          {item.status === 'draft' && <p className="why">Approve or discard it once the findings are confirmed.</p>}
         </>
       )}
     </section>

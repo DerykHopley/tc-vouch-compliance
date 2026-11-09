@@ -15,6 +15,7 @@ from urllib.request import urlopen
 import pdf_words
 import pytest
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
+from reviewing import reviewed
 from touch_targets import small_targets
 
 LOCAL_USER = "Local user"
@@ -50,16 +51,21 @@ def accepted(
     control_id: str,
     profile: str,
     overrides: list | None = None,
+    decisions: dict | None = None,
 ) -> str:
+    """The control assessed and accepted through the three steps (#372): the items `decisions`
+    names decided so, every other one discarded. Its thread id."""
     thread_id = assessed(request, report_url, control_id, profile)
-    review = {"decision": "accept", "overrides": overrides or []}
-    post(request, f"{report_url}/api/assessments/{thread_id}/review", review, profile)
+    headers = {"X-Vouch-Profile": profile}
+    reviewed(
+        request,
+        report_url,
+        thread_id,
+        overrides=overrides or [],
+        decisions=decisions,
+        headers=headers,
+    )
     return thread_id
-
-
-def decided(request, report_url, thread_id: str, requirement_id: str, decision: str) -> None:
-    url = f"{report_url}/api/assessments/{thread_id}/remediation/{requirement_id}"
-    post(request, url, {"decision": decision}, "nordlicht")
 
 
 def open_report(page: Page, report_url: str) -> Locator:
@@ -80,10 +86,15 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     s1_not_evidenced = [
         {"requirement_id": "S1", "verdict": "not-evidenced", "reason": "No per-system list."}
     ]
-    thread = accepted(request, report_url, "4.1.2", "nordlicht", s1_not_evidenced)
-    decided(request, report_url, thread, "S1", "discard")
-    accepted(request, report_url, "1.1.1", "nordlicht")
-    decided(request, report_url, thread, "M1", "approve")
+    accepted(
+        request,
+        report_url,
+        "4.1.2",
+        "nordlicht",
+        s1_not_evidenced,
+        {"S1": {"decision": "discard"}, "M1": {"decision": "approve"}},
+    )
+    accepted(request, report_url, "1.1.1", "nordlicht")  # its items discarded
     assessed(request, report_url, "5.2.9", "nordlicht")  # proposed: still open
 
     report = open_report(page, report_url)
@@ -123,7 +134,8 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
 
     # The trail, newest first, each with who, action and evidence versions (story 6).
     # Asserted with expect, which retries: a response's event fires before the page renders (#240).
-    # 4.1.2's accept and its S1 override are one review, kept in either order.
+    # Each review in its three steps (#372): the overrides and Findings confirmed (one time, the
+    # override first kept), the items decided, then Accepted. 1.1.1's items are discarded.
     trail = report.get_by_role("table", name="Audit trail").locator("tbody tr")
 
     def entry(control: str, requirement: str, action: str) -> re.Pattern:
@@ -131,17 +143,20 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
         cells = r"\s*".join([re.escape(LOCAL_USER), re.escape(control), requirement, action])
         return re.compile(cells)
 
-    one_review = entry("4.1.2", "(S1)?", "(Overridden|Accepted)")
     expect(trail).to_have_text(
         [
-            entry("4.1.2", "M1", "Approved"),
             entry("1.1.1", "", "Accepted"),
+            entry("1.1.1", r"S\d", "Discarded"),
+            entry("1.1.1", r"S\d", "Discarded"),
+            entry("1.1.1", "", "Findings confirmed"),
+            entry("4.1.2", "", "Accepted"),
+            entry("4.1.2", "M1", "Approved"),
             entry("4.1.2", "S1", "Discarded"),
-            one_review,
-            one_review,
+            entry("4.1.2", "", "Findings confirmed"),
+            entry("4.1.2", "S1", "Overridden"),
         ]
     )
-    for kept in (trail.nth(0), trail.nth(1), trail.filter(has_text="Accepted").last):
+    for kept in (trail.nth(0), trail.nth(5), trail.filter(has_text="Accepted").last):
         expect(kept.locator("td").nth(8)).to_have_text(re.compile(r"\S+ v\S+"))
     # Every trail cell stays a table cell, so a row's rule lines up across it.
     displays = trail.locator("td").evaluate_all(

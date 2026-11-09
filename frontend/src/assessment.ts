@@ -1,5 +1,5 @@
 import type { RemediationItem } from './remediation.ts'
-import type { Review } from './review.ts'
+import type { KeptOverride, Review, ReviewStep } from './review.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
@@ -85,6 +85,11 @@ export type Assessment = {
   /** The thread to review it by (#38, #39). */
   thread_id?: string
   review?: Review | null
+  /** The step of the review it waits at (#372), from the server; null once reviewed. `review.ts`'s `reviewStep` reads
+   * it with the items as the page holds them. */
+  review_step?: ReviewStep | null
+  /** The overrides recorded with Confirm findings, once the findings are confirmed (#372). */
+  confirmed?: KeptOverride[] | null
   /** One per requirement not or partly evidenced (#212), each with the lead's decision (#43). */
   remediation?: RemediationItem[]
 }
