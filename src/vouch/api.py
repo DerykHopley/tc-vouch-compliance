@@ -1,6 +1,7 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, a profile pass over every open control (#371), the review that resumes
-an assessment, the lead's remediation decisions, the user's assessments, the Dossier overview, and the developer page's settings.
+compliance lead's review, a profile pass over every applicable control not yet accepted (#371),
+the review that resumes an assessment, the lead's remediation decisions, the user's assessments,
+the Dossier overview, and the developer page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -624,8 +625,9 @@ def create_profile_pass(
     saver: Checkpointer,
     running: Running,
 ) -> Any:
-    """A profile pass (vouch.profile_pass, #371): every open control of the user's compliance
-    profile assessed in one guarded model run, each new assessment waiting for review. It holds
+    """A profile pass (vouch.profile_pass, #371): every applicable control of the user's
+    compliance profile not yet accepted, assessed in one guarded model run, each new assessment
+    waiting for review. It holds
     the lead's one run, as an assessment does: another of theirs going is a 409.
 
     200: each new assessment's thread id, control, status and verdict, the controls skipped as

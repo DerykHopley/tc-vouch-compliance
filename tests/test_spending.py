@@ -865,13 +865,39 @@ def test_with_the_counter_store_down_a_pass_is_a_503_and_nothing_is_called(monke
     assert client.get("/api/assessments", headers=lead).json()["assessments"] == []
 
 
-def test_the_pass_usage_is_kept_once_under_profile_pass_and_counted_apart_from_chat():
+def pass_chat_and_assessment_usage(store) -> UsageTotals:
+    """A chat message's and an assessment's usage (chat_and_assessment_usage), and a pass's."""
+    guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
+    guard.record("alice", PROFILE_PASS, Usage("fake", 9000, 4000, 0.0, 0.05, True, True))
+    return chat_and_assessment_usage(store)
+
+
+def test_a_pass_usage_is_kept_once_under_profile_pass():
     store = MemorySpendingStore()
     guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
 
     guard.record("alice", PROFILE_PASS, Usage("fake", 9000, 4000, 0.0, 0.05, True, True))
 
     assert [(r.control_id, r.usage.input_tokens) for r in store.records()] == [(PROFILE_PASS, 9000)]
+
+
+def test_a_pass_usage_counts_in_the_tokens_and_cost_but_not_as_an_assessment():
+    fake = pass_chat_and_assessment_usage(MemorySpendingStore()).fake
+
+    assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 9012, 4007)
+    assert fake.estimated_cost_usd == pytest.approx(0.0502)
+
+
+@needs_postgres
+def test_in_the_database_a_pass_usage_counts_in_the_tokens_and_cost_but_not_as_an_assessment(
+    empty_database,  # noqa: F811
+):
+    empty_database.setup()
+
+    fake = pass_chat_and_assessment_usage(DatabaseSpendingStore(empty_database)).fake
+
+    assert (fake.assessments, fake.input_tokens, fake.output_tokens) == (1, 9012, 4007)
+    assert fake.estimated_cost_usd == pytest.approx(0.0502)
 
 
 @needs_postgres

@@ -54,6 +54,9 @@ PROFILE_PASS = "profile-pass"
 CHAT = "chat"
 """The control a usage record names for a chat message (#44): no control was assessed, so the
 totals count its tokens and cost, but not as an assessment."""
+NOT_ASSESSMENTS = (CHAT, PROFILE_PASS)
+"""The usage records the totals count in tokens and cost but not as assessments: a chat message,
+and a profile pass (#371), whose assessments came from one run."""
 NO_SHARED_COUNTER = (
     "Assessments on OpenRouter need a database to hold each user's daily limit. "
     f"Set {DATABASE_URL_ENV}."
@@ -362,7 +365,7 @@ class MemorySpendingStore:
     def totals(self) -> UsageTotals:
         openrouter, fake = RunTotals(), RunTotals()
         for record in self.records():
-            assessment = record.control_id != CHAT
+            assessment = record.control_id not in NOT_ASSESSMENTS
             if record.usage.model == FAKE:
                 fake = fake.add(record.usage, assessment)
             else:
@@ -412,7 +415,7 @@ class DatabaseSpendingStore:
         )
 
     def totals(self) -> UsageTotals:
-        rows = self.db.usage_totals(fake_model=FAKE, not_assessments=CHAT)
+        rows = self.db.usage_totals(fake_model=FAKE, not_assessments=NOT_ASSESSMENTS)
         return UsageTotals(
             openrouter=RunTotals(**rows["openrouter"]) if "openrouter" in rows else RunTotals(),
             fake=RunTotals(**rows["fake"]) if "fake" in rows else RunTotals(),
@@ -426,6 +429,9 @@ def spending_store(db: Database | None) -> SpendingStore:
 class DailyLimitReached(Exception):
     """The user has started `limit` assessments today; the count resets at `resets_at`."""
 
+    noun = "assessment"
+    nouns = "assessments"
+
     def __init__(self, limit: int, resets_at: datetime, now: datetime) -> None:
         super().__init__(f"daily limit of {limit} reached")
         self.limit = limit
@@ -433,7 +439,7 @@ class DailyLimitReached(Exception):
         self.retry_after = max(1, math.ceil((resets_at - now).total_seconds()))
 
     def message(self) -> str:
-        noun = "assessment" if self.limit == 1 else "assessments"
+        noun = self.noun if self.limit == 1 else self.nouns
         when = f"{self.resets_at:%H:%M} UTC on {self.resets_at.day} {self.resets_at:%B %Y}"
         return f"You have reached today's limit of {self.limit} {noun}. It resets at {when}."
 
@@ -441,10 +447,8 @@ class DailyLimitReached(Exception):
 class ProfilePassLimitReached(DailyLimitReached):
     """The user has run `limit` profile passes today (#371); the count resets at `resets_at`."""
 
-    def message(self) -> str:
-        noun = "profile pass" if self.limit == 1 else "profile passes"
-        when = f"{self.resets_at:%H:%M} UTC on {self.resets_at.day} {self.resets_at:%B %Y}"
-        return f"You have reached today's limit of {self.limit} {noun}. It resets at {when}."
+    noun = "profile pass"
+    nouns = "profile passes"
 
 
 def _utc_now() -> datetime:
@@ -470,25 +474,30 @@ class SpendingGuard:
         """Count one assessment for the user; `paid`: it runs on OpenRouter. Raises
         NoSharedCounter (a paid model, counted only in memory), DailyLimitReached, or
         DatabaseUnavailable: then no assessment starts."""
-        if paid and self.store.kept_in == "memory":
-            raise NoSharedCounter(NO_SHARED_COUNTER)
-        now = self.clock().astimezone(UTC)
-        taken, limit = self.store.take(user_id, now.date())
-        if not taken:
-            log.info("a user reached the daily limit of %d assessments", limit)
-            raise _reached(limit, now)
+        self._take(self.store.take, user_id, paid, DailyLimitReached)
 
     def start_profile_pass(self, user_id: str, paid: bool) -> None:
         """Count one profile pass for the user against the passes' own daily limit (#371), never
         against the assessments'; `paid`: it runs on OpenRouter. Raises NoSharedCounter,
         ProfilePassLimitReached, or DatabaseUnavailable: then the pass doesn't run."""
+        self._take(self.store.take_profile_pass, user_id, paid, ProfilePassLimitReached)
+
+    def _take(
+        self,
+        take: Callable[[str, date], tuple[bool, int]],
+        user_id: str,
+        paid: bool,
+        reached: type[DailyLimitReached],
+    ) -> None:
+        """Count one for the user's UTC day with `take`; over its limit, `reached`. Raises
+        NoSharedCounter (a paid model, counted only in memory) before anything is taken."""
         if paid and self.store.kept_in == "memory":
             raise NoSharedCounter(NO_SHARED_COUNTER)
         now = self.clock().astimezone(UTC)
-        taken, limit = self.store.take_profile_pass(user_id, now.date())
+        taken, limit = take(user_id, now.date())
         if not taken:
-            log.info("a user reached the daily limit of %d profile passes", limit)
-            raise _reached(limit, now, ProfilePassLimitReached)
+            log.info("a user reached the daily limit of %d %s", limit, reached.nouns)
+            raise _reached(limit, now, reached)
 
     def check(self, user_id: str, paid: bool) -> None:
         """Before a chat message (#44), whose model calls go through the spending guard too:

@@ -112,11 +112,9 @@ def _load_script(path: Path) -> Script:
         raise ScriptError(path, f"{where}: {first['msg']}") from error
 
 
-# The fake's token counts: CHARS_PER_TOKEN, about four characters a token, as the profile
-# pass estimates its prompt (vouch.profile_pass).
-
-
 def _tokens(text: str) -> int:
+    """The fake's token count for `text`: CHARS_PER_TOKEN, about four characters a token, as
+    the profile pass estimates its prompt (vouch.profile_pass)."""
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 

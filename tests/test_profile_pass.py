@@ -1,4 +1,5 @@
-"""The profile pass (#371): every open control of a profile in one guarded model run.
+"""The profile pass (#371): every applicable control of a profile not yet accepted, in one
+guarded model run.
 
 On the scripted fake model, offline: the bundled Nordlicht pass script, or a reply built here.
 The engine first (run_profile_pass), then its route, POST /api/profile-pass, on the in-memory

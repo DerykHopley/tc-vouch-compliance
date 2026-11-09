@@ -1,5 +1,5 @@
-"""The profile pass (GLOSSARY.md): every open control of a compliance profile assessed in one
-guarded model run, with all the profile's evidence in the prompt (#371).
+"""The profile pass (GLOSSARY.md): every applicable control of a compliance profile not yet
+accepted, assessed in one guarded model run, with all the profile's evidence in the prompt (#371).
 
 Which controls: each control of the profile's ISA edition with an applicable requirement, unless
 its newest assessment is accepted. The prompt holds the rules, those controls' applicable
@@ -42,21 +42,21 @@ from vouch.graph import (
     RemediationPlan,
     RequirementJudgement,
     Step,
-    _ask_until_clean,
-    _config,
-    _drafts,
-    _format_requirements,
-    _guard_steps,
-    _judged_requirements,
-    _loaded_step,
-    _model_name,
-    _never_claim,
-    _to_remediate,
+    ask_until_clean,
     assessment_loader,
     build_graph,
     checked_requirements,
+    format_requirements,
+    guard_steps,
+    judged_requirements,
+    loaded_step,
+    model_name_of,
+    never_claim,
     new_thread_id,
     plural,
+    remediation_drafts,
+    thread_config,
+    to_remediate,
     verdict_changes,
 )
 from vouch.guards import DATA_RULE, as_data, flagged_steps
@@ -65,6 +65,7 @@ from vouch.language import language_name
 from vouch.memory import Memory, newest_by_control
 from vouch.profile import ComplianceProfile, ControlRequirements
 from vouch.search import passages_of
+from vouch.settings import PROFILE_PASS_TOKENS
 
 log = logging.getLogger(__name__)
 
@@ -72,8 +73,6 @@ PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-1"
 """The version of the pass's prompt: change it whenever the prompt changes."""
 CHARS_PER_TOKEN = 4
 """A prompt's size is estimated at about four characters a token, as for English text."""
-DEFAULT_MAX_TOKENS = 50_000
-"""The token threshold when no setting names another (vouch.settings, VOUCH_PROFILE_PASS_TOKENS)."""
 PROFILE_PASS_FAILED = "The profile pass could not be completed. Please try again later."
 """The one sentence for a pass whose model run failed, or whose reply claimed an audit result
 twice."""
@@ -165,7 +164,7 @@ def _prompt(
     language = language_name(profile.answer_language)
     controls = "\n\n".join(
         f"Control {i.control.id}: {i.control.question}\n"
-        f"Requirements:\n{_format_requirements(i.requirements.applicable)}"
+        f"Requirements:\n{format_requirements(i.requirements.applicable)}"
         for i in included
     )
     evidence = as_data(documents) if documents else "(none)"
@@ -190,7 +189,7 @@ def _prompt(
             f"the fix (a role, never a person's name), and how many days from today (1 to "
             f"{MAX_DUE_DAYS}) until it is due. Write every answer, reason and item in {language}; "
             "copy each quote unchanged, in its document's language, never translated. "
-            f"{_never_claim(profile)} {DATA_RULE}"
+            f"{never_claim(profile)} {DATA_RULE}"
         ),
         HumanMessage(f"Controls:\n\n{controls}\n\nEvidence:\n{evidence}"),
     ]
@@ -221,13 +220,13 @@ def _assessed(
     read as the judge step reads them, the quote check and the judge's rules, then one
     remediation item per requirement not or partly evidenced."""
     judgement = Judgement(requirements=reply.requirements) if reply else None
-    judged = _judged_requirements(included.requirements, judgement)
+    judged = judged_requirements(included.requirements, judgement)
     requirements, dropped = checked_requirements(
         judged.results, judged.claims, checker, judged.about_doing, profile.answer_language
     )
-    to_fix = _to_remediate(requirements, [])
+    to_fix = to_remediate(requirements, [])
     plan = RemediationPlan(items=reply.remediation) if reply else None
-    drafts, not_drafted = _drafts(to_fix, plan, today)
+    drafts, not_drafted = remediation_drafts(to_fix, plan, today)
     answer = reply.answer if reply else NO_ANSWER
     partly = {r.id for r in to_fix if r.verdict == "partly-evidenced"}
     updates: list[tuple[str, dict[str, Any]]] = [
@@ -252,7 +251,7 @@ def _assessed(
     ]
     steps = []
     for node, update in updates:
-        steps += [Step(node, update, profile), *_guard_steps(update)]
+        steps += [Step(node, update, profile), *guard_steps(update)]
     values = {
         "control": included.control,
         "control_requirements": included.requirements,
@@ -304,9 +303,9 @@ def _write(
             thread_id = new_thread_id()
             memory.remember_assessment(thread_id, control_id)
             made.append(thread_id)
-            config = _config(thread_id, memory.scope)
+            config = thread_config(thread_id, memory.scope)
             control = part.values["control"]
-            loaded = _loaded_step(control, shared["profile"]).to_dict()
+            loaded = loaded_step(control, shared["profile"]).to_dict()
             values = {
                 **{k: v for k, v in shared.items() if k != "profile"},
                 **part.values,
@@ -331,10 +330,11 @@ def run_profile_pass(
     model: BaseChatModel,
     *,
     today: date | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
+    max_tokens: int = PROFILE_PASS_TOKENS,
     count: Callable[[], None] = lambda: None,
 ) -> ProfilePassResult:
-    """Assess every open control of the profile in one model run (see the module's doc).
+    """Assess every applicable control of the profile not yet accepted in one model run (see
+    the module's doc).
 
     With every applicable control accepted, nothing is counted or called. Otherwise the sources
     are read and the prompt estimated: an unreadable source or a prompt over `max_tokens` raises
@@ -381,7 +381,7 @@ def run_profile_pass(
         }
         return assessed, [text for part in assessed.values() for text in part.texts]
 
-    assessed, usage, rejected = _ask_until_clean(
+    assessed, usage, rejected = ask_until_clean(
         model.with_structured_output(ProfilePassReply, include_raw=True),
         prompt,
         read,
@@ -400,7 +400,7 @@ def run_profile_pass(
         "profile": profile,
         "profile_id": profile.id,
         "overlay_requirements": (),
-        "model": _model_name(model),
+        "model": model_name_of(model),
         "prompt_version": PROFILE_PASS_PROMPT_VERSION,
         "answer_language": profile.answer_language,
         "evidence": [],
