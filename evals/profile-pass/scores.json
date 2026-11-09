@@ -1,0 +1,69 @@
+{
+ "nordlicht": {
+  "verdicts": "75/84 (89%)",
+  "stricter": 3,
+  "generous": 6,
+  "citations": "100/111",
+  "controls": {
+   "1.1.1": "partly-evidenced",
+   "1.6.1": "evidenced",
+   "1.6.2": "partly-evidenced",
+   "2.1.3": "evidenced",
+   "4.1.2": "evidenced",
+   "4.1.3": "partly-evidenced",
+   "4.2.1": "partly-evidenced",
+   "5.1.1": "not-evidenced",
+   "5.1.2": "evidenced",
+   "5.2.4": "partly-evidenced",
+   "5.2.5": "partly-evidenced",
+   "5.2.9": "not-evidenced"
+  },
+  "guard_steps": {
+   "Flagged instruction-like text in logging-standard; it is treated as data and ignored.": 12,
+   "Dropped a citation for S1 from joiner-leaver-record: the quote is shorter than 4 words.": 1
+  },
+  "usage": {
+   "model": "anthropic/claude-sonnet-5.5",
+   "input_tokens": 16839,
+   "output_tokens": 26097,
+   "reported_cost_usd": 0.294648,
+   "estimated_cost_usd": 0.0,
+   "estimated": false,
+   "cost_complete": true,
+   "cost_usd": 0.294648
+  },
+  "skipped": []
+ },
+ "alpenwerk": {
+  "verdicts": "87/100 (87%)",
+  "stricter": 9,
+  "generous": 4,
+  "citations": "147/156",
+  "controls": {
+   "1.1.1": "partly-evidenced",
+   "1.6.1": "evidenced",
+   "1.6.2": "partly-evidenced",
+   "2.1.3": "not-evidenced",
+   "4.1.2": "evidenced",
+   "4.1.3": "partly-evidenced",
+   "4.2.1": "partly-evidenced",
+   "5.1.1": "partly-evidenced",
+   "5.1.2": "evidenced",
+   "5.2.4": "partly-evidenced",
+   "5.2.5": "partly-evidenced",
+   "5.2.9": "partly-evidenced"
+  },
+  "guard_steps": {},
+  "usage": {
+   "model": "anthropic/claude-sonnet-5.5",
+   "input_tokens": 30640,
+   "output_tokens": 41531,
+   "reported_cost_usd": 0.47659,
+   "estimated_cost_usd": 0.0,
+   "estimated": false,
+   "cost_complete": true,
+   "cost_usd": 0.47659
+  },
+  "skipped": []
+ }
+}
