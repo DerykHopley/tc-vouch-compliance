@@ -261,6 +261,21 @@ def test_a_closed_controls_items_show_closed_from_the_plan_that_closed_it():
     assert report.plan_rows(shown["plan"][0], report.words_for("de"))[0][5] == "Geschlossen"
 
 
+def test_done_items_stay_done_while_their_reassessment_waits_or_shows_a_gap():
+    # #414: card_flags hides the suggestion while a re-assessment waits; Closed needs it accepted.
+    planned = assessment("p", {"M1": "not-evidenced"})
+    decided = {("p", "M1"): approved("p", "M1")}
+    marks = {("p", "M1"): done(DAY_1, "Fixed.")}
+    waiting = assessment("r", {"M1": "evidenced"}, status="waiting-for-review")
+    gap = assessment("g", {"M1": "partly-evidenced"}, reviewed_at=T0 + timedelta(days=2))
+
+    for newest in (waiting, gap):
+        shown = built({"4.1.2": newest}, history=[newest, planned], decided=decided, marks=marks)
+        statuses = [i["status"] for g in shown["plan"] for i in g["items"]]
+        # The gap's own item is a draft (not approved), so the plan is still the earlier one.
+        assert statuses == ["done"], newest.thread_id
+
+
 def test_items_follow_the_base_frameworks_control_order_within_a_priority():
     later = assessment("x", {"M1": "not-evidenced"}, control_id="4.1.2")
     earlier = assessment("y", {"M1": "not-evidenced"}, control_id="1.1.1")
