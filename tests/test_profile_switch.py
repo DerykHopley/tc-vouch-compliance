@@ -219,7 +219,7 @@ def test_the_default_profiles_folder_lists_both_companies_and_not_the_sample_lib
     assert [p["id"] for p in listed["profiles"]] == ["alpenwerk", "nordlicht"]
 
 
-def test_the_sample_library_is_404_before_any_stream_though_the_eval_can_load_it(users):
+def test_the_sample_library_is_404_before_any_stream(users):
     alice, _ = users
     with app_with(FIXTURES_DIR) as client:
         response = client.post(
@@ -228,6 +228,9 @@ def test_the_sample_library_is_404_before_any_stream_though_the_eval_can_load_it
 
     assert response.status_code == 404
     assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_the_eval_can_still_load_the_sample_library():
     assert scan_profiles(FIXTURES_DIR).find(SAMPLE_LIBRARY) is not None
 
 

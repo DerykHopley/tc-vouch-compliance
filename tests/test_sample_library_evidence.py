@@ -58,7 +58,7 @@ def applicable(control_id: str):
 
 
 def kinds_cited(entry: dict) -> set[str]:
-    return {read(p)[0].kind for p in DOCUMENTS if p.stem in entry["cites"]}
+    return {LIBRARY.document(doc_id)[0].kind for doc_id in entry["cites"]}
 
 
 # The profile.
@@ -77,6 +77,7 @@ def test_the_reference_profile_is_germany_english_high_with_nothing_left_out():
 
 
 def test_the_library_lives_in_the_shipped_fixtures():
+    """The two constants agree, so the eval's profile and the library are one folder."""
     assert SAMPLE_LIBRARY_DIR == FIXTURES_DIR / SAMPLE_LIBRARY
 
 
