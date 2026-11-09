@@ -8,8 +8,9 @@ import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { setUnsaved } from './leaving.ts'
 import Prose from './Prose.tsx'
-import Remediation from './Remediation.tsx'
+import Remediation, { type Plan } from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
+import type { Goal } from './report.ts'
 import { type Override, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import StepText from './StepText.tsx'
@@ -23,6 +24,9 @@ const ACTION: Record<Run['status'], string> = {
   failed: 'Assess again',
   unreachable: 'Retry',
 }
+
+/** A Closed control's review state tag (#410): the accepted tag's style, this word in place of "Accepted". */
+const CLOSED = 'Closed'
 
 /** The steps the trace marks apart (#232): a guard step and an overlay branch step, by their chip's border. */
 // The class that marks a step's chip apart, by node name (docs/design.md, Agent steps).
@@ -64,6 +68,7 @@ type PaperProps = {
   /** The overview: the company; the profile's protection level, answer language and requirements; the cards (the
    * control index). */
   overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'>
+    & { goal?: Goal }
   /** The open control's card. */
   card: ControlCard
   /** The control being assessed just now, if any (one run at a time, maybe of another control). */
@@ -142,10 +147,17 @@ export default function WorkingPaper(props: PaperProps) {
   const assessingElsewhere = elsewhere !== null ? <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
     : passing && <p className="field-note">Vouch is running a profile pass. One run at a time.</p>
   const held = elsewhere !== null || passing
+  // The improvement plan (#410), in the Internal improvement goal only: each item's priority and done mark; a
+  // re-assessment suggested once every approved item of the accepted control is done; Closed from its card.
+  const improving = overview.goal === 'internal-improvement'
+  const plan: Plan | undefined = improving ? { accepted: review === 'accepted' } : undefined
+  const approvedItems = remediation.filter((i) => i.status === 'approved')
+  const reassess = improving && review === 'accepted' && approvedItems.length > 0 && approvedItems.every((i) => i.done)
+  const closed = improving && review === 'accepted' && card.closed === true
   return (
     <div className="wp">
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
-        language={overview.answer_language} />
+        language={overview.answer_language} improving={improving} />
       <section className="paper wrap" aria-label="Working paper">
         <nav className="crumbs" aria-label="Breadcrumb">
           <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>
@@ -163,7 +175,7 @@ export default function WorkingPaper(props: PaperProps) {
           {!checking && (
             <div className="paper-meta">
               <span>Verdict</span><RunChip run={run} />
-              {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
+              {review && <span className={`tag tag-${review}`}>{closed ? CLOSED : REVIEW_WORDS[review]}</span>}
             </div>
           )}
           {!checking && explained && (
@@ -204,6 +216,12 @@ export default function WorkingPaper(props: PaperProps) {
                   profile.
                 </p>
               )}
+              {reassess && (
+                <p className="field-note">
+                  Every approved remediation item is done. Assess {card.id} again: the control is Closed once that
+                  assessment is accepted with no gaps.
+                </p>
+              )}
               <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />
               {assessingElsewhere}
             </div>}
@@ -215,6 +233,7 @@ export default function WorkingPaper(props: PaperProps) {
                   // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
                   decidable: step === 'plan-fixes' || step === 'accept' || review === 'accepted',
                   onDecided: (item) => { if (assessed?.thread_id) onItemDecided(assessed.thread_id, item) },
+                  plan,
                 }} />
             ) : <Requirements requirements={requirements} language={overview.answer_language} />}
             {assessed?.status && assessed.thread_id && (
@@ -243,6 +262,8 @@ type IndexProps = {
   onOpen: (controlId: string) => void
   /** The profile's answer language: the verdicts' (#200). */
   language: string
+  /** The Internal improvement goal: a Closed card's tag reads Closed (#410). */
+  improving: boolean
 }
 
 /** The run with the lead's overrides in place in its assessment, and the control's verdict recalculated from them. */
@@ -263,7 +284,7 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 }
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. */
-function ControlIndex({ controls, openId, running, run, onOpen, language }: IndexProps) {
+function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   return (
     <nav className="wp-index" aria-label="Controls">
       {areas(controls).map(([area, cards]) => (
@@ -281,7 +302,8 @@ function ControlIndex({ controls, openId, running, run, onOpen, language }: Inde
                 <span className="mono">{card.id}</span>
                 <span className="wp-state">
                   <VerdictChip verdict={verdict} assessing={assessing} language={language} />
-                  {!assessing && status && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
+                  {!assessing && status && <span className={`tag tag-${status}`}>
+                    {improving && status === 'accepted' && card.closed ? CLOSED : REVIEW_WORDS[status]}</span>}
                 </span>
                 <span className="wp-q" lang={language}>{card.question}</span>
               </PaperLink>
@@ -345,6 +367,8 @@ type RemediationItems = {
   threadId: string
   decidable: boolean
   onDecided: (item: RemediationItem) => void
+  /** The improvement plan (#410); undefined under Audit readiness. */
+  plan?: Plan
 }
 
 type JudgedProps = {
@@ -473,7 +497,8 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   {item && items.threadId && (
                     // A new key when the item changes, so its fields start from the kept values.
                     <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
-                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language} />
+                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language}
+                      plan={items.plan} />
                   )}
                 </div></td>
               </tr>,

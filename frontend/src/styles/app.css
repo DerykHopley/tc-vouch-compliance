@@ -246,6 +246,11 @@ textarea.field { resize: vertical; font-family: inherit; }
 .remediation p { margin: 0; }
 .remediation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .remediation-missing { overflow-wrap: anywhere; }
+/* The improvement plan on an approved item (#410): the Priority select, then Mark done; the done note as written. */
+.item-plan { display: grid; gap: 6px; max-width: 60ch; }
+.item-plan > label { font-weight: 500; }
+.item-plan > .field { flex: none; width: 100%; max-width: 16ch; }
+.remediation .done-note { overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* Developer page (#34, pending design pass): working-paper sheets, one form row. The field's edge is --muted:
    --rule on --sheet is 1.47:1, under the 3:1 a control's edge needs (--muted: 5.45:1 light, 6.17:1 dark). */

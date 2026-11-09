@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Assessment, RequirementVerdict } from './assessment.ts'
 import { NO_OWNER, type RemediationItem } from './remediation.ts'
 import type { ControlCard } from './overview.ts'
+import type { Goal } from './report.ts'
 import type { PaperRequirement } from './paper.ts'
 import { withOverrides } from './review.ts'
 import type { Run } from './useAssessment.ts'
@@ -58,13 +59,17 @@ type Shown = {
   onRefresh?: () => Promise<boolean>
   onItemDecided?: (threadId: string, item: RemediationItem) => void
   language?: string
+  /** The profile's goal (#369): the improvement plan shows in Internal improvement only (#410). */
+  goal?: Goal
+  /** The open card's improvement plan flags (#410). */
+  flags?: Pick<ControlCard, 'reassess_suggested' | 'closed'>
 }
 
 function paper({ run = { status: 'idle', steps: [] }, running = null, checking = false, onAssess = () => {},
   onOpen = () => {}, onOverview = () => {}, onReviewed = () => {}, onRefresh = () => Promise.resolve(true),
-  onItemDecided = () => {}, language = 'en' }: Shown) {
-  const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION }
-  return <WorkingPaper overview={{ ...OVERVIEW, answer_language: language }} card={card} running={running} run={run} checking={checking}
+  onItemDecided = () => {}, language = 'en', goal = 'audit-readiness', flags }: Shown) {
+  const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION, ...flags }
+  return <WorkingPaper overview={{ ...OVERVIEW, answer_language: language, goal }} card={card} running={running} run={run} checking={checking}
     onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} onReviewed={onReviewed} onRefresh={onRefresh}
     onItemDecided={onItemDecided} />
 }
@@ -837,5 +842,150 @@ describe("a German profile's verdicts (ticket 200)", () => {
       ['Evidenced', false], ['Partly evidenced', false]])
     // The head's run chip too: an English assessment's verdict is in the interface's own words.
     expect(chip(headVerdict()).hasAttribute('lang')).toBe(false)
+  })
+})
+
+describe('the improvement plan (issue 410)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const APPROVED: RemediationItem = { requirement_id: 'S1', missing: 'A record of access reviews.',
+    owner_role: 'CISO', due_date: '2027-02-01', status: 'approved', priority: 'high', done: null }
+  const REVIEWED = { decision: 'accept' as const, note: '', overrides: [], reviewer_id: 'user_1',
+    reviewer_name: 'Jana Weber', reviewed_at: '2026-11-04T08:30:00+00:00' }
+  const ACCEPTED: Assessment = { ...PROPOSED, status: 'accepted', review_step: null, review: REVIEWED,
+    remediation: [APPROVED] }
+  const NOTE = 'Quarterly access reviews are now recorded in the ticket system.'
+  const DONE: RemediationItem = { ...APPROVED, done: { at: '2026-11-09T10:00:00+00:00', note: NOTE } }
+  const item = () => screen.getByRole('region', { name: 'Remediation item S1' })
+  const improving = (assessment: Assessment, rest: Shown = {}) =>
+    review({ assessment, goal: 'internal-improvement', ...rest })
+
+  /** The plan's routes answering `status` with `body`; what they got. */
+  function planRoute(status = 200, body: unknown = {}) {
+    const sent: { url: string; method?: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      sent.push({ url, method: init?.method, body: JSON.parse(init!.body as string) })
+      return Promise.resolve(Response.json(body, { status }))
+    }))
+    return sent
+  }
+
+  it("shows each item's priority beside its status, a draft's default too", () => {
+    improving({ ...ACCEPTED, remediation: [{ ...APPROVED, status: 'draft', priority: 'medium' }] })
+    expect(within(item()).getByText('Priority: Medium')).toBeTruthy()
+    cleanup()
+    improving(ACCEPTED)
+    expect(within(item()).getByText('Priority: High')).toBeTruthy()
+  })
+
+  it('shows no priority and no plan under Audit readiness', () => {
+    review({ assessment: ACCEPTED })
+    expect(within(item()).queryByText(/Priority/)).toBeNull()
+    expect(within(item()).queryByRole('button', { name: /Mark done/ })).toBeNull()
+  })
+
+  it("sends a priority change at once and hands on the kept item", async () => {
+    const kept = { ...APPROVED, priority: 'low' }
+    const sent = planRoute(200, { item: kept })
+    const onItemDecided = vi.fn()
+    improving(ACCEPTED, { onItemDecided })
+    await userEvent.selectOptions(within(item()).getByLabelText('Priority'), 'low')
+    expect(sent).toEqual([{ url: '/api/assessments/t1/remediation/S1/priority', method: 'PUT',
+      body: { priority: 'low' } }])
+    expect(onItemDecided).toHaveBeenCalledWith('t1', kept)
+  })
+
+  it("shows a refused priority change with the server's sentence, the select back at the kept value", async () => {
+    const detail = 'This remediation item is done already.'
+    planRoute(409, { detail })
+    improving(ACCEPTED)
+    await userEvent.selectOptions(within(item()).getByLabelText('Priority'), 'low')
+    expect(within(item()).getByRole('alert').textContent).toBe(detail)
+    expect((within(item()).getByLabelText('Priority') as HTMLSelectElement).value).toBe('high')
+  })
+
+  it('says a failed priority change could not be made just now', async () => {
+    planRoute(500)
+    improving(ACCEPTED)
+    await userEvent.selectOptions(within(item()).getByLabelText('Priority'), 'medium')
+    expect(within(item()).getByRole('alert').textContent)
+      .toBe('The priority could not be changed just now. Please try again.')
+  })
+
+  it('refuses a blank done note in the browser, sending nothing', async () => {
+    const sent = planRoute()
+    improving(ACCEPTED)
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark S1 done' }))
+    await userEvent.type(within(item()).getByLabelText('What was done'), '   ')
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark done' }))
+    expect(within(item()).getByRole('alert').textContent).toBe('Say what was done first.')
+    expect(sent).toEqual([])
+  })
+
+  it('marks an item done with the note, and hands on the kept item', async () => {
+    const sent = planRoute(200, { item: DONE })
+    const onItemDecided = vi.fn()
+    improving(ACCEPTED, { onItemDecided })
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark S1 done' }))
+    await userEvent.type(within(item()).getByLabelText('What was done'), NOTE)
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark done' }))
+    expect(sent).toEqual([{ url: '/api/assessments/t1/remediation/S1/done', method: 'POST', body: { note: NOTE } }])
+    expect(onItemDecided).toHaveBeenCalledWith('t1', DONE)
+  })
+
+  it('Cancel closes the done form, sending nothing', async () => {
+    const sent = planRoute()
+    improving(ACCEPTED)
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark S1 done' }))
+    await userEvent.click(within(item()).getByRole('button', { name: 'Cancel' }))
+    expect(within(item()).queryByLabelText('What was done')).toBeNull()
+    expect(sent).toEqual([])
+  })
+
+  it("shows a refused done mark with the server's sentence", async () => {
+    const detail = 'Accept the control before marking its remediation items done.'
+    planRoute(409, { detail })
+    improving(ACCEPTED)
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark S1 done' }))
+    await userEvent.type(within(item()).getByLabelText('What was done'), NOTE)
+    await userEvent.click(within(item()).getByRole('button', { name: 'Mark done' }))
+    expect(within(item()).getByRole('alert').textContent).toBe(detail)
+  })
+
+  it('offers no Mark done before the control is accepted', () => {
+    improving({ ...PROPOSED, review_step: 'accept', confirmed: [], remediation: [APPROVED] })
+    expect(within(item()).getByLabelText('Priority')).toBeTruthy()
+    expect(within(item()).queryByRole('button', { name: 'Mark S1 done' })).toBeNull()
+  })
+
+  it('shows a done item: the Done tag, the date and note, its priority read-only', () => {
+    improving({ ...ACCEPTED, remediation: [DONE] })
+    expect(within(item()).getByText('Done', { selector: '.tag' })).toBeTruthy()
+    expect(within(item()).queryByText('Approved')).toBeNull()
+    expect(within(item()).getByText(`Done on 9 November 2026: ${NOTE}`)).toBeTruthy()
+    expect(within(item()).getByText('Priority: High')).toBeTruthy()
+    expect(within(item()).queryByLabelText('Priority')).toBeNull()
+    expect(within(item()).queryByRole('button')).toBeNull()
+  })
+
+  it('suggests assessing again once every approved item is done', () => {
+    const sentence = 'Every approved remediation item is done. Assess 5.1.2 again: the control is Closed once that '
+      + 'assessment is accepted with no gaps.'
+    improving({ ...ACCEPTED, remediation: [DONE] })
+    expect(screen.getByText(sentence)).toBeTruthy()
+    cleanup()
+    improving(ACCEPTED)
+    expect(screen.queryByText(sentence)).toBeNull()
+  })
+
+  it("reads Closed in the head for a Closed control", () => {
+    improving({ ...ACCEPTED, remediation: [] }, { flags: { reassess_suggested: false, closed: true } })
+    expect(within(headVerdict()).getByText('Closed')).toBeTruthy()
+    expect(within(headVerdict()).queryByText('Accepted')).toBeNull()
+  })
+
+  it('reads Accepted under Audit readiness, whatever the card says', () => {
+    review({ assessment: { ...ACCEPTED, remediation: [] }, flags: { reassess_suggested: false, closed: true } })
+    expect(within(headVerdict()).getByText('Accepted')).toBeTruthy()
   })
 })

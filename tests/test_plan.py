@@ -386,6 +386,21 @@ def test_the_lead_lowers_an_approved_items_priority_with_one_entry(database_url,
     assert (entry["verdict_before"], entry["verdict_after"]) == ("not-evidenced", "not-evidenced")
 
 
+def test_accept_answers_the_items_as_decided_with_their_priority(database_url, users):
+    """The paper shows the accepted control's items from Accept's answer: approved, not drafts."""
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        improve(client, alice)
+        thread_id = planned_item(client, alice, then=None)
+        set_priority(client, alice, thread_id, priority="low")
+        response = client.post(
+            f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=alice
+        )
+
+    (item,) = response.json()["assessment"]["remediation"]
+    assert (item["status"], item["priority"]) == ("approved", "low")
+
+
 def test_the_priority_can_be_set_while_the_assessment_waits_at_accept(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:

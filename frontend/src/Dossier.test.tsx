@@ -695,3 +695,38 @@ describe('the round comparison on the Dossier (ticket 402)', () => {
     expect(screen.queryByText(/Close this one/)).toBeNull()
   })
 })
+
+describe('the improvement plan on the Dossier (ticket 410)', () => {
+  const FIXES_DONE = 'Fixes done: assess again'
+
+  function showFlags(goal: Goal) {
+    const overview = seeded({ '1.1.1': { status: 'accepted', verdict: 'evidenced' },
+      '4.1.2': { status: 'accepted', verdict: 'partly-evidenced' } })
+    overview.goal = goal
+    overview.controls = overview.controls.map((c) => c.id === '1.1.1' ? { ...c, closed: true }
+      : c.id === '4.1.2' ? { ...c, reassess_suggested: true } : c)
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null}
+      {...NO_PASS} {...NO_GOAL} />)
+  }
+  const card = (id: string) => screen.getByRole('article', { name: `Control ${id}` })
+
+  it("reads Closed in a Closed card's tag, in the accepted tag's style", () => {
+    showFlags('internal-improvement')
+    const tag = within(card('1.1.1')).getByText('Closed')
+    expect(tag.className).toBe('tag tag-accepted')
+    expect(within(card('1.1.1')).queryByText('Accepted')).toBeNull()
+  })
+
+  it('says "Fixes done: assess again" under a suggested card\'s title', () => {
+    showFlags('internal-improvement')
+    expect(within(card('4.1.2')).getByText(FIXES_DONE).className).toBe('field-note')
+    expect(within(card('1.1.1')).queryByText(FIXES_DONE)).toBeNull()
+  })
+
+  it('shows neither under Audit readiness', () => {
+    showFlags('audit-readiness')
+    expect(within(card('1.1.1')).getByText('Accepted')).toBeTruthy()
+    expect(screen.queryByText('Closed')).toBeNull()
+    expect(screen.queryByText(FIXES_DONE)).toBeNull()
+  })
+})
