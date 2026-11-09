@@ -6,6 +6,7 @@ import calendar
 import datetime
 import logging
 import re
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -25,6 +26,10 @@ KINDS: tuple[EvidenceKind, ...] = (DOCUMENTED, IMPLEMENTED)
 # done; every other source (policies, and any source not listed) is documented.
 SOURCE_KINDS: dict[str, EvidenceKind] = {"records": IMPLEMENTED}
 
+# The documents of a source's folder the profile chose (ids: file names without .md); None, the
+# whole folder (EvidenceSource.documents). An assessment's state keeps them as lists.
+DocumentChoice = tuple[str, ...] | None
+
 log = logging.getLogger(__name__)
 
 
@@ -40,6 +45,19 @@ def escaped(folder: Path) -> bool:
     """Whether a folder the profile resolved on load now resolves elsewhere (swapped for a
     symlink since): nothing in it may be read."""
     return folder.resolve() != folder
+
+
+def is_chosen(doc_id: str, choice: DocumentChoice) -> bool:
+    """Whether a document (its id, `.md` allowed) may be used under a source's choice: every one
+    when there is no choice (None)."""
+    return choice is None or doc_id.removesuffix(SUFFIX) in choice
+
+
+def choice_in(choices: Mapping[str, Collection[str]] | None, source: str) -> DocumentChoice:
+    """A source's choice in an assessment's `document_choices` (source name to chosen ids); a
+    source absent from it, or a state with none (saved before #384), uses its whole folder."""
+    chosen = (choices or {}).get(source)
+    return None if chosen is None else tuple(chosen)
 
 
 def document_path(folder: Path, doc_id: str) -> Path | None:

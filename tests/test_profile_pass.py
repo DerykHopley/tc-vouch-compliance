@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from chosen_documents import CHOSEN, CHOSEN_QUOTE, UNCHOSEN, UNCHOSEN_QUOTE, chosen_profile
 from fastapi.testclient import TestClient
 from langgraph.store.memory import InMemoryStore
 from test_memory import as_user
@@ -35,13 +36,20 @@ from vouch.graph import (
 )
 from vouch.memory import Memory, newest_by_control, process_store
 from vouch.paths import FIXTURES_DIR
-from vouch.profile import DEFAULT_PROFILE, PROFILE_FILE, load_profile, read_profile_once
+from vouch.profile import (
+    DEFAULT_PROFILE,
+    PROFILE_FILE,
+    SAMPLE_LIBRARY,
+    load_profile,
+    read_profile_once,
+)
 from vouch.profile_pass import (
     PASS_NODE,
     PROFILE_PASS_FAILED,
     PROFILE_PASS_PROMPT_VERSION,
     ProfilePassRefused,
     ProfilePassReply,
+    _documents,
     estimate_tokens,
     run_profile_pass,
 )
@@ -522,3 +530,46 @@ def test_another_run_of_the_lead_going_is_a_409(pass_calls):
 
     assert response.status_code == 409
     assert pass_calls == []
+
+
+def test_the_pass_reads_only_the_chosen_documents_of_a_source_that_chose(tmp_path):
+    profile = chosen_profile(tmp_path)
+
+    read = _documents(profile, TODAY)
+
+    policies = [d["doc_id"] for d in read if d["source"] == "policies"]
+    records = {d["doc_id"] for d in read if d["source"] == "records"}
+    assert policies == list(CHOSEN)
+    assert records == {p.stem for p in (tmp_path / SAMPLE_LIBRARY / "records").glob("*.md")}
+
+
+def test_a_pass_drops_a_citation_of_an_unchosen_document_and_keeps_a_chosen_one(tmp_path):
+    def judged(requirement_id: str, doc_id: str, quote: str) -> dict:
+        citation = {"doc_id": doc_id, "quote": quote}
+        return {
+            "requirement_id": requirement_id,
+            "verdict": "evidenced",
+            "reason": "Shown.",
+            "citations": [citation],
+        }
+
+    reply = {
+        "controls": [
+            {
+                "control_id": "1.1.1",
+                "answer": "A draft answer.",
+                "requirements": [
+                    judged("M1", "backup-policy", CHOSEN_QUOTE),
+                    judged("M2", UNCHOSEN, UNCHOSEN_QUOTE),
+                ],
+            }
+        ]
+    }
+
+    result = Lead(chosen_profile(tmp_path)).run(fake(reply))
+
+    assessed = next(a for a in result.assessments if a.control_id == "1.1.1")
+    assert [c.doc_id for c in requirement(assessed, "M1").citations] == ["backup-policy"]
+    assert requirement(assessed, "M2").reason == CITATIONS_DROPPED
+    dropped = [s["text"] for s in assessed.steps if s["text"].startswith("Dropped")]
+    assert dropped == [f"Dropped a citation for M2 from {UNCHOSEN}: no such document."]

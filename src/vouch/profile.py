@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 
+from vouch.documents import SUFFIX, DocumentChoice, document_path, escaped, is_chosen
 from vouch.isa import (
     SOURCE,
     BaseFramework,
@@ -116,6 +117,35 @@ class EvidenceSource(_Strict):
         if not found:
             raise ValueError(f"folder {resolved} does not exist")
         return resolved
+
+    # The documents of the folder the profile may use (ids: file names without .md); None, the
+    # whole folder. A company set up in the app chooses from the sample library (#384).
+    # An id given with `.md` is kept without it.
+    documents: DocumentChoice = Field(default=None, min_length=1)
+
+    @field_validator("documents", mode="after")
+    @classmethod
+    def _documents_in_folder(
+        cls, documents: DocumentChoice, info: ValidationInfo
+    ) -> DocumentChoice:
+        folder = info.data.get("folder")
+        if documents is None or folder is None:  # no choice, or the folder already refused
+            return documents
+        if escaped(folder):  # swapped for a link since its own check: none of it may be read
+            raise ValueError(f"the folder {folder.name} now points outside its allowed folder")
+        ids = tuple(doc_id.removesuffix(SUFFIX) for doc_id in documents)
+        seen: set[str] = set()
+        for doc_id in ids:
+            if doc_id in seen:
+                raise ValueError(f"{doc_id} is named twice")
+            seen.add(doc_id)
+            if document_path(folder, doc_id) is None:
+                raise ValueError(f"no document {doc_id} in the folder {folder.name}")
+        return ids
+
+    def uses(self, doc_id: str) -> bool:
+        """Whether the profile may use this document of the folder (every one, with no choice)."""
+        return is_chosen(doc_id, self.documents)
 
 
 class CountryOverlayRequirement(_Strict):
@@ -217,6 +247,15 @@ class ComplianceProfile(_Strict):
                     f"doesn't apply at {self.protection_level} protection"
                 )
         return self
+
+    def document_choices(self) -> dict[str, list[str]]:
+        """Each source limited to chosen documents, to its chosen ids; a source using its whole
+        folder is absent. An assessment keeps it in its state (`document_choices`)."""
+        return {
+            name: list(source.documents)
+            for name, source in self.evidence_sources.items()
+            if source.documents is not None
+        }
 
     def isa_edition(self) -> BaseFramework:
         """The base framework in the ISA edition of this profile's answer language (English

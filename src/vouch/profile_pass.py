@@ -36,6 +36,7 @@ from vouch.graph import (
     GUARD,
     MAX_DUE_DAYS,
     Assessment,
+    AssessState,
     EvidencePassage,
     Judgement,
     RemediationItemReply,
@@ -54,6 +55,7 @@ from vouch.graph import (
     never_claim,
     new_thread_id,
     plural,
+    quote_checker,
     remediation_drafts,
     thread_config,
     to_remediate,
@@ -121,9 +123,10 @@ class _Included:
 
 
 def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
-    """Every document of every evidence source the profile allows, whole, with its source, kind
-    and staleness on `today`. ProfilePassRefused for a source whose folder can't be read
-    (missing, unreadable, or `escaped` since the profile loaded)."""
+    """Every document of every evidence source the profile allows (only the chosen ones, where
+    it chose: EvidenceSource.documents), whole, with its source, kind and staleness on `today`.
+    ProfilePassRefused for a source whose folder can't be read (missing, unreadable, or
+    `escaped` since the profile loaded)."""
 
     def refused(why: str) -> ProfilePassRefused:
         return ProfilePassRefused(
@@ -140,6 +143,8 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
                 raise FileNotFoundError(folder)
             for path in sorted(folder.glob("*.md")):
                 if document_path(folder, path.stem) is None:  # a link out of the folder
+                    continue
+                if not allowed.uses(path.stem):
                     continue
                 data, body = split_front_matter(path.read_text(encoding="utf-8"))
                 facts = facts_of(data, source, path.stem, today)
@@ -288,7 +293,8 @@ def _pass_step(controls: int, documents: int, rejected: str | None) -> dict[str,
 def _write(
     assessed: dict[str, _Assessed],
     head: list[dict[str, str]],
-    shared: dict[str, Any],
+    shared: AssessState,
+    profile: ComplianceProfile,
     memory: Memory,
     saver: BaseCheckpointSaver,
 ) -> list[str]:
@@ -305,9 +311,9 @@ def _write(
             made.append(thread_id)
             config = thread_config(thread_id, memory.scope)
             control = part.values["control"]
-            loaded = loaded_step(control, shared["profile"]).to_dict()
+            loaded = loaded_step(control, profile).to_dict()
             values = {
-                **{k: v for k, v in shared.items() if k != "profile"},
+                **shared,
                 **part.values,
                 "steps": [loaded, *head, *part.values["steps"]],
             }
@@ -366,8 +372,26 @@ def run_profile_pass(
             f"threshold of {max_tokens:,}. Assess the controls one at a time instead."
         )
     count()
-    folders: dict[str, str] = {name: str(s.folder) for name, s in profile.evidence_sources.items()}
-    checker = QuoteChecker(folders, today=today)
+    shared: AssessState = {
+        "profile_id": profile.id,
+        "overlay_requirements": (),
+        "model": model_name_of(model),
+        "prompt_version": PROFILE_PASS_PROMPT_VERSION,
+        "answer_language": profile.answer_language,
+        "evidence": [],
+        "warnings": [],
+        "pending": {},
+        "pending_ids": [],
+        "searches_run": 0,
+        "searches_refused": 0,
+        "usage": [],
+        "today": today.isoformat(),
+        "note": "",
+        "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
+        "document_choices": profile.document_choices(),
+        "claims": {},
+    }
+    checker = quote_checker(shared)
     by_id = {i.control.id: i for i in included}
     paragraphs = [p["text"] for d in documents for p in passages_of(d["doc_id"], d["text"])]
 
@@ -396,27 +420,8 @@ def run_profile_pass(
         _pass_step(len(included), len(documents), rejected),
         *(Step(GUARD, {"text": text}).to_dict() for text in flagged_steps(documents)),
     ]
-    shared = {
-        "profile": profile,
-        "profile_id": profile.id,
-        "overlay_requirements": (),
-        "model": model_name_of(model),
-        "prompt_version": PROFILE_PASS_PROMPT_VERSION,
-        "answer_language": profile.answer_language,
-        "evidence": [],
-        "warnings": [],
-        "pending": {},
-        "pending_ids": [],
-        "searches_run": 0,
-        "searches_refused": 0,
-        "usage": [],
-        "today": today.isoformat(),
-        "note": "",
-        "document_folders": folders,
-        "claims": {},
-    }
     log.info("a profile pass of %d controls used %s", len(included), usage)
-    thread_ids = _write(assessed, head, shared, memory, saver)
+    thread_ids = _write(assessed, head, shared, profile, memory, saver)
     load = assessment_loader(saver, scope=memory.scope)
     loaded = [load(thread_id) for thread_id in thread_ids]
     return ProfilePassResult([a for a in loaded if a is not None], skipped)

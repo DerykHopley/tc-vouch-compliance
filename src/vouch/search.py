@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from vouch.documents import escaped, paragraphs
+from vouch.documents import DocumentChoice, escaped, is_chosen, paragraphs
 from vouch.front_matter import split_front_matter
 
 MAX_QUERY_CHARS = 200
@@ -30,12 +30,17 @@ class ErrorResult(TypedDict):
 
 
 def search_folder(
-    query: str, limit: int = DEFAULT_LIMIT, *, folder: Path
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    folder: Path,
+    documents: DocumentChoice = None,
 ) -> list[Passage] | ErrorResult:
     """Return up to `limit` passages that match the query's keywords, best first.
 
     `folder` is the evidence folder the compliance profile allows, resolved as the profile
-    resolved it on load. It is resolved again here, on the path actually read: one that now
+    resolved it on load; `documents`, the ids of its documents the profile chose (None: every
+    one). It is resolved again here, on the path actually read: one that now
     resolves elsewhere (swapped for a symlink) is refused with `folder_escaped`. Errors come
     back as a dict with an `error` key; nothing is raised.
     """
@@ -45,7 +50,9 @@ def search_folder(
     if escaped(folder):
         return folder_escaped()
     try:
-        passages = [p for doc in _document_files(folder) for p in _passages(doc)]
+        files = _document_files(folder)
+        chosen = [f for f in files if is_chosen(f.stem, documents)]
+        passages = [p for doc in chosen for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
         return ErrorResult(error=SOURCE_UNAVAILABLE)
     terms = {t.lower() for t in _WORD.findall(query)}

@@ -14,6 +14,14 @@ from datetime import UTC, datetime
 
 import pytest
 import test_memory
+from chosen_documents import (
+    CHOSEN,
+    CHOSEN_QUOTE,
+    SHARED_WORDS,
+    UNCHOSEN,
+    UNCHOSEN_QUOTE,
+    chosen_profile,
+)
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
@@ -42,7 +50,7 @@ from vouch.chat_agent import (
     verdict_words_for,
 )
 from vouch.chat_fake import CannedChatModel
-from vouch.citations import Citation
+from vouch.citations import Citation, DropReason
 from vouch.database import Database
 from vouch.documents import EvidenceKind
 from vouch.graph import (
@@ -56,7 +64,12 @@ from vouch.graph import (
 from vouch.isa import load_base_framework
 from vouch.memory import Memory, process_checkpointer
 from vouch.model_choice import MemoryModelStore, ModelChoice
-from vouch.profile import DEFAULT_PROFILE, load_named_profile, read_profile_once
+from vouch.profile import (
+    DEFAULT_PROFILE,
+    SAMPLE_LIBRARY,
+    load_named_profile,
+    read_profile_once,
+)
 from vouch.runs import RUNNING_ALREADY, AssessmentRun, RunningAssessments
 from vouch.settings import Settings
 from vouch.spending import DailyLimitReached, MemorySpendingStore, SpendingGuard, UsageMeter
@@ -447,6 +460,34 @@ def chat_tools() -> tuple[ChatTools, list[str]]:
         lambda control_id, usage: recorded.append(control_id),
     )
     return tools, recorded
+
+
+def chosen_tools(tmp_path) -> ChatTools:
+    """The chat's tools under a profile whose policies are limited to CHOSEN (#384)."""
+    profile = chosen_profile(tmp_path)
+    memory = Memory(InMemoryStore(), "lead-chosen", profile.id)
+    models = ModelChoice(Settings(), MemoryModelStore())
+    run = AssessmentRun(
+        models, None, frozenset(), memory_checkpointer(), UsageMeter(None), memory.scope
+    )
+    spending = SpendingGuard(MemorySpendingStore())
+    return ChatTools(profile, memory, run, spending, RunningAssessments(), lambda c, u: None)
+
+
+def test_the_chats_search_finds_passages_only_in_the_chosen_documents(tmp_path):
+    words = chosen_tools(tmp_path).search_evidence(SHARED_WORDS, lambda event: None)
+
+    found = set(re.findall(r'"doc_id": "([^"]+)"', words))
+    assert found & set(CHOSEN)
+    records = {p.stem for p in (tmp_path / SAMPLE_LIBRARY / "records").glob("*.md")}
+    assert found <= set(CHOSEN) | records  # records chooses nothing: its whole folder
+
+
+def test_a_chat_answer_citing_an_unchosen_document_is_dropped_and_a_chosen_one_kept(tmp_path):
+    tools = chosen_tools(tmp_path)
+
+    assert tools.check_quote(UNCHOSEN_QUOTE, UNCHOSEN) == str(DropReason.NO_DOCUMENT)
+    assert tools.check_quote(CHOSEN_QUOTE, "backup-policy") is None
 
 
 def test_a_chat_left_mid_assessment_neither_waits_for_it_nor_ends_its_run_early(monkeypatch):
