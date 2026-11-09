@@ -191,3 +191,28 @@ describe('verdictWord', () => {
     expect(verdictWord('not-evidenced', 'lt')).toBe('Not evidenced')
   })
 })
+
+describe("assess, when the API refuses it with its own message (issue 116)", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const events = async (status: number, body: unknown) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json(body, { status })))
+    const seen = []
+    for await (const item of assess('NK-ENC-01')) seen.push(item)
+    return seen
+  }
+
+  it("says a 413's message: the message is too long", async () => {
+    const detail = 'That message is too long for Vouch: at most 65536 bytes.'
+    expect(await events(413, { detail })).toEqual([{ event: 'error', data: { message: detail } }])
+  })
+
+  it("says the database 503's message rather than that the service can't be reached", async () => {
+    const detail = 'The database is unavailable just now. Please try again shortly.'
+    expect(await events(503, { detail, unavailable: 'database' })).toEqual([{ event: 'error', data: { message: detail } }])
+  })
+
+  it('still throws (unreachable) for any other 503', async () => {
+    await expect(events(503, { detail: 'Something else.' })).rejects.toThrow('service answered 503')
+  })
+})
