@@ -20,11 +20,10 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
-limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
-the remediation items the lead decided on (#43) and the companies made in the app (#385);
-nothing else does. Before it has run, a setting
-reads as unset and no company is found, and a write, a count, the usage, a review, a remediation
-decision or a new company is DatabaseUnavailable (a 503).
+limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39), the
+remediation items the lead decided on (#43) and the companies made in the app (#385); nothing else
+does. Before it has run, a setting reads as unset and no company is found, and a write, a count,
+the usage, a review, a remediation decision or a new company is DatabaseUnavailable (a 503).
 """
 
 import hashlib
@@ -33,7 +32,7 @@ import sys
 import threading
 import time
 import urllib.parse
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Any, Literal, Protocol, Self, get_args
@@ -679,20 +678,21 @@ class Database:
 
     def create_company_profile(
         self,
-        ids: Iterable[str],
+        ids: Iterator[str],
         profile: Mapping[str, Any],
         created_by: str,
         created_at: datetime,
     ) -> str:
-        """Keep a company profile under the first of `ids` no row holds yet; that id. Each try
-        is one insert that takes the id or finds it taken, so two at once get different ids.
-        Raises DatabaseUnavailable, also before vouch-db-setup ran."""
+        """Keep a company profile under the first of `ids` (endless) no row holds yet; that id.
+        Each try is one insert that takes the id or finds it taken, so two at once get different
+        ids. Raises DatabaseUnavailable, also before vouch-db-setup ran."""
         with (
             self.connection() as conn,
             self._failed(COMPANY_PROFILES_TABLE),
             self._needs_setup(COMPANY_PROFILES_TABLE),
         ):
-            for profile_id in ids:
+            while True:
+                profile_id = next(ids)
                 row = conn.execute(
                     f"INSERT INTO {COMPANY_PROFILES_TABLE} ({', '.join(COMPANY_PROFILE_COLUMNS)}) "
                     "VALUES (%s, %s, %s, %s) ON CONFLICT (id) DO NOTHING RETURNING id",
@@ -700,7 +700,6 @@ class Database:
                 ).fetchone()
                 if row is not None:
                     return str(row["id"])
-        raise DatabaseUnavailable(f"no free id in {COMPANY_PROFILES_TABLE}")
 
     def company_profiles(self) -> list[dict[str, Any]]:
         """Every company profile, oldest first: mappings of COMPANY_PROFILE_COLUMNS; none before

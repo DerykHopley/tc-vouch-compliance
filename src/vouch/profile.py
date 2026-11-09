@@ -8,7 +8,7 @@ and risks.
 
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -312,11 +312,17 @@ class ComplianceProfile(_Strict):
         return None
 
 
-def _describe(error: ValidationError) -> str:
-    """Each problem as `field.path: message`, so the error names the field."""
+Location = tuple[int | str, ...]
+
+
+def field_problems(
+    error: ValidationError, field_of: Callable[[Location], Location] = lambda loc: loc
+) -> str:
+    """Each problem as `field.path: message`, so the error names the field; `field_of` turns a
+    location into the field a reader knows."""
     problems = []
     for item in error.errors():
-        field = ".".join(str(part) for part in item["loc"])
+        field = ".".join(str(part) for part in field_of(item["loc"]))
         message = item["msg"].removeprefix("Value error, ")
         problems.append(f"{field}: {message}" if field else message)
     return "; ".join(problems)
@@ -337,7 +343,7 @@ def load_profile(path: Path) -> ComplianceProfile:
     try:
         return ComplianceProfile.model_validate(data, context={"base_dir": path.parent})
     except ValidationError as error:
-        raise ProfileError(path, _describe(error)) from error
+        raise ProfileError(path, field_problems(error)) from error
     except BaseFrameworkError as error:  # the controls it names couldn't be looked up
         raise ProfileError(path, str(error)) from error
     except OSError as error:  # a backstop: a path it names the file system refuses
@@ -346,41 +352,41 @@ def load_profile(path: Path) -> ComplianceProfile:
         ) from error
 
 
-STORED_SOURCES: tuple[EvidenceSourceName, ...] = ("policies", "records")
-"""The sample library's folders a stored profile's evidence is chosen from."""
-
-
-STORED_FIELDS = ("company", "country", "answer_language", "protection_level", "not_applicable")
-"""A stored profile's own fields, beside its evidence."""
-
-
 def load_stored_profile(
-    profile_id: str, fields: Mapping[str, Any], library: Path = SAMPLE_LIBRARY_DIR
+    profile_id: str,
+    fields: Mapping[str, Any],
+    documents: Mapping[str, Sequence[str]],
+    library: Path = SAMPLE_LIBRARY_DIR,
 ) -> ComplianceProfile:
-    """The validated profile of a company made in the app (#385), from its stored fields
-    (`company`, `country`, `answer_language`, `protection_level`, `not_applicable`, and
-    `evidence`: each source's chosen document ids): the ISA with no overlays, its evidence the
-    chosen documents of the sample library's folders, its id the stored one. A source with no
-    document chosen is left out. ProfileError (its path the id) when it doesn't validate."""
-    evidence = fields.get("evidence")
-    chosen = evidence if isinstance(evidence, Mapping) else {}
+    """The validated profile of a company made in the app (#385), from its own `fields` (each a
+    ComplianceProfile field: company, country, ...) and the `documents` chosen from each of the
+    sample library's folders: the ISA with no overlays, its evidence those documents, its id the
+    stored one. A folder with no document chosen is left out. ProfileError (its path the id) when
+    it doesn't validate; a problem with a folder's documents is named `evidence.<folder>`, the
+    company setup's field."""
     data: dict[str, Any] = {
+        **fields,
         "id": profile_id,
-        **{key: fields.get(key) for key in STORED_FIELDS},
         "base_framework": SOURCE,
         "overlays": [],
         "evidence_sources": {
-            name: {"folder": name, "documents": chosen[name]}
-            for name in STORED_SOURCES
-            if chosen.get(name)
+            name: {"folder": name, "documents": ids} for name, ids in documents.items() if ids
         },
     }
     try:
         return ComplianceProfile.model_validate(data, context={"base_dir": library, STORED: True})
     except ValidationError as error:
-        raise ProfileError(Path(profile_id), _describe(error)) from error
+        raise ProfileError(Path(profile_id), field_problems(error, _setup_field)) from error
     except BaseFrameworkError as error:
         raise ProfileError(Path(profile_id), str(error)) from error
+
+
+def _setup_field(loc: Location) -> Location:
+    """`evidence_sources.<folder>.documents` (or `.folder`) as the company setup names it,
+    `evidence.<folder>`."""
+    if len(loc) >= 2 and loc[0] == "evidence_sources":
+        return ("evidence", loc[1], *loc[3:])
+    return loc
 
 
 PROFILE_LOAD_ERRORS: tuple[type[Exception], ...] = (ProfileError, BaseFrameworkError)
@@ -506,3 +512,13 @@ def profile_names(folder: Path) -> tuple[str, ...]:
         log.exception("the compliance profiles in %s could not be listed", folder)
         return ()
     return tuple(sorted(name for name in found if PROFILE_NAME.fullmatch(name)))
+
+
+def profile_folder_names(folder: Path) -> set[str]:
+    """Every folder's name in `folder`, a profile in it or not: no company made in the app may
+    take one (#385). None when the folder can't be read."""
+    try:
+        return {path.name for path in folder.iterdir() if path.is_dir()}
+    except OSError:
+        log.exception("the profile folders in %s could not be listed", folder)
+        return set()

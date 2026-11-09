@@ -36,12 +36,14 @@ def as_user(request: Request) -> User:
 
 
 def restart() -> None:
-    """What a restart of the process forgets: its in-memory saver, store and audit trail."""
+    """What a restart of the process forgets: its in-memory saver, store and audit trail, and the
+    companies made in it with the profiles read from them."""
     memory.process_checkpointer.cache_clear()
     memory.process_store.cache_clear()
     audit.process_trail.cache_clear()
     remediation.process_items.cache_clear()
     company_profiles.process_company_profiles.cache_clear()
+    company_profiles.read_stored_once.cache_clear()
 
 
 def app_on(url: SecretStr | None) -> Any:

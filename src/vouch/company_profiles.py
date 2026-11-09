@@ -4,9 +4,9 @@ database, listed and opened beside the file profiles.
 A developer creates one with its company, country, answer language, protection level, the
 requirements it marks not applicable, and its evidence: chosen documents of the sample library's
 folders. What the request gave is kept, never a server path; the profile is rebuilt from it and
-checked on load (vouch.profile's load_stored_profile), once per stored row, so requests reuse one
-object and a profile that no longer validates (a document gone from the library) is a
-BrokenProfile.
+checked on load (vouch.profile's load_stored_profile), once per stored row and version of its chosen
+documents, so requests reuse one object and a profile that no longer validates (a document gone
+from the library) is a BrokenProfile, and one whose document is back loads again.
 
 Kept in Postgres with a database URL (vouch.database), else in this process (a developer's local
 run, gone on restart), as the remediation decisions are.
@@ -22,32 +22,42 @@ import threading
 import unicodedata
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from functools import cache, lru_cache
+from datetime import datetime
+from functools import cache
 from itertools import count
+from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
+from vouch.audit import now
 from vouch.database import Database
-from vouch.documents import SUFFIX, document_path
+from vouch.documents import document_path
 from vouch.paths import SAMPLE_LIBRARY_DIR
 from vouch.profile import (
     PROFILE_LOAD_ERRORS,
     PROFILE_NAME,
-    STORED_SOURCES,
     BrokenProfile,
     ComplianceProfile,
     NonEmpty,
     NotApplicable,
+    ProfileError,
     ProtectionLevel,
+    field_problems,
     load_problem,
     load_stored_profile,
 )
 
 log = logging.getLogger(__name__)
 
-MAX_COMPANY = 100
+MAX_COMPANY_LENGTH = 100
 NO_NAME_ID = "company"
 """The id of a company whose name leaves nothing to make one from."""
 MAX_ID = 63
@@ -55,57 +65,75 @@ MAX_ID = 63
 NO_DOCUMENT = "choose at least one document of the sample library"
 
 
+def _storable(text: str) -> str:
+    """Text the database can keep: Postgres's jsonb takes no NUL character, and the text must
+    be UTF-8 (JSON may carry a lone surrogate, which isn't)."""
+    if "\x00" in text:
+        raise ValueError("must not hold a NUL character")
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("must be text UTF-8 can carry") from None
+    return text
+
+
+Text = Annotated[str, AfterValidator(_storable)]
+"""Every text field of a company setup: text the database can keep (_storable)."""
+
+
+class NotApplicableSetup(NotApplicable):
+    """A requirement (or a whole control) the company marks not applicable; the profile checks
+    it on load."""
+
+    control: Text
+    requirement: Text | None = None
+    reason: Annotated[NonEmpty, AfterValidator(_storable)]
+
+
 class Evidence(BaseModel):
     """The documents a company chose from each folder of the sample library (ids: file names
-    without .md, which may be given)."""
+    without .md, which may be given); the profile checks each is there, once, on load
+    (EvidenceSource)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    policies: list[str] = []
-    records: list[str] = []
+    policies: list[Text] = []
+    records: list[Text] = []
 
     @model_validator(mode="after")
-    def _documents_in_the_library(self) -> Self:
-        for source in STORED_SOURCES:
-            ids = [doc_id.removesuffix(SUFFIX) for doc_id in getattr(self, source)]
-            for index, doc_id in enumerate(ids):
-                if doc_id in ids[:index]:
-                    raise ValueError(f"{source}: {doc_id} is named twice")
-                folder = SAMPLE_LIBRARY_DIR / source
-                if doc_id.endswith(SUFFIX) or document_path(folder, doc_id) is None:
-                    raise ValueError(f"{source}: no document {doc_id} in the sample library")
-            setattr(self, source, ids)
-        if not any(getattr(self, source) for source in STORED_SOURCES):
+    def _some_document(self) -> Self:
+        if not any(self.model_dump().values()):
             raise ValueError(NO_DOCUMENT)
         return self
 
 
 class CompanySetup(BaseModel):
-    """A company to make (`POST /api/developer/profiles`): what is kept of it."""
+    """A company to make (`POST /api/developer/profiles`): what is kept of it, every field but
+    `evidence` its compliance profile's own (compliance_profile_of)."""
 
     model_config = ConfigDict(extra="forbid")
 
     company: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_COMPANY)
+        Text, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_COMPANY_LENGTH)
     ]
-    country: NonEmpty
+    country: Annotated[NonEmpty, AfterValidator(_storable)]
     answer_language: Literal["en", "de"]
     protection_level: ProtectionLevel
-    not_applicable: list[NotApplicable] = []
+    not_applicable: list[NotApplicableSetup] = []
     evidence: Evidence
 
-    @model_validator(mode="after")
-    def _no_nul(self) -> Self:
-        """The database keeps no NUL character in text, so none is taken."""
-        named = [("company", self.company), ("country", self.country)] + [
-            (f"not_applicable.{i}", value)
-            for i, entry in enumerate(self.not_applicable)
-            for value in (entry.control, entry.requirement or "", entry.reason)
-        ]
-        for field, value in named:
-            if "\x00" in value:
-                raise ValueError(f"{field}: must not hold a NUL character")
-        return self
+
+def compliance_profile_of(profile_id: str, setup: CompanySetup) -> ComplianceProfile:
+    """The company's compliance profile under `profile_id`, its evidence the chosen documents of
+    the sample library. ProfileError (path-free problems, each naming the setup's field) when
+    the profile's checks refuse it: a document not there or named twice, a not-applicable
+    entry the framework doesn't have."""
+    return load_stored_profile(
+        profile_id,
+        setup.model_dump(exclude={"evidence"}),
+        setup.evidence.model_dump(),
+        SAMPLE_LIBRARY_DIR,
+    )
 
 
 @dataclass(frozen=True)
@@ -153,10 +181,6 @@ class CompanyProfiles(Protocol):
     def one(self, profile_id: str) -> StoredProfile | None:
         """The stored company profile `profile_id`; None when there's none."""
         ...
-
-
-def now() -> datetime:
-    return datetime.now(UTC)
 
 
 class ProcessCompanyProfiles:
@@ -209,19 +233,71 @@ def process_company_profiles() -> ProcessCompanyProfiles:
     return ProcessCompanyProfiles()
 
 
-def read_stored_once(stored: StoredProfile) -> ComplianceProfile | BrokenProfile:
-    """The stored company's compliance profile, or why it can't be used (path-free): validated
-    once per stored row, so requests reuse the same object."""
-    return _read_row(stored.id, json.dumps(stored.profile, sort_keys=True))
+DocumentVersion = tuple[int, int, int] | None
 
 
-@lru_cache(maxsize=256)
-def _read_row(profile_id: str, fields: str) -> ComplianceProfile | BrokenProfile:
+def _chosen_versions(fields: Mapping[str, Any]) -> tuple[tuple[str, str, DocumentVersion], ...]:
+    """Each chosen document of the sample library, with its file's version (modification time,
+    change time, size; None when it isn't there), as vouch.profile versions a profile file."""
+    evidence = fields.get("evidence")
+    chosen = evidence if isinstance(evidence, Mapping) else {}
+    versions = []
+    for source in Evidence.model_fields:
+        ids = chosen.get(source)
+        for doc_id in ids if isinstance(ids, list) else ():
+            versions.append((source, str(doc_id), _document_version(source, str(doc_id))))
+    return tuple(versions)
+
+
+def _document_version(source: str, doc_id: str) -> DocumentVersion:
     try:
-        return load_stored_profile(profile_id, json.loads(fields))
+        path = document_path(SAMPLE_LIBRARY_DIR / source, doc_id)
+        stat = None if path is None else path.stat()
+    except (OSError, ValueError):
+        return None
+    return None if stat is None else (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+
+
+def _load_row(profile_id: str, fields: Mapping[str, Any]) -> ComplianceProfile | BrokenProfile:
+    try:
+        try:
+            setup = CompanySetup.model_validate(fields)
+        except ValidationError as error:
+            raise ProfileError(Path(profile_id), field_problems(error)) from error
+        return compliance_profile_of(profile_id, setup)
     except PROFILE_LOAD_ERRORS as error:
         log.warning("company profile %s left out: %s", profile_id, error)
         return BrokenProfile(profile_id, load_problem(error))
+
+
+class _StoredReader:
+    """read_stored_once: one read kept per stored id, replaced when its row or a chosen
+    document changes, so a listing never pushes out its own reads, however many companies."""
+
+    def __init__(self) -> None:
+        self._kept: dict[str, tuple[object, ComplianceProfile | BrokenProfile]] = {}
+        self._guard = threading.Lock()
+
+    def __call__(self, stored: StoredProfile) -> ComplianceProfile | BrokenProfile:
+        """The stored company's compliance profile, or why it can't be used (path-free):
+        validated once per row and version of its chosen documents, so requests reuse the same
+        object and a document gone from the library, or back, is seen."""
+        key = (json.dumps(stored.profile, sort_keys=True), _chosen_versions(stored.profile))
+        with self._guard:
+            kept = self._kept.get(stored.id)
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        read = _load_row(stored.id, stored.profile)
+        with self._guard:
+            self._kept[stored.id] = (key, read)
+        return read
+
+    def cache_clear(self) -> None:
+        with self._guard:
+            self._kept.clear()
+
+
+read_stored_once = _StoredReader()
 
 
 def is_profile_name(name: str) -> bool:

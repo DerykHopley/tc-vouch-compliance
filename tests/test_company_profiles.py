@@ -4,12 +4,14 @@ by a developer."""
 
 import json
 import logging
+import shutil
 import threading
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 import test_memory
+from company_setup import MUSTERFIRMA, MUSTERFIRMA_ID, POLICIES, RECORDS
 from fastapi.testclient import TestClient
 from profiles_dir import BROKEN, make_profiles
 from test_auth import FakeClerk, bearer, clerk_app, token
@@ -18,19 +20,27 @@ from test_memory import app_on, as_user, assess, restart
 
 from vouch import company_profiles
 from vouch.api import PROFILE_HEADER, app_company_profiles, create_app, current_user
+from vouch.audit import now
 from vouch.company_profiles import (
+    CompanySetup,
     PostgresCompanyProfiles,
     ProcessCompanyProfiles,
     StoredProfile,
     candidate_ids,
     company_id,
+    compliance_profile_of,
     read_stored_once,
 )
 from vouch.database import Database, DatabaseUnavailable
 from vouch.graph import build_graph, state_serializer, thread_config
 from vouch.memory import process_checkpointer
 from vouch.paths import SAMPLE_LIBRARY_DIR
-from vouch.profile import BrokenProfile, ComplianceProfile, read_profile_once
+from vouch.profile import (
+    BrokenProfile,
+    ComplianceProfile,
+    profile_folder_names,
+    read_profile_once,
+)
 from vouch.settings import Settings
 
 database_url = test_memory.database_url
@@ -38,34 +48,20 @@ postgres = test_memory.postgres
 empty_database = test_memory.empty_database
 users = test_memory.users
 
-POLICIES = ["authentication-standard", "backup-policy"]
-RECORDS = ["sign-in-settings-record"]
-MUSTERFIRMA = {
-    "company": "Musterfirma Süd GmbH",
-    "country": "Germany",
-    "answer_language": "en",
-    "protection_level": "normal",
-    "evidence": {"policies": POLICIES, "records": RECORDS},
-}
-MUSTERFIRMA_ID = "musterfirma-sud-gmbh"
-FIELDS = {
-    "company": "Musterfirma Süd GmbH",
-    "country": "Germany",
+FIELDS = MUSTERFIRMA | {
     "answer_language": "de",
     "protection_level": "high",
     "not_applicable": [{"control": "1.1.1", "requirement": None, "reason": "Not ours."}],
-    "evidence": {"policies": POLICIES, "records": RECORDS},
 }
 
 
 @pytest.fixture(autouse=True)
 def _fresh_process():
     """Each test starts as a new process: no company kept in it, nothing cached."""
-    company_profiles.process_company_profiles.cache_clear()
-    company_profiles._read_row.cache_clear()
+    restart()
     read_profile_once.cache_clear()
     yield
-    company_profiles.process_company_profiles.cache_clear()
+    restart()
 
 
 def create(client: TestClient, headers: dict[str, str], body: dict[str, Any] = MUSTERFIRMA):
@@ -170,6 +166,51 @@ def test_a_source_with_no_document_chosen_is_left_out_not_the_whole_folder(store
     assert set(profile.evidence_sources) == {"policies"}
 
 
+def test_every_field_of_a_company_setup_reaches_its_compliance_profile():
+    setup = CompanySetup.model_validate(FIELDS)
+    profile = compliance_profile_of(MUSTERFIRMA_ID, setup)
+
+    own = set(CompanySetup.model_fields) - {"evidence"}
+    assert profile.model_dump(mode="json", include=own) == setup.model_dump(
+        mode="json", include=own
+    )
+    sources = profile.evidence_sources
+    assert {name: list(sources[name].documents or ()) for name in sources} == {
+        "policies": POLICIES,
+        "records": RECORDS,
+    }
+
+
+def test_a_stored_company_is_checked_again_when_a_chosen_document_goes_or_comes_back(
+    tmp_path, monkeypatch
+):
+    library = tmp_path / "library"
+    shutil.copytree(SAMPLE_LIBRARY_DIR, library)
+    monkeypatch.setattr(company_profiles, "SAMPLE_LIBRARY_DIR", library)
+    row = StoredProfile(MUSTERFIRMA_ID, MUSTERFIRMA, "user_dev", now())
+    chosen = library / "policies" / f"{POLICIES[0]}.md"
+    text = chosen.read_bytes()
+
+    assert isinstance(read_stored_once(row), ComplianceProfile)
+    chosen.unlink()
+    gone = read_stored_once(row)
+    chosen.write_bytes(text)
+    back = read_stored_once(row)
+
+    assert isinstance(gone, BrokenProfile)
+    assert POLICIES[0] in gone.problem
+    assert isinstance(back, ComplianceProfile)
+    assert read_stored_once(row) is back  # read again only when a document changed
+
+
+def test_a_listing_of_many_companies_reads_each_once():
+    """Past any fixed number of companies, a listing still reuses every profile it read."""
+    rows = [StoredProfile(f"company-{n}", MUSTERFIRMA, "u", now()) for n in range(300)]
+    first = [read_stored_once(row) for row in rows]
+
+    assert all(read_stored_once(row) is profile for row, profile in zip(rows, first, strict=True))
+
+
 # --- Listed and opened beside the file profiles (stories 1 and 3, backend) --------------------
 
 
@@ -251,13 +292,14 @@ OK_NA = {"control": "1.1.1", "reason": "Not ours."}
         ({"company": "a" * 101}, "company"),
         ({"country": ""}, "country"),
         ({"company": "Nul\x00 AG"}, "company"),
+        ({"country": "x\x00"}, "country"),
         ({"answer_language": "fr"}, "answer_language"),
         ({"protection_level": "medium"}, "protection_level"),
-        ({"evidence": {"policies": POLICIES, "patch": ["x"]}}, "patch"),
+        ({"evidence": {"policies": POLICIES, "patch": ["x"]}}, "evidence.patch"),
         ({"evidence": {"policies": [], "records": []}}, "evidence"),
-        ({"evidence": {"policies": ["no-such-policy"]}}, "no-such-policy"),
-        ({"evidence": {"policies": ["../records/training-record"]}}, "evidence"),
-        ({"evidence": {"policies": ["backup-policy", "backup-policy.md"]}}, "named twice"),
+        ({"evidence": {"policies": ["no-such-policy"]}}, "evidence.policies"),
+        ({"evidence": {"policies": ["../records/training-record"]}}, "evidence.policies"),
+        ({"evidence": {"policies": ["backup-policy", "backup-policy.md"]}}, "evidence.policies"),
         ({"not_applicable": [{"control": "99.9.9", "reason": "x"}]}, "not_applicable.0.control"),
         (
             {"not_applicable": [{"control": "1.1.1", "requirement": "M9", "reason": "x"}]},
@@ -268,8 +310,8 @@ OK_NA = {"control": "1.1.1", "reason": "Not ours."}
             "not_applicable.0.requirement",
         ),
         ({"not_applicable": [OK_NA, OK_NA]}, "not_applicable.1"),
-        ({"not_applicable": [{"control": "1.1.1", "reason": " "}]}, "reason"),
-        ({"not_applicable": [{"control": "1.1.1", "reason": "x\x00"}]}, "not_applicable.0"),
+        ({"not_applicable": [{"control": "1.1.1", "reason": " "}]}, "not_applicable.0.reason"),
+        ({"not_applicable": [{"control": "1.1.1", "reason": "x\x00"}]}, "not_applicable.0.reason"),
     ],
 )
 def test_a_refused_company_answers_422_naming_the_field_and_keeps_nothing(change, field, users):
@@ -279,8 +321,51 @@ def test_a_refused_company_answers_422_naming_the_field_and_keeps_nothing(change
         after = listed_ids(client, alice)
 
     assert refused.status_code == 422, refused.text
-    assert field in refused.text
+    assert field in refused_fields(refused), refused.text
     assert str(SAMPLE_LIBRARY_DIR) not in refused.text
+    assert after == ["alpenwerk", "nordlicht"]
+
+
+def refused_fields(response) -> list[str]:
+    """The fields a 422 names: the request check's error locations (past `body`), or the
+    profile check's `field: problem` parts of its plain detail."""
+    detail = response.json()["detail"]
+    if isinstance(detail, str):
+        return [part.split(": ", 1)[0] for part in detail.split("; ")]
+    return [".".join(str(part) for part in error["loc"][1:]) for error in detail]
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ({"company": "Bad \ud800 AG"}, "company"),
+        ({"country": "\udfff"}, "country"),
+        (
+            {"not_applicable": [{"control": "1.1.1", "reason": "x\ud800"}]},
+            "not_applicable.0.reason",
+        ),
+        (
+            {"not_applicable": [{"control": "1.1.1", "requirement": "\ud800", "reason": "x"}]},
+            "not_applicable.0.requirement",
+        ),
+        ({"evidence": {"policies": ["backup\ud800"]}}, "evidence.policies.0"),
+        ({"evidence": {"records": ["x\x00"]}}, "evidence.records.0"),
+    ],
+)
+def test_text_the_database_cant_keep_is_refused_422_naming_the_field(change, field, users):
+    """A lone surrogate (valid JSON, no UTF-8) or a NUL: Postgres's jsonb refuses either."""
+    alice, _ = users
+    body = json.dumps(MUSTERFIRMA | change)  # ASCII escapes: the surrogate survives the trip
+    with TestClient(app_on(None)) as client:
+        refused = client.post(
+            "/api/developer/profiles",
+            content=body,
+            headers=alice | {"Content-Type": "application/json"},
+        )
+        after = listed_ids(client, alice)
+
+    assert refused.status_code == 422, refused.text
+    assert field in refused_fields(refused), refused.text
     assert after == ["alpenwerk", "nordlicht"]
 
 
@@ -301,16 +386,16 @@ def clerk() -> FakeClerk:
     return FakeClerk({"user_alice": {}, "user_dev": {"role": "developer"}})
 
 
-def test_a_compliance_leads_create_is_403_and_signed_out_401_keeping_nothing(clerk):
-    client = TestClient(clerk_app(clerk), raise_server_exceptions=False)
+def test_a_compliance_leads_create_is_403_and_signed_out_401_never_reaching_the_store(clerk):
+    app = clerk_app(clerk)
+    app.dependency_overrides[app_company_profiles] = UnreadableStore
+    client = TestClient(app, raise_server_exceptions=False)
 
     lead = create(client, bearer(token("user_alice")))
     signed_out = create(client, {})
-    developer = client.get("/api/profiles", headers=bearer(token("user_dev")))
 
     assert lead.status_code == 403
     assert signed_out.status_code == 401
-    assert [p["id"] for p in developer.json()["profiles"]] == ["alpenwerk", "nordlicht"]
 
 
 def test_a_stored_company_no_longer_valid_is_broken_and_noted_path_free(users):
@@ -330,6 +415,38 @@ def test_a_stored_company_no_longer_valid_is_broken_and_noted_path_free(users):
     assert "/" not in note["problem"]
     assert opened.status_code == 500
     assert isinstance(read_stored_once(kept.one("stale-gmbh")), BrokenProfile)
+
+
+def test_a_file_profile_with_a_stored_companys_id_wins_and_the_stored_one_is_noted(users):
+    """A folder added later under a stored company's id: the file profile is listed and opened;
+    the stored one is noted on the developer page."""
+    alice, _ = users
+    kept = company_profiles.process_company_profiles()
+    assert kept.create("Nordlicht", MUSTERFIRMA, "user_dev", taken=set()) == "nordlicht"
+    with TestClient(app_on(None)) as client:
+        listed = client.get("/api/profiles", headers=alice).json()["profiles"]
+        notes = client.get("/api/developer/settings", headers=alice).json()["broken_profiles"]
+        opened = client.get("/api/overview", headers=alice | {PROFILE_HEADER: "nordlicht"})
+
+    assert [p["id"] for p in listed] == ["alpenwerk", "nordlicht"]
+    assert listed[1]["company"] != MUSTERFIRMA["company"]
+    assert notes == [{"id": "nordlicht", "problem": "its id is now a file profile's"}]
+    assert opened.json()["company"] == listed[1]["company"]
+
+
+def test_every_folder_in_the_profiles_folder_is_a_taken_name(tmp_path):
+    make_profiles(tmp_path)
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "a-file").write_text("", encoding="utf-8")
+
+    assert profile_folder_names(tmp_path) == {"nordlicht", "testwerk", BROKEN, "empty"}
+
+
+def test_a_profiles_folder_that_cant_be_read_takes_no_name_and_is_logged(tmp_path, caplog):
+    with caplog.at_level(logging.ERROR):
+        assert profile_folder_names(tmp_path / "missing") == set()
+
+    assert "could not be listed" in caplog.text
 
 
 class UnreadableStore:

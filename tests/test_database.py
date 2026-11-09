@@ -20,6 +20,7 @@ from typing import Annotated, Any
 
 import psycopg
 import pytest
+from company_setup import MUSTERFIRMA
 from fastapi import Depends
 from fastapi.testclient import TestClient
 from psycopg import conninfo
@@ -613,16 +614,9 @@ def test_before_the_setup_made_the_company_profiles_table_files_are_listed_and_a
     empty_database, caplog
 ):
     app = create_app(Settings(database_url=empty_database.url))
-    body = {
-        "company": "Musterfirma Süd GmbH",
-        "country": "Germany",
-        "answer_language": "en",
-        "protection_level": "normal",
-        "evidence": {"policies": ["backup-policy"]},
-    }
     with TestClient(app, raise_server_exceptions=False) as client:
         listed = client.get("/api/profiles")
-        made = client.post("/api/developer/profiles", json=body)
+        made = client.post("/api/developer/profiles", json=MUSTERFIRMA)
 
     assert listed.status_code == 200
     assert [p["id"] for p in listed.json()["profiles"]] == ["alpenwerk", "nordlicht"]
