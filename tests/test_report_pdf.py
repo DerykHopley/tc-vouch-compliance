@@ -88,7 +88,7 @@ def test_alpenwerks_pdf_is_german_with_its_umlauts_and_quote_marks_as_written():
 
     assert data.startswith(b"%PDF-")
     read = text(data)
-    assert read.startswith("Bereitschaftsbericht")
+    assert read.startswith("BEREITSCHAFTSBERICHT")  # the title in capitals, as the app has it
     for label in ("Länderergänzungen", "Geprüft von", "Maßnahmen", "Prüfpfad"):
         assert label in read, label
     assert ROLES_QUOTE in read
@@ -259,8 +259,9 @@ def breaks_inside_words(sheet, head, cells, widths) -> list[str]:
     """Each trail cell's line that ends inside a word, as the table draws it."""
     broken = []
     for bold, row in [(True, head), *((False, r) for r in cells)]:
-        for cell, width in zip(row, widths, strict=True):
-            sheet.font(report_pdf.TRAIL, bold)
+        for i, (cell, width) in enumerate(zip(row, widths, strict=True)):
+            ids = not bold and i in report_pdf.TRAIL_IDS  # drawn in Plex Mono
+            sheet.font(report_pdf.TRAIL, bold, report_pdf.MONO if ids else report_pdf.SANS)
             lines = sheet.wrapped(cell, width)
             broken += [f"{cell!r} at {line!r}" for line in at_a_boundary(cell, lines)]
     return broken
@@ -347,7 +348,7 @@ def test_every_page_has_the_letterhead_and_page_x_of_y_with_the_date(
 
     assert len(shown) >= 3
     for n, (head, foot) in enumerate(shown, 1):
-        assert head == f"Vouch {company}"
+        assert head == f"VOUCH {company}"
         assert foot == footer.format(n, len(shown))
 
 
@@ -378,7 +379,18 @@ def test_the_pdfs_colours_are_the_light_themes_tokens():
         "muted": report_pdf.MUTED,
         "rule": report_pdf.RULE,
         "brass": report_pdf.BRASS,
-        "paper": report_pdf.PAPER,
     }
 
     assert {name: light[name] for name in used} == used
+
+
+def test_the_pdf_is_set_in_the_apps_type():
+    # The owner (#352): "the main content should follow the general font styles".
+    data = report_pdf.pdf(long_report("alpenwerk"), report.words_for("de"))
+    used = set()
+    for page in PdfReader(BytesIO(data)).pages:
+        fonts = page["/Resources"]["/Font"]
+        used |= {str(fonts[name].get_object()["/BaseFont"]) for name in fonts}
+
+    for family in ("LibreCaslonDisplay", "Manrope", "IBMPlexMono", "IBMPlexSerif"):
+        assert any(family in name for name in used), (family, used)

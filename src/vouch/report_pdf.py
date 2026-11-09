@@ -3,7 +3,9 @@
 same rows (vouch.report's head_rows, control_rows and the rest) in the same words and the page's
 order, so the two downloads never disagree.
 
-Plain, black on white, on A4: the title, the head as label and value lines, readiness, the
+Black on white, on A4, under a letterhead on every page (#352: Vouch and the company over a thin
+brass rule; the date and "Page x of y" in the footer): the title, the head as label and value
+lines, readiness, the
 controls table and each accepted control's quotes, the remediation items under their control,
 the not-applicable list, the audit trail table (on landscape A4 pages, for its 11 columns) and
 the disclaimer at the foot. Each table's header row repeats on every page it runs onto, its
@@ -14,16 +16,18 @@ a remediation item's missing text). So a cell shows at most MAX_CELL_LINES lines
 of text as the Markdown's cells are; a longer one ends in `… [n]`, and its whole text, line by
 line as written, follows the table as note [n]. The PDF always builds.
 
-The text is drawn in DejaVu Sans (fonts/, with its licence), as fpdf2's built-in fonts are
-Latin-1 only and the German editions' quotes carry „ “ and –. A character the font lacks (an
-emoji in a quote) is left out, so the PDF is still served. Carried text stays as written: unlike
+The text is in the app's type (docs/design.md, Type; fonts/, with their licences): Libre Caslon
+Display in capitals for the title and section headings, Manrope for the body and tables, IBM
+Plex Mono for ids, IBM Plex Serif italic for quoted evidence, so the report reads as Vouch's.
+DejaVu Sans draws a character one of them lacks; one DejaVu lacks too (an emoji in a quote) is
+left out, so the PDF is still served. Carried text stays as written: unlike
 Markdown, nothing in a PDF's text can turn into a heading or live HTML, so nothing is escaped.
 
 fpdf2 is imported here only, keeping it out of vouch.report.
 """
 
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +38,17 @@ from fpdf.fonts import FontFace, TTFFont
 from vouch import report as rows
 
 FONTS = Path(__file__).parent / "fonts"
-FAMILY = "dejavu"
+DISPLAY, SANS, MONO, QUOTE = "caslon", "manrope", "plexmono", "plexserif"  # the app's type
+FALLBACK = "dejavu"  # draws what the app's fonts lack
+_FILES = {
+    (DISPLAY, ""): "LibreCaslonDisplay-Regular.ttf",
+    (SANS, ""): "Manrope-Regular.ttf",
+    (SANS, "B"): "Manrope-Bold.ttf",
+    (MONO, ""): "IBMPlexMono-Regular.ttf",
+    (QUOTE, "I"): "IBMPlexSerif-MediumItalic.ttf",
+    (FALLBACK, ""): "DejaVuSans.ttf",
+    (FALLBACK, "B"): "DejaVuSans-Bold.ttf",
+}
 MARGIN = 15  # mm, on every side
 TITLE = 16  # pt
 SECTION = 12  # pt: Readiness, Controls and the other parts
@@ -47,16 +61,16 @@ MAX_CELL_LINES = 12  # a row of 12 lines is well under a page, in any column and
 CELL_PADDING = 1  # mm
 CELL_SLACK = 0.5  # mm: a cell's lines are measured this much narrower, for its border
 HEADINGS = FontFace(emphasis="BOLD", fill_color=None)
+IDS = FontFace(family=MONO)  # a table cell holding an id
 
 # The letterhead (#352): docs/design.md's light tokens, as frontend/src/styles/tokens.css holds them
 # (tests/test_report_pdf.py keeps the two the same). A printed page is the light theme.
-INK, MUTED, RULE, BRASS, PAPER = "#1B1D21", "#62656B", "#D0CEC8", "#A8834A", "#E8E7E3"
+INK, MUTED, RULE, BRASS = "#1B1D21", "#62656B", "#D0CEC8", "#A8834A"
 HEAD_TOP = 8  # mm: the letterhead's line, from the page's top edge
 FOOT_FROM_BOTTOM = 10  # mm: the footer's line, from the page's bottom edge
 TOP = 24  # mm: where a page's text starts, under the letterhead
 BOTTOM = 18  # mm: where it stops, over the footer
 LETTERHEAD = 7.5  # pt
-STYLE = "rule"  # "rule" (A: a thin brass rule) or "band" (B: a tinted band): the owner's pick
 
 
 class _Sheet(FPDF):
@@ -68,29 +82,39 @@ class _Sheet(FPDF):
         top, bottom = (TOP, BOTTOM) if letterhead else (MARGIN, MARGIN)
         self.set_margins(MARGIN, top, MARGIN)
         self.set_auto_page_break(auto=True, margin=bottom)
-        self.add_font(FAMILY, "", FONTS / "DejaVuSans.ttf")
-        self.add_font(FAMILY, "B", FONTS / "DejaVuSans-Bold.ttf")
-        regular, bold = self.fonts[FAMILY], self.fonts[f"{FAMILY}B"]
-        assert isinstance(regular, TTFFont) and isinstance(bold, TTFFont)
-        self._glyphs = set(regular.cmap) & set(bold.cmap)  # drawn in either weight
+        for (family, style), file in _FILES.items():
+            self.add_font(family, style, FONTS / file)
+        self.set_fallback_fonts([FALLBACK])
+        # Drawn: what every app font has, or what DejaVu has in either weight (the fallback).
+        maps = {key: font.cmap for key, font in self.fonts.items() if isinstance(font, TTFFont)}
+        fallback = set(maps[FALLBACK]) & set(maps[f"{FALLBACK}B"])
+        app = set.intersection(*(set(m) for k, m in maps.items() if not k.startswith(FALLBACK)))
+        self._glyphs = fallback | app
         self._notes = 0  # the long cells' notes so far, numbered through the document
 
     def header(self) -> None:
-        """The letterhead on each page: Vouch and the company, on a thin brass rule or a tinted
-        band (STYLE)."""
+        """The letterhead on each page (the owner's pick, option A, 2026-11-09): VOUCH as the app's
+        brand mark (Caslon capitals, a brass diamond after) and the company, over a thin brass
+        rule."""
         if not self.letterhead:
             return
-        company = self.letterhead[0]
-        if STYLE == "band":
-            self.set_fill_color(PAPER)
-            self.rect(0, 0, self.w, HEAD_TOP + 8, style="F")
-            self.set_fill_color(BRASS)
-            self.rect(0, HEAD_TOP + 8, self.w, 0.8, style="F")
-        self._letterhead_line(HEAD_TOP, "Vouch", company, bold=True)
-        if STYLE == "rule":
-            self.set_draw_color(BRASS)
-            self.set_line_width(0.5)
-            self.line(self.l_margin, HEAD_TOP + 6, self.w - self.r_margin, HEAD_TOP + 6)
+        width = self.w - self.l_margin - self.r_margin
+        self.set_xy(self.l_margin, HEAD_TOP)
+        self.font(LETTERHEAD + 3.5, family=DISPLAY)
+        self.set_char_spacing(1)
+        self.set_text_color(INK)
+        self.cell(text="VOUCH")
+        self.set_char_spacing(0)
+        x, y = self.get_x() + 1.8, HEAD_TOP + 1.6  # the diamond, as the app's .brand has it
+        self.set_fill_color(BRASS)
+        self.polygon([(x, y - 0.9), (x + 0.9, y), (x, y + 0.9), (x - 0.9, y)], style="F")
+        self.set_xy(self.l_margin + width / 2, HEAD_TOP)
+        self.font(LETTERHEAD)
+        self.set_text_color(MUTED)
+        self.cell(width / 2, 4, self.drawable(self.letterhead[0]), align="R")
+        self.set_draw_color(BRASS)
+        self.set_line_width(0.5)
+        self.line(self.l_margin, HEAD_TOP + 6, self.w - self.r_margin, HEAD_TOP + 6)
         self._reset()
         self.set_xy(self.l_margin, self.t_margin)  # the page's text starts under it
 
@@ -104,33 +128,39 @@ class _Sheet(FPDF):
         self.set_line_width(0.2)
         self.line(self.l_margin, y - 1.5, self.w - self.r_margin, y - 1.5)
         pages = page_of.format(page=self.page_no(), pages=self.str_alias_nb_pages)
-        self._letterhead_line(y, date, pages, bold=False)
-        self._reset()
-
-    def _letterhead_line(self, y: float, left: str, right: str, bold: bool) -> None:
         width = self.w - self.l_margin - self.r_margin
         self.set_xy(self.l_margin, y)
-        self.font(LETTERHEAD + (1 if bold else 0), bold)
-        self.set_text_color(INK)
-        self.cell(width / 2, 4, self.drawable(left), align="L")
         self.font(LETTERHEAD)
+        self.set_text_color(INK)
+        self.cell(width / 2, 4, self.drawable(date), align="L")
         self.set_text_color(MUTED)
-        self.cell(width / 2, 4, self.drawable(right), align="R")
+        self.cell(width / 2, 4, self.drawable(pages), align="R")
+        self._reset()
 
     def _reset(self) -> None:
         self.set_text_color(0)
         self.set_draw_color(0)
+        self.set_fill_color(255)
         self.set_line_width(0.2)
 
     def drawable(self, text: object) -> str:
         """The text without the characters the font lacks; line breaks kept."""
         return "".join(c for c in str(text) if c == "\n" or ord(c) in self._glyphs)
 
-    def font(self, size: float, bold: bool = False) -> None:
-        self.set_font(FAMILY, "B" if bold else "", size)
+    def font(self, size: float, bold: bool = False, family: str = SANS) -> None:
+        """`family` in `size`: Manrope by default; its bold where it has one; quotes italic."""
+        style = "I" if family == QUOTE else "B" if bold and (family, "B") in _FILES else ""
+        self.set_font(family, style, size)
 
-    def paragraph(self, text: object, size: float = BODY, bold: bool = False, indent: float = 0):
-        self.font(size, bold)
+    def paragraph(
+        self,
+        text: object,
+        size: float = BODY,
+        bold: bool = False,
+        indent: float = 0,
+        family: str = SANS,
+    ) -> None:
+        self.font(size, bold, family)
         self.set_x(self.l_margin + indent)
         self.multi_cell(
             self.epw - indent,
@@ -142,11 +172,15 @@ class _Sheet(FPDF):
         )
 
     def heading(self, text: object, size: float) -> None:
-        """A heading, never alone at a page's foot: a page break first when little room is left."""
+        """A heading, never alone at a page's foot: a page break first when little room is left.
+        A section's in Caslon capitals, as the app's h2; a smaller one in bold Manrope."""
         if self.y + KEEP_WITH_NEXT > self.page_break_trigger:
             self.add_page()
         self.ln(size * 0.4)
-        self.paragraph(text, size, bold=True)
+        if size >= SECTION:
+            self.paragraph(str(text).upper(), size, family=DISPLAY)
+        else:
+            self.paragraph(text, size, bold=True)
         self.ln(1.5)
 
     def wrapped(self, text: object, width: float) -> list[str]:
@@ -184,14 +218,19 @@ class _Sheet(FPDF):
         body: Iterable[Sequence[object]],
         widths: Sequence[float],
         size: float = TABLE,
+        ids: Collection[int] = (),
     ) -> None:
         """A table: its header row on each page it runs onto, each cell's text wrapped, a long
-        cell's whole text after it as a note."""
-        self.font(size)
+        cell's whole text after it as a note. The columns numbered in `ids` hold ids, in Plex
+        Mono (their headers stay in Manrope)."""
         notes: list[tuple[int, str]] = []
-        cells = [
-            [self.cell_text(v, w, notes) for v, w in zip(r, widths, strict=True)] for r in body
-        ]
+        cells: list[list[str]] = []
+        for r in body:
+            cells.append([])
+            for i, (v, w) in enumerate(zip(r, widths, strict=True)):
+                self.font(size, family=MONO if i in ids else SANS)
+                cells[-1].append(self.cell_text(v, w, notes))
+        self.font(size)
         with self.table(
             col_widths=tuple(widths),
             headings_style=HEADINGS,
@@ -200,10 +239,10 @@ class _Sheet(FPDF):
             padding=CELL_PADDING,
             text_align="LEFT",
         ) as table:
-            for values in [list(columns), *cells]:
+            for n, values in enumerate([list(columns), *cells]):
                 row = table.row()
-                for value in values:
-                    row.cell(value)
+                for i, value in enumerate(values):
+                    row.cell(value, style=IDS if n and i in ids else None)
         self.ln(2)
         self.notes(notes, size)
 
@@ -225,7 +264,7 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     sheet.set_creator("Vouch")
     sheet.add_page()
 
-    sheet.paragraph(words["title"], TITLE, bold=True)
+    sheet.paragraph(str(words["title"]).upper(), TITLE, family=DISPLAY)
     sheet.ln(2)
     _head(sheet, report["head"], words)
 
@@ -242,7 +281,12 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     sheet.heading(labels["remediation"], SECTION)
     for group in report["remediation"]:
         sheet.heading(f"{group['control_id']} {group['question']}", SUBSECTION)
-        sheet.grid(rows.remediation_columns(words), rows.remediation_rows(group), (24, 94, 38, 24))
+        sheet.grid(
+            rows.remediation_columns(words),
+            rows.remediation_rows(group),
+            (24, 94, 38, 24),
+            ids=[0],
+        )
     if not report["remediation"]:
         sheet.paragraph(sentences["no_remediation"])
 
@@ -263,7 +307,7 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
         head, body, widths = trail_table(
             sheet, rows.trail_columns(words), rows.trail_rows(entries, words)
         )
-        sheet.grid(head, body, widths, TRAIL)
+        sheet.grid(head, body, widths, TRAIL, TRAIL_IDS)
     else:
         sheet.heading(labels["trail"], SECTION)
         sheet.paragraph(sentences["no_trail"])
@@ -275,6 +319,7 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
     return bytes(sheet.output())
 
 
+TRAIL_IDS = (2, 3, 8, 9, 10)  # the trail's control, requirement, evidence, model, prompt version
 _PIECE = re.compile(r"[^\s/-]*[/-]?")  # a piece of an id: up to and with a "-" or "/"
 # A zero-width space after an id's "-" or "/": where fpdf2 may break a line inside it. Only when
 # whole ids don't fit (it stays in the PDF's text where no line breaks; the Markdown never has it).
@@ -328,16 +373,20 @@ def _pieces(text: str) -> list[str]:
     return _PIECE.findall(text.replace(BREAK, ""))
 
 
-def _width(sheet: _Sheet, text: str, bold: bool) -> float:
-    """The cell width `text` fits on one line of, in the trail's font: the measure
+def _width(sheet: _Sheet, text: str, family: str, bold: bool) -> float:
+    """The cell width `text` fits on one line of, in the trail's size: the measure
     `_Sheet.wrapped` makes, plus a hair for rounding."""
-    sheet.font(TRAIL, bold)
+    sheet.font(TRAIL, bold, family)
     return sheet.get_string_width(sheet.drawable(text)) + 2 * CELL_PADDING + CELL_SLACK + 0.1
 
 
-def _columns(head: list[str], rows: list[list[str]]) -> list[list[tuple[str, bool]]]:
-    """The table by column: each column's header (bold) and then its cells."""
-    return [[(c, True)] + [(r[i], False) for r in rows] for i, c in enumerate(head)]
+def _columns(head: list[str], rows: list[list[str]]) -> list[list[tuple[str, str, bool]]]:
+    """The table by column: each column's header (bold Manrope) and then its cells, as (text,
+    family, bold), an id column's in Plex Mono."""
+    return [
+        [(c, SANS, True)] + [(r[i], MONO if i in TRAIL_IDS else SANS, False) for r in rows]
+        for i, c in enumerate(head)
+    ]
 
 
 def _least(
@@ -345,7 +394,10 @@ def _least(
 ) -> list[float]:
     """Each column's least width: its widest part."""
     return [
-        max([_width(sheet, p, bold) for text, bold in col for p in parts(text) if p], default=0)
+        max(
+            [_width(sheet, p, f, bold) for text, f, bold in col for p in parts(text) if p],
+            default=0,
+        )
         for col in _columns(head, rows)
     ]
 
@@ -357,7 +409,7 @@ def _shared(
     wants on one line, and anything left after that evenly."""
     spare = max(sheet.epw - sum(least), 0)
     whole = [
-        max(_width(sheet, " ".join(t.replace(BREAK, "").split()), b) for t, b in col)
+        max(_width(sheet, " ".join(t.replace(BREAK, "").split()), f, b) for t, f, b in col)
         for col in _columns(head, rows)
     ]
     wants = [max(w - m, 0) for w, m in zip(whole, least, strict=True)]
@@ -394,10 +446,10 @@ def _head(sheet: _Sheet, head: Mapping[str, Any], words: Mapping[str, Any]) -> N
 def _controls(sheet: _Sheet, controls: list[Mapping[str, Any]], words: Mapping[str, Any]) -> None:
     """The controls table, then each accepted control's quotes under a heading of its own."""
     widths = (18, 58, 20, 34, 30, 20)
-    sheet.grid(rows.control_columns(words), rows.control_rows(controls, words), widths)
+    sheet.grid(rows.control_columns(words), rows.control_rows(controls, words), widths, ids=[0])
     for c in rows.quoted(controls):
         sheet.heading(f"{words['labels']['quotes']} {c['id']}", SUBSECTION)
         for q in c["quotes"]:
-            sheet.paragraph(q["quote"], indent=5)  # line by line as written
-            sheet.paragraph(f"— {rows.quote_source(q, words)}", TABLE, indent=5)
+            sheet.paragraph(q["quote"], indent=5, family=QUOTE)  # line by line as written
+            sheet.paragraph(f"— {rows.quote_source(q, words)}", TABLE, indent=5, family=MONO)
             sheet.ln(2)

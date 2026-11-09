@@ -946,7 +946,7 @@ def pdf_pages(data: bytes) -> list[str]:
     the letterhead and footer (#352) left out, the first and last lines fpdf2 draws on a page."""
     pages = []
     for lines in _page_lines(data):
-        assert lines[0].startswith("Vouch"), lines[0]  # the letterhead, drawn first
+        assert lines[0].startswith("VOUCH"), lines[0]  # the letterhead, drawn first
         pages.append(" ".join(" ".join(lines[1:-1]).split()))
     return pages
 
@@ -972,7 +972,7 @@ def test_the_pdf_export_is_a_pdf_attachment_named_for_the_profile_and_the_day(us
         "filename*=UTF-8''readiness-report-alpenwerk-2026-11-06.pdf"
     )
     assert response.content.startswith(b"%PDF-")
-    assert pdf_text(response.content).startswith("Bereitschaftsbericht")
+    assert pdf_text(response.content).startswith("BEREITSCHAFTSBERICHT")
 
 
 def test_a_note_with_an_emoji_still_gives_the_pdf(users):
