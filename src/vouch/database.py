@@ -21,12 +21,14 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
 limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39) and
-the remediation items the lead decided on (#43); nothing else does. Before it has run, a setting
-reads as unset, and a write, a count, the usage, a review or a remediation decision is
-DatabaseUnavailable (a 503).
+the remediation items the lead decided on (#43) and each profile's Goal (#369); nothing else
+does. Before it has run, a setting reads as unset and a Goal as Audit readiness, and a write, a
+count, the usage, a review, a remediation decision or a Goal change is DatabaseUnavailable (a
+503).
 """
 
 import hashlib
+import json
 import logging
 import sys
 import threading
@@ -109,8 +111,11 @@ CREATE_USAGE = (
 
 AUDIT_TABLE = "vouch_audit_trail"
 """Every reviewed verdict and override (vouch.audit), append-only, in its decision's transaction."""
-AuditAction = Literal["accept", "reject", "override", "confirm", "approve", "discard"]
-"""What an audit entry records the compliance lead doing (vouch.audit's Action)."""
+AuditAction = Literal["accept", "reject", "override", "confirm", "approve", "discard", "goal"]
+"""What an audit entry records the compliance lead doing (vouch.audit's Action): `goal` is a
+change of the profile's Goal (#369)."""
+Goal = Literal["audit-readiness", "internal-improvement"]
+"""What a compliance profile is used for (#369, vouch.goal): kept per user and profile."""
 AUDIT_COLUMNS = (
     "user_id",
     "reviewer_name",
@@ -126,6 +131,8 @@ AUDIT_COLUMNS = (
     "evidence",
     "model",
     "prompt_version",
+    "goal_before",
+    "goal_after",
 )
 CREATE_AUDIT = (
     f"CREATE TABLE IF NOT EXISTS {AUDIT_TABLE} (id bigserial PRIMARY KEY, "
@@ -134,7 +141,8 @@ CREATE_AUDIT = (
     "control_id text NOT NULL, thread_id text NOT NULL, action text NOT NULL "
     f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})), "
     "requirement_id text, note text NOT NULL, verdict_before text, verdict_after text, "
-    "evidence jsonb NOT NULL, model text NOT NULL, prompt_version text NOT NULL)"
+    "evidence jsonb NOT NULL, model text NOT NULL, prompt_version text NOT NULL, "
+    "goal_before text, goal_after text)"
 )
 CREATE_AUDIT_INDEX = (
     f"CREATE INDEX IF NOT EXISTS {AUDIT_TABLE}_by_owner ON {AUDIT_TABLE} "
@@ -171,6 +179,13 @@ ADD_AUDIT_REVIEWER_NAME = (
 the name then). One statement, so one transaction: the guard is off only inside it, for this
 one fill, and no other session sees it off. Runs after CREATE_AUDIT_TRIGGERS, so the trigger
 it lifts is there."""
+ADD_AUDIT_GOAL_COLUMNS = (
+    f"ALTER TABLE {AUDIT_TABLE} ADD COLUMN IF NOT EXISTS goal_before text, "
+    "ADD COLUMN IF NOT EXISTS goal_after text"
+)
+"""A trail made before #369 gains the goal columns, nullable: every row keeps them empty, so
+none is rewritten and the append-only guard stays on (an ALTER fires no row trigger). Once
+they are there, a second run does nothing."""
 AUDIT_ACTION_CHECK = f"{AUDIT_TABLE}_action_check"
 """The name Postgres gave CREATE_AUDIT's action CHECK (table, column, "check")."""
 REPLACE_AUDIT_ACTION_CHECK = (
@@ -185,7 +200,7 @@ REPLACE_AUDIT_ACTION_CHECK = (
     f"CHECK (action IN ({', '.join(repr(a) for a in get_args(AuditAction))})); "
     "END IF; END $$"
 )
-"""A trail made before an action was added (`confirm`, #372) has a CHECK refusing it: replaced
+"""A trail made before an action was added (`confirm`, #372; `goal`, #369) has a CHECK refusing it: replaced
 by one naming every AuditAction. No row is changed (the trail's guard is on update and delete,
 which an ALTER doesn't fire), and once the CHECK names them all, a second run does nothing."""
 REMEDIATION_TABLE = "vouch_remediation_items"
@@ -226,6 +241,15 @@ CREATE_REMEDIATION_TRIGGERS = (
 )
 """A decision is kept as made, as its audit entry is: the table refuses an update, a delete or
 a truncate, whoever asks."""
+GOALS_TABLE = "vouch_profile_goals"
+"""Each user's Goal under each compliance profile (vouch.goal, #369), the latest change; none
+kept is Audit readiness. Written in its audit entry's transaction."""
+CREATE_GOALS = (
+    f"CREATE TABLE IF NOT EXISTS {GOALS_TABLE} (user_id text NOT NULL, "
+    "profile_id text NOT NULL, goal text NOT NULL "
+    f"CHECK (goal IN ({', '.join(repr(g) for g in get_args(Goal))})), "
+    "changed_at timestamptz NOT NULL, PRIMARY KEY (user_id, profile_id))"
+)
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -246,6 +270,7 @@ SETUP_TABLES = (
     USAGE_TABLE,
     AUDIT_TABLE,
     REMEDIATION_TABLE,
+    GOALS_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -671,6 +696,58 @@ class Database:
                 log.error("no %s table: run vouch-db-setup on this database", REMEDIATION_TABLE)
                 return []
 
+    def profile_goal(self, user_id: str, profile_id: str) -> Goal | None:
+        """The user's Goal under the profile; None when none was ever changed, or before
+        vouch-db-setup made the table (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                row = conn.execute(
+                    f"SELECT goal FROM {GOALS_TABLE} WHERE user_id = %s AND profile_id = %s",
+                    (user_id, profile_id),
+                ).fetchone()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", GOALS_TABLE)
+                return None
+        return row["goal"] if row else None
+
+    def change_goal(
+        self,
+        user_id: str,
+        profile_id: str,
+        goal: Goal,
+        default: Goal,
+        changed_at: datetime,
+        entry: Callable[[Goal], Mapping[str, Any]],
+    ) -> bool:
+        """Keep `goal` as the user's under the profile with its audit entry (`entry` of the goal
+        before: a mapping of AUDIT_COLUMNS), in one transaction: both, or neither. The goal
+        stored already (`default` when none is) writes nothing: False. Two changes at once take
+        turns on the user's and profile's lock, so each real change writes one entry. Raises
+        DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
+        tables = f"{GOALS_TABLE} or {AUDIT_TABLE}"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            conn.execute(DECIDE_LOCK, (lock_id(json.dumps(["goal", user_id, profile_id])),))
+            row = conn.execute(
+                f"SELECT goal FROM {GOALS_TABLE} WHERE user_id = %s AND profile_id = %s",
+                (user_id, profile_id),
+            ).fetchone()
+            before: Goal = row["goal"] if row else default
+            if before == goal:
+                return False
+            conn.execute(
+                f"INSERT INTO {GOALS_TABLE} (user_id, profile_id, goal, changed_at) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (user_id, profile_id) DO UPDATE "
+                "SET goal = EXCLUDED.goal, changed_at = EXCLUDED.changed_at",
+                (user_id, profile_id, goal, changed_at),
+            )
+            _insert_audit(conn, [entry(before)])
+        return True
+
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[dict[str, Any]]:
@@ -714,11 +791,13 @@ class Database:
                 for trigger in CREATE_AUDIT_TRIGGERS:
                     conn.execute(trigger)
                 conn.execute(ADD_AUDIT_REVIEWER_NAME)
+                conn.execute(ADD_AUDIT_GOAL_COLUMNS)
                 conn.execute(REPLACE_AUDIT_ACTION_CHECK)
                 conn.execute(CREATE_REMEDIATION)
                 conn.execute(CREATE_REMEDIATION_GUARD)
                 for trigger in CREATE_REMEDIATION_TRIGGERS:
                     conn.execute(trigger)
+                conn.execute(CREATE_GOALS)
         finally:
             conn.close()
 

@@ -32,7 +32,8 @@ const ENGLISH: ReportWords = {
     'not-applicable': 'Not applicable' },
   statuses: { accepted: 'Accepted', open: 'Open' },
   actions: { accept: 'Accepted', reject: 'Rejected', override: 'Overridden',
-    confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded' },
+    confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded', goal: 'Goal changed from {before} to {after}' },
+  goals: { 'audit-readiness': 'Audit readiness', 'internal-improvement': 'Internal improvement' },
   protection_levels: { normal: 'Normal', high: 'High', 'very high': 'Very high' },
   languages: { en: 'English', de: 'German' },
   sentences: {
@@ -52,7 +53,8 @@ const ENGLISH: ReportWords = {
 const entry = (id: number, at: string, action: TrailEntry['action'], extra: Partial<TrailEntry> = {}): TrailEntry => ({
   id, at, reviewer_name: 'Local user', control_id: '4.1.2', requirement_id: null, action, note: '',
   verdict_before: 'partly-evidenced', verdict_after: 'partly-evidenced',
-  evidence: [{ doc_id: 'authentication-standard', version: '3' }], model: 'fake', prompt_version: '7', ...extra,
+  evidence: [{ doc_id: 'authentication-standard', version: '3' }], model: 'fake', prompt_version: '7',
+  goal_before: null, goal_after: null, ...extra,
 })
 
 /** Nordlicht's report with 4.1.2 accepted (one stale quote, one current) and the rest open. */
@@ -233,6 +235,35 @@ describe('The readiness report', () => {
       words.actions.reject, words.sentences.open_control, '~1 of 12 controls accepted~']) {
       expect(within(report).getAllByText(word).length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('A goal change in the trail (ticket 369)', () => {
+  /** A goal change's entry, as `vouch.goal.goal_entry` writes it: no control, verdict, evidence, model or prompt. */
+  const goalChange = entry(3, '2026-11-06T14:10:00+00:00', 'goal', { control_id: '', verdict_before: null,
+    verdict_after: null, evidence: [], model: '', prompt_version: '', goal_before: 'audit-readiness',
+    goal_after: 'internal-improvement' })
+
+  it('shows the change filled in as its action, its control cells empty', async () => {
+    serve({ ...REPORT, trail: { entries: [goalChange, ...REPORT.trail.entries], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    const trail = within(report).getByRole('table', { name: 'Audit trail' })
+    const [, change] = within(trail).getAllByRole('row')
+    const cells = within(change).getAllByRole('cell').map((c) => c.textContent)
+    expect(cells).toEqual(['2026-11-06 14:10 UTC', 'Local user', '', '',
+      'Goal changed from Audit readiness to Internal improvement', '', '', '', '', '', ''])
+  })
+
+  it('fills it from the served words', async () => {
+    const words: ReportWords = { ...ENGLISH, actions: { ...ENGLISH.actions, goal: 'Ziel geändert von {before} zu {after}' },
+      goals: { 'audit-readiness': 'Audit-Bereitschaft', 'internal-improvement': 'Interner Verbesserung' } }
+    serve({ ...REPORT, words, trail: { entries: [goalChange], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    expect(within(report).getByText('Ziel geändert von Audit-Bereitschaft zu Interner Verbesserung')).toBeTruthy()
   })
 })
 

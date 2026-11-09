@@ -2,7 +2,8 @@
 
 One entry per action of the compliance lead: the findings confirmed and each override with
 them (the review's first step, #372), the review's accept or reject, and each remediation item
-approved or discarded (vouch.remediation, #43). An entry says
+approved or discarded (vouch.remediation, #43), and each change of the profile's Goal
+(vouch.goal, #369, with the goal before and after). An entry says
 who, when, under which profile, on which control (and requirement), the note, the verdict
 before and after, the versions of the evidence documents it rests on, and the model and prompt
 version of the run, read from the assessment's thread, never assumed.
@@ -31,7 +32,7 @@ from typing import Any, Protocol
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from vouch import graph
-from vouch.database import AuditAction, Database, ReviewInProgress
+from vouch.database import AuditAction, Database, Goal, ReviewInProgress
 from vouch.graph import (
     NO_DRAFTS,
     WAITING,
@@ -86,6 +87,10 @@ class AuditEntry:
     evidence: tuple[EvidenceVersion, ...]
     model: str
     prompt_version: str
+    goal_before: Goal | None = None
+    goal_after: Goal | None = None
+    """A change of the profile's Goal (`goal`, #369): the goal before and after; None on every
+    other entry."""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

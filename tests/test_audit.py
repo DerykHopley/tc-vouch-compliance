@@ -98,6 +98,8 @@ def test_confirm_findings_with_one_override_writes_it_then_confirm_and_accept_wr
         "evidence": AUTH_STANDARD,
         "model": reviewed["model"],  # the thread's own, as the run recorded them
         "prompt_version": reviewed["prompt_version"],
+        "goal_before": None,  # a goal change's only (#369)
+        "goal_after": None,
     }
     confirm_entry, override = after_confirm  # newest first: the override, then the confirm
     assert entries[1:] == after_confirm
@@ -609,3 +611,80 @@ def test_setup_adds_the_name_to_an_existing_trail_keeping_its_rows_and_its_guard
             (AUDIT_TABLE,),
         ).fetchone()
     assert nullable == {"is_nullable": "NO"}
+
+
+# The table as #372's vouch-db-setup made it: `confirm` in its CHECK, no goal columns (#369).
+CREATE_AUDIT_BEFORE_369 = (
+    f"CREATE TABLE {AUDIT_TABLE} (id bigserial PRIMARY KEY, "
+    "user_id text NOT NULL, reviewer_name text NOT NULL, at timestamptz NOT NULL, "
+    "profile_id text NOT NULL, control_id text NOT NULL, thread_id text NOT NULL, "
+    "action text NOT NULL "
+    "CHECK (action IN ('accept', 'reject', 'override', 'confirm', 'approve', 'discard')), "
+    "requirement_id text, note text NOT NULL, verdict_before text, verdict_after text, "
+    "evidence jsonb NOT NULL, model text NOT NULL, prompt_version text NOT NULL)"
+)
+
+
+def _audit_table_shape(db: Any) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+    """The trail's columns and constraints as the catalogue has them: what a second setup run
+    must leave alone."""
+    with db.connection() as conn:
+        columns = conn.execute(
+            "SELECT column_name, is_nullable FROM information_schema.columns "
+            "WHERE table_name = %s ORDER BY ordinal_position",
+            (AUDIT_TABLE,),
+        ).fetchall()
+        constraints = conn.execute(
+            "SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint "
+            "WHERE conrelid = %s::regclass ORDER BY conname",
+            (AUDIT_TABLE,),
+        ).fetchall()
+    return [tuple(r.values()) for r in columns], [tuple(r.values()) for r in constraints]
+
+
+@needs_postgres
+def test_setup_lets_a_trail_made_before_369_keep_a_goal_and_changes_nothing_on_a_second_run(
+    request, users
+):
+    alice, _ = users
+    db = request.getfixturevalue("empty_database")  # not set up: made as #372's setup made it
+    with db.connection() as conn:
+        conn.execute(CREATE_AUDIT_BEFORE_369)
+        conn.execute(CREATE_AUDIT_GUARD)
+        for trigger in CREATE_AUDIT_TRIGGERS:
+            conn.execute(trigger)
+        conn.execute(
+            f"INSERT INTO {AUDIT_TABLE} (user_id, reviewer_name, at, profile_id, control_id, "
+            "thread_id, action, note, evidence, model, prompt_version) VALUES (%s, 'Dana', "
+            "now() - interval '1 day', %s, '4.1.2', 't-old', 'confirm', 'Before #369.', '[]', "
+            "'fake', 'v1')",
+            (alice["X-Test-User"], DEFAULT_PROFILE),
+        )
+
+    db.setup()
+    shape = _audit_table_shape(db)
+    db.setup()  # safe to run again: nothing changes
+    assert _audit_table_shape(db) == shape
+    assert ("goal_before", "YES") in shape[0] and ("goal_after", "YES") in shape[0]
+    with TestClient(app_on(db.url)) as client:
+        changed = client.put("/api/goal", json={"goal": "internal-improvement"}, headers=alice)
+        entries = trail(client, alice)
+
+    assert changed.status_code == 200, changed.text
+    assert [(e["action"], e["note"], e["goal_before"], e["goal_after"]) for e in entries] == [
+        ("goal", "", "audit-readiness", "internal-improvement"),
+        ("confirm", "Before #369.", None, None),  # the old row kept as it was
+    ]
+    refused = []
+    for statement in (
+        f"UPDATE {AUDIT_TABLE} SET goal_after = 'audit-readiness'",
+        f"DELETE FROM {AUDIT_TABLE}",
+        f"TRUNCATE {AUDIT_TABLE}",
+    ):
+        with (
+            db.connection() as conn,
+            pytest.raises(psycopg.errors.RaiseException) as error,
+        ):
+            conn.execute(statement)
+        refused.append("append-only" in str(error.value))
+    assert refused == [True, True, True]

@@ -3,7 +3,7 @@ import type { Verdict } from './assessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
 import Prose from './Prose.tsx'
-import { exportReport, fetchReport, olderEntries, type ReadinessReport, type ReportFormat, type ReportControl, type ReportWords, type TrailEntry }
+import { actionWord, exportReport, fetchReport, olderEntries, type ReadinessReport, type ReportFormat, type ReportControl, type ReportWords, type TrailEntry }
   from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -307,7 +307,7 @@ function Trail({ report: { trail, words } }: { report: ReadinessReport }) {
                   <td>{e.reviewer_name}</td>
                   <td className="mono">{e.control_id}</td>
                   <td className="mono">{e.requirement_id ?? ''}</td>
-                  <td><span data-word>{words.actions[e.action]}</span></td>
+                  <td><span data-word>{actionWord(e, words)}</span></td>
                   <td>{verdict(e.verdict_before)}</td>
                   <td>{verdict(e.verdict_after)}</td>
                   <td className="report-q">{e.note}</td>

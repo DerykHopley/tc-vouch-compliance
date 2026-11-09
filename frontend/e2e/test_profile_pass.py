@@ -96,6 +96,7 @@ def fits(page: Page) -> None:
             assert not scrolls_sideways(page), f"the Dossier scrolls sideways at {width}px, {theme}"
             assert small_targets(page) == [], (width, theme)
     hero = page.locator(".hero")
-    hero.get_by_role("button").first.focus()
+    # The next step: the hero's first button in its row (Change goal, on the goal line above it, comes first, #369).
+    hero.locator(".next").get_by_role("button").first.focus()
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Run a profile pass")).to_be_focused()

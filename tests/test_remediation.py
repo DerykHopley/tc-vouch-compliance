@@ -162,6 +162,8 @@ def test_approve_keeps_the_item_with_the_leads_owner_and_date_and_writes_one_ent
         "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],  # S1's quotes
         "model": reviewed["model"],
         "prompt_version": reviewed["prompt_version"],
+        "goal_before": None,  # a goal change's only (#369)
+        "goal_after": None,
     }
 
 
