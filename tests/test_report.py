@@ -937,9 +937,24 @@ def test_the_export_counts_one_remediation_item_in_the_singular(lang, one, many)
 # --- The PDF export (#308): the same report, built with fpdf2 (vouch.report_pdf) --------------
 
 
+def _page_lines(data: bytes) -> list[list[str]]:
+    return [page.extract_text().splitlines() for page in PdfReader(BytesIO(data)).pages]
+
+
 def pdf_pages(data: bytes) -> list[str]:
-    """Each page's text, read back with pypdf, its whitespace collapsed to single spaces."""
-    return [" ".join(page.extract_text().split()) for page in PdfReader(BytesIO(data)).pages]
+    """Each page's body text, read back with pypdf, its whitespace collapsed to single spaces:
+    the letterhead and footer (#352) left out, the first and last lines fpdf2 draws on a page."""
+    pages = []
+    for lines in _page_lines(data):
+        assert lines[0].startswith("VOUCH"), lines[0]  # the letterhead, drawn first
+        assert re.search(r"\d+ (of|von) \d+$", lines[-1]), lines[-1]  # the footer, drawn last
+        pages.append(" ".join(" ".join(lines[1:-1]).split()))
+    return pages
+
+
+def pdf_letterheads(data: bytes) -> list[tuple[str, str]]:
+    """Each page's letterhead and footer line (#352), whitespace collapsed."""
+    return [(" ".join(ls[0].split()), " ".join(ls[-1].split())) for ls in _page_lines(data)]
 
 
 def pdf_text(data: bytes) -> str:
@@ -958,7 +973,7 @@ def test_the_pdf_export_is_a_pdf_attachment_named_for_the_profile_and_the_day(us
         "filename*=UTF-8''readiness-report-alpenwerk-2026-11-06.pdf"
     )
     assert response.content.startswith(b"%PDF-")
-    assert pdf_text(response.content).startswith("Bereitschaftsbericht")
+    assert pdf_text(response.content).startswith("BEREITSCHAFTSBERICHT")
 
 
 def test_a_note_with_an_emoji_still_gives_the_pdf(users):
