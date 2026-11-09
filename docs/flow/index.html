@@ -129,6 +129,10 @@ svg.playing .wg { opacity: .32; }
 svg .cg.hot .card { stroke-width: 3.2; filter: drop-shadow(0 0 6px var(--c)); }
 svg .enter { animation: enter .45s ease backwards; }
 @keyframes enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+svg .loop { fill: none; stroke: var(--navy); stroke-width: 1.6; stroke-dasharray: 7 5; }
+svg .loop-b { fill: var(--navy); }
+svg .loop-t { fill: var(--sheet); font: 500 10.5px var(--f-mono); letter-spacing: .04em; }
+.sw.loop { border-color: var(--navy); border-style: dashed; background: none; }
 svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
 @media (prefers-reduced-motion: reduce) { svg .enter { animation: none; } svg .cg, svg .wg { transition: none; } }
 </style>
@@ -141,6 +145,8 @@ svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
   <p class="lede">One VDA ISA control, from the lead's click to a reviewed verdict and the readiness report:
   each step, the technology it runs on, where LangGraph and LangChain come in, which guard checks what,
   and when Postgres is written.</p>
+  <p class="note"><strong>Two agent layers.</strong> The chat is a ReAct agent that answers questions and starts assessments;
+  an assessment is a fixed LangGraph graph with a ReAct step inside it (docs/requirements.md, Decisions, 2026-11-03).</p>
   <button class="theme" type="button" id="theme">switch light / dark</button>
 </header>
 
@@ -163,12 +169,17 @@ svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
 <p class="note">Read left to right. Cards marked <span class="chip" style="--c: var(--c-external)">⇡ model</span>
 call the model through LangChain; an orange <code style="color: var(--c-state)">▾ writes</code> line names the table a step writes;
 the lane at the foot says what each store holds and when it is written. A diamond starts a conditional edge:
-the graph takes one of its edges, by the state.</p>
+the graph takes one of its edges, by the state.
+The dashed <span class="chip" style="--c: var(--navy)">⟲ ReAct loop</span> outline marks <code>gather ⇄ tools</code>: hand-built from LangGraph
+nodes and edges, not <code>create_react_agent</code>, so guards sit inside the loop: every tool call checked against the allow-list,
+the 12-call budget on the model, and <code>check_answer</code>, which can send the draft back to <code>gather</code>.</p>
 <div class="scroll"><svg id="main" role="img" aria-label="Process flow of one Vouch assessment"></svg></div>
 
 <h2>2 · Ask Vouch, the chat</h2>
 <p class="note">The chat is a second, smaller LangGraph graph with its own tools. It never writes or reviews a verdict:
-asked to sign off, it links the working paper. Its <code>start_assessment</code> tool runs diagram 1's graph.</p>
+asked to sign off, it links the working paper. Its <code>start_assessment</code> tool runs diagram 1's graph.
+<code>agent ⇄ tools</code> is the same kind of hand-built ReAct loop, on <code>model.bind_tools(CHAT_TOOLS)</code> within the same call budget;
+the <code>answer</code> guard checks every reply and can send it back to <code>agent</code>.</p>
 <div class="scroll"><svg id="chat" role="img" aria-label="Process flow of one Ask Vouch chat turn"></svg></div>
 
 <ul class="legend" id="legend"></ul>
@@ -323,6 +334,8 @@ const MAIN = {
         body: "The developer's model choice and the daily limit." },
     ],
   },
+  loops: [{ ids: ["gather", "tools"], stage: 2,
+    note: "ReAct loop, hand-built from LangGraph nodes and edges (not create_react_agent): gather asks for tools or submit_answer, tools runs them behind the allow-list, the model is capped at 12 calls, and check_answer can send the draft back to gather." }],
   // `ids`: what a drawn route needs open. Arrows between stages land on a closed stage's summary.
   arrows: [
     { from: "browser", to: "api", label: "control id\nBearer token" },
@@ -433,6 +446,8 @@ const CHAT = {
         tech: "vouch.redaction" },
     ] },
   ],
+  loops: [{ ids: ["c-agent", "c-tools"],
+    note: "ReAct loop, hand-built from LangGraph nodes and edges (not create_react_agent): agent answers or calls CHAT_TOOLS, tools runs them, and the answer guard can send the reply back to agent." }],
   arrows: [
     { from: "c-browser", to: "c-api", label: "message + page" },
     { from: "c-api", fs: "r", to: "c-agent", ts: "l", label: "message\nthread id", lp: (g) => [(g["c-api"].x + g["c-api"].w + g["c-agent"].x) / 2, g["c-api"].cy] },
@@ -688,6 +703,29 @@ function draw(svg, spec, view = null, fresh = new Set()) {
     if (fk !== a.from || tk !== a.to) { if (seen.has(key)) continue; seen.add(key); }
     drawArrow(wires, labels, fk !== a.from || tk !== a.to ? { ...a, fo: 0, lp: null } : a, geo, f, t);
   }
+  // ReAct loops: a dashed outline round their nodes, badged; on a closed stage, a badge on its summary.
+  for (const loop of spec.loops || []) {
+    const boxes = loop.ids.map((id) => geo[id]);
+    let bx, by, text;
+    if (boxes.every(Boolean)) {
+      const x0 = Math.min(...boxes.map((b) => b.x)) - 9, x1 = Math.max(...boxes.map((b) => b.x + b.w)) + 9;
+      const y0 = Math.min(...boxes.map((b) => b.y)) - 20, y1 = Math.max(...boxes.map((b) => b.y + b.h)) + 6;
+      const g = el(back, "g");
+      el(g, "title", {}, loop.note);
+      el(g, "rect", { class: "loop", x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 14 });
+      text = "⟲ ReAct loop · hand-built";
+      bx = (x0 + x1) / 2 - (width(text, F.tag) + 16) / 2; by = y1;
+    } else if (loop.stage !== undefined && geo["sum" + loop.stage]) {
+      const sb = geo["sum" + loop.stage];
+      text = "⟲ REACT LOOP INSIDE";
+      bx = sb.x + 14; by = sb.y;
+    } else continue;
+    const bw = width(text, F.tag) + text.length * 0.4 + 16;
+    const g = el(labels, "g");
+    el(g, "title", {}, loop.note);
+    el(g, "rect", { class: "loop-b", x: bx, y: by - 10, width: bw, height: 20, rx: 10 });
+    el(g, "text", { class: "loop-t", x: bx + bw / 2, y: by + 4, "text-anchor": "middle" }, text);
+  }
   const W = TOP * 2 + cols * (CW + GAP) - GAP;
   const H = y + TOP + (spec.lane ? 0 : 24);  // room for a route under the columns
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -704,6 +742,7 @@ function legend() {
   }
   ul.insertAdjacentHTML("beforeend",
     `<li><span class="chip" style="--c: var(--c-external)">⇡ model</span>a LangChain model call</li>` +
+    `<li><span class="sw loop"></span>ReAct: the model reasons, calls tools, reads the results, repeats until it answers.</li>` +
     `<li><span class="line"></span>flow</li><li><span class="line dashed"></span>loop back, or only sometimes</li>` +
     `<li><svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 L11 6 L6 11 L1 6 z" fill="var(--sheet)" stroke="var(--muted)" stroke-width="1.4"/></svg>conditional edge</li>`);
 }
