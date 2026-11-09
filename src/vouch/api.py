@@ -46,6 +46,7 @@ from vouch.chat_agent import (
     chat_prompt,
     chat_turn,
 )
+from vouch.citations import LeadStatement
 from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
@@ -453,6 +454,21 @@ def open_questions(db: AppDatabase) -> questions.OpenQuestions:
 OpenQuestions = Annotated[questions.OpenQuestions, Depends(open_questions)]
 
 
+def lead_statements(asked: OpenQuestions, memory: UserMemory) -> tuple[LeadStatement, ...]:
+    """The lead's statements under the profile (#422): their answered questions asked since the
+    fresh start, on any control. Questions that can't be read leave none, logged: a missing
+    statement can only lower a verdict, never raise it."""
+    try:
+        listed = asked.listed(memory.user_id, memory.profile_id)
+        return tuple(questions.lead_statements(questions.since(listed, memory.fresh_start())))
+    except DatabaseUnavailable:
+        log.warning("the open questions can't be read: assessing without the lead's statements")
+        return ()
+
+
+LeadStatements = Annotated[tuple[LeadStatement, ...], Depends(lead_statements)]
+
+
 def assessment_data(
     assessment: Assessment,
     decided: dict[remediation.Key, remediation.DecidedItem] | None = None,
@@ -581,9 +597,12 @@ def assessment_run(
     tools: Annotated[frozenset[str], Depends(profile_tools)],
     saver: Checkpointer,
     memory: UserMemory,
+    statements: LeadStatements,
 ) -> AssessmentRun:
-    """What the request's assessment runs on (vouch.runs.AssessmentRun), metered afresh."""
-    return AssessmentRun(models, chosen, tools, saver, UsageMeter(chosen), memory.scope)
+    """What the request's assessment runs on (vouch.runs.AssessmentRun), metered afresh, with
+    the lead's statements (#422)."""
+    meter = UsageMeter(chosen)
+    return AssessmentRun(models, chosen, tools, saver, meter, memory.scope, statements)
 
 
 def record_off_the_event_loop(
@@ -675,6 +694,7 @@ def create_profile_pass(
     memory: UserMemory,
     saver: Checkpointer,
     running: Running,
+    statements: LeadStatements,
 ) -> Any:
     """A profile pass (vouch.profile_pass, #371): every applicable control of the user's
     compliance profile not yet accepted, assessed in one guarded model run, each new assessment
@@ -713,6 +733,7 @@ def create_profile_pass(
             model,
             max_tokens=settings.profile_pass_tokens,
             count=count,
+            statements=statements,
         )
     except ProfilePassRefused as refusal:
         return JSONResponse(status_code=422, content={"detail": str(refusal), "fallback": FALLBACK})

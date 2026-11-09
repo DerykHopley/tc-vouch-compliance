@@ -133,6 +133,7 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
             "kind": "documented",
             "stale": False,
             "stale_because": None,
+            "lead_statement": False,
         }
     ]
     assessment = events[-1][1]["assessment"]

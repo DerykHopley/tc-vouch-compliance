@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from vouch.citations import occurs
+from vouch.citations import LEAD_STATEMENT, occurs
 from vouch.documents import CYCLE_MONTHS, NO_REVIEW_DATE
 
 
@@ -120,10 +120,20 @@ def language_refusal(found: str, expected: str) -> str:
     )
 
 
+LEAD_STATEMENT_WORDS = {"en": LEAD_STATEMENT, "de": "Aussage der Compliance-Leitung"}
+"""A lead statement's label per answer language (#422): its citation's section. "Leitung" alone
+would read as the company's management."""
+
+
+def lead_statement_label(code: str) -> str:
+    """The lead statement's label in the answer language `code`; English's for any other."""
+    return LEAD_STATEMENT_WORDS.get(code, LEAD_STATEMENT_WORDS["en"])
+
+
 @dataclass(frozen=True)
 class CapWords:
     """The stale-evidence cap's note in one answer language (#354): its lead-in, a stale
-    document, why it is stale, and the documented-only clause."""
+    document, why it is stale, the documented-only clause, and a lead statement (#422)."""
 
     capped: str
     stale: str  # {doc} and {because}
@@ -131,6 +141,7 @@ class CapWords:
     cycles: dict[str, str]
     no_review_date: str
     documented_only: str
+    lead_statement: str  # {doc}
 
 
 CAP_WORDS = {
@@ -141,6 +152,7 @@ CAP_WORDS = {
         cycles={cycle: cycle for cycle in CYCLE_MONTHS},
         no_review_date=NO_REVIEW_DATE,
         documented_only="it asks for something to be done, and only documented evidence shows it",
+        lead_statement="{doc} is the lead's statement, not a document",
     ),
     "de": CapWords(
         capped="Höchstens teilweise nachgewiesen:",
@@ -157,6 +169,7 @@ CAP_WORDS = {
             "die Anforderung verlangt, dass etwas getan wird, und nur dokumentierte Nachweise "
             "zeigen es"
         ),
+        lead_statement="{doc} ist eine Aussage der Compliance-Leitung, kein Dokument",
     ),
 }
 """The cap's words per answer language; any other language gets English's."""
@@ -166,10 +179,16 @@ _STALE_BECAUSE = re.compile(
 )
 
 
-def cap_note(stale: dict[str, str | None], documented_only: bool, code: str) -> str | None:
+def cap_note(
+    stale: dict[str, str | None],
+    documented_only: bool,
+    code: str,
+    statements: Iterable[str] = (),
+) -> str | None:
     """The cap's note in the answer language `code`: each stale document and why (`stale`, its
-    reason as vouch.documents gives it, in English), then the documented-only clause; None when
-    nothing caps it. A reason vouch.documents didn't write stays as it is."""
+    reason as vouch.documents gives it, in English), each lead statement cited (`statements`,
+    by id, #422), then the documented-only clause; None when nothing caps it. A reason
+    vouch.documents didn't write stays as it is."""
     words = CAP_WORDS.get(code, CAP_WORDS["en"])
     english = CAP_WORDS["en"]
 
@@ -183,6 +202,7 @@ def cap_note(stale: dict[str, str | None], documented_only: bool, code: str) -> 
         return words.because.format(approved=found["approved"], cycle=cycle, due=found["due"])
 
     why = [words.stale.format(doc=doc, because=because(text)) for doc, text in stale.items()]
+    why += [words.lead_statement.format(doc=doc) for doc in statements]
     if documented_only:
         why.append(words.documented_only)
     return f"{words.capped} {'; '.join(why)}." if why else None

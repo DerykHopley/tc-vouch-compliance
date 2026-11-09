@@ -15,12 +15,15 @@ every answer, reason and remediation draft (the whole reply asked for again once
 remediation items drafted as the agent drafts them. Each control's result is written onto a new
 thread of the assessment graph, up to its review interrupt, so it is read and reviewed like any
 agent run's.
+
+The lead's statements (#422, answers to open questions) are listed under their own control, as
+data, and checked against that control's citations only: one cited for another control is dropped.
 """
 
 import logging
 import math
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -29,11 +32,12 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
-from vouch.citations import QuoteChecker
+from vouch.citations import LeadStatement, QuoteChecker
 from vouch.documents import document_path, escaped, facts_of
 from vouch.front_matter import split_front_matter
 from vouch.graph import (
     GUARD,
+    LEAD_RULE,
     MAX_DUE_DAYS,
     Assessment,
     EvidencePassage,
@@ -57,13 +61,15 @@ from vouch.graph import (
     overlays_step,
     plural,
     remediation_drafts,
+    statement_passages,
+    statements_text,
     thread_config,
     to_remediate,
     verdict_changes,
 )
 from vouch.guards import DATA_RULE, as_data, flagged_steps
 from vouch.isa import IsaControl
-from vouch.language import language_name
+from vouch.language import language_name, lead_statement_label
 from vouch.memory import Memory, newest_by_control
 from vouch.profile import ComplianceProfile, ControlRequirements
 from vouch.search import passages_of
@@ -71,7 +77,7 @@ from vouch.settings import PROFILE_PASS_TOKENS
 
 log = logging.getLogger(__name__)
 
-PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-1"
+PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-2"  # the lead's statements (#422)
 """The version of the pass's prompt: change it whenever the prompt changes."""
 CHARS_PER_TOKEN = 4
 """A prompt's size is estimated at about four characters a token, as for English text."""
@@ -120,6 +126,8 @@ class ProfilePassResult:
 class _Included:
     control: IsaControl
     requirements: ControlRequirements
+    statements: list[LeadStatement] = field(default_factory=list)  # the lead's on it (#422)
+    passages: list[EvidencePassage] = field(default_factory=list)  # those, as the prompt lists them
 
 
 def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
@@ -167,9 +175,11 @@ def _prompt(
     controls = "\n\n".join(
         f"Control {i.control.id}: {i.control.question}\n"
         f"Requirements:\n{format_requirements(i.requirements.applicable)}"
+        f"{statements_text(i.passages)}"
         for i in included
     )
     evidence = as_data(documents) if documents else "(none)"
+    lead_rule = f" {LEAD_RULE}" if any(i.passages for i in included) else ""
     return [
         SystemMessage(
             f"You assess every {included[0].control.source} control listed for {profile.company} "
@@ -191,7 +201,7 @@ def _prompt(
             f"the fix (a role, never a person's name), and how many days from today (1 to "
             f"{MAX_DUE_DAYS}) until it is due. Write every answer, reason and item in {language}; "
             "copy each quote unchanged, in its document's language, never translated. "
-            f"{never_claim(profile)} {DATA_RULE}"
+            f"{never_claim(profile)} {DATA_RULE}{lead_rule}"
         ),
         HumanMessage(f"Controls:\n\n{controls}\n\nEvidence:\n{evidence}"),
     ]
@@ -251,7 +261,8 @@ def _assessed(
             },
         ),
     ]
-    steps = []
+    flagged = [Step(GUARD, {"text": t}) for t in flagged_steps(included.passages)]
+    steps = list(flagged)
     for node, update in updates:
         steps += [Step(node, update, profile), *guard_steps(update)]
     values = {
@@ -337,6 +348,7 @@ def run_profile_pass(
     today: date | None = None,
     max_tokens: int = PROFILE_PASS_TOKENS,
     count: Callable[[], None] = lambda: None,
+    statements: Iterable[LeadStatement] = (),
 ) -> ProfilePassResult:
     """Assess every applicable control of the profile not yet accepted in one model run (see
     the module's doc).
@@ -347,8 +359,10 @@ def run_profile_pass(
     daily limit), then the model, once (twice when the output guard asks again). A second audit
     claim raises OutputCheckError; a failed model call raises its error. Either way, nothing is
     kept in the index. `today` (default: now) is what staleness is judged on and due dates count
-    from."""
+    from. `statements` are the lead's (#422): each is listed under its own control, and may be
+    cited for that control only."""
     today = today or date.today()
+    statements = list(statements)
     newest = newest_by_control(memory, saver)
     included, skipped = [], []
     for control in profile.isa_edition().controls:
@@ -359,7 +373,9 @@ def run_profile_pass(
         if newest_one is not None and newest_one.status == "accepted":
             skipped.append(control.id)
         else:
-            included.append(_Included(control, requirements))
+            mine = [s for s in statements if s.control_id == control.id]
+            passages = statement_passages(mine, profile.answer_language)
+            included.append(_Included(control, requirements, mine, passages))
     if not included:
         return ProfilePassResult([], skipped)
     documents = _documents(profile, today)
@@ -372,9 +388,12 @@ def run_profile_pass(
         )
     count()
     folders: dict[str, str] = {name: str(s.folder) for name, s in profile.evidence_sources.items()}
-    checker = QuoteChecker(folders, today=today)
+    checker = QuoteChecker(
+        folders, today=today, label=lead_statement_label(profile.answer_language)
+    )
     by_id = {i.control.id: i for i in included}
     paragraphs = [p["text"] for d in documents for p in passages_of(d["doc_id"], d["text"])]
+    paragraphs += [p["text"] for i in included for p in i.passages]
 
     def read(reply: ProfilePassReply | None) -> tuple[dict[str, _Assessed], list[str]]:
         given: dict[str, ControlAssessmentReply] = {}
@@ -382,7 +401,8 @@ def run_profile_pass(
             if item.control_id in by_id:  # a control not included (unknown, accepted) is ignored
                 given.setdefault(item.control_id, item)
         assessed = {
-            cid: _assessed(i, given.get(cid), checker, profile, today) for cid, i in by_id.items()
+            cid: _assessed(i, given.get(cid), checker.for_statements(i.statements), profile, today)
+            for cid, i in by_id.items()
         }
         return assessed, [text for part in assessed.values() for text in part.texts]
 
