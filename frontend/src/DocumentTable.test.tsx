@@ -2,13 +2,8 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import DocumentTable from './DocumentTable.tsx'
+import { BACKUP_POLICY as BACKUP, BACKUP_STALE } from './libraryFixtures.ts'
 import type { LibraryDocument } from './setup.ts'
-
-const BACKUP: LibraryDocument = {
-  id: 'backup-policy', source: 'policies', title: 'Backup policy', kind: 'documented', version: '1.0',
-  approval_date: '2024-02-12', review_cycle: 'yearly',
-  stale_because: 'approved 2024-02-12 with a yearly review, due 2025-02-12', stale: true,
-}
 const UNDATED: LibraryDocument = {
   id: 'draft-note', source: 'policies', title: 'draft-note', kind: 'documented', version: null,
   approval_date: null, review_cycle: null, stale_because: 'no review date', stale: true,
@@ -30,16 +25,24 @@ describe('the document table', () => {
     expect(within(screen.getByRole('table')).getAllByRole('columnheader').map((h) => h.textContent))
       .toEqual(['Document', 'Kind', 'Version', 'Approved', 'Review', 'Status'])
     const [backup, undated, training] = rows()
-    expect(within(backup).getByRole('rowheader').textContent).toBe('Backup policybackup-policy')
+    const title = within(backup).getByRole('rowheader')
+    expect(within(title).getByText('Backup policy').className).toBe('doc-title')
+    expect(within(title).getByText('backup-policy').className).toBe('mono doc-id')
     expect(cells(backup).slice(0, 4)).toEqual(['documented', '1.0', '2024-02-12', 'yearly'])
-    const stale = within(backup).getByText('Stale')
+    // The stale reason is shown, as the working paper shows it, not only in a tooltip or to a screen reader.
+    const stale = within(backup).getByText(`Stale: ${BACKUP_STALE}`)
     expect(stale.className).toBe('flag')
-    expect(stale.getAttribute('title')).toBe('approved 2024-02-12 with a yearly review, due 2025-02-12')
-    expect(cells(backup)[4]).toBe('Stale: approved 2024-02-12 with a yearly review, due 2025-02-12')
+    expect(stale.closest('.sr-only, [title]')).toBeNull()
+    expect(cells(backup)[4]).toBe(`Stale: ${BACKUP_STALE}`)
     expect(within(backup).getByText('documented').className).toBe('kind kind-documented')
-    expect(cells(undated).slice(1, 4)).toEqual(['', 'no date', 'none'])
+    expect(cells(undated).slice(1, 5)).toEqual(['no version', 'no date', 'none', 'Stale: no review date'])
     expect(within(training).getByText('implemented').className).toBe('kind kind-implemented')
     expect(cells(training)[4]).toBe('Current')
+  })
+
+  it('says only "Stale" when a stale document comes with no reason', () => {
+    render(<DocumentTable caption="Policies" documents={[{ ...BACKUP, stale_because: null }]} />)
+    expect(cells(rows()[0])[4]).toBe('Stale')
   })
 
   it('has no checkboxes without onToggle', () => {

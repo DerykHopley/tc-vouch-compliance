@@ -6,8 +6,6 @@ type Props = {
   /** The chosen documents, by folder; with `onToggle`, each row leads with a checkbox. */
   selected?: ChosenEvidence
   onToggle?: (id: string, source: LibrarySource) => void
-  /** The `data-problem` the first checkbox carries, so Next can focus it (company setup's step 6). */
-  firstProblem?: string
 }
 
 /**
@@ -16,7 +14,7 @@ type Props = {
  * Documents tab is to show it read-only, with a column of its own. Wide, it scrolls inside its own container
  * (design.md, Layout).
  */
-export default function DocumentTable({ caption, documents, selected, onToggle, firstProblem }: Props) {
+export default function DocumentTable({ caption, documents, selected, onToggle }: Props) {
   return (
     <div className="table-wrap doc-table-wrap">
       <table className="report-table doc-table">
@@ -33,16 +31,16 @@ export default function DocumentTable({ caption, documents, selected, onToggle, 
           </tr>
         </thead>
         <tbody>
-          {documents.map((d, i) => (
+          {documents.map((d) => (
             <tr key={`${d.source}/${d.id}`}>
               {onToggle && (
                 <td className="doc-choose">
-                  <span className="setup-choice setup-check">
+                  {/* A label, so the whole 44px cell takes the press, in forced colours too (the box is drawn 18px). */}
+                  <label className="setup-choice setup-check">
                     <input type="checkbox" aria-label={`Choose ${d.title}`}
                       checked={selected?.[d.source].includes(d.id) ?? false}
-                      data-problem={i === 0 ? firstProblem : undefined}
                       onChange={() => onToggle(d.id, d.source)} />
-                  </span>
+                  </label>
                 </td>
               )}
               <th scope="row">
@@ -50,13 +48,12 @@ export default function DocumentTable({ caption, documents, selected, onToggle, 
                 <span className="mono doc-id">{d.id}</span>
               </th>
               <td><span className={`kind kind-${d.kind}`}>{d.kind}</span></td>
-              <td>{d.version}</td>
+              <td>{d.version ?? 'no version'}</td>
               <td>{d.approval_date ?? 'no date'}</td>
               <td>{d.review_cycle ?? 'none'}</td>
               <td>
                 {d.stale
-                  ? <><span className="flag" title={d.stale_because ?? undefined}>Stale</span>
-                    <span className="sr-only">: {d.stale_because}</span></>
+                  ? <span className="flag">{d.stale_because ? `Stale: ${d.stale_because}` : 'Stale'}</span>
                   : <span className="doc-current">Current</span>}
               </td>
             </tr>

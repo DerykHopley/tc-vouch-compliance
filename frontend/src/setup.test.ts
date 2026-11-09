@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { BACKUP_POLICY } from './libraryFixtures.ts'
 import { profileTag } from './profiles.ts'
 import {
   COUNTRIES, frameworkControls, type LibraryDocument, notApplicableProblems, protectionLevels, type ProtectionScope,
@@ -99,11 +100,7 @@ describe("step 5's checks on the controls marked not applicable", () => {
   })
 })
 
-const DOCUMENT: LibraryDocument = {
-  id: 'backup-policy', source: 'policies', title: 'Backup policy', kind: 'documented', version: '1.0',
-  approval_date: '2024-02-12', review_cycle: 'yearly',
-  stale_because: 'approved 2024-02-12 with a yearly review, due 2025-02-12', stale: true,
-}
+const DOCUMENT: LibraryDocument = BACKUP_POLICY
 
 describe('the sample library', () => {
   it("reads the route's documents", async () => {

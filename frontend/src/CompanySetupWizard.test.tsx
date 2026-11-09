@@ -1,7 +1,8 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
+import { BACKUP_POLICY } from './libraryFixtures.ts'
 import type { LibraryDocument, ProtectionScope } from './setup.ts'
 
 const LEVELS: ProtectionScope[] = [
@@ -23,9 +24,7 @@ const libraryDocument = (id: string, title: string, more: Partial<LibraryDocumen
 /** The sample library as GET /api/developer/sample-library sends it: two policies (one stale), then a record. */
 const LIBRARY: LibraryDocument[] = [
   libraryDocument('access-rights-policy', 'Access rights policy'),
-  libraryDocument('backup-policy', 'Backup policy', {
-    approval_date: '2024-02-12', stale_because: 'approved 2024-02-12 with a yearly review, due 2025-02-12', stale: true,
-  }),
+  BACKUP_POLICY,
   libraryDocument('training-record', 'Security training record 2026', { source: 'records', kind: 'implemented' }),
 ]
 
@@ -501,6 +500,55 @@ describe('company setup', () => {
     expect(group.getAttribute('aria-invalid')).toBeNull()
   })
 
+  it('Next on step 6 with no policies in the library focuses the first record', async () => {
+    api([], [], [new Response(JSON.stringify({ documents: LIBRARY.filter((d) => d.source === 'records') }))])
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await findChoose('Security training record 2026')
+    await next()
+    expect(document.activeElement).toBe(choose('Security training record 2026'))
+  })
+
+  it('Next on step 6 while the library loads focuses the step heading, and focus stays there when it lands', async () => {
+    let land: (r: Response) => void = () => {}
+    const fetch = api()
+    fetch.mockImplementation((url: string) => url === LIBRARY_PATH ? new Promise<Response>((resolve) => { land = resolve })
+      : Promise.resolve(url === CONTROLS_PATH ? controlsAnswer() : levelsAnswer()))
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    await next()
+    expect(screen.getByText('Choose at least one document.')).toBeTruthy()
+    expect(document.activeElement).toBe(heading('Evidence'))
+    land(libraryAnswer())
+    await findChoose('Backup policy')
+    expect(document.activeElement).toBe(heading('Evidence'))
+  })
+
+  it.each([
+    ['3', toStep3, 'Choose a protection level.'],
+    ['6', async () => { await toStep6(); await findChoose('Backup policy') }, 'Choose at least one document.'],
+  ])("step %s's problem shows below Back and Next, so a refused Next moves neither", async (_, to, words) => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await to()
+    await next()
+    const notice = screen.getByText(words)
+    expect(nextButton().compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(backButton().compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("while a problem shows, only a double-click's second press off a control is kept from moving focus", async () => {
+    api()
+    render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
+    await toStep6()
+    const cell = (await screen.findAllByText('Current'))[0]
+    expect(fireEvent.mouseDown(cell, { detail: 2 })).toBe(true) // no problem showing
+    await next()
+    expect(fireEvent.mouseDown(cell, { detail: 1 })).toBe(true) // a single press
+    expect(fireEvent.mouseDown(choose('Backup policy'), { detail: 2 })).toBe(true) // a control
+    expect(fireEvent.mouseDown(cell, { detail: 2 })).toBe(false)
+  })
+
   it('Next on step 6 with a document chosen stays and focuses the note that the finish is not built yet', async () => {
     api()
     render(<CompanySetupWizard developerPath="/developer" onDeveloper={() => {}} />)
@@ -553,10 +601,9 @@ describe('company setup', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('The sample library could not be loaded.')
     expect(screen.queryAllByRole('checkbox')).toEqual([])
-    await next() // nothing loaded: stays and says so, focus on Try again, as there is no checkbox
-    expect(heading('Evidence')).toBeTruthy()
+    await next() // nothing loaded: stays and says so, focus on the heading, which outlasts Try again
     expect(screen.getByText('Choose at least one document.')).toBeTruthy()
-    expect(document.activeElement).toBe(within(alert).getByRole('button', { name: 'Try again' }))
+    expect(document.activeElement).toBe(heading('Evidence'))
     await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
     expect(await findChoose('Backup policy')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()

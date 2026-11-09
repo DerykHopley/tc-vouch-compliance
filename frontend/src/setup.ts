@@ -116,8 +116,8 @@ export type ChosenEvidence = Record<LibrarySource, string[]>
 /** Step 6's live line: how many chosen documents Vouch can cite, by kind, and how many of them are stale. */
 export function readyToCite(chosen: readonly LibraryDocument[]): string {
   if (chosen.length === 0) return 'No documents chosen yet.'
-  const of = (kind: EvidenceKind) => chosen.filter((d) => d.kind === kind).length
+  const countOf = (kind: EvidenceKind) => chosen.filter((d) => d.kind === kind).length
   const stale = chosen.filter((d) => d.stale).length
-  return `Ready to cite: ${plural(chosen.length, 'document')} (${of('documented')} documented, `
-    + `${of('implemented')} implemented${stale > 0 ? `, ${stale} stale` : ''}).`
+  return `Ready to cite: ${plural(chosen.length, 'document')} (${countOf('documented')} documented, `
+    + `${countOf('implemented')} implemented${stale > 0 ? `, ${stale} stale` : ''}).`
 }

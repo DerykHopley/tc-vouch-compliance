@@ -305,7 +305,9 @@ def test_a_developer_chooses_evidence_and_sees_it_ready_to_cite(page: Page, prof
     expect(backup.locator(".kind.kind-documented")).to_have_text("documented")
     expect(backup).to_contain_text("1.0")
     expect(backup).to_contain_text("2024-02-12")
-    expect(backup.locator(".flag")).to_have_text("Stale")
+    expect(backup.locator(".flag")).to_have_text(
+        "Stale: approved 2024-02-12 with a yearly review, due 2025-02-12"
+    )
     access = policies.get_by_role("row").filter(has_text="Access rights policy")
     expect(access).to_contain_text("3.2")
     expect(access).to_contain_text("2026-07-20")
@@ -340,7 +342,9 @@ def test_a_double_click_on_next_that_doesnt_move_keeps_focus_on_the_first_invali
     page: Page, profiles_url
 ):
     """From #407's verifier: the problem shown above the buttons moved Next down, so the second
-    press landed on the form and took focus to the page's body."""
+    press landed on the form and took focus to the page's body. The problem now shows below them
+    (step 3); on step 6, focusing the first checkbox scrolls the page, and the second press is
+    kept from taking focus."""
     open_setup(page, profiles_url)
     to_step_3(page)
 
@@ -377,3 +381,70 @@ def test_step_6_scrolls_sideways_only_inside_its_tables(page: Page, profiles_url
     if width == 400:
         wrap = page.get_by_role("table", name="Policies").locator("xpath=..")
         assert wrap.evaluate("w => w.scrollWidth > w.clientWidth")
+
+
+def test_step_6_is_walked_by_keyboard(page: Page, profiles_url):
+    """Heading, then each checkbox (policies, then records), then Back and Next, with Tab."""
+    open_setup(page, profiles_url)
+    to_step_6(page)
+
+    expect(page.get_by_role("heading", name="Evidence")).to_be_focused()
+    page.keyboard.press("Tab")
+    first = page.get_by_role("table", name="Policies").get_by_role("checkbox").first
+    expect(first).to_be_focused()
+    page.keyboard.press("Space")
+    expect(first).to_be_checked()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("checkbox").nth(1)).to_be_focused()
+    page.get_by_role("table", name="Policies").get_by_role("checkbox").last.focus()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("table", name="Records").get_by_role("checkbox").first).to_be_focused()
+    page.get_by_role("checkbox").last.focus()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Back")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Next")).to_be_focused()
+
+
+def test_next_while_the_library_loads_keeps_focus_on_the_heading_when_it_lands(
+    page: Page, profiles_url
+):
+    """No checkbox yet: Next focuses the step's heading, which stays when the library arrives
+    (a focused loading note would go, dropping focus to the page's body)."""
+    held = []
+    page.route(f"**{LIBRARY}", lambda route: held.append(route))
+    open_setup(page, profiles_url)
+    to_step_5(page)
+    press(page, "Next")
+    expect(page.get_by_text("Loading the sample library…")).to_be_visible()
+    assert len(held) == 1
+
+    press(page, "Next")
+    expect(page.get_by_text("Choose at least one document.")).to_be_visible()
+    heading = page.get_by_role("heading", name="Evidence")
+    expect(heading).to_be_focused()
+    with page.expect_response(lambda r: LIBRARY in r.url):
+        held[0].continue_()
+    expect(page.get_by_role("checkbox")).to_have_count(17)
+    expect(heading).to_be_focused()
+
+
+def test_in_forced_colours_a_document_checkbox_keeps_its_44px_target(page: Page, profiles_url):
+    """Forced colours draw the system's 18px box; its label still takes a press anywhere in 44px."""
+    page.emulate_media(forced_colors="active")
+    page.set_viewport_size({"width": 400, "height": 900})
+    open_setup(page, profiles_url)
+    to_step_6(page)
+    box = document(page, "Backup policy")
+
+    size = box.evaluate(
+        """b => { const s = getComputedStyle(b), r = b.getBoundingClientRect()
+        return [r.width + parseFloat(s.marginLeft) + parseFloat(s.marginRight),
+                r.height + parseFloat(s.marginTop) + parseFloat(s.marginBottom)] }"""
+    )
+    assert size[0] >= 44 and size[1] >= 44
+    label = box.locator("xpath=ancestor::label[1]")
+    target = label.bounding_box()
+    assert target is not None and target["width"] >= 44 and target["height"] >= 44
+    page.mouse.click(target["x"] + 2, target["y"] + 2)  # the target's corner, outside the box
+    expect(box).to_be_checked()

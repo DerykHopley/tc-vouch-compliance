@@ -75,6 +75,21 @@ def document_path(folder: Path, doc_id: str) -> Path | None:
     return path
 
 
+def document_files(folder: Path) -> list[Path]:
+    """The documents directly in the folder, by file name: its `.md` files, leaving out a link
+    pointing out of it; none when the folder has `escaped`. A missing folder raises
+    FileNotFoundError."""
+    if not folder.is_dir():
+        raise FileNotFoundError(folder)
+    if escaped(folder):
+        return []
+    return sorted(
+        f
+        for f in folder.iterdir()
+        if f.suffix == SUFFIX and f.is_file() and f.resolve().parent == folder
+    )
+
+
 def sections(body: str) -> list[Section]:
     """The body's sections in order; the text before the first heading is the first one."""
     found: list[tuple[str, list[str]]] = [("", [])]
@@ -102,15 +117,8 @@ def stale_because(front_matter: dict[str, Any] | None, today: datetime.date) -> 
     isn't: its review falls due before today. A document whose review date can't be worked
     out (no approval date, no known review cycle) counts as stale, with NO_REVIEW_DATE."""
     data = front_matter or {}
-    approved, cycle = data.get("approval_date"), data.get("review_cycle")
-    if isinstance(approved, str):
-        try:
-            approved = datetime.date.fromisoformat(approved)
-        except ValueError:
-            approved = None
-    if isinstance(approved, datetime.datetime):
-        approved = approved.date()
-    if not isinstance(approved, datetime.date):
+    approved, cycle = _as_date(data.get("approval_date")), data.get("review_cycle")
+    if approved is None:
         return NO_REVIEW_DATE
     if not isinstance(cycle, str) or cycle not in CYCLE_MONTHS:  # a list or mapping too
         return NO_REVIEW_DATE
@@ -120,16 +128,32 @@ def stale_because(front_matter: dict[str, Any] | None, today: datetime.date) -> 
     return None
 
 
-def kind_of(front_matter: dict[str, Any] | None, source: str, doc_id: str) -> EvidenceKind:
+def _as_date(value: Any) -> datetime.date | None:
+    """A front-matter date (YAML's date or datetime, or ISO text), or None when it isn't one."""
+    if isinstance(value, str):
+        try:
+            value = datetime.date.fromisoformat(value)
+        except ValueError:
+            return None
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    return value if isinstance(value, datetime.date) else None
+
+
+def kind_of(
+    front_matter: dict[str, Any] | None, source: str, doc_id: str, *, warn: bool = True
+) -> EvidenceKind:
     """The document's kind: its front matter's, which is the source of truth. With none, or
-    one that isn't a kind, the source's (SOURCE_KINDS), logged so the document gets fixed."""
+    one that isn't a kind, the source's (SOURCE_KINDS), logged so the document gets fixed
+    (`warn`; a page listing documents on every request passes False)."""
     kind = (front_matter or {}).get("kind")
     if isinstance(kind, str) and kind in KINDS:
         return kind  # type: ignore[return-value]  # checked against KINDS just above
     fallback = SOURCE_KINDS.get(source, DOCUMENTED)
-    log.warning(
-        "%s has no valid kind (%r); taken as %s from the %s", doc_id, kind, fallback, source
-    )
+    if warn:
+        log.warning(
+            "%s has no valid kind (%r); taken as %s from the %s", doc_id, kind, fallback, source
+        )
     return fallback
 
 
@@ -142,10 +166,18 @@ class DocumentFacts:
 
 
 def facts_of(
-    front_matter: dict[str, Any] | None, source: str, doc_id: str, today: datetime.date
+    front_matter: dict[str, Any] | None,
+    source: str,
+    doc_id: str,
+    today: datetime.date,
+    *,
+    warn: bool = True,
 ) -> DocumentFacts:
-    """The document's kind and why it is stale (or None), from its front matter."""
-    return DocumentFacts(kind_of(front_matter, source, doc_id), stale_because(front_matter, today))
+    """The document's kind and why it is stale (or None), from its front matter; `warn` as in
+    kind_of."""
+    return DocumentFacts(
+        kind_of(front_matter, source, doc_id, warn=warn), stale_because(front_matter, today)
+    )
 
 
 def read_facts(path: Path, source: str, today: datetime.date) -> DocumentFacts:
@@ -170,17 +202,6 @@ class DocumentSummary:
     stale_because: str | None
 
 
-def _approval_date(value: Any) -> str | None:
-    if isinstance(value, datetime.datetime):
-        value = value.date()
-    if isinstance(value, str):
-        try:
-            value = datetime.date.fromisoformat(value)
-        except ValueError:
-            return None
-    return value.isoformat() if isinstance(value, datetime.date) else None
-
-
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
@@ -188,32 +209,34 @@ def _text(value: Any) -> str | None:
 def document_summary(path: Path, source: str, today: datetime.date) -> DocumentSummary:
     """The summary of the document at this path in a source's folder, judged on `today`. A
     missing title gives the id; a version, approval date or review cycle that can't be read
-    gives None; no front matter at all, the source's kind and NO_REVIEW_DATE."""
+    gives None; no front matter at all, the source's kind and NO_REVIEW_DATE. The kind and
+    staleness are facts_of's, read without logging (a page lists them on every request)."""
     data, _ = split_front_matter(path.read_text(encoding="utf-8"))
     front = data or {}
+    facts = facts_of(data, source, path.stem, today, warn=False)
+    approved = _as_date(front.get("approval_date"))
     return DocumentSummary(
         id=path.stem,
         source=source,
         title=_text(front.get("title")) or path.stem,
-        kind=kind_of(data, source, path.stem),
+        kind=facts.kind,
         version=_text(front.get("version")),
-        approval_date=_approval_date(front.get("approval_date")),
+        approval_date=approved.isoformat() if approved else None,
         review_cycle=_text(front.get("review_cycle")),
-        stale_because=stale_because(data, today),
+        stale_because=facts.stale_because,
     )
 
 
 def library_summaries(
     library: Path, sources: tuple[str, ...], today: datetime.date
 ) -> list[DocumentSummary]:
-    """Every document directly in each of the library's source folders, in the sources'
-    order, each source's by title. An unreadable folder or document raises (OSError, or ValueError
-    for one that isn't UTF-8 text)."""
+    """Every document of each of the library's source folders (document_files: a link out of a
+    folder, or a folder that has `escaped`, lists nothing), in the sources' order, each source's
+    by title. An unreadable folder or document raises (OSError, or ValueError for one that isn't
+    UTF-8 text)."""
     found: list[DocumentSummary] = []
     for source in sources:
-        folder = library / source
-        paths = [p for p in folder.iterdir() if p.suffix == SUFFIX and p.is_file()]
-        summaries = [document_summary(p, source, today) for p in paths]
+        summaries = [document_summary(p, source, today) for p in document_files(library / source)]
         found += sorted(summaries, key=lambda s: (s.title.casefold(), s.id))
     return found
 

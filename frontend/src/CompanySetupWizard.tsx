@@ -38,6 +38,14 @@ type Problems = readonly string[]
 const NO_PROBLEMS: Problems = []
 const ALL_MARKED = 'all marked'
 const NO_EVIDENCE = 'no evidence'
+/** What a problem of the whole step says. It shows below Back and Next, so a refused Next never moves them: a
+ * double-click's second press lands on Next again, not on the form, which would take focus off the field Next just
+ * focused (#408, from #407's verifier). */
+const STEP_NOTICES: Readonly<Record<string, string>> = {
+  level: 'Choose a protection level.',
+  [ALL_MARKED]: 'At least one control must apply.',
+  [NO_EVIDENCE]: 'Choose at least one document.',
+}
 type Read<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed' }
 type Scope = Read<ProtectionScope[]>
 type Controls = Read<FrameworkControl[]>
@@ -68,7 +76,8 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
   const headingRef = useRef<HTMLHeadingElement>(null)
   const notBuiltRef = useRef<HTMLParagraphElement>(null)
   const lastMove = useRef(-Infinity)
-  const lastRefusal = useRef(-Infinity) // when Next last found a problem
+  const noticeId = useId()
+  const notice = problems.map((p) => STEP_NOTICES[p]).find((words) => words !== undefined)
   const moved = useRef(false)
   useEffect(() => {
     if (moved.current) headingRef.current?.focus() // on each step change, not on opening
@@ -109,21 +118,25 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
     const found = check()
     setProblems(found)
     if (found.length > 0) {
-      lastRefusal.current = performance.now()
-      formRef.current?.querySelector<HTMLElement>(`[data-problem="${found[0]}"]`)?.focus()
+      focusProblem(found[0])
       return
     }
     if (step < BUILT) go(step + 1)
     else notBuiltRef.current?.focus() // nowhere to go yet (#409): say so, so Next doesn't look dead
   }
-  // A refused Next shows its problem above the buttons, so they move down: a double-click's second press lands on
-  // the form around them, which would take focus off the field Next just focused (to the page's body). Within
-  // SETTLE_MS of a refusal, a press on anything that can't take focus leaves focus where it is (#408, from #407's
-  // verifier).
+  // Next focuses the field a problem names (its `data-problem`), or a group's first field. With no field to take it (a
+  // list still loading, or one that failed), the step's heading: it stays when the list lands or Try again goes.
+  const focusProblem = (problem: string) => {
+    const found = formRef.current?.querySelector<HTMLElement>(`[data-problem="${problem}"]`)
+    const field = found instanceof HTMLFieldSetElement ? found.querySelector<HTMLElement>('input') : found
+    ;(field ?? headingRef.current)?.focus()
+  }
+  // Focusing a field above the fold scrolls the page (step 6's first checkbox, from Next at the table's foot), so a
+  // double-click's second press lands on whatever scrolled under the pointer and takes focus to the page's body.
+  // While a problem shows, that second press (detail 2 or more), off a control, leaves focus where Next put it.
   const keepFocus = (e: MouseEvent) => {
-    const target = e.target as HTMLElement
-    if (performance.now() - lastRefusal.current < SETTLE_MS && !target.closest('input, select, textarea, button, a, label'))
-      e.preventDefault()
+    const off = !(e.target as HTMLElement).closest('input, select, textarea, button, a, label')
+    if (e.detail > 1 && problems.length > 0 && off) e.preventDefault()
   }
   // A changed answer's problem clears at once; Next checks again.
   const answer = (change: Partial<Answers>) => {
@@ -174,20 +187,22 @@ export default function CompanySetupWizard({ developerPath, onDeveloper }: Props
         {step === COMPANY && <CompanyStep answers={answers} problems={problems} answer={answer} />}
         {step === LANGUAGE && <LanguageStep answers={answers} answer={answer} />}
         {step === LEVEL && (
-          <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} problem={problems.includes('level')} />
+          <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} problem={problems.includes('level')}
+            problemId={noticeId} />
         )}
         {step === NOT_APPLICABLE && (
           <NotApplicableStep marked={answers.notApplicable} mark={mark} controls={controls} onRetry={readControls}
-            problems={problems} />
+            problems={problems} problemId={noticeId} />
         )}
         {step === EVIDENCE && (
           <EvidenceStep chosen={answers.evidence} choose={choose} library={library} onRetry={readLibrary}
-            problem={problems.includes(NO_EVIDENCE)} />
+            problem={problems.includes(NO_EVIDENCE)} problemId={noticeId} />
         )}
         <div className="setup-nav">
           {step > COMPANY && <button type="button" className="btn btn-ghost" onClick={() => go(step - 1)}>Back</button>}
           <button type="submit" className="btn btn-primary">Next</button>
         </div>
+        {notice && <p id={noticeId} className="notice field-note">{notice}</p>}
         {step === BUILT && (
           <p ref={notBuiltRef} tabIndex={-1} className="field-note">
             The finish is not built yet. Nothing has been saved.
@@ -261,12 +276,13 @@ function LanguageStep({ answers, answer }: StepProps) {
   )
 }
 
-function LevelStep({ answers, answer, scope, onRetry, problem }: StepProps & {
+function LevelStep({ answers, answer, scope, onRetry, problem, problemId }: StepProps & {
   scope: Scope | null
   onRetry: () => void
   problem: boolean
+  /** The id of the wizard's notice that says what the problem is. */
+  problemId: string
 }) {
-  const problemId = useId()
   const brings = (level: ProtectionLevel) => {
     if (scope?.status === 'ready') {
       const found = scope.data.find((s) => s.level === level)
@@ -292,7 +308,6 @@ function LevelStep({ answers, answer, scope, onRetry, problem }: StepProps & {
           </label>
         )
       })}
-      {problem && <p id={problemId} className="notice field-note">Choose a protection level.</p>}
       {scope?.status === 'failed' && (
         <div className="notice field-note setup-alert" role="alert">
           <p>What each level brings into scope could not be loaded.</p>
@@ -303,19 +318,19 @@ function LevelStep({ answers, answer, scope, onRetry, problem }: StepProps & {
   )
 }
 
-function NotApplicableStep({ marked, mark, controls, onRetry, problems }: {
+function NotApplicableStep({ marked, mark, controls, onRetry, problems, problemId }: {
   marked: NotApplicable[]
   mark: (control: string, reason: string | null) => void
   controls: Controls | null
   onRetry: () => void
   problems: Problems
+  problemId: string
 }) {
   const id = useId()
-  const allMarkedId = `${id}-all`
   const allMarked = problems.includes(ALL_MARKED)
   return (
     <fieldset className="setup-choices" aria-invalid={allMarked || undefined}
-      aria-describedby={allMarked ? allMarkedId : undefined}>
+      aria-describedby={allMarked ? problemId : undefined}>
       <legend>Controls not applicable</legend>
       <p className="field-note">
         Mark a control not applicable only when it doesn't apply to the company at all; the assessment leaves it out
@@ -345,7 +360,6 @@ function NotApplicableStep({ marked, mark, controls, onRetry, problems }: {
           </div>
         )
       })}
-      {allMarked && <p id={allMarkedId} className="notice field-note">At least one control must apply.</p>}
       {controls?.status === 'failed' && (
         <div className="notice field-note setup-alert" role="alert">
           <p>The controls could not be loaded.</p>
@@ -356,39 +370,35 @@ function NotApplicableStep({ marked, mark, controls, onRetry, problems }: {
   )
 }
 
-function EvidenceStep({ chosen, choose, library, onRetry, problem }: {
+function EvidenceStep({ chosen, choose, library, onRetry, problem, problemId }: {
   chosen: ChosenEvidence
   choose: (id: string, source: LibrarySource) => void
   library: Library | null
   onRetry: () => void
   problem: boolean
+  problemId: string
 }) {
-  const problemId = useId()
   const documents = library?.status === 'ready' ? library.data : []
-  const of = (source: LibrarySource) => documents.filter((d) => d.source === source)
+  const inFolder = (source: LibrarySource) => documents.filter((d) => d.source === source)
   const picked = documents.filter((d) => chosen[d.source].includes(d.id))
   return (
-    <fieldset className="setup-choices" aria-invalid={problem || undefined}
+    // NO_EVIDENCE names the whole group: Next focuses its first checkbox, whichever folder it is in.
+    <fieldset className="setup-choices" aria-invalid={problem || undefined} data-problem={NO_EVIDENCE}
       aria-describedby={problem ? problemId : undefined}>
       <legend className="sr-only">Evidence documents</legend>
       <p className="field-note">Choose the documents that are this company's evidence. Vouch searches and cites only these.</p>
-      {/* With nothing loaded there is no checkbox: Next focuses this note, or Try again, in its place. */}
-      {(library === null || library.status === 'loading') && (
-        <p className="field-note" tabIndex={-1} data-problem={NO_EVIDENCE}>Loading the sample library…</p>
-      )}
+      {(library === null || library.status === 'loading') && <p className="field-note">Loading the sample library…</p>}
       {library?.status === 'ready' && (
         <>
-          <DocumentTable caption="Policies" documents={of('policies')} selected={chosen} onToggle={choose}
-            firstProblem={NO_EVIDENCE} />
-          <DocumentTable caption="Records" documents={of('records')} selected={chosen} onToggle={choose} />
+          <DocumentTable caption="Policies" documents={inFolder('policies')} selected={chosen} onToggle={choose} />
+          <DocumentTable caption="Records" documents={inFolder('records')} selected={chosen} onToggle={choose} />
           <p className="field-note setup-ready" role="status">{readyToCite(picked)}</p>
         </>
       )}
-      {problem && <p id={problemId} className="notice field-note">Choose at least one document.</p>}
       {library?.status === 'failed' && (
         <div className="notice field-note setup-alert" role="alert">
           <p>The sample library could not be loaded.</p>
-          <button type="button" className="btn" onClick={onRetry} data-problem={NO_EVIDENCE}>Try again</button>
+          <button type="button" className="btn" onClick={onRetry}>Try again</button>
         </div>
       )}
     </fieldset>

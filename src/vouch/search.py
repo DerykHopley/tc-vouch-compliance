@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from vouch.documents import DocumentChoice, escaped, is_chosen, paragraphs
+from vouch.documents import DocumentChoice, document_files, escaped, is_chosen, paragraphs
 from vouch.front_matter import split_front_matter
 
 MAX_QUERY_CHARS = 200
@@ -50,7 +50,7 @@ def search_folder(
     if escaped(folder):
         return folder_escaped()
     try:
-        files = _document_files(folder)
+        files = document_files(folder)
         chosen = [f for f in files if is_chosen(f.stem, documents)]
         passages = [p for doc in chosen for p in _passages(doc)]
     except (OSError, UnicodeDecodeError):  # missing, unreadable, or not text
@@ -84,17 +84,6 @@ def _check_input(query: Any, limit: Any) -> str | None:
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIMIT:
         return f"limit must be an integer from 1 to {MAX_LIMIT}"
     return None
-
-
-def _document_files(root: Path) -> list[Path]:
-    """The .md files directly in the resolved folder; a link pointing elsewhere is left out."""
-    if not root.is_dir():
-        raise FileNotFoundError(root)
-    return sorted(
-        f
-        for f in root.iterdir()
-        if f.suffix == ".md" and f.is_file() and f.resolve().parent == root
-    )
 
 
 def _passages(doc: Path) -> list[Passage]:

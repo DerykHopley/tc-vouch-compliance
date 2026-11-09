@@ -1,6 +1,7 @@
 """What Vouch reads from each evidence document for a page (#408): `document_summary`, and the
 developer route that lists the sample library for company setup's step 6."""
 
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -8,9 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 from test_auth import FakeClerk, bearer, clerk_app, token
 
-from vouch import api, report
+from vouch import api, company_profiles, report
 from vouch.api import create_app
-from vouch.documents import NO_REVIEW_DATE, DocumentSummary, document_summary
+from vouch.documents import NO_REVIEW_DATE, DocumentSummary, document_summary, library_summaries
 from vouch.paths import SAMPLE_LIBRARY_DIR
 from vouch.settings import Settings
 
@@ -229,3 +230,52 @@ def test_a_library_document_that_isnt_text_is_a_500_naming_no_server_path(monkey
 
     assert response.status_code == 500
     assert "garbled" not in response.text
+
+
+# library_summaries: the same listing rule as search and the profile pass
+
+
+def library(tmp_path: Path) -> Path:
+    root = tmp_path.resolve()
+    (root / "policies").mkdir()
+    (root / "records").mkdir()
+    write(root / "policies", "kept", "---\ntitle: Kept\nkind: documented\n---\n")
+    return root
+
+
+def test_a_link_pointing_out_of_the_folder_is_not_listed(tmp_path):
+    root = library(tmp_path)
+    outside = write(root, "secret", "---\ntitle: Outside\n---\n")
+    (root / "policies" / "linked.md").symlink_to(outside)
+
+    summaries = library_summaries(root, ("policies", "records"), TODAY)
+
+    assert [s.id for s in summaries] == ["kept"]
+
+
+def test_a_folder_swapped_for_a_link_lists_nothing(tmp_path):
+    root = library(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    write(elsewhere, "planted", "---\ntitle: Planted\n---\n")
+    (root / "records").rmdir()
+    (root / "records").symlink_to(elsewhere)
+
+    summaries = library_summaries(root, ("policies", "records"), TODAY)
+
+    assert [s.id for s in summaries] == ["kept"]
+
+
+def test_listing_a_document_with_no_kind_logs_nothing(tmp_path, caplog):
+    root = library(tmp_path)
+    write(root / "records", "no-kind", "---\ntitle: No kind\n---\n")
+
+    with caplog.at_level(logging.WARNING, logger="vouch.documents"):
+        summaries = library_summaries(root, ("policies", "records"), TODAY)
+
+    assert [s.kind for s in summaries] == ["documented", "implemented"]
+    assert caplog.records == []
+
+
+def test_the_listed_folders_are_the_ones_a_companys_evidence_chooses_from():
+    assert set(api.LIBRARY_SOURCES) == set(company_profiles.Evidence.model_fields)

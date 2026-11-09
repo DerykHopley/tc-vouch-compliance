@@ -488,4 +488,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 .doc-table .doc-current { color: var(--muted); }
 .doc-table td.doc-choose { width: 44px; padding: 0 4px 0 0; vertical-align: middle; }
 .doc-table .doc-choose .setup-choice input { margin: 0; }
+/* Forced colours draw the system's 18px box (above); its margin makes the 44px target again, the label around it taking
+   the press, as on step 5. */
+@media (forced-colors: active) {
+  .doc-table .doc-choose .setup-choice input { margin: 13px; }
+}
 .setup-ready { font-variant-numeric: tabular-nums; }

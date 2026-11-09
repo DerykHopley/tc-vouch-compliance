@@ -150,8 +150,9 @@ DEVELOPERS_ONLY = "This is available to developers only."
 PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
 CONTROLS_FAILED = "The framework's controls could not be read."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
-# The library's folders a company's evidence chooses from, in the order step 6 lists them.
-LIBRARY_SOURCES = tuple(company_profiles.Evidence.model_fields)
+# The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
+# in the order step 6 lists them.
+LIBRARY_SOURCES = ("policies", "records")
 NOT_A_MEMBER = (
     "Vouch is open to members of the course's Discord server. This Discord account is not in it."
 )
