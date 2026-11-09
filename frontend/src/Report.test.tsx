@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import Report from './Report.tsx'
-import { EXPORT_FAILED, OLDER_FAILED, type ReadinessReport as Served, REPORT_FAILED, type ReportWords, type TrailEntry } from './report.ts'
+import { type AuditReadinessReport, EXPORT_FAILED, type ImprovementReport, OLDER_FAILED, type ReadinessReport as Served,
+  REPORT_FAILED, type ReportWords, type TrailEntry } from './report.ts'
 import { SESSION_ENDED, setOnSignedOut } from './session.ts'
 
 afterEach(() => {
@@ -17,6 +18,7 @@ afterEach(() => {
 /** The English words as `vouch.report.WORDS` serves them. */
 const ENGLISH: ReportWords = {
   title: 'Readiness report',
+  improvement_title: 'Improvement report',
   labels: {
     company: 'Company', country: 'Country', base_framework: 'Base framework', protection_level: 'Protection level',
     overlays: 'Country overlays', answer_language: 'Language', date: 'Drawn up on', readiness: 'Readiness',
@@ -26,7 +28,9 @@ const ENGLISH: ReportWords = {
     missing: 'Missing', owner_role: 'Owner role', due_date: 'Due date', not_applicable: 'Not applicable',
     reason: 'Reason', trail: 'Audit trail', at: 'When', who: 'Who', action: 'Action', note: 'Note',
     verdict_before: 'Verdict before', verdict_after: 'Verdict after', evidence: 'Evidence', model: 'Model',
-    prompt_version: 'Prompt version',
+    prompt_version: 'Prompt version', comparison: 'Compared with the last round', changed: 'Changed controls',
+    before: 'Before', after: 'After', plan: 'Improvement plan', open_questions: 'Open questions', asked_of: 'For',
+    answer: 'Answer',
   },
   verdicts: { evidenced: 'Evidenced', 'partly-evidenced': 'Partly evidenced', 'not-evidenced': 'Not evidenced',
     'not-applicable': 'Not applicable' },
@@ -37,6 +41,9 @@ const ENGLISH: ReportWords = {
     priority: 'Priority changed', done: 'Marked done', question: 'Open question logged', answer: 'Question answered' },
   goals: { 'audit-readiness': 'Audit readiness', 'internal-improvement': 'Internal improvement' },
   protection_levels: { normal: 'Normal', high: 'High', 'very high': 'Very high' },
+  priorities: { high: 'High', medium: 'Medium', low: 'Low' },
+  item_statuses: { open: 'Open', done: 'Done', closed: 'Closed' },
+  question_statuses: { answered: 'Answered', overdue: 'Overdue', open: 'Open' },
   languages: { en: 'English', de: 'German' },
   sentences: {
     accepted_of: '{accepted} of {controls} controls accepted',
@@ -49,6 +56,17 @@ const ENGLISH: ReportWords = {
     disclaimer: 'Drafted by an AI assistant, reviewed by {names}; not an audit result.',
     disclaimer_nothing_reviewed: 'Drafted by an AI assistant; nothing has been reviewed yet; not an audit result.',
     and: 'and',
+    compared_with: 'Compared with {name}, closed on {date}.',
+    accepted_now_then: 'Accepted: {now} now, {then} when {name} closed.',
+    no_change: '(no change)',
+    nothing_changed: 'Nothing has changed since {name} closed.',
+    no_comparison: 'No review round has been closed yet, so there is nothing to compare with.',
+    not_accepted: 'Not accepted',
+    no_plan: 'No remediation item is approved yet.',
+    no_questions: 'No open question has been logged.',
+    improvement_disclaimer: 'Internal self-assessment, drafted by an AI assistant, reviewed by {names}.',
+    improvement_disclaimer_nothing_reviewed:
+      'Internal self-assessment, drafted by an AI assistant; nothing has been reviewed yet.',
   },
 }
 
@@ -60,7 +78,8 @@ const entry = (id: number, at: string, action: TrailEntry['action'], extra: Part
 })
 
 /** Nordlicht's report with 4.1.2 accepted (one stale quote, one current) and the rest open. */
-const REPORT: Served = {
+const REPORT: AuditReadinessReport = {
+  goal: 'audit-readiness',
   head: { company: 'Nordlicht Komponenten GmbH', country: 'Germany', base_framework: 'VDA ISA 6 (subset)',
     protection_level: 'high', overlays: [], answer_language: 'en', words_language: 'en', date: '2026-11-06' },
   readiness: { controls: 12, accepted: 1,
@@ -89,7 +108,7 @@ const REPORT: Served = {
   words: ENGLISH,
 }
 
-const NOTHING_ACCEPTED: Served = {
+const NOTHING_ACCEPTED: AuditReadinessReport = {
   ...REPORT,
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
@@ -237,6 +256,128 @@ describe('The readiness report', () => {
       words.actions.reject, words.sentences.open_control, '~1 of 12 controls accepted~']) {
       expect(within(report).getAllByText(word).length).toBeGreaterThan(0)
     }
+  })
+})
+
+const NOW_AND_THEN = { now: 0, then: 0 }
+
+/** Nordlicht's improvement report: compared with "Q3 2026", a plan of a High item and a done Medium one, a Closed
+ * control's Low item, and an answered, an overdue and an open question. */
+const IMPROVEMENT: ImprovementReport = {
+  goal: 'internal-improvement',
+  head: REPORT.head,
+  readiness: { ...REPORT.readiness, accepted: 2, open: 10, remediation_items: 3, remediation_approved: 3 },
+  comparison: {
+    against: { name: 'Q3 2026', closed_at: '2026-10-01T12:00:00+00:00' },
+    accepted: { now: 2, then: 1 },
+    by_verdict: { evidenced: { now: 1, then: 0 }, 'partly-evidenced': { now: 1, then: 1 }, 'not-evidenced': NOW_AND_THEN,
+      'not-applicable': NOW_AND_THEN },
+    changed: [{ control_id: '1.1.1', before: null, after: 'evidenced' }],
+  },
+  plan: [
+    { priority: 'high', items: [{ control_id: '4.1.2', requirement_id: 'M1', missing: 'No **exposure** record.',
+      owner_role: 'IT security officer', due_date: '2026-12-31', status: 'open', note: '' }] },
+    { priority: 'medium', items: [{ control_id: '4.1.2', requirement_id: 'M2', missing: 'No key list.',
+      owner_role: 'CISO', due_date: '2026-12-15', status: 'done', note: 'Keys listed in the vault.' }] },
+    { priority: 'low', items: [{ control_id: '5.2.9', requirement_id: 'S1', missing: 'No drill.',
+      owner_role: 'CISO', due_date: '2026-12-01', status: 'closed', note: 'Drill held.' }] },
+  ],
+  questions: [
+    { control_id: '1.1.1', id: 1, question: 'Who signs the scope?', asked_of: 'CEO', due_date: '2026-11-01',
+      asked_at: '2026-10-20T09:00:00+00:00', answer: 'The CEO, yearly.', answered_at: '2026-10-25T09:00:00+00:00',
+      overdue: false },
+    { control_id: '1.1.1', id: 2, question: 'Is the scope published?', asked_of: 'IT lead', due_date: '2026-11-02',
+      asked_at: '2026-10-21T09:00:00+00:00', answer: null, answered_at: null, overdue: true },
+    { control_id: '4.1.2', id: 3, question: 'Who holds the keys?', asked_of: 'IT lead', due_date: '2026-12-01',
+      asked_at: '2026-10-22T09:00:00+00:00', answer: null, answered_at: null, overdue: false },
+  ],
+  trail: REPORT.trail,
+  disclaimer: 'Internal self-assessment, drafted by an AI assistant, reviewed by Local user.',
+  words: ENGLISH,
+}
+
+describe('The improvement report (ticket 420)', () => {
+  const opened = () => screen.findByRole('article', { name: ENGLISH.improvement_title })
+
+  it('shows the comparison, the plan by priority with statuses, the questions and the disclaimer', async () => {
+    serve(IMPROVEMENT)
+    render(<Report />)
+    const report = await opened()
+
+    expect(within(report).getByRole('heading', { level: 1 }).textContent).toBe('Improvement report')
+    expect(within(report).getAllByText('2 of 12 controls accepted').length).toBeGreaterThan(0)
+
+    const compared = within(report).getByRole('region', { name: 'Compared with the last round' })
+    expect(within(compared).getByText('Compared with Q3 2026, closed on 2026-10-01.')).toBeTruthy()
+    expect(within(compared).getByText('Accepted: 2 now, 1 when Q3 2026 closed.')).toBeTruthy()
+    expect(within(compared).getByText('Evidenced 1 (+1)')).toBeTruthy()
+    expect(within(compared).getByText('Partly evidenced 1 (no change)')).toBeTruthy()
+    expect(within(compared).queryByText(/Not evidenced 0/)).toBeNull() // counted neither now nor then
+    const changed = within(compared).getByRole('table', { name: 'Changed controls' })
+    const row = within(changed).getByRole('row', { name: /^1\.1\.1/ })
+    expect(within(row).getByText('Not accepted')).toBeTruthy()
+    expect(within(row).getByText('Evidenced')).toBeTruthy()
+
+    const plan = within(report).getByRole('region', { name: 'Improvement plan' })
+    expect(within(plan).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['High', 'Medium', 'Low'])
+    const high = within(plan).getByRole('table', { name: 'High' })
+    expect(within(high).getByText('exposure').tagName).toBe('STRONG') // the model's text, through Prose
+    expect(within(high).getByText('Open')).toBeTruthy()
+    const medium = within(plan).getByRole('table', { name: 'Medium' })
+    expect(within(medium).getByText('Done')).toBeTruthy()
+    expect(within(medium).getByText('Keys listed in the vault.')).toBeTruthy()
+    expect(within(within(plan).getByRole('table', { name: 'Low' })).getByText('Closed')).toBeTruthy()
+
+    const asked = within(report).getByRole('table', { name: 'Open questions' })
+    const [, answered, overdue, open] = within(asked).getAllByRole('row')
+    expect(within(answered).getByText('Answered')).toBeTruthy()
+    expect(within(answered).getByText('The CEO, yearly.')).toBeTruthy()
+    expect(within(overdue).getByText('Overdue')).toBeTruthy()
+    expect(within(open).getByText('Open')).toBeTruthy()
+    expect(within(open).getByText('4.1.2')).toBeTruthy()
+
+    expect(within(report).getByRole('table', { name: 'Audit trail' })).toBeTruthy()
+    expect(within(report).getByText(IMPROVEMENT.disclaimer)).toBeTruthy()
+    expect(within(report).queryByRole('table', { name: 'Controls' })).toBeNull()
+    expect(within(report).queryByRole('region', { name: 'Remediation items' })).toBeNull()
+    expect(within(report).queryByRole('region', { name: 'Not applicable' })).toBeNull()
+  })
+
+  it('with no round closed, nothing planned and nothing asked, says so in the served sentences', async () => {
+    serve({ ...IMPROVEMENT, comparison: null, plan: [], questions: [] })
+    render(<Report />)
+    const report = await opened()
+
+    for (const sentence of ['no_comparison', 'no_plan', 'no_questions']) {
+      expect(within(report).getByText(ENGLISH.sentences[sentence])).toBeTruthy()
+    }
+    expect(within(report).queryByRole('table', { name: 'Changed controls' })).toBeNull()
+  })
+
+  it('says nothing changed in place of the table when nothing did', async () => {
+    serve({ ...IMPROVEMENT, comparison: { ...IMPROVEMENT.comparison!, changed: [] } })
+    render(<Report />)
+    const report = await opened()
+
+    expect(within(report).getByText('Nothing has changed since Q3 2026 closed.')).toBeTruthy()
+    expect(within(report).queryByRole('table', { name: 'Changed controls' })).toBeNull()
+  })
+
+  it('shows each heading, column name and status in the served words only', async () => {
+    const mark = (words: unknown): unknown => typeof words === 'string' ? `~${words}~`
+      : Object.fromEntries(Object.entries(words as object).map(([k, v]) => [k, mark(v)]))
+    const words = mark(ENGLISH) as ReportWords
+    serve({ ...IMPROVEMENT, words })
+    render(<Report />)
+    const report = await screen.findByRole('article', { name: words.improvement_title })
+
+    const served = new Set<string>()
+    const collect = (w: unknown) => typeof w === 'string' ? served.add(w) : Object.values(w as object).forEach(collect)
+    collect(words)
+    const own = [...report.querySelectorAll('h1, h2, h3, th[scope=col], dt, [data-word]')]
+      .map((el) => el.textContent ?? '')
+    expect(own.length).toBeGreaterThan(30)
+    expect(own.filter((text) => !served.has(text) && !text.startsWith('~2 of'))).toEqual([])
   })
 })
 

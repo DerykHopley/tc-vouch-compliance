@@ -9,6 +9,7 @@ German demo script (demo-de.json). The page checks only read, so they run in any
 import json
 import re
 from collections import Counter
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -532,3 +533,70 @@ def test_a_printed_a4_report_keeps_headings_clear_of_tables_and_notes_whole(
     )
     assert noted - printed_parts == Counter()
     assert [w.text for w in found if w.right > printed.page_width - margin + 0.5] == []
+
+
+# --- The improvement report (#420, story 13 of spec #350) ---------------------------------------
+
+DONE_NOTE = "Exposure record kept in the ISMS folder."
+ASKED = "Who signs off the ISMS scope each year?"
+DUE = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()  # within the horizon
+
+
+def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_exports_them(
+    page: Page, improvement_url
+):
+    request = page.request
+    goal = request.put(
+        f"{improvement_url}/api/goal",
+        data={"goal": "internal-improvement"},
+        headers={"X-Vouch-Profile": "nordlicht"},
+    )
+    assert goal.ok, goal.text()
+    thread_id = accepted(
+        request,
+        improvement_url,
+        "4.1.2",
+        "nordlicht",
+        decisions={"M1": {"decision": "approve", "owner_role": OWNER}},
+    )
+    done = f"{improvement_url}/api/assessments/{thread_id}/remediation/M1/done"
+    post(request, done, {"note": DONE_NOTE}, "nordlicht")
+    post(request, f"{improvement_url}/api/rounds/close", {}, "nordlicht")
+    question = {"question": ASKED, "asked_of": "CEO", "due_date": DUE}
+    post(request, f"{improvement_url}/api/controls/1.1.1/questions", question, "nordlicht")
+
+    for width in (1280, 400):
+        page.set_viewport_size({"width": width, "height": 900})
+        for scheme in ("light", "dark"):
+            page.emulate_media(color_scheme=scheme)
+            report = open_report(page, improvement_url)
+            expect(report.get_by_role("heading", level=1)).to_have_text("Improvement report")
+            # M1, partly evidenced on the fake: Medium by default, Done once marked.
+            plan = report.get_by_role("region", name="Improvement plan")
+            row = plan.get_by_role("table", name="Medium").locator("tbody tr")
+            expect(row).to_have_count(1)
+            expect(row).to_contain_text("M1")
+            expect(row).to_contain_text("Done")
+            expect(row).to_contain_text(DONE_NOTE)
+            asked = report.get_by_role("table", name="Open questions").locator("tbody tr")
+            expect(asked).to_have_count(1)
+            expect(asked).to_contain_text(ASKED)
+            expect(asked).to_contain_text("Open")
+            compared = report.get_by_role("region", name="Compared with the last round")
+            expect(compared).to_contain_text("Compared with First round, closed on")
+            expect(report.locator("table.report-controls")).to_have_count(0)
+            scrolls = page.evaluate(
+                "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+            )
+            assert not scrolls, f"the improvement report scrolls sideways at {width}px in {scheme}"
+            assert small_targets(page) == []
+
+    with page.expect_download() as download_info:
+        page.get_by_role("button", name="Export Markdown").click()
+    download = download_info.value
+    name = download.suggested_filename
+    assert re.fullmatch(r"improvement-report-nordlicht-\d{4}-\d{2}-\d{2}\.md", name), name
+    text = Path(download.path()).read_text(encoding="utf-8")
+    assert text.startswith("# Improvement report\n")
+    assert f"| Done | {DONE_NOTE} |" in text
+    assert f"| 1.1.1 | {ASKED} | CEO | {DUE} | Open |" in text

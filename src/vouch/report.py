@@ -14,6 +14,12 @@ Dossier already reads.
 - a page of the audit trail, newest first (vouch.audit.read);
 - the disclaimer, naming the reviewers of the accepted verdicts.
 
+In the Internal improvement goal the report is the improvement report (#420,
+`improvement_report`), for the team rather than an auditor: the head and readiness, the
+comparison with the last review round closed since the fresh start, the improvement plan by
+priority with each item's status, the open questions, the trail and an internal
+self-assessment disclaimer. Each report names its shape in `goal`.
+
 `markdown` writes a served report as one Markdown file (#57): the page's parts in the page's
 order, in the report's words.
 
@@ -24,17 +30,22 @@ English. None of them claims an audit result (vouch.language.audit_claim); text 
 elsewhere (quotes, the lead's notes, the model's remediation text) stays as written.
 """
 
-from collections.abc import Iterable, Mapping
-from datetime import UTC, date, datetime
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import UTC, date, datetime, time
 from typing import Any, Literal, TypedDict, TypeGuard
 
 from vouch import audit
 from vouch.citations import EvidenceKind
+from vouch.database import Priority
 from vouch.dossier import Readiness, control_requirements, readiness
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
+from vouch.plan import CardFlags
 from vouch.profile import ComplianceProfile, ProtectionLevel
-from vouch.remediation import DecidedItem, Key
+from vouch.questions import OpenQuestion
+from vouch.questions import shown as shown_question
+from vouch.remediation import DecidedItem, Key, Mark, default_priority
+from vouch.rounds import Comparison
 
 ControlStatus = Literal["accepted", "open"]
 DEFAULT_LANGUAGE = "en"
@@ -42,6 +53,7 @@ DEFAULT_LANGUAGE = "en"
 WORDS: dict[str, dict[str, Any]] = {
     "en": {
         "title": "Readiness report",
+        "improvement_title": "Improvement report",  # the Internal improvement goal's (#420)
         "labels": {
             "company": "Company",
             "country": "Country",
@@ -82,6 +94,15 @@ WORDS: dict[str, dict[str, Any]] = {
             "evidence": "Evidence",
             "model": "Model",
             "prompt_version": "Prompt version",
+            # The improvement report's (#420).
+            "comparison": "Compared with the last round",
+            "changed": "Changed controls",
+            "before": "Before",
+            "after": "After",
+            "plan": "Improvement plan",
+            "open_questions": "Open questions",
+            "asked_of": "For",
+            "answer": "Answer",
         },
         "verdicts": {
             "evidenced": "Evidenced",
@@ -110,6 +131,9 @@ WORDS: dict[str, dict[str, Any]] = {
             "internal-improvement": "Internal improvement",
         },
         "protection_levels": {"normal": "Normal", "high": "High", "very high": "Very high"},
+        "priorities": {"high": "High", "medium": "Medium", "low": "Low"},
+        "item_statuses": {"open": "Open", "done": "Done", "closed": "Closed"},
+        "question_statuses": {"answered": "Answered", "overdue": "Overdue", "open": "Open"},
         "languages": {"en": "English", "de": "German"},
         "sentences": {
             "accepted_of": "{accepted} of {controls} controls accepted",
@@ -125,10 +149,28 @@ WORDS: dict[str, dict[str, Any]] = {
             ),
             "and": "and",  # joins the last two names
             "page_of": "Page {page} of {pages}",  # the PDF's footer (#352)
+            # The improvement report's (#420): {name} the round compared with, {date} its day.
+            "compared_with": "Compared with {name}, closed on {date}.",
+            "accepted_now_then": "Accepted: {now} now, {then} when {name} closed.",
+            "no_change": "(no change)",
+            "nothing_changed": "Nothing has changed since {name} closed.",
+            "no_comparison": (
+                "No review round has been closed yet, so there is nothing to compare with."
+            ),
+            "not_accepted": "Not accepted",
+            "no_plan": "No remediation item is approved yet.",
+            "no_questions": "No open question has been logged.",
+            "improvement_disclaimer": (
+                "Internal self-assessment, drafted by an AI assistant, reviewed by {names}."
+            ),
+            "improvement_disclaimer_nothing_reviewed": (
+                "Internal self-assessment, drafted by an AI assistant; nothing has been reviewed yet."
+            ),
         },
     },
     "de": {
         "title": "Bereitschaftsbericht",
+        "improvement_title": "Verbesserungsbericht",
         "labels": {
             "company": "Unternehmen",
             "country": "Land",
@@ -168,6 +210,14 @@ WORDS: dict[str, dict[str, Any]] = {
             "evidence": "Nachweise",
             "model": "Modell",
             "prompt_version": "Prompt-Version",
+            "comparison": "Vergleich mit der letzten Prüfrunde",
+            "changed": "Geänderte Kontrollen",
+            "before": "Vorher",
+            "after": "Nachher",
+            "plan": "Verbesserungsplan",
+            "open_questions": "Offene Fragen",
+            "asked_of": "Für",
+            "answer": "Antwort",
         },
         "verdicts": {
             "evidenced": "Nachgewiesen",
@@ -197,6 +247,9 @@ WORDS: dict[str, dict[str, Any]] = {
             "internal-improvement": "Interner Verbesserung",
         },
         "protection_levels": {"normal": "Normal", "high": "Hoch", "very high": "Sehr hoch"},
+        "priorities": {"high": "Hoch", "medium": "Mittel", "low": "Niedrig"},
+        "item_statuses": {"open": "Offen", "done": "Erledigt", "closed": "Geschlossen"},
+        "question_statuses": {"answered": "Beantwortet", "overdue": "Überfällig", "open": "Offen"},
         "languages": {"en": "Englisch", "de": "Deutsch"},
         "sentences": {
             "accepted_of": "{accepted} von {controls} Kontrollen akzeptiert",
@@ -214,6 +267,22 @@ WORDS: dict[str, dict[str, Any]] = {
             ),
             "and": "und",
             "page_of": "Seite {page} von {pages}",
+            "compared_with": "Verglichen mit {name}, abgeschlossen am {date}.",
+            "accepted_now_then": "Akzeptiert: {now} jetzt, {then} beim Abschluss von {name}.",
+            "no_change": "(unverändert)",
+            "nothing_changed": "Seit dem Abschluss von {name} hat sich nichts geändert.",
+            "no_comparison": (
+                "Noch ist keine Prüfrunde abgeschlossen, daher gibt es keinen Vergleich."
+            ),
+            "not_accepted": "Nicht akzeptiert",
+            "no_plan": "Noch ist keine Maßnahme freigegeben.",
+            "no_questions": "Es wurde keine offene Frage erfasst.",
+            "improvement_disclaimer": (
+                "Interne Selbstbewertung, erstellt von einem KI-Assistenten, geprüft von {names}."
+            ),
+            "improvement_disclaimer_nothing_reviewed": (
+                "Interne Selbstbewertung, erstellt von einem KI-Assistenten; noch nichts geprüft."
+            ),
         },
     },
 }
@@ -275,11 +344,57 @@ class Trail(TypedDict):
 
 
 class Report(TypedDict):
+    goal: Literal["audit-readiness"]
     head: Head
     readiness: Readiness
     controls: list[ReportControl]
     remediation: list[ControlItems]
     not_applicable: list[NotApplicableEntry]
+    trail: Trail
+    disclaimer: str
+
+
+ItemState = Literal["open", "done", "closed"]
+"""A plan item's status (#420): Closed with its control, else Done once marked done, else Open."""
+PRIORITIES: tuple[Priority, ...] = ("high", "medium", "low")
+"""The plan's groups, in this order."""
+
+
+class Against(TypedDict):
+    name: str
+    closed_at: str  # ISO 8601
+
+
+class ReportComparison(Comparison):
+    """The overview's comparison (vouch.rounds.compare) with the round it is against."""
+
+    against: Against
+
+
+class PlanItem(TypedDict):
+    control_id: str
+    requirement_id: str
+    missing: str
+    owner_role: str
+    due_date: str  # ISO 8601
+    status: ItemState
+    note: str  # the done note; empty when none
+
+
+class PlanGroup(TypedDict):
+    priority: Priority
+    items: list[PlanItem]
+
+
+class ImprovementReport(TypedDict):
+    """The report in the Internal improvement goal (#420): for the team, not an auditor."""
+
+    goal: Literal["internal-improvement"]
+    head: Head
+    readiness: Readiness
+    comparison: ReportComparison | None  # None: no round closed since the fresh start
+    plan: list[PlanGroup]
+    questions: list[dict[str, Any]]  # each: `control_id` and vouch.questions.shown's fields
     trail: Trail
     disclaimer: str
 
@@ -332,16 +447,31 @@ def country_in(country: str, language: str) -> str:
     return COUNTRY_NAMES.get(words_language(language), {}).get(country, country)
 
 
-def disclaimer(names: Iterable[str], language: str) -> str:
+def disclaimer(names: Iterable[str], language: str, *, improvement: bool = False) -> str:
     """The AI disclaimer, naming the reviewers in the order given (each once), joined in the
-    language ("A, B and C", "A, B und C"); the nothing-reviewed wording when there are none."""
+    language ("A, B and C", "A, B und C"); the nothing-reviewed wording when there are none.
+    `improvement`: the improvement report's internal self-assessment wording (#420)."""
     sentences = words_for(language)["sentences"]
+    key = "improvement_disclaimer" if improvement else "disclaimer"
     unique = list(dict.fromkeys(names))
     if not unique:
-        return sentences["disclaimer_nothing_reviewed"]
+        return sentences[f"{key}_nothing_reviewed"]
     *first, last = unique
     joined = f"{', '.join(first)} {sentences['and']} {last}" if first else last
-    return sentences["disclaimer"].format(names=joined)
+    return sentences[key].format(names=joined)
+
+
+def _head(profile: ComplianceProfile, today: date) -> Head:
+    return {
+        "company": profile.company,
+        "country": country_in(profile.country, profile.answer_language),
+        "base_framework": profile.base_framework,
+        "protection_level": profile.protection_level,
+        "overlays": [overlay.name for overlay in profile.overlays],
+        "answer_language": profile.answer_language,
+        "words_language": words_language(profile.answer_language),
+        "date": today.isoformat(),
+    }
 
 
 def readiness_report(
@@ -363,16 +493,8 @@ def readiness_report(
     remediation = _remediation(controls, latest, decided)
     approved = sum(len(group["items"]) for group in remediation)
     return {
-        "head": {
-            "company": profile.company,
-            "country": country_in(profile.country, profile.answer_language),
-            "base_framework": profile.base_framework,
-            "protection_level": profile.protection_level,
-            "overlays": [overlay.name for overlay in profile.overlays],
-            "answer_language": profile.answer_language,
-            "words_language": words_language(profile.answer_language),
-            "date": today.isoformat(),
-        },
+        "goal": "audit-readiness",
+        "head": _head(profile, today),
         # The accepted counts as the overview's; the items as the report lists them.
         "readiness": readiness(controls, latest)
         | {"remediation_items": approved, "remediation_approved": approved},
@@ -474,6 +596,117 @@ def _not_applicable(
         for r in control_requirements(profile, control)
         if r["not_applicable"] is not None
     ]
+
+
+# --- The improvement report (#420) ------------------------------------------------------------
+
+
+def improvement_report(
+    profile: ComplianceProfile,
+    controls: Iterable[IsaControl],
+    latest: Mapping[str, Assessment],
+    *,
+    history: Sequence[Assessment],
+    decided: Mapping[Key, DecidedItem],
+    marks: Mapping[Key, Mark],
+    flags: Mapping[str, CardFlags],
+    comparison: ReportComparison | None,
+    questions: Iterable[OpenQuestion],
+    trail: audit.Page,
+    today: date,
+) -> ImprovementReport:
+    """The report in the Internal improvement goal, for the team: the head and readiness as the
+    readiness report has them (its item count the plan's); the `comparison` with the last round
+    closed since the fresh start (the overview's, None when there is none); the plan, from the
+    assessments listed since the fresh start (`history`, newest first, vouch.memory's
+    `assessments`), the lead's decisions and marks on them and the cards' `flags`
+    (vouch.plan.card_flags); the open questions listed since the fresh start, each overdue or not
+    as of `today`; a page of the trail; and the internal self-assessment disclaimer. No controls
+    table, remediation by control or not-applicable list: those are an auditor's."""
+    controls = list(controls)
+    plan = _plan(controls, history, decided, marks, flags)
+    listed = sum(len(group["items"]) for group in plan)
+    reviewers = [
+        row["reviewer"]
+        for row in (_control(control, latest.get(control.id)) for control in controls)
+        if row["reviewer"] is not None
+    ]
+    return {
+        "goal": "internal-improvement",
+        "head": _head(profile, today),
+        "readiness": readiness(controls, latest)
+        | {"remediation_items": listed, "remediation_approved": listed},
+        "comparison": comparison,
+        "plan": plan,
+        "questions": _questions(controls, questions, today),
+        "trail": {"entries": [e.to_dict() for e in trail.entries], "next": trail.next},
+        "disclaimer": disclaimer(reviewers, profile.answer_language, improvement=True),
+    }
+
+
+def _plan(
+    controls: list[IsaControl],
+    history: Sequence[Assessment],
+    decided: Mapping[Key, DecidedItem],
+    marks: Mapping[Key, Mark],
+    flags: Mapping[str, CardFlags],
+) -> list[PlanGroup]:
+    """For each control, the approved items of its newest accepted assessment that has any (so a
+    Closed control keeps the items that closed it), by priority (the lead's, else the default),
+    then in the base framework's control order and the assessment's item order. A priority with
+    no item is left out."""
+    order = {control.id: n for n, control in enumerate(controls)}
+    planned: dict[str, list[tuple[Priority, PlanItem]]] = {}
+    for assessment in history:  # newest first: the first with an approved item is the plan
+        if assessment.control_id in planned or assessment.control_id not in order:
+            continue
+        if assessment.status != "accepted":
+            continue
+        closed = (shown := flags.get(assessment.control_id)) is not None and shown.closed
+        items = []
+        for draft in assessment.remediation:
+            key = (assessment.thread_id, draft.requirement_id)
+            kept = decided.get(key)
+            if kept is None or kept.status != "approved":
+                continue
+            mark = marks.get(key)
+            done = mark is not None and mark.done_at is not None
+            state: ItemState = "closed" if closed else "done" if done else "open"
+            priority = (mark.priority if mark else None) or default_priority(
+                assessment, draft.requirement_id
+            )
+            item: PlanItem = {
+                "control_id": assessment.control_id,
+                "requirement_id": kept.requirement_id,
+                "missing": kept.missing,
+                "owner_role": kept.owner_role,
+                "due_date": kept.due_date.isoformat(),
+                "status": state,
+                "note": (mark.done_note or "") if mark is not None and done else "",
+            }
+            items.append((priority, item))
+        if items:
+            planned[assessment.control_id] = items
+    ranked = sorted(planned.items(), key=lambda pair: order[pair[0]])
+    groups: list[PlanGroup] = []
+    for priority in PRIORITIES:
+        mine = [item for _, items in ranked for p, item in items if p == priority]
+        if mine:
+            groups.append({"priority": priority, "items": mine})
+    return groups
+
+
+def _questions(
+    controls: list[IsaControl], questions: Iterable[OpenQuestion], today: date
+) -> list[dict[str, Any]]:
+    """Each question in the base framework's control order (one on a control the edition
+    doesn't list last), oldest first within a control, overdue or not as of `today` in UTC."""
+    order = {control.id: n for n, control in enumerate(controls)}
+    at = datetime.combine(today, time.min, UTC)  # overdue turns at a day's start in UTC
+    ranked = sorted(
+        questions, key=lambda q: (order.get(q.control_id, len(order)), q.asked_at, q.id)
+    )
+    return [{"control_id": q.control_id} | shown_question(q, at) for q in ranked]
 
 
 # --- The downloads' rows (#57, #308) ----------------------------------------------------------
@@ -636,7 +869,96 @@ def trail_rows(entries: list[Mapping[str, Any]], words: Mapping[str, Any]) -> li
     ]
 
 
-# --- The Markdown export (#57) -----------------------------------------------------------------
+def comparison_lines(
+    c: Mapping[str, Any] | None, words: Mapping[str, Any]
+) -> tuple[list[str], list[str], str | None]:
+    """The comparison (#420) as its lead sentences, its counts (one per verdict counted now or
+    then: "Evidenced 3 (+2)") and its closing sentence (nothing changed; None when something
+    did, as the changed controls' table follows). No comparison: its one sentence alone."""
+    sentences = words["sentences"]
+    if c is None:
+        return [sentences["no_comparison"]], [], None
+    name = c["against"]["name"]
+    lead = [
+        sentences["compared_with"].format(name=name, date=day_of(c["against"]["closed_at"])),
+        sentences["accepted_now_then"].format(
+            now=c["accepted"]["now"], then=c["accepted"]["then"], name=name
+        ),
+    ]
+    counts = []
+    for verdict, n in c["by_verdict"].items():
+        now, then = n["now"], n["then"]
+        if now or then:
+            change = sentences["no_change"] if now == then else f"({now - then:+d})"
+            counts.append(f"{words['verdicts'][verdict]} {now} {change}")
+    closing = None if c["changed"] else sentences["nothing_changed"].format(name=name)
+    return lead, counts, closing
+
+
+def changed_columns(words: Mapping[str, Any]) -> list[str]:
+    labels = words["labels"]
+    return [labels["control"], labels["before"], labels["after"]]
+
+
+def changed_rows(c: Mapping[str, Any], words: Mapping[str, Any]) -> list[list[str]]:
+    """The changed controls' rows: the accepted verdict before and after, "Not accepted" for none."""
+
+    def accepted(verdict: str | None) -> str:
+        return words["verdicts"][verdict] if verdict else words["sentences"]["not_accepted"]
+
+    return [[x["control_id"], accepted(x["before"]), accepted(x["after"])] for x in c["changed"]]
+
+
+def plan_columns(words: Mapping[str, Any]) -> list[str]:
+    labels = words["labels"]
+    keys = ("control", "requirement", "missing", "owner_role", "due_date", "status", "note")
+    return [labels[k] for k in keys]
+
+
+def plan_rows(group: Mapping[str, Any], words: Mapping[str, Any]) -> list[list[str]]:
+    """A priority's items, each with its status in words and its done note."""
+    statuses = words["item_statuses"]
+    return [
+        [
+            i["control_id"],
+            i["requirement_id"],
+            i["missing"],
+            i["owner_role"],
+            i["due_date"],
+            statuses[i["status"]],
+            i["note"],
+        ]
+        for i in group["items"]
+    ]
+
+
+def question_columns(words: Mapping[str, Any]) -> list[str]:
+    labels = words["labels"]
+    return [labels[k] for k in ("control", "question", "asked_of", "due_date", "status", "answer")]
+
+
+def question_status(q: Mapping[str, Any]) -> str:
+    """Answered once answered, else overdue when it is, else open."""
+    return "answered" if q["answer"] is not None else "overdue" if q["overdue"] else "open"
+
+
+def question_rows(questions: list[Mapping[str, Any]], words: Mapping[str, Any]) -> list[list[str]]:
+    """The open questions' rows: each with its status in words and its answer, if any."""
+    statuses = words["question_statuses"]
+    return [
+        [
+            q["control_id"],
+            q["question"],
+            q["asked_of"],
+            q["due_date"],
+            statuses[question_status(q)],
+            q["answer"] or "",
+        ]
+        for q in questions
+    ]
+
+
+# --- The Markdown export (#57)-----------------------------------------------------------------
 #
 # Each writer is `_md_*`, apart from the data builders above. Text carried from elsewhere (the
 # company, questions, quotes, the lead's notes, reasons) stays as written, but never as Markdown
@@ -649,7 +971,10 @@ def markdown(report: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     (`words_for`): the page's parts in the page's order, an empty list's sentence in its place.
     Carried text stays as written but can't become a heading, a table's edge or live HTML: a
     line break in the head, a list item or a table cell becomes a space; a quote stays a
-    blockquote line by line. No model, no database."""
+    blockquote line by line. No model, no database. The improvement report (`goal`
+    "internal-improvement", #420) has its own parts (`_md_improvement`)."""
+    if report.get("goal") == "internal-improvement":
+        return _md_improvement(report, words)
     labels, sentences = words["labels"], words["sentences"]
     parts = [
         f"# {words['title']}",
@@ -668,6 +993,56 @@ def markdown(report: Mapping[str, Any], words: Mapping[str, Any]) -> str:
         _md_line(report["disclaimer"]),
     ]
     return "\n\n".join(parts) + "\n"
+
+
+def _md_improvement(report: Mapping[str, Any], words: Mapping[str, Any]) -> str:
+    """The improvement report (#420): title, head, readiness, the comparison, the plan by
+    priority, the open questions, the trail and the disclaimer."""
+    labels, sentences = words["labels"], words["sentences"]
+    parts = [
+        f"# {words['improvement_title']}",
+        _md_head(report["head"], words),
+        f"## {labels['readiness']}",
+        _md_readiness(report["readiness"], words),
+        f"## {labels['comparison']}",
+        *_md_comparison(report["comparison"], words),
+        f"## {labels['plan']}",
+        *(_md_plan(report["plan"], words) or [sentences["no_plan"]]),
+        f"## {labels['open_questions']}",
+        _md_questions(report["questions"], words) or sentences["no_questions"],
+        f"## {labels['trail']}",
+        _md_trail(report["trail"]["entries"], words) or sentences["no_trail"],
+        "---",
+        _md_line(report["disclaimer"]),
+    ]
+    return "\n\n".join(parts) + "\n"
+
+
+def _md_comparison(c: Mapping[str, Any] | None, words: Mapping[str, Any]) -> list[str]:
+    lead, counts, closing = comparison_lines(c, words)
+    parts = ["\n".join(_md_line(line) for line in lead)]
+    if counts:
+        parts.append("\n".join(f"- {count}" for count in counts))
+    if closing is not None:
+        parts.append(_md_line(closing))
+    elif c is not None:
+        parts.append(f"### {words['labels']['changed']}")
+        parts.append(_md_table(changed_columns(words), changed_rows(c, words)))
+    return parts
+
+
+def _md_plan(groups: list[Mapping[str, Any]], words: Mapping[str, Any]) -> list[str]:
+    parts: list[str] = []
+    for group in groups:
+        parts.append(f"### {words['priorities'][group['priority']]}")
+        parts.append(_md_table(plan_columns(words), plan_rows(group, words)))
+    return parts
+
+
+def _md_questions(questions: list[Mapping[str, Any]], words: Mapping[str, Any]) -> str:
+    if not questions:
+        return ""
+    return _md_table(question_columns(words), question_rows(questions, words))
 
 
 def _md_text(text: object) -> str:
