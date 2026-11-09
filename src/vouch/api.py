@@ -50,6 +50,7 @@ from vouch.database import Connection, Database, DatabaseUnavailable
 from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
+    ConfirmFindings,
     InvalidReviewError,
     NotWaitingForReviewError,
     ReviewDecision,
@@ -416,9 +417,12 @@ def assessment_data(
     assessment: Assessment, decided: dict[remediation.Key, remediation.DecidedItem] | None = None
 ) -> dict[str, Any]:
     """The assessment as the API sends it, each remediation item with its status (#43): a draft,
-    or as the lead decided it (`decided`, none for a run just made or just reviewed)."""
+    or as the lead decided it (`decided`, none for a run just made, its findings just confirmed,
+    or just reviewed: nothing is decided before the findings are), and `review_step`, the step
+    of the review it waits at (#372; null once reviewed)."""
     return assessment.to_dict() | {
-        "remediation": remediation.shown_items(assessment, decided or {})
+        "remediation": remediation.shown_items(assessment, decided or {}),
+        "review_step": remediation.review_step(assessment, decided or {}),
     }
 
 
@@ -722,26 +726,35 @@ def open_assessment(
     return clean
 
 
-@router.post("/assessments/{thread_id}/review")
-def review_assessment(
+def _noting_work(memory: Memory) -> None:
+    """Note the lead worked now; a step of the review stands whatever happens here."""
+    try:
+        memory.note_worked()
+    except Exception:
+        log.exception("a review's time wasn't kept")
+
+
+@router.post("/assessments/{thread_id}/findings")
+def confirm_findings(
     thread_id: str,
-    decision: Annotated[ReviewDecision, Body()],
+    findings: Annotated[ConfirmFindings, Body()],
     trail: AuditTrail,
     memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
 ) -> dict[str, Any]:
-    """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
-    as the stream's events are (its state holds the model's words as written). No model runs.
-    The decision and its audit entries are written together (vouch.audit): when the entries
-    can't be, nothing is, and it's a 503.
+    """Confirm findings, the review's first step (#372): the waiting assessment's verdicts
+    confirmed, any overridden; the assessment, redacted, now waiting at Plan fixes (or Accept,
+    with no remediation item). No model runs. The step and its audit entries are written
+    together (vouch.audit): when the entries can't be, nothing is, and it's a 503.
 
-    404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
-    already); 422 for an override naming a requirement the assessment didn't judge, or naming
-    one twice (the decision's shape is checked before, also 422)."""
+    404 for an unknown thread, another user's included; 409 for one not waiting at Confirm
+    findings (confirmed or reviewed already, or another step of its review running); 422 for an
+    override naming a requirement the assessment didn't judge, or naming one twice (the
+    findings' shape is checked before, also 422)."""
     try:
-        reviewed = audit.review(
-            trail, thread_id, decision, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
+        confirmed = audit.confirm_findings(
+            trail, thread_id, findings, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
         )
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -749,10 +762,54 @@ def review_assessment(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except InvalidReviewError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    try:  # the review stands whatever happens here: noting when is a convenience
-        memory.note_worked()
-    except Exception:
-        log.exception("a review's time wasn't kept")
+    _noting_work(memory)
+    clean, _ = redact_data({"assessment": assessment_data(confirmed)})
+    return clean
+
+
+@router.post("/assessments/{thread_id}/review")
+def review_assessment(
+    thread_id: str,
+    decision: Annotated[ReviewDecision, Body()],
+    trail: AuditTrail,
+    items: RemediationItems,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """Resume a waiting assessment with the lead's decision, Accept (the review's last step,
+    #372) or Reject (at any step); the reviewed Assessment, redacted as the stream's events are
+    (its state holds the model's words as written). No model runs. The decision and its audit
+    entry are written together (vouch.audit): when the entry can't be, nothing is, and it's a
+    503.
+
+    404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
+    already), an Accept before the findings are confirmed, or with remediation items left
+    drafts (`detail` names their requirements); 422 for a decision that doesn't validate, one
+    carrying overrides included (they go with Confirm findings)."""
+
+    # Read before the review's transaction, so it holds one connection: a draft decided
+    # meanwhile only makes fewer drafts, and the remediation route can't decide one while the
+    # review holds the thread's lock.
+    decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
+
+    def drafts(waiting: Assessment) -> list[str]:
+        return remediation.drafts_left(waiting, decided)
+
+    try:
+        reviewed = audit.review(
+            trail,
+            thread_id,
+            decision,
+            reviewer=audit.Reviewer(user.id, name),
+            scope=memory.scope,
+            drafts=drafts,
+        )
+    except UnknownAssessmentError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except NotWaitingForReviewError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    _noting_work(memory)
     clean, _ = redact_data({"assessment": assessment_data(reviewed)})
     return clean
 
@@ -764,25 +821,25 @@ def decide_remediation(
     request: Annotated[remediation.DecisionRequest, Body()],
     items: RemediationItems,
     memory: UserMemory,
-    saver: Checkpointer,
     user: CurrentUser,
     name: ReviewerName,
 ) -> dict[str, Any]:
-    """The lead approves or discards one of an accepted assessment's remediation items (#43),
+    """The lead approves or discards one of an assessment's remediation items (#43), once its
+    findings are confirmed (Plan fixes, #372; an accepted one's too),
     an approval maybe with another owner role or due date: the item as kept, redacted. The
     decision and its audit entry are kept together, under the user and the compliance profile;
     when the entry can't be written, neither is (a 503). The same decision again changes
     nothing and writes no entry.
 
     404 for an unknown thread (another user's or profile's too) or a requirement with no item;
-    409 for an assessment not accepted, an item decided the other way, or approved with other
+    409 for an assessment whose findings aren't confirmed, or rejected, an item decided the
+    other way, or approved with other
     values (`detail` names the kept ones); 422 for an approval due on a date past everywhere or
     beyond the horizon, or naming no owner where Vouch suggested none, with the hint in `detail`
     (the request's shape is checked before, also 422)."""
     try:
         kept = remediation.decide(
             items,
-            saver,
             thread_id,
             requirement_id,
             request,
@@ -792,7 +849,7 @@ def decide_remediation(
         )
     except (UnknownAssessmentError, remediation.UnknownItemError) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    except (remediation.NotAcceptedError, remediation.DecidedAlreadyError) as error:
+    except (remediation.NotDecidableError, remediation.DecidedAlreadyError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except (remediation.DueDateError, remediation.OwnerNeededError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

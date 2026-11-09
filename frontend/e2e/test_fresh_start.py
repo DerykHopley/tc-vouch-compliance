@@ -10,6 +10,7 @@ import re
 
 from dossier_cards import card
 from playwright.sync_api import Dialog, Page, expect
+from reviewing import reviewed
 
 CONTROL = "4.1.2"
 COMPANY = "Nordlicht Komponenten GmbH"
@@ -22,10 +23,7 @@ def accepted(page: Page, afresh_url: str) -> None:
     data = re.search(r"event: result\r?\ndata: (.*)", response.text())
     assert data, response.text()
     thread_id = json.loads(data.group(1))["assessment"]["thread_id"]
-    review = page.request.post(
-        f"{afresh_url}/api/assessments/{thread_id}/review", data={"decision": "accept"}
-    )
-    assert review.ok, review.status
+    reviewed(page.request, afresh_url, thread_id)
 
 
 def test_starting_nordlicht_afresh_shows_every_control_open_and_keeps_the_trail(

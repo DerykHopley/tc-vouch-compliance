@@ -16,9 +16,10 @@ import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
-from typing import Any
+from typing import Any, Literal
 
 import pytest
+import reviewing
 import test_memory
 from fastapi.testclient import TestClient
 from profiles_dir import SECOND, make_profiles
@@ -62,16 +63,14 @@ def reviewed(
     client: TestClient,
     user: dict[str, str],
     control_id: str = DEMO_CONTROL,
-    decision: str = "accept",
-    **body: Any,
+    decision: Literal["accept", "reject"] = "accept",
+    **options: Any,
 ) -> str:
+    """The control assessed and reviewed through the three steps (reviewing.reviewed's
+    `options`); an Accept discards the items `decisions` leaves, so only those approved there
+    are listed. Its thread id."""
     thread_id = assessed(client, user, control_id)["thread_id"]
-    response = client.post(
-        f"/api/assessments/{thread_id}/review",
-        json={"decision": decision, **body},
-        headers=user,
-    )
-    assert response.status_code == 200, response.text
+    reviewing.reviewed(client, thread_id, decision, items="discard", headers=user, **options)
     return thread_id
 
 
@@ -113,7 +112,7 @@ def every_word(words: Any) -> list[str]:
 def test_readiness_counts_accepted_verdicts_only_and_equals_the_overviews(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        reviewed(client, alice, "4.1.2", "accept")
+        reviewed(client, alice, "4.1.2", "accept", decisions={"M1": {"decision": "approve"}})
         assessed(client, alice, "1.1.1")  # proposed, waiting for review
         reviewed(client, alice, "1.6.1", "reject")
         shown = report_of(client, alice)
@@ -126,10 +125,10 @@ def test_readiness_counts_accepted_verdicts_only_and_equals_the_overviews(databa
     assert {k: shown["readiness"][k] for k in counts} == {
         k: overview["readiness"][k] for k in counts
     }
-    # The overview counts 4.1.2's undecided M1 draft; the report counts what it lists: none.
+    # 4.1.2's approved M1 item, on both; nothing of the controls not accepted.
     assert overview["readiness"]["remediation_items"] == 1
-    assert shown["readiness"]["remediation_items"] == 0
-    assert shown["remediation"] == []
+    assert shown["readiness"]["remediation_items"] == 1
+    assert [g["control_id"] for g in shown["remediation"]] == ["4.1.2"]
 
 
 # --- The controls: reviewed verdict, reviewer, date and quotes; open ones carry none (1, 2) ----
@@ -207,10 +206,18 @@ def test_an_approved_item_is_listed_under_its_control_and_a_discarded_one_and_a_
     due = (date.today() + timedelta(days=30)).isoformat()
     with TestClient(app_on(database_url)) as client:
         # M1's drafted item, and S1's "not drafted" one from the lead's override.
-        thread = reviewed(client, alice, "4.1.2", "accept", overrides=[S1_NOT_EVIDENCED])
-        decide(client, alice, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
-        decide(client, alice, thread, "S1", decision="discard")
-        reviewed(client, alice, "1.1.1", "accept")  # its drafts stay drafts
+        reviewed(
+            client,
+            alice,
+            "4.1.2",
+            "accept",
+            overrides=[S1_NOT_EVIDENCED],
+            decisions={
+                "M1": {"decision": "approve", "owner_role": "CISO", "due_date": due},
+                "S1": {"decision": "discard"},
+            },
+        )
+        reviewed(client, alice, "1.1.1", "accept")  # its items discarded
         shown = report_of(client, alice)
 
     assert shown["remediation"] == [
@@ -261,20 +268,27 @@ def test_the_trail_holds_each_accept_override_and_approval_newest_first(database
     app = app_on(database_url)
     named(app, "Dana Lead")
     with TestClient(app) as client:
-        thread = reviewed(
-            client, alice, "4.1.2", "accept", note="Fine.", overrides=[S1_NOT_EVIDENCED]
-        )
-        decide(client, alice, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
+        reviewed(
+            client,
+            alice,
+            "4.1.2",
+            "accept",
+            note="Fine.",
+            overrides=[S1_NOT_EVIDENCED],
+            decisions={"M1": {"decision": "approve", "owner_role": "CISO", "due_date": due}},
+        )  # S1's item discarded before the Accept
         shown = report_of(client, alice)
         other = report_of(client, under(alice, "alpenwerk"))
 
     entries = shown["trail"]["entries"]
     assert [(e["action"], e["requirement_id"]) for e in entries] == [
-        ("approve", "M1"),
         ("accept", None),
+        ("discard", "S1"),
+        ("approve", "M1"),
+        ("confirm", None),
         ("override", "S1"),
     ]
-    accept = entries[1]
+    accept = entries[0]
     assert accept["reviewer_name"] == "Dana Lead"
     assert accept["note"] == "Fine."
     assert accept["evidence"] == [{"doc_id": "authentication-standard", "version": "3.1"}]
@@ -617,9 +631,18 @@ def carried(shown: dict[str, Any]) -> list[str]:
 def seed_nordlicht(client: TestClient, user: dict[str, str]) -> None:
     """4.1.2 accepted with S1 overridden (M1 approved, S1 discarded), 1.1.1 accepted."""
     due = (date.today() + timedelta(days=30)).isoformat()
-    thread = reviewed(client, user, "4.1.2", "accept", note="Fine.", overrides=[S1_NOT_EVIDENCED])
-    decide(client, user, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
-    decide(client, user, thread, "S1", decision="discard")
+    reviewed(
+        client,
+        user,
+        "4.1.2",
+        "accept",
+        note="Fine.",
+        overrides=[S1_NOT_EVIDENCED],
+        decisions={
+            "M1": {"decision": "approve", "owner_role": "CISO", "due_date": due},
+            "S1": {"decision": "discard"},
+        },
+    )
     reviewed(client, user, "1.1.1", "accept")
 
 
@@ -667,7 +690,8 @@ def test_the_export_holds_the_same_standing_as_the_served_report(database_url, u
 
     trail = table_rows(section(md, "Audit trail"))
     entries = shown["trail"]["entries"]
-    assert len(trail) == len(entries) == 5
+    # 4.1.2: override, confirm, approve, discard, accept; 1.1.1: confirm, two discards, accept.
+    assert len(trail) == len(entries) == 9
     for row, e in zip(trail, entries, strict=True):
         action = words["actions"][e["action"]]
         assert row[1:5] == [e["reviewer_name"], e["control_id"], e["requirement_id"] or "", action]

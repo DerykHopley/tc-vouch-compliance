@@ -193,18 +193,23 @@ describe('the working paper', () => {
 
   describe('reviewing a stored proposed assessment (#42; from #40\'s verify)', () => {
     const WAITING = { ...STORED, requirements: [{ id: 'M1', column: 'must', text: 'Keys.', verdict: 'partly-evidenced',
-      reason: 'Policy only.', citations: [] }], review: null }
-    const ACCEPTED = { ...WAITING, status: 'accepted', review: { decision: 'accept', note: '', overrides: [] } }
+      reason: 'Policy only.', citations: [] }], review: null, review_step: 'confirm-findings' }
+    /** Its findings confirmed with nothing left to plan: at Accept (#372). */
+    const READY = { ...WAITING, review_step: 'accept', confirmed: [], remediation: [] }
+    const ACCEPTED = { ...WAITING, status: 'accepted', review: { decision: 'accept', note: '', overrides: [] },
+      review_step: null }
 
-    /** The API with WAITING stored; the review route answers `review`; GET of the thread answers `reread`. */
-    function serveReview(review: Response, reread = ACCEPTED) {
+    /** The API with `stored` stored (WAITING by default); the review and findings routes answer `review`; GET of the
+     * thread answers `reread` once either was posted to. */
+    function serveReview(review: Response, reread: object = ACCEPTED, stored: object = WAITING) {
+      const posted = (u: string) => u.endsWith('/review') || u.endsWith('/findings')
       const fetch = vi.fn((url: string, init?: RequestInit) =>
         url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
           : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [STORED] }))
-            : url === '/api/assessments/t1/review' && init?.method === 'POST' ? Promise.resolve(review)
+            : posted(url) && init?.method === 'POST' ? Promise.resolve(review)
               : url === '/api/assessments/t1'
-                ? Promise.resolve(Response.json({ assessment: fetch.mock.calls.some(([u]) => u.endsWith('/review'))
-                  ? reread : WAITING }))
+                ? Promise.resolve(Response.json({ assessment: fetch.mock.calls.some(([u]) => posted(u))
+                  ? reread : stored }))
                 : url.startsWith('/api/audit-trail') ? Promise.resolve(Response.json({ entries: [] }))
                   : new Promise<Response>(() => {}))
       vi.stubGlobal('fetch', fetch)
@@ -212,7 +217,7 @@ describe('the working paper', () => {
     }
 
     it('accepts it from its paper: the paper and the control index show it accepted', async () => {
-      serveReview(Response.json({ assessment: ACCEPTED }))
+      serveReview(Response.json({ assessment: ACCEPTED }), ACCEPTED, READY)
       window.history.replaceState(null, '', '/controls/4.1.2')
       render(<App />)
       const bar = await screen.findByRole('region', { name: 'Review' })
@@ -222,12 +227,12 @@ describe('the working paper', () => {
       expect(within(within(index).getByRole('link', { name: /^4\.1\.2/ })).getByText('Accepted')).toBeTruthy()
     })
 
-    it('after "already reviewed", Refresh reads the assessment again and shows the decision made elsewhere', async () => {
+    it('after "moved on", Refresh reads the assessment again and shows the decision made elsewhere', async () => {
       serveReview(Response.json({ detail: 'not waiting' }, { status: 409 }))
       window.history.replaceState(null, '', '/controls/4.1.2')
       render(<App />)
       const bar = await screen.findByRole('region', { name: 'Review' })
-      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      await userEvent.click(within(bar).getByRole('button', { name: 'Confirm findings' }))
       await userEvent.click(await within(bar).findByRole('button', { name: 'Refresh' }))
       expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
     })
@@ -246,7 +251,7 @@ describe('the working paper', () => {
       }
       /** 4.1.2's paper on WAITING, at its address. */
       async function openPaper() {
-        serveReview(Response.json({ assessment: ACCEPTED }))
+        serveReview(Response.json({ assessment: READY }), READY)
         window.history.replaceState(null, '', '/controls/4.1.2')
         render(<App />)
         await screen.findByRole('region', { name: 'Review' })
@@ -350,13 +355,13 @@ describe('the working paper', () => {
         expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
       })
 
-      it('asks nothing after Accept verdict records the decision', async () => {
+      it('asks nothing after Confirm findings records the overrides', async () => {
         await openPaper()
         await saveOverrideOfM1()
         const confirm = asking(false)
         await userEvent.click(within(screen.getByRole('region', { name: 'Review' }))
-          .getByRole('button', { name: 'Accept verdict' }))
-        await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')
+          .getByRole('button', { name: 'Confirm findings' }))
+        await within(screen.getByRole('region', { name: 'Review' })).findByRole('button', { name: 'Accept verdict' })
 
         await userEvent.click(indexLink('4.1.3'))
 

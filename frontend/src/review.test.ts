@@ -3,7 +3,8 @@ import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Column, RequirementVerdict, Verdict } from './assessment.ts'
 import {
-  ALREADY_REVIEWED, REVIEW_FAILED, REVIEW_REFUSED, rollUp, rollUpWords, submitReview, withOverrides,
+  confirmFindings, MOVED_ON, REVIEW_FAILED, REVIEW_REFUSED, reviewStep, rollUp, rollUpWords, submitReview,
+  withOverrides,
 } from './review.ts'
 
 const req = (id: string, column: Column, verdict: Verdict): RequirementVerdict =>
@@ -59,7 +60,7 @@ describe('withOverrides', () => {
 })
 
 describe('submitReview', () => {
-  const decision = { decision: 'accept' as const, note: 'Checked.', overrides: [] }
+  const decision = { decision: 'accept' as const, note: 'Checked.' }
 
   it("POSTs the decision to the assessment's review route and gives back the reviewed assessment", async () => {
     const reviewed = { control_id: '4.1.2', verdict: 'evidenced', answer: 'A.', status: 'accepted', thread_id: 't 1' }
@@ -72,9 +73,9 @@ describe('submitReview', () => {
     expect(JSON.parse(init.body as string)).toEqual(decision)
   })
 
-  it('says "already reviewed" for a 409: another tab reviewed it first', async () => {
+  it('says the review moved on for a 409: another tab reviewed it first', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(Response.json({ detail: 'x' }, { status: 409 }))))
-    expect(await submitReview('t1', decision)).toEqual({ ok: false, refusal: 'conflict', message: ALREADY_REVIEWED })
+    expect(await submitReview('t1', decision)).toEqual({ ok: false, refusal: 'conflict', message: MOVED_ON })
   })
 
   it("says a 422 refused the decision, with the server's detail: retrying the same one can't help", async () => {
@@ -93,5 +94,38 @@ describe('submitReview', () => {
     expect(await submitReview('t1', decision)).toEqual({ ok: false, refusal: 'failed', message: REVIEW_FAILED })
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
     expect(await submitReview('t1', decision)).toEqual({ ok: false, refusal: 'failed', message: REVIEW_FAILED })
+  })
+})
+
+describe('confirmFindings (issue 372)', () => {
+  it("POSTs the overrides to the assessment's findings route and gives back the assessment at its next step", async () => {
+    const next = { control_id: '4.1.2', verdict: 'evidenced', answer: 'A.', review_step: 'plan-fixes' }
+    const fetch = vi.fn(() => Promise.resolve(Response.json({ assessment: next })))
+    vi.stubGlobal('fetch', fetch)
+    const overrides = [{ requirement_id: 'M1', verdict: 'evidenced' as const, reason: 'Seen.' }]
+    expect(await confirmFindings('t 1', overrides)).toEqual({ ok: true, assessment: next })
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/assessments/t%201/findings')
+    expect(JSON.parse(init.body as string)).toEqual({ overrides })
+  })
+
+  it('says the review moved on for a 409: another tab confirmed them first', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(Response.json({ detail: 'x' }, { status: 409 }))))
+    expect(await confirmFindings('t1', [])).toEqual({ ok: false, refusal: 'conflict', message: MOVED_ON })
+  })
+})
+
+describe('reviewStep (issue 372)', () => {
+  const item = (status: 'draft' | 'approved') =>
+    ({ requirement_id: 'M1', missing: 'x', owner_role: 'CISO', due_date: '2027-01-01', status })
+
+  it("reads the server's step, Plan fixes and Accept from the items as the page holds them", () => {
+    const waiting = { status: 'waiting-for-review' as const }
+    expect(reviewStep({ ...waiting, review_step: 'confirm-findings', remediation: [item('draft')] }))
+      .toBe('confirm-findings')
+    expect(reviewStep({ ...waiting, review_step: 'plan-fixes', remediation: [item('draft')] })).toBe('plan-fixes')
+    expect(reviewStep({ ...waiting, review_step: 'plan-fixes', remediation: [item('approved')] })).toBe('accept')
+    expect(reviewStep({ ...waiting, review_step: 'accept', remediation: [] })).toBe('accept')
+    expect(reviewStep({ status: 'accepted', review_step: null, remediation: [item('draft')] })).toBeNull()
   })
 })

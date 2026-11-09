@@ -7,7 +7,7 @@ import pytest
 from playwright.sync_api import Page, expect
 from test_guided_chat import assess_in_the_chat
 from test_profiles import assessed as assessed_in
-from test_remediation import ITEM, accepted_with_an_item
+from test_remediation import ITEM, confirmed_with_an_item
 from test_review import assessed, open_paper, row
 from touch_targets import small_targets
 
@@ -79,7 +79,7 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
     expect(page.get_by_role("form", name="Override M1")).to_be_visible()
     assert small_targets(page) == []
 
-    accepted_with_an_item(page.request, paper_url)  # accepted, with S1's item to approve or discard
+    confirmed_with_an_item(page.request, paper_url)  # Plan fixes: S1's item to approve or discard
     paper = open_paper(page, paper_url)
     expect(row(paper, ITEM).get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
     assert small_targets(page) == []

@@ -14,7 +14,7 @@ import logging
 import operator
 import textwrap
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,7 +29,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command, StateSnapshot, interrupt
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
 from vouch.documents import (
@@ -388,12 +388,34 @@ class OverrideRequest(BaseModel):
     ]
 
 
+class ConfirmFindings(BaseModel):
+    """The first step of the lead's review (Confirm findings): the requirements' verdicts
+    confirmed, any overridden with a reason; one not overridden is confirmed as Vouch judged it."""
+
+    overrides: list[OverrideRequest] = Field(default_factory=list)
+
+
+OVERRIDES_AT_CONFIRM = (
+    "Overrides are recorded with Confirm findings, not with the decision: confirm the findings "
+    "with them first."
+)
+
+
 class ReviewDecision(BaseModel):
-    """The compliance lead's review of one control: accept or reject, a note, any overrides."""
+    """The compliance lead's decision on one control, the review's last step (Accept), or its
+    end at any step (Reject): the decision and a note. Overrides go with Confirm findings: a
+    decision carrying them (a page loaded before the three-step review) is refused, so none is
+    silently dropped."""
 
     decision: Decision
     note: Annotated[str, StringConstraints(pattern=NO_NUL_PATTERN)] = ""
-    overrides: list[OverrideRequest] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_overrides(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "overrides" in data:
+            raise ValueError(OVERRIDES_AT_CONFIRM)
+        return data
 
 
 @dataclass(frozen=True)
@@ -419,6 +441,9 @@ class Review:
     reviewer_id: str = ""
     reviewer_name: str = ""
     reviewed_at: str = ""
+    three_step: bool = False
+    """Made in the three-step review (Confirm findings, Plan fixes, Accept; #372). A review kept
+    before it reads False, its default."""
 
     @property
     def status(self) -> "Status":
@@ -429,6 +454,7 @@ Status = Literal["waiting-for-review", "accepted", "rejected"]
 WAITING: Status = "waiting-for-review"
 REVIEWED: dict[Decision, Status] = {"accept": "accepted", "reject": "rejected"}
 WAITING_TEXT = "Waiting for the compliance lead's review."
+WAITING_TO_ACCEPT_TEXT = "Findings confirmed. Waiting for the compliance lead's plan and decision."
 
 
 class UnknownAssessmentError(LookupError):
@@ -437,6 +463,19 @@ class UnknownAssessmentError(LookupError):
 
 class NotWaitingForReviewError(RuntimeError):
     """The assessment exists but isn't paused at the review (it was reviewed already)."""
+
+
+class WrongStepError(NotWaitingForReviewError):
+    """The assessment waits at another step of the review than the one asked for: its findings
+    confirmed already, or not yet confirmed for Accept (a 409, as a review made already)."""
+
+
+CONFIRM_FIRST = "Confirm the findings first."
+CONFIRMED_ALREADY = "The findings of this assessment were confirmed already."
+DRAFTS_LEFT = "Approve or discard the remediation items of {ids} first."
+NO_DRAFTS: "Callable[[Assessment], Sequence[str]]" = lambda _: ()
+"""No remediation item left a draft: what `resume` assumes unless told (vouch.remediation keeps
+the decisions)."""
 
 
 class InvalidReviewError(ValueError):
@@ -461,6 +500,9 @@ class Assessment:
     thread_id: str = ""  # resume this thread with the lead's review decision
     status: Status = WAITING
     review: Review | None = None
+    confirmed: list[Override] | None = None
+    """The overrides recorded with Confirm findings, once the findings are confirmed (#372); None
+    before, and on a review kept before the three-step review."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -577,6 +619,7 @@ class AssessState(TypedDict, total=False):
     remediate_rejected_word: str | None
     partly_drafted: int  # of the drafts made, those for partly evidenced requirements (#212)
     not_drafted: list[str]
+    confirmed: list[Override]  # the overrides confirmed with the findings (#372)
     review: Review
     steps: Annotated[list[dict[str, str]], operator.add]  # each node's described step
     model: str  # the model that drafted it, and its prompt version
@@ -1196,29 +1239,36 @@ def build_graph(
         }
 
     def review(state: AssessState) -> dict[str, Any]:
-        """Pause for the compliance lead. This node re-runs from its start on resume, so
-        nothing before the interrupt writes; the decision comes back as its value."""
+        """Pause for the compliance lead's Confirm findings, the review's first step (#372; the
+        node keeps its name, so a thread waiting here from before resumes into it). This node
+        re-runs from its start on resume, so nothing before the interrupt writes; the lead's
+        findings come back as its value: the overrides applied, the roll-up and remediation
+        items recalculated, the overrides kept for the review. Or a rejection, which ends the
+        review here."""
         answer = interrupt({"control_id": state["control"].id})
-        decision = ReviewDecision.model_validate(answer)
-        requirements, overrides = apply_overrides(state["requirements"], decision.overrides)
+        if DECISION in answer:  # Reject (`resume` lets no Accept through here)
+            decision = ReviewDecision.model_validate(_fields(answer))
+            return {"review": _recorded(decision, [], answer)}
+        findings = ConfirmFindings.model_validate(_fields(answer))
+        requirements, overrides = apply_overrides(state["requirements"], findings.overrides)
         today = date.fromisoformat(state["today"])
         overridden = {o.requirement_id for o in overrides}
         still_pending = [i for i in state["pending_ids"] if i not in overridden]
         remediation = _reviewed_remediation(
             requirements, state["remediation"], today, still_pending
         )
-        return {
-            "requirements": requirements,
-            "remediation": remediation,
-            "review": Review(
-                decision.decision,
-                decision.note,
-                overrides,
-                reviewer_id=answer.get(REVIEWED_BY, {}).get("id", ""),
-                reviewer_name=answer.get(REVIEWED_BY, {}).get("name", ""),
-                reviewed_at=answer.get(REVIEWED_AT, ""),
-            ),
-        }
+        return {"requirements": requirements, "remediation": remediation, "confirmed": overrides}
+
+    def accept(state: AssessState) -> dict[str, Any]:
+        """Pause for the lead's decision once the findings are confirmed: Accept (after Plan
+        fixes, which happens outside the graph, vouch.remediation) or Reject. The review keeps
+        the overrides confirmed with the findings."""
+        answer = interrupt({"control_id": state["control"].id})
+        decision = ReviewDecision.model_validate(_fields(answer))
+        return {"review": _recorded(decision, state["confirmed"], answer)}
+
+    def after_review(state: AssessState) -> str:
+        return END if state.get("review") is not None else "accept"
 
     def after_gather(state: AssessState) -> str:
         return "check_answer" if state.get("answer") is not None else "tools"
@@ -1247,6 +1297,7 @@ def build_graph(
         "check_quotes": check_quotes,
         "remediate": remediate,
         "review": review,
+        "accept": accept,
     }.items():
         graph.add_node(node, described(node, run))
     graph.add_edge(START, "apply_overlays")
@@ -1259,7 +1310,8 @@ def build_graph(
     # Remediation follows the quote check, which can turn a verdict into not-evidenced.
     graph.add_edge("check_quotes", "remediate")
     graph.add_edge("remediate", "review")
-    graph.add_edge("review", END)
+    graph.add_conditional_edges("review", after_review, ["accept", END])
+    graph.add_edge("accept", END)
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -1393,14 +1445,19 @@ class Step:
             if not_drafted:
                 text += " Not drafted: " + ", ".join(not_drafted) + "."
             return text
-        if self.node == "review":
+        if self.node in ("review", "accept"):
             review = update.get("review")
-            if review is None:
-                return WAITING_TEXT
-            text = f"The compliance lead {review.status} the assessment"
-            if review.overrides:
-                ids = ", ".join(o.requirement_id for o in review.overrides)
-                text += f", overriding {ids}"
+            confirmed = update.get("confirmed")
+            if review is None and confirmed is None:
+                return WAITING_TEXT if self.node == "review" else WAITING_TO_ACCEPT_TEXT
+            text = (
+                "The compliance lead confirmed the findings"
+                if review is None
+                else f"The compliance lead {review.status} the assessment"
+            )
+            overrides = confirmed if review is None else review.overrides
+            if overrides and self.node == "review":  # the accept step's were named at confirm
+                text += f", overriding {', '.join(o.requirement_id for o in overrides)}"
             return text + "."
         return f"Finished the {self.node} step."
 
@@ -1425,9 +1482,10 @@ def loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
     return Step("load_control", update, profile)
 
 
-def _waiting_step() -> Step:
-    """The step a paused run ends with: the review node, interrupted, made no update."""
-    return Step("review", {})
+def _waiting_step(node: str = "review") -> Step:
+    """The step a paused run ends with: the review node (or, once the findings are confirmed,
+    the accept node), interrupted, made no update."""
+    return Step(node, {})
 
 
 def guard_steps(update: dict[str, Any]) -> list[Step]:
@@ -1595,9 +1653,10 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
     requirements = values["requirements"]
     review: Review | None = values.get("review")
     steps = list(values["steps"])
+    confirmed: list[Override] | None = values.get("confirmed")
     if review is None:
         status: Status = WAITING
-        steps.append(_waiting_step().to_dict())
+        steps.append(_waiting_step("review" if confirmed is None else "accept").to_dict())
     else:
         status = review.status
     return Assessment(
@@ -1619,6 +1678,7 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
         thread_id=thread_id,
         status=status,
         review=review,
+        confirmed=confirmed,
     )
 
 
@@ -1751,6 +1811,67 @@ def load_assessment(
 REVIEWED_BY = "reviewed_by"
 REVIEWED_AT = "reviewed_at"
 """Who decided and when: sent to the review node with the decision, beside its fields."""
+DECISION = "decision"
+"""The field a decision (Accept or Reject) carries and the findings don't: how the review node
+tells a rejection at Confirm findings from the findings."""
+
+
+def _fields(answer: dict[str, Any]) -> dict[str, Any]:
+    """What the lead sent, without who and when (sent beside it)."""
+    return {k: v for k, v in answer.items() if k not in (REVIEWED_BY, REVIEWED_AT)}
+
+
+def _recorded(
+    decision: ReviewDecision, overrides: list[Override], answer: dict[str, Any]
+) -> Review:
+    """The lead's decision as the thread keeps it, with who made it and when."""
+    return Review(
+        decision.decision,
+        decision.note,
+        overrides,
+        reviewer_id=answer.get(REVIEWED_BY, {}).get("id", ""),
+        reviewer_name=answer.get(REVIEWED_BY, {}).get("name", ""),
+        reviewed_at=answer.get(REVIEWED_AT, ""),
+        three_step=True,
+    )
+
+
+def _waiting(graph: Any, config: dict[str, Any], thread_id: str) -> StateSnapshot:
+    """The thread's snapshot, waiting at a step of the review; UnknownAssessmentError or
+    NotWaitingForReviewError when it isn't."""
+    snapshot: StateSnapshot = graph.get_state(config)
+    if not _reached_review(snapshot):
+        raise UnknownAssessmentError(f"no assessment {thread_id}")
+    if not snapshot.interrupts:
+        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
+    return snapshot
+
+
+def confirm_findings(
+    thread_id: str,
+    findings: ConfirmFindings,
+    checkpointer: BaseCheckpointSaver,
+    *,
+    scope: str = "",
+) -> Assessment:
+    """Resume a thread waiting at Confirm findings with the lead's findings, and return the
+    assessment waiting for the decision (#372): overrides applied, the roll-up and remediation
+    items recalculated. No model is called.
+
+    Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
+    review), NotWaitingForReviewError for one not waiting (reviewed already) and WrongStepError
+    for one whose findings were confirmed already, and InvalidReviewError for an override
+    `_check_overrides` refuses. Nothing is resumed when any is raised. `scope` says whose thread
+    it is (see `thread_config`). As `resume`, it doesn't keep two steps of one thread apart: the
+    caller does (vouch.audit)."""
+    graph = build_graph(None, checkpointer=checkpointer)
+    config = thread_config(thread_id, scope)
+    snapshot = _waiting(graph, config, thread_id)
+    if "confirmed" in snapshot.values:
+        raise WrongStepError(CONFIRMED_ALREADY)
+    _check_overrides(snapshot.values["requirements"], findings.overrides)
+    values = graph.invoke(Command(resume=findings.model_dump()), config)
+    return _assessment(values, thread_id)
 
 
 def resume(
@@ -1762,28 +1883,30 @@ def resume(
     reviewer_id: str = "",
     reviewer_name: str = "",
     reviewed_at: datetime | None = None,
+    drafts: Callable[[Assessment], Sequence[str]] = NO_DRAFTS,
 ) -> Assessment:
-    """Resume a thread waiting for review with the lead's decision and return the reviewed
-    Assessment: overrides applied, the roll-up and remediation items recalculated, the decision
-    recorded with who made it and when (the review's `reviewer_*` and `reviewed_at`). No model
-    is called.
+    """Resume a waiting thread with the lead's decision and return the reviewed Assessment: the
+    decision recorded with who made it and when (the review's `reviewer_*` and `reviewed_at`),
+    with the overrides confirmed with the findings. Accept is the review's last step, once the
+    findings are confirmed (`confirm_findings`); Reject ends it at any step. No model is called.
 
     Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
-    review), NotWaitingForReviewError for one not waiting (reviewed already), and
-    InvalidReviewError for an override `_check_overrides` refuses. Nothing is resumed when any
-    is raised. `scope` says whose thread it is (see `thread_config`): another user's thread id is
-    unknown.
+    review), NotWaitingForReviewError for one not waiting (reviewed already), and WrongStepError
+    for an Accept before the findings are confirmed, or while `drafts` names requirements whose
+    remediation items are still drafts. Nothing is resumed when any is raised.
+    `scope` says whose thread it is (see `thread_config`): another user's thread id is unknown.
 
     It doesn't keep two reviews of one thread apart: the caller does (the API through
     vouch.audit, whose trail holds a lock on the thread while it reviews and records)."""
     graph = build_graph(None, checkpointer=checkpointer)
     config = thread_config(thread_id, scope)
-    snapshot = graph.get_state(config)
-    if not _reached_review(snapshot):
-        raise UnknownAssessmentError(f"no assessment {thread_id}")
-    if not snapshot.interrupts:
-        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-    _check_overrides(snapshot.values["requirements"], decision.overrides)
+    snapshot = _waiting(graph, config, thread_id)
+    if decision.decision == "accept":
+        if "confirmed" not in snapshot.values:
+            raise WrongStepError(CONFIRM_FIRST)
+        left = drafts(_assessment(snapshot.values, thread_id))
+        if left:
+            raise WrongStepError(DRAFTS_LEFT.format(ids=", ".join(left)))
     answer = decision.model_dump() | {
         REVIEWED_BY: {"id": reviewer_id, "name": reviewer_name},
         REVIEWED_AT: reviewed_at.isoformat() if reviewed_at else "",

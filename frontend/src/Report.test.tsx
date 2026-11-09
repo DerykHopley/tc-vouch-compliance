@@ -31,7 +31,8 @@ const ENGLISH: ReportWords = {
   verdicts: { evidenced: 'Evidenced', 'partly-evidenced': 'Partly evidenced', 'not-evidenced': 'Not evidenced',
     'not-applicable': 'Not applicable' },
   statuses: { accepted: 'Accepted', open: 'Open' },
-  actions: { accept: 'Accepted', reject: 'Rejected', override: 'Overridden', approve: 'Approved', discard: 'Discarded' },
+  actions: { accept: 'Accepted', reject: 'Rejected', override: 'Overridden',
+    confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded' },
   protection_levels: { normal: 'Normal', high: 'High', 'very high': 'Very high' },
   languages: { en: 'English', de: 'German' },
   sentences: {

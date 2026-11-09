@@ -15,7 +15,7 @@ from langgraph.store.memory import InMemoryStore
 from test_api import read_events
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, failing_write, set_daily_limit, user_memory
-from test_remediation import OWNER, accepted_with_an_item, decide, trail
+from test_remediation import OWNER, accept, confirmed_with_an_item, decide, trail
 
 from vouch import memory
 from vouch.api import PROFILE_HEADER
@@ -46,8 +46,9 @@ def statuses(shown: dict[str, Any]) -> set[str]:
 def test_the_overview_starts_from_nothing_after_a_fresh_start(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, alice, thread_id)
         before = overview(client, alice)
 
         answer = start_afresh(client, alice)
@@ -66,7 +67,9 @@ def test_the_overview_starts_from_nothing_after_a_fresh_start(database_url, user
 def test_a_fresh_start_deletes_nothing_the_old_thread_still_opens(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
+        decide(client, alice, thread_id, decision="discard")
+        accept(client, alice, thread_id)
         start_afresh(client, alice)
         listed = client.get("/api/assessments", headers=alice)
         opened = client.get(f"/api/assessments/{thread_id}", headers=alice)
@@ -81,8 +84,9 @@ def test_the_report_lists_every_control_open_and_keeps_the_earlier_accept_in_its
 ):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, alice, thread_id)
         start_afresh(client, alice)
         response = client.get("/api/report", headers=alice)
 
@@ -97,13 +101,14 @@ def test_the_report_lists_every_control_open_and_keeps_the_earlier_accept_in_its
 def test_the_audit_trail_is_the_same_before_and_after_a_fresh_start(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        thread_id = accepted_with_an_item(client, alice)
+        thread_id = confirmed_with_an_item(client, alice)
         decide(client, alice, thread_id, decision="approve", owner_role=OWNER)
+        accept(client, alice, thread_id)
         before = trail(client, alice)
         start_afresh(client, alice)
         after = trail(client, alice)
 
-    assert before  # the accept and the approval
+    assert before  # the steps of the review and the approval
     assert after == before
 
 

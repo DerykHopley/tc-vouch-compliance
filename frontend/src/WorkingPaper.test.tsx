@@ -303,7 +303,7 @@ const DEMO: RequirementVerdict[] = [
   { id: 'S1', column: 'should', text: 'Access is reviewed.', verdict: 'not-evidenced', reason: 'Nothing.', citations: [] },
 ]
 const PROPOSED: Assessment = { control_id: '5.1.2', verdict: 'partly-evidenced', answer: 'Keys for administrators.',
-  status: 'waiting-for-review', requirements: DEMO, thread_id: 't1', review: null }
+  status: 'waiting-for-review', requirements: DEMO, thread_id: 't1', review: null, review_step: 'confirm-findings' }
 const REASON = 'The 2025 MFA rollout record shows it.'
 
 const done = (assessment: Assessment): Run => ({ status: 'done', steps: [], assessment })
@@ -386,29 +386,30 @@ describe('the review of a proposed control', () => {
     expect((within(editor).getByLabelText('Reason (required)') as HTMLTextAreaElement).value).toBe(REASON)
   })
 
-  it('accepts with the note and the overrides, through the review route, and hands on the reviewed assessment', async () => {
-    const accepted = { ...PROPOSED, status: 'accepted', verdict: 'evidenced' }
-    const sent = reviewRoute(200, { assessment: accepted })
+  it('confirms the findings with the overrides, through the findings route, and hands on the assessment', async () => {
+    const confirmed = { ...PROPOSED, verdict: 'evidenced', review_step: 'plan-fixes' }
+    const sent = reviewRoute(200, { assessment: confirmed })
     const onReviewed = vi.fn()
     review({ onReviewed })
     await saveOverrideOfM1()
-    await userEvent.type(within(bar()).getByLabelText('Your note (kept in the audit trail)'), 'Checked.')
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    expect(within(bar()).getByText('1 override, recorded with the findings.')).toBeTruthy()
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
 
-    expect(sent).toEqual([{ url: '/api/assessments/t1/review', body: { decision: 'accept', note: 'Checked.',
-      overrides: [{ requirement_id: 'M1', verdict: 'evidenced', reason: REASON }] } }])
-    expect(onReviewed).toHaveBeenCalledWith(accepted)
+    expect(sent).toEqual([{ url: '/api/assessments/t1/findings',
+      body: { overrides: [{ requirement_id: 'M1', verdict: 'evidenced', reason: REASON }] } }])
+    expect(onReviewed).toHaveBeenCalledWith(confirmed)
   })
 
-  it('blocks Accept and Reject while an override is open, saying why', async () => {
+  it('blocks Confirm findings and Reject while an override is open, saying why', async () => {
     review()
     await overrideM1()
-    for (const name of ['Accept verdict', 'Reject verdict']) {
+    for (const name of ['Confirm findings', 'Reject verdict']) {
       expect((within(bar()).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
     }
     expect(within(bar()).getByText('Save or cancel the override of M1 first.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect((within(bar()).getByRole('button', { name: 'Accept verdict' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((within(bar()).getByRole('button', { name: 'Confirm findings' }) as HTMLButtonElement).disabled)
+      .toBe(false)
   })
 
   it('shows a failed review as not made, with a message and Retry, which sends it again', async () => {
@@ -417,7 +418,7 @@ describe('the review of a proposed control', () => {
     review({ onReviewed })
     await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
     expect((await within(bar()).findByRole('alert')).textContent).toBe(
-      'Your decision could not be recorded just now. Nothing was changed; please try again.')
+      'This step could not be recorded just now. Nothing was changed; please try again.')
     expect(onReviewed).not.toHaveBeenCalled()
     expect(within(headVerdict()).getByText('Proposed')).toBeTruthy()
     await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
@@ -427,21 +428,103 @@ describe('the review of a proposed control', () => {
   it("shows a 422 as refused, with the server's reason, and no Retry", async () => {
     reviewRoute(422, { detail: 'override names M9' })
     review()
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
     expect((await within(bar()).findByRole('alert')).textContent).toContain('override names M9')
     expect(within(bar()).queryByRole('button', { name: 'Retry' })).toBeNull()
   })
 
-  it('shows a 409 as already reviewed, with Refresh; a Refresh that fails says so', async () => {
+  it('shows a 409 at Confirm findings as the review moved on, with Refresh; a Refresh that fails says so', async () => {
     reviewRoute(409, { detail: 'not waiting' })
     const onRefresh = vi.fn(() => Promise.resolve(false))
     review({ onRefresh })
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
-    expect((await within(bar()).findByRole('alert')).textContent).toContain('already been reviewed')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
+    expect((await within(bar()).findByRole('alert')).textContent)
+      .toBe("This control's review has moved on, perhaps in another tab. Refresh to see where it stands.")
+    expect(within(bar()).queryByRole('button', { name: 'Retry' })).toBeNull()
     await userEvent.click(within(bar()).getByRole('button', { name: 'Refresh' }))
     expect(onRefresh).toHaveBeenCalledOnce()
     expect(await within(bar()).findByText('The assessment could not be read again just now. Please try again.'))
       .toBeTruthy()
+  })
+})
+
+describe('the review in three steps (issue 372)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const steps = () => within(screen.getByRole('list', { name: 'Review steps' })).getAllByRole('listitem')
+  const current = () => steps().filter((s) => s.getAttribute('aria-current') === 'step').map((s) => s.textContent)
+  const fix = (requirement_id: string, status: RemediationItem['status']): RemediationItem =>
+    ({ requirement_id, missing: 'A record.', owner_role: 'CISO', due_date: '2027-02-01', status })
+  /** Findings confirmed with M2 overridden to partly evidenced: M1, M2 and S1 each have an item, M1's decided. */
+  const PLANNING: Assessment = { ...PROPOSED, review_step: 'plan-fixes',
+    requirements: withOverrides(DEMO, [{ requirement_id: 'M2', verdict: 'partly-evidenced', reason: REASON }]),
+    confirmed: [{ requirement_id: 'M2', verdict: 'partly-evidenced', reason: REASON, agent_verdict: 'evidenced',
+      agent_reason: 'Keys issued.' }],
+    remediation: [fix('M1', 'approved'), fix('M2', 'draft'), fix('S1', 'draft')] }
+  const READY: Assessment = { ...PROPOSED, review_step: 'accept', confirmed: [], remediation: [] }
+
+  it('names the three steps in order and marks Confirm findings current on a proposed control', () => {
+    review()
+    expect(steps().map((s) => s.textContent)).toEqual(['Confirm findings', 'Plan fixes', 'Accept'])
+    expect(current()).toEqual(['Confirm findings'])
+  })
+
+  it('marks Accept current and shows Plan fixes as skipped for a control with no remediation item', () => {
+    review({ assessment: READY })
+    expect(current()).toEqual(['Accept'])
+    expect(steps()[1].textContent).toBe('Plan fixes: skipped, nothing to fix')
+    expect((within(bar()).getByRole('button', { name: 'Accept verdict' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(within(bar()).queryByRole('button', { name: 'Confirm findings' })).toBeNull()
+  })
+
+  it('at Plan fixes holds Accept verdict, saying why and how many items are decided; the rows offer no Change', () => {
+    review({ assessment: PLANNING })
+    expect(current()).toEqual(['Plan fixes'])
+    const accept = within(bar()).getByRole('button', { name: 'Accept verdict' }) as HTMLButtonElement
+    expect(accept.disabled).toBe(true)
+    expect(document.getElementById(accept.getAttribute('aria-describedby')!)!.textContent)
+      .toBe('Approve or discard each remediation item to accept the verdict.')
+    expect(within(bar()).getByText('1 of 3 remediation items decided.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Change / })).toBeNull()
+    expect(within(row('M2')).getByText('Overridden from Evidenced')).toBeTruthy()
+    expect(within(row('M2')).getByRole('button', { name: 'Approve M2' })).toBeTruthy()
+  })
+
+  it('counts an item decided on the page at once, and offers Accept once none is left a draft', () => {
+    const again = review({ assessment: PLANNING })
+    again({ run: done({ ...PLANNING, remediation: [fix('M1', 'approved'), fix('M2', 'discarded'),
+      fix('S1', 'approved')] }) })
+    expect(current()).toEqual(['Accept'])
+    expect((within(bar()).getByRole('button', { name: 'Accept verdict' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('accepts with the note through the review route, and hands on the reviewed assessment', async () => {
+    const accepted = { ...READY, status: 'accepted', review_step: null }
+    const sent = reviewRoute(200, { assessment: accepted })
+    const onReviewed = vi.fn()
+    review({ assessment: READY, onReviewed })
+    await userEvent.type(within(bar()).getByLabelText('Your note (kept in the audit trail)'), 'Checked.')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    expect(sent).toEqual([{ url: '/api/assessments/t1/review', body: { decision: 'accept', note: 'Checked.' } }])
+    expect(onReviewed).toHaveBeenCalledWith(accepted)
+  })
+
+  it('rejects at Plan fixes with the note', async () => {
+    const sent = reviewRoute(200, { assessment: { ...PLANNING, status: 'rejected', review_step: null } })
+    review({ assessment: PLANNING })
+    await userEvent.type(within(bar()).getByLabelText('Your note (kept in the audit trail)'), 'Look again.')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
+    expect(sent).toEqual([{ url: '/api/assessments/t1/review', body: { decision: 'reject', note: 'Look again.' } }])
+  })
+
+  it('shows a failed Confirm findings as not recorded, with Retry, which sends it again', async () => {
+    const sent = reviewRoute(503)
+    review()
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
+    expect((await within(bar()).findByRole('alert')).textContent).toBe(
+      'This step could not be recorded just now. Nothing was changed; please try again.')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
+    expect(sent.map((s) => s.url)).toEqual(['/api/assessments/t1/findings', '/api/assessments/t1/findings'])
   })
 })
 
@@ -496,7 +579,7 @@ describe('overrides belong to the assessment shown', () => {
     reviewRoute(409)
     const again = review()
     await saveOverrideOfM1()
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
     await within(bar()).findByRole('alert')
     again({ run: done({ ...PROPOSED }) }) // re-read: still waiting, a new object
     expect(within(row('M1')).queryByText(/^Overridden/)).toBeNull()
@@ -507,7 +590,7 @@ describe('overrides belong to the assessment shown', () => {
     let land: (response: Response) => void = () => {}
     reviewRoute(200, {}, () => new Promise<Response>((resolve) => { land = resolve }))
     const again = review()
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Confirm findings' }))
     again({ run: done(OTHER) })
     await saveOverrideOfM1()
     land(Response.json({ assessment: { ...PROPOSED, status: 'accepted' } }))
@@ -683,7 +766,7 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
   it("offers no decision on a proposed control's draft, saying when it can be made", () => {
     review({ assessment: { ...PROPOSED, remediation: [DRAFT] } })
     expect(within(item()).queryByRole('button')).toBeNull()
-    expect(within(item()).getByText('Approve or discard it once the verdict is accepted.')).toBeTruthy()
+    expect(within(item()).getByText('Approve or discard it once the findings are confirmed.')).toBeTruthy()
   })
 })
 

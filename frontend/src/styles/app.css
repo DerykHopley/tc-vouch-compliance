@@ -215,6 +215,13 @@ textarea.field { resize: vertical; font-family: inherit; }
   border-top: 2px solid var(--sign); border-radius: 0; padding: 12px; display: grid; gap: 8px; }
 .review-bar .decided { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); }
 .review-bar .note { margin: 0; border-left: 2px solid var(--rule); padding: 2px 10px; overflow-wrap: anywhere; }
+/* The review's three steps (#372): numbered in order, the current one in --ink under a 2px --ink rule, the others
+   --muted; the number is a counter, so each step's name is its text. --sign stays for sign-off (design.md, Tokens). */
+.review-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px;
+  counter-reset: review-step; font-size: 13px; color: var(--muted); }
+.review-steps li { counter-increment: review-step; padding: 2px 0; border-bottom: 2px solid transparent; }
+.review-steps li::before { content: counter(review-step) ". "; }
+.review-steps li[aria-current="step"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
 /* Remediation item (#43, design.md Components): under a not-evidenced requirement's reason, ruled off from the quotes;
    a draft's form takes the override editor's grid, Approve in the sign-off colour. */
 .remediation { display: grid; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--rule); }

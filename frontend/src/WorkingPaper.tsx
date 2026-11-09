@@ -10,7 +10,7 @@ import { setUnsaved } from './leaving.ts'
 import Prose from './Prose.tsx'
 import Remediation from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
-import { type Override, rollUp, rollUpWords, withOverrides } from './review.ts'
+import { type Override, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import StepText from './StepText.tsx'
 import VerdictChip from './VerdictChip.tsx'
@@ -92,7 +92,7 @@ type PaperProps = {
 export default function WorkingPaper(props: PaperProps) {
   const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
     onItemDecided } = props
-  // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until the decision; the
+  // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
   // afresh. A decision on an earlier one landing late can't touch them, as nothing but this resets them.
@@ -122,12 +122,16 @@ export default function WorkingPaper(props: PaperProps) {
   const elsewhere = running !== null && running !== card.id ? running : null
   const agentVerdicts: Record<string, Verdict> = Object.fromEntries(
     (assessed?.requirements ?? []).map((r) => [r.id, r.verdict]))
-  // A proposed control's requirements can be overridden; a reviewed one's show the overrides the lead made.
-  const marks: Overrides = review === 'waiting-for-review'
+  // The step of a proposed control's review (#372), its items as the page holds them.
+  const step = assessed ? reviewStep(assessed) : null
+  const remediation = assessed?.remediation ?? []
+  // At Confirm findings the requirements can be overridden; after, they show the overrides the lead recorded.
+  const recorded = assessed?.review?.overrides ?? assessed?.confirmed ?? []
+  const marks: Overrides = step === 'confirm-findings'
     ? { editable: true, saved: overrides, agentVerdicts,
       replaced: Object.fromEntries(overrides.map((o) => [o.requirement_id, agentVerdicts[o.requirement_id]])) }
     : { editable: false, saved: [], agentVerdicts,
-      replaced: Object.fromEntries((assessed?.review?.overrides ?? []).map((o) => [o.requirement_id, o.agent_verdict])) }
+      replaced: Object.fromEntries(recorded.map((o) => [o.requirement_id, o.agent_verdict])) }
   const save = (next: Override) => {
     setOverrides((now) => [...now.filter((o) => o.requirement_id !== next.requirement_id), next])
     setEditing(null)
@@ -203,14 +207,16 @@ export default function WorkingPaper(props: PaperProps) {
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
                 language={answerLanguage(run)}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
-                  shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
-                  decidable: review === 'accepted',
+                  shown: remediation, threadId: assessed?.thread_id ?? '',
+                  // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
+                  decidable: step === 'plan-fixes' || step === 'accept' || review === 'accepted',
                   onDecided: (item) => { if (assessed?.thread_id) onItemDecided(assessed.thread_id, item) },
                 }} />
             ) : <Requirements requirements={requirements} language={overview.answer_language} />}
             {assessed?.status && assessed.thread_id && (
               <ReviewBar key={`${assessed.thread_id}:${reads}`} status={assessed.status} threadId={assessed.thread_id}
-                review={assessed.review} overrides={overrides} editing={editing} onReviewed={onReviewed}
+                review={assessed.review} step={step} overrides={overrides} editing={editing} onReviewed={onReviewed}
+                items={{ decided: remediation.filter((i) => i.status !== 'draft').length, total: remediation.length }}
                 onRefresh={onRefresh} assessAgain={<>
                   <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
                   {assessingElsewhere}
@@ -317,8 +323,8 @@ function Requirements({ requirements, language }: { requirements: PaperRequireme
 
 /**
  * The lead's overrides on the requirements: `replaced` holds the agent's verdict of each overridden one, `saved` the
- * overrides not yet recorded, `agentVerdicts` every requirement's own. `editable` while the control is proposed,
- * when each requirement that applies has "Change".
+ * overrides not yet recorded, `agentVerdicts` every requirement's own. `editable` at Confirm findings (#372), when each
+ * requirement that applies has "Change".
  */
 type Overrides = {
   editable: boolean
@@ -327,8 +333,8 @@ type Overrides = {
   agentVerdicts: Record<string, Verdict>
 }
 
-/** The assessment's remediation items, one per requirement not or partly evidenced (#43, #212): `decidable` once it
- * is accepted. */
+/** The assessment's remediation items, one per requirement not or partly evidenced (#43, #212): `decidable` once its
+ * findings are confirmed (Plan fixes, #372). */
 type RemediationItems = {
   shown: RemediationItem[]
   threadId: string
@@ -353,7 +359,7 @@ type JudgedProps = {
 /**
  * The assessment's requirements: verdict, evidence kind and stale flag, then the reason and the exact quotes. An
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
- * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
+ * overridden requirement says what the agent's verdict was; at Confirm findings, "Change" opens a row to override
  * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
  * to evidenced on screen hides its draft, which the review drops. On a phone each row is a stacked card, by CSS, its
  * text clamped to 2 lines with a toggle (`RequirementText`, #211).

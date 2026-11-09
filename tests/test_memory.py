@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 from pydantic import SecretStr
+from reviewing import accepted, confirm, plan_fixes
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
 
@@ -156,12 +157,13 @@ def test_reviewing_another_users_thread_is_404_and_leaves_it_waiting(database_ur
         thread_id = assess(client, alice)
         url = f"/api/assessments/{thread_id}/review"
 
-        refused = client.post(url, json={"decision": "accept"}, headers=bob)
-        accepted = client.post(url, json={"decision": "accept"}, headers=alice)
+        refused = client.post(url, json={"decision": "reject"}, headers=bob)
+        not_confirmed = confirm(client, thread_id, headers=bob)
+        reviewed = accepted(client, thread_id, headers=alice)
 
     assert refused.status_code == 404
-    assert accepted.status_code == 200
-    assert accepted.json()["assessment"]["status"] == "accepted"
+    assert not_confirmed.status_code == 404
+    assert reviewed["status"] == "accepted"
 
 
 def test_the_list_is_newest_first_and_shows_each_review(database_url, users):
@@ -169,7 +171,7 @@ def test_the_list_is_newest_first_and_shows_each_review(database_url, users):
     with TestClient(app_on(database_url)) as client:
         first = assess(client, alice)
         second = assess(client, alice)
-        client.post(f"/api/assessments/{first}/review", json={"decision": "accept"}, headers=alice)
+        accepted(client, first, headers=alice)
 
         listed = client.get("/api/assessments", headers=alice).json()["assessments"]
 
@@ -189,8 +191,10 @@ def test_a_run_waiting_for_review_survives_a_restart_then_resumes_and_completes(
 
     with TestClient(app_on(url)) as before:
         thread_id = assess(before, alice)
+        confirm(before, thread_id, headers=alice)  # the restart comes at Plan fixes (#372)
     restart()
     with TestClient(app_on(url)) as after:  # the first app is shut down: its pool is closed
+        plan_fixes(after, thread_id, headers=alice)
         reviewed = after.post(
             f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=alice
         )
@@ -208,9 +212,7 @@ def test_progress_written_before_a_restart_is_read_after_it(postgres, users):
     url = postgres.url
     with TestClient(app_on(url)) as before:
         thread_id = assess(before, alice)
-        before.post(
-            f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=alice
-        )
+        accepted(before, thread_id, headers=alice)
     restart()
 
     with Database(url) as db, db.store() as store, db.checkpointer(state_serializer()) as saver:
@@ -348,32 +350,31 @@ def test_only_a_successful_review_counts_as_work(database_url, users):
         unknown = client.post(
             "/api/assessments/no-such-thread/review", json={"decision": "accept"}, headers=alice
         )
-        bad = client.post(
-            url,
-            json={
-                "decision": "accept",
-                "overrides": [{"requirement_id": "M9", "verdict": "evidenced", "reason": "x"}],
-            },
+        bad = confirm(
+            client,
+            thread_id,
+            [{"requirement_id": "M9", "verdict": "evidenced", "reason": "x"}],
             headers=alice,
         )
+        too_soon = client.post(url, json={"decision": "accept"}, headers=alice)
         with user_memory(database_url, alice) as mine:
             after_refusals = mine.last_worked()
-        accepted = client.post(url, json={"decision": "accept"}, headers=alice)
+        confirmed = confirm(client, thread_id, headers=alice)
+        with user_memory(database_url, alice) as mine:
+            after_confirm = mine.last_worked()
+        rejected = client.post(url, json={"decision": "reject"}, headers=alice)
         with user_memory(database_url, alice) as mine:
             after_review = mine.last_worked()
-        again = client.post(url, json={"decision": "accept"}, headers=alice)
+        again = client.post(url, json={"decision": "reject"}, headers=alice)
         with user_memory(database_url, alice) as mine:
             after_again = mine.last_worked()
 
-    assert (unknown.status_code, bad.status_code, accepted.status_code, again.status_code) == (
-        404,
-        422,
-        200,
-        409,
-    )
+    codes = [r.status_code for r in (unknown, bad, too_soon, confirmed, rejected, again)]
+    assert codes == [404, 422, 409, 200, 200, 409]
     assert started is not None
     assert after_refusals == started
-    assert after_review is not None and after_review > started
+    assert after_confirm is not None and after_confirm > started  # each step counts (#372)
+    assert after_review is not None and after_review > after_confirm
     assert after_again == after_review
 
 
@@ -382,12 +383,9 @@ def test_a_review_stands_when_noting_the_work_fails(database_url, users, monkeyp
     with TestClient(app_on(database_url), raise_server_exceptions=False) as client:
         thread_id = assess(client, alice)
         monkeypatch.setattr(memory.Memory, "note_worked", failing_write)
-        response = client.post(
-            f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=alice
-        )
+        reviewed = accepted(client, thread_id, headers=alice)  # each step stands
 
-    assert response.status_code == 200
-    assert response.json()["assessment"]["status"] == "accepted"
+    assert reviewed["status"] == "accepted"
 
 
 def test_over_the_cap_the_newest_assessments_are_kept_on_every_store(any_store, monkeypatch):
