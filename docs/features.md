@@ -5,9 +5,9 @@ quotes are the app's own; the domain words are in the [glossary](../GLOSSARY.md)
 
 **Before you start:** run `scripts/dev.sh` (see [setup](setup.md#run-the-app)) and open the URL it
 prints. It runs on the scripted fake model, offline and free, with no sign-in: you are "Local
-user", on the Nordlicht Komponenten GmbH profile. The fake has scripted runs for four
-controls, **1.1.1**, **1.6.2**, **4.1.2** and **5.1.1**; these walk-throughs use 4.1.2. Work
-done here lasts until you stop the script. On the live app any control runs on the real model.
+user", a developer, and Nordlicht Komponenten GmbH is the current company, named in the top bar.
+The fake has scripted runs for four controls, **1.1.1**, **1.6.2**, **4.1.2** and **5.1.1**;
+these walk-throughs use 4.1.2. Work done here lasts until you stop the script. On the live app any control runs on the real model.
 
 Do the walk-throughs in order: each starts where the one before stopped.
 
@@ -16,10 +16,12 @@ Do the walk-throughs in order: each starts where the one before stopped.
 1. On the Overview (the Dossier, `/`), "Where you stand" reads "0 accepted of 12", and every
    control under "The controls" is "Not assessed".
 2. Open **4.1.2** ("To what extent is the user access to IT services and IT systems secured?").
-   Its working paper opens at `/controls/4.1.2`: "Not assessed yet. 5 requirements apply in this
-   profile.", with the requirements M1, M2, S1, S2 and S3 listed.
+   Its working paper opens at `/controls/4.1.2`:
+   "Not assessed yet. 5 requirements apply in this profile.",
+   with the requirements M1, M2, S1, S2 and S3 listed.
 3. Select **Assess**. The steps appear one by one under "How Vouch reached this":
-   - `load_control`: the control loaded, and that 5 requirements apply under Nordlicht's profile;
+   - `load_control`: the control loaded, and that 5 requirements apply under Nordlicht's
+     compliance profile;
    - `apply_overlays`: "No country overlay adds a requirement to this control, so no overlay
      branch is taken.";
    - `gather` and `tools`: the policies searched, and the passages found;
@@ -98,8 +100,8 @@ Do the walk-throughs in order: each starts where the one before stopped.
    so it has no reviewed verdict."
 5. **Remediation items**: the approved items of accepted controls, here M1's (and S2's, if you
    approved it), with its owner and due date.
-6. **Not applicable**: what the profile excludes, each with its reason; for Nordlicht, 5.1.2 S3
-   (no remote access to the company network).
+6. **Not applicable**: what the company's compliance profile excludes, each with its reason; for
+   Nordlicht, 5.1.2 S3 (no remote access to the company network).
 7. **Audit trail**: one row per action, with when, who, the control, the requirement, the
    verdict before and after, the note, the evidence, the model and the prompt version. Newest
    first: the acceptance of 4.1.2, the decision on S2's remediation item ("Discarded" or
@@ -116,11 +118,13 @@ Do the walk-throughs in order: each starts where the one before stopped.
 
 ## Examples
 
-### The German profile
+### The German company
 
-1. Open the profile switcher in the top bar (it shows "Nordlicht Komponenten GmbH") and choose
-   **Alpenwerk Präzision GmbH · Austria · German**. The controls' questions are now the German
-   ISA edition's; the app's own labels stay English.
+1. Make Alpenwerk current: in the user menu (**LU**), choose **Developer page**, and under
+   "Companies" select **Make current** in Alpenwerk Präzision GmbH's row. The app opens afresh on
+   the Developer page, reading "Alpenwerk Präzision GmbH is now the current company.", and the
+   top bar names Alpenwerk Präzision GmbH. Select **Overview** in the top bar: the controls'
+   questions are now the German ISA edition's; the app's own labels stay English.
 2. Open **4.1.2** and select **Assess**. The working paper says "Answer language: German", and
    the verdict, the draft answer and the requirements are in German: "Teilweise nachgewiesen",
    with 6 requirements under Alpenwerk's high protection level.
@@ -130,19 +134,25 @@ Do the walk-throughs in order: each starts where the one before stopped.
    "1 von 12 Kontrollen akzeptiert"), with Alpenwerk's country overlay "AT NIS2 (illustrativ)"
    in its head and the disclaimer "Erstellt von einem KI-Assistenten, geprüft von Local user;
    kein Auditergebnis."
+4. Make Nordlicht current again: on the Developer page (user menu), under "Companies", select
+   **Make current** in Nordlicht Komponenten GmbH's row. The top bar names Nordlicht Komponenten
+   GmbH.
 
 ### The overlay branch
 
 A country overlay adds a requirement, and the assessment graph takes its overlay branch for it.
 Alpenwerk's overlay adds O1 to 1.6.2.
 
-1. Choose **Alpenwerk Präzision GmbH** in the profile switcher, open **1.6.2** and select
-   **Assess**.
+1. Make Alpenwerk current as in the German example: on the Developer page (user menu), under
+   "Companies", select **Make current** in Alpenwerk Präzision GmbH's row. Select **Overview** in
+   the top bar, open **1.6.2** and select **Assess**.
 2. Under "How Vouch reached this":
    - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrativ) adds O1.";
    - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrativ))."
 3. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrativ)", with
    its own verdict and reason: "Nicht nachgewiesen", since nothing provides for an early warning
    to the national CSIRT.
+4. Make Nordlicht current again: on the Developer page, select **Make current** in Nordlicht
+   Komponenten GmbH's row. The Overview's top bar names Nordlicht Komponenten GmbH.
 
 On the live app the overlay branch is taken wherever a country overlay adds a requirement.
