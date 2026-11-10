@@ -4,7 +4,8 @@ import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
 import Prose from './Prose.tsx'
 import { actionWord, type AuditReadinessReport, exportReport, fetchReport, type ImprovementReport, olderEntries,
-  type QuestionState, type ReadinessReport, type ReportControl, type ReportFormat, type ReportQuestion, type ReportWords, type TrailEntry }
+  type QuestionState, type ReadinessReport, type ReportControl, type ReportFormat, type ReportItem, type ReportQuestion,
+  type ReportWords, type TrailEntry }
   from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -96,9 +97,10 @@ const timeOf = (iso: string) => {
 const filled = (sentence: string, values: Record<string, number | string>) =>
   sentence.replace(/\{(\w+)\}/g, (all, name: string) => Object.hasOwn(values, name) ? String(values[name]) : all)
 
-/** A column of the controls or trail table (#463): its served name and what it shows for a row. A column empty in
- * every row is left out, and each cell carries its column's name (`data-label`), which the phone's stacked rows show
- * beside the value, as they hide the header row. `lang` marks a column whose text is in the answer language (#521). */
+/** A column of the controls, trail or remediation table (#463, #534): its served name and what it shows for a row.
+ * Each cell carries its column's name (`data-label`), which the phone's stacked rows show beside the value, as they
+ * hide the header row; `shownColumns` leaves out a column empty in every row. `lang` marks a column whose text is in
+ * the answer language (#521). */
 type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean; lang?: string }
 
 // `false` too: a cell written `a && b` gives it when `a` is empty.
@@ -387,6 +389,13 @@ function ControlRows({ control: c, columns, words }: { control: ReportControl; c
 
 function Remediation({ report: { remediation, words, head } }: { report: AuditReadinessReport }) {
   const { labels } = words
+  // Every column always shown, as before #534: each item is approved with its owner role and due date.
+  const columns: Column<ReportItem>[] = [
+    { label: labels.requirement, cell: (item) => item.requirement_id, className: 'mono', rowHeader: true },
+    { label: labels.missing, cell: (item) => <Prose text={item.missing} />, ...answerText(head) },
+    { label: labels.owner_role, cell: (item) => item.owner_role },
+    { label: labels.due_date, cell: (item) => item.due_date, className: 'mono' },
+  ]
   return (
     <section className="report-part" aria-labelledby="report-remediation">
       <h2 id="report-remediation">{labels.remediation}</h2>
@@ -395,24 +404,10 @@ function Remediation({ report: { remediation, words, head } }: { report: AuditRe
           <div key={group.control_id} className="report-group">
             <p className="report-group-head"><span className="mono">{group.control_id}</span> {group.question}</p>
             <div className="table-wrap">
-              <table className="report-table">
-                <thead>
-                  <tr>
-                    <th scope="col">{labels.requirement}</th>
-                    <th scope="col">{labels.missing}</th>
-                    <th scope="col">{labels.owner_role}</th>
-                    <th scope="col">{labels.due_date}</th>
-                  </tr>
-                </thead>
+              <table className="report-table report-remediation">
+                <ColumnHeads columns={columns} />
                 <tbody>
-                  {group.items.map((item) => (
-                    <tr key={item.requirement_id}>
-                      <th scope="row" className="mono">{item.requirement_id}</th>
-                      <td {...answerText(head)}><Prose text={item.missing} /></td>
-                      <td>{item.owner_role}</td>
-                      <td className="mono">{item.due_date}</td>
-                    </tr>
-                  ))}
+                  {group.items.map((item) => <tr key={item.requirement_id}><Cells columns={columns} row={item} /></tr>)}
                 </tbody>
               </table>
             </div>

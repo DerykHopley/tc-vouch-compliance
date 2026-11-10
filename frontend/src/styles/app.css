@@ -456,20 +456,22 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .report-doc { padding: 20px 16px; }
   .report-head { grid-template-columns: minmax(0, 1fr); }
   .report-head dd { margin-bottom: 6px; }
-  /* Phone: the controls and trail as stacked rows (#463), after the working paper's cards (#211): each row a card
-     ruled off from the next, each filled cell a line of its column's name (the cell's data-label) and its value. The
-     header row stays for screen readers (the table keeps its roles), so the shown name has empty alt text and isn't
-     read twice; a browser without alt text in `content` keeps the first declaration. An empty cell is not shown. */
-  .report-controls, .report-trail, .report-controls tbody, .report-trail tbody { display: block; }
-  .report-controls thead, .report-trail thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  /* Phone: the controls, trail and remediation items as stacked rows (#463, #534), after the working paper's cards
+     (#211): each row a card ruled off from the next, each filled cell a line of its column's name (the cell's
+     data-label) and its value. The header row stays for screen readers (the table keeps its roles), so the shown name
+     has empty alt text and isn't read twice; a browser without alt text in `content` keeps the first declaration. An
+     empty cell is not shown. A free-text cell drops its 14ch floor here (min-width: 0), so it never widens a card. */
+  .report-controls, .report-trail, .report-remediation, :is(.report-controls, .report-trail, .report-remediation) tbody {
+    display: block; }
+  :is(.report-controls, .report-trail, .report-remediation) thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
     clip-path: inset(50%); }
-  .report-controls tbody tr, .report-trail tbody tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  :is(.report-controls, .report-trail, .report-remediation) tbody tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--rule); }
   .report-controls tbody tr:has(+ .report-quote-row) { border-bottom: 0; padding-bottom: 4px; }
-  .report-table:is(.report-controls, .report-trail) tbody tr > * { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
+  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > * { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
     gap: 0 12px; justify-items: start; padding: 2px 0; border-bottom: 0; max-width: none; min-width: 0; }
-  .report-table:is(.report-controls, .report-trail) tbody tr > :empty { display: none; }
-  .report-table:is(.report-controls, .report-trail) tbody tr > * > * { grid-column: 2; }
-  .report-table:is(.report-controls, .report-trail) tbody tr > [data-label]::before { content: attr(data-label);
+  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > :empty { display: none; }
+  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > * > * { grid-column: 2; }
+  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > [data-label]::before { content: attr(data-label);
     content: attr(data-label) / ""; grid-column: 1; font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
     padding-top: 2px; overflow-wrap: anywhere; }
   .report-table.report-controls .report-quote-row td { display: block; padding: 0 0 12px 16px; }

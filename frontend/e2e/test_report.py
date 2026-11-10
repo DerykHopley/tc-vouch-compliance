@@ -413,6 +413,73 @@ def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
         assert small_targets(page) == []
 
 
+# The remediation table's column names, in each profile's report language (#534).
+REMEDIATION_LABELS = {
+    "nordlicht": ("Requirement", "Missing", "Owner role", "Due date"),
+    "alpenwerk": ("Anforderung", "Fehlt", "Verantwortliche Rolle", "Fällig am"),
+}
+
+
+def with_a_german_remediation_item(page: Page) -> None:
+    """Alpenwerk's report as served (as_company's header: this route answers before its), with one
+    more remediation group whose Missing is GERMAN_REASON, long compounds that must break in a
+    phone's card: they hyphenate in German or the check sees it."""
+
+    def patched(route: Route) -> None:
+        headers = {**route.request.headers, "x-vouch-profile": "alpenwerk"}
+        served = route.fetch(headers=headers).json()
+        group = unbreakable_remediation()
+        group["items"] = [{**group["items"][0], "missing": GERMAN_REASON}]
+        served["remediation"] = [*served["remediation"], group]
+        route.fulfill(json=served)
+
+    page.route("**/api/report", patched)
+
+
+@pytest.mark.parametrize("width", [390, 360, 1024])
+def test_each_remediation_item_reads_as_a_stacked_card_on_a_phone(page: Page, report_url, width):
+    """#534: since #530 the remediation table was 332-440px in a 294-324px box under 700px, its
+    Owner role and Due date off-screen with no cue that the box scrolls. Under 700px each item is a
+    card, as the controls and trail rows are (#463): each cell a line of its column's name and its
+    value, inside the box. At 1024 the table is unchanged: its rows are table rows."""
+    approve = {"M1": {"decision": "approve", "owner_role": "IT-Leiter"}}
+    for profile in ("nordlicht", "alpenwerk"):
+        accepted(page.request, report_url, "4.1.2", profile, decisions=approve)
+    page.set_viewport_size({"width": width, "height": 900})
+    for profile, labels in REMEDIATION_LABELS.items():
+        page.unroute("**/api/**")
+        page.unroute("**/api/report")
+        as_company(page, profile)
+        if profile == "alpenwerk":
+            with_a_german_remediation_item(page)
+        report = open_report(page, report_url)
+        tables = report.locator(REMEDIATION)
+        expect(tables.first).to_be_visible()
+        if profile == "alpenwerk":
+            expect(tables.last).to_contain_text(GERMAN_REASON)
+        rows = tables.locator("tbody tr")
+        displays = set(rows.evaluate_all("rows => rows.map((r) => getComputedStyle(r).display)"))
+        if width > 700:
+            assert displays == {"table-row"}, (profile, displays)
+            continue
+        assert displays == {"block"}, (profile, displays)
+        assert tables_overflowing(report, (REMEDIATION,)) == [], (profile, width)
+        # Every cell of the first item inside its box, named by its column in the report's language
+        # (the header row still names it for a screen reader).
+        cells = rows.first.locator("th, td").evaluate_all(
+            """cells => cells.map((c) => {
+              const box = c.closest('.table-wrap').getBoundingClientRect()
+              const r = c.getBoundingClientRect()
+              return { label: c.dataset.label ?? null, inside: r.left >= box.left - 0.5
+                && r.right <= box.right + 0.5, shown: getComputedStyle(c, '::before').content }
+            })"""
+        )
+        assert [c["label"] for c in cells] == list(labels), (profile, cells)
+        assert all(c["inside"] and c["shown"] != "none" for c in cells), (profile, width, cells)
+        if profile == "alpenwerk" and width == 390:
+            assert_hyphenated_in_german(page, {"missing": f"{REMEDIATION} td.report-q"})
+
+
 def long_entry() -> dict:
     """A trail entry with a long note and a long model name, filling every column."""
     return {
