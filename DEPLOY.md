@@ -221,19 +221,19 @@ keeps the count down.
 ### Tracing (Langfuse, #460)
 
 The live app traces each assessment, chat turn and profile pass in Langfuse once two more secrets
-are in Secret Manager: `LANGFUSE_PUBLIC_KEY` (keyring `langfuse-vouch-public`) and
-`LANGFUSE_SECRET_KEY` (keyring `langfuse-vouch-secret`). The wizard never creates or writes them:
+are in Secret Manager: `LANGFUSE_PUBLIC_KEY` (keyring `langfuse-cloud-public-key`) and
+`LANGFUSE_SECRET_KEY` (keyring `langfuse-cloud-secret-key`). The wizard never creates or writes them:
 when both have an enabled version it pins each one's newest enabled version and grants the service's account Secret Accessor
 on them; when either is missing it says "Tracing stays off" and deploys without them, so a deploy
 before they exist runs as before (*checked*, `tests/test_deploy_wizard.py`). Put them there once,
-by hand, each through a pipe:
+by hand, each through a pipe from the keyring, where the Langfuse Cloud project's (EU) keys already
+are:
 
 ```bash
 export CLOUDSDK_CORE_LOG_HTTP=false
-scripts/store-secret.sh langfuse-vouch-public < public-key-file    # and langfuse-vouch-secret
-secret-tool lookup service langfuse-vouch-public | gcloud secrets create LANGFUSE_PUBLIC_KEY \
+secret-tool lookup service langfuse-cloud-public-key | gcloud secrets create LANGFUSE_PUBLIC_KEY \
   --replication-policy=automatic --data-file=- --project=$PROJECT_ID
-secret-tool lookup service langfuse-vouch-secret | gcloud secrets create LANGFUSE_SECRET_KEY \
+secret-tool lookup service langfuse-cloud-secret-key | gcloud secrets create LANGFUSE_SECRET_KEY \
   --replication-policy=automatic --data-file=- --project=$PROJECT_ID
 ```
 
