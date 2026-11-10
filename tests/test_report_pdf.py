@@ -229,6 +229,7 @@ def test_a_long_missing_text_and_company_still_give_the_pdf_with_all_of_it():
 
 # --- The audit trail's narrow columns (#353): no word broken mid-word -------------------------
 
+TOKEN = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + "0" * 32  # 96 chars
 ACTIONS: tuple[audit.Action, ...] = ("accept", "reject", "override", "approve", "discard")
 VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced", "not-applicable")
 
@@ -318,10 +319,9 @@ def test_ids_too_long_to_fit_whole_break_only_after_a_dash_or_slash():
 def test_a_note_with_a_token_too_long_for_any_column_breaks_only_that_token():
     # #353's verify: a 96-character hash in a note once shrank every column, so even the headers
     # broke mid-word. Now only the note's own column gives way.
-    token = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + "0" * 32
     words = report.words_for("en")
     body = report.trail_rows(
-        [replace(e, note=f"Hash {token}").to_dict() for e in fixture_trail("nordlicht")], words
+        [replace(e, note=f"Hash {TOKEN}").to_dict() for e in fixture_trail("nordlicht")], words
     )
     sheet = report_pdf._Sheet()
     sheet.add_page(orientation="landscape")
@@ -330,21 +330,17 @@ def test_a_note_with_a_token_too_long_for_any_column_breaks_only_that_token():
 
     assert sum(widths) <= sheet.epw + 0.01
     broken = breaks_inside_words(sheet, head, cells, widths)
-    assert broken and all(token[:8] in line for line in broken)  # the token's cells, no other
-
-
-TOKEN = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + "0" * 32  # 96 chars
+    assert broken and all(TOKEN[:8] in line for line in broken)  # the token's cells, no other
 
 
 def hashed_trail(profile_id: str, documents: int = 1) -> list[audit.AuditEntry]:
-    """The profile's fixture trail with TOKEN in its first entry's note and its second entry
-    resting on `documents` policies from its own on."""
+    """The profile's fixture trail with TOKEN in its first entry's note, and its second entry
+    citing `documents` policies: its own and the next entries' ones."""
     trail = fixture_trail(profile_id)
     docs = tuple(e.evidence[0] for e in trail[1 : 1 + documents])
-    return [
-        replace(e, note=f"Hash {TOKEN}") if n == 0 else replace(e, evidence=docs) if n == 1 else e
-        for n, e in enumerate(trail)
-    ]
+    trail[0] = replace(trail[0], note=f"Hash {TOKEN}")
+    trail[1] = replace(trail[1], evidence=docs)
+    return trail
 
 
 @pytest.mark.parametrize(("profile_id", "language"), [("nordlicht", "en"), ("alpenwerk", "de")])
@@ -360,8 +356,8 @@ def test_with_a_long_token_in_a_note_the_trail_still_carries_each_document_id_wh
     read = text(report_pdf.pdf(built, words))
 
     trail = read[read.index(words["labels"]["trail"].upper()) :]
-    missing = [e.evidence[0].doc_id for e in fixture_trail(profile_id)]
-    assert [doc for doc in missing if doc not in trail] == []
+    doc_ids = [e.evidence[0].doc_id for e in fixture_trail(profile_id)]
+    assert [doc for doc in doc_ids if doc not in trail] == []
     assert report_pdf.BREAK not in trail
 
 
