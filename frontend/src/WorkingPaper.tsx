@@ -343,11 +343,17 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 }
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
- * view beside the paper as the paper scrolls (#466). */
+ * view beside the paper as the paper scrolls and scrolls on its own (#466): the open control's row is brought into
+ * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. */
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
+  const list = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
+  }, [openId])
   return (
     <nav className="wp-index" aria-label="Controls">
-      <div className="wp-index-list">
+      <div className="wp-index-list" ref={list}
+        onFocus={(e) => e.target.closest('.wp-row')?.scrollIntoView?.({ block: 'nearest' })}>
         {areas(controls).map(([area, cards]) => (
           <div key={area}>
             <h3>{area}</h3>

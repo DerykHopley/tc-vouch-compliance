@@ -450,6 +450,23 @@ describe('the control index', () => {
     expect(question?.getAttribute('lang')).toBe('de')
   })
 
+  it('brings the open control, then a focused row, into view in its own list (issue 466)', () => {
+    const scrolled: [string | null, unknown][] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element, how?: unknown) {
+      scrolled.push([this.querySelector('.mono')?.textContent ?? null, how])
+    }
+    try {
+      show()
+      expect(scrolled).toEqual([['5.1.2', { block: 'nearest' }]])
+      const index = screen.getByRole('navigation', { name: 'Controls' })
+      within(index).getByRole('link', { name: /^4\.1\.2/ }).focus()
+      expect(scrolled.at(-1)).toEqual(['4.1.2', { block: 'nearest' }])
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
   it("shows the open control's own run: assessing, then its verdict and state", () => {
     show({ run: { status: 'running', steps: [] } })
     const index = screen.getByRole('navigation', { name: 'Controls' })

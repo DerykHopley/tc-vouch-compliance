@@ -438,6 +438,15 @@ ROW_WRAPPED_MAX = 96
 owner's answer A on #466 (2026-11-10)."""
 
 
+LINE_SHARED = 3
+"""How far apart, in px, the vertical centres of two things on one line may be (#466)."""
+
+
+def centre(rect: dict) -> float:
+    """A DOMRect's vertical centre, as INDEX_ROWS reads them."""
+    return rect["top"] + rect["height"] / 2
+
+
 @pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
 def test_at_1440_each_index_row_is_its_id_and_chip_then_at_most_two_lines_of_question(
     page: Page, paper_url, profile
@@ -461,8 +470,9 @@ def test_at_1440_each_index_row_is_its_id_and_chip_then_at_most_two_lines_of_que
     assert any(r["tag"] for r in rows), "no row has a review tag to place"
     for r in rows:
         id_line = r["idBox"]
-        # The id and chip share a line: their boxes overlap vertically.
-        assert r["chip"]["top"] < id_line["bottom"] and r["chip"]["bottom"] > id_line["top"], r
+        # The id and chip share a line: their vertical centres within LINE_SHARED, also when the
+        # tag wraps below them (centred across both lines, the id sat half a line low).
+        assert abs(centre(id_line) - centre(r["chip"])) <= LINE_SHARED, r
         assert r["q"]["height"] <= 2 * r["line"] + 1, r  # two lines of question at most
         assert r["q"]["top"] >= r["state"]["bottom"] - 1, r  # the question under the state
         if r["tag"] is None:
@@ -497,6 +507,38 @@ def test_at_1440_the_index_stays_in_view_when_the_paper_scrolls_to_its_foot(page
     assert box(last)["y"] + box(last)["height"] <= 900 + 1, box(last)
     moved = abs(box(index)["y"] - shown["y"])  # the top bar's height is fractional (62.67px)
     assert moved <= 1, "bringing the last row into view moved the index"
+
+
+FOCUSED_IN_LIST = (
+    """async () => {"""
+    + FONTS_SETTLED
+    + """
+  const row = document.activeElement
+  const list = document.querySelector('.wp-index-list')
+  if (!row || !list.contains(row)) return null
+  const r = row.getBoundingClientRect(), l = list.getBoundingClientRect()
+  return { id: row.querySelector('.mono').textContent, top: r.top, bottom: r.bottom,
+    listTop: l.top, listBottom: l.bottom }
+}"""
+)
+
+
+def test_at_1440_a_focused_index_row_is_scrolled_into_the_lists_view(page: Page, paper_url):
+    """#466: the index's list scrolls on its own, so a row Tab reaches lies inside it, its focus
+    ring whole. Firefox left 5.1.2 sticking out of the list's foot (#466's verifier)."""
+    page.set_viewport_size({"width": 1440, "height": 900})
+    open_paper(page, paper_url, "1.1.1", assessed=False)
+    links = page.get_by_role("navigation", name="Controls").get_by_role("link")
+    links.first.focus()
+    seen = []
+    for _ in range(links.count()):
+        focused = page.evaluate(FOCUSED_IN_LIST)
+        assert focused, f"focus left the index after {seen}"
+        seen.append(focused["id"])
+        assert focused["top"] >= focused["listTop"] - 1, focused
+        assert focused["bottom"] <= focused["listBottom"] + 1, focused
+        page.keyboard.press("Tab")
+    assert seen[-1] == "5.2.9", seen
 
 
 def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page, paper_url):
