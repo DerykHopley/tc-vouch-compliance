@@ -8,8 +8,12 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 /** One new assessment of a pass, as the API lists it. */
 export type PassAssessment = { thread_id: string; control_id: string; status: ReviewStatus; verdict: Verdict | null }
 
+/** A control the pass left out, and why: its newest assessment is accepted, or its review is in progress (#437: its
+ * findings confirmed, at Plan fixes or Accept). */
+export type SkippedControl = { control_id: string; reason: 'accepted' | 'in-review' }
+
 export type PassResult =
-  | { kind: 'done'; assessments: PassAssessment[]; skipped: string[] }
+  | { kind: 'done'; assessments: PassAssessment[]; skipped: SkippedControl[] }
   /** The 422 offering the per-control agent: the prompt is over the threshold, or a source can't be read. */
   | { kind: 'refused'; message: string }
   /** The 429 of the pass's own daily limit: the per-control assessments have their own. */
@@ -29,7 +33,7 @@ export async function runProfilePass(): Promise<PassResult> {
   }
   if (sessionEnded(response)) return { kind: 'failed', message: SESSION_ENDED }
   const body = await response.json().catch(() => ({})) as
-    { assessments?: PassAssessment[]; skipped?: string[]; detail?: unknown; fallback?: unknown; limit?: unknown }
+    { assessments?: PassAssessment[]; skipped?: SkippedControl[]; detail?: unknown; fallback?: unknown; limit?: unknown }
   if (response.ok) return { kind: 'done', assessments: body.assessments ?? [], skipped: body.skipped ?? [] }
   const message = typeof body.detail === 'string' ? body.detail : PASS_NOT_STARTED
   if (response.status === 422 && body.fallback === 'per-control') return { kind: 'refused', message }

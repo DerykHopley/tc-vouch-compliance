@@ -5,7 +5,7 @@ import Dossier from './Dossier.tsx'
 import type { ControlCard, Overview } from './overview.ts'
 import type { Verdict } from './assessment.ts'
 import type { Goal } from './report.ts'
-import type { PassAssessment, PassState } from './profilePass.ts'
+import type { PassAssessment, PassState, SkippedControl } from './profilePass.ts'
 
 afterEach(() => {
   cleanup()
@@ -21,7 +21,7 @@ const NO_GOAL = { onGoalChanged: () => Promise.resolve(true), onRoundChanged: ()
 
 const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
 
-function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verdict'>>> = {}): Overview {
+function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verdict' | 'in_review'>>> = {}): Overview {
   const controls = IDS.map((id) => ({
     id, question: `Question ${id}?`, iso_27001: 'ISO 27001:2022: A.5.1',
     ...(cards[id] ?? { status: 'not-assessed' as const, verdict: null }),
@@ -211,10 +211,12 @@ describe('the Dossier overview', () => {
 })
 
 describe('the profile pass on the Dossier (ticket 390)', () => {
-  const NOTE = 'Assesses every open control in one run. Accepted controls are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'
+  const NOTE = 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'
   const passButton = () => screen.getByRole('button', { name: /profile pass/i })
   const panel = () => screen.getByRole('region', { name: 'Profile pass' })
   const row = (id: string) => within(panel()).getByRole('listitem', { name: `Control ${id}` })
+  const accepted = (...ids: string[]): SkippedControl[] => ids.map((control_id) => ({ control_id, reason: 'accepted' }))
+  const inReview = (...ids: string[]): SkippedControl[] => ids.map((control_id) => ({ control_id, reason: 'in-review' }))
   const proposed = (control_id: string, verdict: PassAssessment['verdict']): PassAssessment =>
     ({ thread_id: `t-${control_id}`, control_id, status: 'waiting-for-review', verdict })
 
@@ -275,7 +277,7 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
       '4.1.3': { status: 'waiting-for-review', verdict: 'not-evidenced' },
       '5.2.9': { status: 'accepted', verdict: 'evidenced' },
     })
-    shown({ kind: 'done', skipped: ['5.2.9'], assessments: [
+    shown({ kind: 'done', skipped: accepted('5.2.9'), assessments: [
       proposed('1.1.1', 'not-evidenced'), proposed('4.1.2', 'partly-evidenced'), proposed('4.1.3', 'not-evidenced'),
     ] }, { overview })
     expect(panel().className).toContain('sheet')
@@ -308,11 +310,45 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
   })
 
   it('with nothing to assess, says every applicable control is accepted already and names the skipped', () => {
-    shown({ kind: 'done', skipped: ['1.1.1', '4.1.2'], assessments: [] })
+    shown({ kind: 'done', skipped: accepted('1.1.1', '4.1.2'), assessments: [] })
     expect(panel().textContent).toContain('Every applicable control is accepted already. Nothing was assessed.')
     expect(panel().textContent).toContain('2 accepted controls skipped: 1.1.1, 4.1.2.')
     expect(within(panel()).queryAllByRole('listitem')).toHaveLength(0)
   })
+
+  it('names the controls in review skipped on a line of their own, beside the accepted ones (ticket 437)', () => {
+    shown({ kind: 'done', skipped: [...accepted('1.1.1'), ...inReview('1.6.2', '4.1.2')],
+      assessments: [proposed('4.1.3', 'not-evidenced')] })
+    const lines = within(panel()).getAllByText(/skipped:/).map((p) => p.textContent)
+    expect(lines).toEqual([
+      '1 accepted control skipped: 1.1.1.',
+      '2 controls in review skipped: 1.6.2, 4.1.2. Finish their review, or assess one again from its paper.',
+    ])
+  })
+
+  it('with nothing to assess and a control in review, says every control is accepted or in review (ticket 437)',
+    () => {
+      shown({ kind: 'done', skipped: [...accepted('1.1.1'), ...inReview('4.1.2')], assessments: [] })
+      expect(panel().textContent).toContain(
+        'Every applicable control is accepted or in review. Nothing was assessed.')
+      expect(panel().textContent).not.toContain('accepted already')
+      expect(panel().textContent).toContain('1 control in review skipped: 4.1.2.')
+    })
+
+  it('on a row whose control is in review, Assess <id> again opens its paper and starts nothing (ticket 437)',
+    async () => {
+      const overview = seeded({
+        '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced', in_review: true },
+        '4.1.3': { status: 'waiting-for-review', verdict: 'not-evidenced', in_review: false },
+      })
+      const { onOpen } = shown({ kind: 'done', skipped: [], assessments: [
+        proposed('4.1.2', 'partly-evidenced'), proposed('4.1.3', 'not-evidenced'),
+      ] }, { overview })
+      await userEvent.click(within(row('4.1.2')).getByRole('button', { name: 'Assess 4.1.2 again' }))
+      expect(onOpen).toHaveBeenLastCalledWith('4.1.2', false)
+      await userEvent.click(within(row('4.1.3')).getByRole('button', { name: 'Assess 4.1.3 again' }))
+      expect(onOpen).toHaveBeenLastCalledWith('4.1.3', true)
+    })
 
   it.each([
     ['refused', 'The profile pass can\'t run: its prompt is about 90,000 tokens.'],

@@ -26,6 +26,8 @@ export type ControlCard = {
   reassess_suggested?: boolean
   reassess_reasons?: ReassessReason[]
   closed?: boolean
+  /** Its newest assessment's review is in progress (#437): findings confirmed, at Plan fixes or Accept. */
+  in_review?: boolean
 }
 
 /** Counted from accepted verdicts only; `open` is every control not accepted. */

@@ -1019,3 +1019,56 @@ describe('the improvement plan (issue 410)', () => {
     })
   })
 })
+
+describe('Assess again on a review in progress (ticket 437)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const WARNING = 'Assessing 5.1.2 again sets its review aside: the findings you confirmed and the remediation items you '
+    + "decided won't carry over to the new assessment. Nothing is deleted; they stay in the audit trail."
+  const item = (status: RemediationItem['status']): RemediationItem =>
+    ({ requirement_id: 'M1', missing: 'A record.', owner_role: 'CISO', due_date: '2027-02-01', status })
+  const AT_PLAN_FIXES: Assessment = { ...PROPOSED, review_step: 'plan-fixes', confirmed: [], remediation: [item('draft')] }
+  const AT_ACCEPT: Assessment = { ...PROPOSED, review_step: 'accept', confirmed: [], remediation: [item('approved')] }
+  const ACCEPTED: Assessment = { ...PROPOSED, status: 'accepted', review_step: null, confirmed: [],
+    review: { decision: 'accept', note: '', overrides: [], reviewer_id: 'user_1', reviewer_name: 'Jana Weber',
+      reviewed_at: '2026-11-04T08:30:00+00:00' } }
+  const assessAgain = () => screen.getByRole('button', { name: 'Assess again 5.1.2' })
+
+  it.each([['Plan fixes', AT_PLAN_FIXES], ['Accept', AT_ACCEPT]])(
+    'at %s, the first click warns in the app and starts nothing; Keep the review closes the warning',
+    async (_, assessment) => {
+      const onAssess = vi.fn()
+      const confirm = vi.spyOn(window, 'confirm')
+      review({ assessment, onAssess })
+      await userEvent.click(assessAgain())
+      expect(onAssess).not.toHaveBeenCalled()
+      expect(confirm).not.toHaveBeenCalled() // in the app, not the browser's confirm
+      const warning = screen.getByRole('alert')
+      expect(warning.textContent).toBe(WARNING)
+      expect(warning.className).toBe('field-note')
+      expect(screen.queryByRole('button', { name: 'Assess again 5.1.2' })).toBeNull() // in its place
+      expect(screen.getByRole('button', { name: 'Assess 5.1.2 again anyway' }).className).toBe('btn btn-primary')
+      await userEvent.click(screen.getByRole('button', { name: 'Keep the review' }))
+      expect(onAssess).not.toHaveBeenCalled()
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(assessAgain()).toBeTruthy()
+    })
+
+  it('Assess <id> again anyway starts the run', async () => {
+    const onAssess = vi.fn()
+    review({ assessment: AT_PLAN_FIXES, onAssess })
+    await userEvent.click(assessAgain())
+    expect(screen.getByRole('button', { name: 'Keep the review' }).className).toBe('btn btn-ghost')
+    await userEvent.click(screen.getByRole('button', { name: 'Assess 5.1.2 again anyway' }))
+    expect(onAssess).toHaveBeenCalledOnce()
+  })
+
+  it.each([['at Confirm findings', PROPOSED], ['accepted', ACCEPTED]])(
+    'on a control %s, Assess again starts the run in one click', async (_, assessment) => {
+      const onAssess = vi.fn()
+      review({ assessment, onAssess })
+      await userEvent.click(assessAgain())
+      expect(onAssess).toHaveBeenCalledOnce()
+      expect(screen.queryByRole('button', { name: 'Keep the review' })).toBeNull()
+    })
+})

@@ -133,6 +133,11 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
     expect(row(paper, ITEM).get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
     assert small_targets(page) == []
 
+    # #437: Assess again on a review in progress warns first, with two pills in its place.
+    paper.get_by_role("button", name="Assess again 4.1.2").click()
+    expect(paper.get_by_role("button", name="Keep the review")).to_be_visible()
+    assert small_targets(page) == []
+
 
 def test_the_top_bar_menu_and_its_menus_are_at_least_44px(page: Page, profiles_url):
     # #222: on a phone the tabs, the profile dropdown and the user menu sit behind one Menu button.

@@ -554,6 +554,13 @@ class Assessment:
         return asdict(self)
 
 
+def in_review(assessment: Assessment) -> bool:
+    """Whether the assessment's review is in progress (#437): waiting for review with its
+    findings confirmed, at Plan fixes or Accept. A profile pass never sets such a review aside,
+    and the app warns before Assess again does."""
+    return assessment.status == WAITING and assessment.confirmed is not None
+
+
 def counts_towards_roll_up(requirement: RequirementVerdict) -> bool:
     """Whether the requirement's verdict counts towards the control's (`roll_up`): a must,
     high, very high or overlay requirement that applies."""
