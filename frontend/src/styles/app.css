@@ -477,10 +477,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 }
 
 /* Company setup (#403, pending design pass): the step list, each step's sheet, its fields and choice cards, from the
-   existing tokens. The current step is ink with an ink number; later steps are muted and say so to a screen reader. */
+   existing tokens. The current step is ink with an ink number. */
 .setup-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink); }
 .setup-steps li { display: inline-flex; align-items: center; gap: 6px; }
-.setup-steps li.later { color: var(--muted); }
 .setup-steps li[aria-current="step"] { color: var(--ink); font-weight: 700; }
 .setup-step-n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; }
 .setup-steps li[aria-current="step"] .setup-step-n { background: var(--ink); border-color: var(--ink); color: var(--sheet); }

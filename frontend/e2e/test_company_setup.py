@@ -1,10 +1,13 @@
-"""Company setup (#403, #407, #408, #409, M8 #351), steps 1 to 3 and 5 to 7: a developer opens it
+"""Company setup (#403, #407, #408, #409, #447, M8 #351), its seven steps: a developer opens it
 from the developer page and walks it, going back and forward without losing an answer, then creates
-the company and lands on it; a compliance lead never reaches it.
+the company and lands on it, its Goal set and a profile pass running; a compliance lead never
+reaches it.
 
 On the profiles server, as the developer page's checks are (local mode: its one user is a
-developer), except the one check that creates a company: that runs on a server of its own
-(setup_url), as the company stays in that process and would join the other checks' switchers.
+developer), except the checks that create a company: they run on servers of their own, as the
+company stays in that process and would join the other checks' switchers. Story 5's runs on
+first_pass_url, as every create now runs a profile pass and setup_url's creates would spend the
+passes' daily limit (3).
 """
 
 import re
@@ -44,9 +47,16 @@ def to_step_3(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
     assert answer.value.status == 200
 
 
-def to_step_5(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
+def to_step_4(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
     to_step_3(page, company)
     page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+    press(page, "Next")
+    expect(page.get_by_role("heading", name="Goal")).to_be_focused()
+
+
+def to_step_5(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
+    """Steps 1 to 4 answered (Internal improvement kept), then Next to step 5."""
+    to_step_4(page, company)
     with page.expect_response(lambda r: CONTROLS in r.url) as answer:
         press(page, "Next")
     assert answer.value.status == 200
@@ -165,8 +175,8 @@ def test_enter_in_the_name_field_moves_on_as_next_does(page: Page, profiles_url)
 def test_a_developer_marks_two_controls_not_applicable_and_keeps_them_going_back(
     page: Page, profiles_url
 ):
-    """Story 2: step 3's Next skips the Goal to step 5; two controls ticked with reasons stay
-    ticked, their reasons as typed, after Back to step 3 and Next again."""
+    """Story 2: two controls ticked with reasons stay ticked, their reasons as typed, after Back to
+    step 4 and Next again."""
     posted: list[str] = []
     page.on("request", lambda r: posted.append(r.url) if r.method == "POST" else None)
     open_setup(page, profiles_url)
@@ -180,7 +190,7 @@ def test_a_developer_marks_two_controls_not_applicable_and_keeps_them_going_back
     reason(page, "5.1.1").fill("No cryptography in our own products ")
 
     press(page, "Back")
-    expect(page.get_by_text("Step 3 of 7")).to_be_visible()
+    expect(page.get_by_text("Step 4 of 7")).to_be_visible()
     press(page, "Next")
 
     expect(control(page, "1.6.1")).to_be_checked()
@@ -356,6 +366,7 @@ def test_a_double_click_on_next_that_doesnt_move_keeps_focus_on_the_first_invali
     expect(page.get_by_role("radio", name=re.compile(r"^Normal"))).to_be_focused()
 
     page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+    press(page, "Next")  # step 4: the Goal
     with page.expect_response(lambda r: CONTROLS in r.url):
         press(page, "Next")
     expect(page.get_by_role("checkbox")).to_have_count(12)
@@ -486,6 +497,7 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
     expect(summary).to_contain_text("Germany")
     expect(summary).to_contain_text("German")
     expect(summary).to_contain_text("Normal")
+    expect(summary).to_contain_text("Internal improvement")
     expect(summary.get_by_role("listitem")).to_have_count(2)
     assert summary.get_by_role("listitem").all_text_contents() == [
         "1.6.1: We build no prototype vehicles.",
@@ -520,7 +532,9 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
         banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
     ).to_be_visible()
     expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
-    expect(page.get_by_text("Not assessed", exact=True)).to_have_count(12)
+    # Its Goal is set and its profile pass starts (#447): story 5's check follows the pass through.
+    expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
+    expect(page.get_by_role("region", name="Profile pass")).to_be_visible()
     banner.get_by_role("button", name=re.compile(r"^Profile: ")).click()
     expect(
         banner.get_by_role("menuitemradio", name=re.compile(r"^Musterfirma Nord GmbH"))
@@ -569,10 +583,16 @@ def test_a_double_click_on_step_6s_next_lands_on_step_7_and_creates_nothing(
 def test_a_double_click_on_a_next_that_moves_leaves_focus_on_the_new_heading(
     page: Page, profiles_url
 ):
-    """From #408's verifier: on 3 to 5, 5 to 6 and 6 to 7, the second press left focus on BODY."""
+    """From #408's verifier: on 3 to 5, 5 to 6 and 6 to 7, the second press left focus on BODY; 3 to
+    4 and 4 to 5 since #447 built step 4."""
     open_setup(page, profiles_url)
     to_step_3(page)
     page.get_by_role("radio", name=re.compile(r"^Normal")).check()
+
+    page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Next").dblclick()
+    expect(page.get_by_role("heading", name="Goal")).to_be_focused()
+    expect(page.get_by_role("radio", name=re.compile(r"^Internal improvement"))).to_be_checked()
 
     page.wait_for_timeout(SETTLE_MS)
     with page.expect_response(lambda r: CONTROLS in r.url):
@@ -638,3 +658,80 @@ def test_step_7_scrolls_sideways_only_inside_its_tables(page: Page, profiles_url
         "document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth"
     )
     assert page_overflow <= 0
+
+
+CHOSEN = {
+    "Information security policy": "information-security-policy",
+    "Backup policy": "backup-policy",
+    "Security training record 2026": "training-record",
+}
+
+
+def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted(
+    page: Page, first_pass_url
+):
+    """Story 5 end to end (#447): setup with Internal improvement left chosen on step 4 and a few
+    library documents, Create company, then the new company's Overview with its Goal set and the
+    profile pass running; it finishes with every card waiting for review, and an opened working
+    paper cites only chosen documents."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    open_setup(page, first_pass_url)
+    to_step_4(page, "Erstpass GmbH")
+    expect(page.get_by_text("Step 4 of 7")).to_be_visible()
+    expect(page.get_by_role("radio", name=re.compile(r"^Internal improvement"))).to_be_checked()
+    expect(page.get_by_text("You can change the Goal later on the overview.")).to_be_visible()
+    with page.expect_response(lambda r: CONTROLS in r.url):
+        press(page, "Next")
+    with page.expect_response(lambda r: LIBRARY in r.url):
+        press(page, "Next")
+    for title in CHOSEN:
+        document(page, title).check()
+    press(page, "Next")
+    summary = page.locator("dl.setup-summary")
+    expect(summary).to_contain_text("Internal improvement")
+    expect(
+        page.get_by_text(re.compile(r"Then Vouch sets its Goal and runs a profile pass"))
+    ).to_be_visible()
+
+    with (
+        page.expect_response(lambda r: r.url.endswith(PROFILES)) as created,
+        page.expect_response(
+            lambda r: r.url.endswith("/api/goal") and r.request.method == "PUT"
+        ) as goal,
+        page.expect_response(lambda r: r.url.endswith("/api/profile-pass")) as passed,
+    ):
+        press(page, "Create company")
+        running = page.get_by_role("button", name="Running the profile pass…")
+        expect(running).to_be_disabled()
+        expect(page.get_by_role("status")).to_have_text(
+            "Vouch is assessing every open control in one run. This can take a few minutes."
+        )
+    assert created.value.status == 201
+    profile = created.value.json()["id"]
+    assert goal.value.ok, goal.value.status
+    assert goal.value.request.post_data_json == {"goal": "internal-improvement"}
+    assert goal.value.request.headers["x-vouch-profile"] == profile
+    assert passed.value.ok, passed.value.status
+    assert passed.value.request.headers["x-vouch-profile"] == profile
+
+    expect(page).to_have_url(f"{first_pass_url}/")
+    expect(
+        page.get_by_role("banner").get_by_role(
+            "button", name=re.compile(r"^Profile: Erstpass GmbH")
+        )
+    ).to_be_visible()
+    expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
+    panel = page.get_by_role("region", name="Profile pass")
+    expect(panel).to_contain_text("12 assessments waiting for your review.")
+    cards = page.get_by_role("article", name=re.compile(r"^Control "))
+    expect(cards).to_have_count(12)
+    for card in cards.all():
+        expect(card).to_contain_text("Proposed")
+
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
+        panel.get_by_role("button", name="Open 1.1.1").click()
+    paper = page.get_by_role("region", name="Working paper")
+    cited = paper.locator(".quotes-cell .mono")
+    expect(cited.first).to_be_visible()
+    for doc in cited.all_text_contents():
+        assert doc.split(" v")[0] in CHOSEN.values(), doc

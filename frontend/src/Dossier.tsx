@@ -28,10 +28,13 @@ type Props = {
   onGoalChanged: (goal: Goal) => Promise<boolean>
   /** A review round was started or closed (#402): reads the overview again; whether it was read. */
   onRoundChanged: () => Promise<boolean>
+  /** The Goal chosen in company setup that couldn't be set on arrival (#447): said under the Goal line until the goal
+   * shown is that one. */
+  goalNotSet?: Goal
 }
 
 export default function Dossier({ state, onRetry, onOpen, running, focusHeading = false, pass, onPass, onGoalChanged,
-  onRoundChanged }: Props) {
+  onRoundChanged, goalNotSet }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -49,7 +52,7 @@ export default function Dossier({ state, onRetry, onOpen, running, focusHeading 
   return (
     <main className="dossier wrap">
       <Hero overview={overview} onOpen={onOpen} running={running} focus={focusHeading} pass={pass} onPass={onPass}
-        onGoalChanged={onGoalChanged} onRoundChanged={onRoundChanged} />
+        onGoalChanged={onGoalChanged} onRoundChanged={onRoundChanged} goalNotSet={goalNotSet} />
       <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} running={running} />
       <Band readiness={overview.readiness} />
       <Comparison overview={overview} onOpen={onOpen} />
@@ -78,9 +81,10 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
 }
 
 type HeroProps = { overview: Overview; onOpen: Props['onOpen']; running: string | null; focus: boolean;
-  pass: PassState; onPass: () => void; onGoalChanged: Props['onGoalChanged']; onRoundChanged: Props['onRoundChanged'] }
+  pass: PassState; onPass: () => void; onGoalChanged: Props['onGoalChanged']; onRoundChanged: Props['onRoundChanged'];
+  goalNotSet?: Goal }
 
-function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, onRoundChanged }: HeroProps) {
+function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, onRoundChanged, goalNotSet }: HeroProps) {
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (focus) heading.current?.focus()
@@ -103,7 +107,7 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
-      <GoalRow overview={overview} onChanged={onGoalChanged} />
+      <GoalRow overview={overview} onChanged={onGoalChanged} notSet={goalNotSet} />
       <RoundRow overview={overview} onChanged={onRoundChanged} />
       <h1 ref={heading} tabIndex={-1}>Prepared for audit. One piece of evidence at a time.</h1>
       <p><b>{headline}</b> {detail}</p>
@@ -140,9 +144,10 @@ const GOAL_STALE = 'The goal was changed, but the overview could not be read aga
 /**
  * The profile's goal on the hero (`docs/design.md`, Components: Goal, #369): "Goal: <goal>" and a ghost Change goal,
  * which asks first (the browser's own confirm, as the fresh start does) and changes it to the other goal. The change
- * starts no run, so it stays usable while one goes on. A failure says so, and the line keeps the old goal.
+ * starts no run, so it stays usable while one goes on. A failure says so, and the line keeps the old goal. `notSet`:
+ * the Goal chosen in company setup couldn't be set on arrival (#447), said until the line shows it.
  */
-function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props['onGoalChanged'] }) {
+function GoalRow({ overview, onChanged, notSet }: { overview: Overview; onChanged: Props['onGoalChanged']; notSet?: Goal }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   // The change was kept but the overview wasn't read again: the line shows the new goal; Retry reads it again.
@@ -172,6 +177,11 @@ function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props
           Change goal
         </button>
       </div>
+      {notSet !== undefined && notSet !== overview.goal && (
+        <p role="alert" className="field-note notice">
+          The company was created, but its Goal could not be set to {GOAL_WORDS[notSet]}. Use Change goal to set it.
+        </p>
+      )}
       {failed && <p role="alert" className="field-note notice">{GOAL_FAILED}</p>}
       {stale !== null && (
         <div className="next">

@@ -101,6 +101,7 @@ async function toStep5() {
   await toStep3()
   await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
   await next()
+  await next() // step 4: the Goal, Internal improvement kept
 }
 
 /** A control's checkbox on step 5, by its id (its label starts with the id). */
@@ -128,6 +129,7 @@ async function toStep7() {
   await next()
   await userEvent.click(await screen.findByRole('radio', { name: /^High/ }))
   await next()
+  await next() // step 4: the Goal, Internal improvement kept
   await userEvent.click(await findControl('5.1.1'))
   await userEvent.type(reason('5.1.1'), 'No cryptography')
   await userEvent.click(control('1.6.1'))
@@ -154,7 +156,7 @@ describe('company setup', () => {
     wizard()
     const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
     expect(steps.map((s) => s.textContent)).toEqual([
-      '1Company', '2Language', '3Protection level', '4Goal (not yet available)', '5Not applicable',
+      '1Company', '2Language', '3Protection level', '4Goal', '5Not applicable',
       '6Evidence', '7Finish'])
     expect(steps[0].getAttribute('aria-current')).toBe('step')
     expect(screen.getByText('Step 1 of 7')).toBeTruthy()
@@ -300,19 +302,59 @@ describe('company setup', () => {
     expect(screen.queryByText('Choose a protection level.')).toBeNull()
   })
 
-  it('Next on step 3 with a level skips the Goal to step 5, and Back returns to step 3', async () => {
+  it('Next on step 3 with a level opens step 4, the Goal, Internal improvement chosen; Back from step 5 keeps it',
+    async () => {
+      api()
+      wizard()
+      await toStep3()
+      await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
+      await next()
+      expect(screen.getByText('Step 4 of 7')).toBeTruthy()
+      expect(document.activeElement).toBe(heading('Goal'))
+      const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
+      expect(steps.map((s) => s.className)).toEqual(['', '', '', '', '', '', ''])
+      expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, 'step', null, null, null])
+      expect(screen.queryByText(/not yet available/)).toBeNull()
+      const goals = screen.getByRole('group', { name: 'Goal' })
+      expect(within(goals).getAllByRole('radio').map((r) => r.closest('label')?.textContent)).toEqual([
+        "Internal improvementImproving the company's own security, with no audit planned.",
+        'Audit readinessPreparing for an external audit.',
+      ])
+      expect((screen.getByRole('radio', { name: /^Internal improvement/ }) as HTMLInputElement).checked).toBe(true)
+      expect(goals.textContent).toContain('You can change the Goal later on the overview.')
+      await next() // a Goal is always chosen: Next never refuses step 4
+      expect(screen.getByText('Step 5 of 7')).toBeTruthy()
+      expect(document.activeElement).toBe(heading('Not applicable'))
+      await back()
+      expect(screen.getByText('Step 4 of 7')).toBeTruthy()
+      expect((screen.getByRole('radio', { name: /^Internal improvement/ }) as HTMLInputElement).checked).toBe(true)
+      await back()
+      expect(heading('Protection level')).toBeTruthy()
+    })
+
+  it('keeps Audit readiness through step 7 and back; step 7 shows it and says a profile pass runs', async () => {
     api()
     wizard()
-    await toStep5()
-    expect(screen.getByText('Step 5 of 7')).toBeTruthy()
-    expect(document.activeElement).toBe(heading('Not applicable'))
-    const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
-    expect(steps[3].textContent).toBe('4Goal (not yet available)')
-    expect(steps[3].className).toBe('later')
-    expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, null, 'step', null, null])
+    await toStep3()
+    await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
+    await next()
+    await userEvent.click(screen.getByRole('radio', { name: /^Audit readiness/ }))
+    await next()
+    await findControl('1.1.1')
+    await next()
+    await userEvent.click(await findChoose('Backup policy'))
+    await next()
+    const summary = heading('Finish').parentElement?.querySelector('dl') as HTMLElement
+    const terms = within(summary).getAllByRole('term').map((t) => t.textContent)
+    expect(terms.indexOf('Goal')).toBe(terms.indexOf('Protection level') + 1)
+    expect(within(summary).getAllByRole('definition')[terms.indexOf('Goal')].textContent).toBe('Audit readiness')
+    expect(screen.getByText(/Then Vouch sets its Goal and runs a profile pass/)).toBeTruthy()
     await back()
-    expect(heading('Protection level')).toBeTruthy()
-    expect(screen.getByText('Step 3 of 7')).toBeTruthy()
+    await back()
+    await back()
+    expect(screen.getByText('Step 4 of 7')).toBeTruthy()
+    expect((screen.getByRole('radio', { name: /^Audit readiness/ }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('radio', { name: /^Internal improvement/ }) as HTMLInputElement).checked).toBe(false)
   })
 
   it('step 5 lists every control unticked, under the sentence that says what not applicable means', async () => {
@@ -471,6 +513,7 @@ describe('company setup', () => {
     expect(screen.getByRole('group', { name: 'Protection level' }).getAttribute('aria-invalid')).toBeNull()
     await userEvent.click(screen.getByRole('radio', { name: /^Normal/ }))
     await next()
+    await next()
     await userEvent.click(await findControl('1.6.1'))
     await next()
     expect(reason('1.6.1').getAttribute('aria-invalid')).toBe('true')
@@ -619,7 +662,7 @@ describe('company setup', () => {
       expect(screen.getByText('Step 7 of 7')).toBeTruthy()
       expect(document.activeElement).toBe(heading('Finish'))
       const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
-      expect(steps.map((s) => s.className)).toEqual(['', '', '', 'later', '', '', ''])
+      expect(steps.map((s) => s.className)).toEqual(['', '', '', '', '', '', ''])
       expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, null, null, null, 'step'])
       expect(screen.queryByRole('button', { name: 'Next' })).toBeNull()
       expect(screen.queryByText(/not built yet/)).toBeNull()
@@ -706,20 +749,20 @@ describe('company setup', () => {
       expect(summary).toBeTruthy()
       const terms = within(summary as HTMLElement).getAllByRole('term').map((t) => t.textContent)
       const values = within(summary as HTMLElement).getAllByRole('definition').map((d) => d.textContent)
-      expect(terms).toEqual(['Company', 'Country', 'Answer language', 'Protection level', 'Not applicable',
+      expect(terms).toEqual(['Company', 'Country', 'Answer language', 'Protection level', 'Goal', 'Not applicable',
         'Ready to cite'])
-      expect(values.slice(0, 4)).toEqual(['Musterfirma GmbH', 'Germany', 'German', 'High'])
+      expect(values.slice(0, 5)).toEqual(['Musterfirma GmbH', 'Germany', 'German', 'High', 'Internal improvement'])
       expect(within(summary as HTMLElement).getAllByRole('listitem').map((i) => i.textContent))
         .toEqual(['1.6.1: Remote only', '5.1.1: No cryptography'])
-      expect(values[5]).toContain('Ready to cite: 2 documents (1 documented, 1 implemented, 1 stale).')
+      expect(values[6]).toContain('Ready to cite: 2 documents (1 documented, 1 implemented, 1 stale).')
       const policies = screen.getByRole('table', { name: 'Policies' })
       expect(within(policies).getAllByRole('rowheader').map((r) => r.querySelector('.doc-title')?.textContent))
         .toEqual(['Backup policy'])
       const records = screen.getByRole('table', { name: 'Records' })
       expect(within(records).getAllByRole('rowheader')).toHaveLength(1)
       expect(screen.queryAllByRole('checkbox')).toEqual([])
-      expect(screen.getByText('Creating the company adds it to the profile switcher. Its first assessment comes in a '
-        + 'later step.')).toBeTruthy()
+      expect(screen.getByText('Creating the company adds it to the profile switcher. Then Vouch sets its Goal and runs '
+        + 'a profile pass: every applicable control drafted, waiting for your review.')).toBeTruthy()
       expect(createButton().getAttribute('type')).toBe('submit')
     })
 
@@ -730,7 +773,7 @@ describe('company setup', () => {
     await userEvent.click(await findChoose('Backup policy'))
     await next()
     const summary = heading('Finish').parentElement?.querySelector('dl') as HTMLElement
-    expect(within(summary).getAllByRole('definition')[4].textContent).toBe('None')
+    expect(within(summary).getAllByRole('definition')[5].textContent).toBe('None')
     expect(within(summary).getAllByRole('definition')[2].textContent).toBe('English')
     expect(screen.getByRole('table', { name: 'Policies' })).toBeTruthy()
     expect(screen.queryByRole('table', { name: 'Records' })).toBeNull()
@@ -762,12 +805,12 @@ describe('company setup', () => {
     expect(body.not_applicable).toEqual([])
   })
 
-  it('a 201 hands the created profile to onCreated', async () => {
+  it('a 201 hands the created profile and the chosen Goal to onCreated', async () => {
     api()
     const onCreated = wizard()
     await toStep7()
     await create()
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
     expect(onCreated).toHaveBeenCalledOnce()
   })
 
@@ -840,7 +883,7 @@ describe('company setup', () => {
     await next()
     expect(screen.queryByRole('alert')).toBeNull() // leaving the step drops it
     await create()
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
     expect(posts(fetch)).toHaveLength(2)
   })
 
@@ -857,7 +900,7 @@ describe('company setup', () => {
     expect(onCreated).not.toHaveBeenCalled()
     await create()
     expect(screen.queryByRole('alert')).toBeNull() // a new press clears the last alert
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
     expect(posts(fetch)).toHaveLength(2)
   })
 
@@ -872,7 +915,7 @@ describe('company setup', () => {
     const onCreated = wizard()
     await toStep7()
     await create()
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
     expect(screen.queryByRole('alert')).toBeNull()
     expect(posts(fetch)).toHaveLength(1)
   })

@@ -8,10 +8,11 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Documents from './Documents.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
-import { controlPath, useOverview } from './overview.ts'
+import { changeGoal, controlPath, useOverview } from './overview.ts'
 import { type PassAssessment, useProfilePass } from './profilePass.ts'
 import type { ProfileSummary } from './profiles.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
+import type { Goal } from './report.ts'
 import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
 import UserMenu from './UserMenu.tsx'
@@ -65,6 +66,9 @@ function viewAt(path: string): View {
   }
 }
 
+/** What the app does on opening under a company just made in setup (#447): sets its Goal, then runs a profile pass. */
+export type FirstPass = { goal: Goal }
+
 type AppProps = {
   /** Clerk mode's sign out, in the user menu; local mode has nobody to sign out. */
   onSignOut?: () => void
@@ -76,8 +80,8 @@ type AppProps = {
   company?: string
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
-  /** Company setup made a company (#409): ProfiledApp opens the app afresh under it. */
-  onCompanyCreated?: (profile: ProfileSummary) => void
+  /** Company setup made a company (#409), with the Goal chosen in it (#447): ProfiledApp opens the app afresh under it. */
+  onCompanyCreated?: (profile: ProfileSummary, goal: Goal) => void
   /** A company made in setup was removed on the developer page (#418): ProfiledApp reads the profile list again. */
   onCompanyRemoved?: (id: string) => void
   /** The company shown was removed, so the app opened afresh (#418): the developer page says so, once. */
@@ -86,12 +90,15 @@ type AppProps = {
   onRemovedShown?: () => void
   /** The app opens on a company just made (#409): the Dossier's heading takes focus, until the first move elsewhere. */
   focusHeading?: boolean
+  /** The app opens on a company just made (#447): once, it sets this Goal (unless it is Audit readiness, every
+   * profile's default) and then runs a profile pass. Only a create sets it. */
+  firstPass?: FirstPass
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
 export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh, onCompanyCreated,
-  onCompanyRemoved, removedCompany, onRemovedShown, focusHeading: arriving = false }: AppProps = {}) {
+  onCompanyRemoved, removedCompany, onRemovedShown, focusHeading: arriving = false, firstPass }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -218,6 +225,32 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   }, [load])
   const { pass, start: startPass } = useProfilePass(passed)
   const passing = pass.kind === 'running' // one run at a time: a working paper's Assess waits for the pass
+  // A company just made (#447): its Goal is set, then its first pass runs, once. The ref outlasts StrictMode's second
+  // mount, so it sends one of each; `mounted` keeps a pass from starting after the app has closed (a switch landing
+  // while the Goal change is out would name the other profile). A failed change keeps the company and still runs the
+  // pass, the Dossier saying the Goal wasn't set; a 401 hands over to the sign-in, with no pass.
+  const [goalNotSet, setGoalNotSet] = useState<Goal | null>(null)
+  const firstPassStarted = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const { goalChanged } = overview
+  useEffect(() => {
+    if (!firstPass || firstPassStarted.current) return
+    firstPassStarted.current = true
+    const { goal } = firstPass
+    void (async () => {
+      if (goal !== 'audit-readiness') {
+        const result = await changeGoal(goal)
+        if (!mounted.current || result === 'signed-out') return
+        if (result === 'changed') void goalChanged(goal)
+        else setGoalNotSet(goal)
+      }
+      void startPass()
+    })()
+  }, [firstPass, goalChanged, startPass])
   useEffect(() => {
     if (paperId === null || !readStored) return
     const answer = { wanted: true } // until the paper changes
@@ -316,7 +349,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running}
             focusHeading={focusHeading} pass={pass} onPass={() => void startPass()}
-            onGoalChanged={overview.goalChanged} onRoundChanged={overview.roundChanged} />}
+            onGoalChanged={overview.goalChanged} onRoundChanged={overview.roundChanged}
+            goalNotSet={goalNotSet ?? undefined} />}
       {/* An assessment from the chat reads the overview afresh (its card, readiness), its paper's newest if open, and
           the documents if shown (their Cited by, #424). */}
       <AskVouch context={{ page: chatPage(shown),

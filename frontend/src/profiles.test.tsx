@@ -1,16 +1,24 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
+import type { Goal } from './report.ts'
 
-// Company setup stands in as one button that reports the company made (#409): its steps are tested on their own.
-vi.mock('./CompanySetupWizard.tsx', () => ({
-  default: ({ onCreated }: { onCreated: (profile: ProfileSummary) => void }) => (
-    <button type="button" onClick={() => onCreated({ id: 'musterfirma-gmbh', company: 'Musterfirma GmbH',
-      country: 'Germany', answer_language: 'de' })}>Created</button>
-  ),
-}))
+// Company setup stands in as buttons that report the company made (#409) with the Goal chosen on step 4 (#447): its
+// steps are tested on their own.
+vi.mock('./CompanySetupWizard.tsx', () => {
+  const made = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de' }
+  return {
+    default: ({ onCreated }: { onCreated: (profile: ProfileSummary, goal: Goal) => void }) => (
+      <>
+        <button type="button" onClick={() => onCreated(made, 'internal-improvement')}>Created</button>
+        <button type="button" onClick={() => onCreated(made, 'audit-readiness')}>Created for audit</button>
+      </>
+    ),
+  }
+})
 // Each list read is kept, so a test can wait on a late one's answer having been handled (#418 review): ProfiledApp's
 // own `.then` on it runs before a test's `await` on the same promise.
 const reads = vi.hoisted(() => [] as Promise<unknown>[])
@@ -652,5 +660,153 @@ describe('a company removed on the developer page, issue 418', () => {
     expect(rememberedProfile()).toBe('musterfirma-gmbh')
     expect(screen.getByRole('button', { name: /^Profile: Musterfirma/ })).toBeTruthy()
     expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
+  })
+})
+
+describe('the first pass on a company just made, issue 447', () => {
+  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
+    kept_in: 'memory', daily_limit: 10 }
+  const PASS_DONE = { assessments: [{ thread_id: 't1', control_id: '1.1.1', status: 'waiting-for-review',
+    verdict: 'partly-evidenced' }], skipped: [] }
+  const LIMIT = 'The daily limit of profile passes is reached. It resets at midnight UTC.'
+
+  /** The API for a developer on the setup page: Nordlicht and Testwerk listed, Musterfirma too once made. PUT
+   * /api/goal answers `goalAnswer` (and keeps the goal on a 2xx, so the overview shows it), the pass `passAnswer`. */
+  function serveSetup(goalAnswer: () => Response = () => Response.json({ goal: 'internal-improvement' }),
+    passAnswer: () => Response = () => Response.json(PASS_DONE)) {
+    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    let goal: Goal = 'audit-readiness'
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/profiles') {
+        const profiles = ++listings > 1 ? [NORDLICHT, TESTWERK, MUSTERFIRMA] : [NORDLICHT, TESTWERK]
+        return Promise.resolve(Response.json({ profiles, default: 'nordlicht' }))
+      }
+      if (url === '/api/goal' && init?.method === 'PUT') {
+        const answer = goalAnswer()
+        if (answer.ok) goal = (JSON.parse(String(init.body)) as { goal: Goal }).goal
+        return Promise.resolve(answer)
+      }
+      if (url === '/api/profile-pass' && init?.method === 'POST') return Promise.resolve(passAnswer())
+      if (url === '/api/overview') {
+        const named = new Headers(init?.headers).get('X-Vouch-Profile')
+        const company = [NORDLICHT, TESTWERK, MUSTERFIRMA].find((p) => p.id === named)?.company ?? NORDLICHT.company
+        return Promise.resolve(Response.json({ ...overviewOf(company), goal: named === 'musterfirma-gmbh' ? goal
+          : 'audit-readiness' }))
+      }
+      return answered(url, init)
+    })
+    return fetch
+  }
+  /** Each goal change and pass sent, in order, with the profile it named. */
+  const firstPassCalls = (fetch: ReturnType<typeof serve>) => fetch.mock.calls
+    .filter(([url, init]) => (url === '/api/goal' && init?.method === 'PUT') || url === '/api/profile-pass')
+    .map(([url, init]) => [url, new Headers(init?.headers).get('X-Vouch-Profile'), init?.body ?? null])
+  const passes = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')
+
+  async function createFromSetup(button = 'Created', strict = true) {
+    window.history.replaceState(null, '', '/developer/setup')
+    render(strict ? <StrictMode><ProfiledApp /></StrictMode> : <ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: button }))
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+  }
+
+  it('sets Internal improvement under the new company, then runs one pass, once under StrictMode', async () => {
+    const fetch = serveSetup()
+    await createFromSetup()
+    expect(await screen.findByText('1 assessment waiting for your review.')).toBeTruthy()
+    expect(firstPassCalls(fetch)).toEqual([
+      ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
+      ['/api/profile-pass', 'musterfirma-gmbh', null],
+    ])
+    expect(await screen.findByText('Goal: Internal improvement')).toBeTruthy()
+  })
+
+  it('shows the running state on the hero while the pass runs', async () => {
+    serveSetup(undefined, () => { throw new Error('held') })
+    const fetch = vi.mocked(globalThis.fetch)
+    const answered = fetch.getMockImplementation()!
+    fetch.mockImplementation((url, init) => url === '/api/profile-pass' ? new Promise<Response>(() => {})
+      : answered(url, init))
+    await createFromSetup()
+    expect(await screen.findByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    expect(screen.getByText('Vouch is assessing every open control in one run. This can take a few minutes.'))
+      .toBeTruthy()
+  })
+
+  it('with Audit readiness chosen, sends no goal change and still runs the pass', async () => {
+    const fetch = serveSetup()
+    await createFromSetup('Created for audit')
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(fetch)).toEqual([['/api/profile-pass', 'musterfirma-gmbh', null]])
+    expect(screen.getByText('Goal: Audit readiness')).toBeTruthy()
+  })
+
+  it('a switch away and back, then a fresh start, start no pass again', async () => {
+    const fetch = serveSetup()
+    vi.stubGlobal('confirm', () => true)
+    const answered = fetch.getMockImplementation()!
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/progress/fresh-start'
+      ? Promise.resolve(Response.json({ fresh_start: '2026-11-10T10:00:00+00:00' }))
+      : answered(url, init))
+    await createFromSetup()
+    await screen.findByText('1 assessment waiting for your review.')
+    await switchTo('nordlicht')
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    await userEvent.click(screen.getByRole('menuitemradio', { name: profileLabel(MUSTERFIRMA) }))
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    const before = overviewCalls(fetch).length
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${MUSTERFIRMA.company} afresh…` }))
+    await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/progress/fresh-start')).toHaveLength(1))
+    await waitFor(() => expect(overviewCalls(fetch).length).toBeGreaterThan(before)) // the app opened afresh
+    await screen.findByRole('button', { name: 'Run a profile pass' })
+    expect(passes(fetch)).toHaveLength(1)
+    expect(screen.queryByText('Running the profile pass…')).toBeNull()
+  })
+
+  it('a fresh mount (a reload) under the new company starts no pass', async () => {
+    rememberProfile('musterfirma-gmbh')
+    const fetch = serveSetup()
+    fetch.mockImplementation(((answered) => (url: string, init?: RequestInit) => url === '/api/profiles'
+      ? Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK, MUSTERFIRMA], default: 'nordlicht' }))
+      : answered(url, init))(fetch.getMockImplementation()!))
+    render(<StrictMode><ProfiledApp /></StrictMode>)
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await screen.findByRole('button', { name: 'Run a profile pass' })
+    expect(firstPassCalls(fetch)).toEqual([])
+  })
+
+  it('a failed goal change says so under the Goal line, and the pass still runs', async () => {
+    const fetch = serveSetup(() => new Response(null, { status: 503 }))
+    await createFromSetup()
+    const alert = await screen.findByText('The company was created, but its Goal could not be set to Internal '
+      + 'improvement. Use Change goal to set it.')
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(screen.getByText('Goal: Audit readiness')).toBeTruthy()
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal', '/api/profile-pass'])
+  })
+
+  it('a goal change answering 401 signs out and starts no pass', async () => {
+    const fetch = serveSetup(() => new Response(null, { status: 401 }))
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    await createFromSetup()
+    await waitFor(() => expect(signOut).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(passes(fetch)).toHaveLength(0)
+  })
+
+  it("the pass's daily limit leaves the company open, with the limit sentence and the per-control way on", async () => {
+    serveSetup(undefined, () => Response.json({ detail: LIMIT, limit: 'profile-pass' }, { status: 429 }))
+    await createFromSetup()
+    expect(await screen.findByText(LIMIT)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Assess 1.1.1 on its own' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
+    expect(screen.getByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })).toBeTruthy()
   })
 })
