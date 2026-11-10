@@ -853,7 +853,7 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     expect(own).not.toBe(row('S1'))
     expect(row('S1').nextElementSibling).toBe(own)
     expect(own.querySelectorAll('td')).toHaveLength(1)
-    expect(own.querySelector('td')!.colSpan).toBe(5)
+    expect(own.querySelector('td')!.colSpan).toBe(screen.getAllByRole('columnheader').length)
     expect(row('S1').querySelector('.quotes-cell .remediation')).toBeNull()
   })
 

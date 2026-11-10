@@ -494,6 +494,9 @@ function RequirementText({ text, language }: { text: string; language?: string }
   )
 }
 
+/** The judged table's columns: the override and remediation item rows span them all (#464). */
+const JUDGED_COLUMNS = 5
+
 /** The statement note in English, for an API that serves none (#439); `vouch.language` holds it in each language. */
 const STATEMENT_NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is "
   + 'needed to close it.'
@@ -589,7 +592,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
               </tr>,
               overrides.editable && editing === r.id && (
                 <tr key={`${r.id}-override`} className="override-row">
-                  <td colSpan={5}>
+                  <td colSpan={JUDGED_COLUMNS}>
                     <OverrideEditor requirementId={r.id} agentVerdict={overrides.agentVerdicts[r.id] ?? r.verdict}
                       saved={overrides.saved.find((o) => o.requirement_id === r.id)} onCancel={() => onEdit(null)}
                       onSave={onSave} />
@@ -598,7 +601,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
               ),
               item && (
                 <tr key={`${r.id}-item`} className="remediation-row">
-                  <td colSpan={5}>
+                  <td colSpan={JUDGED_COLUMNS}>
                     {/* A new key when the item changes, so its fields start from the kept values. */}
                     <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
                       threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language}

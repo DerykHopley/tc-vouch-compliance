@@ -320,7 +320,8 @@ TABLE_LAYOUT = """async () => {
 
 def as_company(page: Page, profile: str) -> None:
     """Every API call the page makes goes under `profile`, by the API's own header: not by the
-    'vouch.profile' key, which M9 (#448, #480) removes."""
+    'vouch.profile' key, which M9 (#448, #480) removes. Lower case, as the request's own headers
+    are: a second spelling would send the header twice."""
     page.route(
         "**/api/**",
         lambda route: route.continue_(
@@ -347,7 +348,7 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
         )
         assert response.ok, response.status
         assert "event: result" in response.text()
-        page.unroute("**/api/**")
+        page.unroute("**/api/**")  # the last company's route gives way to this one's
         as_company(page, profile)
         paper = open_paper(page, paper_url, WIDE, assessed=True)
         name = "German" if language == "de" else "English"
