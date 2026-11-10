@@ -230,6 +230,29 @@ describe("a stale citation's flag on a German profile, issue 359", () => {
   })
 })
 
+describe("the evidence column's labels on a German profile, issue 484", () => {
+  const evidence = (id: string) => row(id).querySelector('.evidence-col')! as HTMLElement
+
+  it('reads in German, the served stale and current words, marked German', () => {
+    const assessment = { ...ASSESSED, answer_language: 'de', stale_word: 'Prüfung überfällig',
+      current_word: 'Aktuell' }
+    show({ run: { status: 'done', steps: [], assessment }, language: 'de' })
+    const stale = within(evidence('S1')).getByText('Prüfung überfällig')
+    expect(stale.className).toBe('flag')
+    expect(stale.getAttribute('lang')).toBe('de')
+    const current = within(evidence('M1')).getByText('Aktuell')
+    expect(current.className).toBe('why')
+    expect(current.getAttribute('lang')).toBe('de')
+    expect(screen.queryByText(/^(Stale|Current)$/)).toBeNull()
+  })
+
+  it('reads "Stale" and "Current" from an API that serves no words', () => {
+    show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+    expect(within(evidence('S1')).getByText('Stale')).toBeTruthy()
+    expect(within(evidence('M1')).getByText('Current')).toBeTruthy()
+  })
+})
+
 describe('the working paper of a control not yet assessed', () => {
   it('lists its requirements, not-applicable ones with their reason, and an Assess button', async () => {
     const onAssess = vi.fn()

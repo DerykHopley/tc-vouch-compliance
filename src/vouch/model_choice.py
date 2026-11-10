@@ -22,18 +22,24 @@ server's Retry-After). A request that timed out may still have been generated an
 OpenRouter, so its retry may be billed again: TIMEOUT_SECONDS is long enough for a slow but valid
 answer, and one retry the most. A profile pass request is never retried (PROFILE_PASS_MAX_RETRIES).
 What still fails raises, and the API turns it into one `error` event.
+
+Each run is traced in Langfuse when its keys are set (#460, vouch.tracing): `traced` gives the
+run config that carries the trace's handler to the graph, where every step and model call
+inherits it. Without the keys there is no handler and no Langfuse client.
 """
 
 import logging
 import re
 import time
 from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from typing import Any, Literal, Protocol
 
 import httpx
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.runnables import RunnableConfig
 from pydantic import PrivateAttr, SecretStr
 
 from vouch.chat import CHAT_PROMPT_VERSION
@@ -41,6 +47,7 @@ from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
 from vouch.profile import ComplianceProfile
 from vouch.settings import PROFILE_PASS_SCRIPT, Settings, demo_script, fake_model
+from vouch.tracing import TraceFacts, Tracing, start_tracing, traced
 
 log = logging.getLogger(__name__)
 
@@ -279,7 +286,8 @@ class OpenRouter:
 
 
 class ModelChoice:
-    """The model an assessment runs on, for the API and the CLI; one per app."""
+    """The model an assessment runs on, for the API and the CLI; one per app. With the Langfuse
+    keys set, it traces each run too (`traced`)."""
 
     def __init__(
         self,
@@ -291,6 +299,7 @@ class ModelChoice:
         self.store = store
         key = settings.openrouter_api_key
         self.openrouter = openrouter or (OpenRouter(key) if key else None)
+        self.tracing: Tracing | None = start_tracing(settings.langfuse)
 
     def __repr__(self) -> str:
         return f"ModelChoice(runs_on={self.runs_on!r}, kept_in={self.kept_in!r})"
@@ -414,9 +423,17 @@ class ModelChoice:
             return CannedChatModel(callbacks=callbacks, language=answer_language)
         return self.openrouter.chat_model(chosen, callbacks)
 
+    def traced(self, facts: TraceFacts) -> AbstractContextManager[RunnableConfig]:
+        """The run config that traces one run (empty with tracing off), sent when it ends."""
+        return traced(self.tracing, facts)
+
     def close(self) -> None:
         if self.openrouter is not None:
             self.openrouter.close()
+        if self.tracing is not None:
+            # Sent, not shut down: Langfuse keeps one client per key in the process, shared
+            # with any other app on the same keys; its own exit hook shuts it down.
+            self.tracing.flush()
 
 
 def model_store(db: Database | None) -> ModelStore:

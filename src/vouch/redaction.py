@@ -108,8 +108,9 @@ _known: Redaction | None = None
 
 def remember_secrets(settings: Settings) -> None:
     """Remove `settings`' own secret values exactly from now on, whatever their shape: the
-    Clerk secret and JWT keys, the OpenRouter key, the database URL and its password (as
-    vouch.database finds it, written and decoded). The app does this when it's made."""
+    Clerk secret and JWT keys, the OpenRouter key, the Langfuse secret key, the database URL and
+    its password (as vouch.database finds it, written and decoded). The app does this when it's
+    made."""
     global _known
     values: list[str] = []
     if settings.clerk is not None:
@@ -117,6 +118,8 @@ def remember_secrets(settings: Settings) -> None:
         values += [settings.clerk.jwt_key.get_secret_value()]
     if settings.openrouter_api_key is not None:
         values.append(settings.openrouter_api_key.get_secret_value())
+    if settings.langfuse is not None:
+        values.append(settings.langfuse.secret_key.get_secret_value())
     if settings.database_url is not None:
         values += _secrets_in(settings.database_url.get_secret_value())
     with _secrets_lock:
