@@ -230,6 +230,12 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
     })
     setProblems((now) => now.filter((p) => p !== NO_EVIDENCE))
   }
+  // Step 6's Select all and Deselect all (#475): a folder's documents become `ids` (all of them, or none); the other
+  // folder stays as it is. A change, as a tick is, so it clears NO_EVIDENCE.
+  const chooseAll = (source: LibrarySource, ids: string[]) => {
+    setAnswers((now) => ({ ...now, evidence: { ...now.evidence, [source]: ids } }))
+    setProblems((now) => now.filter((p) => p !== NO_EVIDENCE))
+  }
 
   return (
     <section className="paper wrap" aria-label="Company setup">
@@ -264,7 +270,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
             problems={problems} problemId={noticeId} />
         )}
         {step === EVIDENCE && (
-          <EvidenceStep chosen={answers.evidence} choose={choose} library={library} onRetry={readLibrary}
+          <EvidenceStep chosen={answers.evidence} choose={choose} chooseAll={chooseAll} library={library} onRetry={readLibrary}
             problem={problems.includes(NO_EVIDENCE)} problemId={noticeId} />
         )}
         {step === FINISH && <FinishStep answers={answers} controls={controls} library={library} />}
@@ -462,9 +468,14 @@ function NotApplicableStep({ marked, mark, controls, onRetry, problems, problemI
   )
 }
 
-function EvidenceStep({ chosen, choose, library, onRetry, problem, problemId }: {
+/** Step 6's folders, in the order it lists them, each with its table's caption. */
+const FOLDERS: { source: LibrarySource; caption: string }[] = [
+  { source: 'policies', caption: 'Policies' }, { source: 'records', caption: 'Records' }]
+
+function EvidenceStep({ chosen, choose, chooseAll, library, onRetry, problem, problemId }: {
   chosen: ChosenEvidence
   choose: (id: string, source: LibrarySource) => void
+  chooseAll: (source: LibrarySource, ids: string[]) => void
   library: Library | null
   onRetry: () => void
   problem: boolean
@@ -482,8 +493,27 @@ function EvidenceStep({ chosen, choose, library, onRetry, problem, problemId }: 
       {(library === null || library.status === 'loading') && <p className="field-note">Loading the sample library…</p>}
       {library?.status === 'ready' && (
         <>
-          <DocumentTable caption="Policies" documents={inFolder('policies')} selected={chosen} onToggle={choose} />
-          <DocumentTable caption="Records" documents={inFolder('records')} selected={chosen} onToggle={choose} />
+          {FOLDERS.map(({ source, caption }) => {
+            const inThis = inFolder(source)
+            const noun = caption.toLowerCase()
+            return (
+              <div key={source} className="setup-folder">
+                {/* Above its table, so Tab reaches them before its checkboxes; each named with its folder. */}
+                {inThis.length > 0 && (
+                  <div className="setup-folder-actions">
+                    <button type="button" className="btn btn-ghost"
+                      onClick={() => chooseAll(source, inThis.map((d) => d.id))}>
+                      Select all{' '}<span className="sr-only">{noun}</span>
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => chooseAll(source, [])}>
+                      Deselect all{' '}<span className="sr-only">{noun}</span>
+                    </button>
+                  </div>
+                )}
+                <DocumentTable caption={caption} documents={inThis} selected={chosen} onToggle={choose} />
+              </div>
+            )
+          })}
           <p className="field-note setup-ready" role="status">{readyToCite(picked)}</p>
         </>
       )}
