@@ -686,6 +686,69 @@ describe('company setup', () => {
       expect((choose('Access rights policy') as HTMLInputElement).checked).toBe(false)
     })
 
+  /** Step 6's Select all or Deselect all (#475) for a folder, by the name a screen reader announces. */
+  const folderButton = (name: string) => screen.getByRole('button', { name })
+  /** The ticked checkboxes on step 6, by name, in page order. */
+  const ticked = () =>
+    screen.getAllByRole('checkbox').filter((b) => (b as HTMLInputElement).checked).map((b) => b.getAttribute('aria-label'))
+
+  it('Select all and Deselect all choose or clear one folder, leaving the other as it is', async () => {
+    api()
+    wizard()
+    await toStep6()
+    await findChoose('Backup policy')
+    await userEvent.click(folderButton('Select all policies'))
+    expect(ticked()).toEqual(['Choose Access rights policy', 'Choose Backup policy'])
+    expect(screen.getByRole('status').textContent).toBe('Ready to cite: 2 documents (2 documented, 0 implemented, 1 stale).')
+    await userEvent.click(folderButton('Select all records'))
+    expect(ticked()).toEqual(['Choose Access rights policy', 'Choose Backup policy', 'Choose Security training record 2026'])
+    await userEvent.click(folderButton('Deselect all policies'))
+    expect(ticked()).toEqual(['Choose Security training record 2026'])
+    await userEvent.click(folderButton('Select all policies'))
+    await userEvent.click(folderButton('Deselect all records'))
+    expect(ticked()).toEqual(['Choose Access rights policy', 'Choose Backup policy'])
+    await userEvent.click(folderButton('Deselect all policies'))
+    expect(ticked()).toEqual([])
+    expect(screen.getByRole('status').textContent).toBe('No documents chosen yet.')
+  })
+
+  it('Select all after a tick chooses each document once, in the library\'s order, and sends them', async () => {
+    const fetch = api()
+    wizard()
+    await toStep6()
+    await userEvent.click(await findChoose('Backup policy'))
+    await userEvent.click(folderButton('Select all policies'))
+    await userEvent.click(folderButton('Select all policies'))
+    await next()
+    await create()
+    const body = JSON.parse(String(posts(fetch)[0][1]?.body)) as { evidence: unknown }
+    expect(body.evidence).toEqual({ policies: ['access-rights-policy', 'backup-policy'], records: [] })
+  })
+
+  it('Select all clears "Choose at least one document."; after Deselect all, Next says it again', async () => {
+    api()
+    wizard()
+    await toStep6()
+    await findChoose('Backup policy')
+    await next()
+    expect(screen.getByText('Choose at least one document.')).toBeTruthy()
+    await userEvent.click(folderButton('Select all records'))
+    expect(screen.queryByText('Choose at least one document.')).toBeNull()
+    await userEvent.click(folderButton('Deselect all records'))
+    await next()
+    expect(heading('Evidence')).toBeTruthy()
+    expect(screen.getByText('Choose at least one document.')).toBeTruthy()
+  })
+
+  it('a folder with no documents in the library has no Select all or Deselect all', async () => {
+    api([], [], [new Response(JSON.stringify({ documents: LIBRARY.filter((d) => d.source === 'records') }))])
+    wizard()
+    await toStep6()
+    await findChoose('Security training record 2026')
+    expect(screen.queryByRole('button', { name: /all policies$/ })).toBeNull()
+    expect(folderButton('Select all records')).toBeTruthy()
+  })
+
   it('keeps the chosen documents through Back and Next', async () => {
     api()
     wizard()
