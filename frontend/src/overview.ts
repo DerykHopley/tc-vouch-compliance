@@ -88,13 +88,19 @@ export type OpenRound = { name: string; opened_at: string | null }
 /** A count now, and when the compared round closed. */
 export type NowAndThen = { now: number; then: number }
 
-/** Now against the last closed review round (#402), accepted verdicts only: `now` is the overview's readiness. */
+/**
+ * Now against the last closed review round (#402), accepted verdicts only: `now` is the overview's readiness, but a
+ * control assessed again counts under its earlier accepted verdict while the new run waits for review (#438).
+ */
 export type RoundComparison = {
   against: { name: string; closed_at: string }
   accepted: NowAndThen
   by_verdict: Record<Verdict, NowAndThen>
-  /** Each control whose accepted verdict changed, in the base framework's order; null: not accepted. */
-  changed: { control_id: string; before: Verdict | null; after: Verdict | null }[]
+  /**
+   * Each control whose accepted verdict changed, and each being re-assessed, in the base framework's order; null: not
+   * accepted. `reassessing` (#438): counted under its earlier accepted verdict while its newest assessment waits.
+   */
+  changed: { control_id: string; before: Verdict | null; after: Verdict | null; reassessing?: boolean }[]
 }
 
 /** The open round (null when none is), and the comparison (null when no round was closed since the fresh start). */

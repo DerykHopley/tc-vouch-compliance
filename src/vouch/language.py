@@ -133,7 +133,8 @@ def lead_statement_label(code: str) -> str:
 @dataclass(frozen=True)
 class CapWords:
     """The stale-evidence cap's note in one answer language (#354): its lead-in, a stale
-    document, why it is stale, the documented-only clause, and a lead statement (#422)."""
+    document, why it is stale, the documented-only clause, and a lead statement (#422), with
+    what a statement's cap asks for on the working paper (#439)."""
 
     capped: str
     stale: str  # {doc} and {because}
@@ -142,6 +143,7 @@ class CapWords:
     no_review_date: str
     documented_only: str
     lead_statement: str  # {doc}
+    statement_note: str  # the working paper's, under a statement's quotes (#439)
 
 
 CAP_WORDS = {
@@ -153,6 +155,10 @@ CAP_WORDS = {
         no_review_date=NO_REVIEW_DATE,
         documented_only="it asks for something to be done, and only documented evidence shows it",
         lead_statement="{doc} is the lead's statement, not a document",
+        statement_note=(
+            "A lead's statement can't fully evidence a requirement: a document or record that "
+            "shows it is needed to close it."
+        ),
     ),
     "de": CapWords(
         capped="Höchstens teilweise nachgewiesen:",
@@ -170,6 +176,11 @@ CAP_WORDS = {
             "zeigen es"
         ),
         lead_statement=f"{{doc}} ist eine {LEAD_STATEMENT_WORDS['de']}, kein Dokument",
+        statement_note=(
+            f"Eine {LEAD_STATEMENT_WORDS['de']} kann eine Anforderung nicht vollständig "
+            "nachweisen: Um sie zu schließen, ist ein Dokument oder eine Aufzeichnung nötig, die "
+            "sie belegt."
+        ),
     ),
 }
 """The cap's words per answer language; any other language gets English's."""
@@ -211,6 +222,13 @@ def cap_note(
     if documented_only:
         why.append(words.documented_only)
     return f"{words.capped} {'; '.join(why)}." if why else None
+
+
+def statement_note(code: str) -> str:
+    """What a lead statement's cap asks for, in the answer language `code` (English's for any
+    other): the working paper says it under the quotes of a requirement a statement caps (#439),
+    beside the cap note's "is the lead's statement, not a document"."""
+    return CAP_WORDS.get(code, CAP_WORDS["en"]).statement_note
 
 
 def audit_words_in(code: str) -> str:

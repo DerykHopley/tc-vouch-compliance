@@ -253,6 +253,83 @@ describe("the evidence column's labels on a German profile, issue 484", () => {
   })
 })
 
+describe("a lead's statement cited, issue 439", () => {
+  const NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is needed "
+    + 'to close it.'
+  const statement = (section: string) => ({ doc_id: 'Q12', version: '2026-11-10', section,
+    quote: 'Keys are rotated every year.', kind: 'documented' as const, stale: false, stale_because: null,
+    lead_statement: true })
+  const citedBy = (section: string) => judged.map((r) => r.id !== 'S1' ? r
+    : { ...r, reason: 'The lead says so. At most partly evidenced: Q12 is the lead\'s statement, not a document.',
+      citations: [statement(section)] })
+  const quotes = (id: string) => row(id).querySelector('.quotes-cell')! as HTMLElement
+
+  it('shows no kind chip on the statement, and says a document or record is needed to close it', () => {
+    const assessment = { ...ASSESSED, answer_language: 'en', statement_note: NOTE,
+      requirements: citedBy("Lead's statement") }
+    show({ run: { status: 'done', steps: [], assessment } })
+    expect(within(quotes('S1')).getByText("Q12 v2026-11-10 · Lead's statement")).toBeTruthy()
+    expect(quotes('S1').querySelector('.kind')).toBeNull()
+    expect(within(quotes('S1')).getByText(NOTE).getAttribute('lang')).toBe('en')
+    // A document's citation keeps its kind chip, and a requirement not shown by a statement has no note.
+    expect(within(quotes('M1')).getByText('implemented').className).toBe('kind kind-implemented')
+    expect(within(quotes('M1')).queryByText(NOTE)).toBeNull()
+  })
+
+  it('reads in German on a German profile, the served sentence marked German', () => {
+    const german = 'Eine Aussage der Compliance-Leitung kann eine Anforderung nicht vollständig nachweisen.'
+    const assessment = { ...ASSESSED, answer_language: 'de', statement_note: german,
+      requirements: citedBy('Aussage der Compliance-Leitung') }
+    show({ run: { status: 'done', steps: [], assessment }, language: 'de' })
+    expect(within(quotes('S1')).getByText(german).getAttribute('lang')).toBe('de')
+    expect(within(quotes('S1')).queryByText(NOTE)).toBeNull()
+  })
+
+  it("says it in English's words from an API that serves none", () => {
+    show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, requirements: citedBy("Lead's statement") } } })
+    expect(within(quotes('S1')).getByText(NOTE)).toBeTruthy()
+  })
+
+  const evidence = (id: string) => row(id).querySelector('.evidence-col')! as HTMLElement
+
+  it('labels the evidence column with the served statement word, not "documented", issue 498', () => {
+    const assessment = { ...ASSESSED, answer_language: 'en', statement_word: "Lead's statement",
+      requirements: citedBy("Lead's statement") }
+    show({ run: { status: 'done', steps: [], assessment } })
+    expect(evidence('S1').querySelector('.kind')).toBeNull()
+    expect(within(evidence('S1')).queryByText('documented')).toBeNull()
+    expect(within(evidence('S1')).queryByText('No evidence')).toBeNull()
+    expect(within(evidence('S1')).queryByText('Current')).toBeNull() // a statement is no document to be current
+    const word = within(evidence('S1')).getByText("Lead's statement")
+    expect(word.className).toBe('why')
+    expect(word.getAttribute('lang')).toBe('en')
+    // A document's evidence reads as before.
+    expect(within(evidence('M1')).getByText('implemented').className).toBe('kind kind-implemented')
+    expect(within(evidence('M1')).getByText('Current')).toBeTruthy()
+  })
+
+  it('labels it in German on a German profile, the served word marked German, issue 498', () => {
+    const assessment = { ...ASSESSED, answer_language: 'de', statement_word: 'Aussage der Compliance-Leitung',
+      requirements: citedBy('Aussage der Compliance-Leitung') }
+    show({ run: { status: 'done', steps: [], assessment }, language: 'de' })
+    expect(within(evidence('S1')).queryByText('documented')).toBeNull()
+    expect(within(evidence('S1')).getByText('Aussage der Compliance-Leitung').getAttribute('lang')).toBe('de')
+    expect(within(evidence('S1')).queryByText("Lead's statement")).toBeNull()
+  })
+
+  it("labels it in English's words from an API that serves none, issue 498", () => {
+    show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, requirements: citedBy("Lead's statement") } } })
+    expect(within(evidence('S1')).getByText("Lead's statement")).toBeTruthy()
+    expect(within(evidence('S1')).queryByText('documented')).toBeNull()
+  })
+
+  it('says nothing on a requirement judged evidenced, as nothing caps it', () => {
+    const evidenced = citedBy("Lead's statement").map((r) => r.id === 'S1' ? { ...r, verdict: 'evidenced' as const } : r)
+    show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, requirements: evidenced } } })
+    expect(within(quotes('S1')).queryByText(NOTE)).toBeNull()
+  })
+})
+
 describe('the working paper of a control not yet assessed', () => {
   it('lists its requirements, not-applicable ones with their reason, and an Assess button', async () => {
     const onAssess = vi.fn()

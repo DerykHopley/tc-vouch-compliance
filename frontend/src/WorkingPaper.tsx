@@ -284,6 +284,7 @@ export default function WorkingPaper(props: PaperProps) {
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
                 language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
+                statementNote={assessed?.statement_note} statementWord={assessed?.statement_word}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
                   // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
@@ -447,6 +448,12 @@ type JudgedProps = {
   /** The evidence column's word for evidence that isn't stale, served in the answer language (#484); English's when
    * the API sends none. */
   currentWord?: string
+  /** Under the quotes of a requirement a lead's statement caps (#439), served in the answer language; English's when
+   * the API sends none. */
+  statementNote?: string
+  /** The evidence column's word for a lead's statement (#498), served in the answer language; English's when the API
+   * sends none. */
+  statementWord?: string
 }
 
 /**
@@ -486,8 +493,13 @@ function RequirementText({ text, language }: { text: string; language?: string }
   )
 }
 
+/** The statement note in English, for an API that serves none (#439); `vouch.language` holds it in each language. */
+const STATEMENT_NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is "
+  + 'needed to close it.'
+
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language,
-  staleWord = 'Stale', currentWord = 'Current' }: JudgedProps) {
+  staleWord = 'Stale', currentWord = 'Current', statementNote = STATEMENT_NOTE,
+  statementWord = "Lead's statement" }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   // Closing a requirement's override (Save or Cancel) gives focus back to its "Change" (#226): only when focus fell
   // to the page with the form, never taken from where the lead has moved it meanwhile.
@@ -509,7 +521,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
         </thead>
         <tbody>
           {judged.map((r) => {
-            const { kinds, stale } = evidenceOf(r)
+            const { kinds, stale, statement } = evidenceOf(r)
             const applies = r.verdict !== 'not-applicable'
             const replaced = overrides.replaced[r.id]
             const toFix = r.verdict === 'not-evidenced' || r.verdict === 'partly-evidenced'
@@ -540,12 +552,15 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   </div>
                 </td>
                 <td className="evidence-col">
-                  {applies && (kinds.length === 0 ? <span className="why">No evidence</span> : (
+                  {applies && (kinds.length === 0 && !statement ? <span className="why">No evidence</span> : (
                     <span className="evidence">
                       {kinds.map((k) => <span key={k} className={`kind kind-${k}`}>{k}</span>)}
-                      <span className={stale ? 'flag' : 'why'} lang={language}>
-                        {stale ? staleWord : currentWord}
-                      </span>
+                      {statement && <span className="why" lang={language}>{statementWord}</span>}
+                      {kinds.length > 0 && ( // a statement alone is no document to be current or stale (#498)
+                        <span className={stale ? 'flag' : 'why'} lang={language}>
+                          {stale ? staleWord : currentWord}
+                        </span>
+                      )}
                     </span>
                   ))}
                 </td>
@@ -555,7 +570,9 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                     // By position: two quotes may read alike once redacted.
                     <CitedQuote key={i} quote={c.quote}>
                       <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
-                      <span className={`kind kind-${c.kind}`}>{c.kind}</span>
+                      {!c.lead_statement && ( // a statement's section names it; it has no kind (#439)
+                        <span className={`kind kind-${c.kind}`}>{c.kind}</span>
+                      )}
                       {c.stale && ( // in the answer language, like the reason (#359)
                         <span className="flag" lang={language}>
                           {c.stale_because ? `${staleWord}: ${c.stale_because}` : staleWord}
@@ -564,6 +581,9 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                       <span>Quote verified</span>
                     </CitedQuote>
                   ))}
+                  {r.verdict === 'partly-evidenced' && r.citations.some((c) => c.lead_statement) && (
+                    <p className="why" lang={language}>{statementNote}</p> // what the cap note's statement asks (#439)
+                  )}
                   {item && items.threadId && (
                     // A new key when the item changes, so its fields start from the kept values.
                     <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}

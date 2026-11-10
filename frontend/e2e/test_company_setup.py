@@ -423,11 +423,16 @@ def test_step_6_scrolls_sideways_only_inside_its_tables(page: Page, profiles_url
 
 
 def test_step_6_is_walked_by_keyboard(page: Page, profiles_url):
-    """Heading, then each checkbox (policies, then records), then Back and Next, with Tab."""
+    """Heading, then each folder's Select all and Deselect all (#475) and its checkboxes (policies,
+    then records), then Back and Next, with Tab."""
     open_setup(page, profiles_url)
     to_step_6(page)
 
     expect(page.get_by_role("heading", name="Evidence")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Select all policies", exact=True)).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Deselect all policies", exact=True)).to_be_focused()
     page.keyboard.press("Tab")
     first = page.get_by_role("table", name="Policies").get_by_role("checkbox").first
     expect(first).to_be_focused()
@@ -437,12 +442,45 @@ def test_step_6_is_walked_by_keyboard(page: Page, profiles_url):
     expect(page.get_by_role("checkbox").nth(1)).to_be_focused()
     page.get_by_role("table", name="Policies").get_by_role("checkbox").last.focus()
     page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Select all records", exact=True)).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Deselect all records", exact=True)).to_be_focused()
+    page.keyboard.press("Tab")
     expect(page.get_by_role("table", name="Records").get_by_role("checkbox").first).to_be_focused()
     page.get_by_role("checkbox").last.focus()
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Back")).to_be_focused()
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Next")).to_be_focused()
+
+
+def test_select_all_and_deselect_all_work_by_keyboard_one_folder_at_a_time(
+    page: Page, profiles_url
+):
+    """#475: Enter on Select all policies ticks every policy, Space on Deselect all unticks them;
+    the records stay as they were, and the ready-to-cite line follows."""
+    open_setup(page, profiles_url)
+    to_step_6(page)
+    policies = page.get_by_role("table", name="Policies").get_by_role("checkbox")
+    records = page.get_by_role("table", name="Records").get_by_role("checkbox")
+    document(page, "Security training record 2026").check()
+    ticked_records = [records.nth(i).is_checked() for i in range(records.count())]
+
+    page.get_by_role("button", name="Select all policies", exact=True).focus()
+    page.keyboard.press("Enter")
+    for i in range(policies.count()):
+        expect(policies.nth(i)).to_be_checked()
+    assert [records.nth(i).is_checked() for i in range(records.count())] == ticked_records
+    expect(page.get_by_role("status")).to_contain_text(
+        f"Ready to cite: {policies.count() + 1} documents"
+    )
+
+    page.get_by_role("button", name="Deselect all policies", exact=True).focus()
+    page.keyboard.press("Space")
+    for i in range(policies.count()):
+        expect(policies.nth(i)).not_to_be_checked()
+    expect(document(page, "Security training record 2026")).to_be_checked()
+    expect(page.get_by_role("status")).to_have_text(re.compile(r"^Ready to cite: 1 document \("))
 
 
 def test_next_while_the_library_loads_keeps_focus_on_the_heading_when_it_lands(

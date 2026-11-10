@@ -14,11 +14,18 @@ const requirement = (citations: Citation[]): RequirementVerdict => ({
 describe('evidenceOf', () => {
   it('names each kind of evidence once, implemented first, and is stale when any quote is', () => {
     const evidence = evidenceOf(requirement([cite(), cite({ kind: 'implemented', stale: true }), cite()]))
-    expect(evidence).toEqual({ kinds: ['implemented', 'documented'], stale: true })
+    expect(evidence).toEqual({ kinds: ['implemented', 'documented'], stale: true, statement: false })
   })
 
   it('has no kind and is not stale without quotes', () => {
-    expect(evidenceOf(requirement([]))).toEqual({ kinds: [], stale: false })
+    expect(evidenceOf(requirement([]))).toEqual({ kinds: [], stale: false, statement: false })
+  })
+
+  it("gives a lead's statement no kind, only that a statement shows it, issue 498", () => {
+    const statement = cite({ doc_id: 'Q1', section: "Lead's statement", lead_statement: true })
+    expect(evidenceOf(requirement([statement]))).toEqual({ kinds: [], stale: false, statement: true })
+    expect(evidenceOf(requirement([statement, cite({ kind: 'implemented' })])))
+      .toEqual({ kinds: ['implemented'], stale: false, statement: true })
   })
 })
 

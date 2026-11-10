@@ -306,7 +306,8 @@ const acceptedWord = (verdict: Verdict | null) => verdict === null ? 'Not accept
 /**
  * Now against the last closed review round (`docs/design.md`, Components: Round comparison, #402): accepted verdicts
  * only, as readiness counts them, then each control whose accepted verdict changed, its link opening its working
- * paper in place (as a Control card's). Never called progress.
+ * paper in place (as a Control card's). A control assessed again counts under its earlier accepted verdict while the
+ * new run waits, and its row says so (#438). Never called progress.
  */
 function Comparison({ overview, onOpen }: { overview: Overview; onOpen: Props['onOpen'] }) {
   const comparison: RoundComparison | null = overview.rounds.comparison
@@ -349,7 +350,9 @@ function Comparison({ overview, onOpen }: { overview: Overview; onOpen: Props['o
               {changed.map((c) => (
                 <li key={c.control_id}>
                   <a href={controlPath(c.control_id)} onClick={(e) => openInPlace(e, () => onOpen(c.control_id, false))}>
-                    <span className="mono">{c.control_id}</span>: {acceptedWord(c.before)} → {acceptedWord(c.after)}
+                    <span className="mono">{c.control_id}</span>: {c.before === c.after
+                      ? acceptedWord(c.after) : `${acceptedWord(c.before)} → ${acceptedWord(c.after)}`}
+                    {c.reassessing && ', re-assessment proposed'}
                   </a>
                 </li>
               ))}

@@ -723,7 +723,9 @@ describe('the review round on the Dossier (ticket 402)', () => {
 })
 
 describe('the round comparison on the Dossier (ticket 402)', () => {
-  const comparison = (changed: { control_id: string; before: Verdict | null; after: Verdict | null }[]) => ({
+  const comparison = (
+    changed: { control_id: string; before: Verdict | null; after: Verdict | null; reassessing?: boolean }[],
+  ) => ({
     against: { name: 'Q4 2026', closed_at: '2026-11-09T10:30:00Z' },
     accepted: { now: 5, then: 3 },
     by_verdict: { evidenced: { now: 4, then: 2 }, 'partly-evidenced': { now: 1, then: 1 },
@@ -764,6 +766,22 @@ describe('the round comparison on the Dossier (ticket 402)', () => {
     expect(links.map((a) => a.textContent)).toEqual(
       ['1.1.1: Not accepted → Evidenced', '4.1.2: Partly evidenced → Not accepted'])
     expect(links[0].getAttribute('href')).toBe('/controls/1.1.1')
+    await userEvent.click(links[0])
+    expect(onOpen).toHaveBeenCalledWith('1.1.1', false)
+  })
+
+  it('marks a control being re-assessed, counted under its accepted verdict (ticket 438)', async () => {
+    const { section, onOpen } = shown({ current: null, comparison: comparison([
+      { control_id: '1.1.1', before: 'evidenced', after: 'evidenced', reassessing: true },
+      { control_id: '4.1.2', before: null, after: 'partly-evidenced', reassessing: true },
+      { control_id: '5.1.1', before: 'evidenced', after: null, reassessing: false },
+    ]) })
+    const links = within(section).getAllByRole('link')
+    expect(links.map((a) => a.textContent)).toEqual([
+      '1.1.1: Evidenced, re-assessment proposed',
+      '4.1.2: Not accepted → Partly evidenced, re-assessment proposed',
+      '5.1.1: Evidenced → Not accepted',
+    ])
     await userEvent.click(links[0])
     expect(onOpen).toHaveBeenCalledWith('1.1.1', false)
   })
