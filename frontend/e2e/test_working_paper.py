@@ -411,29 +411,55 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
 
 
 # Each quote word on the judged table that breaks across lines without a hyphen, read once the
-# fonts have loaded and layout has settled (as CARD_PARTS). A word's range has one rect per line it
-# is on; Chromium gives a hyphen it inserts a rect of its own at the end of the line, so a word
-# broken with a hyphen has two rects on every line but its last, and one broken anywhere has one.
+# fonts have loaded and layout has settled (as CARD_PARTS). A word's letters are grouped by the line
+# each is on; on every line but its last, the word's rects there are as wide as those letters set
+# unbroken, plus the hyphen the browser inserted. Chromium gives that hyphen a rect of its own and
+# Firefox widens the line's rect by it (#488), so the width is what both agree on: a break with less
+# than half a hyphen's extra width has none.
 UNHYPHENATED_BREAKS = (
     "async () => {"
     + FONTS_SETTLED
     + r"""  const words = []
   const breaks = []
+  const rangeOf = (node, start, end) => {
+    const range = document.createRange()
+    range.setStart(node, start)
+    range.setEnd(node, end)
+    return range
+  }
   for (const quote of document.querySelectorAll('table.reqs.judged .quotes-cell blockquote')) {
+    // The quote's own font, unbroken: what its letters measure with no hyphen at the line's end.
+    const natural = (text) => {
+      const probe = document.createElement('span')
+      probe.style.cssText = 'position: absolute; visibility: hidden; white-space: pre'
+      probe.textContent = text
+      quote.append(probe)
+      const width = probe.getBoundingClientRect().width
+      probe.remove()
+      return width
+    }
+    const hyphen = natural('-')
     const walk = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT)
-    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    const nodes = []
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) nodes.push(node)
+    for (const node of nodes) {
       for (const word of node.data.matchAll(/\p{L}+/gu)) {
-        const range = document.createRange()
-        range.setStart(node, word.index)
-        range.setEnd(node, word.index + word[0].length)
-        const perLine = new Map()
-        for (const r of range.getClientRects()) {
-          const top = Math.round(r.top)
-          perLine.set(top, (perLine.get(top) ?? 0) + 1)
+        const lines = new Map() // a line's top -> the word's letters on it
+        for (let i = 0; i < word[0].length; i++) {
+          // Its own rect is its last: Chromium adds the hyphen's, on the line above, to a line's first letter.
+          const own = [...rangeOf(node, word.index + i, word.index + i + 1).getClientRects()].at(-1)
+          const top = Math.round(own.top)
+          lines.set(top, (lines.get(top) ?? '') + word[0][i])
         }
+        const rects = [...rangeOf(node, word.index, word.index + word[0].length).getClientRects()]
         words.push(word[0])
-        const lines = [...perLine.keys()].sort((a, b) => a - b)
-        if (lines.slice(0, -1).some((top) => perLine.get(top) < 2)) breaks.push(word[0])
+        const tops = [...lines.keys()].sort((a, b) => a - b)
+        const bare = tops.slice(0, -1).some((top) => {
+          const here = rects.filter((r) => Math.abs(r.top - top) < 2)
+          const width = Math.max(...here.map((r) => r.right)) - Math.min(...here.map((r) => r.left))
+          return width - natural(lines.get(top)) < hyphen / 2
+        })
+        if (bare) breaks.push(word[0])
       }
     }
   }
