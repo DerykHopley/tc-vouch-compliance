@@ -1,9 +1,9 @@
 """Tracing Vouch's runs in Langfuse (#460), the course's LLM observability task.
 
 With both Langfuse keys set (vouch.settings.LangfuseKeys), each assessment run, chat turn and
-profile pass is one trace: its LangGraph steps, each model call (prompt, answer, model, tokens),
-and each tool call, tagged with the profile, the control, the model and the prompt version, its
-user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
+profile pass is one trace: its LangGraph steps, each model call (prompt, answer, model, tokens,
+and the cost Vouch records for it, #504: cost_details), and each tool call, tagged with the
+profile, the control, the model and the prompt version, its user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
 client is made, nothing is imported from it, and no call is sent.
 
 A run is traced by its RunnableConfig: `traced` gives one holding a fresh Langfuse LangChain
@@ -27,8 +27,11 @@ import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import UUID
 
+from langchain_core.outputs import LLMResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.runnables.config import ensure_config, get_callback_manager_for_config
 from opentelemetry.sdk.trace import Event, ReadableSpan
@@ -122,12 +125,8 @@ class Tracing:
 
     def config(self, facts: TraceFacts) -> RunnableConfig:
         """The run config that traces one run: a new handler, and the trace's attributes."""
-        from langfuse.langchain import CallbackHandler
-
-        return {
-            "callbacks": [CallbackHandler(public_key=self.public_key)],
-            "metadata": facts.metadata(),
-        }
+        handler = _costing_handler()(public_key=self.public_key, model=facts.model)
+        return {"callbacks": [handler], "metadata": facts.metadata()}
 
     def flush(self) -> None:
         """Send what the client holds now, and wait for it; a failure is logged, never the
@@ -149,6 +148,71 @@ class Tracing:
             self.client.shutdown()
         except Exception:
             log.exception("the Langfuse client could not be shut down")
+
+
+def cost_details(response: LLMResult, model: str | None) -> dict[str, float] | None:
+    """One model call's cost as Langfuse's `cost_details` (US dollars): the cost Vouch records
+    for it (vouch.spending.UsageMeter: OpenRouter's reported cost, else the estimate from
+    PRICES; the fake priced as DEFAULT_MODEL), its total split into input and output in the
+    proportion of the model's list prices; the total alone for a model PRICES doesn't list.
+    None when the cost can't be known, so nothing counts as $0."""
+    # Imported here: vouch.spending imports vouch.model_choice, which imports this module.
+    from vouch.model_choice import DEFAULT_MODEL
+    from vouch.spending import PRICES, UsageMeter
+
+    meter = UsageMeter(model)
+    meter.on_llm_end(response)
+    usage = meter.usage()
+    if not usage.cost_complete:
+        return None
+    total = usage.cost_usd
+    price = PRICES.get(model or DEFAULT_MODEL)
+    listed = price.cost(usage.input_tokens, usage.output_tokens) if price else 0.0
+    if price is None or listed <= 0:
+        return {"total": total}
+    share = price.cost(usage.input_tokens, 0) / listed
+    return {"input": total * share, "output": total * (1 - share), "total": total}
+
+
+def _generation_model(response: LLMResult, model: str | None) -> str:
+    """The model a generation names: the one OpenRouter's answer says served it, read as the
+    usage meter reads it, else the one asked for, else the fake's tag."""
+    from vouch.spending import _served_model
+
+    return _served_model(response) or model or FAKE_MODEL_TAG
+
+
+@cache
+def _costing_handler() -> type[Any]:
+    """Langfuse's LangChain handler, each generation sent with its cost and model (#504).
+
+    The handler sends a call's tokens but never its cost: Langfuse then infers one only for a
+    model in its own price table, and OpenRouter's Claude ids (`anthropic/claude-haiku-5.5`)
+    match none of it (`claude-haiku-5-5`). Langfuse takes a cost sent with a generation over
+    the one it infers. Made on first use, as Langfuse is imported only with tracing on."""
+    from langfuse import LangfuseGeneration
+    from langfuse.langchain import CallbackHandler
+
+    class CostingCallbackHandler(CallbackHandler):  # type: ignore[misc]
+        def __init__(self, *, public_key: str, model: str | None) -> None:
+            super().__init__(public_key=public_key)
+            self.vouch_model = model
+
+        def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> Any:
+            # The generation is still open here (`_runs`, the handler's own open runs); its
+            # on_llm_end ends it. A failure loses the cost, never the generation.
+            try:
+                generation = self._runs.get(run_id)
+                if isinstance(generation, LangfuseGeneration):
+                    generation.update(
+                        model=_generation_model(response, self.vouch_model),
+                        cost_details=cost_details(response, self.vouch_model),
+                    )
+            except Exception:
+                log.exception("a model call's cost couldn't be added to its trace")
+            return super().on_llm_end(response, run_id=run_id, **kwargs)
+
+    return CostingCallbackHandler
 
 
 def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
