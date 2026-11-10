@@ -781,14 +781,15 @@ describe('the first pass on a company just made, issue 447', () => {
     let changes = 0
     serveSetup({ goalAnswer: () => ++changes === 1 ? new Response(null, { status: 503 })
       : Response.json({ goal: 'internal-improvement' }) })
-    vi.stubGlobal('confirm', () => true)
     await createAndOpen()
     await screen.findByText(NOT_SET)
     await screen.findByText('1 assessment waiting for your review.')
     await userEvent.click(goalButton())
+    await userEvent.click(goalButton()) // in the in-app ask (#441)
     await screen.findByText('Goal: Internal improvement')
     expect(screen.queryByText(NOT_SET)).toBeNull()
     await userEvent.click(goalButton()) // back to Audit readiness: the note stays gone
+    await userEvent.click(goalButton())
     await screen.findByText('Goal: Audit readiness')
     expect(screen.queryByText(NOT_SET)).toBeNull()
   })

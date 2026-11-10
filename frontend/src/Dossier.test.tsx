@@ -53,6 +53,12 @@ const ALL_VERDICTS = {
   '5.2.9': { status: 'accepted', verdict: 'not-applicable' },
 } as const
 
+/** Presses `name` and then `name` again in the in-app ask it opens (#441). */
+async function confirmed(name: string) {
+  await userEvent.click(screen.getByRole('button', { name }))
+  await userEvent.click(screen.getByRole('button', { name }))
+}
+
 /** The verdict chip on a control's card. */
 const cardChip = (id: string) =>
   within(screen.getByRole('article', { name: `Control ${id}` })).getByText(/./, { selector: '.chip' })
@@ -503,22 +509,21 @@ describe('the goal on the Dossier (ticket 369)', () => {
     expect(goalLine().textContent).toBe('Goal: Internal improvement')
   })
 
-  it('asks first, and on Cancel sends nothing', async () => {
+  it('asks first in the app (ticket 441), and on Cancel sends nothing', async () => {
     const fetch = serve(() => Promise.resolve(new Response('{}')))
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const { onGoalChanged } = shown()
     await userEvent.click(changeButton())
-    expect(ask).toHaveBeenCalledWith(
+    expect(screen.getByRole('alert').textContent).toBe(
       "Change this profile's goal to Internal improvement? The change is recorded in the audit trail.")
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(fetch).not.toHaveBeenCalled()
     expect(onGoalChanged).not.toHaveBeenCalled()
   })
 
   it('on OK sends the other goal, then reads the overview again', async () => {
     const fetch = serve(() => Promise.resolve(new Response(JSON.stringify({ goal: 'audit-readiness' }))))
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { onGoalChanged } = shown({ ...seeded(), goal: 'internal-improvement' })
-    await userEvent.click(changeButton())
+    await confirmed('Change goal')
     expect(fetch).toHaveBeenCalledTimes(1)
     const [url, init] = fetch.mock.calls[0]
     expect(url).toBe('/api/goal')
@@ -532,9 +537,8 @@ describe('the goal on the Dossier (ticket 369)', () => {
   it("when the change is kept but the overview can't be read again, says so with Retry, which reads it again",
     async () => {
       serve(() => Promise.resolve(new Response(JSON.stringify({ goal: 'internal-improvement' }))))
-      vi.spyOn(window, 'confirm').mockReturnValue(true)
       const { onGoalChanged } = shown(seeded(), { read: false })
-      await userEvent.click(changeButton())
+      await confirmed('Change goal')
       expect((await screen.findByRole('alert')).textContent).toBe(STALE)
       expect(onGoalChanged).toHaveBeenCalledWith('internal-improvement')
       onGoalChanged.mockResolvedValue(true)
@@ -544,16 +548,15 @@ describe('the goal on the Dossier (ticket 369)', () => {
       await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     })
 
-  it('is busy and disabled while the change runs', async () => {
+  it('is busy and held (aria-disabled, keeping focus, ticket 441) while the change runs', async () => {
     let answer: (r: Response) => void = () => {}
     serve(() => new Promise<Response>((resolve) => { answer = resolve }))
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     shown()
-    await userEvent.click(changeButton())
-    expect(changeButton().disabled).toBe(true)
+    await confirmed('Change goal')
+    expect(changeButton().getAttribute('aria-disabled')).toBe('true')
     expect(changeButton().getAttribute('aria-busy')).toBe('true')
     answer(new Response(JSON.stringify({ goal: 'internal-improvement' })))
-    await waitFor(() => expect(changeButton().disabled).toBe(false))
+    await waitFor(() => expect(changeButton().getAttribute('aria-disabled')).toBeNull())
     expect(changeButton().getAttribute('aria-busy')).toBeNull()
   })
 
@@ -562,9 +565,8 @@ describe('the goal on the Dossier (ticket 369)', () => {
     ['no answer', () => Promise.reject(new TypeError('offline'))],
   ])('on %s says so and keeps the old goal', async (_, answer) => {
     serve(answer)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { onGoalChanged } = shown()
-    await userEvent.click(changeButton())
+    await confirmed('Change goal')
     expect((await screen.findByRole('alert')).textContent).toBe(FAILED)
     expect(goalLine().textContent).toBe('Goal: Audit readiness')
     expect(onGoalChanged).not.toHaveBeenCalled()
@@ -618,13 +620,13 @@ describe('the review round on the Dossier (ticket 402)', () => {
     expect(roundLine().textContent).toBe('Review round: Q4 2026, open since 9 November 2026')
   })
 
-  it('asks before closing, and on Cancel sends nothing', async () => {
+  it('asks before closing, in the app (ticket 441), and on Cancel sends nothing', async () => {
     const fetch = serve(() => Promise.resolve(new Response('{}')))
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const { onRoundChanged } = shown({ current: { name: 'Q4 2026', opened_at: '2026-11-09T10:30:00Z' }, comparison: null })
     await userEvent.click(closeButton())
-    expect(ask).toHaveBeenCalledWith('Close the review round "Q4 2026"? Its results are frozen, and the overview '
-      + 'compares later work with them. The close is recorded in the audit trail.')
+    expect(screen.getByRole('alert').textContent).toBe('Close the review round "Q4 2026"? Its results are frozen, '
+      + 'and the overview compares later work with them. The close is recorded in the audit trail.')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(fetch).not.toHaveBeenCalled()
     expect(onRoundChanged).not.toHaveBeenCalled()
   })
@@ -632,23 +634,21 @@ describe('the review round on the Dossier (ticket 402)', () => {
   it('on OK closes the round, busy meanwhile, then reads the overview again', async () => {
     let answer: (r: Response) => void = () => {}
     const fetch = serve(() => new Promise<Response>((resolve) => { answer = resolve }))
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { onRoundChanged } = shown()
-    await userEvent.click(closeButton())
+    await confirmed('Close round')
     expect(fetch.mock.calls[0][0]).toBe('/api/rounds/close')
-    expect(closeButton().disabled).toBe(true)
+    expect(closeButton().getAttribute('aria-disabled')).toBe('true')
     expect(closeButton().getAttribute('aria-busy')).toBe('true')
     answer(new Response(JSON.stringify({ closed: { name: 'First round', closed_at: '2026-11-09T10:30:00Z' } })))
     await waitFor(() => expect(onRoundChanged).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(closeButton().disabled).toBe(false))
+    await waitFor(() => expect(closeButton().getAttribute('aria-disabled')).toBeNull())
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it("when the change is kept but the overview can't be read again, says so with Retry", async () => {
     serve(() => Promise.resolve(new Response('{}')))
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { onRoundChanged } = shown(seeded().rounds, { read: false })
-    await userEvent.click(closeButton())
+    await confirmed('Close round')
     expect((await screen.findByRole('alert')).textContent)
       .toBe('The review round was changed, but the overview could not be read again just now.')
     onRoundChanged.mockResolvedValue(true)
@@ -713,9 +713,8 @@ describe('the review round on the Dossier (ticket 402)', () => {
     ['no answer', () => Promise.reject(new TypeError('offline'))],
   ])('on %s says the round could not be changed', async (_, answer) => {
     serve(answer)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { onRoundChanged } = shown()
-    await userEvent.click(closeButton())
+    await confirmed('Close round')
     expect((await screen.findByRole('alert')).textContent).toBe(FAILED)
     expect(onRoundChanged).not.toHaveBeenCalled()
     expect(roundLine().textContent).toBe('Review round: First round, open since the start')
