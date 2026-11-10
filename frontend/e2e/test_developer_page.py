@@ -140,3 +140,59 @@ def test_the_daily_limit_field_focused_from_the_bottom_stops_below_the_sticky_to
     field.focus()
 
     assert not overlaps(field.bounding_box(), bar.bounding_box())
+
+
+# --- A change keeps the page (#455) -------------------------------------------------------------
+# A change's answer once lacked the broken profiles, the page threw rendering it, and the live app
+# showed the Discord gate with "Vouch could not be loaded" until a reload.
+
+
+def test_a_daily_limit_change_keeps_the_developer_page_showing_the_new_limit(
+    page: Page, profiles_url
+):
+    page.goto(f"{profiles_url}/developer")
+    settings = page.get_by_role("region", name="Developer settings")
+    try:
+        field = settings.get_by_role("textbox", name="Assessments per day")
+        field.fill("29")
+        with page.expect_response("**/api/developer/daily-limit") as answered:
+            field.press("Enter")
+        assert answered.value.status == 200
+
+        expect(settings.get_by_role("status")).to_contain_text(
+            "Each user may now start 29 assessments a day."
+        )
+        expect(settings).to_contain_text("29 assessments per user per day (UTC)")
+        expect(page.get_by_text("Vouch could not")).to_have_count(0)
+    finally:  # the servers are shared: the next test reads the default again
+        reset = page.request.put(
+            f"{profiles_url}/api/developer/daily-limit", data={"daily_limit": 30}
+        )
+        assert reset.status == 200, reset.text()
+
+
+def test_a_model_change_keeps_the_developer_page_showing_the_new_model(page: Page, profiles_url):
+    # No key here, so the API refuses a change: its answer is the settings read, the new model in it, as the API's own
+    # test (tests/test_model_choice.py) shows a change answers.
+    read = page.request.get(f"{profiles_url}/api/developer/settings").json()
+
+    def changed(route: Route) -> None:
+        route.fulfill(
+            status=200,
+            json=read | {"model": "openai/gpt-5.5", "runs_on": "openrouter", "fake_reason": None},
+        )
+
+    page.route("**/api/developer/model", changed)
+    page.goto(f"{profiles_url}/developer")
+    settings = page.get_by_role("region", name="Developer settings")
+
+    field = settings.get_by_role("textbox", name="Model id")
+    field.fill("openai/gpt-5.5")
+    with page.expect_response("**/api/developer/model"):
+        field.press("Enter")
+
+    expect(settings.get_by_role("status")).to_contain_text(
+        "The next assessment runs on openai/gpt-5.5."
+    )
+    expect(settings.locator(".sheet .mono").first).to_have_text("openai/gpt-5.5")
+    expect(page.get_by_text("Vouch could not")).to_have_count(0)

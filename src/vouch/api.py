@@ -1871,9 +1871,17 @@ class DailyLimitRequest(BaseModel):
 
 
 def _developer_page(
-    models: ModelChoice, spending: SpendingGuard, model: str | None = None
+    models: ModelChoice,
+    spending: SpendingGuard,
+    settings: Settings,
+    companies: CompanyProfiles,
+    model: str | None = None,
 ) -> dict[str, Any]:
-    return models.settings(model) | spending.settings()
+    """The whole developer page, the same for its read and for each change's answer (#455: the
+    changes once left out the broken profiles, and the page rendering their answer failed),
+    the companies made in setup included (#418)."""
+    page = models.settings(model) | spending.settings()
+    return page | _company_settings(settings, companies)
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
@@ -1888,7 +1896,7 @@ def developer_settings(
     limit, every assessment's usage totalled, the compliance profiles left out of the profile
     switcher because they can't be loaded (#47), each with its problem, and the companies made
     in setup (#418)."""
-    return _developer_page(models, spending) | _company_settings(settings, companies)
+    return _developer_page(models, spending, settings, companies)
 
 
 def _company_settings(settings: Settings, companies: CompanyProfiles) -> dict[str, Any]:
@@ -1913,16 +1921,28 @@ def _made_company(row: company_profiles.StoredProfile) -> dict[str, str]:
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)
 def change_daily_limit(
-    request: DailyLimitRequest, models: AppModels, spending: AppSpending
+    request: DailyLimitRequest,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    companies: CompanyProfiles,
 ) -> dict[str, Any]:
-    """Each user may start `daily_limit` assessments a day, from the next one on."""
+    """Each user may start `daily_limit` assessments a day, from the next one on. The answer is
+    the whole developer page, as `developer_settings` reads it (#455)."""
     spending.set_daily_limit(request.daily_limit)
-    return _developer_page(models, spending)
+    return _developer_page(models, spending, settings, companies)
 
 
 @router.put("/developer/model", dependencies=DEVELOPERS)
-def change_model(request: ModelRequest, models: AppModels, spending: AppSpending) -> dict[str, Any]:
-    """The next assessment runs on `model`, once OpenRouter's model list has it."""
+def change_model(
+    request: ModelRequest,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    companies: CompanyProfiles,
+) -> dict[str, Any]:
+    """The next assessment runs on `model`, once OpenRouter's model list has it. The answer is
+    the whole developer page, as `developer_settings` reads it (#455)."""
     try:
         model = models.change(request.model)
     except NoKey:
@@ -1932,7 +1952,7 @@ def change_model(request: ModelRequest, models: AppModels, spending: AppSpending
         raise HTTPException(status_code=422, detail=detail) from None
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
-    return _developer_page(models, spending, model)
+    return _developer_page(models, spending, settings, companies, model)
 
 
 @router.get("/developer/protection-levels", dependencies=DEVELOPERS)
@@ -2023,7 +2043,7 @@ def remove_company_profile(
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
     _forget_profile(profile_id)
     try:
-        return developer_settings(models, spending, settings, user, companies)
+        return _developer_page(models, spending, settings, companies)
     except Exception:  # removed already: never answer as if nothing was (#418 review)
         log.exception("the developer settings can't be read after removing %s", profile_id)
         return {"settings_unavailable": True}
