@@ -239,14 +239,14 @@ class _Sheet(FPDF):
     def cell_text(self, text: object, width: float, notes: list[tuple[int, str]]) -> str:
         """A cell's text in the current font: on one line of text (each line break a space),
         cut to MAX_CELL_LINES lines of `width` mm ending in `… [n]` when longer, its whole text
-        then added to `notes` as note n."""
+        then added to `notes` as note n: without BREAKs, as a note runs the page's width."""
         whole = self.drawable(text)
         flat = " ".join(whole.split())
         lines = self.wrapped(flat, width)
         if len(lines) <= MAX_CELL_LINES:
             return flat
         self._notes += 1
-        notes.append((self._notes, whole))
+        notes.append((self._notes, whole.replace(BREAK, "")))
         kept = sum(len(line) + 1 for line in lines[: MAX_CELL_LINES - 1])
         return f"{flat[:kept].rstrip()} … [{self._notes}]"
 
@@ -434,8 +434,9 @@ def _closed(sheet: _Sheet, report: Mapping[str, Any], words: Mapping[str, Any]) 
 
 TRAIL_IDS = (2, 3, 8, 9, 10)  # the trail's control, requirement, evidence, model, prompt version
 _PIECE = re.compile(r"[^\s/-]*[/-]?")  # a piece of an id: up to and with a "-" or "/"
-# A zero-width space after an id's "-" or "/": where fpdf2 may break a line inside it. Only when
-# whole ids don't fit (it stays in the PDF's text where no line breaks; the Markdown never has it).
+# A zero-width space after a "-" or "/": where fpdf2 may break a line inside an id. Only in a word
+# wider than its column (it stays in the PDF's text, so an id with one isn't found by a search;
+# the Markdown never has it).
 BREAK = "\u200b"
 
 
@@ -445,22 +446,31 @@ def trail_table(
     """The audit trail's header, rows and column widths across the page (#353), so no line
     breaks inside a word. Each column is at least as wide as its widest word or id (a header's
     in bold); the rest of the page is shared out by how much more each column's longest cell
-    wants. When the words can't all fit, the widest columns give way first, down to their
-    widest piece: an id may then break after a "-" or "/" (a BREAK there). Only a column whose
-    piece is wider than any column can be breaks inside a word, and only there."""
+    wants. When the words can't all fit, the text columns give way before the id columns
+    (#377), down to their pieces up to an even share of the page (a wider one, such as a hash
+    in a note, breaks inside itself); then the id columns, down to their widest piece. Only a
+    word wider than its column gets BREAKs, so every other id stays searchable."""
     head = [str(c) for c in columns]
     rows = [[str(v) for v in r] for r in body]
     words = _least(sheet, head, rows, str.split)
-    if sum(words) <= sheet.epw:
-        return head, rows, _shared(sheet, head, rows, words)
-    head = [_breakable(c) for c in head]
-    rows = [[_breakable(v) for v in r] for r in rows]
-    pieces = _least(sheet, head, rows, _pieces)
-    if sum(pieces) <= sheet.epw:  # whole words where they fit, pieces in the widest columns
-        least = _capped(words, pieces, sheet.epw)
-    else:  # a piece too wide for the page: its column alone breaks inside a word
-        least = _capped(pieces, [0.0] * len(pieces), sheet.epw)
-    return head, rows, _shared(sheet, head, rows, least)
+    least = words
+    if sum(words) > sheet.epw:
+        pieces = _least(sheet, head, rows, _pieces)
+        text_floor = _least(sheet, head, rows, _pieces, most=sheet.epw / len(head))
+        for id_floor in (words, pieces):  # the ids whole, else in pieces
+            floors = [id_floor[i] if i in TRAIL_IDS else text_floor[i] for i in range(len(head))]
+            if sum(floors) <= sheet.epw:
+                least = _capped(words, floors, sheet.epw)
+                break
+        else:  # a piece too wide for the page: its column breaks inside a word too
+            least = _capped(pieces, [0.0] * len(pieces), sheet.epw)
+    widths = _shared(sheet, head, rows, least)
+    columns_marked = [
+        [_marked(sheet, cell, w) for cell in col]
+        for col, w in zip(_columns(head, rows, TRAIL_IDS), widths, strict=True)
+    ]
+    marked = [list(r) for r in zip(*columns_marked, strict=True)]
+    return marked[0], marked[1:], widths
 
 
 def _capped(widths: list[float], floors: list[float], total: float) -> list[float]:
@@ -476,14 +486,25 @@ def _capped(widths: list[float], floors: list[float], total: float) -> list[floa
     return [max(f, min(w, low)) for w, f in zip(widths, floors, strict=True)]
 
 
+def _marked(sheet: _Sheet, cell: tuple[str, str, bool], width: float) -> str:
+    """A cell's text (as `_columns` gives it) with a BREAK after each "-" or "/" that something
+    follows, in each word wider than a cell `width` mm wide: those words alone."""
+    text, family, bold = cell
+    return re.sub(
+        r"\S+",
+        lambda m: _breakable(m[0]) if _width(sheet, m[0], family, bold) > width else m[0],
+        text,
+    )
+
+
 def _breakable(text: str) -> str:
     """`text` with a BREAK after each "-" or "/" that something follows."""
     return re.sub(r"(?<=[/-])(?=\S)", BREAK, text)
 
 
 def _pieces(text: str) -> list[str]:
-    """The pieces of `text` no line breaks inside once BREAKs are in: words cut after "-", "/"."""
-    return _PIECE.findall(text.replace(BREAK, ""))
+    """The pieces of `text`: its words, cut after each "-" and "/"."""
+    return _PIECE.findall(text)
 
 
 def _width(sheet: _Sheet, text: str, family: str, bold: bool) -> float:
@@ -505,12 +526,21 @@ def _columns(
 
 
 def _least(
-    sheet: _Sheet, head: list[str], rows: list[list[str]], parts: Callable[[str], list[str]]
+    sheet: _Sheet,
+    head: list[str],
+    rows: list[list[str]],
+    parts: Callable[[str], list[str]],
+    most: float = float("inf"),
 ) -> list[float]:
-    """Each column's least width: its widest part."""
+    """Each column's least width: its widest part, of those no wider than `most` mm."""
     return [
         max(
-            [_width(sheet, p, f, bold) for text, f, bold in col for p in parts(text) if p],
+            [
+                w
+                for text, f, bold in col
+                for p in parts(text)
+                if p and (w := _width(sheet, p, f, bold)) <= most
+            ],
             default=0,
         )
         for col in _columns(head, rows, TRAIL_IDS)
@@ -524,7 +554,7 @@ def _shared(
     wants on one line, and anything left after that evenly."""
     spare = max(sheet.epw - sum(least), 0)
     whole = [
-        max(_width(sheet, " ".join(t.replace(BREAK, "").split()), f, b) for t, f, b in col)
+        max(_width(sheet, " ".join(t.split()), f, b) for t, f, b in col)
         for col in _columns(head, rows, TRAIL_IDS)
     ]
     wants = [max(w - m, 0) for w, m in zip(whole, least, strict=True)]
