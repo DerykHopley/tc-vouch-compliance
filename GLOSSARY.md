@@ -117,7 +117,7 @@ Evidence past its review cycle; it can make a requirement partly evidenced at be
 _Avoid_: Expired, outdated, old
 
 **Citation**:
-An exact quoted passage from one version of an evidence document, with its section, backing a verdict.
+An exact quoted passage from one version of an evidence document, or from the lead's statement (an answered open question), with its section, backing a verdict.
 _Avoid_: Source, reference, link
 
 **Verdict**:
@@ -157,7 +157,7 @@ An open question's answer used as citable evidence, labelled as the lead's state
 _Avoid_: Testimony, self-declaration, manual evidence
 
 **Profile pass**:
-One model run over every applicable control of a compliance profile with all its evidence in context, producing one assessment per control, each waiting for review. Controls already accepted are skipped. Used only when the evidence fits under a token threshold, and counted against its own daily limit, apart from the assessments'.
+One model run over every applicable control of a compliance profile with all its evidence in context, producing one assessment per control, each waiting for review. Controls already accepted are skipped, and so are reviews in progress (findings confirmed, at Plan fixes or Accept). Used only when its prompt and expected reply fit under a token threshold, and counted against its own daily limit, apart from the assessments'.
 _Avoid_: Batch run, bulk assessment, full scan
 
 **Reviewed verdict**:
@@ -165,7 +165,7 @@ A verdict the compliance lead has accepted (the last step of the review, after C
 _Avoid_: Approval, sign-off, final verdict
 
 **Audit trail**:
-The append-only record of every action of the compliance lead, one entry each: a control accepted or rejected, a requirement overridden, a remediation item approved or discarded, the goal changed. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
+The append-only record of every action of the compliance lead, one entry each: findings confirmed, a control accepted or rejected, a requirement overridden, a remediation item approved or discarded, its priority changed or its done mark, a review round started or closed, an open question logged or answered, the goal changed. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
 _Avoid_: History, log, changelog
 
 **Override**:
@@ -207,6 +207,10 @@ _Avoid_: Dashboard, home page
 **Readiness report**:
 The summary of a compliance profile's reviewed verdicts, citations and remediation items, written in the profile's language.
 _Avoid_: Audit report, self-assessment, export
+
+**Improvement report**:
+The readiness report's shape in the Internal improvement goal, written for the team: where it stands compared with the last closed review round, the improvement plan by priority with each item's status, and the open questions; an internal self-assessment, from the same report page and exports.
+_Avoid_: Team report, internal audit report
 
 **Eval**:
 A measured run of assessments against cases with known expected verdicts and citations, used to compare models.

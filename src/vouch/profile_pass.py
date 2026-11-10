@@ -2,9 +2,10 @@
 accepted, assessed in one guarded model run, with all the profile's evidence in the prompt (#371).
 
 Which controls: each control of the profile's ISA edition with an applicable requirement, unless
-its newest assessment is accepted. The prompt holds the rules, those controls' applicable
-requirements and every document of every evidence source the profile allows, each passed as data
-(vouch.guards) with its kind and whether it is stale. A prompt estimated over the threshold, or an
+its newest assessment is accepted or its review is in progress (in_review, #437). The prompt holds
+the rules, those controls' applicable requirements and every document of every evidence source
+the profile allows, each passed as data (vouch.guards) with its kind and whether it is stale. A prompt and expected reply estimated over
+the threshold (estimate_tokens, estimate_output_tokens, by the profile's answer language), or an
 allowed source that can't be read, refuses the pass before anything is counted or called
 (ProfilePassRefused): the per-control agent is the way on.
 
@@ -15,21 +16,24 @@ every answer, reason and remediation draft (the whole reply asked for again once
 remediation items drafted as the agent drafts them. Each control's result is written onto a new
 thread of the assessment graph, up to its review interrupt, so it is read and reviewed like any
 agent run's.
+
+The lead's statements (#422, answers to open questions) are listed under their own control, as
+data, and checked against that control's citations only: one cited for another control is dropped.
 """
 
 import logging
 import math
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
-from vouch.citations import QuoteChecker
+from vouch.citations import LeadStatement, QuoteChecker
 from vouch.documents import document_files, escaped, facts_of
 from vouch.front_matter import split_front_matter
 from vouch.graph import (
@@ -49,21 +53,27 @@ from vouch.graph import (
     checked_requirements,
     format_requirements,
     guard_steps,
+    in_review,
     judged_requirements,
+    lead_rule,
     loaded_step,
     model_name_of,
     never_claim,
     new_thread_id,
+    overlay_requirements_of,
+    overlays_step,
     plural,
     quote_checker,
     remediation_drafts,
+    statement_passages,
+    statements_text,
     thread_config,
     to_remediate,
     verdict_changes,
 )
 from vouch.guards import DATA_RULE, as_data, flagged_steps
 from vouch.isa import IsaControl
-from vouch.language import language_name
+from vouch.language import language_name, lead_statement_label
 from vouch.memory import Memory, newest_by_control
 from vouch.profile import ComplianceProfile, ControlRequirements
 from vouch.search import passages_of
@@ -71,10 +81,17 @@ from vouch.settings import PROFILE_PASS_TOKENS
 
 log = logging.getLogger(__name__)
 
-PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-1"
+PROFILE_PASS_PROMPT_VERSION = "m7-profile-pass-2"  # the lead's statements (#422)
 """The version of the pass's prompt: change it whenever the prompt changes."""
-CHARS_PER_TOKEN = 4
-"""A prompt's size is estimated at about four characters a token, as for English text."""
+INPUT_CHARS_PER_TOKEN: dict[str, float] = {"en": 2.5, "de": 1.9}
+"""Characters a prompt token, by the profile's answer language (#432): rounded down from the
+2.68 (Nordlicht, English) and 1.92 (Alpenwerk, German) measured on Sonnet 5.5 (#430), so the
+estimate doesn't undercount. A language without its own rate takes German's (OTHER_LANGUAGE)."""
+OUTPUT_TOKENS_PER_REQUIREMENT: dict[str, int] = {"en": 320, "de": 420}
+"""Reply tokens an applicable requirement, by the profile's answer language, which the reply is
+written in (#432): rounded up from the 311 (Nordlicht) and 415 (Alpenwerk) measured on #430."""
+OTHER_LANGUAGE = "de"
+"""Whose rates a language without its own takes: German's, the higher estimate of the two."""
 PROFILE_PASS_FAILED = "The profile pass could not be completed. Please try again later."
 """The one sentence for a pass whose model run failed, or whose reply claimed an audit result
 twice."""
@@ -107,19 +124,41 @@ class ProfilePassRefused(Exception):
     one sentence; the per-control agent is the way on (FALLBACK)."""
 
 
+SkipReason = Literal["accepted", "in-review"]
+
+
+@dataclass(frozen=True)
+class SkippedControl:
+    """A control the pass left out, and why: its newest assessment is accepted, or its review is
+    in progress (in_review, #437)."""
+
+    control_id: str
+    reason: SkipReason
+
+
 @dataclass(frozen=True)
 class ProfilePassResult:
-    """The new assessments, each waiting for review, and the ids of the controls skipped because
-    their newest assessment is accepted."""
+    """The new assessments, each waiting for review, and the controls skipped, in profile
+    order."""
 
     assessments: list[Assessment]
-    skipped: list[str]
+    skipped: list[SkippedControl]
+
+
+def _skip_reason(newest: Assessment | None) -> SkipReason | None:
+    if newest is None:
+        return None
+    if newest.status == "accepted":
+        return "accepted"
+    return "in-review" if in_review(newest) else None
 
 
 @dataclass(frozen=True)
 class _Included:
     control: IsaControl
     requirements: ControlRequirements
+    statements: list[LeadStatement] = field(default_factory=list)  # the lead's on it (#422)
+    passages: list[EvidencePassage] = field(default_factory=list)  # those, as the prompt lists them
 
 
 def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
@@ -166,9 +205,11 @@ def _prompt(
     controls = "\n\n".join(
         f"Control {i.control.id}: {i.control.question}\n"
         f"Requirements:\n{format_requirements(i.requirements.applicable)}"
+        f"{statements_text(i.passages)}"
         for i in included
     )
     evidence = as_data(documents) if documents else "(none)"
+    rule = lead_rule(any(i.passages for i in included))
     return [
         SystemMessage(
             f"You assess every {included[0].control.source} control listed for {profile.company} "
@@ -190,15 +231,27 @@ def _prompt(
             f"the fix (a role, never a person's name), and how many days from today (1 to "
             f"{MAX_DUE_DAYS}) until it is due. Write every answer, reason and item in {language}; "
             "copy each quote unchanged, in its document's language, never translated. "
-            f"{never_claim(profile)} {DATA_RULE}"
+            f"{never_claim(profile)} {DATA_RULE}{rule}"
         ),
         HumanMessage(f"Controls:\n\n{controls}\n\nEvidence:\n{evidence}"),
     ]
 
 
-def estimate_tokens(prompt: list[AnyMessage]) -> int:
-    """The prompt's size in tokens, estimated at CHARS_PER_TOKEN characters a token."""
-    return math.ceil(sum(len(str(m.content)) for m in prompt) / CHARS_PER_TOKEN)
+def _rate[T](rates: Mapping[str, T], answer_language: str) -> T:
+    return rates.get(answer_language, rates[OTHER_LANGUAGE])
+
+
+def estimate_tokens(prompt: list[AnyMessage], answer_language: str) -> int:
+    """The prompt's size in tokens: its characters at the answer language's
+    INPUT_CHARS_PER_TOKEN, rounded up."""
+    characters = sum(len(str(m.content)) for m in prompt)
+    return math.ceil(characters / _rate(INPUT_CHARS_PER_TOKEN, answer_language))
+
+
+def estimate_output_tokens(requirements: int, answer_language: str) -> int:
+    """The reply's expected size in tokens, for `requirements` applicable requirements (overlay
+    ones included): the answer language's OUTPUT_TOKENS_PER_REQUIREMENT each."""
+    return requirements * _rate(OUTPUT_TOKENS_PER_REQUIREMENT, answer_language)
 
 
 @dataclass(frozen=True)
@@ -250,12 +303,14 @@ def _assessed(
             },
         ),
     ]
-    steps = []
+    flagged = [Step(GUARD, {"text": t}) for t in flagged_steps(included.passages)]
+    steps = list(flagged)
     for node, update in updates:
         steps += [Step(node, update, profile), *guard_steps(update)]
     values = {
         "control": included.control,
         "control_requirements": included.requirements,
+        "overlay_requirements": overlay_requirements_of(included.requirements),
         "answer": answer,
         "requirements": requirements,
         "not_judged": judged.not_judged,
@@ -308,10 +363,12 @@ def _write(
             config = thread_config(thread_id, memory.scope)
             control = part.values["control"]
             loaded = loaded_step(control, profile).to_dict()
+            # The agent's own overlay step; no overlay_branch step, as the pass gathers nothing.
+            overlays = overlays_step(part.values["overlay_requirements"]).to_dict()
             values = {
                 **shared,
                 **part.values,
-                "steps": [loaded, *head, *part.values["steps"]],
+                "steps": [loaded, overlays, *head, *part.values["steps"]],
             }
             graph.update_state(config, values, as_node="remediate")
             graph.invoke(None, config)  # stops at the review interrupt
@@ -334,43 +391,52 @@ def run_profile_pass(
     today: date | None = None,
     max_tokens: int = PROFILE_PASS_TOKENS,
     count: Callable[[], None] = lambda: None,
+    statements: Iterable[LeadStatement] = (),
 ) -> ProfilePassResult:
-    """Assess every applicable control of the profile not yet accepted in one model run (see
-    the module's doc).
+    """Assess every applicable control of the profile not yet accepted, and not in review, in one
+    model run (see the module's doc).
 
-    With every applicable control accepted, nothing is counted or called. Otherwise the sources
-    are read and the prompt estimated: an unreadable source or a prompt over `max_tokens` raises
-    ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
+    With every applicable control accepted or in review, nothing is counted or called.
+    Otherwise the sources are read and the prompt and reply estimated: an unreadable source, or a
+    prompt and expected reply over `max_tokens`, raises ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
     daily limit), then the model, once (twice when the output guard asks again). A second audit
     claim raises OutputCheckError; a failed model call raises its error. Either way, nothing is
     kept in the index. `today` (default: now) is what staleness is judged on and due dates count
-    from."""
+    from. `statements` are the lead's (#422): each is listed under its own control, and may be
+    cited for that control only."""
     today = today or date.today()
+    statements = list(statements)
     newest = newest_by_control(memory, saver)
-    included, skipped = [], []
+    included: list[_Included] = []
+    skipped: list[SkippedControl] = []
     for control in profile.isa_edition().controls:
         requirements = profile.requirements_for(control)
         if not requirements.applicable:
             continue
-        newest_one = newest.get(control.id)
-        if newest_one is not None and newest_one.status == "accepted":
-            skipped.append(control.id)
+        reason = _skip_reason(newest.get(control.id))
+        if reason is not None:
+            skipped.append(SkippedControl(control.id, reason))
         else:
-            included.append(_Included(control, requirements))
+            mine = [s for s in statements if s.control_id == control.id]
+            passages = statement_passages(mine, profile.answer_language)
+            included.append(_Included(control, requirements, mine, passages))
     if not included:
         return ProfilePassResult([], skipped)
     documents = _documents(profile, today)
     prompt = _prompt(profile, included, documents)
-    estimate = estimate_tokens(prompt)
-    if estimate > max_tokens:
+    tokens_in = estimate_tokens(prompt, profile.answer_language)
+    tokens_out = estimate_output_tokens(
+        sum(len(i.requirements.applicable) for i in included), profile.answer_language
+    )
+    if tokens_in + tokens_out > max_tokens:
         raise ProfilePassRefused(
-            f"The profile pass can't run: its prompt is about {estimate:,} tokens, over the "
+            f"The profile pass can't run: its prompt and reply are about "
+            f"{tokens_in + tokens_out:,} tokens ({tokens_in:,} in, {tokens_out:,} out), over the "
             f"threshold of {max_tokens:,}. Assess the controls one at a time instead."
         )
     count()
     shared: AssessState = {
         "profile_id": profile.id,
-        "overlay_requirements": (),
         "model": model_name_of(model),
         "prompt_version": PROFILE_PASS_PROMPT_VERSION,
         "answer_language": profile.answer_language,
@@ -387,17 +453,19 @@ def run_profile_pass(
         "document_choices": profile.document_choices(),
         "claims": {},
     }
-    checker = quote_checker(shared)
+    checker = quote_checker(shared, label=lead_statement_label(profile.answer_language))
     by_id = {i.control.id: i for i in included}
     paragraphs = [p["text"] for d in documents for p in passages_of(d["doc_id"], d["text"])]
+    paragraphs += [p["text"] for i in included for p in i.passages]
 
     def read(reply: ProfilePassReply | None) -> tuple[dict[str, _Assessed], list[str]]:
         given: dict[str, ControlAssessmentReply] = {}
         for item in reply.controls if reply else []:
-            if item.control_id in by_id:  # a control not included (unknown, accepted) is ignored
+            if item.control_id in by_id:  # a control not included (unknown, skipped) is ignored
                 given.setdefault(item.control_id, item)
         assessed = {
-            cid: _assessed(i, given.get(cid), checker, profile, today) for cid, i in by_id.items()
+            cid: _assessed(i, given.get(cid), checker.for_statements(i.statements), profile, today)
+            for cid, i in by_id.items()
         }
         return assessed, [text for part in assessed.values() for text in part.texts]
 

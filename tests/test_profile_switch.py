@@ -11,6 +11,7 @@ import pytest
 import test_memory
 from fastapi.testclient import TestClient
 from profiles_dir import BROKEN, SECOND, SECOND_COMPANY, make_profiles
+from reviewing import reviewed
 from test_memory import as_user, assess, restart
 
 from vouch import api
@@ -167,18 +168,14 @@ def test_each_profile_keeps_its_own_progress(profiles, users):
     alice, _ = users
     with app_with(profiles) as client:
         thread_id = assess(client, under(alice, "nordlicht"))
-        accepted = client.post(
-            f"/api/assessments/{thread_id}/review",
-            json={"decision": "accept"},
-            headers=under(alice, "nordlicht"),
-        )
+        accepted = reviewed(client, thread_id, headers=under(alice, "nordlicht"))
         nordlicht = client.get("/api/overview", headers=under(alice, "nordlicht")).json()
         second = client.get("/api/overview", headers=under(alice, SECOND)).json()
         listed_second = client.get("/api/assessments", headers=under(alice, SECOND)).json()
         opened_second = client.get(f"/api/assessments/{thread_id}", headers=under(alice, SECOND))
         trail_second = client.get("/api/audit-trail", headers=under(alice, SECOND)).json()
 
-    assert accepted.status_code == 200, accepted.text
+    assert accepted["status"] == "accepted"
     assert (nordlicht["company"], nordlicht["readiness"]["accepted"]) == (
         "Nordlicht Komponenten GmbH",
         1,

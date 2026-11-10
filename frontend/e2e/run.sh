@@ -13,7 +13,17 @@
 #   - a sixth, for the readiness report's checks (#234), for the same reason;
 #   - a seventh, for the fresh start's check (#285): starting Nordlicht afresh would hide the other
 #     servers' seeded progress from their checks;
-#   - an eighth, for company setup's create (#409): the company it makes stays in that process,
+#   - an eighth, for the profile pass's checks (#390): a pass assesses all 12 controls, which would
+#     change the counts the other servers' checks read;
+#   - a ninth, for the review rounds' checks (#402): closing a round changes the hero and the
+#     comparison the other servers' checks read, and its control's accept changes the counts;
+#   - a tenth, for the improvement plan's checks (#410): its goal is Internal improvement, and its
+#     control ends Closed, which the other servers' checks would read;
+#   - an eleventh, for the open questions' checks (#414): its control is accepted, questioned and
+#     assessed again, which would change the counts and the cards the other servers' checks read;
+#   - a twelfth, for the improvement report's check (#420): its goal is Internal improvement and a
+#     round is closed, which would change the report the sixth server's checks read;
+#   - a thirteenth, for company setup's create (#409): the company it makes stays in that process,
 #     and would add a profile to the other servers' switchers;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
@@ -43,7 +53,8 @@ RATE="${VOUCH_RATE_REQUESTS:-100000}"
 # its URL goes in. A new server is one more entry here.
 SERVERS=(
   vouch:VOUCH_URL dossier:DOSSIER_URL profiles:PROFILES_URL paper:PAPER_URL chat:CHAT_URL
-  report:REPORT_URL afresh:AFRESH_URL setup:SETUP_URL
+  report:REPORT_URL afresh:AFRESH_URL pass:PASS_URL rounds:ROUNDS_URL plan:PLAN_URL
+  questions:QUESTIONS_URL improvement:IMPROVEMENT_URL setup:SETUP_URL
 )
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done

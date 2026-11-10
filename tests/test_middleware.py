@@ -11,6 +11,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from reviewing import confirm, plan_fixes
 
 from vouch.api import compliance_profile, create_app, profile_tools
 from vouch.fake_model import ScriptedChatModel
@@ -317,12 +318,15 @@ def test_the_reviewed_assessment_is_redacted_as_the_stream_is(tmp_path):
     events = read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
     thread_id = events[-1][1]["assessment"]["thread_id"]
 
+    confirmed = confirm(client, thread_id)
+    plan_fixes(client, thread_id)
     response = client.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
 
-    assert response.status_code == 200
-    assert response.json()["assessment"]["answer"] == "Ask [removed] about the key [removed]."
-    for planted in (PLANTED_KEY, PLANTED_EMAIL):
-        assert planted not in response.text
+    for answer in (confirmed, response):
+        assert answer.status_code == 200
+        assert answer.json()["assessment"]["answer"] == "Ask [removed] about the key [removed]."
+        for planted in (PLANTED_KEY, PLANTED_EMAIL):
+            assert planted not in answer.text
 
 
 def test_with_no_rate_setting_the_61st_request_in_a_minute_gets_429():

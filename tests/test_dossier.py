@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
+from reviewing import reviewed
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import app_on, assess, restart
 
@@ -351,11 +352,7 @@ def card(body: dict, control_id: str) -> dict:
 
 
 def review(client: TestClient, user: dict[str, str], thread_id: str, decision: str) -> dict:
-    response = client.post(
-        f"/api/assessments/{thread_id}/review", json={"decision": decision}, headers=user
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
+    return {"assessment": reviewed(client, thread_id, decision, headers=user)}  # type: ignore[arg-type]
 
 
 def test_the_overview_starts_with_nothing_assessed(database_url, users):
@@ -380,6 +377,9 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
             "iso_27001": "ISO 27001:2022: A.5.15, A.8.5",
             "status": "waiting-for-review",
             "verdict": "partly-evidenced",
+            "reassess_suggested": False,  # the improvement plan's (#410)
+            "reassess_reasons": [],  # the open questions' too (#414)
+            "closed": False,
         }
         assert proposed["readiness"]["accepted"] == 0
         assert proposed["readiness"]["by_verdict"]["partly-evidenced"] == 0

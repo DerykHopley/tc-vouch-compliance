@@ -8,6 +8,7 @@ import pytest
 from assess_steps import in_order
 from fastapi.testclient import TestClient
 from isa_editions import GERMAN_5_1_1
+from reviewing import accepted, confirm, plan_fixes
 
 from vouch import ScriptedChatModel, isa, profile
 from vouch.api import PROFILE_HEADER, create_app
@@ -132,6 +133,7 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
             "kind": "documented",
             "stale": False,
             "stale_because": None,
+            "lead_statement": False,
         }
     ]
     assessment = events[-1][1]["assessment"]
@@ -148,6 +150,7 @@ def test_demo_control_streams_steps_then_requirement_events_then_waits_for_revie
     # M1 is partly evidenced, so it gets a draft (#212); the evidenced ones get none.
     assert [item["requirement_id"] for item in assessment["remediation"]] == ["M1"]
     assert assessment["review"] is None
+    assert assessment["review_step"] == "confirm-findings"
 
 
 def proposed_thread(client) -> str:
@@ -155,31 +158,183 @@ def proposed_thread(client) -> str:
     return events[-1][1]["assessment"]["thread_id"]
 
 
-def test_the_review_endpoint_resumes_with_an_override_and_returns_the_reviewed_assessment(client):
+M1_EVIDENCED = {
+    "requirement_id": "M1",
+    "verdict": "evidenced",
+    "reason": "The exposure assessment is in the records.",
+}
+S1_NOT_EVIDENCED = {"requirement_id": "S1", "verdict": "not-evidenced", "reason": "No list."}
+
+
+def review(client, thread_id: str, **decision):
+    return client.post(f"/api/assessments/{thread_id}/review", json=decision)
+
+
+def opened(client, thread_id: str) -> dict:
+    response = client.get(f"/api/assessments/{thread_id}")
+    assert response.status_code == 200, response.text
+    return response.json()["assessment"]
+
+
+def entries_of(client, thread_id: str) -> list[tuple[str, str | None]]:
+    """The thread's audit entries, oldest first: (action, requirement)."""
+    entries = client.get("/api/audit-trail").json()["entries"]
+    mine = [e for e in entries if e["thread_id"] == thread_id]
+    return [(e["action"], e["requirement_id"]) for e in reversed(mine)]
+
+
+def test_confirm_findings_applies_the_overrides_and_moves_on_to_plan_fixes(client):
     thread_id = proposed_thread(client)
 
-    response = client.post(
-        f"/api/assessments/{thread_id}/review",
-        json={
-            "decision": "accept",
-            "note": "Checked against the records.",
-            "overrides": [
-                {
-                    "requirement_id": "M1",
-                    "verdict": "evidenced",
-                    "reason": "The exposure assessment is in the records.",
-                }
-            ],
-        },
-    )
+    response = confirm(client, thread_id, [M1_EVIDENCED, S1_NOT_EVIDENCED])
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
+    confirmed = response.json()["assessment"]
+    assert confirmed["status"] == "waiting-for-review"
+    assert confirmed["review_step"] == "plan-fixes"
+    assert confirmed["verdict"] == "evidenced"  # partly-evidenced before M1's override
+    verdicts = {r["id"]: r["verdict"] for r in confirmed["requirements"]}
+    assert (verdicts["M1"], verdicts["S1"]) == ("evidenced", "not-evidenced")
+    # M1's draft dropped with its override to evidenced; S1 gets one to fill in.
+    assert [(i["requirement_id"], i["status"]) for i in confirmed["remediation"]] == [
+        ("S1", "draft")
+    ]
+    assert [o["requirement_id"] for o in confirmed["confirmed"]] == ["M1", "S1"]
+    assert confirmed["review"] is None
+    assert opened(client, thread_id) == confirmed
+
+
+def test_confirm_findings_that_leaves_no_remediation_item_moves_on_to_accept(client):
+    thread_id = proposed_thread(client)
+
+    confirmed = confirm(client, thread_id, [M1_EVIDENCED]).json()["assessment"]
+
+    assert confirmed["remediation"] == []
+    assert confirmed["review_step"] == "accept"
+
+
+def test_accept_before_the_findings_are_confirmed_is_409_and_writes_nothing(client):
+    thread_id = proposed_thread(client)
+
+    response = review(client, thread_id, decision="accept")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Confirm the findings first."
+    assert opened(client, thread_id)["review_step"] == "confirm-findings"
+    assert entries_of(client, thread_id) == []
+
+
+def test_accept_with_a_draft_item_left_is_409_naming_it_and_writes_nothing(client):
+    thread_id = proposed_thread(client)
+    confirm(client, thread_id)
+
+    response = review(client, thread_id, decision="accept")
+
+    assert response.status_code == 409
+    assert "M1" in response.json()["detail"]
+    assert opened(client, thread_id)["review_step"] == "plan-fixes"
+    assert entries_of(client, thread_id) == [("confirm", None)]
+
+
+def test_with_every_item_decided_accept_makes_the_reviewed_verdict(client):
+    thread_id = proposed_thread(client)
+    confirm(client, thread_id, [S1_NOT_EVIDENCED])
+    assert plan_fixes(client, thread_id, "discard") == ["M1", "S1"]
+    assert opened(client, thread_id)["review_step"] == "accept"
+
+    response = review(client, thread_id, decision="accept", note="Checked against the records.")
+
+    assert response.status_code == 200, response.text
     reviewed = response.json()["assessment"]
-    assert reviewed["thread_id"] == thread_id
     assert reviewed["status"] == "accepted"
-    assert reviewed["verdict"] == "evidenced"  # partly-evidenced before the override
+    assert reviewed["review_step"] is None
+    assert reviewed["review"]["three_step"] is True
     assert reviewed["review"]["note"] == "Checked against the records."
-    assert reviewed["review"]["overrides"][0]["agent_verdict"] == "partly-evidenced"
+    (override,) = reviewed["review"]["overrides"]
+    assert (override["requirement_id"], override["agent_verdict"]) == ("S1", "evidenced")
+    assert entries_of(client, thread_id) == [
+        ("override", "S1"),
+        ("confirm", None),
+        ("discard", "M1"),
+        ("discard", "S1"),
+        ("accept", None),
+    ]
+
+
+@pytest.mark.parametrize("step", ["confirm-findings", "plan-fixes", "accept"])
+def test_reject_ends_the_review_at_any_step_and_a_draft_stays_a_draft(client, step):
+    thread_id = proposed_thread(client)
+    if step != "confirm-findings":
+        confirm(client, thread_id, [S1_NOT_EVIDENCED])  # items for M1 and S1
+        decide = ["M1"] if step == "plan-fixes" else ["M1", "S1"]
+        for requirement_id in decide:
+            client.post(
+                f"/api/assessments/{thread_id}/remediation/{requirement_id}",
+                json={"decision": "discard"},
+            )
+    assert opened(client, thread_id)["review_step"] == step
+    before = entries_of(client, thread_id)
+
+    response = review(client, thread_id, decision="reject", note="Look again.")
+
+    assert response.status_code == 200, response.text
+    rejected = opened(client, thread_id)
+    assert rejected["status"] == "rejected"
+    assert rejected["review_step"] is None
+    assert rejected["review"]["note"] == "Look again."
+    assert entries_of(client, thread_id) == [*before, ("reject", None)]
+    statuses = {i["requirement_id"]: i["status"] for i in rejected["remediation"]}
+    expected = {
+        "confirm-findings": {"M1": "draft"},
+        "plan-fixes": {"M1": "discarded", "S1": "draft"},
+        "accept": {"M1": "discarded", "S1": "discarded"},
+    }
+    assert statuses == expected[step]
+
+
+def test_a_second_confirm_findings_or_an_unknown_requirement_is_refused_and_writes_nothing(
+    client,
+):
+    thread_id = proposed_thread(client)
+    unknown = {"requirement_id": "M9", "verdict": "evidenced", "reason": "Shown."}
+
+    refused = confirm(client, thread_id, [unknown])
+    assert refused.status_code == 422
+    assert opened(client, thread_id)["review_step"] == "confirm-findings"
+    assert entries_of(client, thread_id) == []
+
+    assert confirm(client, thread_id).status_code == 200
+    again = confirm(client, thread_id, [M1_EVIDENCED])
+
+    assert again.status_code == 409
+    assert again.json()["detail"] == "The findings of this assessment were confirmed already."
+    after = opened(client, thread_id)
+    assert after["confirmed"] == []
+    assert [i["requirement_id"] for i in after["remediation"]] == ["M1"]
+    assert entries_of(client, thread_id) == [("confirm", None)]
+
+
+def test_a_decision_still_carrying_overrides_is_422_naming_confirm_findings(client):
+    thread_id = proposed_thread(client)
+    before = opened(client, thread_id)
+
+    response = review(client, thread_id, decision="accept", overrides=[M1_EVIDENCED])
+
+    assert response.status_code == 422
+    assert "Confirm findings" in json.dumps(response.json()["detail"])
+    assert opened(client, thread_id) == before
+    assert entries_of(client, thread_id) == []
+
+
+def test_confirm_findings_of_an_unknown_or_reviewed_thread_is_404_or_409(client):
+    assert confirm(client, "no-such-thread").status_code == 404
+    thread_id = proposed_thread(client)
+    review(client, thread_id, decision="reject")
+
+    response = confirm(client, thread_id)
+
+    assert response.status_code == 409
+    assert "not waiting for review" in response.json()["detail"]
 
 
 def test_reviewing_a_thread_that_is_not_waiting_is_409(client):
@@ -208,8 +363,10 @@ def test_review_needs_no_model_script(client, tmp_path):
     # Another app on a broken script: the paused thread waits in the process's checkpointer.
     reviewer = client_playing(broken)
 
-    response = reviewer.post(f"/api/assessments/{thread_id}/review", json={"decision": "accept"})
+    confirmed = confirm(reviewer, thread_id)
+    response = reviewer.post(f"/api/assessments/{thread_id}/review", json={"decision": "reject"})
 
+    assert confirmed.status_code == 200
     assert response.status_code == 200
     assert response.json()["assessment"]["model"] == "scripted-fake"
 
@@ -271,8 +428,7 @@ def test_a_new_run_carries_no_note_when_the_newest_assessment_was_not_rejected(c
     rejected = proposed_thread(client)
     old = "An old rejection, since accepted."
     client.post(f"/api/assessments/{rejected}/review", json={"decision": "reject", "note": old})
-    accepted = proposed_thread(client)
-    client.post(f"/api/assessments/{accepted}/review", json={"decision": "accept", "note": "Ok."})
+    accepted(client, proposed_thread(client), note="Ok.")
     prompts.clear()
 
     read_events(client.post("/api/assessments", json={"control_id": DEMO_CONTROL}))
@@ -304,12 +460,11 @@ def test_a_stored_review_keeps_who_reviewed_it_and_when(client):
 )
 def test_a_bad_override_is_422_and_the_thread_still_waits(client, override):
     thread_id = proposed_thread(client)
-    url = f"/api/assessments/{thread_id}/review"
 
-    response = client.post(url, json={"decision": "accept", "overrides": [override]})
+    response = confirm(client, thread_id, [override])
 
     assert response.status_code == 422
-    assert client.post(url, json={"decision": "accept"}).status_code == 200
+    assert confirm(client, thread_id).status_code == 200
 
 
 def test_an_answer_claiming_an_audit_result_twice_ends_with_one_error_event(tmp_path):

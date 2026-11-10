@@ -14,7 +14,11 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
 
 from vouch.graph import SUBMIT_ANSWER, Judgement, RemediationPlan, SubmitAnswer
-from vouch.profile_pass import CHARS_PER_TOKEN, ProfilePassReply
+from vouch.profile_pass import ProfilePassReply
+
+FAKE_CHARS_PER_TOKEN = 4
+"""The fake's own token count, four characters a token: its usage figures are estimates by design,
+kept apart from the profile pass's measured rates (#432) so spending tests don't move."""
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -113,9 +117,8 @@ def _load_script(path: Path) -> Script:
 
 
 def _tokens(text: str) -> int:
-    """The fake's token count for `text`: CHARS_PER_TOKEN, about four characters a token, as
-    the profile pass estimates its prompt (vouch.profile_pass)."""
-    return math.ceil(len(text) / CHARS_PER_TOKEN)
+    """The fake's token count for `text`, at FAKE_CHARS_PER_TOKEN characters a token."""
+    return math.ceil(len(text) / FAKE_CHARS_PER_TOKEN)
 
 
 def _usage(messages: list[BaseMessage], written: str) -> UsageMetadata:

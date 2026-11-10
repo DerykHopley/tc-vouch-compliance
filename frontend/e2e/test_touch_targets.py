@@ -2,9 +2,11 @@
 floor). The pages on the profiles server, which reaches the developer page; the chat on its own."""
 
 import re
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from playwright.sync_api import Page, expect
+from reviewing import reviewed
 from test_company_setup import (
     LEVELS,
     control,
@@ -17,8 +19,10 @@ from test_company_setup import (
     to_step_7,
 )
 from test_guided_chat import assess_in_the_chat
+from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
-from test_remediation import ITEM, accepted_with_an_item
+from test_questions import readiness_afresh
+from test_remediation import ITEM, confirmed_with_an_item
 from test_review import assessed, open_paper, row
 from touch_targets import small_targets
 
@@ -41,6 +45,51 @@ def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url,
     if path == "/":
         quotes = page.get_by_role("region", name="What the evidence says")
         expect(quotes.get_by_role("link").first).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_review_round_s_name_field_and_start_round_are_at_least_44px(page: Page, rounds_url):
+    # #402: the overview above measures the open round's Close round; here, none open. On the
+    # rounds' own server, whose checks read whichever state it is in.
+    closed = page.request.post(f"{rounds_url}/api/rounds/close")
+    assert closed.status in (200, 409), closed.status  # 409: none was open
+    at_phone_width(page, rounds_url)
+    expect(page.get_by_role("button", name="Start round")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_improvement_plan_s_priority_and_mark_done_are_at_least_44px(page: Page, plan_url):
+    # #410: an approved item of an accepted control, its Priority select, Mark done and the done
+    # form open, in the Internal improvement goal; on the plan's own server.
+    improving_afresh(page.request, plan_url)
+    thread_id = assessed(page.request, plan_url)["assessment"]["thread_id"]
+    reviewed(page.request, plan_url, thread_id, items="approve")
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
+        at_phone_width(page, f"{plan_url}/controls/4.1.2")
+    item = page.get_by_role("region", name="Remediation item M1")
+    expect(item.get_by_label("Priority")).to_be_visible()
+    assert small_targets(page) == []
+    item.get_by_role("button", name="Mark M1 done").click()
+    expect(item.get_by_label("What was done")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_open_questions_forms_are_at_least_44px(page: Page, questions_url):
+    # #414: a listed question's Record answer, then the answer form and the log form open, on a
+    # control not assessed; on the questions' own server.
+    readiness_afresh(page.request, questions_url)
+    due = (datetime.now(UTC).date() + timedelta(days=7)).isoformat()
+    asked = page.request.post(
+        f"{questions_url}/api/controls/1.1.1/questions",
+        data={"question": "Who owns the policy?", "asked_of": "CISO", "due_date": due},
+    )
+    assert asked.ok, asked.status
+    at_phone_width(page, f"{questions_url}/controls/1.1.1")
+    questions = page.get_by_role("region", name="Open questions")
+    questions.get_by_role("button", name="Record answer").click()
+    expect(questions.get_by_role("textbox", name="Answer", exact=True)).to_be_visible()
+    questions.get_by_role("button", name="Log a question").click()
+    expect(questions.get_by_role("form", name="Log a question on 1.1.1")).to_be_visible()
     assert small_targets(page) == []
 
 
@@ -142,9 +191,14 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
     expect(page.get_by_role("form", name="Override M1")).to_be_visible()
     assert small_targets(page) == []
 
-    accepted_with_an_item(page.request, paper_url)  # accepted, with S1's item to approve or discard
+    confirmed_with_an_item(page.request, paper_url)  # Plan fixes: S1's item to approve or discard
     paper = open_paper(page, paper_url)
     expect(row(paper, ITEM).get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
+    assert small_targets(page) == []
+
+    # #437: Assess again on a review in progress warns first, with two pills in its place.
+    paper.get_by_role("button", name="Assess again 4.1.2").click()
+    expect(paper.get_by_role("button", name="Keep the review")).to_be_visible()
     assert small_targets(page) == []
 
 

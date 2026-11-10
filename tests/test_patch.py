@@ -17,10 +17,12 @@ from vouch.front_matter import split_front_matter
 from vouch.graph import (
     NOT_JUDGED,
     PENDING_REASON,
+    ConfirmFindings,
     Judgement,
     RemediationPlan,
     ReviewDecision,
     ShouldScore,
+    confirm_findings,
     memory_checkpointer,
     resume,
 )
@@ -383,6 +385,7 @@ def test_requirements_pending_on_patch_get_no_remediation_but_the_review_lists_t
         "No remediation item drafted: the evidence for M1, M2, M3, S1, S2, S3 is pending."
     )
 
+    confirm_findings(proposed.thread_id, ConfirmFindings(), saver)
     reviewed = resume(proposed.thread_id, ReviewDecision(decision="accept"), saver)
 
     assert reviewed.remediation == []

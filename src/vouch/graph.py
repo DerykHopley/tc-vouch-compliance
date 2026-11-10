@@ -14,7 +14,7 @@ import logging
 import operator
 import textwrap
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,9 +29,16 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command, StateSnapshot, interrupt
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
-from vouch.citations import Citation, CitationClaim, DropReason, QuoteChecker
+from vouch.citations import (
+    LEAD_STATEMENT,
+    Citation,
+    CitationClaim,
+    DropReason,
+    LeadStatement,
+    QuoteChecker,
+)
 from vouch.documents import (
     DOCUMENTED,
     DocumentChoice,
@@ -59,6 +66,7 @@ from vouch.language import (
     kept_in_other_language,
     language_name,
     language_refusal,
+    lead_statement_label,
     mismatch,
     written_in_not,
 )
@@ -88,7 +96,7 @@ SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m4-answer-language-2"  # with main's partly evidenced remediation (#212)
+PROMPT_VERSION = "m7-lead-statements-1"  # the lead's statements as evidence (#422)
 """The version of the prompts below: change it whenever a prompt changes, so a run can say
 which prompts drafted it (the developer page, #34; the audit trail, M2)."""
 
@@ -126,6 +134,23 @@ NOT_DRAFTED = "not drafted"  # its "missing"
 NO_OWNER = "no owner suggested"  # its owner role
 DEFAULT_DUE_DAYS = 90  # its due date, counted from today
 MAX_DUE_DAYS = 365
+
+LEAD_SOURCE = "lead"
+"""The source a lead statement's passage gives (#422): the lead's answer, not a document."""
+LEAD_RULE = (
+    f"Passages from {LEAD_SOURCE} are the compliance lead's own statements, answers to open "
+    "questions on this control, each headed by the question it answers: cite one only where "
+    "no document shows the requirement, quoting the answer; a statement shows a requirement "
+    "partly at most."
+)
+"""What the prompts say of the lead's statements, only when there are some (#422)."""
+
+
+def lead_rule(statements: object) -> str:
+    """LEAD_RULE to follow a system prompt's rules when there are lead statements; nothing when
+    there are none, so such a prompt is as it was before #422."""
+    return f" {LEAD_RULE}" if statements else ""
+
 
 log = logging.getLogger(__name__)
 
@@ -241,6 +266,34 @@ class EvidencePassage(Passage):
     source: str
     kind: EvidenceKind
     stale: bool
+
+
+def statement_passages(statements: Iterable[LeadStatement], language: str) -> list[EvidencePassage]:
+    """Each lead statement as one evidence passage (#422): its "Q<id>", headed by the label in
+    the answer `language` and the question it answers, the answer as its text (only that is
+    quoted), from LEAD_SOURCE, documented, never stale."""
+    label = lead_statement_label(language)
+    return [
+        EvidencePassage(
+            doc_id=s.doc_id,
+            heading=f"{label}: {s.question}",
+            text=s.answer,
+            source=LEAD_SOURCE,
+            kind=DOCUMENTED,
+            stale=False,
+        )
+        for s in statements
+    ]
+
+
+def statements_text(passages: list[EvidencePassage]) -> str:
+    """The lead's statements as data for a prompt, after what it lists; nothing without any."""
+    if not passages:
+        return ""
+    return (
+        "\n\nThe compliance lead's statements on this control, answers to open questions:\n"
+        f"{as_data(passages)}"
+    )
 
 
 def with_facts(
@@ -396,12 +449,34 @@ class OverrideRequest(BaseModel):
     ]
 
 
+class ConfirmFindings(BaseModel):
+    """The first step of the lead's review (Confirm findings): the requirements' verdicts
+    confirmed, any overridden with a reason; one not overridden is confirmed as Vouch judged it."""
+
+    overrides: list[OverrideRequest] = Field(default_factory=list)
+
+
+OVERRIDES_AT_CONFIRM = (
+    "Overrides are recorded with Confirm findings, not with the decision: confirm the findings "
+    "with them first."
+)
+
+
 class ReviewDecision(BaseModel):
-    """The compliance lead's review of one control: accept or reject, a note, any overrides."""
+    """The compliance lead's decision on one control, the review's last step (Accept), or its
+    end at any step (Reject): the decision and a note. Overrides go with Confirm findings: a
+    decision carrying them (a page loaded before the three-step review) is refused, so none is
+    silently dropped."""
 
     decision: Decision
     note: Annotated[str, StringConstraints(pattern=NO_NUL_PATTERN)] = ""
-    overrides: list[OverrideRequest] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_overrides(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "overrides" in data:
+            raise ValueError(OVERRIDES_AT_CONFIRM)
+        return data
 
 
 @dataclass(frozen=True)
@@ -427,6 +502,9 @@ class Review:
     reviewer_id: str = ""
     reviewer_name: str = ""
     reviewed_at: str = ""
+    three_step: bool = False
+    """Made in the three-step review (Confirm findings, Plan fixes, Accept; #372). A review kept
+    before it reads False, its default."""
 
     @property
     def status(self) -> "Status":
@@ -437,6 +515,7 @@ Status = Literal["waiting-for-review", "accepted", "rejected"]
 WAITING: Status = "waiting-for-review"
 REVIEWED: dict[Decision, Status] = {"accept": "accepted", "reject": "rejected"}
 WAITING_TEXT = "Waiting for the compliance lead's review."
+WAITING_TO_ACCEPT_TEXT = "Findings confirmed. Waiting for the compliance lead's plan and decision."
 
 
 class UnknownAssessmentError(LookupError):
@@ -445,6 +524,19 @@ class UnknownAssessmentError(LookupError):
 
 class NotWaitingForReviewError(RuntimeError):
     """The assessment exists but isn't paused at the review (it was reviewed already)."""
+
+
+class WrongStepError(NotWaitingForReviewError):
+    """The assessment waits at another step of the review than the one asked for: its findings
+    confirmed already, or not yet confirmed for Accept (a 409, as a review made already)."""
+
+
+CONFIRM_FIRST = "Confirm the findings first."
+CONFIRMED_ALREADY = "The findings of this assessment were confirmed already."
+DRAFTS_LEFT = "Approve or discard the remediation items of {ids} first."
+NO_DRAFTS: "Callable[[Assessment], Sequence[str]]" = lambda _: ()
+"""No remediation item left a draft: what `resume` assumes unless told (vouch.remediation keeps
+the decisions)."""
 
 
 class InvalidReviewError(ValueError):
@@ -469,9 +561,19 @@ class Assessment:
     thread_id: str = ""  # resume this thread with the lead's review decision
     status: Status = WAITING
     review: Review | None = None
+    confirmed: list[Override] | None = None
+    """The overrides recorded with Confirm findings, once the findings are confirmed (#372); None
+    before, and on a review kept before the three-step review."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def in_review(assessment: Assessment) -> bool:
+    """Whether the assessment's review is in progress (#437): waiting for review with its
+    findings confirmed, at Plan fixes or Accept. A profile pass never sets such a review aside,
+    and the app warns before Assess again does."""
+    return assessment.status == WAITING and assessment.confirmed is not None
 
 
 def counts_towards_roll_up(requirement: RequirementVerdict) -> bool:
@@ -553,13 +655,19 @@ class AssessState(TypedDict, total=False):
     profile_id: str
     evidence: Annotated[list[EvidencePassage], operator.add]
     warnings: Annotated[list[str], operator.add]
-    guards: list[str]  # the last tools step's guard sentences: refusals and flagged passages
+    # The last step's guard sentences: the tools step's refusals and flagged passages, or the
+    # apply_overlays step's flagged lead statements (#422).
+    guards: list[str]
     searched: list[str]  # the last tools step's searches that ran, one sentence each
     # The tools pending in this run, by label: EVIDENCE_PENDING or TIMED_OUT. An update of ""
     # clears one (it answered later).
     pending: Annotated[dict[str, str], _merge_pending]
     pending_said: list[str]  # the last tools step's sentences about pending sources
     pending_ids: list[str]  # requirements left not evidenced while a source was pending
+    # Judged on the lead's statements though no source could be read (#422): that reason, and the
+    # requirements citing no statement, left not evidenced with it and no remediation item.
+    unread_reason: str | None
+    unread_ids: list[str]
     unreadable: list[str]  # the last tools step's sources that couldn't be read, by label
     searches_run: Annotated[int, operator.add]
     searches_refused: Annotated[int, operator.add]
@@ -588,11 +696,13 @@ class AssessState(TypedDict, total=False):
     remediate_rejected_word: str | None
     partly_drafted: int  # of the drafts made, those for partly evidenced requirements (#212)
     not_drafted: list[str]
+    confirmed: list[Override]  # the overrides confirmed with the findings (#372)
     review: Review
     steps: Annotated[list[dict[str, str]], operator.add]  # each node's described step
     model: str  # the model that drafted it, and its prompt version
     prompt_version: str
     answer_language: str  # the profile's, ISO 639-1
+    lead_statements: list[LeadStatement]  # the lead's on this control (#422)
 
 
 def format_requirements(requirements: Iterable[Requirement]) -> str:
@@ -635,6 +745,7 @@ def _prompt(
     control_requirements: ControlRequirements,
     profile: ComplianceProfile,
     note: str = "",
+    statements: list[EvidencePassage] | None = None,
 ) -> list[AnyMessage]:
     offered = [t["function"]["name"] for t in _offered_tools(profile)]
     search = (
@@ -649,10 +760,12 @@ def _prompt(
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
             f"{language_name(profile.answer_language)}; quote a document only unchanged, in its "
             f"own language. Say what the evidence shows; {never_claim(profile)} {DATA_RULE}"
+            f"{lead_rule(statements)}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
             f"Requirements:\n{format_requirements(control_requirements.applicable)}"
+            f"{statements_text(statements or [])}"
             f"{_note_text(note)}"
         ),
     ]
@@ -666,12 +779,18 @@ def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage
     )
 
 
+def _statements_of(state: AssessState, profile: ComplianceProfile) -> list[EvidencePassage]:
+    """The lead's statements on the control, as the prompts list them (#422)."""
+    return statement_passages(state.get("lead_statements", []), profile.answer_language)
+
+
 def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMessage]:
     control = state["control"]
     pending = [
         f"{label} could not be read, so its evidence is pending" for label in state["pending"]
     ]
-    evidence = as_data(state["evidence"], pending) if state["evidence"] or pending else "(none)"
+    passages = [*state["evidence"], *_statements_of(state, profile)]
+    evidence = as_data(passages, pending) if passages or pending else "(none)"
     return [
         SystemMessage(
             "Judge each requirement listed from the evidence alone, not the draft answer. "
@@ -688,6 +807,7 @@ def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMes
             "evidence. Stale evidence shows a requirement partly at most. Write each reason in "
             f"{language_name(profile.answer_language)}; copy each quote unchanged, in its "
             f"document's language, never translated. {never_claim(profile)} {DATA_RULE}"
+            f"{lead_rule(state.get('lead_statements'))}"
         ),
         HumanMessage(
             f"Control {control.id}: {control.question}\n"
@@ -810,6 +930,30 @@ def apply_overrides(
     return reviewed, kept
 
 
+UNREAD_REASONS = frozenset({NO_SOURCE, NO_ALLOWED_SEARCH})
+"""The reasons no allowed source could be read, which a requirement citing no lead statement
+keeps when the control is judged on the statements alone (#422)."""
+
+
+def _kept_unread(
+    requirements: list[RequirementVerdict], reason: str | None
+) -> tuple[list[RequirementVerdict], list[str]]:
+    """With no source read (`reason`, one of UNREAD_REASONS), each applicable requirement that
+    cites no lead statement is not evidenced for that reason, its citations gone, and the ids of
+    those requirements: the source may hold what they lack, so no remediation item is drafted
+    for them, as for pending ones (#422). Nothing changes without a reason."""
+    if reason is None:
+        return requirements, []
+    kept, ids = [], []
+    for r in requirements:
+        if r.verdict == NOT_APPLICABLE or any(c.lead_statement for c in r.citations):
+            kept.append(r)
+            continue
+        kept.append(replace(r, verdict="not-evidenced", reason=reason, citations=()))
+        ids.append(r.id)
+    return kept, ids
+
+
 def _noted_pending(
     requirements: list[RequirementVerdict], pending: dict[str, str]
 ) -> tuple[list[RequirementVerdict], list[str]]:
@@ -881,8 +1025,10 @@ def _usage_of(message: Any) -> list[dict[str, int]]:
 
 
 def _gathered(state: AssessState) -> list[str]:
-    """The texts of the passages this assessment gathered: search results, records, Patch."""
-    return [p["text"] for p in state.get("evidence", [])]
+    """The texts of the passages this assessment gathered: search results, records, Patch, and
+    the lead's statements (#422)."""
+    statements = [s.answer for s in state.get("lead_statements", [])]
+    return [p["text"] for p in state.get("evidence", [])] + statements
 
 
 def ask_until_clean[T](
@@ -943,13 +1089,13 @@ def build_graph(
         prompt that starts gathering."""
         control = state["control"]
         control_requirements = profile.requirements_for(control)
-        applicable = set(control_requirements.applicable)
+        statements = _statements_of(state, profile)
+        prompt = _prompt(control, control_requirements, profile, state.get("note", ""), statements)
         return {
             "control_requirements": control_requirements,
-            "overlay_requirements": tuple(
-                r for r in control_requirements.overlay if r in applicable
-            ),
-            "messages": _prompt(control, control_requirements, profile, state.get("note", "")),
+            "overlay_requirements": overlay_requirements_of(control_requirements),
+            "messages": prompt,
+            "guards": flagged_steps(statements),  # an instruction-like answer (#422)
         }
 
     def overlay_branch(state: AssessState) -> dict[str, Any]:
@@ -1115,9 +1261,18 @@ def build_graph(
         """
         control_requirements = state["control_requirements"]
         reason = no_evidence_reason(state)
-        if reason is not None:  # nothing could be read, so nothing is shown
+        # With the lead's statements there is always something to judge on (#422); where no
+        # source could be read, only what a statement shows counts (check_quotes).
+        if reason is not None and not state.get("lead_statements"):  # nothing read, none shown
             results = judged_requirements(control_requirements, None, reason).results
-            return {"requirements": results, "not_judged": [], "claims": {}, "about_doing": []}
+            return {
+                "requirements": results,
+                "not_judged": [],
+                "claims": {},
+                "about_doing": [],
+                "unread_reason": None,
+            }
+        unread = reason if reason in UNREAD_REASONS else None
 
         def read(judgement: Judgement | None) -> tuple[JudgedRequirements, list[str]]:
             judged = judged_requirements(control_requirements, judgement)
@@ -1141,6 +1296,7 @@ def build_graph(
             "about_doing": judged.about_doing,
             "judge_rejected_word": rejected,
             "usage": usage,
+            "unread_reason": unread,
         }
 
     def check_quotes(state: AssessState) -> dict[str, Any]:
@@ -1151,7 +1307,7 @@ def build_graph(
         judge's rules (`_apply_rules`) cap what the checked citations can show. Each document
         is read once.
         """
-        checker = quote_checker(state)
+        checker = quote_checker(state, label=lead_statement_label(profile.answer_language))
         results, dropped = checked_requirements(
             state["requirements"],
             state.get("claims", {}),
@@ -1159,12 +1315,14 @@ def build_graph(
             state.get("about_doing", []),
             profile.answer_language,
         )
+        results, unread_ids = _kept_unread(results, state.get("unread_reason"))
         results, pending_ids = _noted_pending(results, state["pending"])
         changes = verdict_changes(state["requirements"], results)
         return {
             "requirements": results,
             "dropped_citations": dropped,
             "pending_ids": pending_ids,
+            "unread_ids": unread_ids,
             "verdict_changes": changes,
         }
 
@@ -1172,7 +1330,9 @@ def build_graph(
         """The model drafts one remediation item per requirement not or partly evidenced (#212);
         none of those, no call. A draft claiming an audit result gets the plan asked for again
         once, then an error. Before the interrupt, so it only reads and asks the model."""
-        to_fix = to_remediate(state["requirements"], state["pending_ids"])
+        unread = state.get("unread_ids", [])
+        to_fix = to_remediate(state["requirements"], [*state["pending_ids"], *unread])
+        said_unread = {"unread_ids": unread, "unread_reason": state.get("unread_reason")}
         if not to_fix:
             return {
                 "remediation": [],
@@ -1180,6 +1340,7 @@ def build_graph(
                 "remediate_rejected_word": None,
                 "partly_drafted": 0,
                 "pending_ids": state["pending_ids"],
+                **said_unread,
             }
         today = date.fromisoformat(state["today"])
 
@@ -1206,32 +1367,41 @@ def build_graph(
             "partly_drafted": len(partly - set(not_drafted)),
             "usage": usage,
             "pending_ids": state["pending_ids"],
+            **said_unread,
         }
 
     def review(state: AssessState) -> dict[str, Any]:
-        """Pause for the compliance lead. This node re-runs from its start on resume, so
-        nothing before the interrupt writes; the decision comes back as its value."""
+        """Pause for the compliance lead's Confirm findings, the review's first step (#372; the
+        node keeps its name, so a thread waiting here from before resumes into it). This node
+        re-runs from its start on resume, so nothing before the interrupt writes; the lead's
+        findings come back as its value: the overrides applied, the roll-up and remediation
+        items recalculated, the overrides kept for the review. Or a rejection, which ends the
+        review here."""
         answer = interrupt({"control_id": state["control"].id})
-        decision = ReviewDecision.model_validate(answer)
-        requirements, overrides = apply_overrides(state["requirements"], decision.overrides)
+        if DECISION in answer:  # Reject (`resume` lets no Accept through here)
+            decision = ReviewDecision.model_validate(_fields(answer))
+            return {"review": _recorded(decision, [], answer)}
+        findings = ConfirmFindings.model_validate(_fields(answer))
+        requirements, overrides = apply_overrides(state["requirements"], findings.overrides)
         today = date.fromisoformat(state["today"])
         overridden = {o.requirement_id for o in overrides}
-        still_pending = [i for i in state["pending_ids"] if i not in overridden]
+        left_out = [*state["pending_ids"], *state.get("unread_ids", [])]
+        still_pending = [i for i in left_out if i not in overridden]
         remediation = _reviewed_remediation(
             requirements, state["remediation"], today, still_pending
         )
-        return {
-            "requirements": requirements,
-            "remediation": remediation,
-            "review": Review(
-                decision.decision,
-                decision.note,
-                overrides,
-                reviewer_id=answer.get(REVIEWED_BY, {}).get("id", ""),
-                reviewer_name=answer.get(REVIEWED_BY, {}).get("name", ""),
-                reviewed_at=answer.get(REVIEWED_AT, ""),
-            ),
-        }
+        return {"requirements": requirements, "remediation": remediation, "confirmed": overrides}
+
+    def accept(state: AssessState) -> dict[str, Any]:
+        """Pause for the lead's decision once the findings are confirmed: Accept (after Plan
+        fixes, which happens outside the graph, vouch.remediation) or Reject. The review keeps
+        the overrides confirmed with the findings."""
+        answer = interrupt({"control_id": state["control"].id})
+        decision = ReviewDecision.model_validate(_fields(answer))
+        return {"review": _recorded(decision, state["confirmed"], answer)}
+
+    def after_review(state: AssessState) -> str:
+        return END if state.get("review") is not None else "accept"
 
     def after_gather(state: AssessState) -> str:
         return "check_answer" if state.get("answer") is not None else "tools"
@@ -1260,6 +1430,7 @@ def build_graph(
         "check_quotes": check_quotes,
         "remediate": remediate,
         "review": review,
+        "accept": accept,
     }.items():
         graph.add_node(node, described(node, run))
     graph.add_edge(START, "apply_overlays")
@@ -1272,7 +1443,8 @@ def build_graph(
     # Remediation follows the quote check, which can turn a verdict into not-evidenced.
     graph.add_edge("check_quotes", "remediate")
     graph.add_edge("remediate", "review")
-    graph.add_edge("review", END)
+    graph.add_conditional_edges("review", after_review, ["accept", END])
+    graph.add_edge("accept", END)
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -1379,8 +1551,11 @@ class Step:
         if self.node == "remediate":
             drafts, pending = update["remediation"], update.get("pending_ids", [])
             waiting = f"the evidence for {', '.join(pending)} is pending"
-            if not drafts and pending:
-                return f"No remediation item drafted: {waiting}."
+            unread = update.get("unread_ids", [])
+            unread_said = f" None for {', '.join(unread)}: {update.get('unread_reason')}."
+            if not drafts and (pending or unread):
+                text = f"No remediation item drafted: {waiting}." if pending else ""
+                return (text + (unread_said if unread else "")).strip()
             if not drafts:
                 return (
                     "Every requirement that applies is evidenced, so no remediation item was "
@@ -1397,6 +1572,8 @@ class Step:
             )
             if pending:
                 text += f" None for {', '.join(pending)}: {waiting}."
+            if unread:
+                text += unread_said
             word = update.get("remediate_rejected_word")
             if word:
                 text = (
@@ -1406,14 +1583,19 @@ class Step:
             if not_drafted:
                 text += " Not drafted: " + ", ".join(not_drafted) + "."
             return text
-        if self.node == "review":
+        if self.node in ("review", "accept"):
             review = update.get("review")
-            if review is None:
-                return WAITING_TEXT
-            text = f"The compliance lead {review.status} the assessment"
-            if review.overrides:
-                ids = ", ".join(o.requirement_id for o in review.overrides)
-                text += f", overriding {ids}"
+            confirmed = update.get("confirmed")
+            if review is None and confirmed is None:
+                return WAITING_TEXT if self.node == "review" else WAITING_TO_ACCEPT_TEXT
+            text = (
+                "The compliance lead confirmed the findings"
+                if review is None
+                else f"The compliance lead {review.status} the assessment"
+            )
+            overrides = confirmed if review is None else review.overrides
+            if overrides and self.node == "review":  # the accept step's were named at confirm
+                text += f", overriding {', '.join(o.requirement_id for o in overrides)}"
             return text + "."
         return f"Finished the {self.node} step."
 
@@ -1438,9 +1620,22 @@ def loaded_step(control: IsaControl, profile: ComplianceProfile) -> Step:
     return Step("load_control", update, profile)
 
 
-def _waiting_step() -> Step:
-    """The step a paused run ends with: the review node, interrupted, made no update."""
-    return Step("review", {})
+def overlay_requirements_of(requirements: ControlRequirements) -> tuple[Requirement, ...]:
+    """The applicable requirements the country overlays add to a control, in order: what the
+    apply_overlays node sets (the profile pass too, #390)."""
+    applicable = set(requirements.applicable)
+    return tuple(r for r in requirements.overlay if r in applicable)
+
+
+def overlays_step(overlay_requirements: tuple[Requirement, ...]) -> Step:
+    """The apply_overlays step for these overlay requirements, in the agent's own words."""
+    return Step("apply_overlays", {"overlay_requirements": overlay_requirements})
+
+
+def _waiting_step(node: str = "review") -> Step:
+    """The step a paused run ends with: the review node (or, once the findings are confirmed,
+    the accept node), interrupted, made no update."""
+    return Step(node, {})
 
 
 def guard_steps(update: dict[str, Any]) -> list[Step]:
@@ -1465,16 +1660,18 @@ def _apply_rules(
     """The judge's rules on a requirement whose citations are checked (spec #2, ticket #22).
 
     Stale evidence caps it at partly-evidenced, and the reason names each stale document and
-    why. A requirement about doing something (as the judge said) needs implemented evidence to
-    be evidenced; with documented evidence only it is capped too, and the reason says so.
+    why; so does a lead statement cited, whatever else is (#422), the reason naming it. A
+    requirement about doing something (as the judge said) needs implemented evidence to be
+    evidenced; with documented evidence only it is capped too, and the reason says so.
     """
     if requirement.verdict not in SHOWN_VERDICTS:
         return requirement
     stale = {c.doc_id: c.stale_because for c in requirement.citations if c.stale}
+    statements = [c.doc_id for c in requirement.citations if c.lead_statement]
     documented_only = all(c.kind == DOCUMENTED for c in requirement.citations)
     doing_unshown = about_doing and documented_only and requirement.verdict == "evidenced"
     # In the profile's answer language, as the rest of the reason is (#354).
-    note = cap_note(stale, doing_unshown, language)
+    note = cap_note(stale, doing_unshown, language, dict.fromkeys(statements))
     if note is None:
         return requirement
     return replace(requirement, verdict="partly-evidenced", reason=f"{requirement.reason} {note}")
@@ -1565,6 +1762,7 @@ STATE_TYPES: tuple[type, ...] = (
     CitationClaim,
     DropReason,
     DroppedCitation,
+    LeadStatement,
     RemediationItem,
     Review,
     Override,
@@ -1577,14 +1775,16 @@ def state_serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=None).with_msgpack_allowlist(STATE_TYPES)
 
 
-def quote_checker(state: AssessState) -> QuoteChecker:
+def quote_checker(state: AssessState, *, label: str = LEAD_STATEMENT) -> QuoteChecker:
     """The quote check for an assessment's state: its folders, limited to the documents it
-    chose; a state saved before `document_choices` (#384) is checked against the whole
-    folders."""
+    chose, and the lead's statements it was given (#422), shown under `label`; a state saved
+    before `document_choices` (#384) is checked against the whole folders."""
     return QuoteChecker(
         state["document_folders"],
         today=date.fromisoformat(state["today"]),
         choices=state.get("document_choices"),
+        statements=state.get("lead_statements", []),
+        label=label,
     )
 
 
@@ -1619,9 +1819,10 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
     requirements = values["requirements"]
     review: Review | None = values.get("review")
     steps = list(values["steps"])
+    confirmed: list[Override] | None = values.get("confirmed")
     if review is None:
         status: Status = WAITING
-        steps.append(_waiting_step().to_dict())
+        steps.append(_waiting_step("review" if confirmed is None else "accept").to_dict())
     else:
         status = review.status
     return Assessment(
@@ -1643,6 +1844,7 @@ def _assessment(values: dict[str, Any], thread_id: str) -> Assessment:
         thread_id=thread_id,
         status=status,
         review=review,
+        confirmed=confirmed,
     )
 
 
@@ -1656,6 +1858,7 @@ def assess_steps(
     today: date | None = None,
     thread_id: str | None = None,
     scope: str = "",
+    statements: Iterable[LeadStatement] = (),
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
     Step saying the control was loaded, a Step per node as it finishes (and a guard Step per
@@ -1666,7 +1869,8 @@ def assess_steps(
     resumed. `note` is the lead's note from a rejected review, when the control is assessed
     again; `today` (default: the date now) is what due dates count from and what staleness is
     judged on. `thread_id` (default: a new one) must name a new thread; `scope` says whose
-    thread it is (see `thread_config`).
+    thread it is (see `thread_config`). `statements` are the lead's on this control (#422): the
+    judge may cite them, each showing a requirement partly at most.
 
     The control is assessed as given: a caller picks its ISA edition, normally the profile's
     (`ComplianceProfile.isa_control`)."""
@@ -1693,6 +1897,7 @@ def assess_steps(
         "note": note,
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
         "document_choices": profile.document_choices(),
+        "lead_statements": list(statements),
     }
     config = thread_config(thread_id, scope)
     yield loaded
@@ -1776,6 +1981,67 @@ def load_assessment(
 REVIEWED_BY = "reviewed_by"
 REVIEWED_AT = "reviewed_at"
 """Who decided and when: sent to the review node with the decision, beside its fields."""
+DECISION = "decision"
+"""The field a decision (Accept or Reject) carries and the findings don't: how the review node
+tells a rejection at Confirm findings from the findings."""
+
+
+def _fields(answer: dict[str, Any]) -> dict[str, Any]:
+    """What the lead sent, without who and when (sent beside it)."""
+    return {k: v for k, v in answer.items() if k not in (REVIEWED_BY, REVIEWED_AT)}
+
+
+def _recorded(
+    decision: ReviewDecision, overrides: list[Override], answer: dict[str, Any]
+) -> Review:
+    """The lead's decision as the thread keeps it, with who made it and when."""
+    return Review(
+        decision.decision,
+        decision.note,
+        overrides,
+        reviewer_id=answer.get(REVIEWED_BY, {}).get("id", ""),
+        reviewer_name=answer.get(REVIEWED_BY, {}).get("name", ""),
+        reviewed_at=answer.get(REVIEWED_AT, ""),
+        three_step=True,
+    )
+
+
+def _waiting(graph: Any, config: dict[str, Any], thread_id: str) -> StateSnapshot:
+    """The thread's snapshot, waiting at a step of the review; UnknownAssessmentError or
+    NotWaitingForReviewError when it isn't."""
+    snapshot: StateSnapshot = graph.get_state(config)
+    if not _reached_review(snapshot):
+        raise UnknownAssessmentError(f"no assessment {thread_id}")
+    if not snapshot.interrupts:
+        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
+    return snapshot
+
+
+def confirm_findings(
+    thread_id: str,
+    findings: ConfirmFindings,
+    checkpointer: BaseCheckpointSaver,
+    *,
+    scope: str = "",
+) -> Assessment:
+    """Resume a thread waiting at Confirm findings with the lead's findings, and return the
+    assessment waiting for the decision (#372): overrides applied, the roll-up and remediation
+    items recalculated. No model is called.
+
+    Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
+    review), NotWaitingForReviewError for one not waiting (reviewed already) and WrongStepError
+    for one whose findings were confirmed already, and InvalidReviewError for an override
+    `_check_overrides` refuses. Nothing is resumed when any is raised. `scope` says whose thread
+    it is (see `thread_config`). As `resume`, it doesn't keep two steps of one thread apart: the
+    caller does (vouch.audit)."""
+    graph = build_graph(None, checkpointer=checkpointer)
+    config = thread_config(thread_id, scope)
+    snapshot = _waiting(graph, config, thread_id)
+    if "confirmed" in snapshot.values:
+        raise WrongStepError(CONFIRMED_ALREADY)
+    _check_overrides(snapshot.values["requirements"], findings.overrides)
+    values = graph.invoke(Command(resume=findings.model_dump()), config)
+    return _assessment(values, thread_id)
 
 
 def resume(
@@ -1787,28 +2053,30 @@ def resume(
     reviewer_id: str = "",
     reviewer_name: str = "",
     reviewed_at: datetime | None = None,
+    drafts: Callable[[Assessment], Sequence[str]] = NO_DRAFTS,
 ) -> Assessment:
-    """Resume a thread waiting for review with the lead's decision and return the reviewed
-    Assessment: overrides applied, the roll-up and remediation items recalculated, the decision
-    recorded with who made it and when (the review's `reviewer_*` and `reviewed_at`). No model
-    is called.
+    """Resume a waiting thread with the lead's decision and return the reviewed Assessment: the
+    decision recorded with who made it and when (the review's `reviewer_*` and `reviewed_at`),
+    with the overrides confirmed with the findings. Accept is the review's last step, once the
+    findings are confirmed (`confirm_findings`); Reject ends it at any step. No model is called.
 
     Raises UnknownAssessmentError for an unknown thread (or one whose run never reached the
-    review), NotWaitingForReviewError for one not waiting (reviewed already), and
-    InvalidReviewError for an override `_check_overrides` refuses. Nothing is resumed when any
-    is raised. `scope` says whose thread it is (see `thread_config`): another user's thread id is
-    unknown.
+    review), NotWaitingForReviewError for one not waiting (reviewed already), and WrongStepError
+    for an Accept before the findings are confirmed, or while `drafts` names requirements whose
+    remediation items are still drafts. Nothing is resumed when any is raised.
+    `scope` says whose thread it is (see `thread_config`): another user's thread id is unknown.
 
     It doesn't keep two reviews of one thread apart: the caller does (the API through
     vouch.audit, whose trail holds a lock on the thread while it reviews and records)."""
     graph = build_graph(None, checkpointer=checkpointer)
     config = thread_config(thread_id, scope)
-    snapshot = graph.get_state(config)
-    if not _reached_review(snapshot):
-        raise UnknownAssessmentError(f"no assessment {thread_id}")
-    if not snapshot.interrupts:
-        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
-    _check_overrides(snapshot.values["requirements"], decision.overrides)
+    snapshot = _waiting(graph, config, thread_id)
+    if decision.decision == "accept":
+        if "confirmed" not in snapshot.values:
+            raise WrongStepError(CONFIRM_FIRST)
+        left = drafts(_assessment(snapshot.values, thread_id))
+        if left:
+            raise WrongStepError(DRAFTS_LEFT.format(ids=", ".join(left)))
     answer = decision.model_dump() | {
         REVIEWED_BY: {"id": reviewer_id, "name": reviewer_name},
         REVIEWED_AT: reviewed_at.isoformat() if reviewed_at else "",

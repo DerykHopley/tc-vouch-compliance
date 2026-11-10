@@ -38,8 +38,9 @@ Do the walk-throughs in order: each starts where the one before stopped.
      exposure, but no record shows that assessment was done. Its remediation item, a draft, says
      what is missing, with an owner and a due date.
    - **M2**, **S1**, **S2** and **S3** are **Evidenced**.
-6. At the foot, the proposed verdict waits for your review: a note field ("Your note (kept in the
-   audit trail)"), **Accept verdict** and **Reject verdict**.
+6. At the foot, the proposed verdict waits for the first of the review's three steps: the steps
+   "Confirm findings", "Plan fixes" and "Accept", a note field ("Your note (kept in the audit
+   trail)"), **Confirm findings** and **Reject verdict**.
 
 ## 2. Review it with an override
 
@@ -48,16 +49,21 @@ Do the walk-throughs in order: each starts where the one before stopped.
    empty. **Save** stays disabled until you give a reason. Type one, for example "The supplier
    portal does not check passwords against breach lists yet.", and select **Save**.
 3. S2 now reads **Partly evidenced**, "Overridden from Evidenced", with your reason, and
-   **Undo** next to **Change**. Above the review buttons: "1 override, recorded with your
-   decision." The control's verdict stays Partly evidenced (M1 still is).
-4. Select **Accept verdict**. The verdict is marked "Accepted", and the foot of the page reads
-   "Accepted by Local user on" the date and time.
-5. M1's remediation item now offers **Approve** and **Discard**, with its owner role and due
-   date. Select **Approve**: it reads "Approved". The override also drafts an item for S2, which
-   reads "not drafted" and needs an owner role before it can be approved: leave it. The Overview
-   counts both items, the report only the approved one.
-6. Back on the Overview: 4.1.2's card is "Accepted", Partly evidenced, and "Where you stand"
-   reads "1 accepted of 12", with 1 partly evidenced.
+   **Undo** next to **Change**. Above the review buttons: "1 override, recorded with the
+   findings." The control's verdict stays Partly evidenced (M1 still is).
+4. **Confirm findings:** select **Confirm findings**. The review moves to Plan fixes: the foot
+   reads "0 of 2 remediation items decided.", and **Accept verdict** stays disabled: "Approve or
+   discard each remediation item to accept the verdict."
+5. **Plan fixes:** M1's remediation item now offers its "Owner role" and "Due date", with
+   **Approve** and **Discard**. Select **Approve**: it reads "Approved". The override also drafted
+   an item for S2, which reads "not drafted" with an empty "Owner role": "Name the role that owns
+   the fix to approve it." Select **Discard** (it reads "Discarded"), or type an owner role and
+   select **Approve**. The foot reads "2 of 2 remediation items decided."
+6. **Accept:** select **Accept verdict**. The verdict is marked "Accepted", and the foot of the
+   page reads "Accepted by Local user on" the date and time.
+7. Back on the Overview: 4.1.2's card is "Accepted", Partly evidenced, and "Where you stand"
+   reads "1 accepted of 12", with 1 partly evidenced and 1 remediation item (M1's; with S2's
+   approved too, 2).
 
 ## 3. Ask a question
 
@@ -85,18 +91,20 @@ Do the walk-throughs in order: each starts where the one before stopped.
 2. Its head: the company, country, base framework (VDA ISA 2027.1), protection level, country
    overlays, language and the date it was drawn up.
 3. **Readiness** counts only accepted verdicts: "1 of 12 controls accepted", then 1 Partly
-   evidenced, 0 Evidenced, 0 Not evidenced, 0 Not applicable, 11 Open, and 1 remediation item.
+   evidenced, 0 Evidenced, 0 Not evidenced, 0 Not applicable, 11 Open, and 1 remediation item
+   (2 if you approved S2's).
 4. **Controls**: every control with its status. 4.1.2 is "Accepted", Partly evidenced, reviewed
    by Local user on its date, with the quotes behind it. The others are "Open: not yet accepted,
    so it has no reviewed verdict."
-5. **Remediation items**: the approved items of accepted controls, here M1's, with its owner and
-   due date.
+5. **Remediation items**: the approved items of accepted controls, here M1's (and S2's, if you
+   approved it), with its owner and due date.
 6. **Not applicable**: what the profile excludes, each with its reason; for Nordlicht, 5.1.2 S3
    (no remote access to the company network).
 7. **Audit trail**: one row per action, with when, who, the control, the requirement, the
    verdict before and after, the note, the evidence, the model and the prompt version. Newest
-   first: the approval of M1's remediation item, the acceptance of 4.1.2 and the override of S2,
-   with your reason as its note.
+   first: the acceptance of 4.1.2, the decision on S2's remediation item ("Discarded" or
+   "Approved"), the approval of M1's, "Findings confirmed", and the override of S2, with your
+   reason as its note.
 8. At the foot, the disclaimer: "Drafted by an AI assistant, reviewed by Local user; not an
    audit result."
 9. Select **Export PDF**: a PDF named `readiness-report-nordlicht-<date>.pdf` downloads, plain
@@ -116,8 +124,10 @@ Do the walk-throughs in order: each starts where the one before stopped.
 2. Open **4.1.2** and select **Assess**. The working paper says "Answer language: German", and
    the verdict, the draft answer and the requirements are in German: "Teilweise nachgewiesen",
    with 6 requirements under Alpenwerk's high protection level.
-3. Select **Accept verdict**, then **Report**: the report is in German ("Bereitschaftsbericht",
-   "1 von 12 Kontrollen akzeptiert"), with Alpenwerk's country overlay "AT NIS2 (illustrative)"
+3. Review it in three steps: select **Confirm findings**; at Plan fixes, select **Approve** on
+   its one remediation item (M1's); then select **Accept verdict**. Then select **Report**: the
+   report is in German ("Bereitschaftsbericht",
+   "1 von 12 Kontrollen akzeptiert"), with Alpenwerk's country overlay "AT NIS2 (illustrativ)"
    in its head and the disclaimer "Erstellt von einem KI-Assistenten, geprüft von Local user;
    kein Auditergebnis."
 
@@ -129,9 +139,9 @@ Alpenwerk's overlay adds O1 to 1.6.2.
 1. Choose **Alpenwerk Präzision GmbH** in the profile switcher, open **1.6.2** and select
    **Assess**.
 2. Under "How Vouch reached this":
-   - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrative) adds O1.";
-   - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrative))."
-3. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrative)", with
+   - `apply_overlays`: "Applied the country overlays: AT NIS2 (illustrativ) adds O1.";
+   - `overlay_branch`: "Overlay branch: gathering evidence for O1 (AT NIS2 (illustrativ))."
+3. O1 is in the requirements table, marked "Country overlay" and "AT NIS2 (illustrativ)", with
    its own verdict and reason: "Nicht nachgewiesen", since nothing provides for an early warning
    to the national CSIRT.
 

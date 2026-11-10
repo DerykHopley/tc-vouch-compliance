@@ -1,7 +1,11 @@
 import type { Assessment, Column, RequirementVerdict, Verdict } from './assessment.ts'
 import { authHeaders, refusedBecause, SESSION_ENDED, sessionEnded } from './session.ts'
 
-/** The compliance lead's review of a proposed assessment (#42), through #39's review route. */
+/**
+ * The compliance lead's review of a proposed assessment (#42), in three steps (#372): Confirm findings (the findings
+ * route, with the overrides), Plan fixes (each remediation item decided, `remediation.ts`), then Accept (#39's review
+ * route). Reject ends it at any step.
+ */
 
 /** A verdict the lead may give a requirement (`vouch.graph.JudgedVerdict`): not applicable is the profile's call. */
 export type JudgedVerdict = Exclude<Verdict, 'not-applicable'>
@@ -10,19 +14,43 @@ export const JUDGED_VERDICTS: JudgedVerdict[] = ['evidenced', 'partly-evidenced'
 /** An override: one requirement's verdict changed by the lead, with the reason (`vouch.graph.OverrideRequest`). */
 export type Override = { requirement_id: string; verdict: JudgedVerdict; reason: string }
 
-/** The lead's decision on a control (`vouch.graph.ReviewDecision`). */
-export type ReviewDecision = { decision: 'accept' | 'reject'; note: string; overrides: Override[] }
+/** The lead's decision on a control (`vouch.graph.ReviewDecision`): Accept, the last step, or Reject, at any. */
+export type ReviewDecision = { decision: 'accept' | 'reject'; note: string }
+
+/** An override as the assessment keeps it (`vouch.graph.Override`): with the agent's verdict and reason. */
+export type KeptOverride = Override & { agent_verdict: Verdict; agent_reason: string }
 
 /**
- * The decision as the assessment keeps it (`vouch.graph.Review`): each override with the agent's verdict and reason,
- * and who decided and when (empty on a review kept before #42).
+ * The decision as the assessment keeps it (`vouch.graph.Review`): each override confirmed with the findings, who
+ * decided and when (empty on a review kept before #42), and whether it was made in three steps (false on one kept
+ * before #372).
  */
-export type Review = Omit<ReviewDecision, 'overrides'> & {
-  overrides: (Override & { agent_verdict: Verdict; agent_reason: string })[]
+export type Review = ReviewDecision & {
+  overrides: KeptOverride[]
   reviewer_id: string
   reviewer_name: string
   /** ISO 8601. */
   reviewed_at: string
+  three_step?: boolean
+}
+
+/** The step of the review a proposed assessment waits at (`vouch.remediation.ReviewStep`). */
+export type ReviewStep = 'confirm-findings' | 'plan-fixes' | 'accept'
+
+/** The three steps, in order, with their names on screen (`GLOSSARY.md`). */
+export const REVIEW_STEPS: [ReviewStep, string][] = [
+  ['confirm-findings', 'Confirm findings'], ['plan-fixes', 'Plan fixes'], ['accept', 'Accept'],
+]
+
+/**
+ * The step a proposed assessment's review is at: Confirm findings until the server says they are confirmed; then Plan
+ * fixes while any remediation item is a draft, Accept once none is, counted from the items as the page holds them, so
+ * an item decided on the page moves it on at once. Null for a reviewed assessment.
+ */
+export function reviewStep(assessment: Pick<Assessment, 'status' | 'review_step' | 'remediation'>): ReviewStep | null {
+  if (assessment.status !== 'waiting-for-review') return null
+  if (!assessment.review_step || assessment.review_step === 'confirm-findings') return 'confirm-findings'
+  return (assessment.remediation ?? []).some((i) => i.status === 'draft') ? 'plan-fixes' : 'accept'
 }
 
 /** The columns whose verdicts make the control's (`vouch.graph.ROLL_UP_COLUMNS`). */
@@ -130,28 +158,38 @@ export function withOverrides(requirements: RequirementVerdict[], overrides: Ove
   })
 }
 
-export const ALREADY_REVIEWED = 'This control has already been reviewed, perhaps in another tab. Refresh to see the decision.'
-export const REVIEW_FAILED = 'Your decision could not be recorded just now. Nothing was changed; please try again.'
-export const REVIEW_REFUSED = 'Vouch refused this decision, and nothing was changed:'
+export const MOVED_ON = "This control's review has moved on, perhaps in another tab. Refresh to see where it stands."
+export const REVIEW_FAILED = 'This step could not be recorded just now. Nothing was changed; please try again.'
+export const REVIEW_REFUSED = 'Vouch refused this step, and nothing was changed:'
 
 /**
- * Why a decision wasn't recorded: `conflict`, reviewed already (409); `refused`, the decision itself was refused (422),
- * so sending it again can't help; `failed`, anything else, worth trying again.
+ * Why a step wasn't recorded: `conflict`, the review moved on (409: reviewed, or confirmed, already, perhaps in
+ * another tab); `refused`, the step itself was refused (422), so sending it again can't help; `failed`, anything else,
+ * worth trying again.
  */
 export type Refusal = 'conflict' | 'refused' | 'failed'
 
 export type ReviewAnswer = { ok: true; assessment: Assessment } | { ok: false; refusal: Refusal; message: string }
 
 /** Records the decision: the reviewed assessment, or why not. */
-export async function submitReview(threadId: string, decision: ReviewDecision): Promise<ReviewAnswer> {
+export function submitReview(threadId: string, decision: ReviewDecision): Promise<ReviewAnswer> {
+  return send(threadId, 'review', decision)
+}
+
+/** Confirms the findings with the lead's overrides (Confirm findings): the assessment at its next step, or why not. */
+export function confirmFindings(threadId: string, overrides: Override[]): Promise<ReviewAnswer> {
+  return send(threadId, 'findings', { overrides })
+}
+
+async function send(threadId: string, route: 'review' | 'findings', body: unknown): Promise<ReviewAnswer> {
   try {
-    const response = await fetch(`/api/assessments/${encodeURIComponent(threadId)}/review`, {
+    const response = await fetch(`/api/assessments/${encodeURIComponent(threadId)}/${route}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-      body: JSON.stringify(decision),
+      body: JSON.stringify(body),
     })
     if (response.ok) return { ok: true, assessment: ((await response.json()) as { assessment: Assessment }).assessment }
-    if (response.status === 409) return { ok: false, refusal: 'conflict', message: ALREADY_REVIEWED }
+    if (response.status === 409) return { ok: false, refusal: 'conflict', message: MOVED_ON }
     if (response.status === 422) {
       return { ok: false, refusal: 'refused', message: `${REVIEW_REFUSED} ${await refusedBecause(response)}`.trim() }
     }

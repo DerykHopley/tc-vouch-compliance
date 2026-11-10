@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
 from profiles_dir import SECOND, make_profiles
+from reviewing import reviewed
 from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
 from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1
@@ -147,7 +148,7 @@ def assess_and_review(client, control_id, decision=None):
     events = read_events(client.post("/api/assessments", json={"control_id": control_id}))
     thread_id = events[-1][1]["assessment"]["thread_id"]
     if decision:
-        client.post(f"/api/assessments/{thread_id}/review", json={"decision": decision})
+        reviewed(client, thread_id, decision)  # type: ignore[arg-type]
 
 
 @pytest.fixture

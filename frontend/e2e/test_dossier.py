@@ -3,6 +3,7 @@ cards with their state, the empty state, the API failing, and the page at 400px 
 
 import json
 
+import reviewing
 from dossier_cards import card, click_on_card, click_on_quote, first_quote
 from playwright.sync_api import APIRequestContext, Page, expect
 
@@ -19,10 +20,7 @@ def assessed(request: APIRequestContext, dossier_url: str, control_id: str) -> s
 
 
 def reviewed(request: APIRequestContext, dossier_url: str, thread_id: str, decision: str) -> None:
-    response = request.post(
-        f"{dossier_url}/api/assessments/{thread_id}/review", data={"decision": decision}
-    )
-    assert response.ok, response.status
+    reviewing.reviewed(request, dossier_url, thread_id, decision)  # type: ignore[arg-type]
 
 
 def open_dossier(page: Page, dossier_url: str) -> None:

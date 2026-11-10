@@ -13,6 +13,7 @@ from typing import Literal, TypedDict, get_args
 from vouch.citations import EvidenceKind
 from vouch.graph import Assessment, Status, Verdict
 from vouch.isa import Column, IsaControl, Requirement
+from vouch.plan import CardFlags, ReassessReason
 from vouch.profile import ComplianceProfile, ProtectionLevel
 
 QUOTES_SHOWN = 6  # the evidence quote cards on the overview, at most
@@ -43,6 +44,13 @@ class ControlCard(TypedDict):
     iso_27001: str
     status: CardStatus
     verdict: Verdict | None
+    # The improvement plan's (#410, vouch.plan.card_flags) and the open questions' (#414,
+    # vouch.questions): false (empty) on a control not assessed; `closed` and the `fixes-done`
+    # reason under Internal improvement only. `reassess_suggested` is true exactly when
+    # `reassess_reasons` isn't empty. None changes the status, the counts or the next step.
+    reassess_suggested: bool
+    reassess_reasons: list[ReassessReason]
+    closed: bool
 
 
 class Quote(TypedDict):
@@ -142,16 +150,20 @@ def overview(
     latest: Mapping[str, Assessment],
     discarded: Collection[tuple[str, str]] = (),
     approved: Collection[tuple[str, str]] = (),
+    flags: Mapping[str, CardFlags] | None = None,
 ) -> Overview:
     """The overview: the company, the profile's protection level and answer language, readiness from accepted verdicts only, a card per control
     (in the base framework's order) with its review state and verdict, how many controls are in
     each state, the evidence quotes from assessed controls not rejected, and the next step (None
     once every control is accepted). Assessments of controls not in `controls` are left out.
     `discarded` names the remediation items the lead discarded, by thread and requirement id:
-    the band counts the others (#43); `approved` those approved, counted apart (#310)."""
+    the band counts the others (#43); `approved` those approved, counted apart (#310). `flags`
+    are the improvement plan's and the open questions' per control (#410, #414; none: no flag
+    set)."""
     controls = list(controls)
     listed = {c.id: latest[c.id] for c in controls if c.id in latest}
-    cards = [_card(control, listed.get(control.id)) for control in controls]
+    flags = flags or {}
+    cards = [_card(control, listed.get(control.id), flags.get(control.id)) for control in controls]
     statuses = Counter(card["status"] for card in cards)
     return {
         "company": profile.company,
@@ -175,13 +187,18 @@ _NEXT: tuple[tuple[CardStatus, NextAction], ...] = (
 then assess one not yet assessed; the first such control in the base framework's order."""
 
 
-def _card(control: IsaControl, assessment: Assessment | None) -> ControlCard:
+def _card(
+    control: IsaControl, assessment: Assessment | None, flags: CardFlags | None
+) -> ControlCard:
     return {
         "id": control.id,
         "question": control.question,
         "iso_27001": control.iso_27001,
         "status": assessment.status if assessment else NOT_ASSESSED,
         "verdict": assessment.verdict if assessment else None,
+        "reassess_suggested": bool(assessment and flags and flags.reassess_suggested),
+        "reassess_reasons": list(flags.reasons) if assessment and flags else [],
+        "closed": bool(assessment and flags and flags.closed),
     }
 
 

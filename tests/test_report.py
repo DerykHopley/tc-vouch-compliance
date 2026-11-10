@@ -16,9 +16,10 @@ import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
-from typing import Any
+from typing import Any, Literal
 
 import pytest
+import reviewing
 import test_memory
 from fastapi.testclient import TestClient
 from profiles_dir import SECOND, make_profiles
@@ -29,7 +30,7 @@ from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noq
 from test_dossier import seeded
 from test_memory import app_on, restart
 
-from vouch import api, audit, isa, report
+from vouch import api, audit, goal, isa, report
 from vouch.database import Database
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import Review
@@ -62,16 +63,14 @@ def reviewed(
     client: TestClient,
     user: dict[str, str],
     control_id: str = DEMO_CONTROL,
-    decision: str = "accept",
-    **body: Any,
+    decision: Literal["accept", "reject"] = "accept",
+    **options: Any,
 ) -> str:
+    """The control assessed and reviewed through the three steps (reviewing.reviewed's
+    `options`); an Accept discards the items `decisions` leaves, so only those approved there
+    are listed. Its thread id."""
     thread_id = assessed(client, user, control_id)["thread_id"]
-    response = client.post(
-        f"/api/assessments/{thread_id}/review",
-        json={"decision": decision, **body},
-        headers=user,
-    )
-    assert response.status_code == 200, response.text
+    reviewing.reviewed(client, thread_id, decision, items="discard", headers=user, **options)
     return thread_id
 
 
@@ -113,7 +112,7 @@ def every_word(words: Any) -> list[str]:
 def test_readiness_counts_accepted_verdicts_only_and_equals_the_overviews(database_url, users):
     alice, _ = users
     with TestClient(app_on(database_url)) as client:
-        reviewed(client, alice, "4.1.2", "accept")
+        reviewed(client, alice, "4.1.2", "accept", decisions={"M1": {"decision": "approve"}})
         assessed(client, alice, "1.1.1")  # proposed, waiting for review
         reviewed(client, alice, "1.6.1", "reject")
         shown = report_of(client, alice)
@@ -126,10 +125,10 @@ def test_readiness_counts_accepted_verdicts_only_and_equals_the_overviews(databa
     assert {k: shown["readiness"][k] for k in counts} == {
         k: overview["readiness"][k] for k in counts
     }
-    # The overview counts 4.1.2's undecided M1 draft; the report counts what it lists: none.
+    # 4.1.2's approved M1 item, on both; nothing of the controls not accepted.
     assert overview["readiness"]["remediation_items"] == 1
-    assert shown["readiness"]["remediation_items"] == 0
-    assert shown["remediation"] == []
+    assert shown["readiness"]["remediation_items"] == 1
+    assert [g["control_id"] for g in shown["remediation"]] == ["4.1.2"]
 
 
 # --- The controls: reviewed verdict, reviewer, date and quotes; open ones carry none (1, 2) ----
@@ -207,10 +206,18 @@ def test_an_approved_item_is_listed_under_its_control_and_a_discarded_one_and_a_
     due = (date.today() + timedelta(days=30)).isoformat()
     with TestClient(app_on(database_url)) as client:
         # M1's drafted item, and S1's "not drafted" one from the lead's override.
-        thread = reviewed(client, alice, "4.1.2", "accept", overrides=[S1_NOT_EVIDENCED])
-        decide(client, alice, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
-        decide(client, alice, thread, "S1", decision="discard")
-        reviewed(client, alice, "1.1.1", "accept")  # its drafts stay drafts
+        reviewed(
+            client,
+            alice,
+            "4.1.2",
+            "accept",
+            overrides=[S1_NOT_EVIDENCED],
+            decisions={
+                "M1": {"decision": "approve", "owner_role": "CISO", "due_date": due},
+                "S1": {"decision": "discard"},
+            },
+        )
+        reviewed(client, alice, "1.1.1", "accept")  # its items discarded
         shown = report_of(client, alice)
 
     assert shown["remediation"] == [
@@ -261,20 +268,27 @@ def test_the_trail_holds_each_accept_override_and_approval_newest_first(database
     app = app_on(database_url)
     named(app, "Dana Lead")
     with TestClient(app) as client:
-        thread = reviewed(
-            client, alice, "4.1.2", "accept", note="Fine.", overrides=[S1_NOT_EVIDENCED]
-        )
-        decide(client, alice, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
+        reviewed(
+            client,
+            alice,
+            "4.1.2",
+            "accept",
+            note="Fine.",
+            overrides=[S1_NOT_EVIDENCED],
+            decisions={"M1": {"decision": "approve", "owner_role": "CISO", "due_date": due}},
+        )  # S1's item discarded before the Accept
         shown = report_of(client, alice)
         other = report_of(client, under(alice, "alpenwerk"))
 
     entries = shown["trail"]["entries"]
     assert [(e["action"], e["requirement_id"]) for e in entries] == [
-        ("approve", "M1"),
         ("accept", None),
+        ("discard", "S1"),
+        ("approve", "M1"),
+        ("confirm", None),
         ("override", "S1"),
     ]
-    accept = entries[1]
+    accept = entries[0]
     assert accept["reviewer_name"] == "Dana Lead"
     assert accept["note"] == "Fine."
     assert accept["evidence"] == [{"doc_id": "authentication-standard", "version": "3.1"}]
@@ -481,9 +495,19 @@ def test_the_head_names_the_company_framework_level_overlays_language_and_todays
         "words_language": "en",
         "date": "2026-11-06",
     }
-    assert german["overlays"] == ["AT NIS2 (illustrative)"]
+    assert german["overlays"] == ["AT NIS2 (illustrativ)"]  # written in German (#379)
+    assert german["country"] == "Österreich"  # the stored "Austria", in the report's words
     assert german["words_language"] == "de"
     assert german["protection_level"] == "high"
+
+
+def test_a_country_the_words_dont_name_shows_as_stored_never_blank():
+    # #379: the stored name is English by design (the top bar finds its ISO code from it).
+    assert report.country_in("Austria", "de") == "Österreich"
+    assert report.country_in("Germany", "de") == "Deutschland"
+    assert report.country_in("Atlantis", "de") == "Atlantis"
+    assert report.country_in("Austria", "en") == "Austria"
+    assert report.country_in("Austria", "fr") == "Austria"  # a language with no words: English
 
 
 # --- Failures ----------------------------------------------------------------------------------
@@ -617,9 +641,18 @@ def carried(shown: dict[str, Any]) -> list[str]:
 def seed_nordlicht(client: TestClient, user: dict[str, str]) -> None:
     """4.1.2 accepted with S1 overridden (M1 approved, S1 discarded), 1.1.1 accepted."""
     due = (date.today() + timedelta(days=30)).isoformat()
-    thread = reviewed(client, user, "4.1.2", "accept", note="Fine.", overrides=[S1_NOT_EVIDENCED])
-    decide(client, user, thread, "M1", decision="approve", owner_role="CISO", due_date=due)
-    decide(client, user, thread, "S1", decision="discard")
+    reviewed(
+        client,
+        user,
+        "4.1.2",
+        "accept",
+        note="Fine.",
+        overrides=[S1_NOT_EVIDENCED],
+        decisions={
+            "M1": {"decision": "approve", "owner_role": "CISO", "due_date": due},
+            "S1": {"decision": "discard"},
+        },
+    )
     reviewed(client, user, "1.1.1", "accept")
 
 
@@ -667,7 +700,8 @@ def test_the_export_holds_the_same_standing_as_the_served_report(database_url, u
 
     trail = table_rows(section(md, "Audit trail"))
     entries = shown["trail"]["entries"]
-    assert len(trail) == len(entries) == 5
+    # 4.1.2: override, confirm, approve, discard, accept; 1.1.1: confirm, two discards, accept.
+    assert len(trail) == len(entries) == 9
     for row, e in zip(trail, entries, strict=True):
         action = words["actions"][e["action"]]
         assert row[1:5] == [e["reviewer_name"], e["control_id"], e["requirement_id"] or "", action]
@@ -750,6 +784,66 @@ def test_a_note_with_a_bar_and_a_line_break_keeps_the_trail_tables_shape():
     assert rows[0][7] == "Checked \\| twice by phone."
     header = next(line for line in trail.splitlines() if line.startswith("|"))
     assert len(_CELL_EDGE.split(header)) - 2 == 11
+
+
+GOAL_SENTENCES = {
+    "en": "Goal changed from Audit readiness to Internal improvement",
+    "de": "Ziel geändert von Audit-Bereitschaft zu Interner Verbesserung",
+}
+
+
+def goal_change(n: int = 1) -> audit.AuditEntry:
+    """A goal change's entry (#369), as vouch.goal writes it."""
+    return goal.goal_entry(
+        audit.Reviewer("u", "Dana Lead"),
+        "nordlicht",
+        "audit-readiness",
+        "internal-improvement",
+        datetime(2026, 11, 9, 10, 30, tzinfo=UTC) + timedelta(minutes=n),
+    )
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_a_goal_changes_trail_row_says_the_change_in_the_reports_words(language):
+    built = built_report(entries=[replace(goal_change(), id=1)])
+
+    rows = report.trail_rows(built["trail"]["entries"], report.words_for(language))
+
+    assert rows == [
+        [
+            "2026-11-09 10:31 UTC",
+            "Dana Lead",
+            "",
+            "",
+            GOAL_SENTENCES[language],
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]
+    ]
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_markdown_export_shows_a_goal_change_with_its_control_cells_empty(language):
+    built = built_report(entries=[replace(goal_change(), id=2), replace(entry("u", 0), id=1)])
+
+    md = report.markdown(built, report.words_for(language))
+
+    goal_row, accept_row = table_rows(section(md, report.words_for(language)["labels"]["trail"]))
+    assert goal_row[4] == GOAL_SENTENCES[language]
+    assert [goal_row[i] for i in (2, 3, 5, 6, 7, 8, 9, 10)] == [""] * 8
+    assert accept_row[4] == report.words_for(language)["actions"]["accept"]
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_reports_words_name_both_goals(language):
+    words = report.words_for(language)
+
+    assert set(words["goals"]) == {"audit-readiness", "internal-improvement"}
+    assert "{before}" in words["actions"]["goal"] and "{after}" in words["actions"]["goal"]
 
 
 @pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
@@ -937,9 +1031,24 @@ def test_the_export_counts_one_remediation_item_in_the_singular(lang, one, many)
 # --- The PDF export (#308): the same report, built with fpdf2 (vouch.report_pdf) --------------
 
 
+def _page_lines(data: bytes) -> list[list[str]]:
+    return [page.extract_text().splitlines() for page in PdfReader(BytesIO(data)).pages]
+
+
 def pdf_pages(data: bytes) -> list[str]:
-    """Each page's text, read back with pypdf, its whitespace collapsed to single spaces."""
-    return [" ".join(page.extract_text().split()) for page in PdfReader(BytesIO(data)).pages]
+    """Each page's body text, read back with pypdf, its whitespace collapsed to single spaces:
+    the letterhead and footer (#352) left out, the first and last lines fpdf2 draws on a page."""
+    pages = []
+    for lines in _page_lines(data):
+        assert lines[0].startswith("VOUCH"), lines[0]  # the letterhead, drawn first
+        assert re.search(r"\d+ (of|von) \d+$", lines[-1]), lines[-1]  # the footer, drawn last
+        pages.append(" ".join(" ".join(lines[1:-1]).split()))
+    return pages
+
+
+def pdf_letterheads(data: bytes) -> list[tuple[str, str]]:
+    """Each page's letterhead and footer line (#352), whitespace collapsed."""
+    return [(" ".join(ls[0].split()), " ".join(ls[-1].split())) for ls in _page_lines(data)]
 
 
 def pdf_text(data: bytes) -> str:
@@ -958,7 +1067,7 @@ def test_the_pdf_export_is_a_pdf_attachment_named_for_the_profile_and_the_day(us
         "filename*=UTF-8''readiness-report-alpenwerk-2026-11-06.pdf"
     )
     assert response.content.startswith(b"%PDF-")
-    assert pdf_text(response.content).startswith("Bereitschaftsbericht")
+    assert pdf_text(response.content).startswith("BEREITSCHAFTSBERICHT")
 
 
 def test_a_note_with_an_emoji_still_gives_the_pdf(users):

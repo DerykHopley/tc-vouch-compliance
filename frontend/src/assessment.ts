@@ -1,5 +1,5 @@
 import type { RemediationItem } from './remediation.ts'
-import type { Review } from './review.ts'
+import type { KeptOverride, Review, ReviewStep } from './review.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** One control's assessment from `POST /api/assessments`, read as server-sent events. */
@@ -76,6 +76,10 @@ export const REVIEW_WORDS: Record<ReviewStatus, string> = {
   rejected: 'Rejected',
 }
 
+/** A Closed control's review state tag (#410, Internal improvement only): the accepted tag's style, this word in place
+ * of "Accepted". A Closed control is still accepted. */
+export const CLOSED_WORD = 'Closed'
+
 // The page reads only these of the Assessment's fields so far; the working paper's rows come from `requirements`.
 export type Assessment = {
   control_id: string
@@ -88,6 +92,13 @@ export type Assessment = {
   /** The thread to review it by (#38, #39). */
   thread_id?: string
   review?: Review | null
+  /** The step of the review it waits at (#372), from the server; null once reviewed. `review.ts`'s `reviewStep` reads
+   * it with the items as the page holds them. */
+  review_step?: ReviewStep | null
+  /** Reviewed before the three-step review (#373): it still counts as reviewed. */
+  before_three_step_review?: boolean
+  /** The overrides recorded with Confirm findings, once the findings are confirmed (#372). */
+  confirmed?: KeptOverride[] | null
   /** One per requirement not or partly evidenced (#212), each with the lead's decision (#43). */
   remediation?: RemediationItem[]
 }

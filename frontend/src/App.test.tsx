@@ -45,7 +45,8 @@ const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1
 /** The overview with nothing assessed, as `GET /api/overview` sends it. */
 const OVERVIEW: Overview = {
   company: 'Nordlicht Komponenten GmbH', country: 'Germany', protection_level: 'normal', answer_language: 'en',
-  requirements: {},
+  goal: 'audit-readiness', requirements: {},
+  rounds: { current: { name: 'First round', opened_at: null }, comparison: null },
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0, remediation_approved: 0 },
@@ -193,18 +194,23 @@ describe('the working paper', () => {
 
   describe('reviewing a stored proposed assessment (#42; from #40\'s verify)', () => {
     const WAITING = { ...STORED, requirements: [{ id: 'M1', column: 'must', text: 'Keys.', verdict: 'partly-evidenced',
-      reason: 'Policy only.', citations: [] }], review: null }
-    const ACCEPTED = { ...WAITING, status: 'accepted', review: { decision: 'accept', note: '', overrides: [] } }
+      reason: 'Policy only.', citations: [] }], review: null, review_step: 'confirm-findings' }
+    /** Its findings confirmed with nothing left to plan: at Accept (#372). */
+    const READY = { ...WAITING, review_step: 'accept', confirmed: [], remediation: [] }
+    const ACCEPTED = { ...WAITING, status: 'accepted', review: { decision: 'accept', note: '', overrides: [] },
+      review_step: null }
 
-    /** The API with WAITING stored; the review route answers `review`; GET of the thread answers `reread`. */
-    function serveReview(review: Response, reread = ACCEPTED) {
+    /** The API with `stored` stored (WAITING by default); the review and findings routes answer `review`; GET of the
+     * thread answers `reread` once either was posted to. */
+    function serveReview(review: Response, reread: object = ACCEPTED, stored: object = WAITING) {
+      const posted = (u: string) => u.endsWith('/review') || u.endsWith('/findings')
       const fetch = vi.fn((url: string, init?: RequestInit) =>
         url === '/api/overview' ? Promise.resolve(Response.json(overviewWith([STORED])))
           : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [STORED] }))
-            : url === '/api/assessments/t1/review' && init?.method === 'POST' ? Promise.resolve(review)
+            : posted(url) && init?.method === 'POST' ? Promise.resolve(review)
               : url === '/api/assessments/t1'
-                ? Promise.resolve(Response.json({ assessment: fetch.mock.calls.some(([u]) => u.endsWith('/review'))
-                  ? reread : WAITING }))
+                ? Promise.resolve(Response.json({ assessment: fetch.mock.calls.some(([u]) => posted(u))
+                  ? reread : stored }))
                 : url.startsWith('/api/audit-trail') ? Promise.resolve(Response.json({ entries: [] }))
                   : new Promise<Response>(() => {}))
       vi.stubGlobal('fetch', fetch)
@@ -212,7 +218,7 @@ describe('the working paper', () => {
     }
 
     it('accepts it from its paper: the paper and the control index show it accepted', async () => {
-      serveReview(Response.json({ assessment: ACCEPTED }))
+      serveReview(Response.json({ assessment: ACCEPTED }), ACCEPTED, READY)
       window.history.replaceState(null, '', '/controls/4.1.2')
       render(<App />)
       const bar = await screen.findByRole('region', { name: 'Review' })
@@ -222,12 +228,12 @@ describe('the working paper', () => {
       expect(within(within(index).getByRole('link', { name: /^4\.1\.2/ })).getByText('Accepted')).toBeTruthy()
     })
 
-    it('after "already reviewed", Refresh reads the assessment again and shows the decision made elsewhere', async () => {
+    it('after "moved on", Refresh reads the assessment again and shows the decision made elsewhere', async () => {
       serveReview(Response.json({ detail: 'not waiting' }, { status: 409 }))
       window.history.replaceState(null, '', '/controls/4.1.2')
       render(<App />)
       const bar = await screen.findByRole('region', { name: 'Review' })
-      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      await userEvent.click(within(bar).getByRole('button', { name: 'Confirm findings' }))
       await userEvent.click(await within(bar).findByRole('button', { name: 'Refresh' }))
       expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
     })
@@ -246,7 +252,7 @@ describe('the working paper', () => {
       }
       /** 4.1.2's paper on WAITING, at its address. */
       async function openPaper() {
-        serveReview(Response.json({ assessment: ACCEPTED }))
+        serveReview(Response.json({ assessment: READY }), READY)
         window.history.replaceState(null, '', '/controls/4.1.2')
         render(<App />)
         await screen.findByRole('region', { name: 'Review' })
@@ -350,13 +356,13 @@ describe('the working paper', () => {
         expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
       })
 
-      it('asks nothing after Accept verdict records the decision', async () => {
+      it('asks nothing after Confirm findings records the overrides', async () => {
         await openPaper()
         await saveOverrideOfM1()
         const confirm = asking(false)
         await userEvent.click(within(screen.getByRole('region', { name: 'Review' }))
-          .getByRole('button', { name: 'Accept verdict' }))
-        await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')
+          .getByRole('button', { name: 'Confirm findings' }))
+        await within(screen.getByRole('region', { name: 'Review' })).findByRole('button', { name: 'Accept verdict' })
 
         await userEvent.click(indexLink('4.1.3'))
 
@@ -561,6 +567,141 @@ describe('the Documents tab (issue 424)', () => {
     expect(tab('Overview').getAttribute('aria-current')).toBeNull()
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
     expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
+  })
+})
+
+describe('the improvement plan (ticket 410)', () => {
+  const ITEM = { requirement_id: 'M1', missing: 'A record.', owner_role: 'CISO', due_date: '2027-02-01',
+    status: 'approved', priority: 'medium', done: null }
+  const ACCEPTED = { ...STORED, status: 'accepted', requirements: [{ id: 'M1', column: 'must', text: 'Keys.',
+    verdict: 'partly-evidenced', reason: 'Policy only.', citations: [] }],
+  review: { decision: 'accept', note: '', overrides: [] }, review_step: null, remediation: [ITEM] }
+  const DONE = { ...ITEM, done: { at: '2026-11-09T10:00:00+00:00', note: 'Recorded.' } }
+
+  it('keeps the working paper when the overview read after a done mark fails', async () => {
+    let overviews = 0
+    const improving: Overview = { ...overviewWith([STORED]), goal: 'internal-improvement',
+      controls: overviewWith([STORED]).controls.map((c) => c.id === '4.1.2' ? { ...c, status: 'accepted' } : c) }
+    vi.stubGlobal('fetch', vi.fn((url: string) =>
+      url === '/api/overview' ? Promise.resolve(++overviews === 1 ? Response.json(improving)
+        : new Response('{}', { status: 503 }))
+        : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: [ACCEPTED] }))
+        : url === '/api/assessments/t1' ? Promise.resolve(Response.json({ assessment: ACCEPTED }))
+          : url === '/api/assessments/t1/remediation/M1/done' ? Promise.resolve(Response.json({ item: DONE }))
+            : new Promise<Response>(() => {})))
+    window.history.replaceState(null, '', '/controls/4.1.2')
+    render(<App />)
+    const item = await screen.findByRole('region', { name: 'Remediation item M1' })
+    await userEvent.click(within(item).getByRole('button', { name: 'Mark M1 done' }))
+    await userEvent.type(within(item).getByLabelText('What was done'), 'Recorded.')
+    await userEvent.click(within(item).getByRole('button', { name: 'Mark done' }))
+    await waitFor(() => expect(overviews).toBe(2))
+    expect(await screen.findByText(/^Done on 9 November 2026: Recorded\.$/)).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Working paper' })).toBeTruthy()
+    expect(screen.queryByText(OVERVIEW_FAILED)).toBeNull()
+  })
+})
+
+describe('the profile pass (ticket 390)', () => {
+  it('carries on while the lead opens a working paper, and its result shows on the Dossier on return', async () => {
+    let answer: (response: Response) => void = () => {}
+    let passed = false
+    const proposed = IDS.map((id) => ({ ...STORED, control_id: id, thread_id: `t-${id}` }))
+    const fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/overview' ? Promise.resolve(Response.json(passed ? overviewWith(proposed) : OVERVIEW))
+        : url === '/api/profile-pass' && init?.method === 'POST'
+          ? new Promise<Response>((resolve) => { answer = resolve })
+          : new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    expect(screen.getByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: 'Open 4.1.2' }))
+    expect(await screen.findByRole('region', { name: 'Working paper' })).toBeTruthy()
+    passed = true
+    await act(async () => answer(Response.json({
+      assessments: proposed.map(({ thread_id, control_id }) =>
+        ({ thread_id, control_id, status: 'waiting-for-review', verdict: 'partly-evidenced' })),
+      skipped: [], usage: {},
+    })))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
+    const panel = await screen.findByRole('region', { name: 'Profile pass' })
+    expect(panel.textContent).toContain('12 assessments waiting for your review.')
+    await waitFor(() => expect(within(screen.getByRole('article', { name: 'Control 5.2.9' })).getByText('Proposed'))
+      .toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')).toHaveLength(1)
+  })
+
+  /** The API with a pass held open until `finish`, the stored assessments as `store` holds them (newest first), and a
+   * per-control run that ends in `onItsOwn`. */
+  function passServer(store: (typeof STORED)[], onItsOwn?: typeof STORED) {
+    let answer: (response: Response) => void = () => {}
+    let overview = overviewWith(store)
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      const post = init?.method === 'POST'
+      if (url === '/api/overview') return Promise.resolve(Response.json(overview))
+      if (url === '/api/profile-pass' && post) return new Promise<Response>((resolve) => { answer = resolve })
+      if (url === '/api/assessments' && post) {
+        return onItsOwn
+          ? Promise.resolve(new Response(`event: result\ndata: ${JSON.stringify({ assessment: onItsOwn })}\n\n`))
+          : new Promise<Response>(() => {})
+      }
+      if (url === '/api/assessments') return Promise.resolve(Response.json({ assessments: store }))
+      const one = store.find((a) => url === `/api/assessments/${a.thread_id}`)
+      return one ? Promise.resolve(Response.json({ assessment: one })) : new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    /** The pass ends, having proposed `made` (put first in the store, as newest). */
+    const finish = async (made: (typeof STORED)[]) => {
+      store.unshift(...made)
+      overview = overviewWith(store)
+      await act(async () => answer(Response.json({
+        assessments: made.map(({ thread_id, control_id, status, verdict }) => ({ thread_id, control_id, status, verdict })),
+        skipped: [], usage: {},
+      })))
+    }
+    return { fetch, finish }
+  }
+  const answerShown = () => screen.findByRole('region', { name: 'Verdict and draft answer' })
+  const toOverview = () =>
+    userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Overview' }))
+
+  it("reads an open paper's control afresh when the pass ends, showing the pass's assessment", async () => {
+    const { finish } = passServer([STORED])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Open 4.1.2' }))
+    expect(within(await answerShown()).getByText('Keys for administrators.')).toBeTruthy()
+    await finish([{ ...STORED, thread_id: 't2', answer: 'From the pass.' }])
+    await waitFor(async () => expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy())
+  })
+
+  it("shows the pass's assessment, not an earlier run's, for a control assessed on its own before", async () => {
+    const own = { ...STORED, control_id: '1.1.1', thread_id: 't-own', answer: 'On its own.' }
+    const { finish } = passServer([], own)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Assess 1.1.1' }))
+    expect(within(await answerShown()).getByText('On its own.')).toBeTruthy()
+    await toOverview()
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await finish([{ ...own, thread_id: 't-pass', answer: 'From the pass.' }])
+    await userEvent.click(screen.getByRole('link', { name: 'Open 1.1.1' }))
+    expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy()
+  })
+
+  it("holds a working paper's Assess while the pass runs, saying why", async () => {
+    const { fetch } = passServer([])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Open 1.1.1' }))
+    const paper = await screen.findByRole('region', { name: 'Working paper' })
+    const assess = within(paper).getByRole('button', { name: 'Assess 1.1.1' }) as HTMLButtonElement
+    expect(assess.disabled).toBe(true)
+    expect(paper.textContent).toContain('Vouch is running a profile pass. One run at a time.')
+    await userEvent.click(assess)
+    expect(fetch.mock.calls.filter(([url, init]) => url === '/api/assessments' && init?.method === 'POST'))
+      .toHaveLength(0)
   })
 })
 

@@ -1,0 +1,3430 @@
+[
+ {
+  "control_id": "1.1.1",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 4,
+   "total": 4
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Die Anforderungen an die Informationssicherheit wurden festgelegt, dokumentiert und an die Ziele der Organisation angepasst.",
+    "verdict": "evidenced",
+    "reason": "Die Leitlinie leitet die Anforderungen jährlich aus Strategie, Verträgen und Recht ab, dokumentiert sie und verknüpft sie mit den Zielen.",
+    "citations": [
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Anforderungen",
+      "quote": "Die Anforderungen an die Informationssicherheit werden jedes Jahr aus der Unternehmensstrategie, den Kundenverträgen und dem österreichischen und europäischen Recht abgeleitet",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Ziele",
+      "quote": "Wir erfüllen die Anforderungen unserer Kunden für ein TISAX-Label mit hohem Schutzbedarf.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Es gibt eine Richtlinie, die von der Geschäftsleitung der Organisation genehmigt wurde.",
+    "verdict": "evidenced",
+    "reason": "Der Nachweis zeigt die tatsächliche Freigabe der Version 4.0 durch die Geschäftsführung am 20. Juli 2026.",
+    "citations": [
+     {
+      "doc_id": "leitlinien-veroeffentlichung",
+      "version": "2026-07",
+      "section": "Prüfung 2026",
+      "quote": "Die Geschäftsführung hat die Version 4.0 am 20. Juli 2026 freigegeben.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Die Richtlinie enthält Ziele und beschreibt die Bedeutung der Informationssicherheit innerhalb der Organisation.",
+    "verdict": "evidenced",
+    "reason": "Die Leitlinie nennt Ziele und beschreibt die Bedeutung der Informationssicherheit für Kunden und Fertigung.",
+    "citations": [
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Bedeutung der Informationssicherheit",
+      "quote": "Ein Verlust oder Abfluss würde das Vertrauen unserer Kunden und unsere Aufträge gefährden.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Ziele",
+      "quote": "Vertrauliche Kundendaten sind gegen unbefugten Zugriff geschützt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M4",
+    "column": "must",
+    "text": "Die Richtlinien werden den Mitarbeitern in geeigneter Form (z. B. über das Intranet) zur Verfügung gestellt.",
+    "verdict": "evidenced",
+    "reason": "Die Leitlinie steht seit dem 22. Juli 2026 im Intranet und wurde 412-mal aufgerufen.",
+    "citations": [
+     {
+      "doc_id": "leitlinien-veroeffentlichung",
+      "version": "2026-07",
+      "section": "Veröffentlichung",
+      "quote": "Die Version 4.0 steht seit dem 22. Juli 2026 im Intranet",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M5",
+    "column": "must",
+    "text": "Mitarbeiter und externe Geschäftspartner werden über alle für sie relevanten Änderungen informiert.",
+    "verdict": "partly-evidenced",
+    "reason": "Die Mitarbeiter wurden per E-Mail informiert, die Information der externen Geschäftspartner ist noch nicht erfolgt.",
+    "citations": [
+     {
+      "doc_id": "leitlinien-veroeffentlichung",
+      "version": "2026-07",
+      "section": "Information der Mitarbeiter",
+      "quote": "Am 22. Juli 2026 ging eine E-Mail an alle Mitarbeiterinnen und Mitarbeiter",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "leitlinien-veroeffentlichung",
+      "version": "2026-07",
+      "section": "Information der externen Geschäftspartner",
+      "quote": "Die Information der Lieferanten und Dienstleister über die geänderten Abschnitte ist für das vierte Quartal 2026 geplant und noch nicht erfolgt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Die Anforderungen an die Informationssicherheit auf der Grundlage der Organisationsstrategie, Gesetzen und Verträgen sind in der Richtlinie berücksichtigt.",
+    "verdict": "evidenced",
+    "reason": "Strategie, Kundenverträge und Gesetze fließen in die Anforderungen der Leitlinie ein.",
+    "citations": [
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Anforderungen",
+      "quote": "Die Anforderungen an die Informationssicherheit werden jedes Jahr aus der Unternehmensstrategie, den Kundenverträgen und dem österreichischen und europäischen Recht abgeleitet",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Die Richtlinie weist auf Konsequenzen bei Nichtbeachtung hin.",
+    "verdict": "evidenced",
+    "reason": "Die Leitlinie nennt arbeitsrechtliche Folgen und die Vertragsauflösung bei externen Partnern.",
+    "citations": [
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Konsequenzen bei Nichtbeachtung",
+      "quote": "Wer gegen diese Leitlinie oder eine mitgeltende Richtlinie verstößt, muss mit arbeitsrechtlichen Folgen rechnen",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Weitere relevante Sicherheitsrichtlinien sind erstellt.",
+    "verdict": "evidenced",
+    "reason": "Die Leitlinie listet zehn mitgeltende Richtlinien und Verfahren mit Eigentümern, die als Dokumente vorliegen.",
+    "citations": [
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Mitgeltende Richtlinien",
+      "quote": "Die folgenden Richtlinien und Verfahren gelten mit dieser Leitlinie.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S4",
+    "column": "should",
+    "text": "Eine regelmäßige Prüfung und, falls notwendig, Überarbeitung der Richtlinien sind etabliert.",
+    "verdict": "evidenced",
+    "reason": "Die jährliche Prüfung ist festgelegt und wurde am 14. Juli 2026 mit Überarbeitung durchgeführt.",
+    "citations": [
+     {
+      "doc_id": "informationssicherheitsleitlinie",
+      "version": "4.0",
+      "section": "Überprüfung",
+      "quote": "Diese Leitlinie wird mindestens einmal jährlich geprüft und, falls notwendig, überarbeitet.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "leitlinien-veroeffentlichung",
+      "version": "2026-07",
+      "section": "Prüfung 2026",
+      "quote": "Die Informationssicherheitsbeauftragte hat die Leitlinie am 14. Juli 2026 geprüft.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Die Leitlinie zur Informationssicherheit ist von der Geschäftsführung am 20. Juli 2026 freigegeben und seit dem 22. Juli 2026 im Intranet veröffentlicht. Sie enthält Ziele, Bedeutung, Anforderungen, Konsequenzen und mitgeltende Richtlinien und wird jährlich geprüft. Die Mitarbeiter wurden per E-Mail informiert; die externen Geschäftspartner sind noch nicht informiert (für das vierte Quartal 2026 geplant).",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 1.1.1: Inwieweit sind Richtlinien zur Informationssicherheit vorhanden? 9 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit sind Richtlinien zur Informationssicherheit vorhanden?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 8 of 9 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 13 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 1 remediation item (1 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "M5",
+    "missing": "Information der Lieferanten und Dienstleister über die geänderten Abschnitte der Leitlinie ist noch nicht erfolgt.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "9444a48766eb4ba7936b9d8add4dc4c1",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "1.6.1",
+  "profile_id": "alpenwerk",
+  "verdict": "evidenced",
+  "should_score": {
+   "evidenced": 6,
+   "total": 6
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Es gibt eine Definition für ein meldepflichtiges Sicherheitsereignis oder eine meldepflichtige Beobachtung, die den Mitarbeitern und allen relevanten Stakeholdern bekannt ist.\nDie folgenden Aspekte werden berücksichtigt:\n  - Ereignisse und Beobachtungen in Bezug auf das Personal\n  - Ereignisse und Beobachtungen in Bezug auf die physische Sicherheit \n     (z. B. Einbruch, Diebstahl, unbefugter Zugang zu Sicherheitszonen, \n     Schwachstellen in den Sicherheitszonen)\n  - Ereignisse und Beobachtungen in Bezug auf die IT und Cybersicherheit \n    (z. B. anfällige IT-Systeme mit Schwachstellen, erkannte erfolgreiche oder nicht erfolgreiche Angriffe)\n  - Ereignisse und Beobachtungen in Bezug auf Lieferanten und andere Geschäftspartner (z. B. alle Vorfälle, die sich negativ auf die Sicherheit der eigenen Organisation auswirken können)",
+    "verdict": "evidenced",
+    "reason": "Das Meldeverfahren definiert Ereignisse zu Personal, physischer Sicherheit, IT und Lieferanten, und die Grundschulung vermittelt sie den Mitarbeitern.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Was gemeldet wird",
+      "quote": "Melden Sie alles, was die Sicherheit unserer Informationen gefährden könnte.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Was gemeldet wird",
+      "quote": "Ereignisse bei Lieferanten und Dienstleistern, zum Beispiel ein Lieferant meldet einen Sicherheitsvorfall",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungsnachweis",
+      "version": "2026-Q3",
+      "section": "Teilnahme",
+      "quote": "Die Grundschulung umfasst die Leitlinie, das Melden von Sicherheitsereignissen",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Es sind angemessene Mechanismen für die Meldung von Sicherheitsereignissen auf der Grundlage wahrgenommener Risiken festgelegt, umgesetzt und allen Mitarbeitern bekannt,",
+    "verdict": "evidenced",
+    "reason": "Die Meldemechanismen sind festgelegt, werden geschult und wurden 2026 tatsächlich genutzt.",
+    "citations": [
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Übersicht",
+      "quote": "37 Meldungen gingen ein: 26 per E-Mail oder Ticket, 9 über die Sicherheits-Hotline und 2 von externen Stellen.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Meldepflicht",
+      "quote": "Die Meldepflicht steht im Dienstvertrag und wird in der jährlichen Schulung behandelt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Es sind geeignete Kommunikationskanäle für Meldende vorhanden.",
+    "verdict": "evidenced",
+    "reason": "E-Mail, Ticket und Hotline stehen als Kommunikationskanäle zur Verfügung.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Wie gemeldet wird",
+      "quote": "Gewöhnliche Meldungen gehen per E-Mail an [removed] oder als Ticket im IT-Serviceportal.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Es existiert eine zentrale Anlaufstelle für die Meldung von Vorfällen.",
+    "verdict": "evidenced",
+    "reason": "Der Security-Desk ist als zentrale Anlaufstelle benannt.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Wie gemeldet wird",
+      "quote": "Der Security-Desk der IT ist die zentrale Anlaufstelle für alle Meldungen.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Je nach dem wahrgenommenen Schweregrad stehen unterschiedliche Meldewege zur Verfügung (d. h. Echtzeitkommunikation für signifikante Ereignisse/Notfälle zusätzlich zu asynchronen Mechanismen wie Tickets oder E-Mail).",
+    "verdict": "evidenced",
+    "reason": "Neben E-Mail und Ticket gibt es für dringende Fälle eine rund um die Uhr erreichbare Hotline.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Wie gemeldet wird",
+      "quote": "Für dringende Fälle, zum Beispiel einen laufenden Angriff oder einen Stillstand der Fertigung, rufen Sie die Sicherheits-Hotline unter der Durchwahl 2900 an.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Mitarbeiter sind verpflichtet und geschult, relevante Ereignisse zu melden.",
+    "verdict": "evidenced",
+    "reason": "Die Meldepflicht ist im Dienstvertrag verankert und Teil der Grundschulung.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Meldepflicht",
+      "quote": "Jede Mitarbeiterin und jeder Mitarbeiter ist verpflichtet, Sicherheitsereignisse sofort zu melden.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungsnachweis",
+      "version": "2026-Q3",
+      "section": "Teilnahme",
+      "quote": "Die Grundschulung umfasst die Leitlinie, das Melden von Sicherheitsereignissen",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S4",
+    "column": "should",
+    "text": "Meldungen von Sicherheitsereignissen können ebenfalls durch organisationsfremde Stellen übermittelt werden. Die folgenden Aspekte werden berücksichtigt:\n  - Es besteht eine extern zugängliche Möglichkeit, Sicherheitsereignisse zu melden und ist kommuniziert bzw. bekannt,\n  - Die Reaktion auf Sicherheitsereignis-Meldungen von organisationsfremden Stellen ist definiert.",
+    "verdict": "evidenced",
+    "reason": "Eine externe Meldeadresse steht auf der Website; externe Meldungen gingen 2026 ein und Lieferantenmeldungen werden wie eigene Meldungen erfasst.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Meldungen von außen",
+      "quote": "Kunden, Lieferanten und andere Stellen außerhalb des Unternehmens können Sicherheitsereignisse an [removed] melden.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Vorfälle bei Lieferanten",
+      "quote": "erfasst den Fall wie eine eigene Meldung im Register",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S5",
+    "column": "should",
+    "text": "Alle relevanten Meldenden haben Zugriff auf Mechanismen und Informationen zum Melden von Vorfällen.",
+    "verdict": "evidenced",
+    "reason": "Kontaktdaten stehen im Intranet, auf Aushängen, in der Begrüßungsmappe und auf der Website.",
+    "citations": [
+     {
+      "doc_id": "meldeverfahren-sicherheitsereignisse",
+      "version": "3.1",
+      "section": "Wo die Informationen stehen",
+      "quote": "Die Kontaktdaten stehen auf der Startseite des Intranets, auf einem Aushang an jedem Zeiterfassungsterminal",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S6",
+    "column": "should",
+    "text": "Ein Rückmeldeverfahren an die Meldenden ist etabliert.",
+    "verdict": "evidenced",
+    "reason": "Der Security-Desk bestätigt jede Meldung, und das Register belegt die Rückmeldungen innerhalb eines Arbeitstages.",
+    "citations": [
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Übersicht",
+      "quote": "Alle meldenden Personen erhielten innerhalb eines Arbeitstages eine Rückmeldung.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Das Meldeverfahren definiert meldepflichtige Ereignisse in allen vier Bereichen und nennt den Security-Desk als zentrale Anlaufstelle. Es gibt E-Mail, Ticket und eine rund um die Uhr erreichbare Hotline, eine Meldepflicht samt Schulung, einen externen Meldeweg und eine Rückmeldung. Das Register mit 37 Meldungen in 2026 belegt die Umsetzung.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 1.6.1: Inwieweit werden für die Informationssicherheit relevante Ereignisse oder Beobachtungen… 9 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden für die Informationssicherheit relevante Ereignisse oder Beobachtungen…"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 9 of 9 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 14 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Every requirement that applies is evidenced, so no remediation item was drafted."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [],
+  "thread_id": "1c4dd539258c4136a449e7840f712d4c",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "1.6.2",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 2,
+   "total": 3
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Gemeldete Ereignisse werden unverzüglich bearbeitet.",
+    "verdict": "evidenced",
+    "reason": "Alle Meldungen wurden am Eingangstag erfasst, die erste Maßnahme erfolgte im Median nach 2 Stunden.",
+    "citations": [
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Übersicht",
+      "quote": "Jede Meldung wurde am Tag des Eingangs erfasst; die erste Maßnahme erfolgte im Median nach 2 Stunden.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Eine angemessene Reaktion auf gemeldete Sicherheitsereignisse ist sichergestellt.",
+    "verdict": "evidenced",
+    "reason": "Die Einträge zeigen angemessene Reaktionen, z. B. Entfernung der Schadsoftware und Sperrung der Lieferantenzugänge.",
+    "citations": [
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Ausgewählte Einträge",
+      "quote": "Schadsoftware auf zwei Fertigungs-PCs entfernt, Linie 3 vom Netz getrennt und neu aufgesetzt",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Ausgewählte Einträge",
+      "quote": "Ein Lieferant meldete einen Angriff auf sein Kundenportal; Zugänge von Alpenwerk gesperrt und Passwörter geändert",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Diesbezüglich gewonnene Erfahrungen werden in die kontinuierliche Verbesserung einbezogen.",
+    "verdict": "evidenced",
+    "reason": "Nachbesprechungen führten zu umgesetzten Verbesserungen wie der USB-Sperre.",
+    "citations": [
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Nachbesprechungen",
+      "quote": "USB-Anschlüsse an allen Fertigungs-PCs gesperrt (erledigt 2026-03-06)",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Lehren aus Vorfällen",
+      "quote": "Nach jedem Vorfall der Priorität hoch oder kritisch hält die Informationssicherheitsbeauftragte innerhalb von zwei Wochen eine Nachbesprechung ab.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Während der Bearbeitung werden gemeldete Ereignisse kategorisiert (z. B. nach der Verantwortung in Personal, physische- und Cybersicherheit betreffende Ereignisse), qualifiziert (z. B. nicht sicherheitsrelevant, Beobachtung, vorgeschlagene Sicherheitsverbesserung, Sicherheitsschwachstelle, Sicherheitsvorfall) und priorisiert (z. B. niedriger, mittlerer, hoher, kritischer Schweregrad).",
+    "verdict": "evidenced",
+    "reason": "Meldungen werden nach Kategorie, Art und Priorität eingestuft.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Erfassung und Einstufung",
+      "quote": "Er ordnet sie einer Kategorie zu (Personal, physische Sicherheit, IT und Fertigung)",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Verantwortlichkeiten für den Umgang mit Ereignissen werden anhand ihrer Kategorie definiert und zugewiesen. Die folgenden Aspekte werden berücksichtigt:\n  - Koordinierung von Vorfällen und Schwachstellen über mehrere Kategorien\n  - Qualifikation und Ressourcen\n  - Kommunikationsmethoden je nach Art und Priorität\n(z. B. nicht zeitkritische Kommunikation, zeitkritische Kommunikation, Notfallkommunikation)\n  - Abwesenheitsmanagement",
+    "verdict": "partly-evidenced",
+    "reason": "Zuständigkeit, Vertretung, Koordination und Kommunikationswege sind definiert, Qualifikation und Ressourcen der Zuständigen werden nicht geregelt.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Zuständigkeiten",
+      "quote": "Betrifft ein Ereignis mehrere Kategorien, koordiniert die Informationssicherheitsbeauftragte.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Zuständigkeiten",
+      "quote": "Kritische Ereignisse werden telefonisch weitergegeben, alle anderen per Ticket.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Es existiert eine Strategie zur Meldung potenziell strafrechtlicher Aspekte von Sicherheitsvorfällen an die zuständigen Behörden, sofern dies notwendig oder angemessen ist. (C, I, A).",
+    "verdict": "evidenced",
+    "reason": "Die Meldung von Straftaten an die Polizei ist geregelt, die Entscheidung liegt bei der Geschäftsführung.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Meldepflichten",
+      "quote": "Straftaten, zum Beispiel ein Einbruch oder eine Erpressung, an die Polizei.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Auf der Grundlage von Klasse, Kategorie und Schweregrad sind die maximalen Reaktionszeiten definiert. (C, I, A)",
+    "verdict": "evidenced",
+    "reason": "Für jede Priorität sind Zeiten für die erste Maßnahme und den Abschluss definiert.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Reaktionszeiten",
+      "quote": "Kritisch | 1 Stunde | 24 Stunden",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H2",
+    "column": "high",
+    "text": "Ereignisse, die nicht entsprechend ihrer Priorität angemessen bearbeitet wurden, werden eskaliert. Die folgenden Aspekte werden berücksichtigt: (C, I, A)\n - Es sind Bedingungen und Schwellenwerte, wie z. B. maximale Reaktionszeiten, bevor eskaliert wird definiert,\n - Mechanismen, Prozesse und Kontakte für die Eskalation sind festgelegt,\n - Eskalationswege bis zur obersten Leitung der Organisation sind definiert.",
+    "verdict": "evidenced",
+    "reason": "Eskalationsschwellen und -wege bis zur Geschäftsführung sind definiert und wurden bei Meldung 2026-031 angewendet.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Eskalation",
+      "quote": "Wird eine Reaktionszeit überschritten, eskaliert der Security-Desk an den IT-Leiter.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Eskalation",
+      "quote": "Die Meldung 2026-031 wurde nicht innerhalb von 4 Stunden bearbeitet und deshalb vom Security-Desk an den IT-Leiter eskaliert",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H3",
+    "column": "high",
+    "text": "Gesetzliche, regulatorische und vertragliche Meldepflichten und entsprechende Kontaktinformationen sind bekannt. (C, I, A)",
+    "verdict": "evidenced",
+    "reason": "Meldepflichten gegenüber Datenschutzbehörde, Kunden und Polizei sind mit Fristen bekannt und im Notfallordner hinterlegt.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Meldepflichten",
+      "quote": "Datenschutzverletzungen an die österreichische Datenschutzbehörde innerhalb von 72 Stunden",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H4",
+    "column": "high",
+    "text": "Eine Kommunikationsstrategie für sicherheitsrelevante Ereignisse ist vorhanden. Die folgenden Aspekte werden berücksichtigt: (C, I, A)\n - Mit wem zu kommunizieren ist (z. B. Gesellschafter, betroffene Geschäftspartner und Kunden, weitere Gesellschafter, Öffentlichkeit),\n - Wann zu kommunizieren ist,\n - Verantwortlichkeiten für die Kommunikation,\n - Autorisierung und Freigabe der Kommunikation,\n - Gesetzliche und regulatorische Einschränkungen der Kommunikation, \n - Was zu kommunizieren ist (z. B. vorbereitete Vorlagen und Bausteine für bestimmte Szenarien),\n - Wie zu kommunizieren ist (z. B. Kommunikationskanäle).",
+    "verdict": "partly-evidenced",
+    "reason": "Adressaten, Zeitpunkt, Verantwortliche und Freigabe sind geregelt, gesetzliche Einschränkungen, Vorlagen und Kommunikationskanäle fehlen.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Kommunikation",
+      "quote": "Die Geschäftsführung gibt jede Mitteilung nach außen frei.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Kommunikation",
+      "quote": "Die Informationssicherheitsbeauftragte entscheidet mit ihr, wer informiert wird",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H5",
+    "column": "high",
+    "text": "Verfahren zur Reaktion auf Sicherheitsvorfälle bei Lieferanten sind etabliert. Die folgenden Aspekte werden berücksichtigt:  (C, I, A)\n - Analyse der Auswirkungen auf die eigene Organisation und Abrufen entsprechender interner Mechanismen,\n - Die Notwendigkeit zur Berichterstattung entsprechend den eigenen Meldeverfahren.",
+    "verdict": "evidenced",
+    "reason": "Bei Lieferantenvorfällen werden Auswirkungen geprüft und der Fall wie eine eigene Meldung erfasst; Vorfall 2026-015 zeigt die Anwendung.",
+    "citations": [
+     {
+      "doc_id": "vorfallbehandlungsverfahren",
+      "version": "2.2",
+      "section": "Vorfälle bei Lieferanten",
+      "quote": "Meldet ein Lieferant oder Dienstleister einen Sicherheitsvorfall, prüft die Informationssicherheitsbeauftragte die Auswirkungen auf Alpenwerk",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "sicherheitsereignis-register",
+      "version": "2026-Q3",
+      "section": "Ausgewählte Einträge",
+      "quote": "Ein Lieferant meldete einen Angriff auf sein Kundenportal; Zugänge von Alpenwerk gesperrt und Passwörter geändert",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "O1",
+    "column": "overlay",
+    "text": "Ein erheblicher Sicherheitsvorfall wird dem nationalen CSIRT innerhalb von 24 Stunden als Frühwarnung gemeldet.",
+    "verdict": "not-evidenced",
+    "reason": "Die Evidenz enthält weder ein Verfahren noch eine Meldung an das nationale CSIRT, obwohl der Vorfall 2026-009 als erheblich eingestuft wurde.",
+    "citations": []
+   }
+  ],
+  "answer": "Gemeldete Ereignisse werden im Register erfasst, kategorisiert, qualifiziert und priorisiert, mit Reaktionszeiten, Eskalation, Meldepflichten und Nachbesprechungen. Das Register belegt zeitnahe Bearbeitung und Verbesserungen. Es fehlen eine vollständige Kommunikationsstrategie, Regelungen zu Qualifikation und Ressourcen der Zuständigen sowie eine Meldung an das nationale CSIRT.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 1.6.2: Inwieweit werden gemeldete Sicherheitsereignisse verwaltet? 12 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden gemeldete Sicherheitsereignisse verwaltet?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "Applied the country overlays: AT NIS2 (illustrativ) adds O1."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 9 of 12 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 17 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 3 remediation items (2 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "S2",
+    "missing": "Anforderungen an Qualifikation und Ressourcen der für Ereigniskategorien Zuständigen sind nicht definiert.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "H4",
+    "missing": "Kommunikationsstrategie ohne gesetzliche Einschränkungen, vorbereitete Vorlagen und Kommunikationskanäle.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "O1",
+    "missing": "Verfahren und Nachweis für die Frühwarnung erheblicher Sicherheitsvorfälle an das nationale CSIRT innerhalb von 24 Stunden.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2026-12-24",
+    "status": "draft",
+    "priority": "high",
+    "done": null
+   }
+  ],
+  "thread_id": "69aacea7ef2940b78c66994a703e3ad1",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "2.1.3",
+  "profile_id": "alpenwerk",
+  "verdict": "not-evidenced",
+  "should_score": {
+   "evidenced": 4,
+   "total": 6
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Mitarbeiter sind geschult und sensibilisiert.",
+    "verdict": "partly-evidenced",
+    "reason": "96 % haben die Grundschulung abgeschlossen, sieben Mitarbeiter noch nicht.",
+    "citations": [
+     {
+      "doc_id": "schulungsnachweis",
+      "version": "2026-Q3",
+      "section": "Teilnahme",
+      "quote": "Grundschulung Informationssicherheit 2026 | alle Mitarbeiter | 178 | 171 | 96 %",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungsnachweis",
+      "version": "2026-Q3",
+      "section": "Erinnerungen",
+      "quote": "Die sieben Mitarbeiter ohne abgeschlossene Grundschulung wurden am 1. Oktober 2026 erinnert",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Ein Konzept zur Sensibilisierung und Schulung der Mitarbeiter ist erstellt. Die folgenden Aspekte sind berücksichtigt:\n  - Richtlinie zur Informationssicherheit,\n  - Meldungen von Informationssicherheitsereignissen,\n  - Verhalten bei Auftreten von Schadsoftware,\n  - Richtlinien zu Benutzerkonten und Anmeldeinformationen (z. B. Passwort-Richtlinie),\n  - Compliance-Themen der Informationssicherheit,\n  - Anforderungen und Verfahren zum Einsatz von Geheimhaltungsvereinbarungen bei der gemeinsamen Nutzung schutzbedürftiger Informationen,\n  - Nutzung organisationsfremder IT-Dienste.",
+    "verdict": "partly-evidenced",
+    "reason": "Das Konzept behandelt Leitlinie, Meldungen, Schadsoftware, Passwörter und Compliance, nicht aber Geheimhaltungsvereinbarungen und die Nutzung organisationsfremder IT-Dienste.",
+    "citations": [
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Inhalte der Grundschulung",
+      "quote": "wie Sicherheitsereignisse gemeldet werden;",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Inhalte der Grundschulung",
+      "quote": "was bei Verdacht auf Schadsoftware zu tun ist;",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Inhalte der Grundschulung",
+      "quote": "Datenschutz und andere Compliance-Themen der Informationssicherheit.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Zielgruppen für Schulungs- und Sensibilisierungsmaßnahmen (d. h. Personen, die in bestimmten Risikoumgebungen tätig sind, wie z. B. Führungskräfte einschließlich Organisationsleiter, Administratoren, Mitarbeiter mit Zugriff auf Kundennetzwerke sowie Personal in Produktionsbereichen) werden identifiziert und in einem Schulungskonzept berücksichtigt.",
+    "verdict": "partly-evidenced",
+    "reason": "Führungskräfte und Administratoren sind berücksichtigt, Mitarbeiter mit Zugriff auf Kundennetzwerke und Produktionspersonal nicht.",
+    "citations": [
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Zielgruppen",
+      "quote": "Für zwei Gruppen gibt es zusätzliche Schulungen: Führungskräfte einschließlich der Geschäftsführung",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Zielgruppen",
+      "quote": "Für weitere Gruppen ist keine eigene Schulung vorgesehen.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Das Konzept wurde vom verantwortlichen Management freigegeben.",
+    "verdict": "evidenced",
+    "reason": "Die Geschäftsführung hat das Konzept am 26. Jänner 2026 freigegeben.",
+    "citations": [
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Freigabe",
+      "quote": "Die Geschäftsführung hat dieses Konzept am 26. Jänner 2026 freigegeben.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S4",
+    "column": "should",
+    "text": "Schulungs- und Sensibilisierungsmaßnahmen werden sowohl in regelmäßigen Abständen als auch als Reaktion auf Ereignisse durchgeführt.",
+    "verdict": "evidenced",
+    "reason": "Jährliche Grundschulung und anlassbezogene Phishing-Übung nach dem Vorfall vom Februar 2026 sind belegt.",
+    "citations": [
+     {
+      "doc_id": "schulungsnachweis",
+      "version": "2026-Q3",
+      "section": "Anlassbezogene Schulung",
+      "quote": "Nach dem Schadsoftware-Vorfall vom Februar 2026 hat die Informationssicherheitsbeauftragte im März 2026 eine Phishing-Übung mit anschließender Kurzschulung durchgeführt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Inhalte der Grundschulung",
+      "quote": "Alle Mitarbeiterinnen und Mitarbeiter absolvieren jedes Jahr die Grundschulung",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S5",
+    "column": "should",
+    "text": "Die Teilnahme an Schulungs- und Sensibilisierungsmaßnahmen wird dokumentiert.",
+    "verdict": "evidenced",
+    "reason": "Die E-Learning-Plattform zeichnet die Teilnahme auf, der Auszug liegt vor.",
+    "citations": [
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Nachweis",
+      "quote": "Die E-Learning-Plattform zeichnet jede Teilnahme auf.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "schulungsnachweis",
+      "version": "2026-Q3",
+      "section": "Schulungsnachweis 2026",
+      "quote": "Auszug aus unserer E-Learning-Plattform, Stand 30. September 2026.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S6",
+    "column": "should",
+    "text": "Mitarbeitern sind die Ansprechpartner für Informationssicherheit bekannt.",
+    "verdict": "evidenced",
+    "reason": "Die Informationssicherheitsbeauftragte ist als Ansprechpartnerin benannt, Kontaktdaten stehen im Intranet und in den Schulungen.",
+    "citations": [
+     {
+      "doc_id": "schulungskonzept",
+      "version": "2.0",
+      "section": "Ansprechpartner",
+      "quote": "Die Informationssicherheitsbeauftragte ist die Ansprechpartnerin für alle Fragen zur Informationssicherheit.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Die Grundschulung wurde 2026 für 171 von 178 Mitarbeitern abgeschlossen, dazu gibt es Schulungen für Administratoren und Führungskräfte, anlassbezogene Maßnahmen und dokumentierte Teilnahme. Das von der Geschäftsführung freigegebene Konzept deckt nicht alle geforderten Themen und Zielgruppen ab.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 2.1.3: Inwieweit werden Mitarbeiter hinsichtlich der Risiken beim Umgang mit Informationen… 7 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden Mitarbeiter hinsichtlich der Risiken beim Umgang mit Informationen…"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 4 of 7 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 13 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 3 remediation items (3 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "M1",
+    "missing": "Sieben Mitarbeiter haben die Grundschulung 2026 noch nicht abgeschlossen.",
+    "owner_role": "Personalleiterin",
+    "due_date": "2026-12-09",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S1",
+    "missing": "Schulungsinhalte zu Geheimhaltungsvereinbarungen und zur Nutzung organisationsfremder IT-Dienste im Konzept.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S2",
+    "missing": "Zielgruppen Mitarbeiter mit Zugriff auf Kundennetzwerke und Produktionspersonal sind im Schulungskonzept nicht berücksichtigt.",
+    "owner_role": "Personalleiterin",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "1b734257928d457aac38605d6f316272",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "4.1.2",
+  "profile_id": "alpenwerk",
+  "verdict": "evidenced",
+  "should_score": {
+   "evidenced": 3,
+   "total": 3
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Die Auswahl der Verfahren zur Benutzerauthentifizierung wird auf Basis einer Risikobewertung getroffen. Mögliche Angriffsszenarien werden berücksichtigt (z. B. direkte Zugänglichkeit über das Internet).",
+    "verdict": "evidenced",
+    "reason": "Die Risikobewertung berücksichtigt Internet-Erreichbarkeit und Angriffe und wählt Verfahren je System.",
+    "citations": [
+     {
+      "doc_id": "risikobewertung-anmeldeverfahren",
+      "version": "2026",
+      "section": "Ergebnis",
+      "quote": "Die Risiken der direkt aus dem Internet erreichbaren Systeme sind durch die Mehrfaktor-Authentifizierung und die ergänzenden Maßnahmen ausreichend behandelt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "risikobewertung-anmeldeverfahren",
+      "version": "2026",
+      "section": "Risikobewertung der Anmeldeverfahren 2026",
+      "quote": "Erstellt vom IT-Leiter am 7. September 2026, geprüft von der Informationssicherheitsbeauftragten.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Die Authentifizierungsverfahren entsprechen den anerkannten Best Practices im Bereich Sicherheit.",
+    "verdict": "evidenced",
+    "reason": "Die Verfahren richten sich nach BSI-Grundschutz und NIST.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Grundlage",
+      "quote": "Die Verfahren richten sich nach den Empfehlungen des BSI-Grundschutzes und des NIST zu Passwörtern.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Die Verfahren zur Benutzerauthentifizierung werden auf der Grundlage der geschäftsbezogenen und sicherheitsrelevanten Anforderungen festgelegt und umgesetzt.",
+    "verdict": "evidenced",
+    "reason": "Die Verfahren wurden je System nach Risiko festgelegt und sind als umgesetzt dokumentiert.",
+    "citations": [
+     {
+      "doc_id": "risikobewertung-anmeldeverfahren",
+      "version": "2026",
+      "section": "Ergebnis",
+      "quote": "Alle Maßnahmen der Tabelle sind umgesetzt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Benutzer werden mindestens mittels starker Passwörter entsprechend dem aktuellen Stand der Technik authentifiziert.",
+    "verdict": "evidenced",
+    "reason": "Mindestens 14 Zeichen und Prüfung gegen Listen geleakter Passwörter sind vorgegeben und technisch durchgesetzt.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Passwörter",
+      "quote": "Passwörter haben mindestens 14 Zeichen.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Passwörter",
+      "quote": "Der Verzeichnisdienst lehnt Standard-Passwörter und solche aus der Liste technisch ab.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Es werden höherwertige Verfahren zur Authentifizierung von privilegierten Benutzerkonten angewendet (z. B. Privilegiertes Zugangsmanagement, 2-Faktor-Authentifizierung).",
+    "verdict": "evidenced",
+    "reason": "Alle Administratorkonten nutzen getrennte Konten mit Hardware-Token.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Mehrfaktor-Authentifizierung",
+      "quote": "Eine zweite Anmeldung mit einem Hardware-Token ist Pflicht für alle Administratorkonten",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "risikobewertung-anmeldeverfahren",
+      "version": "2026",
+      "section": "Bewertung",
+      "quote": "getrenntes Konto mit Hardware-Token | seit 2026-03, alle 9 Konten",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Abhängig von der Risikobewertung werden die Authentifizierungsverfahren und die Zugriffskontrolle durch ergänzende Maßnahmen verstärkt (z. B. dauerhafte Zugriffsüberwachung hinsichtlich Unregelmäßigkeiten oder Einsatz einer starken Authentifizierung, automatische Abmeldung, Sperrung bei Inaktivität oder Schutz vor Brute-Force-Angriffen). (C, I, A)",
+    "verdict": "evidenced",
+    "reason": "Kontosperre, Bildschirmsperre, Sitzungsende und Warnungen bei ungewöhnlichen Ländern ergänzen die Authentifizierung.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Ergänzende Maßnahmen",
+      "quote": "Nach fünf Fehlversuchen wird ein Konto für 15 Minuten gesperrt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Ergänzende Maßnahmen",
+      "quote": "Bildschirme sperren sich nach 10 Minuten ohne Eingabe, Fertigungsterminals nach 30 Minuten.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "risikobewertung-anmeldeverfahren",
+      "version": "2026",
+      "section": "Bewertung",
+      "quote": "Passwort und Hardware-Token, Sperre nach Fehlversuchen, Warnung bei ungewöhnlichen Ländern",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Die Authentifizierungsverfahren beruhen auf der Risikobewertung vom 7. September 2026 und folgen BSI- und NIST-Empfehlungen. Passwörter mit mindestens 14 Zeichen, Hardware-Token für Administratoren, VPN und Cloud sowie Sperren und Warnungen sind festgelegt und laut Risikobewertung umgesetzt.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 4.1.2: Inwieweit wird der Zugang von Benutzern zu IT-Diensten und IT-Systemen gesichert? 6 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit wird der Zugang von Benutzern zu IT-Diensten und IT-Systemen gesichert?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 6 of 6 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 11 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Every requirement that applies is evidenced, so no remediation item was drafted."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [],
+  "thread_id": "fb75babda005401ebf5006bc2f04337b",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "4.1.3",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 6,
+   "total": 10
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Die Erstellung, Änderung und Löschung von Benutzerkonten wird durchgeführt.",
+    "verdict": "partly-evidenced",
+    "reason": "Anlegen, Ändern und Sperren sind im Protokoll belegt, tatsächliche Löschungen von Konten nicht.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Eintritte",
+      "quote": "Jeder Antrag kam von der Personalabteilung, wurde von der Führungskraft genehmigt und danach von der IT angelegt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Abteilungswechsel",
+      "quote": "Ihre Rollen wurden jeweils am Tag des Wechsels angepasst und die alten Rechte entzogen.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Sperren und Löschen",
+      "quote": "Gesperrte Konten werden nach 6 Monaten gelöscht, Postfächer nach 12 Monaten.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Es werden eindeutige und personalisierte Benutzerkonten verwendet.",
+    "verdict": "evidenced",
+    "reason": "Jede Person erhält ein eigenes Konto, die Überprüfung bestätigte die Zuordnung zu genau einer Person.",
+    "citations": [
+     {
+      "doc_id": "zugriffsrechte-ueberpruefung",
+      "version": "2026-H1",
+      "section": "Ergebnis",
+      "quote": "Jedes geprüfte Konto war genau einer Person zugeordnet",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Grundsätze",
+      "quote": "Jede Person erhält ein eigenes, persönliches Benutzerkonto.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Die Nutzung von „Sammel-Konten“ ist geregelt (z. B. auf Fälle beschränkt, bei denen die Rückverfolgbarkeit von Aktionen verzichtbar ist).",
+    "verdict": "evidenced",
+    "reason": "Sammelkonten sind auf Anzeigeterminals ohne Eingabe beschränkt und in der Praxis nur dort vorhanden.",
+    "citations": [
+     {
+      "doc_id": "zugriffsrechte-ueberpruefung",
+      "version": "2026-H1",
+      "section": "Ergebnis",
+      "quote": "Sammelkonten gab es nur auf den Anzeigeterminals der Fertigung, wie in der Liste des IT-Leiters geführt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M4",
+    "column": "must",
+    "text": "Benutzerkonten werden unmittelbar nachdem der Benutzer aus der Organisation ausgeschieden ist oder diese verlassen hat (z. B. bei Beendigung des Arbeitsverhältnisses) gesperrt.",
+    "verdict": "partly-evidenced",
+    "reason": "Sechs von sieben Konten wurden am letzten Arbeitstag gesperrt, A-04 erst sechs Tage später.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Austritte",
+      "quote": "Das Konto von A-04 wurde sechs Tage nach dem letzten Arbeitstag gesperrt, weil die Personalabteilung den Austritt verspätet gemeldet hatte.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Sperren und Löschen",
+      "quote": "Konten ausscheidender Mitarbeiter werden am letzten Arbeitstag gesperrt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M5",
+    "column": "must",
+    "text": "Benutzerkonten werden in regelmäßigen Abständen überprüft.",
+    "verdict": "evidenced",
+    "reason": "Die Benutzerkonten wurden zwischen 15. Juni und 3. Juli 2026 überprüft, ein halbjährlicher Rhythmus ist festgelegt.",
+    "citations": [
+     {
+      "doc_id": "zugriffsrechte-ueberpruefung",
+      "version": "2026-H1",
+      "section": "Ablauf",
+      "quote": "Zwischen 15. Juni und 3. Juli 2026 haben die Informationseigentümer mit den Führungskräften alle Benutzerkonten und die vergebenen Rechte ihrer Systeme geprüft",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M6",
+    "column": "must",
+    "text": "Es erfolgt eine sichere Zustellung der Anmeldeinformationen an den Benutzer.",
+    "verdict": "evidenced",
+    "reason": "Erstpasswort per SMS und Benutzername getrennt per E-Mail, belegt für alle 14 Eintritte.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Eintritte",
+      "quote": "Jedes Erstpasswort ging per SMS auf das Diensthandy, der Benutzername getrennt per E-Mail an die Führungskraft.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M7",
+    "column": "must",
+    "text": "Eine Richtlinie zum Umgang mit Anmeldeinformationen ist definiert und umgesetzt. Die folgenden Aspekte werden berücksichtigt:\n  - Keine Weitergabe von Anmeldedaten, auch nicht an Personen in leitender Position, im Rahmen der geltenden Gesetze,\n  - kein Notieren von Anmeldeinformationen oder unverschlüsselte Speicherung\n  - sofortige Änderung der Anmeldeinformation bei Verdacht auf mögliche Kompromittierung\n  - keine Verwendung von identischen Anmeldeinformationen für geschäftliche und nicht-geschäftliche Nutzung\n  - Änderung von temporären oder Initial-Anmeldeinformationen nach dem 1. Login\n  - Vorgaben für die Qualität von Anmeldeinformationen (z. B. Passwort-Länge, zu verwendende Zeichenarten).",
+    "verdict": "partly-evidenced",
+    "reason": "Die Richtlinien decken Weitergabe, Notieren, Kompromittierung, Erstpasswort und Qualität ab, die getrennte Nutzung geschäftlicher und privater Anmeldeinformationen fehlt und die Umsetzung ist nur dokumentiert.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Umgang mit Anmeldeinformationen",
+      "quote": "Anmeldedaten werden an niemanden weitergegeben, auch nicht an Vorgesetzte.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Umgang mit Anmeldeinformationen",
+      "quote": "Passwörter werden nicht notiert und nur im freigegebenen Passwort-Manager gespeichert.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Zustellung der Anmeldedaten",
+      "quote": "Bei der ersten Anmeldung muss das Passwort geändert werden.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Ein Basis-Benutzerprofil mit minimalen Zugriffsrechten und Funktionalitäten ist vorhanden und wird angewendet.",
+    "verdict": "partly-evidenced",
+    "reason": "Das Basisprofil ist im Verfahren beschrieben, die tatsächliche Anwendung ist nicht belegt.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Grundsätze",
+      "quote": "Neue Konten starten mit einem Basisprofil, das nur E-Mail, Intranet und das IT-Serviceportal erlaubt",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Herstellerseitig vorgegebene Standardkonten und -Passwörter werden deaktiviert (z. B. durch Sperrung oder Änderung des Passworts).",
+    "verdict": "partly-evidenced",
+    "reason": "Die Deaktivierung von Standardkonten ist nur dokumentiert, ein Umsetzungsnachweis fehlt.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Standardkonten",
+      "quote": "Herstellerseitige Standardkonten werden vor der Inbetriebnahme eines Systems deaktiviert oder erhalten ein neues Passwort.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Die Einrichtung von Benutzerkonten erfolgt durch die verantwortliche Stelle oder wird durch diese autorisiert.",
+    "verdict": "evidenced",
+    "reason": "Konten werden auf Antrag der Personalabteilung nach Genehmigung durch die Führungskraft von der IT angelegt.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Eintritte",
+      "quote": "Jeder Antrag kam von der Personalabteilung, wurde von der Führungskraft genehmigt und danach von der IT angelegt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S4",
+    "column": "should",
+    "text": "Die Einrichtung von Benutzerkonten unterliegt einem Genehmigungsprozess (4-Augen-Prinzip).",
+    "verdict": "evidenced",
+    "reason": "Antrag, Genehmigung und Anlage durch getrennte Stellen sind festgelegt und im Protokoll belegt.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Anlegen und Ändern",
+      "quote": "Die Führungskraft genehmigt den Antrag, danach legt die IT das Konto an (Vier-Augen-Prinzip).",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Eintritte",
+      "quote": "Jeder Antrag kam von der Personalabteilung, wurde von der Führungskraft genehmigt und danach von der IT angelegt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S5",
+    "column": "should",
+    "text": "Benutzerkonten von Dienstleistern werden nach Abschluss von deren Aufgabe gesperrt.",
+    "verdict": "evidenced",
+    "reason": "Die Konten dreier Dienstleister wurden am Auftragsende gesperrt.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Dienstleister",
+      "quote": "Die Konten von drei Dienstleistern wurden am Ende ihres Auftrags gesperrt",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S6",
+    "column": "should",
+    "text": "Sperr- und Löschfristen für Benutzerkonten sind definiert.",
+    "verdict": "evidenced",
+    "reason": "Sperr- und Löschfristen sind festgelegt.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-verfahren",
+      "version": "2.3",
+      "section": "Sperren und Löschen",
+      "quote": "Gesperrte Konten werden nach 6 Monaten gelöscht, Postfächer nach 12 Monaten.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S7",
+    "column": "should",
+    "text": "Die Verwendung von Standard-Passworten wird technisch verhindert.",
+    "verdict": "evidenced",
+    "reason": "Der Verzeichnisdienst lehnt Standard-Passwörter technisch ab.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Passwörter",
+      "quote": "Der Verzeichnisdienst lehnt Standard-Passwörter und solche aus der Liste technisch ab.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S8",
+    "column": "should",
+    "text": "Beim Einsatz einer starken Authentifizierung wird das Medium (z. B. Faktor Besitz) sicher verwendet.",
+    "verdict": "evidenced",
+    "reason": "Hardware-Token sind persönlich, werden nicht weitergegeben und bei Verlust sofort gesperrt.",
+    "citations": [
+     {
+      "doc_id": "authentifizierungsrichtlinie",
+      "version": "3.0",
+      "section": "Mehrfaktor-Authentifizierung",
+      "quote": "Ein Token ist persönlich, wird nicht weitergegeben und bei Verlust sofort beim Security-Desk gesperrt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S9",
+    "column": "should",
+    "text": "Es findet eine Überprüfung der Benutzerkonten in regelmäßigen Abständen statt. Dazu gehören auch Benutzerkonten in IT-Systemen von Kunden.",
+    "verdict": "partly-evidenced",
+    "reason": "Eigene Systeme und Lieferantenportale wurden geprüft, die Konten in den Portalen von drei Kunden nicht.",
+    "citations": [
+     {
+      "doc_id": "zugriffsrechte-ueberpruefung",
+      "version": "2026-H1",
+      "section": "Nicht geprüft",
+      "quote": "Technische Konten und die Benutzerkonten von Alpenwerk in den Portalen von drei Kunden wurden nicht geprüft.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S10",
+    "column": "should",
+    "text": "Die interaktive Anmeldung bei Dienstkonten (technischen Konten) wird technisch verhindert.",
+    "verdict": "not-evidenced",
+    "reason": "Die Evidenz enthält keine Aussage zur technischen Verhinderung der interaktiven Anmeldung bei Dienstkonten.",
+    "citations": []
+   }
+  ],
+  "answer": "Das Kontenverfahren und das Protokoll der Ein- und Austritte zeigen persönliche Konten, geregelte Sammelkonten, sichere Zustellung, Vier-Augen-Prinzip und halbjährliche Überprüfung. Lücken: ein Konto wurde sechs Tage zu spät gesperrt, Löschungen und Standardkonten sind nicht belegt, die Richtlinie zu Anmeldeinformationen ist unvollständig, Konten in Kundensystemen wurden nicht geprüft und die Dienstkonten-Anmeldung ist nicht belegt.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 4.1.3: Inwieweit werden Benutzerkonten und Anmeldeinformationen sicher verwaltet und angewendet? 17 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden Benutzerkonten und Anmeldeinformationen sicher verwaltet und angewendet?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 10 of 17 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 23 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 7 remediation items (6 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "M1",
+    "missing": "Nachweis, dass Konten nach Ablauf der Fristen tatsächlich gelöscht werden.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "M4",
+    "missing": "Zuverlässige und rechtzeitige Meldung von Austritten durch die Personalabteilung, damit Konten am letzten Arbeitstag gesperrt werden.",
+    "owner_role": "Personalleiterin",
+    "due_date": "2026-12-09",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "M7",
+    "missing": "Regel zur getrennten Nutzung geschäftlicher und privater Anmeldeinformationen sowie Umsetzungsnachweis der Richtlinie.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S1",
+    "missing": "Nachweis, dass das Basisprofil bei neuen Konten angewendet wird.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S2",
+    "missing": "Nachweis der Deaktivierung herstellerseitiger Standardkonten und -passwörter.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S9",
+    "missing": "Überprüfung der Benutzerkonten von Alpenwerk in den Portalen der drei Kunden.",
+    "owner_role": "Leiter Vertrieb",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S10",
+    "missing": "Technische Verhinderung der interaktiven Anmeldung bei Dienstkonten und deren Nachweis.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "high",
+    "done": null
+   }
+  ],
+  "thread_id": "0d60873d1dcb4ec5aec27f15216ef0cb",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "4.2.1",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 5,
+   "total": 5
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Die Anforderungen an das Management von Zugriffsrechten (Autorisierung) sind ermittelt und erfüllt. Die folgenden Aspekte werden berücksichtigt:\n  - Verfahren zur Beantragung, Verifizierung und Genehmigung,\n  - Anwendung des Minimal- („Need-to-know\" / “Least-Privilege“)-Prinzips.\n  - Zugriffsrechte werden widerrufen, wenn sie nicht mehr benötigt werden",
+    "verdict": "evidenced",
+    "reason": "Beantragung, Prüfung, Freigabe, Least-Privilege und Entzug sind geregelt und bei Abteilungswechseln belegt.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Beantragung und Genehmigung",
+      "quote": "Danach gibt der interne Informationseigentümer des betroffenen Systems, zum Beispiel der Leiter Konstruktion für den CAD-Tresor, die Rechte frei.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Rollen",
+      "quote": "Jede Rolle hat genau die Rechte, die für ihre Aufgaben nötig sind (Need-to-know und Least-Privilege).",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Abteilungswechsel",
+      "quote": "Ihre Rollen wurden jeweils am Tag des Wechsels angepasst und die alten Rechte entzogen.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Die erteilten Zugriffsrechte für normale und privilegierte Benutzerkonten sowie technische Konten werden in regelmäßigen Abständen auch in IT-Systemen von Kunden überprüft.",
+    "verdict": "partly-evidenced",
+    "reason": "Normale und privilegierte Konten werden halbjährlich geprüft, technische Konten und Kundensysteme sind ausgenommen.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Überprüfung",
+      "quote": "Die Informationseigentümer prüfen halbjährlich die vergebenen Rechte der normalen und privilegierten Benutzerkonten ihrer Systeme.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Überprüfung",
+      "quote": "Technische Konten und Konten in IT-Systemen von Kunden sind von der Überprüfung ausgenommen.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Berechtigungskonzepte für den Zugriff auf Informationen sind erstellt.",
+    "verdict": "evidenced",
+    "reason": "Ein Berechtigungskonzept liegt vor.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Rollen",
+      "quote": "Zugriffsrechte werden über Rollen vergeben, zum Beispiel",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Berechtigungs-Rollen werden verwendet.",
+    "verdict": "evidenced",
+    "reason": "Rechte werden über Rollen wie Konstruktion, Einkauf oder Buchhaltung vergeben.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Rollen",
+      "quote": "Zugriffsrechte werden über Rollen vergeben, zum Beispiel",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Die Vergabe von Rechten erfolgt bedarfsorientiert und entsprechend der Rolle und/oder dem Verantwortungsbereich.",
+    "verdict": "evidenced",
+    "reason": "Rechte entsprechen der Rolle und dem Bedarf der Aufgaben.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Rollen",
+      "quote": "Jede Rolle hat genau die Rechte, die für ihre Aufgaben nötig sind (Need-to-know und Least-Privilege).",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S4",
+    "column": "should",
+    "text": "Normalen Benutzerkonten werden keine privilegierten Zugriffsrechte erteilt.",
+    "verdict": "evidenced",
+    "reason": "Das Konzept schließt privilegierte Rechte für normale Konten aus, die Überprüfung bestätigte dies.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Privilegierte Rechte",
+      "quote": "Normale Benutzerkonten erhalten keine privilegierten Rechte.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "zugriffsrechte-ueberpruefung",
+      "version": "2026-H1",
+      "section": "Ergebnis",
+      "quote": "Keines der normalen Benutzerkonten hatte privilegierte Rechte.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S5",
+    "column": "should",
+    "text": "Die Zugriffsrechte eines Benutzers werden aktualisiert, sobald sich dessen Aufgabenbereich geändert hat (z. B. Wechsel in einen anderen Zuständigkeitsbereich).",
+    "verdict": "evidenced",
+    "reason": "Bei Abteilungswechseln wurden die Rollen jeweils am Wechseltag angepasst.",
+    "citations": [
+     {
+      "doc_id": "benutzerkonten-protokoll",
+      "version": "2026-Q3",
+      "section": "Abteilungswechsel",
+      "quote": "Ihre Rollen wurden jeweils am Tag des Wechsels angepasst und die alten Rechte entzogen.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Die Zugriffsrechte sind durch den internen Informationsverantwortlichen freigegeben. (C, I, A)",
+    "verdict": "evidenced",
+    "reason": "Der interne Informationseigentümer gibt Rechte vor der Einrichtung frei.",
+    "citations": [
+     {
+      "doc_id": "berechtigungskonzept",
+      "version": "2.1",
+      "section": "Beantragung und Genehmigung",
+      "quote": "Danach gibt der interne Informationseigentümer des betroffenen Systems, zum Beispiel der Leiter Konstruktion für den CAD-Tresor, die Rechte frei.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Das Berechtigungskonzept regelt rollenbasierte Vergabe, Beantragung, Freigabe durch den Informationseigentümer, Least-Privilege und Entzug. Das Protokoll belegt die halbjährliche Überprüfung normaler und privilegierter Konten; technische Konten und Konten in Kundensystemen sind ausgenommen.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 4.2.1: Inwieweit werden Zugriffsrechte vergeben und verwaltet? 8 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden Zugriffsrechte vergeben und verwaltet?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 7 of 8 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 12 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 1 remediation item (1 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "M2",
+    "missing": "Regelmäßige Überprüfung der Rechte technischer Konten und der Konten in IT-Systemen von Kunden.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "cd202ab937014f4fa8da531f7a5bcc0f",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "5.1.1",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 0,
+   "total": 1
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Alle angewendeten kryptografischen Verfahren (z. B. Verschlüsselung, Signatur und Hash-Algorithmen, Protokolle) bieten die für das jeweilige Anwendungsgebiet notwendige Sicherheit entsprechend der anerkannten Industrienorm, soweit rechtlich möglich.",
+    "verdict": "evidenced",
+    "reason": "Die Verfahren folgen der BSI-Richtlinie TR-02102 und die Prüfung bestätigt, dass alle Verbindungen verschlüsselt sind.",
+    "citations": [
+     {
+      "doc_id": "kryptografiekonzept",
+      "version": "1.4",
+      "section": "Verfahren und Schlüsselstärken",
+      "quote": "Die Verfahren richten sich nach der aktuellen Technischen Richtlinie TR-02102 des BSI.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "netzwerkdienste-verzeichnis",
+      "version": "2026-09",
+      "section": "Prüfung",
+      "quote": "Am 21. September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Ein Konzept für den Einsatz von Kryptografie ist definiert und umgesetzt. Die folgenden Aspekte werden berücksichtigt:\n  - Kryptografische Verfahren, \n  - Schlüsselstärken,\n  - Verfahren für den vollständigen Lebenszyklus von kryptografischen Schlüsseln einschließlich Erzeugung, Speicherung, Archivierung, Abruf, Verteilung, Deaktivierung, Erneuerung und Löschung.",
+    "verdict": "partly-evidenced",
+    "reason": "Das Konzept deckt Verfahren, Schlüsselstärken und Lebenszyklus ab, die Umsetzung des Schlüssellebenszyklus ist nicht belegt und für den CAD-Datenaustausch gibt es eine offene Ausnahme.",
+    "citations": [
+     {
+      "doc_id": "kryptografiekonzept",
+      "version": "1.4",
+      "section": "Lebenszyklus der Schlüssel",
+      "quote": "Das Konzept regelt für jeden Schlüssel Archivierung, Abruf, Verteilung, Deaktivierung, Erneuerung spätestens nach drei Jahren und Löschung.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "kryptografiekonzept",
+      "version": "1.4",
+      "section": "Lebenszyklus der Schlüssel",
+      "quote": "Schlüssel werden auf dem Hardware-Sicherheitsmodul der IT erzeugt und gespeichert.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Anforderungen an die Schlüsselhoheit (insbesondere bei organisationsfremder Verarbeitung) werden festgelegt und erfüllt. (C, I)",
+    "verdict": "partly-evidenced",
+    "reason": "Die Anforderung ist festgelegt und bei der Lohnverrechnung erfüllt, beim CAD-Datenaustausch hält der Anbieter die Schlüssel und die Ausnahme ist offen.",
+    "citations": [
+     {
+      "doc_id": "kryptografiekonzept",
+      "version": "1.4",
+      "section": "Schlüsselhoheit bei Cloud-Diensten",
+      "quote": "Vertrauliche Daten, die ein Anbieter außerhalb von Alpenwerk verarbeitet, werden mit Schlüsseln verschlüsselt, die nur Alpenwerk besitzt",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "cloud-dienste-register",
+      "version": "2026-09",
+      "section": "Ausnahmen",
+      "quote": "Für den CAD-Datenaustausch hat der IT-Leiter am 12. August 2026 eine Ausnahme vom Kryptografiekonzept beantragt",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Das Kryptografiekonzept legt Verfahren, Schlüsselstärken nach BSI TR-02102 und den Schlüssellebenszyklus fest, die Netzwerkprüfung bestätigt verschlüsselte Verbindungen. Für den CAD-Datenaustausch hält der Anbieter die Schlüssel, die beantragte Ausnahme ist noch nicht entschieden, die Schlüsselhoheit ist dort nicht erfüllt.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 5.1.1: Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet? 3 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit wird die Nutzung kryptografischer Verfahren verwaltet?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 1 of 3 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 6 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 2 remediation items (2 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "S1",
+    "missing": "Nachweis der umgesetzten Schlüsselverwaltung über den vollständigen Lebenszyklus und Entscheidung zur offenen Ausnahme.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "H1",
+    "missing": "Entscheidung zur Ausnahme beim CAD-Datenaustausch und Herstellung der Schlüsselhoheit (kundenverwaltete Schlüssel) oder gleichwertige Maßnahme.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "741702672584464cb6fd63291b938c70",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "5.1.2",
+  "profile_id": "alpenwerk",
+  "verdict": "evidenced",
+  "should_score": {
+   "evidenced": 2,
+   "total": 3
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Die zur Übertragung von Informationen genutzten Netzwerkdienste sind identifiziert und dokumentiert.",
+    "verdict": "evidenced",
+    "reason": "Alle genutzten Netzwerkdienste stehen im Verzeichnis und wurden am 21. September 2026 bestätigt.",
+    "citations": [
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Netzwerkdienste",
+      "quote": "Alle Netzwerkdienste, über die Informationen übertragen werden, stehen im Verzeichnis der Netzwerkdienste.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "netzwerkdienste-verzeichnis",
+      "version": "2026-09",
+      "section": "Prüfung",
+      "quote": "Am 21. September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Richtlinien und Verfahren entsprechend den Klassifizierungsvorgaben zur Nutzung von Netzwerkdiensten sind definiert und umgesetzt.",
+    "verdict": "evidenced",
+    "reason": "Die Richtlinie ordnet Klassifizierungen erlaubte Übertragungen zu, die Freigabe neuer Dienste ist geregelt und wurde geprüft.",
+    "citations": [
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Netzwerkdienste",
+      "quote": "Ein neuer Dienst wird erst genutzt, wenn die IT ihn dort eingetragen und freigegeben hat.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "netzwerkdienste-verzeichnis",
+      "version": "2026-09",
+      "section": "Prüfung",
+      "quote": "Am 21. September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Maßnahmen zum Schutz von übertragenen Inhalten vor unberechtigtem Zugriff sind umgesetzt.",
+    "verdict": "evidenced",
+    "reason": "Transportverschlüsselung und Sperre unverschlüsselter Protokolle sind umgesetzt und geprüft.",
+    "citations": [
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Schutz der Übertragung",
+      "quote": "Unverschlüsselte Protokolle wie FTP oder Telnet sind an der Firewall gesperrt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "netzwerkdienste-verzeichnis",
+      "version": "2026-09",
+      "section": "Prüfung",
+      "quote": "Am 21. September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Maßnahmen zur Sicherstellung der korrekten Adressierung und des korrekten Transports von Informationen sind umgesetzt.",
+    "verdict": "partly-evidenced",
+    "reason": "Die Maßnahmen zur richtigen Adressierung sind nur beschrieben, ein Umsetzungsnachweis fehlt.",
+    "citations": [
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Richtige Adressierung",
+      "quote": "Das E-Mail-Programm warnt vor dem Versand an externe Empfänger.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Der elektronische Informationsaustausch erfolgt entsprechend der jeweiligen Klassifizierung durch Inhalts- oder Transportverschlüsselung.",
+    "verdict": "evidenced",
+    "reason": "Transport- und Inhaltsverschlüsselung richten sich nach der Klassifizierung und sind im Verzeichnis ausgewiesen.",
+    "citations": [
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Schutz der Übertragung",
+      "quote": "Alle Informationen werden mindestens transportverschlüsselt übertragen (TLS 1.2 oder höher).",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Schutz der Übertragung",
+      "quote": "Vertrauliche Zeichnungen werden zusätzlich inhaltsverschlüsselt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Fernzugriffsverbindungen zum Unternehmensnetzwerk verfügen über angemessene Sicherheitsfunktionen. Die folgenden Aspekte werden berücksichtigt: \n  - Verschlüsselung,\n  - Authentifizierungsstärke,\n  - Gewähren und Beenden des Zugriffs,\n  - Nutzung einer sicheren Verbindung (z. B. VPN).",
+    "verdict": "evidenced",
+    "reason": "Fernzugriff erfolgt nur über VPN mit TLS 1.3 und Mehrfaktor-Authentifizierung, Zugänge werden beantragt, genehmigt und gesperrt.",
+    "citations": [
+     {
+      "doc_id": "netzwerk-uebertragungsrichtlinie",
+      "version": "2.0",
+      "section": "Fernzugriff",
+      "quote": "Das VPN verlangt Mehrfaktor-Authentifizierung und ist mit TLS 1.3 verschlüsselt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "netzwerkdienste-verzeichnis",
+      "version": "2026-09",
+      "section": "VPN-Zugänge",
+      "quote": "Ende September 2026 hatten 41 Mitarbeiter und 4 Dienstleister einen VPN-Zugang; jeder war über das IT-Serviceportal beantragt und genehmigt.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Informationen werden in verschlüsselter Form (mindestens Transportverschlüsselung) übertragen oder durch gleichwertige Maßnahmen geschützt. (C)",
+    "verdict": "evidenced",
+    "reason": "Die Firewall-Auswertung bestätigt, dass alle Verbindungen verschlüsselt sind.",
+    "citations": [
+     {
+      "doc_id": "netzwerkdienste-verzeichnis",
+      "version": "2026-09",
+      "section": "Prüfung",
+      "quote": "Am 21. September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Netzwerkdienste sind im Verzeichnis dokumentiert und nach Klassifizierung geregelt, alle Verbindungen sind mindestens transportverschlüsselt, Fernzugriff läuft nur über VPN mit Mehrfaktor-Authentifizierung. Die Prüfung vom 21. September 2026 bestätigt dies. Für die korrekte Adressierung liegt nur eine Beschreibung vor.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 5.1.2: Inwieweit werden Informationen während der Übertragung geschützt? 7 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden Informationen während der Übertragung geschützt?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 6 of 7 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 12 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 1 remediation item (1 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "S1",
+    "missing": "Nachweis der Wirksamkeit der Maßnahmen zur korrekten Adressierung (E-Mail-Warnung, Freischaltung im CAD-Datenaustausch).",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-02-07",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "a95f3ecd43ae435ca768e149982e95bd",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "5.2.4",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 1,
+   "total": 3
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Anforderungen an die Informationssicherheit bezüglich der Handhabung von Ereignisprotokollen sind ermittelt und erfüllt.",
+    "verdict": "partly-evidenced",
+    "reason": "Die Anforderungen stehen in der überfälligen Richtlinie, die monatliche Auswertung belegt die Handhabung aktuell. Höchstens teilweise nachgewiesen: protokollierungsrichtlinie: Prüfung überfällig (freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10).",
+    "citations": [
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Anforderungen an die Protokollierung",
+      "quote": "Ereignisprotokolle werden so geführt, dass Sicherheitsvorfälle erkannt und nachvollzogen werden können.",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     },
+     {
+      "doc_id": "protokollauswertung",
+      "version": "2026-Q3",
+      "section": "Monatliche Auswertung",
+      "quote": "Die IT hat die Ereignisprotokolle jeden Monat auf Regelverstöße und Auffälligkeiten ausgewertet",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Sicherheitsrelevante Anforderungen an die Protokollierung der Aktivitäten von Systemadministratoren und Nutzern sind ermittelt, festgelegt und erfüllt.",
+    "verdict": "partly-evidenced",
+    "reason": "Protokollierung von An- und Abmeldungen und Administratortätigkeiten ist nur in der überfälligen Richtlinie festgelegt. Höchstens teilweise nachgewiesen: protokollierungsrichtlinie: Prüfung überfällig (freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10).",
+    "citations": [
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Was protokolliert wird",
+      "quote": "An- und Abmeldungen aller Benutzer und Administratoren;",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     },
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Was protokolliert wird",
+      "quote": "alle Tätigkeiten mit Administratorkonten",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Die eingesetzten IT-Systeme werden hinsichtlich der Notwendigkeit der Protokollierung bewertet.",
+    "verdict": "partly-evidenced",
+    "reason": "Die Bewertung neuer Systeme ist nur in der überfälligen Richtlinie beschrieben, ein Nachweis fehlt. Höchstens teilweise nachgewiesen: protokollierungsrichtlinie: Prüfung überfällig (freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10).",
+    "citations": [
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Bewertung der Systeme",
+      "quote": "Die IT bewertet für jedes neue System, ob und was protokolliert werden muss, und trägt das Ergebnis in die Systemliste ein.",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M4",
+    "column": "must",
+    "text": "Bei der Nutzung organisationsfremder IT-Dienste werden Informationen zu den Überwachungsmöglichkeiten eingeholt und in der Bewertungberücksichtigt.",
+    "verdict": "evidenced",
+    "reason": "Bei der Freigabe jedes Cloud-Dienstes wurden dessen Protokoll- und Warnmöglichkeiten festgehalten.",
+    "citations": [
+     {
+      "doc_id": "cloud-dienste-register",
+      "version": "2026-09",
+      "section": "Überwachung",
+      "quote": "Bei der Freigabe wurde für jeden Dienst festgehalten, welche Protokolle und Warnungen der Anbieter bietet.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M5",
+    "column": "must",
+    "text": "Ereignisprotokolle werden, soweit im Einklang mit den zulässigen gesetzlichen und betrieblichen Bestimmungen, regelmäßig auf Regelverstöße und Auffälligkeiten überprüft.",
+    "verdict": "evidenced",
+    "reason": "Die Protokolle wurden monatlich ausgewertet, zuletzt am 6. Oktober 2026.",
+    "citations": [
+     {
+      "doc_id": "protokollauswertung",
+      "version": "2026-Q3",
+      "section": "Monatliche Auswertung",
+      "quote": "Die IT hat die Ereignisprotokolle jeden Monat auf Regelverstöße und Auffälligkeiten ausgewertet, zuletzt am 6. Oktober 2026 für September.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Ein Verfahren zur Eskalation von relevanten Ereignissen an die zuständige Stelle (z. B. Sicherheitsvorfall-Meldung, Datenschutz, Unternehmenssicherheit, IT-Sicherheit) ist definiert und etabliert.",
+    "verdict": "evidenced",
+    "reason": "Auffälligkeiten werden an den Security-Desk eskaliert und im Register erfasst.",
+    "citations": [
+     {
+      "doc_id": "protokollauswertung",
+      "version": "2026-Q3",
+      "section": "Monatliche Auswertung",
+      "quote": "Auffälligkeiten, die auf ein Sicherheitsereignis hindeuten, wurden nach dem Meldeverfahren an den Security-Desk eskaliert",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Ereignisprotokolle (Inhalte und Metadaten) sind gegen Änderungen geschützt. (z. B. durch eine dedizierte Umgebung).",
+    "verdict": "partly-evidenced",
+    "reason": "Der Schutz der Protokolle ist nur in der überfälligen Richtlinie beschrieben. Höchstens teilweise nachgewiesen: protokollierungsrichtlinie: Prüfung überfällig (freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10).",
+    "citations": [
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Schutz der Protokolle",
+      "quote": "Die Protokolle werden auf einem eigenen Protokollserver gesammelt, auf den nur zwei Administratoren Zugriff haben.",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Eine angemessene Überwachung und Aufzeichnung aller informationssicherheitsrelevanten Aktionen im Netzwerk sind etabliert.",
+    "verdict": "partly-evidenced",
+    "reason": "Netzwerküberwachung ist in der überfälligen Richtlinie festgelegt, die Auswertung von Firewall und VPN belegt sie teilweise. Höchstens teilweise nachgewiesen: protokollierungsrichtlinie: Prüfung überfällig (freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10).",
+    "citations": [
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Überwachung des Netzwerks",
+      "quote": "Das Netzwerk wird durch die Firewall und ein System zur Angriffserkennung überwacht; Warnungen gehen an den Security-Desk.",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     },
+     {
+      "doc_id": "protokollauswertung",
+      "version": "2026-Q3",
+      "section": "Monatliche Auswertung",
+      "quote": "Ausgewertet wurden die Protokolle des Verzeichnisdienstes, der Firewall, des VPN und der Cloud-Dienste.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Informationssicherheitsanforderungen, die für die Sicherheit während der Handhabung von Ereignisprotokollen relevant sind, z. B. vertragliche Anforderungen, sind ermittelt und umgesetzt. (C, I, A)",
+    "verdict": "partly-evidenced",
+    "reason": "Speicherdauer und Zustimmung des Betriebsrats stehen nur in der überfälligen Richtlinie, vertragliche Anforderungen werden nicht genannt. Höchstens teilweise nachgewiesen: protokollierungsrichtlinie: Prüfung überfällig (freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10).",
+    "citations": [
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Anforderungen an die Protokollierung",
+      "quote": "Die Speicherdauer beträgt 12 Monate; danach werden die Protokolle gelöscht.",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     },
+     {
+      "doc_id": "protokollierungsrichtlinie",
+      "version": "1.0",
+      "section": "Anforderungen an die Protokollierung",
+      "quote": "Der Betriebsrat hat der Protokollierung zugestimmt.",
+      "kind": "documented",
+      "stale": true,
+      "stale_because": "approved 2023-05-10 with a yearly review, due 2024-05-10",
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H2",
+    "column": "high",
+    "text": "Zugriffe beim Auf- und Abbau von organisationsfremden Netzwerkverbindungen (z. B. Fernwartung) werden protokolliert. (C, I, A)",
+    "verdict": "evidenced",
+    "reason": "Auf- und Abbau jeder Fernwartungssitzung werden protokolliert, 23 Sitzungen 2026.",
+    "citations": [
+     {
+      "doc_id": "protokollauswertung",
+      "version": "2026-Q3",
+      "section": "Fernwartung",
+      "quote": "Der Auf- und Abbau jeder Fernwartungssitzung wird mit Benutzer, Zeit und Zielmaschine protokolliert.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Die Auswertung der Ereignisprotokolle erfolgt monatlich, Fernwartungssitzungen werden protokolliert und die Überwachungsmöglichkeiten der Cloud-Dienste sind bewertet. Die Protokollierungsrichtlinie ist überfällig zur Prüfung (stale), daher gelten die darauf beruhenden Anforderungen höchstens teilweise als belegt.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 5.2.4: Inwieweit werden Ereignisprotokolle aufgezeichnet und analysiert? 10 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden Ereignisprotokolle aufgezeichnet und analysiert?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 4 of 10 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 14 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 6 remediation items (6 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "M1",
+    "missing": "Aktuell geprüfte und freigegebene Protokollierungsrichtlinie mit ermittelten Anforderungen.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2026-12-24",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "M2",
+    "missing": "Aktualisierte Festlegung der Protokollierungsanforderungen für Administratoren und Nutzer mit Umsetzungsnachweis.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2026-12-24",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "M3",
+    "missing": "Nachweis der Bewertung der eingesetzten Systeme zur Protokollierung (Systemliste).",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S2",
+    "missing": "Aktuelle Dokumentation und Nachweis des Änderungsschutzes der Ereignisprotokolle.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S3",
+    "missing": "Aktueller Nachweis der Netzwerküberwachung (Firewall, Angriffserkennung) nach Überprüfung der Richtlinie.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "H1",
+    "missing": "Ermittlung vertraglicher Anforderungen an die Protokollhandhabung und Aktualisierung der Richtlinie.",
+    "owner_role": "Informationssicherheitsbeauftragte",
+    "due_date": "2027-01-08",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "f0c22c511d7e4274b36b9390142c178e",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "5.2.5",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 1,
+   "total": 3
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Es werden Informationen zu technischen Schwachstellen der eingesetzten IT-Systeme gesammelt (z. B. Informationen des Herstellers, Systemaudits, CVE-Datenbank) und bewertet (z. B. Allgemeines Bewertungssystem für Schwachstellen, en: Common Vulnerability Scoring System, CVSS)",
+    "verdict": "evidenced",
+    "reason": "Hersteller- und CVE-Hinweise werden nächtlich gesammelt und mit CVSS 3.1 bewertet.",
+    "citations": [
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Patch Schwachstellenstatus",
+      "quote": "Patch sammelt jede Nacht die Hinweise der Hersteller und der CVE-Datenbank und bewertet jeden mit CVSS 3.1.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Potenziell betroffene IT-Systeme und Software werden identifiziert und bewertet.",
+    "verdict": "evidenced",
+    "reason": "Für jede Schwachstelle werden betroffene Systeme und Software ermittelt.",
+    "citations": [
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Patch Schwachstellenstatus",
+      "quote": "Für jede Schwachstelle ermittelt Patch die betroffenen Systeme und die eingesetzte Software.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M3",
+    "column": "must",
+    "text": "Aus Schwachstellen resultierende Risiken werden behandelt.",
+    "verdict": "partly-evidenced",
+    "reason": "Kritische und niedrige Schwachstellen sind behandelt, CVE-2026-35512 ist überfällig ohne Behandlung.",
+    "citations": [
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Erfasste Schwachstellen",
+      "quote": "Patch-Ticket PT-204 am 2026-10-16 geschlossen",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Überfällig",
+      "quote": "Update noch nicht freigegeben, keine Ersatzmaßnahme",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Ein angemessenes Patch-Management ist definiert und umgesetzt (z. B. Prüfung und Installation von Patches).",
+    "verdict": "partly-evidenced",
+    "reason": "Tickets und Wartungsfenster zeigen ein praktiziertes Patch-Management, eine überfällige Hochrisiko-Schwachstelle bleibt offen.",
+    "citations": [
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Erfasste Schwachstellen",
+      "quote": "Patch-Ticket PT-209 am 2026-10-29 geschlossen",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Überfällig",
+      "quote": "Update noch nicht freigegeben, keine Ersatzmaßnahme",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S2",
+    "column": "should",
+    "text": "Bei Bedarf werden Maßnahmen zur Risikominimierung umgesetzt.",
+    "verdict": "partly-evidenced",
+    "reason": "Beim CAD-Tresor wird das Risiko durch Zugriffsbeschränkung gemindert, für die Fertigungs-PCs fehlt eine Ersatzmaßnahme.",
+    "citations": [
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Erfasste Schwachstellen",
+      "quote": "Risiko akzeptiert, siehe RA-2026-05; Zugriff nur aus dem Konstruktionsnetz",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Überfällig",
+      "quote": "Update noch nicht freigegeben, keine Ersatzmaßnahme",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S3",
+    "column": "should",
+    "text": "Die erfolgreiche Installation von Patches ist in geeigneter Weise verifiziert.",
+    "verdict": "evidenced",
+    "reason": "Nach jedem geschlossenen Ticket verifiziert ein erneuter Scan die Installation, bestätigt für PT-204 und PT-209.",
+    "citations": [
+     {
+      "doc_id": "patch-vulnerability-status",
+      "version": "2026-11-03T07:00Z",
+      "section": "Nachweis der Installation",
+      "quote": "Nach jedem geschlossenen Patch-Ticket prüft Patch mit einem erneuten Scan, ob das Update auf allen betroffenen Systemen installiert ist.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Patch sammelt nächtlich Schwachstellen, bewertet sie nach CVSS, ermittelt betroffene Systeme und verifiziert installierte Patches per Scan. Die Behandlung ist unvollständig: CVE-2026-35512 ist 12 Tage überfällig, ohne Ersatzmaßnahme.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 5.2.5: Inwieweit werden Schwachstellen erkannt und behandelt? 6 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit werden Schwachstellen erkannt und behandelt?"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 3 of 6 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 9 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 3 remediation items (3 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "M3",
+    "missing": "Behandlung der überfälligen Schwachstelle CVE-2026-35512 auf den Fertigungs-PCs Linie 1 bis 4 (Update oder Ersatzmaßnahme).",
+    "owner_role": "IT-Leiter",
+    "due_date": "2026-11-23",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S1",
+    "missing": "Definiertes Patch-Verfahren mit Eskalation bei Freigabeverzögerungen durch Hersteller und Abbau der überfälligen Patches.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2026-12-24",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   },
+   {
+    "requirement_id": "S2",
+    "missing": "Risikominimierende Ersatzmaßnahme für CVE-2026-35512, z. B. Netzsegmentierung der Fertigungs-PCs.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2026-11-23",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "b6f62d586a3c44d98945fcd37239123d",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ },
+ {
+  "control_id": "5.2.9",
+  "profile_id": "alpenwerk",
+  "verdict": "partly-evidenced",
+  "should_score": {
+   "evidenced": 1,
+   "total": 1
+  },
+  "requirements": [
+   {
+    "id": "M1",
+    "column": "must",
+    "text": "Für die maßgeblichen IT-Systeme sind Datensicherungs-Konzepte vorhanden. Es werden geeignete Schutzmaßnahmen zur Gewährleistung der Vertraulichkeit, Integrität und Verfügbarkeit der Datensicherungen berücksichtigt.",
+    "verdict": "evidenced",
+    "reason": "Konzepte für alle maßgeblichen Dienste liegen vor, Sicherungen sind verschlüsselt, unveränderlich und räumlich getrennt.",
+    "citations": [
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Schutz der Sicherungen",
+      "quote": "Die Sicherungen werden verschlüsselt (AES 256 Bit) auf ein Speichersystem in einem zweiten Brandabschnitt geschrieben",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Schutz der Sicherungen",
+      "quote": "Das Speichersystem ist unveränderlich: Sicherungen können 30 Tage lang nicht gelöscht oder überschrieben werden.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "M2",
+    "column": "must",
+    "text": "Für die maßgeblichen IT-Dienste liegen Wiederherstellungs-Konzepte vor.",
+    "verdict": "evidenced",
+    "reason": "Für jeden maßgeblichen Dienst sind RTO und Wiederherstellungsreihenfolge festgelegt, Tests belegen die Praxis.",
+    "citations": [
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Maßgebliche IT-Dienste",
+      "quote": "Verzeichnisdienst | stündlich, Snapshot | 1 Stunde | 4 Stunden",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Wiederherstellungstests",
+      "quote": "Jeder maßgebliche Dienst wird mindestens einmal jährlich testweise auf einem Testsystem wiederhergestellt.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "S1",
+    "column": "should",
+    "text": "Für jeden maßgeblichen IT-Dienst ist ein Sicherungs- und Wiederherstellungs-Konzept vorhanden. Dabei werden die Abhängigkeiten zwischen den IT-Diensten sowie die Reihenfolge der Wiederherstellung berücksichtigt.",
+    "verdict": "evidenced",
+    "reason": "Die Tabelle nennt je Dienst Sicherung und Abhängigkeiten und ist nach der Wiederherstellungsreihenfolge geordnet.",
+    "citations": [
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Maßgebliche IT-Dienste",
+      "quote": "ERP | stündlich, Datenbank und Dateien | 1 Stunde | 8 Stunden | Verzeichnisdienst",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Maßgebliche IT-Dienste",
+      "quote": "Die Tabelle steht in der Reihenfolge der Wiederherstellung",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H1",
+    "column": "high",
+    "text": "Sicherungs- und Wiederherstellungskonzepte werden in regelmäßigen Abständen methodisch überprüft. (A)",
+    "verdict": "evidenced",
+    "reason": "Der IT-Leiter prüft das Konzept jährlich methodisch, zuletzt am 5. Oktober 2026 anhand der Testergebnisse.",
+    "citations": [
+     {
+      "doc_id": "wiederherstellungstests",
+      "version": "2026",
+      "section": "Prüfung des Konzepts",
+      "quote": "Am 5. Oktober 2026 hat der IT-Leiter das Datensicherungs- und Wiederherstellungskonzept anhand dieser Testergebnisse und der Änderungen in der IT geprüft.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H2",
+    "column": "high",
+    "text": "Die allgemeine Wiederherstellungskapazität wird berücksichtigt und geprüft (z. B. Stichprobenprüfung, Testsysteme). (I, A)",
+    "verdict": "partly-evidenced",
+    "reason": "Drei von fünf Diensten wurden 2026 getestet, CAD-Tresor und Dateiserver nicht.",
+    "citations": [
+     {
+      "doc_id": "wiederherstellungstests",
+      "version": "2026",
+      "section": "Durchgeführte Tests",
+      "quote": "Verzeichnisdienst | 2026-04-14 | Testsystem | 2 Stunden | ja | vollständig, Anmeldung geprüft",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "wiederherstellungstests",
+      "version": "2026",
+      "section": "Nicht getestet",
+      "quote": "Der CAD-Tresor und der Dateiserver wurden 2026 nicht testweise wiederhergestellt, weil das Testsystem zu wenig Speicher hat.",
+      "kind": "implemented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   },
+   {
+    "id": "H3",
+    "column": "high",
+    "text": "Es liegen Konzepte für Datensicherung und Wiederherstellung vor. (A)\nDie folgenden Aspekte werden berücksichtigt:\n  - Recovery Point Objective (RPO),\n  - Recovery Time Objective (RTO),\n  - Erforderliche Ressourcen für die Wiederherstellung (unter Berücksichtigung von Kapazität und Leistung, einschließlich Personal und Hardware),\n  - Vermeidung von Überlastungsszenarien während der Wiederherstellung,\n  - Angemessene räumliche Redundanz (z. B. separater Raum, separater Brandabschnitt, separates Rechenzentrum, separater Standort).",
+    "verdict": "evidenced",
+    "reason": "Das Konzept enthält RPO, RTO, Ressourcen, Vermeidung von Überlast und räumliche Redundanz.",
+    "citations": [
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Ressourcen für die Wiederherstellung",
+      "quote": "Für eine vollständige Wiederherstellung stehen ein Ersatzserver und zwei Administratoren mit Vertretung bereit.",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Ressourcen für die Wiederherstellung",
+      "quote": "Damit das Speichersystem bei einer vollständigen Wiederherstellung nicht überlastet wird",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     },
+     {
+      "doc_id": "datensicherungskonzept",
+      "version": "3.0",
+      "section": "Schutz der Sicherungen",
+      "quote": "wöchentlich auf Bänder ausgelagert, die in einem Bankschließfach in Kufstein liegen",
+      "kind": "documented",
+      "stale": false,
+      "stale_because": null,
+      "lead_statement": false
+     }
+    ]
+   }
+  ],
+  "answer": "Das Datensicherungs- und Wiederherstellungskonzept enthält RPO, RTO, Reihenfolge, Ressourcen, Schutz der Sicherungen und räumliche Redundanz und wurde am 5. Oktober 2026 methodisch geprüft. Wiederherstellungstests liegen für Verzeichnisdienst, ERP und DNC vor, für CAD-Tresor und Dateiserver fehlen sie.",
+  "warnings": [],
+  "steps": [
+   {
+    "node": "load_control",
+    "text": "Loaded control 5.2.9: Inwieweit wird die Sicherung und Wiederherstellung von Daten und IT-Diensten… 6 requirements apply under Alpenwerk Präzision GmbH's profile.",
+    "quote": "Inwieweit wird die Sicherung und Wiederherstellung von Daten und IT-Diensten…"
+   },
+   {
+    "node": "apply_overlays",
+    "text": "No country overlay adds a requirement to this control, so no overlay branch is taken."
+   },
+   {
+    "node": "profile_pass",
+    "text": "Assessed in a profile pass: one model run over 12 controls, with all of the profile's evidence (22 documents) in the prompt."
+   },
+   {
+    "node": "judge",
+    "text": "Judged 5 of 6 requirements evidenced."
+   },
+   {
+    "node": "check_quotes",
+    "text": "Checked each quote against its document: kept 12 citations."
+   },
+   {
+    "node": "remediate",
+    "text": "Drafted 1 remediation item (1 partly evidenced)."
+   },
+   {
+    "node": "review",
+    "text": "Waiting for the compliance lead's review."
+   }
+  ],
+  "token_usage": {
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "total_tokens": 0
+  },
+  "model": "anthropic/claude-sonnet-5.5",
+  "prompt_version": "m7-profile-pass-2",
+  "answer_language": "de",
+  "remediation": [
+   {
+    "requirement_id": "H2",
+    "missing": "Testweise Wiederherstellung von CAD-Tresor und Dateiserver, dafür Erweiterung des Testsystems.",
+    "owner_role": "IT-Leiter",
+    "due_date": "2027-03-09",
+    "status": "draft",
+    "priority": "medium",
+    "done": null
+   }
+  ],
+  "thread_id": "4e1ca09a408147e9b0b3ac3319bb8779",
+  "status": "waiting-for-review",
+  "review": null,
+  "confirmed": null,
+  "review_step": "confirm-findings",
+  "before_three_step_review": false
+ }
+]

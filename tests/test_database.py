@@ -944,3 +944,58 @@ def test_the_server_holds_each_statement_to_the_timeout(empty_database):
         shown = conn.execute("SHOW statement_timeout").fetchone()
 
     assert shown == {"statement_timeout": f"{database.STATEMENT_TIMEOUT_SECONDS}s"}
+
+
+# The trail as vouch-db-setup made it before #372: its CHECK names five actions, not `confirm`.
+CREATE_AUDIT_BEFORE_372 = database.CREATE_AUDIT.replace("'override', 'confirm',", "'override',")
+AUDIT_ROW = (
+    f"INSERT INTO {database.AUDIT_TABLE} (user_id, reviewer_name, at, profile_id, control_id, "
+    "thread_id, action, note, evidence, model, prompt_version) VALUES ('u', 'U', "
+    "'2026-11-01T09:00:00Z', 'nordlicht', '4.1.2', 't', %s, 'Before #372.', '[]', 'fake', 'v1')"
+)
+
+
+def action_check(db: Database) -> dict[str, Any]:
+    """The trail's action CHECK: its oid (a new one when it is replaced) and its definition."""
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT oid, pg_get_constraintdef(oid) AS definition FROM pg_constraint "
+            "WHERE conname = %s",
+            (database.AUDIT_ACTION_CHECK,),
+        ).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def audit_rows(db: Database) -> list[dict[str, Any]]:
+    with db.connection() as conn:
+        return list(conn.execute(f"SELECT * FROM {database.AUDIT_TABLE} ORDER BY id").fetchall())
+
+
+@needs_postgres
+def test_setup_lets_a_trail_made_before_372_keep_confirm_and_changes_nothing_on_a_second_run(
+    empty_database,
+):
+    assert "'confirm'" not in CREATE_AUDIT_BEFORE_372
+    with empty_database.connection() as conn:
+        conn.execute(CREATE_AUDIT_BEFORE_372)
+        conn.execute(AUDIT_ROW, ("accept",))
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(AUDIT_ROW, ("confirm",))
+    rows_before = audit_rows(empty_database)
+
+    empty_database.setup()
+    replaced = action_check(empty_database)
+    rows_after = audit_rows(empty_database)
+    empty_database.setup()
+    again = action_check(empty_database)
+
+    assert "'confirm'" in replaced["definition"]
+    assert rows_after == rows_before  # no row changed
+    assert again == replaced  # the second run left the CHECK as it was
+    assert audit_rows(empty_database) == rows_before
+    with empty_database.connection() as conn:
+        conn.execute(AUDIT_ROW, ("confirm",))
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(AUDIT_ROW, ("sign-off",))
+    assert [r["action"] for r in audit_rows(empty_database)] == ["accept", "confirm"]

@@ -14,6 +14,7 @@ import test_memory
 from company_setup import MUSTERFIRMA, MUSTERFIRMA_ID, POLICIES, RECORDS
 from fastapi.testclient import TestClient
 from profiles_dir import BROKEN, make_profiles
+from reviewing import reviewed
 from test_auth import FakeClerk, bearer, clerk_app, token
 from test_database import needs_postgres
 from test_memory import app_on, as_user, assess, restart
@@ -722,10 +723,7 @@ def test_a_removed_companys_audit_trail_and_row_are_kept(postgres, users):
     with TestClient(app_on(postgres.url)) as client:
         create(client, alice)
         thread_id = assess(client, under)
-        reviewed = client.post(
-            f"/api/assessments/{thread_id}/review", json={"decision": "accept"}, headers=under
-        )
-        assert reviewed.status_code == 200, reviewed.text
+        reviewed(client, thread_id, headers=under)  # M7's three-step review, then accepted
         with postgres.connection() as conn:
             before = conn.execute(
                 f"SELECT * FROM {AUDIT_TABLE} WHERE profile_id = %s ORDER BY id", (MUSTERFIRMA_ID,)

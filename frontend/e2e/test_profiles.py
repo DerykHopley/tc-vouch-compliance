@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 from playwright.sync_api import APIRequestContext, Page, expect
+from reviewing import reviewed
 from top_bar import open_profile_menu, profile_button, switch_profile
 
 NORDLICHT = "Nordlicht Komponenten GmbH · Germany · English"
@@ -31,12 +32,7 @@ def assessed(request: APIRequestContext, url: str, profile: str, control_id: str
 
 
 def accepted(request: APIRequestContext, url: str, profile: str, thread_id: str) -> None:
-    response = request.post(
-        f"{url}/api/assessments/{thread_id}/review",
-        data={"decision": "accept"},
-        headers={"X-Vouch-Profile": profile},
-    )
-    assert response.ok, response.status
+    reviewed(request, url, thread_id, headers={"X-Vouch-Profile": profile})
 
 
 def opened(page: Page, url: str) -> None:
