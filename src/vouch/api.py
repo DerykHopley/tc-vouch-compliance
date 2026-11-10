@@ -62,6 +62,7 @@ from vouch.chat_agent import (
     chat_turn,
 )
 from vouch.citations import LeadStatement
+from vouch.company_page import company_facts
 from vouch.current_company import CurrentCompanyStore, current_company_store, current_of
 from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.documents import library_summaries
@@ -183,6 +184,7 @@ NOT_A_PROMPT_CONTROL = "{control} is not a control the current company applies."
 NO_PROMPT_CONTROL = "The current company applies no control."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
 DOCUMENTS_FAILED = "The documents could not be read."
+COMPANY_FAILED = "The company could not be loaded."
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
 # in the order step 6 lists them.
 LIBRARY_SOURCES = ("policies", "records")
@@ -1748,6 +1750,20 @@ def profile_documents_tab(
     clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
     language, words = documents_tab.document_words(profile.answer_language)
     return clean | {"words": words, "words_language": language}
+
+
+@router.get("/company")
+def company_page(profile: Profile) -> dict[str, Any]:
+    """The Company page's facts (#505, vouch.company_page), for every signed-in user, under the
+    current company: its profile's facts, overlays, protection level's scope, not-applicable
+    entries and where it is defined. Read-only; redacted as the overview is. The base framework
+    unreadable, a plain 500 naming no file."""
+    try:
+        facts = company_facts(profile)
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, COMPANY_FAILED) from None
+    clean, _ = redact_data(facts)
+    return clean
 
 
 def attachment(name: str) -> str:

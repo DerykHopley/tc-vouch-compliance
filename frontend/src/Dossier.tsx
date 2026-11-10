@@ -116,7 +116,7 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
   const assess = next !== null && next.action !== 'review' && running === null && !passing
   const wording = goalWording(overview.goal, overview.answer_language)
   return (
-    <section className="hero">
+    <section className="hero goal-controls">
       <GoalControl overview={overview} onChanged={onGoalChanged} arriving={arriving} notSet={goalNotSet} />
       <RoundControl overview={overview} onChanged={onRoundChanged} />
       <h1 ref={heading} tabIndex={-1} lang={wording.lang}>{wording.headline}</h1>

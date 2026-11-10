@@ -4,9 +4,9 @@ import { type Arrival, useFirstPass } from './arrival.ts'
 import AskVouch from './AskVouch.tsx'
 import type { PageContext } from './chat.ts'
 import { developerSettings, type DeveloperSettings, UNAVAILABLE } from './developer.ts'
+import CompanyPage from './CompanyPage.tsx'
 import CompanySetupWizard from './CompanySetupWizard.tsx'
 import DeveloperPage from './DeveloperPage.tsx'
-import Documents from './Documents.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
 import { controlPath, isReviewState, useOverview } from './overview.ts'
@@ -39,17 +39,18 @@ const COMPANY_PATH = '/company'
 const DOCUMENTS_PATH = '/documents' // the documents' own page before #495: it leads to the Company tab
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
-/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the Company tab
- * at /company (#495: the documents, #424, until #448's slice 4 builds the Company page), the developer page at
- * /developer and its company setup at /developer/setup (#403), the Dossier at /. */
+/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the Company page
+ * at /company (#495, #505), the developer page at /developer and its company setup at /developer/setup (#403), the
+ * Dossier at /. */
 const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
     : view.name === 'company' ? COMPANY_PATH : view.name === 'developer' ? DEVELOPER_PATH
       : view.name === 'setup' ? SETUP_PATH : '/'
 
-/** The page the chat says the lead is on for the view shown: company setup is the developer page's, the Company tab
- * the documents' (#495: the API's pages and the chat's prompts are unchanged), and the not-found page (no view shown)
- * speaks as the Dossier, where its way back leads. */
+/** The page the chat says the lead is on for the view shown: company setup is the developer page's, and the Company
+ * page the documents' (#495), so the chat knows only its Documents panel, not the facts, scope or not-applicable
+ * panels (#505 left the chat's page out of scope; a 'company' page would change the chat's prompt and its version).
+ * The not-found page (no view shown) speaks as the Dossier, where its way back leads. */
 const chatPage = (shown: View['name'] | null): PageContext['page'] =>
   shown === 'setup' ? 'developer' : shown === 'company' ? 'documents' : shown ?? 'dossier'
 
@@ -187,14 +188,17 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
   const { load, noteAssessed, refresh: refreshOverview } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
-  // The report and the Company tab show none of it (#56, #424, #495): it is read on leaving them for a view that does.
-  const needsOverview = view.name !== 'report' && view.name !== 'company'
+  // The report shows none of it (#56): it is read on leaving it for a view that does. The Company page's Goal and
+  // review round panels act on it (#505), so it is read afresh on each arrival there too, as on the Dossier: another
+  // tab may have changed them. A read that fails there keeps the page (CompanyPage keeps the overview last read).
+  const needsOverview = view.name !== 'report'
+  const onCompany = view.name === 'company'
   const read = useRef(false)
   useEffect(() => {
     if (!needsOverview) return
-    if (onDossier || !read.current) void load()
+    if (onDossier || onCompany || !read.current) void load()
     read.current = true
-  }, [load, onDossier, needsOverview])
+  }, [load, onDossier, onCompany, needsOverview])
   // The run sits above the views, so it carries on when the lead leaves its paper. A finished run puts its verdict on
   // its card (the working paper's index), and reads the overview afresh when the Dossier is showing (readiness too).
   const finished = useCallback((assessment: Assessment) => {
@@ -331,7 +335,11 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
         </div>
       </TopBar>
       {shown === 'report' ? <Report />
-        : shown === 'company' ? <Documents reloads={documentsReloads} />
+        : shown === 'company' ? (
+          <CompanyPage overview={overview.state} onRetryOverview={overview.retry} onGoalChanged={changedGoal}
+            onRoundChanged={overview.roundChanged} arriving={arriving} goalNotSet={goalNotSet}
+            documentsReloads={documentsReloads} />
+        )
         : shown === 'developer' && developer ? (
           <main>
             <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })}

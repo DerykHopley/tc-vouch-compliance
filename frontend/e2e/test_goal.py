@@ -20,28 +20,33 @@ def open_dossier(page: Page, url: str) -> None:
         page.goto(url)
 
 
-def ask(page: Page, dialogs: list[str], to: str) -> None:
-    """Change goal on the hero: no browser dialog; the in-app ask opens with today's question,
-    focus on Cancel."""
-    page.locator(".hero .goal").get_by_role("button", name="Change goal").click()
+HERO = ".hero"
+PANEL = ".company-panel"  # the Company page's Goal panel (#505), the first of its panels
+
+
+def ask(page: Page, dialogs: list[str], to: str, where: str = HERO) -> None:
+    """Change goal on the hero (or `where`): no browser dialog; the in-app ask opens with today's
+    question, focus on Cancel."""
+    page.locator(f"{where} .goal").first.get_by_role("button", name="Change goal").click()
     no_dialog(dialogs)
-    expect(page.locator(".hero .inline-confirm [role=alert]")).to_have_text(
+    expect(page.locator(f"{where} .inline-confirm [role=alert]")).to_have_text(
         f"Change this profile's goal to {to}? The change is recorded in the audit trail."
     )
     expect(page.get_by_role("button", name="Cancel")).to_be_focused()
 
 
-def change_goal(page: Page, dialogs: list[str], to: str) -> None:
+def change_goal(page: Page, dialogs: list[str], to: str, where: str = HERO) -> None:
     """Change goal, then Change goal in the ask, waiting for the overview read after it; focus
     stays on Change goal."""
-    ask(page, dialogs, to)
+    ask(page, dialogs, to, where)
     with (
         page.expect_response("**/api/goal") as changed,
         page.expect_response("**/api/overview"),
     ):
-        page.locator(".hero .inline-confirm").get_by_role("button", name="Change goal").click()
+        page.locator(f"{where} .inline-confirm").get_by_role("button", name="Change goal").click()
     assert changed.value.ok, changed.value.status
-    expect(page.locator(".hero .goal").get_by_role("button", name="Change goal")).to_be_focused()
+    goal = page.locator(f"{where} .goal").first
+    expect(goal.get_by_role("button", name="Change goal")).to_be_focused()
 
 
 def newest_trail_actions(page: Page, url: str, n: int) -> list[str]:
@@ -97,6 +102,35 @@ def test_the_lead_changes_the_goal_and_back_and_the_trail_shows_both(
 
     open_dossier(page, dossier_url)
     change_goal(page, dialogs, "Audit readiness")
+    expect(goal).to_contain_text("Goal: Audit readiness")
+    assert newest_trail_actions(page, dossier_url, 2) == [TO_READINESS, TO_IMPROVEMENT]
+    no_dialog(dialogs)
+
+
+def open_company(page: Page, url: str) -> None:
+    with page.expect_response("**/api/company"), page.expect_response("**/api/overview"):
+        page.goto(f"{url}/company")
+
+
+def test_the_lead_changes_the_goal_from_the_company_page_and_back(page: Page, dossier_url):
+    """#505: the same in-app ask in the Company page's Goal panel; the top bar's Goal word
+    follows, the new Goal shows after a reload, and both changes are the trail's newest entries."""
+    dialogs = dialogs_of(page)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    open_company(page, dossier_url)
+    goal = page.get_by_role("region", name="Goal", exact=True).locator(".goal")
+    brand = page.get_by_role("banner").locator(".brand span")
+    expect(goal).to_contain_text("Goal: Audit readiness")
+
+    change_goal(page, dialogs, "Internal improvement", PANEL)
+    expect(goal).to_contain_text("Goal: Internal improvement")
+    expect(brand).to_have_text("Security improvement")
+    open_company(page, dossier_url)
+    expect(goal).to_contain_text("Goal: Internal improvement")
+    assert newest_trail_actions(page, dossier_url, 1) == [TO_IMPROVEMENT]
+
+    open_company(page, dossier_url)
+    change_goal(page, dialogs, "Audit readiness", PANEL)
     expect(goal).to_contain_text("Goal: Audit readiness")
     assert newest_trail_actions(page, dossier_url, 2) == [TO_READINESS, TO_IMPROVEMENT]
     no_dialog(dialogs)

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { EvidenceKind } from './assessment.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 import type { ShownDocument } from './DocumentTable.tsx'
@@ -59,4 +60,25 @@ export type TableWords = Pick<DocumentWords, 'columns' | 'kinds' | 'cycles' | 's
  * cycle or source named `constructor` is shown as written). */
 export function wordFor(words: Record<string, string>, key: string): string | undefined {
   return Object.hasOwn(words, key) ? words[key] : undefined
+}
+
+export type DocumentsState = { status: 'loading' } | { status: 'ready'; documents: ProfileDocuments }
+  | { status: 'failed'; message: string }
+
+/** The documents, read as the caller mounts; `reloads`: bumped to read them again without the loading line (a chat
+ * assessment changes Cited by). `tryAgain` reads them again after a failure. */
+export function useDocuments(reloads = 0): { state: DocumentsState; tryAgain: () => void } {
+  const [state, setState] = useState<DocumentsState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0) // bumped by Try again to read the documents again
+  useEffect(() => {
+    const answer = { wanted: true } // until the page closes or reads again
+    void fetchDocuments().then((read) => answer.wanted && setState(read.ok
+      ? { status: 'ready', documents: read.documents } : { status: 'failed', message: read.message }))
+    return () => { answer.wanted = false }
+  }, [attempt, reloads])
+  const tryAgain = () => {
+    setState({ status: 'loading' })
+    setAttempt((n) => n + 1)
+  }
+  return { state, tryAgain }
 }

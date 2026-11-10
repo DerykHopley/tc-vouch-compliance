@@ -103,13 +103,13 @@ def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url, n
         company_tab(page).click()
     documents = page.locator("article.documents-doc")
     expect(documents).to_have_attribute("lang", "de")
-    expect(documents.get_by_role("heading", level=1)).to_have_text("Dokumente")
+    expect(documents.get_by_role("heading", level=2)).to_have_text("Dokumente")
     assert_marked(page, "Was fehlt?")
 
 
 def test_on_alpenwerk_every_page_s_top_bar_names_it(page: Page, vouch_url, nordlicht_later):
-    """#495: the top bar names the current company on every page, including Report and Company
-    opened directly, which read no overview: the name comes from the profile list."""
+    """#495: the top bar names the current company on every page, including Report opened
+    directly, which reads no overview: the name comes from the profile list."""
     nordlicht_later(vouch_url)
     on_alpenwerk(page, vouch_url)
 

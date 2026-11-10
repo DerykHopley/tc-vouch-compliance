@@ -284,7 +284,7 @@ describe('ProfiledApp, issue 480', () => {
   })
 
   it('names the current company in the top bar on a page that reads no overview, from the list (ticket 495)', async () => {
-    window.history.replaceState(null, '', '/company')
+    window.history.replaceState(null, '', '/report') // the Company page reads the overview since #505
     const fetch = serve([NORDLICHT, TESTWERK], 'testwerk')
     render(<ProfiledApp />)
     await waitFor(() => expect(barName()).toBe('Testwerk Prüfstand GmbH'))

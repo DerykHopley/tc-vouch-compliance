@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
+import type { CompanyFacts } from './company.ts'
 import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
@@ -59,6 +60,15 @@ const OVERVIEW: Overview = {
   quotes: [],
 }
 
+/** Nordlicht's facts, as `GET /api/company` sends them (#505). */
+const COMPANY: CompanyFacts = {
+  company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en', base_framework: 'VDA ISA 2027.1',
+  protection_level: 'normal', overlays: [],
+  scope: { level: 'normal', requirements: { must: 37, should: 48 }, total: 85, controls: 12, added: 0,
+    added_controls: [] },
+  not_applicable: [], defined_in: 'files',
+}
+
 /** A stored assessment as `GET /api/assessments/{thread_id}` sends it (#38). */
 const STORED = { control_id: '4.1.2', verdict: 'partly-evidenced', answer: 'Keys for administrators.',
   status: 'waiting-for-review', thread_id: 't1' }
@@ -79,6 +89,7 @@ const overviewWith = (stored: (typeof STORED)[]): Overview => ({
 function serve(assessment?: () => Promise<Response>, stored: (typeof STORED)[] = []) {
   const fetch = vi.fn((url: string, init?: RequestInit) =>
     url === '/api/overview' ? Promise.resolve(Response.json(overviewWith(stored)))
+      : url === '/api/company' ? Promise.resolve(Response.json(COMPANY))
       : url === '/api/assessments' && init?.method === 'POST' ? (assessment ? assessment() : new Promise<Response>(() => {}))
         : url === '/api/assessments' ? Promise.resolve(Response.json({ assessments: stored }))
           : url.startsWith('/api/assessments/') && stored.length
@@ -594,25 +605,26 @@ describe('the working paper', () => {
   })
 })
 
-describe('the Company tab (ticket 495; the documents, issue 424, until slice 4 builds the Company page)', () => {
+describe('the Company tab (ticket 495; the Company page, ticket 505)', () => {
   const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name })
+  const overviewReads = (fetch: ReturnType<typeof serve>) =>
+    fetch.mock.calls.filter(([url]) => url === '/api/overview').length
 
-  it('sits after Report for every user, opens /company marked current with the documents, and Back returns',
+  it('sits after Report for every user, opens /company marked current with the Company page, and Back returns',
     async () => {
       const fetch = serve()
       render(<App />)
       await screen.findAllByRole('article', { name: /^Control / })
       const names = within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
       expect(names).toEqual(['Overview', 'Report', 'Company'])
-      const overviewReads = () => fetch.mock.calls.filter(([url]) => url === '/api/overview').length
-      const before = overviewReads()
+      const before = overviewReads(fetch)
 
       await userEvent.click(tab('Company'))
       expect(window.location.pathname).toBe('/company')
       expect(tab('Company').getAttribute('aria-current')).toBe('page')
-      expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+      expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Nordlicht Komponenten GmbH')
       await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
-      expect(overviewReads()).toBe(before)
+      expect(overviewReads(fetch)).toBe(before + 1) // read again on arriving, as on the Dossier: another tab may have changed it
 
       act(() => window.history.back())
       await waitFor(() => expect(window.location.pathname).toBe('/'))
@@ -620,31 +632,89 @@ describe('the Company tab (ticket 495; the documents, issue 424, until slice 4 b
       expect(tab('Company').getAttribute('aria-current')).toBeNull()
     })
 
-  it('opened directly (a reload), shows the documents with the Company tab current and reads no overview', async () => {
+  it('opened directly (a reload), reads the overview once, and the top bar names the Goal there', async () => {
     const fetch = serve()
     window.history.replaceState(null, '', '/company')
     render(<App />)
-    expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+    expect(screen.getByRole('status').textContent).toBe('Loading the company…')
     expect(tab('Company').getAttribute('aria-current')).toBe('page')
     expect(tab('Overview').getAttribute('aria-current')).toBeNull()
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Nordlicht Komponenten GmbH')
+    const brand = within(screen.getByRole('banner')).getByText('Vouch').nextElementSibling!
+    expect(brand.textContent).toBe('Audit preparation')
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
+    expect(overviewReads(fetch)).toBe(1)
   })
 
   it('at /documents (an old link), shows the same view, the Company tab current, the address rewritten to /company',
     async () => {
-      const fetch = serve()
+      serve()
       window.history.replaceState(null, '', '/')
       window.history.pushState(null, '', '/documents?from=mail#policies')
       const entries = window.history.length
       render(<App />)
-      expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+      expect(screen.getByRole('status').textContent).toBe('Loading the company…')
       expect(tab('Company').getAttribute('aria-current')).toBe('page')
       expect(window.location.pathname).toBe('/company') // as the app opens
       expect(window.location.search).toBe('?from=mail')
       expect(window.location.hash).toBe('#policies')
       expect(window.history.length).toBe(entries) // replaced, no new entry
-      expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
+      expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Nordlicht Komponenten GmbH')
+    })
+
+  it('reads the overview again on each arrival, and keeps the page when that read fails', async () => {
+    let reads = 0
+    const fetch = vi.fn((url: string) => {
+      if (url === '/api/overview') {
+        reads += 1
+        return reads === 1 ? Promise.resolve(Response.json(OVERVIEW))
+          : Promise.resolve(Response.json({ detail: 'Too many requests.' }, { status: 429 }))
+      }
+      if (url === '/api/company') return Promise.resolve(Response.json(COMPANY))
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    render(<App />)
+    await screen.findAllByRole('article', { name: /^Control / })
+
+    await userEvent.click(tab('Company'))
+    await waitFor(() => expect(reads).toBe(2))
+    const goalPanel = await screen.findByRole('region', { name: 'Goal' })
+    expect(within(goalPanel).getByText('Goal: Audit readiness')).toBeTruthy()
+    expect(screen.queryByText('The company could not be loaded.')).toBeNull()
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Nordlicht Komponenten GmbH')
+  })
+
+  it("changes the Goal from the Goal panel's in-app ask: one PUT, the overview read again, panel and bar follow",
+    async () => {
+      let goal: Overview['goal'] = 'audit-readiness'
+      const fetch = vi.fn((url: string, init?: RequestInit) => {
+        if (url === '/api/overview') return Promise.resolve(Response.json({ ...OVERVIEW, goal }))
+        if (url === '/api/company') return Promise.resolve(Response.json(COMPANY))
+        if (url === '/api/goal' && init?.method === 'PUT') {
+          goal = (JSON.parse(init.body as string) as { goal: Overview['goal'] }).goal
+          return Promise.resolve(Response.json({ goal }))
+        }
+        return new Promise<Response>(() => {})
+      })
+      vi.stubGlobal('fetch', fetch)
+      window.history.replaceState(null, '', '/company')
+      render(<App />)
+      const goalPanel = await screen.findByRole('region', { name: 'Goal' })
+      expect(within(screen.getByRole('region', { name: 'Review rounds' }))
+        .getByRole('button', { name: 'Close round' })).toBeTruthy()
+      expect(within(goalPanel).getByText('Goal: Audit readiness')).toBeTruthy()
+
+      await userEvent.click(within(goalPanel).getByRole('button', { name: 'Change goal' }))
+      within(goalPanel).getByRole('alert') // the in-app ask
+      await userEvent.click(within(goalPanel).getByRole('button', { name: 'Change goal' }))
+
+      await waitFor(() => expect(within(goalPanel).getByText('Goal: Internal improvement')).toBeTruthy())
+      const puts = fetch.mock.calls.filter(([url, init]) => url === '/api/goal' && init?.method === 'PUT')
+      expect(puts).toHaveLength(1)
+      expect(overviewReads(fetch)).toBe(2)
+      const brand = within(screen.getByRole('banner')).getByText('Vouch').nextElementSibling!
+      expect(brand.textContent).toBe('Security improvement')
     })
 })
 
@@ -719,6 +789,7 @@ describe('the profile pass (ticket 390)', () => {
     const fetch = vi.fn((url: string, init?: RequestInit) => {
       const post = init?.method === 'POST'
       if (url === '/api/overview') return Promise.resolve(Response.json(overview))
+      if (url === '/api/company') return Promise.resolve(Response.json(COMPANY))
       if (url === '/api/profile-pass' && post) return new Promise<Response>((resolve) => { answer = resolve })
       if (url === '/api/assessments' && post) {
         return onItsOwn
