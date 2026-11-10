@@ -528,8 +528,8 @@ function FinishStep({ answers, controls, library }: { answers: Answers; controls
         return chosen.length > 0 && <DocumentTable key={source} caption={caption} documents={chosen} />
       })}
       <p className="field-note">
-        Creating the company adds it to the profile switcher. Then Vouch sets its Goal and runs a profile pass: every
-        applicable control drafted, waiting for your review.
+        Creating the company adds it to the Companies list and makes it the current company, for every user. Then
+        Vouch sets its Goal and runs a profile pass: every applicable control drafted, waiting for your review.
       </p>
     </>
   )

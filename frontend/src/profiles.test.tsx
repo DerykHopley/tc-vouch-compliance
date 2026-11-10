@@ -316,6 +316,17 @@ describe('a company made in company setup, issue 409', () => {
     expect(screen.getByRole('menuitem', { name: `Start ${MUSTERFIRMA.company} afresh…` })).toBeTruthy()
   })
 
+  it('a Make current answering 200 with an unreadable body still opens under the new company', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA], () => new Response('<html>proxy</html>'))
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(currentChanges(fetch)).toEqual([{ company: 'musterfirma-gmbh' }])
+  })
+
   it('lands focus on the Dossier\'s main heading', async () => {
     window.history.replaceState(null, '', '/developer/setup')
     serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
@@ -399,7 +410,7 @@ describe('a company removed on the developer page, issues 418 and 480', () => {
    * the DELETE answers the settings without it (Nordlicht current), and the list read again answers `relisted` (null:
    * a 500) with Nordlicht current, or is held until `release` answers it when `hold` is set. */
   function serveRemoval(relisted: ProfileSummary[] | null, current = 'nordlicht', hold = false,
-    listed: ProfileSummary[] = [NORDLICHT, TESTWERK, MUSTERFIRMA]) {
+    listed: ProfileSummary[] = [NORDLICHT, TESTWERK, MUSTERFIRMA], relistedCurrent = 'nordlicht') {
     window.history.replaceState(null, '', '/developer')
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetch = serve(listed, current)
@@ -413,7 +424,8 @@ describe('a company removed on the developer page, issues 418 and 480', () => {
         return Promise.resolve(Response.json(SETTINGS))
       if (url === '/api/profiles' && ++listings > 1) {
         if (hold) return new Promise<Response>((resolve) => { release = resolve })
-        return Promise.resolve(relisted ? Response.json(listOf(relisted)) : new Response(null, { status: 500 }))
+        return Promise.resolve(relisted ? Response.json(listOf(relisted, relistedCurrent))
+          : new Response(null, { status: 500 }))
       }
       return answered(url, init)
     })
@@ -443,11 +455,8 @@ describe('a company removed on the developer page, issues 418 and 480', () => {
       expect(settingsReads(fetch)).toHaveLength(1) // not opened afresh
     })
 
-  it.each([
-    ['read again', [NORDLICHT, TESTWERK]],
-    ["held, less it, when the list can't be read again", null],
-  ])('the current one: opens Nordlicht afresh on the developer page, saying so (%s)', async (_, relisted) => {
-    const { fetch } = serveRemoval(relisted, 'musterfirma-gmbh')
+  it("the current one: opens the API's current company afresh on the developer page, saying so", async () => {
+    const { fetch } = serveRemoval([NORDLICHT, TESTWERK], 'musterfirma-gmbh')
     render(<ProfiledApp />)
     await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' }))
     await removeMusterfirma()
@@ -459,6 +468,29 @@ describe('a company removed on the developer page, issues 418 and 480', () => {
     const note = await within(await companies()).findByRole('status')
     expect(note.textContent).toBe('Removed Musterfirma GmbH. Nordlicht Komponenten GmbH is now the current company.')
     expect(document.activeElement).toBe(note)
+  })
+
+  it("the current one, the list not read again: opens afresh naming none, so the API's current company answers",
+    async () => {
+      const { fetch } = serveRemoval(null, 'musterfirma-gmbh')
+      render(<ProfiledApp />)
+      await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' }))
+      await removeMusterfirma()
+
+      await waitFor(() => expect(settingsReads(fetch)).toHaveLength(2)) // opened afresh
+      expect(await authHeaders()).toEqual({}) // no fallback worked out here
+      expect(window.location.pathname).toBe('/developer')
+    })
+
+  it('one not shown, while another developer changed the current company: keeps the page as it is', async () => {
+    const { fetch } = serveRemoval([NORDLICHT, TESTWERK], 'nordlicht', false, undefined, 'testwerk')
+    render(<ProfiledApp />)
+    await removeMusterfirma()
+
+    await waitFor(() => expect(listings(fetch)).toHaveLength(2))
+    await reads[1]
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' })
+    expect(settingsReads(fetch)).toHaveLength(1) // not reopened
   })
 
   it("the current one, and no other company can be had: opens with none named, not under the one removed", async () => {

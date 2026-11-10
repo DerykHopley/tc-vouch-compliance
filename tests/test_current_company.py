@@ -9,14 +9,17 @@ import pytest
 import test_memory
 from company_setup import MUSTERFIRMA, MUSTERFIRMA_ID
 from fastapi.testclient import TestClient
+from profiles_dir import SECOND, SECOND_COMPANY, make_profiles
 from test_auth import FakeClerk, bearer, clerk_app, token
 from test_database import needs_postgres
 from test_memory import app_on, restart
 
-from vouch import company_profiles
+from vouch import api, company_profiles
+from vouch.api import create_app
 from vouch.current_company import CURRENT_COMPANY_SETTING
 from vouch.database import SETTINGS_TABLE, DatabaseUnavailable
-from vouch.profile import read_profile_once
+from vouch.profile import PROFILE_FILE, read_profile_once
+from vouch.settings import Settings
 
 postgres = test_memory.postgres
 empty_database = test_memory.empty_database
@@ -207,3 +210,47 @@ def test_the_developer_page_carries_the_current_and_listed_companies_on_read_and
     assert changed["listed_companies"] == profiles
     assert limit["current_company"] == MUSTERFIRMA_ID
     assert limit["listed_companies"] == profiles
+
+
+class CompaniesDown:
+    """The companies made in setup with the database down: every read raises."""
+
+    def _down(self, *args: Any) -> Any:
+        raise DatabaseUnavailable("the database is unavailable: test")
+
+    create = all = one = remove = _down
+
+
+def test_a_stored_setup_made_company_unreadable_falls_back_as_the_list_does(users, caplog):
+    """The stored current company is made in setup and the database is down: a request naming no
+    profile is under Nordlicht, as GET /api/profiles says, never a 503 (one rule, current_of)."""
+    alice, _ = users
+    app = app_on(None)
+    app.state.current_company.set(MUSTERFIRMA_ID)
+    app.dependency_overrides[api.app_company_profiles] = CompaniesDown
+    with caplog.at_level(logging.WARNING), TestClient(app, raise_server_exceptions=False) as c:
+        listed = current(c, alice)
+        under = c.get("/api/overview", headers=alice)
+
+    assert listed == "nordlicht"
+    assert under.status_code == 200, under.text
+    assert under.json()["company"] == NORDLICHT
+    assert "the current company can't be read" in caplog.text
+
+
+def test_with_nordlicht_unlisted_and_the_stored_company_removed_the_first_listed_is_current(
+    tmp_path, users
+):
+    alice, _ = users
+    profiles = make_profiles(tmp_path / "profiles", broken=False)
+    read_profile_once.cache_clear()
+    app = create_app(Settings(profiles_dir=profiles))
+    app.dependency_overrides[api.current_user] = test_memory.as_user
+    with TestClient(app, raise_server_exceptions=False) as client:
+        made(client, alice)
+        assert make_current(client, alice, MUSTERFIRMA_ID).status_code == 200
+        assert remove(client, alice, MUSTERFIRMA_ID).status_code == 200
+        (profiles / "nordlicht" / PROFILE_FILE).write_text("id: [unclosed\n", encoding="utf-8")
+
+        assert current(client, alice) == SECOND
+        assert company_of(client, alice) == SECOND_COMPANY

@@ -44,10 +44,11 @@ export type CompanyRemoval =
   | { status: 'signed-out' }
   | { status: 'failed' }
 
-/** How making a company current went (#480): made (the new settings); refused (the API's detail: not a listed
+/** How making a company current went (#480): made (the new settings, or null when the API changed it but its answer
+ * can't be read: the change is done all the same); refused (the API's detail: not a listed
  * company); the database unavailable; the session ended (signed out already); or failed. */
 export type CurrentChange =
-  | { status: 'made'; settings: DeveloperSettings }
+  | { status: 'made'; settings: DeveloperSettings | null }
   | { status: 'refused'; problem: string }
   | { status: 'unavailable' }
   | { status: 'signed-out' }
@@ -157,8 +158,9 @@ export async function makeCurrent(id: string): Promise<CurrentChange> {
     return { status: 'failed' }
   }
   if (response.ok) {
-    const body = (await response.json().catch(() => null)) as DeveloperSettings | null
-    return body ? { status: 'made', settings: body } : { status: 'failed' }
+    // A 2xx changed it: an answer that can't be read is still a change, never "Nothing changed".
+    const body: unknown = await response.json().catch(() => null)
+    return { status: 'made', settings: typeof body === 'object' && body !== null ? body as DeveloperSettings : null }
   }
   if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
   if (response.status === 404) return { status: 'refused', problem: await refusedBecause(response) }

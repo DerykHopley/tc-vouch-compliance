@@ -83,8 +83,8 @@ def test_story_3_removing_the_current_company_makes_nordlicht_current_for_everyo
             row.get_by_role("button", name=f"Remove {COMPANY}").click()
         assert answer.value.status == 200
         question = (
-            f"Remove {COMPANY}? It leaves the profile switcher for everyone and can't be opened "
-            "again. Its audit trail is kept."
+            f"Remove {COMPANY}? It leaves the Companies list for everyone and can't be opened or "
+            "made current again. Its audit trail is kept."
         )
         assert asked == [question]
 

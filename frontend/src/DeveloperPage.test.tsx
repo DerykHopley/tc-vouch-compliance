@@ -123,6 +123,9 @@ describe('the developer page', () => {
     const broken_profiles = [{ id: 'broken', problem: 'not valid YAML (ParserError)' }]
     renderPage({ settings: { ...SETTINGS, broken_profiles } })
     const note = screen.getByRole('region', { name: 'Profiles left out' })
+    expect(within(note).getByText(
+      'These compliance profiles could not be loaded, so the Companies list leaves them out and none can be made current:',
+    )).toBeTruthy()
     expect(within(note).getByText('broken')).toBeTruthy()
     expect(within(note).getByText('not valid YAML (ParserError)')).toBeTruthy()
   })
@@ -182,8 +185,8 @@ describe('the companies made in setup, issue 418', () => {
   const MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', created_at: '2026-11-09T10:15:00+00:00' }
   const WITH_ONE: DeveloperSettings = { ...SETTINGS, companies: [MUSTERFIRMA],
     listed_companies: [...SETTINGS.listed_companies, LISTED_MUSTERFIRMA] }
-  const QUESTION = 'Remove Musterfirma Süd GmbH? It leaves the profile switcher for everyone and can\'t be opened again. '
-    + 'Its audit trail is kept.'
+  const QUESTION = 'Remove Musterfirma Süd GmbH? It leaves the Companies list for everyone and can\'t be opened or '
+    + 'made current again. Its audit trail is kept.'
 
   /** The API answering the DELETE with `status` and `body`, or held until the returned function answers it. */
   function deleting(status?: number, body: unknown = WITH_ONE) {
@@ -329,16 +332,64 @@ describe('the companies made in setup, issue 418', () => {
       expect(within(sheet()).getByRole('status').textContent).toBe(note)
     })
 
-  it("removing the current company, the settings unreadable after, names the fallback from the settings held (issue 480)",
+  /** The API answering the DELETE with `removal`, the settings read again with `again` (null: a 500), and the profile
+   * list with `current` the current company (null: a 500). */
+  function serving(removal: Response, again: DeveloperSettings | null, current: string | null) {
+    const listed = [...SETTINGS.listed_companies, { id: 'alpenwerk-2', company: 'Alpenwerk Zwei GmbH',
+      country: 'Austria', answer_language: 'de' }]
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return Promise.resolve(removal)
+      if (url === '/api/developer/settings')
+        return Promise.resolve(again ? Response.json(again) : new Response(null, { status: 500 }))
+      if (url === '/api/profiles') return Promise.resolve(current
+        ? Response.json({ profiles: listed, default: 'nordlicht', current }) : new Response(null, { status: 500 }))
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  it("removing the current company, the settings unreadable after, names the API's current company (issue 480)",
     async () => {
       const current = { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' }
-      deleting(200, { settings_unavailable: true })
+      // The API's answer, not a rule copied here: whatever company it says is current.
+      serving(Response.json({ settings_unavailable: true }), null, 'alpenwerk-2')
       vi.spyOn(window, 'confirm').mockReturnValue(true)
       renderPage({ settings: current })
       await userEvent.click(removeButton())
       expect((await within(sheet()).findByRole('status')).textContent)
-        .toBe('Removed Musterfirma Süd GmbH. Nordlicht Komponenten GmbH is now the current company.')
+        .toBe('Removed Musterfirma Süd GmbH. Alpenwerk Zwei GmbH is now the current company.')
     })
+
+  it("removing the current company, nothing readable after, says only that it was removed", async () => {
+    serving(Response.json({ settings_unavailable: true }), null, null)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage({ settings: { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' } })
+    await userEvent.click(removeButton())
+    expect((await within(sheet()).findByRole('status')).textContent).toBe('Removed Musterfirma Süd GmbH.')
+  })
+
+  it('removed elsewhere already (404) while current: the note names the company now current (decision 8)',
+    async () => {
+      serving(Response.json({ detail: 'There is no such compliance profile.' }, { status: 404 }), SETTINGS, 'nordlicht')
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const onRemoved = vi.fn()
+      renderPage({ settings: { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' }, onRemoved })
+      await userEvent.click(removeButton())
+      const note = 'Musterfirma Süd GmbH was already removed. Nordlicht Komponenten GmbH is now the current company.'
+      await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', note))
+      expect(within(sheet()).getByRole('status').textContent).toBe(note)
+    })
+
+  it('a removal after the current company changed elsewhere names the company now current', async () => {
+    // Held: Nordlicht current; meanwhile another developer made Alpenwerk current.
+    deleting(200, { ...SETTINGS, current_company: 'alpenwerk' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(removeButton())
+    expect((await within(sheet()).findByRole('status')).textContent)
+      .toBe('Removed Musterfirma Süd GmbH. Alpenwerk Präzision GmbH is now the current company.')
+  })
 })
 
 describe('the Companies section, issue 480', () => {
@@ -431,6 +482,24 @@ describe('the Companies section, issue 480', () => {
     expect(onChange).toHaveBeenCalledWith(again)
     expect(onMadeCurrent).not.toHaveBeenCalled()
   })
+
+  it("a 200 whose answer can't be read is still a change: reads the settings again, never 'Nothing changed'",
+    async () => {
+      const again = { ...WITH_ONE, current_company: 'alpenwerk' }
+      const { fetch } = putting(undefined, WITH_ONE, again)
+      const answered = fetch.getMockImplementation()!
+      fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/developer/current-company'
+        ? Promise.resolve(new Response('<html>proxy page</html>', { status: 200 })) : answered(url, init))
+      const onChange = vi.fn()
+      const onMadeCurrent = vi.fn()
+      renderPage({ settings: WITH_ONE, onChange, onMadeCurrent })
+      await userEvent.click(makeButton('Alpenwerk Präzision GmbH'))
+      const note = 'Alpenwerk Präzision GmbH is now the current company.'
+      await waitFor(() => expect(onMadeCurrent).toHaveBeenCalledWith('alpenwerk', note))
+      expect(onChange).toHaveBeenCalledWith(again)
+      expect(within(sheet()).getByRole('status').textContent).toBe(note)
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
 
   it('with the database down, says nothing changed, and Make current can be pressed again', async () => {
     putting(503, { detail: 'The database is unavailable just now.', unavailable: 'database' })

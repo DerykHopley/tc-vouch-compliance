@@ -469,19 +469,14 @@ def compliance_profile(
     current: AppCurrentCompany,
     chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
 ) -> ComplianceProfile:
-    """The profile the request names, else the current company (#480): a file profile first, so
-    a request under one never reads the companies made in the app, else a company made in the
-    app (the file-first rule user_profiles lists by). A stored current company no longer usable
-    (removed, broken) reads as the default, as current_of lists it. Settled before the stream
-    starts: one there is none of is a 404; a broken one a plain 500; a stored company's that
-    can't be read a 503."""
+    """The profile the request names, else the current company (#480, _current_profile): a file
+    profile first, so a request under one never reads the companies made in the app, else a
+    company made in the app (the file-first rule user_profiles lists by). Settled before the
+    stream starts: one there is none of is a 404; a broken one a plain 500; a stored company's
+    that can't be read a 503."""
+    if chosen is None:
+        return _current_profile(settings, companies, current)
     name = chosen
-    if name is None:
-        stored = stored_current_company(current)
-        found_current = None if stored is None else _find_profile(settings, companies, stored)
-        if isinstance(found_current, ComplianceProfile):
-            return found_current
-        name = DEFAULT_PROFILE
     found = _find_profile(settings, companies, name)
     if found is None:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
@@ -500,6 +495,35 @@ def _find_profile(
         row = companies.one(name)
         found = None if row is None else company_profiles.read_stored_once(row)
     return found
+
+
+def _current_profile(
+    settings: Settings, companies: company_profiles.CompanyProfiles, current: CurrentCompanyStore
+) -> ComplianceProfile:
+    """The current company's profile, by current_of's one rule, as GET /api/profiles lists it:
+    the stored company while it is usable, else Nordlicht, else the first listed. A stored
+    company made in the app that can't be read (the database down) falls back the same way,
+    logged, as the list leaves it out then. The fallback is found among the file profiles first,
+    so a request under one reads no company made in the app; the companies are read only when
+    no file profile is listed."""
+    stored = stored_current_company(current)
+    if stored is not None:
+        try:
+            found = _find_profile(settings, companies, stored)
+        except DatabaseUnavailable:
+            log.warning(
+                "the current company can't be read (%s, made in the app): falling back", stored
+            )
+            found = None
+        if isinstance(found, ComplianceProfile):
+            return found
+    files = file_profiles(settings)  # first in every list, so the fallback is one of them if any
+    scan = files if files.loaded else _profile_scan(settings, _stored_companies(companies))
+    name = current_of(scan, None)
+    profile = None if name is None else scan.find(name)
+    if not isinstance(profile, ComplianceProfile):
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    return profile
 
 
 Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
@@ -1922,12 +1946,15 @@ def _developer_page(
     companies: CompanyProfiles,
     current: CurrentCompanyStore,
     model: str | None = None,
+    *,
+    rows: list[company_profiles.StoredProfile] | None = None,
 ) -> dict[str, Any]:
     """The whole developer page, the same for its read and for each change's answer (#455: the
     changes once left out the broken profiles, and the page rendering their answer failed),
-    the companies made in setup (#418) and the current company (#480) included."""
+    the companies made in setup (#418) and the current company (#480) included. `rows`: the
+    companies made in setup when the caller has just read them, so they aren't read twice."""
     page = models.settings(model) | spending.settings()
-    return page | _company_settings(settings, companies, current)
+    return page | _company_settings(settings, companies, current, rows=rows)
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
@@ -1947,13 +1974,19 @@ def developer_settings(
 
 
 def _company_settings(
-    settings: Settings, companies: CompanyProfiles, current: CurrentCompanyStore
+    settings: Settings,
+    companies: CompanyProfiles,
+    current: CurrentCompanyStore,
+    *,
+    rows: list[company_profiles.StoredProfile] | None = None,
 ) -> dict[str, Any]:
     """The developer page's companies: `broken_profiles`; `companies`, each live company made in
     setup, oldest first, broken and shadowed ones included, so any can be removed (#418), None
     when they can't be read (logged); `listed_companies`, every company listed for users as
-    GET /api/profiles lists them, and `current_company`, the current one's id (#480)."""
-    rows = _stored_companies(companies)
+    GET /api/profiles lists them, and `current_company`, the current one's id (#480). `rows`:
+    the companies made in setup as just read, else they are read here."""
+    if rows is None:
+        rows = _stored_companies(companies)
     scan = _profile_scan(settings, rows)
     made = None if rows is None else [_made_company(row) for row in rows]
     return {
@@ -2030,12 +2063,12 @@ def change_current_company(
     listed company: an unknown, removed or broken one's id is a 404, nothing changed. The
     companies made in setup or the setting can't be read or written: a 503, nothing changed.
     The answer is the whole developer page, as `developer_settings` reads it (#455)."""
-    scan = _profile_scan(settings, companies.all())  # unreadable: a 503, never a wrong 404
-    if request.company not in {p.id for p in scan.loaded}:
+    rows = companies.all()  # unreadable: a 503, never a wrong 404
+    if request.company not in {p.id for p in _profile_scan(settings, rows).loaded}:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
     current.set(request.company)
     log.info("the current company is now %s, made so by %s", request.company, user.id)
-    return _developer_page(models, spending, settings, companies, current)
+    return _developer_page(models, spending, settings, companies, current, rows=rows)
 
 
 @router.get("/developer/protection-levels", dependencies=DEVELOPERS)

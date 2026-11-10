@@ -8,57 +8,21 @@ removed: it simply stops naming a listed company, and the current company reads 
 (current_of).
 """
 
-from typing import Protocol
-
 from vouch.database import Database
-from vouch.model_choice import KeptIn
+from vouch.model_choice import DatabaseSettingStore, MemorySettingStore, SettingStore
 from vouch.profile import DEFAULT_PROFILE, ProfileScan
 
 CURRENT_COMPANY_SETTING = "current_company"
 
-
-class CurrentCompanyStore(Protocol):
-    """Where the current company's id is kept. Both methods may raise DatabaseUnavailable."""
-
-    kept_in: KeptIn
-
-    def get(self) -> str | None: ...
-
-    def set(self, company: str) -> None: ...
-
-
-class MemoryCurrentCompanyStore:
-    """No database: the choice lasts until the server restarts."""
-
-    kept_in: KeptIn = "memory"
-
-    def __init__(self) -> None:
-        self._company: str | None = None
-
-    def get(self) -> str | None:
-        return self._company
-
-    def set(self, company: str) -> None:
-        self._company = company
-
-
-class DatabaseCurrentCompanyStore:
-    """The choice in the database's settings table, shared by every instance and restart."""
-
-    kept_in: KeptIn = "database"
-
-    def __init__(self, db: Database) -> None:
-        self.db = db
-
-    def get(self) -> str | None:
-        return self.db.setting(CURRENT_COMPANY_SETTING)
-
-    def set(self, company: str) -> None:
-        self.db.set_setting(CURRENT_COMPANY_SETTING, company)
+CurrentCompanyStore = SettingStore
+"""Where the current company's id is kept: the model choice's kind of store (vouch.model_choice),
+under CURRENT_COMPANY_SETTING."""
 
 
 def current_company_store(db: Database | None) -> CurrentCompanyStore:
-    return DatabaseCurrentCompanyStore(db) if db is not None else MemoryCurrentCompanyStore()
+    if db is None:
+        return MemorySettingStore()
+    return DatabaseSettingStore(db, CURRENT_COMPANY_SETTING)
 
 
 def current_of(scan: ProfileScan, stored: str | None) -> str | None:

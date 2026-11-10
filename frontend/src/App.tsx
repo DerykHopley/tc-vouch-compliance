@@ -32,7 +32,7 @@ function startingTheme(): Theme {
 type View = { name: 'dossier' } | { name: 'report' } | { name: 'documents' } | { name: 'developer' } | { name: 'setup' }
   | { name: 'paper'; controlId: string }
 
-const DEVELOPER_PATH = '/developer'
+export const DEVELOPER_PATH = '/developer'
 const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
 const DOCUMENTS_PATH = '/documents'

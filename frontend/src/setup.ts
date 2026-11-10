@@ -13,8 +13,8 @@ const COUNTRY_CODES = [
   'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO', 'CH', 'GB',
 ]
 
-/** The countries step 1 offers, each named as a profile stores it (regionName, so the profile switcher's tag finds the
- * code again), in alphabetical order. */
+/** The countries step 1 offers, each named as a profile stores it (regionName, so profileTag finds the code
+ * again), in alphabetical order. */
 export const COUNTRIES: { code: string; name: string }[] = COUNTRY_CODES
   .map((code) => ({ code, name: regionName(code) }))
   .sort((a, b) => a.name.localeCompare(b.name, 'en'))

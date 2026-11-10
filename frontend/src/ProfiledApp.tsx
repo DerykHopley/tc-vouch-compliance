@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import App from './App.tsx'
+import App, { DEVELOPER_PATH } from './App.tsx'
 import type { Arrival } from './arrival.ts'
 import { makeCurrent } from './developer.ts'
 import { fetchProfiles, type Profiles, type ProfileSummary, withoutProfile, withProfile } from './profiles.ts'
@@ -9,8 +9,6 @@ import TopBar from './TopBar.tsx'
 
 /** The profile list as read: not yet, or what came back (null: it couldn't be read). */
 type Listing = { status: 'reading' } | { status: 'read'; profiles: Profiles | null }
-
-const DEVELOPER_PATH = '/developer'
 
 /**
  * The app under the current company (#480, M9 decision 1): one shared setting a developer chooses on the developer
@@ -91,15 +89,13 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     })
   }
   // A developer removed a company made in setup (#418): the list is read again (or, when it can't be, the list held
-  // less it). When the company shown is still the current one, only the list changes. Otherwise (the one removed was
-  // current, decision 8) the app opens afresh under the current company left, where the developer is, carrying the
-  // developer page's note; with no list read again, the default held (or the first listed; with neither, no company
-  // named, so the API's current company answers).
+  // less it). Removing another company changes only the list: the page stays as it is, its note naming the current
+  // company when it changed meanwhile. Removing the one shown (it was current, decision 8) opens the app afresh, where
+  // the developer is, under the current company the API names, carrying the developer page's note; with no list read
+  // again, naming none, so the API's current company answers. Its fallback rule is the API's alone.
   const removed = (id: string, note: string) => afterRelist((found, held, shown) => {
-    const list = found ?? withoutProfile(held, id)
-    setListing({ status: 'read', profiles: list })
-    const next = found ? found.current : shown === id ? (list?.default ?? list?.profiles[0]?.id ?? null) : shown
-    if (next !== shown) reopen(next, note)
+    setListing({ status: 'read', profiles: found ?? withoutProfile(held, id) })
+    if (shown === id) reopen(found ? found.current : null, note)
   })
   useEffect(() => {
     let current = true

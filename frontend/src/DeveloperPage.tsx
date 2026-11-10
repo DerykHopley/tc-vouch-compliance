@@ -4,7 +4,7 @@ import {
   changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, developerSettings, type DeveloperSettings,
   makeCurrent, type MadeCompany, removeCompany, type RunTotals, type SettingChange, UNAVAILABLE,
 } from './developer.ts'
-import type { ProfileSummary } from './profiles.ts'
+import { fetchProfiles, type ProfileSummary } from './profiles.ts'
 
 type Props = {
   settings: DeveloperSettings | typeof UNAVAILABLE
@@ -94,17 +94,20 @@ const without = (settings: DeveloperSettings, id: string): DeveloperSettings => 
   listed_companies: settings.listed_companies.filter((c) => c.id !== id),
 })
 
-/** The company the current one falls back to once `id` is removed, by the API's rule (vouch.current_company): Nordlicht
- * while listed, else the first listed. From the settings held, when they can't be read after the removal. */
-function fallbackOf(settings: DeveloperSettings, id: string): ProfileSummary | undefined {
-  const left = settings.listed_companies.filter((c) => c.id !== id)
-  return left.find((c) => c.id === 'nordlicht') ?? left[0]
+/** The company current in `after`, the settings the API answered after a change. */
+const currentIn = (after: DeveloperSettings) => after.listed_companies.find((c) => c.id === after.current_company)
+
+/** The company GET /api/profiles says is current, for when the settings can't be read after a removal; undefined when
+ * the list can't be read either. Never worked out here: the API's rule (vouch.current_company) has one home. */
+async function listedCurrent(): Promise<ProfileSummary | undefined> {
+  const listed = await fetchProfiles()
+  return listed?.profiles.find((p) => p.id === listed.current)
 }
 
-/** The note a removal ends with: when the company removed was the current one, it names the company now current too
- * (#480, decision 8). */
-function removedNote(company: string, wasCurrent: boolean, now: ProfileSummary | undefined): string {
-  return wasCurrent && now ? `Removed ${company}. ${now.company} is now the current company.` : `Removed ${company}.`
+/** `done`, and when the company now current isn't the one `held` had (the one removed was current, decision 8, or
+ * another developer changed it meanwhile), a sentence naming it. */
+function withCurrent(done: string, held: DeveloperSettings, now: ProfileSummary | undefined): string {
+  return now && now.id !== held.current_company ? `${done} ${now.company} is now the current company.` : done
 }
 
 /** One row of the Companies list: a listed company (Current, or Make current), with Remove when made in setup; or a
@@ -154,22 +157,27 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
 
   const remove = async ({ id, company }: MadeCompany) => {
     if (busy.current) return
-    const question = `Remove ${company}? It leaves the profile switcher for everyone and can't be opened again. `
-      + 'Its audit trail is kept.'
+    const question = `Remove ${company}? It leaves the Companies list for everyone and can't be opened or made current `
+      + 'again. Its audit trail is kept.'
     if (!window.confirm(question)) return
     busy.current = true
     setActing({ status: 'removing', id })
     const result = await removeCompany(id)
     let done: string | null = null
+    let after: DeveloperSettings | null = null // the settings the API answered after it, when they could be read
     if (result.status === 'removed') {
-      const after = result.settings
-      onChange(after ?? without(settings, id))
-      const now = after ? after.listed_companies.find((c) => c.id === after.current_company) : fallbackOf(settings, id)
-      done = removedNote(company, settings.current_company === id, now)
+      after = result.settings
+      done = `Removed ${company}.`
     } else if (result.status === 'gone') {
       const again = await developerSettings()
-      onChange(again && again !== UNAVAILABLE ? again : without(settings, id))
+      after = again && again !== UNAVAILABLE ? again : null
       done = `${company} was already removed.`
+    }
+    if (done !== null) {
+      onChange(after ?? without(settings, id))
+      // The company now current, as the API says: in its settings, else (the one removed was current) in the list.
+      const now = after ? currentIn(after) : settings.current_company === id ? await listedCurrent() : undefined
+      done = withCurrent(done, settings, now)
     }
     busy.current = false
     if (done !== null) {
@@ -184,22 +192,24 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
     }
   }
 
-  const makeCurrentOf = async ({ id, company }: Row) => {
+  const makeRowCurrent = async ({ id, company }: Row) => {
     if (busy.current) return
     busy.current = true
     setActing({ status: 'making', id })
     const result = await makeCurrent(id)
-    if (result.status === 'refused') {
-      const again = await developerSettings()
-      if (again && again !== UNAVAILABLE) onChange(again)
-    }
+    // Refused, or made with an answer that can't be read: the settings as they now stand.
+    const again = result.status === 'refused' || (result.status === 'made' && !result.settings)
+      ? await developerSettings() : null
+    const reread = again && again !== UNAVAILABLE ? again : null
     busy.current = false
     if (result.status === 'made') {
-      onChange(result.settings)
+      const now = result.settings ?? reread
+      if (now) onChange(now)
       const done = `${company} is now the current company.`
       setActing({ status: 'done', note: done })
       onMadeCurrent?.(id, done)
     } else if (result.status === 'refused') {
+      if (reread) onChange(reread)
       setActing({ status: 'problem', message: `Vouch could not make this company current: ${result.problem}` })
     } else if (result.status === 'signed-out') {
       setActing({ status: 'idle' })
@@ -228,7 +238,7 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
                 {row.listed && !current && (
                   <button type="button" className="btn" disabled={out} aria-busy={making}
                     aria-label={making ? undefined : `Make ${row.company} current`}
-                    onClick={() => void makeCurrentOf(row)}>
+                    onClick={() => void makeRowCurrent(row)}>
                     {making ? 'Making current…' : 'Make current'}
                   </button>
                 )}
@@ -298,7 +308,7 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
       {settings.broken_profiles.length > 0 && (
         <section className="sheet notice" aria-label="Profiles left out">
           <span className="lbl">Profiles left out</span>
-          <p>These compliance profiles could not be loaded, so the profile switcher leaves them out:</p>
+          <p>These compliance profiles could not be loaded, so the Companies list leaves them out and none can be made current:</p>
           <ul>
             {settings.broken_profiles.map((b) => (
               <li key={b.id}><span className="mono">{b.id}</span>: <span>{b.problem}</span></li>
