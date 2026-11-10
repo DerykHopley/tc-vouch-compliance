@@ -298,25 +298,33 @@ def test_a_profile_pass_is_one_trace_with_its_model_call_and_each_control_s_step
 
 
 class SlowExporter(InMemorySpanExporter):
-    """An exporter that takes `seconds` to send, as Langfuse over the network does; with `hang`,
-    it answers only once released (or after HANG_SECONDS), as a Langfuse that is down."""
+    """An exporter that takes `seconds` to send, as Langfuse over the network does."""
 
-    HANG_SECONDS = 8.0
-
-    def __init__(self, seconds: float = 0.0, *, hang: bool = False) -> None:
+    def __init__(self, seconds: float) -> None:
         super().__init__()
-        self.seconds, self.hang = seconds, hang
-        self.released = threading.Event()
+        self.seconds = seconds
 
     def export(self, spans):
-        if self.hang:
-            self.released.wait(self.HANG_SECONDS)
-        else:
-            time.sleep(self.seconds)
+        time.sleep(self.seconds)
         return super().export(spans)
 
 
-def tracing_to(exporter: SlowExporter) -> Tracing:
+class HangingExporter(InMemorySpanExporter):
+    """An exporter that answers only once released (or after HANG_SECONDS), as a Langfuse that
+    is down."""
+
+    HANG_SECONDS = 8.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.released = threading.Event()
+
+    def export(self, spans):
+        self.released.wait(self.HANG_SECONDS)
+        return super().export(spans)
+
+
+def tracing_to(exporter: InMemorySpanExporter) -> Tracing:
     keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), LOCAL)
     return Tracing(keys, span_exporter=exporter, tracer_provider=TracerProvider())
 
@@ -332,9 +340,9 @@ def slow() -> Iterator[tuple[Tracing, SlowExporter]]:
 
 
 @pytest.fixture
-def down() -> Iterator[tuple[Tracing, SlowExporter]]:
+def down() -> Iterator[tuple[Tracing, HangingExporter]]:
     """Tracing on, to a Langfuse that never answers."""
-    exporter = SlowExporter(hang=True)
+    exporter = HangingExporter()
     on = tracing_to(exporter)
     yield on, exporter
     exporter.released.set()
@@ -418,7 +426,7 @@ def test_a_stream_closed_on_the_event_loop_never_waits_for_langfuse(down):
     assert asyncio.run(run_and_close()) < 0.5
 
 
-# --- Each generation's cost and model (#504)----------------------------------------------------
+# --- Each generation's cost and model (#504) ----------------------------------------------------
 
 COST = "langfuse.observation.cost_details"
 MODEL = "langfuse.observation.model.name"
