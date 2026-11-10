@@ -144,9 +144,12 @@ def test_the_comparison_names_the_round_its_close_and_the_changed_control():
 
     assert comparison["against"]["name"] == "Q3 2026"
     assert comparison["accepted"] == {"now": 2, "then": 1}
-    assert {"control_id": "1.1.1", "before": "partly-evidenced", "after": "evidenced"} in (
-        comparison["changed"]
-    )
+    assert {
+        "control_id": "1.1.1",
+        "before": "partly-evidenced",
+        "after": "evidenced",
+        "reassessing": False,
+    } in comparison["changed"]
     words = report.words_for("en")
     lead, counts, closing = report.comparison_lines(comparison, words)
     assert lead == [
