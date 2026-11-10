@@ -72,9 +72,14 @@ def test_story_5_a_second_pass_skips_the_accepted_and_one_control_is_assessed_ag
     fits(page)
     again = panel(page).get_by_role("button", name="again").first
     control_id = again.inner_text().removeprefix("Assess ").removesuffix(" again")
-    with page.expect_response("**/api/assessments"):
+    # The row's control waits for review, so the row opens its paper and starts nothing (#437);
+    # at Confirm findings the paper's Assess again starts the run in one click.
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
         again.click()
     paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("list", name="Agent steps")).to_have_count(0)
+    with page.expect_response("**/api/assessments"):
+        paper.get_by_role("button", name=f"Assess again {control_id}").click()
     steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
     expect(steps.first).to_contain_text(f"Loaded control {control_id}: ")
     expect(steps.last).to_contain_text("Waiting for the compliance lead's review.")

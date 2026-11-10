@@ -191,8 +191,9 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 
 #### 2. Profile pass (1:00)
 
-1. Select **Run a profile pass** ("Assesses every open control in one run. Accepted controls are
-   skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.").
+1. Select **Run a profile pass** ("Assesses every open control in one run. Accepted controls and
+   reviews in progress are skipped. On Sonnet 5.5, a pass over 12 controls costs about
+   $0.30–0.50.").
 2. Point at the result panel, "Profile pass": "12 assessments waiting for your review.", each
    control with its verdict and "Proposed". The cards under "The controls" read "Proposed" too.
 

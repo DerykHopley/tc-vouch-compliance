@@ -2,9 +2,9 @@
 accepted, assessed in one guarded model run, with all the profile's evidence in the prompt (#371).
 
 Which controls: each control of the profile's ISA edition with an applicable requirement, unless
-its newest assessment is accepted or its review is in progress (in_review, #437). The prompt holds the rules, those controls' applicable
-requirements and every document of every evidence source the profile allows, each passed as data
-(vouch.guards) with its kind and whether it is stale. A prompt and expected reply estimated over
+its newest assessment is accepted or its review is in progress (in_review, #437). The prompt holds
+the rules, those controls' applicable requirements and every document of every evidence source
+the profile allows, each passed as data (vouch.guards) with its kind and whether it is stale. A prompt and expected reply estimated over
 the threshold (estimate_tokens, estimate_output_tokens, by the profile's answer language), or an
 allowed source that can't be read, refuses the pass before anything is counted or called
 (ProfilePassRefused): the per-control agent is the way on.
@@ -394,10 +394,9 @@ def run_profile_pass(
     """Assess every applicable control of the profile not yet accepted, and not in review, in one
     model run (see the module's doc).
 
-    With every applicable control accepted or in review, nothing is counted or called. Otherwise the sources
-    are read and the prompt and reply estimated: an unreadable source, or a prompt and expected
-    reply over `max_tokens`, raises
-    ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
+    With every applicable control accepted or in review, nothing is counted or called.
+    Otherwise the sources are read and the prompt and reply estimated: an unreadable source, or a
+    prompt and expected reply over `max_tokens`, raises ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
     daily limit), then the model, once (twice when the output guard asks again). A second audit
     claim raises OutputCheckError; a failed model call raises its error. Either way, nothing is
     kept in the index. `today` (default: now) is what staleness is judged on and due dates count

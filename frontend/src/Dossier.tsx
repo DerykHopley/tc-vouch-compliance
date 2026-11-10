@@ -356,7 +356,7 @@ function PassPanel({ overview, pass, onOpen, onPass, running }:
       )}
       {inReview.length > 0 && (
         <p className="field-note">
-          {inReview.length === 1 ? '1 control' : `${inReview.length} controls`} in review skipped: {inReview.join(', ')}.
+          {plural(inReview.length, 'control')} in review skipped: {inReview.join(', ')}.
           {' '}Finish their review, or assess one again from its paper.
         </p>
       )}
@@ -386,8 +386,9 @@ function PassPanel({ overview, pass, onOpen, onPass, running }:
                 <span className="pass-actions">
                   <button className="btn" onClick={() => onOpen(a.control_id, false)}>Open {a.control_id}</button>
                   {shortOf(verdict) && running === null && (
-                    // On a control in review it opens the paper and starts nothing: the paper warns first (#437).
-                    <button className="btn btn-ghost" onClick={() => onOpen(a.control_id, card?.in_review !== true)}>
+                    // On a control waiting for review it opens the paper and starts nothing (#437): the card may not
+                    // know the review moved on (another tab), so the paper's Assess again decides, warning first.
+                    <button className="btn btn-ghost" onClick={() => onOpen(a.control_id, status !== 'waiting-for-review')}>
                       Assess {a.control_id} again
                     </button>
                   )}

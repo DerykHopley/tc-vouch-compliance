@@ -304,7 +304,7 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
     expect(again.map((b) => b.textContent)).toEqual(['Assess 4.1.2 again', 'Assess 4.1.3 again'])
     expect(again[0].className).toBe('btn btn-ghost')
     await userEvent.click(again[1])
-    expect(onOpen).toHaveBeenLastCalledWith('4.1.3', true)
+    expect(onOpen).toHaveBeenLastCalledWith('4.1.3', false) // waiting for review: the paper decides (#437)
     await userEvent.click(within(row('1.1.1')).getByRole('button', { name: 'Open 1.1.1' }))
     expect(onOpen).toHaveBeenLastCalledWith('1.1.1', false)
   })
@@ -335,20 +335,29 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
       expect(panel().textContent).toContain('1 control in review skipped: 4.1.2.')
     })
 
-  it('on a row whose control is in review, Assess <id> again opens its paper and starts nothing (ticket 437)',
-    async () => {
+  it.each([
+    ['in review', true],
+    // The card may be stale (findings confirmed in another tab, or before the overview is read again): it never
+    // decides on its own whether a review would be set aside.
+    ['waiting, the card not saying in review', false],
+  ])('on a row whose control is %s, Assess <id> again opens its paper and starts nothing (ticket 437)',
+    async (_, inReviewNow) => {
       const overview = seeded({
-        '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced', in_review: true },
-        '4.1.3': { status: 'waiting-for-review', verdict: 'not-evidenced', in_review: false },
+        '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced', in_review: inReviewNow },
       })
-      const { onOpen } = shown({ kind: 'done', skipped: [], assessments: [
-        proposed('4.1.2', 'partly-evidenced'), proposed('4.1.3', 'not-evidenced'),
-      ] }, { overview })
+      const { onOpen } = shown({ kind: 'done', skipped: [], assessments: [proposed('4.1.2', 'partly-evidenced')] },
+        { overview })
       await userEvent.click(within(row('4.1.2')).getByRole('button', { name: 'Assess 4.1.2 again' }))
       expect(onOpen).toHaveBeenLastCalledWith('4.1.2', false)
-      await userEvent.click(within(row('4.1.3')).getByRole('button', { name: 'Assess 4.1.3 again' }))
-      expect(onOpen).toHaveBeenLastCalledWith('4.1.3', true)
     })
+
+  it('on a row whose control was rejected since, Assess <id> again starts the run as it opens the paper', async () => {
+    const overview = seeded({ '4.1.3': { status: 'rejected', verdict: 'not-evidenced' } })
+    const { onOpen } = shown({ kind: 'done', skipped: [], assessments: [proposed('4.1.3', 'not-evidenced')] },
+      { overview })
+    await userEvent.click(within(row('4.1.3')).getByRole('button', { name: 'Assess 4.1.3 again' }))
+    expect(onOpen).toHaveBeenLastCalledWith('4.1.3', true)
+  })
 
   it.each([
     ['refused', 'The profile pass can\'t run: its prompt is about 90,000 tokens.'],
