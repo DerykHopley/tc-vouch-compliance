@@ -7,7 +7,8 @@ import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 /** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
 let resizeTo: (width: number) => void = () => {}
 
-function systemPrefers(dark: boolean | null, width = 1400) {
+// 1800px by default: wide enough to pin (from 1402px, #465) at any width from 360px to 720px.
+function systemPrefers(dark: boolean | null, width = 1800) {
   let now = width
   const listeners = new Set<() => void>()
   // The page's width as layout sees it (no scrollbar in jsdom): what the pinned chat's width is checked against.
@@ -840,8 +841,8 @@ describe('Ask Vouch', () => {
     expect(bubble()!.className).toBe('bubble')
   })
 
-  it('offers no pin at 1000px or less: bubble and enlarged only', async () => {
-    systemPrefers(null, 900)
+  it('offers no pin below 1402px, where the page would lose the working paper\'s width (ticket 465)', async () => {
+    systemPrefers(null, 1401)
     render(<App />)
     await open()
     await press('Make larger')
@@ -849,12 +850,12 @@ describe('Ask Vouch', () => {
     expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
   })
 
-  it('falls back from pinned to enlarged at 1000px or less, and to the sheet at 700px', async () => {
+  it('falls back from pinned to enlarged below 1402px, and to the sheet at 700px', async () => {
     render(<App />)
     await open()
     await press('Make larger')
     await press('Pin beside the page')
-    resizeTo(900)
+    resizeTo(1401)
     expect(bubble()!.className).toBe('bubble enlarged')
     expect(document.documentElement.dataset.chat).toBeUndefined()
     expect(screen.queryByRole('button', { name: 'Pin beside the page' })).toBeNull()
@@ -945,13 +946,13 @@ describe('Ask Vouch', () => {
       expect(handle()!.getAttribute('aria-valuenow')).toBe('480')
     })
 
-    it('keeps a remembered 640px through a narrow window: shown at 540px at 1100px, 640px again at 1400px', async () => {
+    it('keeps a remembered 640px through a narrow window: shown at 458px at 1500px, 640px again at 1800px', async () => {
       window.localStorage.setItem('vouch.chatWidth', '640')
-      systemPrefers(null, 1100)
+      systemPrefers(null, 1500)
       render(<App />)
       await pinned()
-      expect(handle()!.getAttribute('aria-valuenow')).toBe('540')
-      resizeTo(1400)
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('458')
+      resizeTo(1800)
       expect(handle()!.getAttribute('aria-valuenow')).toBe('640')
       expect(width()).toBe('640px')
     })
@@ -961,9 +962,9 @@ describe('Ask Vouch', () => {
       render(<App />)
       await pinned()
       expect(handle()!.getAttribute('aria-valuenow')).toBe('720')
-      resizeTo(1100)
-      expect(handle()!.getAttribute('aria-valuenow')).toBe('540')
-      expect(width()).toBe('540px')
+      resizeTo(1500)
+      expect(handle()!.getAttribute('aria-valuenow')).toBe('458')
+      expect(width()).toBe('458px')
     })
 
     it('remembers a chosen width across unpin and pin again', async () => {

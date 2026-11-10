@@ -86,10 +86,11 @@ def test_at_1400px_the_page_stays_reachable_beside_the_bubble(page: Page, dossie
     assert "LU" in reached, reached  # the user menu: local mode's initials (#222)
 
 
-def test_at_1400px_the_chats_header_keeps_to_one_line(page: Page, paper_url):
+def test_at_1440px_the_chats_header_keeps_to_one_line(page: Page, paper_url):
     # On a working paper, the longest page tag, with "New conversation" beside it (#251): in the
     # bubble and pinned beside the page, no control wraps onto a second line, taking the chat's room.
-    page.set_viewport_size({"width": 1400, "height": 800})
+    # The page tag may sit under the name, inside the title (#465). Pinning needs 1402px.
+    page.set_viewport_size({"width": 1440, "height": 800})
     page.goto(f"{paper_url}/controls/4.1.2")
     page.get_by_role("button", name="Ask Vouch").click()
     sheet = page.locator(SHEET)
@@ -113,7 +114,7 @@ def test_at_1400px_the_chats_header_keeps_to_one_line(page: Page, paper_url):
 
 def test_the_close_glyph_keeps_a_44px_box_in_every_chat_state(page: Page, dossier_url):
     # Close is a × glyph (#72): the button around it stays at least 44 by 44px in the 400px sheet
-    # and in the 1400px bubble, enlarged and pinned.
+    # and in the 1440px bubble, enlarged and pinned (pinning needs 1402px, #465).
     def box(state: str) -> tuple[str, float, float]:
         # Measured once the sheet's rise has finished: a resize to 400px starts it again, and a
         # box read mid-move is a fraction short (43.99…).
@@ -122,7 +123,7 @@ def test_the_close_glyph_keeps_a_44px_box_in_every_chat_state(page: Page, dossie
         assert b is not None, state
         return (state, b["width"], b["height"])
 
-    open_sheet(page, dossier_url, 1400)
+    open_sheet(page, dossier_url, 1440)
     sheet = page.locator(SHEET)
     boxes = [box("bubble")]
     sheet.get_by_role("button", name="Make larger").click()
