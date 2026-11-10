@@ -333,6 +333,56 @@ def test_a_note_with_a_token_too_long_for_any_column_breaks_only_that_token():
     assert broken and all(token[:8] in line for line in broken)  # the token's cells, no other
 
 
+TOKEN = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + "0" * 32  # 96 chars
+
+
+def hashed_trail(profile_id: str, documents: int = 1) -> list[audit.AuditEntry]:
+    """The profile's fixture trail with TOKEN in its first entry's note and its second entry
+    resting on `documents` policies from its own on."""
+    trail = fixture_trail(profile_id)
+    docs = tuple(e.evidence[0] for e in trail[1 : 1 + documents])
+    return [
+        replace(e, note=f"Hash {TOKEN}") if n == 0 else replace(e, evidence=docs) if n == 1 else e
+        for n, e in enumerate(trail)
+    ]
+
+
+@pytest.mark.parametrize(("profile_id", "language"), [("nordlicht", "en"), ("alpenwerk", "de")])
+def test_with_a_long_token_in_a_note_the_trail_still_carries_each_document_id_whole(
+    profile_id, language
+):
+    # #377: the fallback once put a zero-width space after every "-" and "/" in the trail, so
+    # searching the PDF for "authentication-standard" found nothing.
+    words = report.words_for(language)
+    built = alpenwerk_report() if profile_id == "alpenwerk" else built_report()
+    built["trail"] = built["trail"] | {"entries": [e.to_dict() for e in hashed_trail(profile_id)]}
+
+    read = text(report_pdf.pdf(built, words))
+
+    trail = read[read.index(words["labels"]["trail"].upper()) :]
+    missing = [e.evidence[0].doc_id for e in fixture_trail(profile_id)]
+    assert [doc for doc in missing if doc not in trail] == []
+    assert report_pdf.BREAK not in trail
+
+
+@pytest.mark.parametrize(("profile_id", "language"), [("nordlicht", "en"), ("alpenwerk", "de")])
+def test_six_documents_in_one_evidence_cell_take_room_from_a_note_with_a_long_token(
+    profile_id, language
+):
+    # #377: the token's column once kept ~95 mm, so six documents got ~16 mm and were cut to a note.
+    words = report.words_for(language)
+    body = report.trail_rows([e.to_dict() for e in hashed_trail(profile_id, 6)], words)
+    sheet = report_pdf._Sheet()
+    sheet.add_page(orientation="landscape")
+
+    head, cells, widths = report_pdf.trail_table(sheet, report.trail_columns(words), body)
+
+    evidence = head.index(words["labels"]["evidence"])
+    sheet.font(report_pdf.TRAIL, family=report_pdf.MONO)
+    assert len(sheet.wrapped(cells[1][evidence], widths[evidence])) <= report_pdf.MAX_CELL_LINES
+    assert sum(widths) <= sheet.epw + 0.01
+
+
 # --- The letterhead (#352): on every page, clear of the tables ----------------------------------
 
 
