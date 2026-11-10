@@ -260,16 +260,14 @@ def test_a_developer_reads_alpenwerks_prompts_the_model_price_and_a_fake_run_in_
     expect(priced).to_contain_text("$2.00 in · $10.00 out per million tokens")
     expect(priced).to_contain_text("Current")
 
-    newest = settings.get_by_role("region", name="Recent runs").get_by_role("row").nth(1)
-    expect(newest.get_by_role("cell")).to_have_text(
-        [
-            re.compile(r"\S"),
-            "4.1.2",
-            "fake",
-            f"{usage['input_tokens']:,}",
-            f"{usage['output_tokens']:,}",
-            re.compile(r"^\$[\d.]+ estimated, not spent$"),
-        ]
+    # Its own run, by control and token counts: other checks on this server may have run since.
+    runs = settings.get_by_role("region", name="Recent runs").get_by_role("row")
+    for text in ("4.1.2", f"{usage['input_tokens']:,}", f"{usage['output_tokens']:,}"):
+        runs = runs.filter(has=page.get_by_role("cell", name=text, exact=True))
+    ours = runs.first
+    expect(ours.get_by_role("cell").nth(2)).to_have_text("fake")
+    expect(ours.get_by_role("cell").nth(5)).to_have_text(
+        re.compile(r"^\$[\d.]+ estimated, not spent$")
     )
 
     for width in (1280, 400):

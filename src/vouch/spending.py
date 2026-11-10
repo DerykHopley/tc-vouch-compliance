@@ -390,7 +390,9 @@ class MemorySpendingStore:
         return UsageTotals(openrouter, fake)
 
     def recent(self, limit: int) -> list[UsageRecord]:
-        runs = [r for r in self.records() if r.control_id not in NOT_RUNS]
+        # Newest kept first, then sorted (a stable sort): runs ending at the same moment list the
+        # last kept first, as the database's `ORDER BY at DESC, id DESC` does.
+        runs = [r for r in reversed(self.records()) if r.control_id not in NOT_RUNS]
         return sorted(runs, key=lambda r: r.at, reverse=True)[:limit]
 
 

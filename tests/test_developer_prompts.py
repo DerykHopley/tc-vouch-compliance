@@ -60,6 +60,13 @@ def test_with_nordlicht_current_1_1_1_has_six_prompts_in_order_each_with_its_ver
     assert gather["sent"] is True and gather["title"] == "Gather evidence" and gather["note"]
 
 
+def test_an_empty_control_is_no_control_so_the_first_applicable_one_applies(client):
+    response = client.get(PROMPTS, params={"control": ""}, headers=DEVELOPER)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["control"]["id"] == prompts(client).json()["control"]["id"]
+
+
 def test_with_no_control_the_first_applicable_one_and_every_applicable_control_listed(client):
     body = prompts(client).json()
 

@@ -13,6 +13,7 @@ from test_lead_statements import CITING_Q12, script_citing, statement
 from vouch import ScriptedChatModel, graph, load_named_profile
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.graph import PROMPT_VERSION, assess_steps, overlay_requirements_of
+from vouch.profile import NotApplicable
 from vouch.profile_pass import PROFILE_PASS_PROMPT_VERSION
 from vouch.prompts import PromptPreview, prompt_previews
 
@@ -174,6 +175,35 @@ def test_for_a_control_with_no_overlay_requirement_the_overlay_prompt_is_not_sen
     assert overlay.sent is False
     assert overlay.messages == ()
     assert overlay.note == "Not sent for this control: it has no overlay requirement."
+
+
+def test_the_lead_statements_id_is_a_placeholder_too_wherever_it_shows():
+    question_id = "[from the run: the question's id, such as Q12]"
+    shown = previews()
+
+    for name in ("gather", "judge", "profile_pass"):
+        said = "\n".join(m.text for m in shown[name].messages)
+        assert question_id in said, name
+        assert '"Q1"' not in said, name
+
+
+def test_for_a_control_with_nothing_to_fix_the_remediation_prompt_is_not_sent():
+    # Every requirement of 1.1.1 not applicable: nothing is left for remediation to draft.
+    control = NORDLICHT.isa_control("1.1.1")
+    bare = NORDLICHT.model_copy(
+        update={
+            "not_applicable": (
+                *NORDLICHT.not_applicable,
+                NotApplicable(control="1.1.1", reason="Not ours."),
+            )
+        }
+    )
+
+    remediation = {p.name: p for p in prompt_previews(bare, control)}["remediation"]
+
+    assert remediation.sent is False
+    assert remediation.messages == ()
+    assert remediation.note == "Not sent for this control: it has no requirement to fix."
 
 
 def test_a_changed_rule_in_the_builder_shows_in_the_preview(monkeypatch):

@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
-import { count, dollars, plural } from './assessment.ts'
+import { costWords, count, dateTimeLabel, dollars, plural } from './assessment.ts'
 import {
   changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, type DeveloperPrompts, developerPrompts,
   developerSettings, type DeveloperSettings, makeCurrent, type MadeCompany, PROFILE_PASS, type PromptMessage,
@@ -235,7 +235,7 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
                 <time className="field-note" dateTime={row.made.created_at}>Made {madeOn(row.made.created_at)}</time>
               )}
               <span className="company-actions">
-                {current && <span className="company-current">Current</span>}
+                {current && <span className="current-mark">Current</span>}
                 {row.listed && !current && (
                   <button type="button" className="btn" disabled={out} aria-busy={making}
                     aria-label={making ? undefined : `Make ${row.company} current`}
@@ -341,7 +341,7 @@ function Prices({ settings }: { settings: DeveloperSettings }) {
           <li key={p.model}>
             <span className="mono">{p.model}</span>
             <span>{`${dollars(p.input_per_million)} in · ${dollars(p.output_per_million)} out per million tokens`}</span>
-            {p.model === settings.model && <span className="company-current">Current</span>}
+            {p.model === settings.model && <span className="current-mark">Current</span>}
           </li>
         ))}
       </ul>
@@ -441,23 +441,18 @@ function Prompts({ listed }: { listed: DeveloperSettings['listed_companies'] }) 
   )
 }
 
-/** "10 Nov 2026, 09:30": when a run ended, in the reader's time zone; as written when it doesn't parse. */
-const ranAt = (iso: string) => {
-  const at = new Date(iso)
-  return Number.isNaN(at.getTime()) ? iso
-    : at.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
 /** The model a run names when the scripted fake ran (vouch.spending.FAKE). */
 const FAKE_MODEL = 'fake'
 
-/** A run's cost: the reported cost, else with the estimated part "estimated"; "incomplete" when some call's cost is
- * unknown; the fake model's "estimated, not spent", as the Usage line says. */
+/** A run's cost in the Usage line's words (costWords): reported, "(estimated)", "at least …" or "cost unknown"; the
+ * fake model's "estimated, not spent", as the Usage line's fake total says. */
 function runCost(run: RecentRun): string {
-  if (run.model === FAKE_MODEL) return `${dollars(run.estimated_cost_usd)} estimated, not spent`
-  const cost = run.estimated ? `${dollars(run.reported_cost_usd + run.estimated_cost_usd)} estimated`
-    : dollars(run.reported_cost_usd)
-  return run.cost_complete ? cost : `${cost} · incomplete`
+  if (run.model === FAKE_MODEL) {
+    return `${costWords({ cost_usd: run.estimated_cost_usd, estimated: false, cost_complete: run.cost_complete })} `
+      + 'estimated, not spent'
+  }
+  return costWords({ cost_usd: run.reported_cost_usd + run.estimated_cost_usd, estimated: run.estimated,
+    cost_complete: run.cost_complete })
 }
 
 /** The last 10 assessments and profile passes (#496), for every company: one table row each, newest first. */
@@ -478,7 +473,7 @@ function RecentRuns({ runs }: { runs: RecentRun[] }) {
               <tbody>
                 {runs.map((run, i) => (
                   <tr key={`${run.at}:${i}`}>
-                    <td><time dateTime={run.at}>{ranAt(run.at)}</time></td>
+                    <td><time dateTime={run.at}>{dateTimeLabel(run.at)}</time></td>
                     <td>{run.control_id === PROFILE_PASS ? 'Profile pass' : <span className="mono">{run.control_id}</span>}</td>
                     <td><span className="mono">{run.model}</span></td>
                     <td>{count(run.input_tokens)}</td>

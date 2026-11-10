@@ -974,6 +974,30 @@ def test_the_developer_page_lists_the_last_10_runs_newest_first_leaving_out_chat
     assert (runs[1]["model"], runs[1]["estimated"]) == ("fake", True)
 
 
+def tied_records() -> list[UsageRecord]:
+    """Three runs ending at the same moment, kept in this order."""
+    usage = Usage("fake", 7, 3, 0.0, 0.0001, estimated=True, cost_complete=True)
+    return [UsageRecord("alice", c, usage, NOV_4_AFTERNOON) for c in ("1.1", "1.2", "1.3")]
+
+
+def test_runs_ending_at_the_same_moment_list_the_last_kept_first():
+    store = MemorySpendingStore()
+    for record in tied_records():
+        store.record(record)
+
+    assert [r.control_id for r in store.recent(10)] == ["1.3", "1.2", "1.1"]
+
+
+@needs_postgres
+def test_in_the_database_runs_ending_at_the_same_moment_list_the_last_kept_first(empty_database):  # noqa: F811
+    empty_database.setup()
+    store = DatabaseSpendingStore(empty_database)
+    for record in tied_records():
+        store.record(record)
+
+    assert [r.control_id for r in store.recent(10)] == ["1.3", "1.2", "1.1"]
+
+
 @needs_postgres
 def test_in_the_database_the_recent_runs_are_read_from_the_usage_table(empty_database):  # noqa: F811
     empty_database.setup()

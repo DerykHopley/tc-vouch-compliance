@@ -180,6 +180,7 @@ PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could n
 CONTROLS_FAILED = "The framework's controls could not be read."
 PROMPTS_FAILED = "The prompts could not be built."
 NOT_A_PROMPT_CONTROL = "{control} is not a control the current company applies."
+NO_PROMPT_CONTROL = "The current company applies no control."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
 DOCUMENTS_FAILED = "The documents could not be read."
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
@@ -2221,6 +2222,7 @@ def developer_prompts(
     first): `company`, `controls` (every applicable one, for the picker), `control` and the six
     `prompts` (vouch.prompts). A control not applicable to the company, or unknown, is a 404
     naming it, nothing built; the base framework unreadable, a plain 500 naming no file."""
+    control = control or None  # `?control=` asks for none: the first applies
     profile = _current_profile(settings, companies, current)
     try:
         controls = applicable_controls(profile, profile.isa_edition().controls)
@@ -2231,7 +2233,7 @@ def developer_prompts(
         raise HTTPException(status_code=404, detail=NOT_A_PROMPT_CONTROL.format(control=control))
     chosen = chosen or (controls[0] if controls else None)
     if chosen is None:  # every control not applicable: company setup refuses such a company
-        raise HTTPException(status_code=404, detail="The current company applies no control.")
+        raise HTTPException(status_code=404, detail=NO_PROMPT_CONTROL)
     return {
         "company": {"id": profile.id, "name": profile.company},
         "controls": [{"id": c.id, "question": c.question} for c in controls],

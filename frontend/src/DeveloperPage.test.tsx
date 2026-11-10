@@ -736,7 +736,7 @@ describe('the price per model, ticket 496', () => {
       'anthropic/claude-sonnet-5.5$2.00 in · $10.00 out per million tokens',
     ])
     expect(within(rows[0]).getByText('anthropic/claude-haiku-5.5').className).toContain('mono')
-    expect(within(rows[0]).getByText('Current').className).toContain('company-current')
+    expect(within(rows[0]).getByText('Current').className).toContain('current-mark')
     expect(within(model()).queryByText(/has no list price here/)).toBeNull()
   })
 
@@ -759,26 +759,32 @@ describe('the recent runs, ticket 496', () => {
   const when = (iso: string) => new Date(iso).toLocaleString('en-GB',
     { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-  it('shows a row per run: when, what, model, tokens and cost, reported, estimated, incomplete or not spent', () => {
+  it('shows a row per run: when, what, model, tokens and cost, in the Usage line\'s words', () => {
+    const FAKE_RUN = { ...RUN, model: 'fake', reported_cost_usd: 0, estimated_cost_usd: 0.0001, estimated: true }
     const runs: RecentRun[] = [
       RUN,
       { ...RUN, control_id: 'profile-pass', reported_cost_usd: 0, estimated_cost_usd: 0.25, estimated: true },
       { ...RUN, control_id: '5.1.1', cost_complete: false },
-      { ...RUN, control_id: '4.1.2', model: 'fake', reported_cost_usd: 0, estimated_cost_usd: 0.0001, estimated: true },
+      { ...RUN, control_id: '5.1.2', reported_cost_usd: 0, cost_complete: false },
+      { ...FAKE_RUN, control_id: '4.1.2' },
+      { ...FAKE_RUN, control_id: '4.1.3', cost_complete: false },
     ]
     renderPage({ settings: { ...SETTINGS, recent_runs: runs } })
     expect(within(section()).getByText('The last 10 assessments and profile passes, for every company.')).toBeTruthy()
     expect(within(section()).getAllByRole('columnheader').map((h) => h.textContent))
       .toEqual(['When', 'What', 'Model', 'Tokens in', 'Tokens out', 'Cost'])
     const rows = within(section()).getAllByRole('row').slice(1)
+    const sonnet = 'anthropic/claude-sonnet-5.5'
     expect(rows.map(cellsOf)).toEqual([
-      [when(RUN.at), '1.6.2', 'anthropic/claude-sonnet-5.5', '12,345', '678', '$0.0123'],
-      [when(RUN.at), 'Profile pass', 'anthropic/claude-sonnet-5.5', '12,345', '678', '$0.25 estimated'],
-      [when(RUN.at), '5.1.1', 'anthropic/claude-sonnet-5.5', '12,345', '678', '$0.0123 · incomplete'],
+      [when(RUN.at), '1.6.2', sonnet, '12,345', '678', '$0.0123'],
+      [when(RUN.at), 'Profile pass', sonnet, '12,345', '678', '$0.25 (estimated)'],
+      [when(RUN.at), '5.1.1', sonnet, '12,345', '678', 'at least $0.0123'],
+      [when(RUN.at), '5.1.2', sonnet, '12,345', '678', 'cost unknown'],
       [when(RUN.at), '4.1.2', 'fake', '12,345', '678', '$0.0001 estimated, not spent'],
+      [when(RUN.at), '4.1.3', 'fake', '12,345', '678', 'at least $0.0001 estimated, not spent'],
     ])
     expect(rows[0].querySelector('time')?.getAttribute('dateTime')).toBe(RUN.at)
-    expect(within(rows[0]).getByText('anthropic/claude-sonnet-5.5').className).toContain('mono')
+    expect(within(rows[0]).getByText(sonnet).className).toContain('mono')
   })
 
   it('says when no assessment or profile pass has run yet', () => {

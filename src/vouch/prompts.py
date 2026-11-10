@@ -20,17 +20,16 @@ from vouch.graph import (
     AssessState,
     EvidencePassage,
     RequirementVerdict,
-    _judge_prompt,
-    _overlay_prompt,
-    _prompt,
-    _remediation_prompt,
+    gather_prompt,
+    judge_prompt,
+    overlay_prompt,
     overlay_requirements_of,
+    remediation_prompt,
     statement_passages,
 )
 from vouch.isa import IsaControl
 from vouch.profile import ComplianceProfile
-from vouch.profile_pass import PROFILE_PASS_PROMPT_VERSION, _Included
-from vouch.profile_pass import _prompt as _profile_pass_prompt
+from vouch.profile_pass import PROFILE_PASS_PROMPT_VERSION, IncludedControl, profile_pass_prompt
 
 
 def from_the_run(what: str) -> str:
@@ -41,36 +40,6 @@ def from_the_run(what: str) -> str:
 NOTE = from_the_run("the lead's rejection note, on a run asked for again")
 DRAFT = from_the_run("the gather step's draft answer")
 REASON = from_the_run("the judge's reason")
-NOT_SENT = "Not sent for this control: it has no overlay requirement."
-
-NOTES = {
-    "gather": (
-        "Sent first on every assessment. The rejection note appears only on a run asked for "
-        "again, and the lead's statements, with the rule on citing them, only when there are "
-        "some on the control."
-    ),
-    "overlay": (
-        "Sent after the first prompt when the control has overlay requirements, asking for "
-        "evidence for each of them too."
-    ),
-    "judge": (
-        "Sent once gathering ends, with the evidence the run found. The rejection note appears "
-        "only on a run asked for again, and the lead's statements, with the rule on citing them, "
-        "only when there are some on the control."
-    ),
-    "remediation": (
-        "Sent after the judge when a requirement isn't fully evidenced. A run lists only the "
-        "requirements not or partly evidenced, each with its verdict and the judge's reason."
-    ),
-    "profile_pass": (
-        "Sent once per profile pass. A run lists every applicable control not yet accepted or in "
-        "review, and every document of every allowed source, whole."
-    ),
-    "chat": (
-        "Sent with every chat message. The page named is the one the lead is on; here, the "
-        "chosen control's working paper."
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -81,8 +50,9 @@ class PromptMessage:
 
 @dataclass(frozen=True)
 class PromptPreview:
-    """One prompt as the developer page shows it: `sent` is False only for the overlay prompt
-    of a control with no overlay requirement, which then has no messages."""
+    """One prompt as the developer page shows it: `sent` is False for a prompt this control
+    never gets (the overlay with no overlay requirement, remediation with nothing to fix),
+    which then has no messages and says why in its note."""
 
     name: str
     title: str
@@ -95,17 +65,45 @@ class PromptPreview:
         return asdict(self)
 
 
-def _messages(prompt: list[AnyMessage]) -> tuple[PromptMessage, ...]:
-    return tuple(
-        PromptMessage("system" if isinstance(m, SystemMessage) else "human", str(m.content))
-        for m in prompt
-    )
+@dataclass(frozen=True)
+class _Row:
+    """One prompt of the table: what it is, its messages built for the control (none: not
+    sent), when it is sent and what a run changes, and why it isn't sent for this control."""
+
+    name: str
+    title: str
+    version: str
+    messages: list[AnyMessage]
+    note: str
+    not_sent: str = ""
+
+    def preview(self) -> PromptPreview:
+        return PromptPreview(
+            self.name,
+            self.title,
+            self.version,
+            sent=bool(self.messages),
+            note=self.note if self.messages else self.not_sent,
+            messages=tuple(
+                PromptMessage("system" if isinstance(m, SystemMessage) else "human", str(m.content))
+                for m in self.messages
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class _PlaceholderStatement(LeadStatement):
+    """A lead statement whose id, like its question and answer, only a run knows."""
+
+    @property
+    def doc_id(self) -> str:
+        return from_the_run("the question's id, such as Q12")
 
 
 def _statement(control: IsaControl) -> LeadStatement:
-    """One lead statement on the control, its question and answer placeholders."""
-    return LeadStatement(
-        id=1,
+    """One lead statement on the control, its id, question and answer placeholders."""
+    return _PlaceholderStatement(
+        id=0,  # not shown: its doc_id is a placeholder
         control_id=control.id,
         answer=from_the_run("the lead's answer"),
         answered_on=date(2000, 1, 1),  # not shown in any prompt
@@ -144,53 +142,64 @@ def prompt_previews(profile: ComplianceProfile, control: IsaControl) -> list[Pro
         "answer": DRAFT,
         "note": NOTE,
     }
-    not_evidenced = [
+    to_fix = [
         RequirementVerdict(r.id, r.column, r.text, "not-evidenced", REASON)
         for r in requirements.applicable
     ]
-    included = _Included(control, requirements, [statement], statements)
+    included = IncludedControl(control, requirements, [statement], statements)
     document = _passage(from_the_run("the document's whole text"), "")
-    prompts: list[tuple[str, str, str, list[AnyMessage]]] = [
-        (
+    rows = [
+        _Row(
             "gather",
             "Gather evidence",
             PROMPT_VERSION,
-            _prompt(control, requirements, profile, NOTE, statements),
+            gather_prompt(control, requirements, profile, NOTE, statements),
+            "Sent first on every assessment. The rejection note appears only on a run asked for "
+            "again, and the lead's statements, with the rule on citing them, only when there are "
+            "some on the control.",
         ),
-        (
+        _Row(
             "overlay",
             "Country overlay",
             PROMPT_VERSION,
-            [_overlay_prompt(overlay)] if overlay else [],
+            [overlay_prompt(overlay)] if overlay else [],
+            "Sent after the first prompt when the control has overlay requirements, asking for "
+            "evidence for each of them too.",
+            "Not sent for this control: it has no overlay requirement.",
         ),
-        ("judge", "Judge", PROMPT_VERSION, _judge_prompt(judged, profile)),
-        (
+        _Row(
+            "judge",
+            "Judge",
+            PROMPT_VERSION,
+            judge_prompt(judged, profile),
+            "Sent once gathering ends, with the evidence the run found. The rejection note "
+            "appears only on a run asked for again, and the lead's statements, with the rule on "
+            "citing them, only when there are some on the control.",
+        ),
+        _Row(
             "remediation",
             "Remediation",
             PROMPT_VERSION,
-            _remediation_prompt(control, not_evidenced, profile),
+            remediation_prompt(control, to_fix, profile) if to_fix else [],
+            "Sent after the judge when a requirement isn't fully evidenced. A run lists only the "
+            "requirements not or partly evidenced, each with its verdict and the judge's reason.",
+            "Not sent for this control: it has no requirement to fix.",
         ),
-        (
+        _Row(
             "profile_pass",
             "Profile pass",
             PROFILE_PASS_PROMPT_VERSION,
-            _profile_pass_prompt(profile, [included], [document]),
+            profile_pass_prompt(profile, [included], [document]),
+            "Sent once per profile pass. A run lists every applicable control not yet accepted "
+            "or in review, and every document of every allowed source, whole.",
         ),
-        (
+        _Row(
             "chat",
             "Chat",
             CHAT_PROMPT_VERSION,
             [chat_prompt(profile, PageContext("paper", control))],
+            "Sent with every chat message. The page named is the one the lead is on; here, the "
+            "chosen control's working paper.",
         ),
     ]
-    return [
-        PromptPreview(
-            name,
-            title,
-            version,
-            sent=bool(messages),
-            note=NOTES[name] if messages else NOT_SENT,
-            messages=_messages(messages),
-        )
-        for name, title, version, messages in prompts
-    ]
+    return [row.preview() for row in rows]
