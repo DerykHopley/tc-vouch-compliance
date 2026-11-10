@@ -58,6 +58,13 @@ def test_the_stale_word_is_the_reports_in_the_answer_language():
     assert assessment_data(assessed("en"))["stale_word"] == "Stale"
 
 
+def test_the_current_word_is_the_documents_tabs_in_the_answer_language():
+    # #484: the evidence column's "Current" beside the stale word, as the Documents tab says a
+    # document is current (vouch.documents_tab.DOCUMENT_WORDS).
+    assert assessment_data(assessed("de"))["current_word"] == "Aktuell"
+    assert assessment_data(assessed("en"))["current_word"] == "Current"
+
+
 def test_a_current_citation_has_no_reason_in_any_language():
     assert served_reasons(assessed("de", cited("register", None))) == [None]
 

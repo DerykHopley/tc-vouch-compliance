@@ -89,6 +89,8 @@ export type Assessment = {
   answer_language?: string
   /** A stale citation's flag word in the answer language, the report's (#359); each stale reason is in it too. */
   stale_word?: string
+  /** The evidence column's word for evidence that isn't stale, in the answer language, the Documents tab's (#484). */
+  current_word?: string
   status?: ReviewStatus
   requirements?: RequirementVerdict[]
   /** The thread to review it by (#38, #39). */
