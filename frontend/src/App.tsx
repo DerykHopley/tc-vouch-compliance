@@ -29,35 +29,37 @@ function startingTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-type View = { name: 'dossier' } | { name: 'report' } | { name: 'documents' } | { name: 'developer' } | { name: 'setup' }
+type View = { name: 'dossier' } | { name: 'report' } | { name: 'company' } | { name: 'developer' } | { name: 'setup' }
   | { name: 'paper'; controlId: string }
 
 export const DEVELOPER_PATH = '/developer'
 const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
-const DOCUMENTS_PATH = '/documents'
+const COMPANY_PATH = '/company'
+const DOCUMENTS_PATH = '/documents' // the documents' own page before #495: it leads to the Company tab
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
-/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the profile's
- * documents at /documents (#424), the developer page at /developer and its company setup at /developer/setup (#403),
- * the Dossier at /. */
+/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the Company tab
+ * at /company (#495: the documents, #424, until #448's slice 4 builds the Company page), the developer page at
+ * /developer and its company setup at /developer/setup (#403), the Dossier at /. */
 const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
-    : view.name === 'documents' ? DOCUMENTS_PATH : view.name === 'developer' ? DEVELOPER_PATH
+    : view.name === 'company' ? COMPANY_PATH : view.name === 'developer' ? DEVELOPER_PATH
       : view.name === 'setup' ? SETUP_PATH : '/'
 
-/** The page the chat says the lead is on for the view shown: company setup is the developer page's, and the
- * not-found page (no view shown) speaks as the Dossier, where its way back leads. */
+/** The page the chat says the lead is on for the view shown: company setup is the developer page's, the Company tab
+ * the documents' (#495: the API's pages and the chat's prompts are unchanged), and the not-found page (no view shown)
+ * speaks as the Dossier, where its way back leads. */
 const chatPage = (shown: View['name'] | null): PageContext['page'] =>
-  shown === 'setup' ? 'developer' : shown ?? 'dossier'
+  shown === 'setup' ? 'developer' : shown === 'company' ? 'documents' : shown ?? 'dossier'
 
-/** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
- * so its paper says not found. */
+/** The view an address shows; the Dossier for one it does not know, and the Company tab for /documents, the documents'
+ * old address (#495). An id with a broken escape stays as written, so its paper says not found. */
 function viewAt(path: string): View {
   if (path === DEVELOPER_PATH) return { name: 'developer' }
   if (path === SETUP_PATH) return { name: 'setup' }
   if (path === REPORT_PATH) return { name: 'report' }
-  if (path === DOCUMENTS_PATH) return { name: 'documents' }
+  if (path === COMPANY_PATH || path === DOCUMENTS_PATH) return { name: 'company' }
   const control = CONTROL_PATH.exec(path)
   if (!control) return { name: 'dossier' }
   try {
@@ -72,8 +74,9 @@ type AppProps = {
   onSignOut?: () => void
   /** The signed-in user's name, for the user menu (#222); none in local mode. */
   userName?: string
-  /** The company of the profile shown, for the user menu's fresh start (#285); none without a profile list. */
-  company?: string
+  /** The current company's summary (#495): the top bar names it, and the user menu's fresh start (#285). None without a
+   * profile list: then the top bar names the overview's company once it's read. */
+  profile?: ProfileSummary
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
   /** Company setup made a company (#409), with the Goal chosen in it (#447): ProfiledApp makes it current (#480) and
@@ -99,7 +102,7 @@ type AppProps = {
 
 /** The app: the top bar (#222, the owner's option D: page tabs and the user menu, behind one Menu button on a phone;
  * no profile switcher since #480), then the page shown, and the chat. */
-export default function App({ onSignOut, userName, company, onStartedAfresh, onCompanyCreated, onCompanyRemoved,
+export default function App({ onSignOut, userName, profile, onStartedAfresh, onCompanyCreated, onCompanyRemoved,
   onMadeCurrent, developerNote, onNoteShown, arrival = null, onArrivalUsed }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
@@ -130,6 +133,8 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
+    // An old link to the documents (#424) shows the Company tab, at its own address, with no new history entry (#495).
+    if (window.location.pathname === DOCUMENTS_PATH) window.history.replaceState(null, '', COMPANY_PATH)
   }, [view])
   useEffect(() => {
     // Back or Forward: the address has already changed, so staying on a paper with unsaved overrides puts it back.
@@ -162,8 +167,8 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
     setView(next)
     return true
   }
-  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer and
-  // /developer/setup show the Dossier.
+  // A developer's settings (or that they're unavailable), or null: then the user menu has no Developer page or Set up a
+  // company, and /developer and /developer/setup show the Dossier.
   const [developer, setDeveloper] = useState<DeveloperSettings | typeof UNAVAILABLE | null>(null)
   useEffect(() => {
     let current = true
@@ -174,8 +179,8 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
   const { load, noteAssessed, refresh: refreshOverview } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
-  // The report and the documents show none of it (#56, #424): it is read on leaving them for a view that does.
-  const needsOverview = view.name !== 'report' && view.name !== 'documents'
+  // The report and the Company tab show none of it (#56, #424, #495): it is read on leaving them for a view that does.
+  const needsOverview = view.name !== 'report' && view.name !== 'company'
   const read = useRef(false)
   useEffect(() => {
     if (!needsOverview) return
@@ -203,7 +208,7 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
   const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
-  const shown: View['name'] | null = view.name === 'report' || view.name === 'documents' ? view.name
+  const shown: View['name'] | null = view.name === 'report' || view.name === 'company' ? view.name
     : (view.name === 'developer' || view.name === 'setup') && developer ? view.name : control ? 'paper'
     : notFound !== null ? null : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
@@ -248,8 +253,10 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
   }, [paperId, readStored, paperReloads])
   // The lead's decisions made in this page (#42), by thread: newer than the run's result or the stored read.
   const [reviewed, setReviewed] = useState<Record<string, Assessment>>({})
-  // The overview once read: its goal and language name the top bar's label (#440).
+  // The overview once read: its goal and language name the top bar's label (#440), and its company the bar's company
+  // when there is no profile list (#495).
   const readOverview = overview.state.status === 'ready' ? overview.state.overview : undefined
+  const barCompany = profile ?? readOverview
   // In the Internal improvement goal a review or a plan mark can change a card's flags (#410: re-assessment
   // suggested, Closed), which the server works out: the overview is read again, kept as it is when that read fails.
   const improving = readOverview?.goal === 'internal-improvement'
@@ -284,34 +291,37 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
     if (again) noteReviewed(again)
     return again !== null
   }
+  /** A tab or a menu item shows `next`; on a phone, the bar's panel closes as it does. */
+  const go = (next: View) => {
+    setBarOpen(false)
+    showView(next)
+  }
   const open = (controlId: string, assess: boolean) => {
     if (showView({ name: 'paper', controlId }) && assess && !passing) void start(controlId)
   }
 
   return (
     <>
-      <TopBar goal={readOverview?.goal} language={readOverview?.answer_language}>
+      <TopBar goal={readOverview?.goal} language={readOverview?.answer_language} company={barCompany}>
         <button className="btn btn-ghost bar-toggle" aria-expanded={barOpen} aria-controls="top-bar-menu"
           onClick={() => setBarOpen((now) => !now)}>Menu</button>
         <div id="top-bar-menu" className={barOpen ? 'bar-menu open' : 'bar-menu'}>
           <nav className="tabs" aria-label="Main">
             <a href="/" aria-current={shown === 'dossier' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'dossier' }) }}>Overview</a>
+              onClick={(e) => { e.preventDefault(); go({ name: 'dossier' }) }}>Overview</a>
             <a href={REPORT_PATH} aria-current={shown === 'report' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'report' }) }}>Report</a>
-            <a href={DOCUMENTS_PATH} aria-current={shown === 'documents' ? 'page' : undefined}
-              onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'documents' }) }}>Documents</a>
-            {developer && (
-              <a href={DEVELOPER_PATH} aria-current={shown === 'developer' || shown === 'setup' ? 'page' : undefined}
-                onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'developer' }) }}>Developer</a>
-            )}
+              onClick={(e) => { e.preventDefault(); go({ name: 'report' }) }}>Report</a>
+            <a href={COMPANY_PATH} aria-current={shown === 'company' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); go({ name: 'company' }) }}>Company</a>
           </nav>
           <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut}
-            company={company} onStartedAfresh={onStartedAfresh} />
+            company={profile?.company} onStartedAfresh={onStartedAfresh}
+            developer={developer ? { onPage: () => go({ name: 'developer' }), onSetup: () => go({ name: 'setup' }) }
+              : undefined} />
         </div>
       </TopBar>
       {shown === 'report' ? <Report />
-        : shown === 'documents' ? <Documents reloads={documentsReloads} />
+        : shown === 'company' ? <Documents reloads={documentsReloads} />
         : shown === 'developer' && developer ? (
           <main>
             <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })}
@@ -343,7 +353,7 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
             onGoalChanged={changedGoal} onRoundChanged={overview.roundChanged}
             arriving={arriving} goalNotSet={goalNotSet} />}
       {/* An assessment from the chat reads the overview afresh (its card, readiness), its paper's newest if open, and
-          the documents if shown (their Cited by, #424). */}
+          the documents if the Company tab shows them (their Cited by, #424). */}
       <AskVouch context={{ page: chatPage(shown),
         controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
@@ -351,7 +361,7 @@ export default function App({ onSignOut, userName, company, onStartedAfresh, onC
         onAssessed={(controlId) => {
           void load()
           if (controlId === paperId) setPaperReloads((n) => n + 1)
-          if (shown === 'documents') setDocumentsReloads((n) => n + 1)
+          if (shown === 'company') setDocumentsReloads((n) => n + 1)
         }} />
     </>
   )

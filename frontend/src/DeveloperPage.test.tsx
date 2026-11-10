@@ -523,22 +523,48 @@ describe('the Companies section, issue 480', () => {
   })
 })
 
-describe('the Developer link', () => {
-  it('shows for a developer and opens the page at /developer', async () => {
+/** The Main tabs' names. */
+const tabNames = () =>
+  within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
+
+/** Opens the user menu (local mode) and gives its items' words. */
+async function menuItems() {
+  await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+  return screen.getAllByRole('menuitem').map((item) => item.textContent)
+}
+
+describe('the developer page in the user menu (ticket 495, M9 decision 4)', () => {
+  it('shows for a developer, beside no Developer or Documents tab, and opens the page at /developer', async () => {
     api(200)
     render(<App />)
-    const link = await screen.findByRole('link', { name: 'Developer' })
-    await userEvent.click(link)
+    await userEvent.click(await screen.findByRole('button', { name: 'Your menu' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Developer page' }))
     expect(window.location.pathname).toBe('/developer')
     expect(screen.getByRole('region', { name: 'Developer settings' })).toBeTruthy()
-    expect(link.getAttribute('aria-current')).toBe('page')
+    expect(tabNames()).toEqual(['Overview', 'Report', 'Company'])
+    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
+    for (const name of tabNames()) {
+      const tab = within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: name! })
+      expect(tab.getAttribute('aria-current')).toBeNull()
+    }
+  })
+
+  it('opens company setup at /developer/setup from Set up a company', async () => {
+    api(200)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Your menu' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a company' }))
+    expect(window.location.pathname).toBe('/developer/setup')
+    expect(screen.getByRole('region', { name: 'Company setup' })).toBeTruthy()
   })
 
   it('is not there for a compliance lead (the API answers 403)', async () => {
     const fetch = api(403)
     render(<App />)
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/developer/settings', expect.anything()))
-    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(await menuItems()).toEqual(['Dark theme'])
+    expect(tabNames()).toEqual(['Overview', 'Report', 'Company'])
   })
 
   it("keeps a compliance lead at /developer on the Dossier, never the page", async () => {
@@ -554,7 +580,6 @@ describe('the Developer link', () => {
     window.history.replaceState(null, '', '/developer')
     api(503, undefined, { detail: 'The database is unavailable just now. Please try again shortly.', unavailable: 'database' })
     render(<App />)
-    expect(await screen.findByRole('link', { name: 'Developer' })).toBeTruthy()
     const region = await screen.findByRole('region', { name: 'Developer settings' })
     expect(within(region).getByRole('alert').textContent).toMatch(/unavailable just now/)
   })
@@ -565,8 +590,8 @@ describe('the Developer link', () => {
     render(<App />)
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/developer/settings', expect.anything()))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
+    expect(await menuItems()).toEqual(['Dark theme'])
   })
 
   it("shows the unavailable notice, not company setup, at /developer/setup on the database's 503", async () => {

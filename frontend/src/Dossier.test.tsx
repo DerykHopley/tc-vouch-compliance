@@ -133,6 +133,7 @@ describe('the Dossier overview', () => {
         ? { ...c, status: 'not-applicable', verdict: 'not-applicable', not_applicable: 'No development of our own.' }
         : { ...c, not_applicable: null })
       overview.readiness = { ...overview.readiness, controls: 11, open: 11 }
+      overview.by_status = { ...overview.by_status, 'not-assessed': 11, 'not-applicable': 1 } // nothing assessed yet
       render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null}
         {...NO_PASS} {...NO_GOAL} />)
       const card = screen.getByRole('article', { name: 'Control 5.2.9' })
@@ -277,6 +278,12 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
     expect(onPass).toHaveBeenCalled()
     expect(onOpen).not.toHaveBeenCalled()
     expect(screen.queryByRole('region', { name: 'Profile pass' })).toBeNull()
+  })
+
+  it('says what a pass costs only before the first pass: once a control is assessed, the note alone (ticket 495)', () => {
+    shown({ kind: 'idle' }, { overview: seeded({ '1.1.1': { status: 'waiting-for-review', verdict: 'evidenced' } }) })
+    expect(document.getElementById('pass-note')?.textContent).toBe(
+      'Assesses every open control in one run. Accepted controls and reviews in progress are skipped.')
   })
 
   it("isn't offered once every control is accepted", () => {
@@ -480,13 +487,15 @@ describe('the goal on the Dossier (ticket 369)', () => {
     return { onGoalChanged }
   }
 
-  it('shows the goal under the company pill, with Change goal beside it', () => {
+  it("shows the goal as the hero's first line, with no company pill (ticket 495), Change goal beside it", () => {
     shown()
     expect(goalLine().textContent).toBe('Goal: Audit readiness')
     expect(changeButton().className).toBe('btn btn-ghost')
     const hero = screen.getByRole('heading', { level: 1 }).parentElement!
     const order = [...hero.children].map((el) => el.className || el.tagName)
-    expect(order.indexOf('goal')).toBe(order.indexOf('pill') + 1)
+    expect(order.slice(0, 3)).toEqual(['goal', 'round', 'H1'])
+    expect(hero.querySelector('.pill')).toBeNull()
+    expect(screen.queryByText(/Nordlicht Komponenten GmbH/)).toBeNull()
   })
 
   it('names Internal improvement when that is the goal', () => {

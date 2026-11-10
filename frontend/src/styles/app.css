@@ -20,8 +20,17 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .brand b { font: 400 20px var(--f-display); text-transform: uppercase; letter-spacing: .08em; }
 .brand b::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 6px; background: var(--brass); transform: rotate(45deg) translateY(-2px); }
 .brand span { font-size: 12px; color: var(--muted); }
-/* The top bar (#222, the owner's option D, 2026-11-06): underlined page tabs, then the profile dropdown and the user
-   menu on the right; on a phone they sit behind one Menu button. */
+/* The current company (#495, the owner's option A "Letterhead", 2026-11-10): a thin --rule line, then the company's
+   name and its tag, plain text. On a phone it stays outside the Menu button and wraps under the brand, the rule with
+   it, when it doesn't fit beside it. */
+.top-id { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 4px 14px; min-width: 0; }
+.top-company { display: flex; align-items: center; gap: 14px; min-width: 0; margin: 0; font-size: 14px; }
+.top-rule { align-self: stretch; flex: none; width: 1px; min-height: 20px; background: var(--rule); }
+.top-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; } /* the tag wraps under the name */
+.top-name { font-weight: 600; overflow-wrap: anywhere; }
+.top-tag { font: 500 12px var(--f-mono); color: var(--muted); }
+/* The top bar (#222, the owner's option D, 2026-11-06; option A since #495): underlined page tabs, then the user menu
+   on the right; on a phone they sit behind one Menu button. */
 .bar-toggle { display: none; }
 .bar-menu { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-width: 0; }
 .tabs { display: flex; gap: 4px; }
@@ -38,7 +47,9 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .menu-item { min-height: 44px; padding: 0 12px; border: 0; border-radius: 3px; background: none; color: var(--ink); font: inherit; text-align: left; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--paper); }
 .menu-item[aria-checked="true"] { font-weight: 600; box-shadow: inset 2px 0 0 var(--brass); }
-.menu-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--rule); }
+.menu-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); }
+/* Between a menu's groups (#495): a --rule line; the arrow keys skip it. */
+.menu-separator { height: 1px; margin: 4px 0; background: var(--rule); }
 /* The working paper's breadcrumb: "Overview › 5.1.1". */
 .crumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .crumbs a { display: inline-flex; align-items: center; min-height: 44px; color: var(--navy); }
@@ -70,8 +81,8 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .hero p { max-width: 52ch; margin: 0; color: var(--muted); }
 .hero p b { color: var(--ink); }
 .hero .next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-/* The goal (#369, design.md Components: Goal): its own line under the company pill, Change goal beside it. */
-.hero .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 10px; color: var(--muted); }
+/* The goal (#369, design.md Components: Goal): its own line at the top of the hero (#495), Change goal beside it. */
+.hero .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 0; color: var(--muted); }
 /* The review round (#402, design.md Components: Review round): its own line under the goal, as the goal's; with none
    open, the next round's name field between the words and Start round. */
 .hero .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
@@ -336,6 +347,7 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 700px) {
   /* The top bar on a phone (#222): the tabs and the user menu behind one Menu button, stacked. */
   .bar-toggle { display: inline-flex; margin-left: auto; }
+  .top-id { flex: 1 1 0; } /* the company wraps under the brand, the Menu button stays beside them (#495) */
   .bar-menu { flex-basis: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
   .bar-menu.open { padding-bottom: 8px; }
   .bar-menu:not(.open) > * { display: none; } /* closed, the panel shows nothing */

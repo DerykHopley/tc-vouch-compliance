@@ -686,7 +686,7 @@ describe('The Report tab', () => {
     const fetch = serve(REPORT)
     render(<App />)
     const nav = screen.getByRole('navigation', { name: 'Main' })
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Overview', 'Report', 'Documents'])
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Overview', 'Report', 'Company'])
 
     await userEvent.click(within(nav).getByRole('link', { name: 'Report' }))
 

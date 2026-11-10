@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
+import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
 /** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
@@ -326,6 +327,25 @@ describe('the working paper', () => {
         expect(within(m1()).getByText('Overridden from Partly evidenced')).toBeTruthy()
       })
 
+      it("the user menu's Developer page asks too (ticket 495); Cancel stays on the paper", async () => {
+        const served = serveReview(Response.json({ assessment: READY }), READY)
+        vi.stubGlobal('fetch', (url: string, init?: RequestInit) => url === '/api/developer/settings'
+          ? Promise.resolve(Response.json(DEVELOPER_SETTINGS)) : served(url, init))
+        window.history.replaceState(null, '', '/controls/4.1.2')
+        render(<App />)
+        await screen.findByRole('region', { name: 'Review' })
+        await saveOverrideOfM1()
+        const confirm = asking(false)
+
+        await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+        await userEvent.click(await screen.findByRole('menuitem', { name: 'Developer page' }))
+
+        expect(confirm).toHaveBeenCalledWith(ONE)
+        expect(window.location.pathname).toBe('/controls/4.1.2')
+        expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
+        expect(within(m1()).getByText('Overridden from Partly evidenced')).toBeTruthy()
+      })
+
       it("Back asks; Cancel keeps the paper shown and puts its address back", async () => {
         window.history.replaceState(null, '', '/')
         window.history.pushState(null, '', '/controls/4.1.2')
@@ -552,37 +572,56 @@ describe('the working paper', () => {
   })
 })
 
-describe('the Documents tab (issue 424)', () => {
+describe('the Company tab (ticket 495; the documents, issue 424, until slice 4 builds the Company page)', () => {
   const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name })
 
-  it('sits after Report for every user, opens straight at /documents marked current, and Back returns', async () => {
-    serve()
-    render(<App />)
-    await screen.findAllByRole('article', { name: /^Control / })
-    const names = within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
-    expect(names).toEqual(['Overview', 'Report', 'Documents'])
+  it('sits after Report for every user, opens /company marked current with the documents, and Back returns',
+    async () => {
+      const fetch = serve()
+      render(<App />)
+      await screen.findAllByRole('article', { name: /^Control / })
+      const names = within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
+      expect(names).toEqual(['Overview', 'Report', 'Company'])
+      const overviewReads = () => fetch.mock.calls.filter(([url]) => url === '/api/overview').length
+      const before = overviewReads()
 
-    await userEvent.click(tab('Documents'))
-    expect(window.location.pathname).toBe('/documents')
-    expect(tab('Documents').getAttribute('aria-current')).toBe('page')
-    expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+      await userEvent.click(tab('Company'))
+      expect(window.location.pathname).toBe('/company')
+      expect(tab('Company').getAttribute('aria-current')).toBe('page')
+      expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+      await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
+      expect(overviewReads()).toBe(before)
 
-    act(() => window.history.back())
-    await waitFor(() => expect(window.location.pathname).toBe('/'))
-    expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
-    expect(tab('Documents').getAttribute('aria-current')).toBeNull()
-  })
+      act(() => window.history.back())
+      await waitFor(() => expect(window.location.pathname).toBe('/'))
+      expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+      expect(tab('Company').getAttribute('aria-current')).toBeNull()
+    })
 
-  it('opened directly (a reload), shows the Documents page with its tab current and reads no overview', async () => {
+  it('opened directly (a reload), shows the documents with the Company tab current and reads no overview', async () => {
     const fetch = serve()
-    window.history.replaceState(null, '', '/documents')
+    window.history.replaceState(null, '', '/company')
     render(<App />)
     expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
-    expect(tab('Documents').getAttribute('aria-current')).toBe('page')
+    expect(tab('Company').getAttribute('aria-current')).toBe('page')
     expect(tab('Overview').getAttribute('aria-current')).toBeNull()
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
     expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
   })
+
+  it('at /documents (an old link), shows the same view, the Company tab current, the address rewritten to /company',
+    async () => {
+      const fetch = serve()
+      window.history.replaceState(null, '', '/')
+      window.history.pushState(null, '', '/documents')
+      const entries = window.history.length
+      render(<App />)
+      expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+      expect(tab('Company').getAttribute('aria-current')).toBe('page')
+      await waitFor(() => expect(window.location.pathname).toBe('/company'))
+      expect(window.history.length).toBe(entries) // replaced, no new entry
+      expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
+    })
 })
 
 describe('the improvement plan (ticket 410)', () => {
@@ -690,6 +729,17 @@ describe('the profile pass (ticket 390)', () => {
     expect(within(await answerShown()).getByText('Keys for administrators.')).toBeTruthy()
     await finish([{ ...STORED, thread_id: 't2', answer: 'From the pass.' }])
     await waitFor(async () => expect(within(await answerShown()).getByText('From the pass.')).toBeTruthy())
+  })
+
+  it('reads the documents again when the pass ends on the Company tab, for Cited by (issue 424, ticket 495)', async () => {
+    const { fetch, finish } = passServer([])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run a profile pass' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Company' }))
+    const documentReads = () => fetch.mock.calls.filter(([url]) => url === '/api/documents').length
+    await waitFor(() => expect(documentReads()).toBe(1))
+    await finish([STORED])
+    await waitFor(() => expect(documentReads()).toBe(2))
   })
 
   it("shows the pass's assessment, not an earlier run's, for a control assessed on its own before", async () => {
@@ -1165,11 +1215,11 @@ describe('Ask Vouch', () => {
     await waitFor(() => expect(asked).toEqual([{ message: 'What is left?', page: 'report', control_id: null, thread_id: 't0' }]))
   })
 
-  it('on the Documents tab, sends the greeting and messages with the documents as the page (issue 424)', async () => {
+  it('on the Company tab, sends the greeting and messages with the documents as the page (issue 424, ticket 495)', async () => {
     const greetings: ChatBody[] = []
     const asked: ChatBody[] = []
     serveChat((body) => { asked.push(body); return QUIET() }, (body) => { greetings.push(body); return QUIET() })
-    window.history.replaceState(null, '', '/documents')
+    window.history.replaceState(null, '', '/company')
     render(<App />)
     await open()
     expect(within(bubble()!).getByText('on Documents')).toBeTruthy()
@@ -1179,7 +1229,7 @@ describe('Ask Vouch', () => {
       thread_id: 't0' }]))
   })
 
-  it('an assessment from the chat on the Documents tab reads the documents again, for Cited by (issue 424)', async () => {
+  it('an assessment from the chat on the Company tab reads the documents again, for Cited by (issue 424, ticket 495)', async () => {
     serveChat(() => Promise.resolve(sse([
       'event: assessment\ndata: {"control_id":"4.1.2","verdict":"evidenced","status":"waiting-for-review","thread_id":"a1"}\n\n',
       'event: token\ndata: {"text":"The assessment of control 4.1.2 has finished."}\n\n',
@@ -1190,7 +1240,7 @@ describe('Ask Vouch', () => {
       if (url === '/api/documents') documentReads.push(url)
       return served(url, init)
     })
-    window.history.replaceState(null, '', '/documents')
+    window.history.replaceState(null, '', '/company')
     render(<App />)
     await waitFor(() => expect(documentReads).toHaveLength(1))
     await open()

@@ -14,6 +14,7 @@ import re
 from current_company import reopened_under
 from playwright.sync_api import Page, Route, expect
 from test_german_answers import ALPENWERK_ASSESSMENT, CONTROL, seeded_stream
+from top_bar import bar_company, bar_tag, company_tab
 
 PROPER_NAMES = ["Alpenwerk Präzision GmbH"]
 """Names, the same in every language: allowed without `lang`."""
@@ -96,10 +97,33 @@ def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url, n
     expect(report.get_by_role("heading", level=1)).to_have_text("Bereitschaftsbericht")
     assert_marked(page, "Was fehlt?")
 
-    # The Documents tab: its words follow the profile's language (#424); the tab name stays English.
+    # The Company tab's documents: their words follow the profile's language (#424); the tab name
+    # stays English.
     with page.expect_response("**/api/documents"):
-        page.get_by_role("link", name="Documents").click()
+        company_tab(page).click()
     documents = page.locator("article.documents-doc")
     expect(documents).to_have_attribute("lang", "de")
     expect(documents.get_by_role("heading", level=1)).to_have_text("Dokumente")
     assert_marked(page, "Was fehlt?")
+
+
+def test_on_alpenwerk_every_page_s_top_bar_names_it(page: Page, vouch_url, nordlicht_later):
+    """#495: the top bar names the current company on every page, including Report and Company
+    opened directly, which read no overview: the name comes from the profile list."""
+    nordlicht_later(vouch_url)
+    on_alpenwerk(page, vouch_url)
+
+    def names_alpenwerk() -> None:
+        expect(bar_company(page)).to_have_text("Alpenwerk Präzision GmbH")
+        expect(bar_tag(page)).to_have_text("AT · DE")
+
+    names_alpenwerk()  # the Overview
+    for path, answer in [
+        ("/report", "**/api/report"),
+        ("/company", "**/api/documents"),
+        ("/developer", "**/api/developer/settings"),
+        (f"/controls/{CONTROL}", "**/api/overview"),
+    ]:
+        with page.expect_response(answer):
+            page.goto(f"{vouch_url}{path}")
+        names_alpenwerk()

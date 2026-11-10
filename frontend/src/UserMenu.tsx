@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from 'react'
 import Menu, { MenuItem } from './Menu.tsx'
 import { startAfresh } from './profiles.ts'
 import { initials, LOCAL_USER, type Theme } from './user.ts'
@@ -13,6 +14,8 @@ type Props = {
   company?: string
   /** The fresh start went through (#285): the app opens afresh. Without it, the menu offers no fresh start. */
   onStartedAfresh?: () => void
+  /** A developer's tools (#495, M9 decision 4): Developer page and Set up a company; none for a lead. */
+  developer?: { onPage: () => void; onSetup: () => void }
 }
 
 const RUNNING = 'An assessment is running: start afresh once it has finished.'
@@ -32,27 +35,44 @@ async function confirmFreshStart(company: string | undefined, onStarted: () => v
   else if (result === 'failed') window.alert(FAILED)
 }
 
-/** The user menu behind the user's initials (#222, the owner's option D): "Signed in as <name>", the fresh start
- * (#285), the theme, and Sign out; in local mode, with no sign-in, no Sign out. */
-export default function UserMenu({ name, theme, onTheme, onSignOut, company, onStartedAfresh }: Props) {
+/** The user menu behind the user's initials (#222), in the Letterhead order (#495, option A): "Signed in as <name>" and
+ * the theme; Developer page and Set up a company (developers only); Sign out; the fresh start (#285), last. A separator
+ * splits the groups (the arrow keys skip it), and a group with nothing in it leaves none. In local mode, with no
+ * sign-in, no "Signed in as" or Sign out. */
+export default function UserMenu({ name, theme, onTheme, onSignOut, company, onStartedAfresh, developer }: Props) {
   const signedIn = Boolean(onSignOut && name)
   // Local mode's one user is "Local user"; in clerk mode, until Clerk has read the user, an ellipsis, never "LU".
   const shown = onSignOut ? name : LOCAL_USER
   return (
     <Menu label={signedIn ? `${name}: your menu` : 'Your menu'} buttonClassName="user-button" className="user-menu"
       button={<span aria-hidden="true">{shown ? initials(shown) : '…'}</span>}>
-      {(close) => (
-        <>
-          {signedIn && <p className="menu-note" role="none">Signed in as {name}</p>}
-          {onStartedAfresh && (
-            <MenuItem onSelect={() => { close(); void confirmFreshStart(company, onStartedAfresh) }}>
-              {`${startWords(company)}…`}
-            </MenuItem>
-          )}
-          <MenuItem onSelect={() => { onTheme(); close() }}>{theme === 'light' ? 'Dark theme' : 'Light theme'}</MenuItem>
-          {onSignOut && <MenuItem onSelect={() => { close(); onSignOut() }}>Sign out</MenuItem>}
-        </>
-      )}
+      {(close) => {
+        const you = (
+          <>
+            {signedIn && <p className="menu-note" role="none">Signed in as {name}</p>}
+            <MenuItem onSelect={() => { onTheme(); close() }}>{theme === 'light' ? 'Dark theme' : 'Light theme'}</MenuItem>
+          </>
+        )
+        const tools = developer && (
+          <>
+            <MenuItem onSelect={() => { close(); developer.onPage() }}>Developer page</MenuItem>
+            <MenuItem onSelect={() => { close(); developer.onSetup() }}>Set up a company</MenuItem>
+          </>
+        )
+        const signOut = onSignOut && <MenuItem onSelect={() => { close(); onSignOut() }}>Sign out</MenuItem>
+        const reset = onStartedAfresh && (
+          <MenuItem onSelect={() => { close(); void confirmFreshStart(company, onStartedAfresh) }}>
+            {`${startWords(company)}…`}
+          </MenuItem>
+        )
+        const groups: ReactNode[] = [you, tools, signOut, reset].filter(Boolean)
+        return groups.map((items, i) => (
+          <Fragment key={i}>
+            {i > 0 && <div className="menu-separator" role="separator" />}
+            {items}
+          </Fragment>
+        ))
+      }}
     </Menu>
   )
 }
