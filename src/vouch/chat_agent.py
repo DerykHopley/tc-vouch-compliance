@@ -27,7 +27,7 @@ import threading
 from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from functools import cache, cached_property, reduce
+from functools import cache, cached_property, partial, reduce
 from operator import add
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict, cast, get_args
@@ -120,6 +120,7 @@ from vouch.spending import (
     Usage,
     count_assessment,
 )
+from vouch.tracing import tool_span
 
 log = logging.getLogger(__name__)
 
@@ -1050,7 +1051,12 @@ def _kept(reply: BaseMessage, checked: str) -> BaseMessage:
 def _tools(state: ChatState, runtime: Runtime[ChatContext]) -> dict[str, Any]:
     chat = runtime.context
     calls = state["messages"][-1].tool_calls  # type: ignore[union-attr]
-    said = [chat.tools.call(c["name"], c["args"], runtime.stream_writer, chat.stop) for c in calls]
+    call, writer = chat.tools.call, runtime.stream_writer
+    # Each call a tool span in the turn's trace, when it has one (vouch.tracing).
+    said = [
+        tool_span(c["name"], c["args"], partial(call, c["name"], c["args"], writer, chat.stop))
+        for c in calls
+    ]
     chat.tools.note_returned(*said)  # the tools' own words may be quoted back
     replies = [
         ToolMessage(redact(text)[0], tool_call_id=c["id"], name=c["name"])
@@ -1117,17 +1123,23 @@ def chat_config(thread_id: str, scope: str) -> RunnableConfig:
 
 
 def chat_turn(
-    graph: ChatGraph, chat: ChatContext, message: str, thread_id: str, scope: str
+    graph: ChatGraph,
+    chat: ChatContext,
+    message: str,
+    thread_id: str,
+    scope: str,
+    run_config: RunnableConfig | None = None,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """One turn on the lead's chat thread: the tools' events as they happen, then the answer,
     whole and with its quotes checked (_answer), all redacted. When the turn is left (the stream
-    closed), `chat.stop` is set, so no tool waits on an assessment still running."""
+    closed), `chat.stop` is set, so no tool waits on an assessment still running. `run_config`
+    joins the turn's config: its trace (vouch.tracing), every step, model and tool call under it."""
     lead = redact(message)[0]
     chat.tools.note_returned(lead)  # the lead's own words may be quoted back
     try:
         parts = graph.stream(
             {"messages": [HumanMessage(lead)]},
-            chat_config(thread_id, scope),
+            {**(run_config or {}), **chat_config(thread_id, scope)},
             context=chat,
             stream_mode=["custom"],
             version="v2",

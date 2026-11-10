@@ -738,3 +738,66 @@ def test_without_a_discord_server_id_it_says_clerk_alone_decides_who_signs_in(tm
     result, _ = deployed(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "No DISCORD_SERVER_ID" in result.stdout
+
+
+# --- Tracing (#460): the Langfuse keys reach the service only when Secret Manager has both ----
+
+LANGFUSE = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+
+
+def in_secret_manager(tmp_path: Path, secret: str, versions: int = 1) -> None:
+    """A secret the owner made by hand, with `versions` versions (the fake gcloud's state)."""
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    (state / f"{secret}.created").touch()
+    for n in range(1, versions + 1):
+        (state / f"{secret}.v{n}").write_text(f"planted-{secret}-{n}")
+
+
+def test_without_the_langfuse_secrets_the_deploy_goes_on_untraced_and_makes_none(tmp_path):
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not set(LANGFUSE) & set(pinned(calls))
+    writes = ("gcloud secrets create", "gcloud secrets versions add", "gcloud secrets add-iam")
+    assert not [c for c in calls.splitlines() if c.startswith(writes) and "LANGFUSE" in c]
+    assert "Tracing stays off" in result.stdout
+
+
+def test_with_both_langfuse_secrets_the_deploy_pins_their_latest_versions(tmp_path):
+    in_secret_manager(tmp_path, "LANGFUSE_PUBLIC_KEY", versions=2)
+    in_secret_manager(tmp_path, "LANGFUSE_SECRET_KEY")
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pinned(calls)["LANGFUSE_PUBLIC_KEY"] == "LANGFUSE_PUBLIC_KEY:2"
+    assert pinned(calls)["LANGFUSE_SECRET_KEY"] == "LANGFUSE_SECRET_KEY:1"
+    granted = {call[3] for call in calls_to(calls, "gcloud secrets add-iam-policy-binding ")}
+    assert set(LANGFUSE) <= granted
+    assert not calls_to(calls, "gcloud secrets versions add LANGFUSE")  # never written
+    assert "planted-LANGFUSE" not in result.stdout + result.stderr + calls
+    assert "LANGFUSE_BASE_URL" not in env_vars(calls)  # Langfuse Cloud's EU region: the default
+
+
+def test_with_one_langfuse_secret_alone_neither_reaches_the_service(tmp_path):
+    in_secret_manager(tmp_path, "LANGFUSE_SECRET_KEY")
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not set(LANGFUSE) & set(pinned(calls))
+    assert "Tracing stays off" in result.stdout and "LANGFUSE_PUBLIC_KEY" in result.stdout
+
+
+def test_a_langfuse_base_url_in_wizard_env_reaches_a_traced_service(tmp_path):
+    for secret in LANGFUSE:
+        in_secret_manager(tmp_path, secret)
+    us = "https://us.cloud.langfuse.com"
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", REGION="europe-west1", LANGFUSE_BASE_URL=us)
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert env_vars(calls)["LANGFUSE_BASE_URL"] == us
+
+
+def test_a_langfuse_base_url_that_isnt_an_origin_stops_before_anything_changes(tmp_path):
+    saved(tmp_path, PROJECT_ID="vouch-demo-123", LANGFUSE_BASE_URL="us.cloud.langfuse.com/x")
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 1
+    assert "LANGFUSE_BASE_URL" in result.stderr
+    assert "gcloud run deploy" not in calls and "docker build" not in calls

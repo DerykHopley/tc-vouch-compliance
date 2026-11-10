@@ -15,7 +15,7 @@ WHAT=(
   "the project id, asked once; the Cloud Run, Artifact Registry, Secret Manager and Cloud SQL Admin APIs on"
   "the image registry \"vouch\" in the region, and docker allowed to push to it"
   "the image from the Dockerfile, tagged one past the registry's highest vN (v1 when it has none)"
-  "a secret each for the four secret settings, a new version only when the keyring's value changed"
+  "a secret each for the four secret settings, a new version only when the keyring's value changed; the two Langfuse keys too when you made both there (tracing, #460)"
   "the service's account may read those secrets (Secret Accessor) and reach Cloud SQL (Cloud SQL Client)"
   "with --db-ready, go on; without, print how to run vouch-db-setup and stop"
   "Cloud Run service \"vouch\": public, min 0 and max 1 instance, each secret's version pinned, the Cloud SQL instance"
@@ -27,6 +27,10 @@ WHAT=(
 # keyring entry its value comes from.
 SECRETS=(CLERK_SECRET_KEY:clerk-vouch-secret CLERK_JWT_KEY:clerk-vouch-jwt-key
   OPENROUTER_API_KEY:openrouter VOUCH_DATABASE_URL:cloudsql-vouch-run-url)
+# Tracing (#460): the Langfuse keys, as Secret Manager names them. The wizard never makes or writes
+# them: they reach the service only when the owner has put both there (DEPLOY.md, Tracing), so a
+# deploy before then runs untraced.
+TRACING_SECRETS=(LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY)
 # Not a secret (the browser gets it), so a plain env var; it still comes from the keyring.
 PUBLISHABLE_ENTRY=clerk-vouch-publishable
 PUBLISHABLE_FORM='^pk_(test|live)_[A-Za-z0-9+/=_$-]+$'
@@ -230,6 +234,10 @@ REGION=$(saved REGION); REGION="${REGION:-europe-west1}"
 DISCORD_SERVER_ID=$(saved DISCORD_SERVER_ID)
 [[ -z "$DISCORD_SERVER_ID" || "$DISCORD_SERVER_ID" =~ ^[0-9]{17,20}$ ]] \
   || stop "DISCORD_SERVER_ID in $WIZARD_ENV isn't a Discord server id (17 to 20 digits: Discord's Developer Mode, Copy Server ID)."
+# Langfuse's region (#460), set by hand in $WIZARD_ENV: unset, Langfuse Cloud's EU region.
+LANGFUSE_BASE_URL=$(saved LANGFUSE_BASE_URL)
+[[ -z "$LANGFUSE_BASE_URL" || "$LANGFUSE_BASE_URL" =~ ^https://[A-Za-z0-9.-]+$ ]] \
+  || stop "LANGFUSE_BASE_URL in $WIZARD_ENV isn't an https origin (such as https://us.cloud.langfuse.com, no path)."
 if [[ $DRY == no ]]; then save PROJECT_ID "$PROJECT_ID"; save REGION "$REGION"; fi
 ok "project $PROJECT_ID, region $REGION$([[ $DRY == no ]] && echo " (in $WIZARD_ENV)")"
 has gcloud projects describe "$PROJECT_ID" || [[ $DRY == yes ]] \
@@ -335,6 +343,20 @@ for pair in "${SECRETS[@]}"; do
   fi
   PINNED+=("$secret=$secret:$version")
 done
+# Tracing (#460): each Langfuse key's latest version, read only; both found, both are pinned.
+TRACED=() TRACE_PINS=() LACKING=()
+for secret in "${TRACING_SECRETS[@]}"; do
+  version=$(version_number "$(query gcloud secrets versions describe latest --secret="$secret" \
+    --project="$PROJECT_ID" --format='value(name)')")
+  if [[ -n $version ]]; then TRACED+=("$secret"); TRACE_PINS+=("$secret=$secret:$version")
+  else LACKING+=("$secret"); fi
+done
+if [[ ${#LACKING[@]} -eq 0 ]]; then
+  PINNED+=("${TRACE_PINS[@]}"); ok "Tracing on: Langfuse's keys ${TRACE_PINS[*]}"
+else
+  TRACED=()
+  say "${Y}Tracing stays off: Secret Manager has no ${LACKING[*]} (DEPLOY.md, Tracing, puts them there).${N}"
+fi
 
 step  # Access
 PROJECT_NUMBER=$(query gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
@@ -344,9 +366,9 @@ ACCOUNT_NOW=$(service_field spec.template.spec.serviceAccountName)
 # A service with no account of its own runs as Compute Engine's default one (Cloud Run's service identity page).
 RUN_AS="${ACCOUNT_NOW:-$PROJECT_NUMBER-compute@developer.gserviceaccount.com}"
 say "The service runs as $RUN_AS. Granting a role it already has changes nothing."
-for pair in "${SECRETS[@]}"; do
-  run "Let it read ${pair%%:*} (Secret Manager Secret Accessor, on this secret only)" \
-    gcloud secrets add-iam-policy-binding "${pair%%:*}" --member="serviceAccount:$RUN_AS" \
+for secret in "${SECRETS[@]%%:*}" "${TRACED[@]}"; do
+  run "Let it read $secret (Secret Manager Secret Accessor, on this secret only)" \
+    gcloud secrets add-iam-policy-binding "$secret" --member="serviceAccount:$RUN_AS" \
     --role=roles/secretmanager.secretAccessor --project="$PROJECT_ID" --quiet
 done
 run "Let it connect to Cloud SQL (Cloud SQL Client, on the project)" \
@@ -387,6 +409,7 @@ else
   say "${Y}No DISCORD_SERVER_ID in $WIZARD_ENV: Clerk's own restrictions alone decide who signs in."
   say "With Clerk's sign-up open (#153), that is anyone with a Discord account.${N}"
 fi
+if [[ ${#TRACED[@]} -gt 0 && -n "$LANGFUSE_BASE_URL" ]]; then ENV_VARS+=",LANGFUSE_BASE_URL=$LANGFUSE_BASE_URL"; fi
 say "Public, asleep when unused (min 0), never more than one instance (max 1), on OpenRouter, signed in"
 say "through Clerk. Each secret's version is pinned; sign-in accepts $SHARE_URL alone."
 # A request may take 660 s (#432): a profile pass's model call takes up to 600 s

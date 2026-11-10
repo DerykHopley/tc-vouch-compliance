@@ -72,6 +72,7 @@ from vouch.dossier import (
     requirements_by_control,
 )
 from vouch.graph import (
+    PROMPT_VERSION,
     Assessment,
     ConfirmFindings,
     InvalidReviewError,
@@ -119,6 +120,7 @@ from vouch.profile import (
 from vouch.profile_pass import (
     FALLBACK,
     PROFILE_PASS_FAILED,
+    PROFILE_PASS_PROMPT_VERSION,
     ProfilePassRefused,
     run_profile_pass,
 )
@@ -161,6 +163,7 @@ from vouch.spending import (
     count_assessment,
     spending_store,
 )
+from vouch.tracing import TraceFacts, run_traced
 
 log = logging.getLogger(__name__)
 
@@ -776,18 +779,36 @@ def create_assessment(
     The `result` carries the assessment's `usage`, its tokens and cost (vouch.spending), metered
     on every model call (the judge's and the remediation drafts' included), which is kept
     whether the assessment ends in its result or an `error`: the calls were made. Every event
-    is redacted (security layer 4).
+    is redacted (security layer 4). With the Langfuse keys set, the run is one trace
+    (vouch.tracing, #460).
     """
     control = requested.control
+    facts = TraceFacts(
+        "assessment",
+        user.id,
+        profile.id,
+        run.chosen,
+        PROMPT_VERSION,
+        control_id=control.id,
+        thread_id=thread_id,
+    )
     try:
-        events = assessment_events(
-            control, profile, run, memory, thread_id=thread_id, note=requested.note
-        )
-        for event, data in events:
-            if isinstance(data, Assessment):
-                data = {"assessment": assessment_data(data), "usage": run.meter.usage().to_dict()}
-            for name, clean in redacted_event(event, data):
-                yield ServerSentEvent(event=name, data=clean)
+        with run.models.traced(facts) as run_config:
+            events = assessment_events(
+                control,
+                profile,
+                run,
+                memory,
+                thread_id=thread_id,
+                note=requested.note,
+                run_config=run_config,
+            )
+            for event, data in events:
+                if isinstance(data, Assessment):
+                    usage = run.meter.usage().to_dict()
+                    data = {"assessment": assessment_data(data), "usage": usage}
+                for name, clean in redacted_event(event, data):
+                    yield ServerSentEvent(event=name, data=clean)
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": ASSESSMENT_FAILED})
@@ -823,7 +844,7 @@ def create_profile_pass(
     count in, or a counter that can't be read). A model run that fails, or a reply claiming an
     audit result twice, is a 502 with one sentence and nothing kept; the pass stays counted, as its
     calls were made. A counted pass's usage is recorded once, under PROFILE_PASS, however it
-    ends."""
+    ends. With the Langfuse keys set, the pass is one trace (vouch.tracing, #460)."""
     if not running.try_hold(memory.scope):
         raise HTTPException(status_code=409, detail=RUNNING_ALREADY)
     meter = UsageMeter(chosen)
@@ -838,17 +859,23 @@ def create_profile_pass(
             raise HTTPException(status_code=503, detail=str(error)) from None
         counted = True
 
+    facts = TraceFacts("profile pass", user.id, profile.id, chosen, PROFILE_PASS_PROMPT_VERSION)
     try:
         model = models.for_profile_pass(chosen, callbacks=[meter], profile=profile)
-        result = run_profile_pass(
-            profile,
-            memory,
-            saver,
-            model,
-            max_tokens=settings.profile_pass_tokens,
-            count=count,
-            statements=statements,
-        )
+        with models.traced(facts) as run_config:
+            result = run_traced(
+                run_config,
+                "profile pass",
+                lambda: run_profile_pass(
+                    profile,
+                    memory,
+                    saver,
+                    model,
+                    max_tokens=settings.profile_pass_tokens,
+                    count=count,
+                    statements=statements,
+                ),
+            )
     except ProfilePassRefused as refusal:
         return JSONResponse(status_code=422, content={"detail": str(refusal), "fallback": FALLBACK})
     except Exception:
@@ -1809,7 +1836,8 @@ def chat(
     (vouch.model_choice): OpenRouter when a key is set, else the chat's canned fake. Its tokens
     and cost are metered and kept with the assessments' (vouch.spending), whether the reply
     ends in `done` or an `error`: the calls were made. An assessment it starts is counted and
-    metered as one from the working paper is."""
+    metered as one from the working paper is. With the Langfuse keys set, the turn is one trace,
+    an assessment it starts inside it (vouch.tracing, #460)."""
     meter = UsageMeter(chosen)
     thread_id = request.thread_id or new_thread_id()
     turn = ShownTurn(request.message)
@@ -1833,9 +1861,20 @@ def chat(
             chat_prompt(profile, context),
         )
         message = request.message or GREETING_REQUEST
-        for event, data in chat_turn(chat_graph(run.saver), chat, message, thread_id, memory.scope):
-            turn.note(event, data)
-            yield ServerSentEvent(event=event, data=data)
+        facts = TraceFacts(
+            "chat turn",
+            user.id,
+            profile.id,
+            chosen,
+            CHAT_PROMPT_VERSION,
+            control_id=request.control_id,
+            session_id=thread_id,
+        )
+        with models.traced(facts) as run_config:
+            graph = chat_graph(run.saver)
+            for event, data in chat_turn(graph, chat, message, thread_id, memory.scope, run_config):
+                turn.note(event, data)
+                yield ServerSentEvent(event=event, data=data)
         yield ServerSentEvent(event="done", data={})
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("the chat could not answer")

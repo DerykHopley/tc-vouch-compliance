@@ -17,12 +17,13 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple, TypedDict, get_args
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.runnables import Runnable, RunnableLambda
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -90,6 +91,7 @@ from vouch.search import (
     Passage,
     search_folder,
 )
+from vouch.tracing import tool_span
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
@@ -1146,7 +1148,7 @@ def build_graph(
             else:
                 # The state's choice, not the live profile's: the quote check reads the same one.
                 documents = choice_in(state.get("document_choices"), tool.source)
-                result = tool.run(args, folder, documents)
+                result = tool_span(name, args, partial(tool.run, args, folder, documents))
                 if isinstance(result, list):
                     result = with_facts(result, tool.source, folder, today)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)
@@ -1859,6 +1861,7 @@ def assess_steps(
     thread_id: str | None = None,
     scope: str = "",
     statements: Iterable[LeadStatement] = (),
+    run_config: RunnableConfig | None = None,
 ) -> Iterator[Step | RequirementVerdict | Assessment]:
     """Run the graph for one loaded control, on a new thread, up to the review interrupt: a
     Step saying the control was loaded, a Step per node as it finishes (and a guard Step per
@@ -1870,7 +1873,8 @@ def assess_steps(
     again; `today` (default: the date now) is what due dates count from and what staleness is
     judged on. `thread_id` (default: a new one) must name a new thread; `scope` says whose
     thread it is (see `thread_config`). `statements` are the lead's on this control (#422): the
-    judge may cite them, each showing a requirement partly at most.
+    judge may cite them, each showing a requirement partly at most. `run_config` joins the run's
+    config: a trace's handler and attributes (vouch.tracing), every step and model call under it.
 
     The control is assessed as given: a caller picks its ISA edition, normally the profile's
     (`ComplianceProfile.isa_control`)."""
@@ -1903,7 +1907,7 @@ def assess_steps(
     yield loaded
     for node, update in (
         (node, update)
-        for chunk in graph.stream(initial, config, stream_mode="updates")
+        for chunk in graph.stream(initial, {**(run_config or {}), **config}, stream_mode="updates")
         for node, update in chunk.items()
     ):
         if node == "__interrupt__":
@@ -1925,15 +1929,23 @@ def assess(
     *,
     note: str = "",
     today: date | None = None,
+    run_config: RunnableConfig | None = None,
 ) -> Assessment:
     """Run the graph for one control under a compliance profile, on a new thread, up to the
     review interrupt and return the proposed Assessment; `resume` its `thread_id` with the
-    lead's decision. Assessing a rejected control again is a new run, with the lead's `note`.
+    lead's decision. Assessing a rejected control again is a new run, with the lead's `note`;
+    `run_config` joins the run's config (a trace's, vouch.tracing).
 
     The control is read in the ISA edition of the profile's answer language. An unknown
     control raises UnknownControlError before the model is called."""
     *_, assessment = assess_steps(
-        profile.isa_control(control_id), profile, model, checkpointer, note=note, today=today
+        profile.isa_control(control_id),
+        profile,
+        model,
+        checkpointer,
+        note=note,
+        today=today,
+        run_config=run_config,
     )
     if not isinstance(assessment, Assessment):
         raise TypeError(f"the graph ended without an Assessment for {control_id}")

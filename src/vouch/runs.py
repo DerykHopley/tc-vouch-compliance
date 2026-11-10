@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from vouch.allow_list import GUARD, ToolAllowList
@@ -71,13 +72,15 @@ def assessment_events(
     *,
     thread_id: str,
     note: str = "",
+    run_config: RunnableConfig | None = None,
 ) -> Generator[tuple[str, Any]]:
     """The run up to the review interrupt, as (event, data): a `step` per agent step (and per
     refused tool call), a `requirement` per judged requirement, then one `result`, the proposed
     Assessment itself. The run's meter sees every model call. Without a `note`, the lead's note
     from the control's last rejection is carried in (#42), wherever the run was started. A run
     that ends before its result (a failure, a refusal, or left part way) is taken out of the
-    index (#137)."""
+    index (#137). `run_config` is the graph run's trace (vouch.tracing), when the caller starts
+    one: a run the chat starts is already in the chat turn's."""
     reviewed = False
     try:  # setup too: the note, the model and the graph can each fail (#137)
         note = note or rejection_note(memory, run.saver, control.id)
@@ -98,6 +101,7 @@ def assessment_events(
             thread_id=thread_id,
             scope=run.scope,
             statements=[s for s in run.statements if s.control_id == control.id],
+            run_config=run_config,
         )
         for item in steps:
             if isinstance(item, Assessment):
