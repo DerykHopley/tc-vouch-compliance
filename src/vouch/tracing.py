@@ -27,7 +27,7 @@ import json
 import logging
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
@@ -41,12 +41,13 @@ from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import Status
 
-from vouch.settings import LangfuseKeys, missing_langfuse_keys
+from vouch.settings import LangfuseKeys
 
 if TYPE_CHECKING:
     import requests
     from opentelemetry.sdk.trace import TracerProvider
 
+    from vouch.settings import Settings
     from vouch.spending import Usage
 
 log = logging.getLogger(__name__)
@@ -284,37 +285,20 @@ def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
     return Tracing(keys) if keys is not None else None
 
 
-def announce_tracing(keys: LangfuseKeys | None, env: Mapping[str, str]) -> None:
+def announce_tracing(settings: "Settings") -> None:
     """The served app's one startup line (#536): `tracing on (<host>)`, or `tracing off: <why>`,
-    the keys `env` leaves unset named (never a key's value)."""
-    if keys is not None:
-        log.info("tracing on (%s)", urlsplit(keys.base_url).netloc)
+    naming the keys left unset (never a key's value). A WARNING when one key is set without the
+    other, a deploy that lost one; INFO otherwise."""
+    if settings.langfuse is not None:
+        log.info("tracing on (%s)", urlsplit(settings.langfuse.base_url).netloc)
         return
-    missing = missing_langfuse_keys(env)
-    log.info(
-        "tracing off: %s %s not set", " and ".join(missing), "is" if len(missing) == 1 else "are"
+    unset = settings.langfuse_keys_unset
+    log.log(
+        logging.WARNING if len(unset) == 1 else logging.INFO,
+        "tracing off: %s %s not set",
+        " and ".join(unset) or "no Langfuse key",
+        "is" if len(unset) <= 1 else "are",
     )
-
-
-def show_tracing_log() -> None:
-    """Make vouch.tracing's INFO lines (the startup line, each send's answer) reach the served
-    app's log (#536). Under uvicorn the root logger has no handler, and Python's last resort
-    writes WARNING and up only; there this logger gets a stderr handler of its own, its lines
-    redacted (security layer 4) as every other handler's are."""
-    from vouch.redaction import RedactingFormatter
-
-    log.setLevel(logging.INFO)
-    if logging.getLogger().handlers or any(isinstance(h, _TracingLogHandler) for h in log.handlers):
-        return
-    handler = _TracingLogHandler()
-    handler.setFormatter(
-        RedactingFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    )
-    log.addHandler(handler)
-
-
-class _TracingLogHandler(logging.StreamHandler):  # type: ignore[type-arg]
-    """show_tracing_log's handler: stderr, as Python's last resort writes."""
 
 
 @contextmanager
@@ -477,16 +461,20 @@ LANGFUSE_EXPORT_TIMEOUT_SECONDS = 5.0
 """As the Langfuse SDK's own exporter: one export's limit."""
 
 
+LANGFUSE_MAX_REQUEST_BYTES = 64 * 1024 * 1024
+"""The largest batch sent, serialized, before compression: the OTLP exporter's own default
+(64 MiB), set here so a batch dropped for its size is named with both sizes."""
+
+
 def langfuse_exporter(keys: LangfuseKeys) -> SpanExporter:
     """The exporter that sends to the keys' Langfuse project over OTLP/HTTP, as the Langfuse SDK
     builds its own: basic auth with the key pair, and the ingestion version that shows a trace
     at once (without it, up to ten minutes later). What Langfuse answers each send is logged
     (ReportingSpanExporter, #536)."""
-    import requests
     from opentelemetry.exporter.otlp.proto.http import Compression
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-    session = requests.Session()
+    attempts = _Attempts()
     pair = f"{keys.public_key}:{keys.secret_key.get_secret_value()}"
     sending = OTLPSpanExporter(
         endpoint=keys.base_url + LANGFUSE_TRACES_PATH,
@@ -497,75 +485,123 @@ def langfuse_exporter(keys: LangfuseKeys) -> SpanExporter:
         },
         timeout=LANGFUSE_EXPORT_TIMEOUT_SECONDS,
         compression=Compression.Gzip,
-        session=session,
+        session=_recording_session(attempts),
+        max_request_size=LANGFUSE_MAX_REQUEST_BYTES,
     )
-    return ReportingSpanExporter(sending, session)
+    return ReportingSpanExporter(sending, attempts, max_request_bytes=LANGFUSE_MAX_REQUEST_BYTES)
+
+
+class _Attempts(threading.local):
+    """The HTTP attempts of the send under way in this thread: each a response, or the
+    exception raised instead of one. None outside a send."""
+
+    taken: list[Any] | None = None
+
+    def add(self, outcome: Any) -> None:
+        if self.taken is not None:
+            self.taken.append(outcome)
+
+
+def _recording_session(attempts: _Attempts) -> "requests.Session":
+    """A requests.Session (the OTLP exporter's public `session` argument) that keeps each
+    attempt's outcome in `attempts`: the exporter itself reads only a status, and drops a
+    connection error's exception after logging it."""
+    import requests
+
+    class RecordingSession(requests.Session):
+        def send(self, request: Any, **kwargs: Any) -> Any:
+            try:
+                response = super().send(request, **kwargs)
+            except Exception as error:
+                attempts.add(error)
+                raise
+            attempts.add(response)
+            return response
+
+    return RecordingSession()
 
 
 class ReportingSpanExporter(SpanExporter):
-    """The OTLP exporter that sends to Langfuse (`sending`), each send's outcome logged (#536).
+    """The OTLP exporter that sends to Langfuse (`inner`), each send's outcome logged (#536).
 
     OTLPSpanExporter reads only an answer's status, and takes any 2xx or 3xx as success: a 200
     whose `partial_success` names rejected spans (the OTLP/HTTP spec's partial success) passes
-    unseen. Its requests.Session is the seam: a response hook (requests' public event hooks)
-    keeps each answer the session gets during `export`, in the exporting thread, and `export`
-    reads the last. One line per send: INFO on full success, with the span count and the batch's
-    size; WARNING on a non-2xx, no answer, or rejected spans, with Langfuse's message."""
+    unseen. Its session records each attempt (_recording_session); one line per send says the
+    last: INFO on full success, with the span count and the batch's size; WARNING on a non-2xx,
+    rejected spans, or no answer (with why: the connection's error, the batch's size over the
+    limit, a batch that couldn't be encoded, or an exporter shut down)."""
 
-    def __init__(self, sending: SpanExporter, session: "requests.Session") -> None:
-        self.sending = sending
-        self._answers = threading.local()
-        session.hooks["response"].append(self._heard)
-
-    def _heard(self, response: Any, *args: Any, **kwargs: Any) -> None:
-        answers = getattr(self._answers, "list", None)
-        if answers is not None:
-            answers.append(response)
+    def __init__(self, inner: SpanExporter, attempts: _Attempts, *, max_request_bytes: int):
+        self._inner = inner
+        self._attempts = attempts
+        self._max_request_bytes = max_request_bytes
+        self._shut = False
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        self._answers.list = []
+        self._attempts.taken = []
         try:
-            result = self.sending.export(spans)
+            result = self._inner.export(spans)
         finally:
-            answers, self._answers.list = self._answers.list, None
+            taken, self._attempts.taken = self._attempts.taken, None
         try:
-            _report_send(len(spans), answers, result)
+            if taken:
+                _report_send(len(spans), taken)
+            else:
+                log.warning("%s: %s", _unsent(len(spans)), self._why_not_sent(spans))
         except Exception:
             log.exception("what Langfuse answered a send couldn't be read")
         return result
 
+    def _why_not_sent(self, spans: Sequence[ReadableSpan]) -> str:
+        """Why the exporter made no request (its own checks, before any)."""
+        from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+
+        if self._shut:
+            return "the exporter was shut down"
+        try:
+            size = encode_spans(spans).ByteSize()
+        except Exception as error:  # noqa: BLE001 - as the exporter's own encoding step catches
+            return f"the batch couldn't be encoded ({_error_text(error)})"
+        if 0 < self._max_request_bytes < size:
+            return f"the batch is {size} bytes, over the {self._max_request_bytes}-byte limit"
+        return "no request was made"
+
     def shutdown(self) -> None:
-        self.sending.shutdown()
+        self._shut = True
+        self._inner.shutdown()
 
     def force_flush(self, timeout_millis: int = 30_000) -> bool:
-        return self.sending.force_flush(timeout_millis)
+        return self._inner.force_flush(timeout_millis)
 
 
-def _report_send(count: int, answers: list[Any], result: SpanExportResult) -> None:
-    """Log one send's outcome: its last answer (the exporter retries 429 and 5xx), if any."""
-    spans = f"{count} span{'s' if count != 1 else ''}"
-    if not answers:
-        log.warning("%s weren't sent to Langfuse: no answer (%s)", spans, result.name)
+def _spans(count: int) -> str:
+    return f"{count} span{'s' if count != 1 else ''}"
+
+
+def _unsent(count: int) -> str:
+    return f"{_spans(count)} {'were' if count != 1 else 'was'}n't sent to Langfuse"
+
+
+def _report_send(count: int, attempts: list[Any]) -> None:
+    """Log one send's outcome: its last attempt (the exporter retries a connection error, 429
+    and 5xx), counting every try, those with no answer too."""
+    last = attempts[-1]
+    tries = f", after {len(attempts)} tries" if len(attempts) > 1 else ""
+    if isinstance(last, BaseException):
+        log.warning("%s: no answer (%s)%s", _unsent(count), _error_text(last), tries)
         return
-    answer = answers[-1]
-    tries = f", after {len(answers)} tries" if len(answers) > 1 else ""
-    size = _batch_size(answer.request.body)
-    if not 200 <= answer.status_code < 300:
-        log.warning(
-            "Langfuse refused %s, %s: %s %s%s",
-            spans,
-            size,
-            answer.status_code,
-            _answer_text(answer.content),
-            tries,
-        )
+    spans, size, status = _spans(count), _batch_size(last.request.body), last.status_code
+    kind = _otlp_kind(last.headers.get("Content-Type", ""))
+    if not 200 <= status < 300:
+        said = _loggable(_refusal_message(last.content, kind))
+        log.warning("Langfuse refused %s, %s: %s %s%s", spans, size, status, said, tries)
         return
-    rejected, message = _partial_success(answer.content, answer.headers.get("Content-Type", ""))
-    said = f": {message}" if message else ""
+    rejected, message = _partial_success(last.content, kind) if kind else (0, "")
+    said = f": {_loggable(message)}" if message else ""
     if rejected:
         log.warning("Langfuse rejected %d of %s, %s%s%s", rejected, spans, size, said, tries)
     else:
-        log.info("sent %s to Langfuse, %s: %s%s%s", spans, size, answer.status_code, said, tries)
+        log.info("sent %s to Langfuse, %s: %s%s%s", spans, size, status, said, tries)
 
 
 def _batch_size(body: bytes | None) -> str:
@@ -577,21 +613,27 @@ def _batch_size(body: bytes | None) -> str:
     return f"{len(body)} bytes"
 
 
-def _partial_success(body: bytes, content_type: str) -> tuple[int, str]:
-    """A 2xx answer's `partial_success` (an ExportTraceServiceResponse, JSON or protobuf as its
-    content type says): the spans it rejected and its message; (0, "") for an empty body."""
+def _otlp_kind(content_type: str) -> Literal["json", "protobuf"] | None:
+    """How an answer's body is encoded, by its content type: OTLP's JSON or protobuf, or
+    neither (None: a body that is no OTLP message, never parsed as one)."""
+    media = content_type.split(";")[0].strip().lower()
+    if media == "application/json" or media.endswith("+json"):
+        return "json"
+    if media in ("application/x-protobuf", "application/protobuf"):
+        return "protobuf"
+    return None
+
+
+def _partial_success(body: bytes, kind: Literal["json", "protobuf"]) -> tuple[int, str]:
+    """A 2xx answer's `partial_success` (an ExportTraceServiceResponse): the spans it rejected,
+    and its message; (0, "") for an empty body. JSON's int64 may come as a string."""
     if not body.strip():
         return 0, ""
-    if "json" in content_type.lower() or body.lstrip().startswith(b"{"):
+    if kind == "json":
         decoded = json.loads(body)
-        partial = (
-            (decoded.get("partialSuccess") or decoded.get("partial_success") or {})
-            if isinstance(decoded, dict)
-            else {}
-        )
-        rejected = partial.get("rejectedSpans", partial.get("rejected_spans", 0))
-        message = partial.get("errorMessage", partial.get("error_message", ""))
-        return int(rejected or 0), str(message or "")
+        partial = decoded.get("partialSuccess", {}) if isinstance(decoded, dict) else {}
+        partial = partial if isinstance(partial, dict) else {}
+        return int(partial.get("rejectedSpans") or 0), str(partial.get("errorMessage") or "")
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
         ExportTraceServiceResponse,
     )
@@ -600,19 +642,35 @@ def _partial_success(body: bytes, content_type: str) -> tuple[int, str]:
     return answer.rejected_spans, answer.error_message
 
 
+def _refusal_message(body: bytes, kind: Literal["json", "protobuf"] | None) -> str:
+    """A refusal's message: a google.rpc.Status's (OTLP's 4xx and 5xx body, protobuf or JSON),
+    else the body as text."""
+    from google.protobuf.message import DecodeError
+    from google.rpc.status_pb2 import Status
+
+    # A body that isn't what its content type says is shown as text.
+    with suppress(ValueError, DecodeError):
+        if kind == "protobuf":
+            return Status.FromString(body).message
+        if kind == "json":
+            decoded = json.loads(body)
+            if isinstance(decoded, dict) and isinstance(decoded.get("message"), str):
+                return decoded["message"]
+    return body.decode("utf-8", errors="replace")
+
+
 ANSWER_TEXT_LIMIT = 300
-"""The most of a refusal's body a log line carries."""
+"""The most of Langfuse's message, or an error's, a log line carries."""
 
 
-def _answer_text(body: bytes) -> str:
-    """A refusal's body as a log line carries it: its JSON `message` if it has one, else its text
-    (a protobuf google.rpc.Status reads as text with its message in it), cut short."""
-    try:
-        decoded = json.loads(body)
-    except ValueError:
-        decoded = None
-    if isinstance(decoded, dict) and isinstance(decoded.get("message"), str):
-        text = decoded["message"]
-    else:
-        text = body.decode("utf-8", errors="replace")
-    return text[:ANSWER_TEXT_LIMIT]
+def _error_text(error: BaseException) -> str:
+    return _loggable(f"{type(error).__name__}: {error}")
+
+
+def _loggable(text: str) -> str:
+    """Text from outside as a log line carries it: redacted (security layer 4), on one line
+    (a control character escaped, never written raw), cut short."""
+    from vouch.redaction import redact
+
+    shown = "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
+    return redact(shown)[0][:ANSWER_TEXT_LIMIT]

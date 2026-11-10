@@ -195,8 +195,44 @@ class RedactingFormatter(logging.Formatter):
         return redact(self.inner.format(record))[0]
 
 
-LOGGERS_WITH_HANDLERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access")
-"""The root logger and uvicorn's: where the served app's log lines are written."""
+APP_LOGGER = "vouch"
+"""The package's logger: every vouch module's logger is below it."""
+LOGGERS_WITH_HANDLERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access", APP_LOGGER)
+"""The root logger, uvicorn's and vouch's own: where the served app's log lines are written."""
+
+
+class AppLogHandler(logging.StreamHandler):  # type: ignore[type-arg]
+    """configure_logging's handler on the vouch logger: stderr (looked up as each line is
+    written, as Python's last resort does), and only while the root logger has no handler of
+    its own; once it has one, a line reaches that by propagation alone, never twice."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+
+    @property  # type: ignore[override]
+    def stream(self) -> Any:
+        import sys
+
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _: Any) -> None:
+        pass
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not logging.getLogger().handlers and bool(super().filter(record))
+
+
+def configure_logging() -> None:
+    """The served app's logging, set once as it starts (#536): vouch's lines at INFO and up are
+    written (uvicorn configures only its own loggers, and Python's last resort writes WARNING
+    and up only), and every handler's lines are redacted (install_log_redaction)."""
+    app = logging.getLogger(APP_LOGGER)
+    app.setLevel(logging.INFO)
+    if not any(isinstance(handler, AppLogHandler) for handler in app.handlers):
+        app.addHandler(AppLogHandler())
+    install_log_redaction()
 
 
 def install_log_redaction() -> None:
