@@ -53,13 +53,13 @@ const ALL_VERDICTS = {
   '5.2.9': { status: 'accepted', verdict: 'not-applicable' },
 } as const
 
-/** The verdict chip on a control's card. */
 /** Presses `name` and then `name` again in the in-app ask it opens (#441). */
 async function confirmed(name: string) {
   await userEvent.click(screen.getByRole('button', { name }))
   await userEvent.click(screen.getByRole('button', { name }))
 }
 
+/** The verdict chip on a control's card. */
 const cardChip = (id: string) =>
   within(screen.getByRole('article', { name: `Control ${id}` })).getByText(/./, { selector: '.chip' })
 
@@ -548,15 +548,15 @@ describe('the goal on the Dossier (ticket 369)', () => {
       await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     })
 
-  it('is busy and disabled while the change runs', async () => {
+  it('is busy and held (aria-disabled, keeping focus, ticket 441) while the change runs', async () => {
     let answer: (r: Response) => void = () => {}
     serve(() => new Promise<Response>((resolve) => { answer = resolve }))
     shown()
     await confirmed('Change goal')
-    expect(changeButton().disabled).toBe(true)
+    expect(changeButton().getAttribute('aria-disabled')).toBe('true')
     expect(changeButton().getAttribute('aria-busy')).toBe('true')
     answer(new Response(JSON.stringify({ goal: 'internal-improvement' })))
-    await waitFor(() => expect(changeButton().disabled).toBe(false))
+    await waitFor(() => expect(changeButton().getAttribute('aria-disabled')).toBeNull())
     expect(changeButton().getAttribute('aria-busy')).toBeNull()
   })
 
@@ -637,11 +637,11 @@ describe('the review round on the Dossier (ticket 402)', () => {
     const { onRoundChanged } = shown()
     await confirmed('Close round')
     expect(fetch.mock.calls[0][0]).toBe('/api/rounds/close')
-    expect(closeButton().disabled).toBe(true)
+    expect(closeButton().getAttribute('aria-disabled')).toBe('true')
     expect(closeButton().getAttribute('aria-busy')).toBe('true')
     answer(new Response(JSON.stringify({ closed: { name: 'First round', closed_at: '2026-11-09T10:30:00Z' } })))
     await waitFor(() => expect(onRoundChanged).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(closeButton().disabled).toBe(false))
+    await waitFor(() => expect(closeButton().getAttribute('aria-disabled')).toBeNull())
     expect(screen.queryByRole('alert')).toBeNull()
   })
 

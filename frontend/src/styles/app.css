@@ -71,7 +71,8 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .v-not-applicable { color: var(--not-applicable); background: var(--not-applicable-bg); }
 .v-assessing { color: var(--navy); background: color-mix(in srgb, var(--navy) 12%, var(--sheet)); }
 .btn-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
-.btn:disabled { opacity: .6; }
+/* aria-disabled: a busy control that keeps focus (#441's Change goal and Close round) looks held as a disabled one. */
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .6; }
 .btn[aria-busy="true"] { cursor: progress; }
 .pill { display: inline-block; background: var(--sheet); border: 1px solid var(--rule); color: var(--muted); border-radius: 999px; padding: 2px 12px; font-size: 12px; font-weight: 600; }
 
@@ -87,10 +88,6 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
    open, the next round's name field between the words and Start round. */
 .hero .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
 .hero .round .field { flex: 0 1 240px; }
-/* The in-app ask on Change goal and Close round (#441, design.md Components: Goal): in the button's place, on a row of
-   its own under the line's words, the question over its two buttons. Placed anywhere the controls are (#505). */
-.inline-confirm { flex: 1 1 100%; display: grid; gap: 8px; }
-.hero .inline-confirm .field-note { margin-top: 0; }
 /* The round comparison (#402, design.md Components: Round comparison): counts now and their change, then the changed
    controls, each a link to its working paper at least 44px tall. */
 .compare-counts, .compare-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
@@ -98,6 +95,12 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .compare-rows a { display: inline-flex; align-items: center; min-height: 44px; }/* The profile pass (#390, design.md Components: Profile pass): its note under the hero's buttons, then its result as a
    sheet, one row per new assessment: the id, verdict chip and review state tag, then Open and Assess again. */
 .hero .field-note { margin-top: 8px; }
+/* The in-app ask (#441, design.md Components: Goal): in the button's place, on a row of its own under the line's
+   words, the question over its two buttons; wherever the controls are placed (the hero, the Company page, #505), so
+   after the hero's note margin. In the working paper's assess row (#437) its parts stay the row's own items. */
+.inline-confirm { flex: 1 1 100%; display: grid; gap: 8px; }
+.inline-confirm .field-note { margin-top: 0; }
+.assess > .inline-confirm { display: contents; }
 .pass h2 { font-size: 20px; }
 .pass p { margin: 0; max-width: 72ch; }
 .pass-rows { list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; }

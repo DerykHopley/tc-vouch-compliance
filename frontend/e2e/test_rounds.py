@@ -15,7 +15,8 @@ import json
 import re
 
 import pytest
-from playwright.sync_api import APIRequestContext, Dialog, Page, expect
+from browser_dialogs import dialogs_of, no_dialog
+from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
 from touch_targets import small_targets
 
@@ -30,37 +31,28 @@ def open_dossier(page: Page, url: str) -> None:
         page.goto(url)
 
 
-def dialogs_of(page: Page) -> list[str]:
-    """Every browser dialog that opens, dismissed and recorded: the test fails on any (#441)."""
-    opened: list[str] = []
-
-    def dismiss(dialog: Dialog) -> None:
-        opened.append(dialog.message)
-        dialog.dismiss()
-
-    page.on("dialog", dismiss)
-    return opened
-
-
-def ask(page: Page) -> str:
-    """Close round on the hero: the in-app ask opens, focus on Cancel; its question."""
+def ask(page: Page, dialogs: list[str]) -> str:
+    """Close round on the hero: no browser dialog; the in-app ask opens, focus on Cancel; its
+    question."""
     page.locator(".hero .round").get_by_role("button", name="Close round").click()
+    no_dialog(dialogs)
     question = page.locator(".hero .inline-confirm [role=alert]")
     expect(question).to_be_visible()
     expect(page.get_by_role("button", name="Cancel")).to_be_focused()
     return question.inner_text()
 
 
-def close_round(page: Page) -> str:
+def close_round(page: Page, dialogs: list[str]) -> str:
     """Close round, then Close round in the ask, waiting for the overview read after it: what
-    was asked."""
-    asked = ask(page)
+    was asked. Focus then moves to the next round's name field."""
+    asked = ask(page, dialogs)
     with (
         page.expect_response("**/api/rounds/close") as closed,
         page.expect_response("**/api/overview"),
     ):
         page.locator(".hero .inline-confirm").get_by_role("button", name="Close round").click()
     assert closed.value.ok, closed.value.status
+    expect(page.get_by_role("textbox", name="Name of the next round")).to_be_focused()
     return asked
 
 
@@ -108,13 +100,13 @@ def test_the_lead_closes_the_first_round_starts_the_next_and_sees_what_changed(
     # Escape closes the ask, sends nothing, and puts focus back on Close round.
     sent: list[str] = []
     page.on("request", lambda r: sent.append(r.url) if "/api/rounds" in r.url else None)
-    assert ask(page) == CLOSE_FIRST
+    assert ask(page, dialogs) == CLOSE_FIRST
     page.keyboard.press("Escape")
     expect(page.locator(".inline-confirm")).to_have_count(0)
     expect(line.get_by_role("button", name="Close round")).to_be_focused()
     assert sent == []
 
-    assert close_round(page) == CLOSE_FIRST
+    assert close_round(page, dialogs) == CLOSE_FIRST
     expect(line).to_contain_text("No review round open.")
     compared = page.get_by_role("region", name="Compared with First round")
     expect(compared).to_contain_text("Nothing has changed since First round closed.")
@@ -137,7 +129,7 @@ def test_the_lead_closes_the_first_round_starts_the_next_and_sees_what_changed(
     trail = page.get_by_role("table", name="Audit trail")
     expect(trail.get_by_text("Review round started: Q4 2026")).to_be_visible()
     expect(trail.get_by_text("Review round closed: First round")).to_be_visible()
-    assert dialogs == []
+    no_dialog(dialogs)
 
 
 def fits(page: Page, where: str) -> None:
@@ -152,6 +144,7 @@ def fits(page: Page, where: str) -> None:
 def test_the_round_line_and_the_comparison_fit_in_both_states(
     page: Page, rounds_url, width, scheme
 ):
+    dialogs = dialogs_of(page)
     page.set_viewport_size({"width": width, "height": 900})
     page.emulate_media(color_scheme=scheme)
     open_dossier(page, rounds_url)
@@ -160,10 +153,10 @@ def test_the_round_line_and_the_comparison_fit_in_both_states(
     fits(page, f"{width}px {scheme}, as it was")
     name = f"Check {width} {scheme}"
     if page.get_by_role("button", name="Close round").count():
-        ask(page)
+        ask(page, dialogs)
         fits(page, f"{width}px {scheme}, the ask open")
         page.get_by_role("button", name="Cancel").click()
-        close_round(page)
+        close_round(page, dialogs)
         expect(line).to_contain_text("No review round open.")
         fits(page, f"{width}px {scheme}, none open")
         start_round(page, name)

@@ -97,6 +97,32 @@ describe('Change goal asks in the app (ticket 441)', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('keeps focus on Change goal while the change runs, busy, and after it', async () => {
+    let answer: (r: Response) => void = () => {}
+    serve('/api/goal', 'PUT', () => new Promise<Response>((resolve) => { answer = resolve }))
+    shown()
+    await userEvent.click(button('Change goal'))
+    await userEvent.click(button('Change goal'))
+    const trigger = button('Change goal')
+    expect(trigger.className).toBe('btn btn-ghost')
+    expect(trigger.getAttribute('aria-disabled')).toBe('true')
+    expect(trigger.getAttribute('aria-busy')).toBe('true')
+    expect(document.activeElement).toBe(trigger)
+    answer(new Response(JSON.stringify({ goal: 'internal-improvement' })))
+    await waitFor(() => expect(trigger.getAttribute('aria-disabled')).toBeNull())
+    expect(document.activeElement).toBe(button('Change goal'))
+  })
+
+  it('closes the ask, focus back on Change goal, when the goal changes under it (another tab)', async () => {
+    const fetch = serve('/api/goal', 'PUT', () => Promise.resolve(new Response('{}')))
+    const { rerender } = shown()
+    await userEvent.click(button('Change goal'))
+    rerender('internal-improvement')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(document.activeElement).toBe(button('Change goal'))
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it("can't be opened while the arrival sequence runs (ticket 447)", () => {
     render(<GoalControl overview={{ goal: 'audit-readiness' }} onChanged={() => Promise.resolve(true)} arriving />)
     expect(button('Change goal').disabled).toBe(true)
@@ -110,8 +136,9 @@ describe('Close round asks in the app (ticket 441)', () => {
 
   function shown() {
     const onChanged = vi.fn(() => Promise.resolve(true))
-    render(<RoundControl overview={{ rounds }} onChanged={onChanged} />)
-    return { onChanged }
+    const view = render(<RoundControl overview={{ rounds }} onChanged={onChanged} />)
+    return { onChanged, rerender: (next: Overview['rounds']) =>
+      view.rerender(<RoundControl overview={{ rounds: next }} onChanged={onChanged} />) }
   }
 
   it('opens the ask with its question, Close round and Cancel, focus on Cancel, nothing sent', async () => {
@@ -152,5 +179,29 @@ describe('Close round asks in the app (ticket 441)', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(fetch.mock.calls[0][0]).toBe('/api/rounds/close')
     expect(fetch.mock.calls[0][1]?.method).toBe('POST')
+  })
+
+  it("keeps focus on Close round while it closes, then moves it to the next round's name field", async () => {
+    let answer: (r: Response) => void = () => {}
+    serve('/api/rounds/close', 'POST', () => new Promise<Response>((resolve) => { answer = resolve }))
+    const { onChanged, rerender } = shown()
+    onChanged.mockImplementation(async () => { rerender({ current: null, comparison: null }); return true })
+    await userEvent.click(button('Close round'))
+    await userEvent.click(button('Close round'))
+    expect(button('Close round').getAttribute('aria-disabled')).toBe('true')
+    expect(document.activeElement).toBe(button('Close round'))
+    answer(new Response(JSON.stringify({ closed: { name: 'Q4 2026' } })))
+    const field = await screen.findByRole('textbox', { name: 'Name of the next round' })
+    await waitFor(() => expect(document.activeElement).toBe(field))
+  })
+
+  it('closes the ask, focus back on Close round, when the open round changes under it (another tab)', async () => {
+    const fetch = serve('/api/rounds/close', 'POST', () => Promise.resolve(new Response('{}')))
+    const { rerender } = shown()
+    await userEvent.click(button('Close round'))
+    rerender({ current: { name: 'Q4 2026', opened_at: '2026-11-10T08:00:00Z' }, comparison: null })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(document.activeElement).toBe(button('Close round'))
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

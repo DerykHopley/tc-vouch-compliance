@@ -3,27 +3,16 @@
 ask (#441: no browser dialog opens), sees it after a reload and as the newest entry of the
 report's audit trail, then changes it back and sees Audit readiness and a second entry. The ask
 takes focus on Cancel, and Escape or Cancel close it with focus back on Change goal, sending
-nothing. At 1280px and 400px, light and dark, with the ask open too: nothing scrolls sideways and
+nothing; confirming keeps focus on Change goal, busy, and after. At 1280px and 400px, light and dark, with the ask open too: nothing scrolls sideways and
 every control is at least 44px. Each run ends on Audit readiness, as it began."""
 
 import pytest
-from playwright.sync_api import Dialog, Page, expect
+from browser_dialogs import dialogs_of, no_dialog
+from playwright.sync_api import Page, expect
 from touch_targets import small_targets
 
 TO_IMPROVEMENT = "Goal changed from Audit readiness to Internal improvement"
 TO_READINESS = "Goal changed from Internal improvement to Audit readiness"
-
-
-def dialogs_of(page: Page) -> list[str]:
-    """Every browser dialog that opens, dismissed and recorded: the test fails on any (#441)."""
-    opened: list[str] = []
-
-    def dismiss(dialog: Dialog) -> None:
-        opened.append(dialog.message)
-        dialog.dismiss()
-
-    page.on("dialog", dismiss)
-    return opened
 
 
 def open_dossier(page: Page, url: str) -> None:
@@ -31,24 +20,28 @@ def open_dossier(page: Page, url: str) -> None:
         page.goto(url)
 
 
-def ask(page: Page, to: str) -> None:
-    """Change goal on the hero: the in-app ask opens with today's question, focus on Cancel."""
+def ask(page: Page, dialogs: list[str], to: str) -> None:
+    """Change goal on the hero: no browser dialog; the in-app ask opens with today's question,
+    focus on Cancel."""
     page.locator(".hero .goal").get_by_role("button", name="Change goal").click()
+    no_dialog(dialogs)
     expect(page.locator(".hero .inline-confirm [role=alert]")).to_have_text(
         f"Change this profile's goal to {to}? The change is recorded in the audit trail."
     )
     expect(page.get_by_role("button", name="Cancel")).to_be_focused()
 
 
-def change_goal(page: Page, to: str) -> None:
-    """Change goal, then Change goal in the ask, waiting for the overview read after it."""
-    ask(page, to)
+def change_goal(page: Page, dialogs: list[str], to: str) -> None:
+    """Change goal, then Change goal in the ask, waiting for the overview read after it; focus
+    stays on Change goal."""
+    ask(page, dialogs, to)
     with (
         page.expect_response("**/api/goal") as changed,
         page.expect_response("**/api/overview"),
     ):
         page.locator(".hero .inline-confirm").get_by_role("button", name="Change goal").click()
     assert changed.value.ok, changed.value.status
+    expect(page.locator(".hero .goal").get_by_role("button", name="Change goal")).to_be_focused()
 
 
 def newest_trail_actions(page: Page, url: str, n: int) -> list[str]:
@@ -84,17 +77,17 @@ def test_the_lead_changes_the_goal_and_back_and_the_trail_shows_both(
     # Escape and Cancel close the ask, send nothing, and put focus back on Change goal.
     sent: list[str] = []
     page.on("request", lambda r: sent.append(r.url) if "/api/goal" in r.url else None)
-    ask(page, "Internal improvement")
+    ask(page, dialogs, "Internal improvement")
     fits(page, f"{scheme}, the ask open")
     page.keyboard.press("Escape")
     expect(page.locator(".inline-confirm")).to_have_count(0)
     expect(goal.get_by_role("button", name="Change goal")).to_be_focused()
-    ask(page, "Internal improvement")
+    ask(page, dialogs, "Internal improvement")
     page.get_by_role("button", name="Cancel").click()
     expect(goal.get_by_role("button", name="Change goal")).to_be_focused()
     assert sent == []
 
-    change_goal(page, "Internal improvement")
+    change_goal(page, dialogs, "Internal improvement")
     expect(goal).to_contain_text("Goal: Internal improvement")
     with page.expect_response("**/api/overview"):
         page.reload()
@@ -103,7 +96,7 @@ def test_the_lead_changes_the_goal_and_back_and_the_trail_shows_both(
     assert newest_trail_actions(page, dossier_url, 1) == [TO_IMPROVEMENT]
 
     open_dossier(page, dossier_url)
-    change_goal(page, "Audit readiness")
+    change_goal(page, dialogs, "Audit readiness")
     expect(goal).to_contain_text("Goal: Audit readiness")
     assert newest_trail_actions(page, dossier_url, 2) == [TO_READINESS, TO_IMPROVEMENT]
-    assert dialogs == []
+    no_dialog(dialogs)
