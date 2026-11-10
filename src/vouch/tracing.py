@@ -37,15 +37,15 @@ from uuid import UUID
 from langchain_core.outputs import LLMResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.runnables.config import ensure_config, get_callback_manager_for_config
-from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import Status
 
 from vouch.settings import LangfuseKeys
 
 if TYPE_CHECKING:
     import requests
-    from opentelemetry.sdk.trace import TracerProvider
 
     from vouch.settings import Settings
     from vouch.spending import Usage
@@ -101,19 +101,31 @@ class TraceFacts:
         return trace | {k: v for k, v in facts.items() if v is not None}
 
 
+def own_tracer_provider() -> TracerProvider:
+    """The tracer provider a Langfuse client gets when none is given (#546): Vouch's own, never
+    the process-wide one. Left to itself, Langfuse registers its provider process-wide; FastAPI's
+    telemetry then switches on and parents each request's spans on its `traceparent`, which Cloud
+    Run flags not sampled for most requests, and the run's trace is silently dropped. It records
+    every span whatever a parent span says (ALWAYS_ON), so no request's sampling decides what
+    Vouch traces. Langfuse sets each span's environment and release itself (LangfuseSpan), so
+    the resource Langfuse's own provider would carry adds nothing."""
+    return TracerProvider(sampler=ALWAYS_ON)
+
+
 class Tracing:
     """One Langfuse client for the process, and a fresh handler per run (`config`).
 
     `span_exporter` and `tracer_provider` are the test seams: an in-memory exporter receives
     what would be sent, redacted; with neither, the client sends to `keys.base_url`
-    (langfuse_exporter). Either way RedactingSpanExporter wraps it."""
+    (langfuse_exporter). Either way RedactingSpanExporter wraps it. With no `tracer_provider`
+    the client gets own_tracer_provider(), so the process-wide one is never set (#546)."""
 
     def __init__(
         self,
         keys: LangfuseKeys,
         *,
         span_exporter: "SpanExporter | None" = None,
-        tracer_provider: "TracerProvider | None" = None,
+        tracer_provider: TracerProvider | None = None,
     ) -> None:
         from langfuse import Langfuse
 
@@ -124,7 +136,7 @@ class Tracing:
             secret_key=keys.secret_key.get_secret_value(),
             base_url=keys.base_url,
             span_exporter=RedactingSpanExporter(sending),
-            tracer_provider=tracer_provider,
+            tracer_provider=tracer_provider or own_tracer_provider(),
         )
 
     def __repr__(self) -> str:

@@ -27,9 +27,11 @@ import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableLambda
+from opentelemetry import context as otel_context
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, set_span_in_context
 from pydantic import SecretStr
 from test_memory import as_user
 from test_model_choice import CONTROL, FakeCatalogue, app_with_key
@@ -576,6 +578,109 @@ def test_a_stream_closed_on_the_event_loop_never_waits_for_langfuse(down):
         return time.monotonic() - started
 
     assert asyncio.run(run_and_close()) < 0.5
+
+
+# --- Whatever the request's traceparent (#546) ---------------------------------------------------
+# Cloud Run puts a `traceparent` on every request, mostly flagged not sampled (`-00`). Tracing
+# here is made as start_tracing makes it, with no tracer provider passed in.
+
+UNSAMPLED = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-00"
+SAMPLED = "00-0af7651916cd43dd8448eb211c80319d-b7ad6b7169203332-01"
+TRACEPARENTS = pytest.mark.parametrize(
+    "traceparent", [UNSAMPLED, SAMPLED], ids=["unsampled", "sampled"]
+)
+
+
+@pytest.fixture
+def as_served() -> Iterator[tuple[Tracing, InMemorySpanExporter]]:
+    """Tracing as start_tracing makes it (no tracer provider), its spans kept in memory."""
+    exporter = InMemorySpanExporter()
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), LOCAL)
+    on = Tracing(keys, span_exporter=exporter)
+    yield on, exporter
+    on.shutdown()
+
+
+@TRACEPARENTS
+def test_an_assessment_is_traced_whatever_the_request_s_traceparent(as_served, traceparent):
+    on, exporter = as_served
+    client = TestClient(traced_app(on))
+
+    response = client.post(
+        "/api/assessments",
+        json={"control_id": DEMO_CONTROL},
+        headers=new_user() | {"traceparent": traceparent},
+    )
+
+    assert "event: result" in response.text
+    [spans] = traces(on, exporter).values()
+    assert "judge" in {s.name for s in spans}
+
+
+@TRACEPARENTS
+def test_a_chat_turn_is_traced_whatever_the_request_s_traceparent(as_served, traceparent):
+    on, exporter = as_served
+    client = TestClient(traced_app(on))
+
+    response = client.post(
+        "/api/chat",
+        json={"page": "dossier", "message": "Where do I stand?"},
+        headers=new_user() | {"traceparent": traceparent},
+    )
+
+    assert "event: done" in response.text
+    [spans] = traces(on, exporter).values()
+    assert {"agent", "answer"} <= {s.name for s in spans}
+
+
+def test_a_run_under_an_unsampled_parent_span_is_still_traced(as_served):
+    """Whatever puts a request's unsampled span around a run (FastAPI's own telemetry, another
+    instrumentation), Vouch's trace doesn't follow its sampling."""
+    on, exporter = as_served
+    parent = SpanContext(
+        trace_id=0x0AF7651916CD43DD8448EB211C80319C,
+        span_id=0xB7AD6B7169203331,
+        is_remote=True,
+        trace_flags=TraceFlags(TraceFlags.DEFAULT),
+    )
+    facts = TraceFacts("assessment", "u", "nordlicht", None, PROMPT_VERSION)
+
+    token = otel_context.attach(set_span_in_context(NonRecordingSpan(parent)))
+    try:
+        with traced(on, facts) as config:
+            run_traced(config, "assessment", lambda: 42)
+    finally:
+        otel_context.detach(token)
+
+    assert [s.name for s in exporter.get_finished_spans()] == ["assessment"]
+
+
+def test_starting_tracing_leaves_the_process_wide_tracer_provider_as_it_was():
+    """In a process of its own, so whatever ran before can't have set the provider already."""
+    script = (
+        "from pydantic import SecretStr\n"
+        "from opentelemetry import trace\n"
+        "from vouch.settings import LangfuseKeys\n"
+        "from vouch.tracing import start_tracing\n"
+        "before = trace.get_tracer_provider()\n"
+        "on = start_tracing(LangfuseKeys('pk-lf-test-own', SecretStr('sk-lf-test'), "
+        "'http://localhost:3300'))\n"
+        "after = trace.get_tracer_provider()\n"
+        "on.client.shutdown()\n"
+        "print(type(before).__name__, type(after).__name__, before is after)\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}  # as conftest: no settings
+    done = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["ProxyTracerProvider", "ProxyTracerProvider", "True"]
 
 
 # --- Each generation's cost and model (#504) ----------------------------------------------------
