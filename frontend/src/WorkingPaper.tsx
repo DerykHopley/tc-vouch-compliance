@@ -572,7 +572,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   <p className="why reason" lang={language}>{r.reason}</p>
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
-                    <CitedQuote key={i} quote={c.quote}>
+                    <CitedQuote key={i} quote={c.quote} lang={language}>
                       <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
                       {!c.lead_statement && ( // a statement's section names it; it has no kind (#439)
                         <span className={`kind kind-${c.kind}`}>{c.kind}</span>
