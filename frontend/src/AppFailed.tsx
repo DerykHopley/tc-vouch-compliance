@@ -1,7 +1,8 @@
 import { Component, Fragment, type ReactNode } from 'react'
 import TopBar from './TopBar.tsx'
 
-type Props = { children: ReactNode }
+/** `onSignOut`: in clerk mode, a way out when the error comes back on every attempt. */
+type Props = { children: ReactNode; onSignOut?: () => void }
 type State = { failed: boolean; attempt: number }
 
 /**
@@ -26,11 +27,13 @@ export default class AppFailed extends Component<Props, State> {
         <main className="dossier wrap">
           <section className="hero">
             <p role="alert">Vouch could not show this page. Please try again.</p>
-            <p><button className="btn btn-primary" onClick={again}>Try again</button></p>
+            <p>
+              <button className="btn btn-primary" onClick={again}>Try again</button>
+              {this.props.onSignOut && <>{' '}<button className="btn" onClick={this.props.onSignOut}>Sign out</button></>}
+            </p>
           </section>
         </main>
       </>
     )
   }
 }
-

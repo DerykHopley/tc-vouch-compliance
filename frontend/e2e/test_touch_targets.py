@@ -160,3 +160,20 @@ def test_the_chat_s_new_conversation_control_is_at_least_44px(page: Page, chat_u
         page.get_by_role("button", name="Ask Vouch").click()
     expect(page.get_by_role("button", name="New conversation")).to_be_visible()
     assert small_targets(page) == []
+
+
+def test_the_app_s_own_error_page_s_try_again_is_at_least_44px(page: Page, profiles_url):
+    # #455: a render error inside the app shows its own page. Reached here as the bug reached it: a
+    # developer page answer without its broken profiles.
+    def without_broken_profiles(route) -> None:
+        answer = route.fetch().json()
+        answer.pop("broken_profiles")
+        route.fulfill(json=answer)
+
+    page.route("**/api/developer/settings", without_broken_profiles)
+    page.set_viewport_size({"width": 400, "height": 900})
+    page.goto(f"{profiles_url}/developer")
+    expect(page.get_by_role("alert")).to_have_text(
+        "Vouch could not show this page. Please try again."
+    )
+    assert small_targets(page) == []

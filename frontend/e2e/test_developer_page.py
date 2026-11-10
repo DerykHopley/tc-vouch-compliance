@@ -151,7 +151,9 @@ def test_a_daily_limit_change_keeps_the_developer_page_showing_the_new_limit(
     try:
         field = settings.get_by_role("textbox", name="Assessments per day")
         field.fill("29")
-        field.press("Enter")
+        with page.expect_response("**/api/developer/daily-limit") as answered:
+            field.press("Enter")
+        assert answered.value.status == 200
 
         expect(settings.get_by_role("status")).to_contain_text(
             "Each user may now start 29 assessments a day."
@@ -159,7 +161,10 @@ def test_a_daily_limit_change_keeps_the_developer_page_showing_the_new_limit(
         expect(settings).to_contain_text("29 assessments per user per day (UTC)")
         expect(page.get_by_text("Vouch could not")).to_have_count(0)
     finally:  # the servers are shared: the next test reads the default again
-        page.request.put(f"{profiles_url}/api/developer/daily-limit", data={"daily_limit": 30})
+        reset = page.request.put(
+            f"{profiles_url}/api/developer/daily-limit", data={"daily_limit": 30}
+        )
+        assert reset.status == 200, reset.text()
 
 
 def test_a_model_change_keeps_the_developer_page_showing_the_new_model(page: Page, profiles_url):
@@ -179,7 +184,8 @@ def test_a_model_change_keeps_the_developer_page_showing_the_new_model(page: Pag
 
     field = settings.get_by_role("textbox", name="Model id")
     field.fill("openai/gpt-5.5")
-    field.press("Enter")
+    with page.expect_response("**/api/developer/model"):
+        field.press("Enter")
 
     expect(settings.get_by_role("status")).to_contain_text(
         "The next assessment runs on openai/gpt-5.5."

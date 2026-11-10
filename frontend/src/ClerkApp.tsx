@@ -77,7 +77,7 @@ function SignedInApp({ gate }: { gate: Gate }) {
   const leave = () => void signOut()
   if (access === 'allowed') {
     // Its own boundary: a render error inside the app is never shown as the sign-in page (issue 455).
-    return <AppFailed><ProfiledApp onSignOut={leave} userName={name} /></AppFailed>
+    return <AppFailed onSignOut={leave}><ProfiledApp onSignOut={leave} userName={name} /></AppFailed>
   }
   const [title, text] = BEFORE_THE_APP[access]
   return (

@@ -49,6 +49,7 @@ describe('a render error inside the app', () => {
 
     expect((await screen.findByRole('alert')).textContent).toBe('Vouch could not show this page. Please try again.')
     for (const copy of GATE_COPY) expect(screen.queryByText(copy)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy() // a way out if it keeps failing
 
     app.throws = false
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
@@ -59,6 +60,7 @@ describe('a render error inside the app', () => {
     render(<Root auth={{ mode: 'local' }} />)
 
     expect((await screen.findByRole('alert')).textContent).toBe('Vouch could not show this page. Please try again.')
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull() // no sign-in to leave
     app.throws = false
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(screen.getByRole('main', { name: 'The app' })).toBeTruthy()
