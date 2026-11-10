@@ -67,6 +67,7 @@ from vouch.graph import (
     GUARD,
     NOT_APPLICABLE,
     OUTPUT_RETRIES,
+    PROMPT_VERSION,
     SEARCH_POLICIES,
     SEARCH_RECORDS,
     Assessment,
@@ -120,7 +121,7 @@ from vouch.spending import (
     Usage,
     count_assessment,
 )
-from vouch.tracing import tool_span, with_run_config
+from vouch.tracing import ASSESSMENT, TraceFacts, tool_span, with_run_config
 
 log = logging.getLogger(__name__)
 
@@ -810,15 +811,31 @@ class ChatTools:
             self.record(control.id, run.meter.usage())
             self.running.release(self.memory.scope)
 
+        def traced_events() -> Generator[tuple[str, Any]]:
+            """The run as a trace of its own (vouch.tracing): in its own thread it is no part
+            of the chat turn's."""
+            facts = TraceFacts(
+                ASSESSMENT,
+                self.memory.user_id,
+                self.profile.id,
+                run.chosen,
+                PROMPT_VERSION,
+                control_id=control.id,
+                thread_id=thread_id,
+            )
+            with run.models.traced(facts) as run_config:
+                yield from assessment_events(
+                    control,
+                    self.profile,
+                    run,
+                    self.memory,
+                    thread_id=thread_id,
+                    run_config=run_config,
+                )
+
         assessment = None
         try:
-            events = _in_own_thread(
-                lambda: assessment_events(
-                    control, self.profile, run, self.memory, thread_id=thread_id
-                ),
-                stop=stop,
-                ended=ended,
-            )
+            events = _in_own_thread(traced_events, stop=stop, ended=ended)
             for event, data in events:
                 if event == "result":
                     assessment = data

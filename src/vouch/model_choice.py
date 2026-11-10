@@ -414,7 +414,9 @@ class ModelChoice:
         if self.openrouter is not None:
             self.openrouter.close()
         if self.tracing is not None:
-            self.tracing.shutdown()
+            # Sent, not shut down: Langfuse keeps one client per key in the process, shared
+            # with any other app on the same keys; its own exit hook shuts it down.
+            self.tracing.flush()
 
 
 def model_store(db: Database | None) -> ModelStore:

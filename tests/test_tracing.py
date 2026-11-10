@@ -75,6 +75,12 @@ def test_a_base_url_that_isnt_an_origin_refuses_naming_the_setting():
         load_settings(KEYS | {"LANGFUSE_BASE_URL": "cloud.langfuse.com/api"})
 
 
+def test_a_base_url_without_keys_is_never_read_and_a_trailing_slash_is_fine():
+    assert load_settings({"LANGFUSE_BASE_URL": "not a url"}).langfuse is None
+    keys = load_settings(KEYS | {"LANGFUSE_BASE_URL": "https://cloud.langfuse.com/"}).langfuse
+    assert keys is not None and keys.base_url == LANGFUSE_CLOUD
+
+
 # --- No keys: no client, no handler, no call -----------------------------------------------------
 
 
@@ -227,6 +233,33 @@ def test_a_chat_turn_is_one_trace_with_its_steps_and_model_call(exported):
     assert attributes["user.id"] == lead["X-Test-User"]
     thread = json.loads(response.text.split("\n")[1].removeprefix("data: "))["thread_id"]
     assert attributes["session.id"] == thread
+
+
+def test_an_assessment_the_chat_starts_is_a_trace_of_its_own_beside_the_turn_s(exported):
+    on, exporter = exported
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    response = client.post(
+        "/api/chat", json={"page": "dossier", "message": "Assess 4.1.2"}, headers=lead
+    )
+
+    assert "event: done" in response.text
+    found = traces(on, exporter)
+    names = sorted(trace_attributes(spans)["langfuse.trace.name"] for spans in found.values())
+    assert names == ["assessment", "chat turn"]
+    [assessment] = [s for s in found.values() if "judge" in {span.name for span in s}]
+    assert len(of_type(assessment, "generation")) == 4
+    assert trace_attributes(assessment)["user.id"] == lead["X-Test-User"]
+
+
+def test_a_handler_that_cannot_be_made_leaves_the_run_untraced_not_failed(exported, monkeypatch):
+    on, _ = exported
+    monkeypatch.setattr(on, "config", lambda facts: 1 / 0)
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
+
+    assert "event: result" in response.text
 
 
 def test_a_profile_pass_is_one_trace_with_its_model_call_and_each_control_s_steps(exported):

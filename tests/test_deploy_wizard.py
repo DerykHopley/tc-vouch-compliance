@@ -86,6 +86,9 @@ case "$tool $*" in
     n=$(( $(newest "$4") + 1 )); cat > "$STATE/$4.v$n"; echo "projects/123/secrets/$4/versions/$n" ;;
   "gcloud secrets versions describe latest"*) name=$(secret_flag "$@"); n=$(newest "$name")
     [ "$n" -gt 0 ] || not_found "$name"; echo "projects/123/secrets/$name/versions/$n" ;;
+  "gcloud secrets versions list"*) n=$(newest "$4")
+    while [ "$n" -gt 0 ] && [ -e "$STATE/$4.v$n.disabled" ]; do n=$((n - 1)); done
+    [ "$n" -gt 0 ] && echo "projects/123/secrets/$4/versions/$n" ;;
   "gcloud secrets versions access"*) name=$(secret_flag "$@")
     [ -f "$STATE/$name.v$4" ] && [ ! -e "$STATE/$name.v$4.disabled" ] || exit 1; cat "$STATE/$name.v$4" ;;
   "gcloud secrets versions disable"*) name=$(secret_flag "$@"); touch "$STATE/$name.v$4.disabled" ;;
@@ -783,6 +786,32 @@ def test_with_one_langfuse_secret_alone_neither_reaches_the_service(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert not set(LANGFUSE) & set(pinned(calls))
     assert "Tracing stays off" in result.stdout and "LANGFUSE_PUBLIC_KEY" in result.stdout
+
+
+def test_a_langfuse_secret_whose_versions_are_all_disabled_leaves_tracing_off(tmp_path):
+    for secret in LANGFUSE:
+        in_secret_manager(tmp_path, secret)
+    (tmp_path / "state" / "LANGFUSE_SECRET_KEY.v1.disabled").touch()
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not set(LANGFUSE) & set(pinned(calls))
+    assert "Tracing stays off" in result.stdout
+
+
+def test_an_enabled_older_version_is_pinned_past_a_disabled_newest(tmp_path):
+    for secret in LANGFUSE:
+        in_secret_manager(tmp_path, secret, versions=2)
+    (tmp_path / "state" / "LANGFUSE_PUBLIC_KEY.v2.disabled").touch()
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pinned(calls)["LANGFUSE_PUBLIC_KEY"] == "LANGFUSE_PUBLIC_KEY:1"
+
+
+def test_a_dry_run_says_it_did_not_read_the_langfuse_secrets(tmp_path):
+    result, _ = run_wizard(tmp_path, "--dry-run")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Tracing stays off" not in result.stdout
+    assert "LANGFUSE_SECRET_KEY" in result.stdout
 
 
 def test_a_langfuse_base_url_in_wizard_env_reaches_a_traced_service(tmp_path):

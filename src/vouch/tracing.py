@@ -19,6 +19,7 @@ address reaches a trace. Headers and Clerk session tokens never enter a run.
 
 import json
 import logging
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -123,11 +124,17 @@ class Tracing:
         }
 
     def flush(self) -> None:
-        """Send what the client holds now; a failure is logged, never the run's."""
+        """Send what the client holds now, and wait for it; a failure is logged, never the
+        run's."""
         try:
             self.client.flush()
         except Exception:
             log.exception("the traces could not be sent to Langfuse")
+
+    def flush_soon(self) -> None:
+        """`flush` in a thread of its own: a run never waits on Langfuse, and a stream closed on
+        the event loop never blocks it."""
+        threading.Thread(target=self.flush, name="langfuse-flush", daemon=True).start()
 
     def shutdown(self) -> None:
         """Send what the client holds and stop it, when the app or the eval runner ends; a
@@ -145,16 +152,23 @@ def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
 
 @contextmanager
 def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfig]:
-    """The run config for one traced run (empty with tracing off), its trace sent when the run
-    ends: on Cloud Run the instance may have no CPU between requests, so it isn't left to the
-    client's own schedule."""
+    """The run config for one traced run (empty with tracing off, or when its handler can't be
+    made: logged, and the run goes on untraced), its trace sent as the run ends, in the
+    background (`flush_soon`): on Cloud Run an instance may have little CPU between requests, so
+    it isn't left to the client's own five-second schedule."""
     if tracing is None:
         yield {}
         return
     try:
-        yield tracing.config(facts)
+        config = tracing.config(facts)
+    except Exception:
+        log.exception("a %s couldn't be traced", facts.name)
+        yield {}
+        return
+    try:
+        yield config
     finally:
-        tracing.flush()
+        tracing.flush_soon()
 
 
 def with_run_config(config: RunnableConfig, run_config: RunnableConfig | None) -> RunnableConfig:
@@ -208,8 +222,8 @@ def _clean(value: Any) -> tuple[Any, bool]:
         clean, removed = redact_data(decoded)
         return (json.dumps(clean, ensure_ascii=False), True) if removed else (value, False)
     if isinstance(value, list | tuple):
-        items = [_clean(item) for item in value]
-        return tuple(item for item, _ in items), any(changed for _, changed in items)
+        clean, removed = redact_data(value)  # a sequence of plain values: tags
+        return clean, bool(removed)
     return value, False
 
 

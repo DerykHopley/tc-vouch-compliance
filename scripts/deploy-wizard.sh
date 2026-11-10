@@ -343,19 +343,24 @@ for pair in "${SECRETS[@]}"; do
   fi
   PINNED+=("$secret=$secret:$version")
 done
-# Tracing (#460): each Langfuse key's latest version, read only; both found, both are pinned.
+# Tracing (#460): each Langfuse key's newest enabled version, read only (a disabled one can't be
+# read by the service); both found, both are pinned.
 TRACED=() TRACE_PINS=() LACKING=()
 for secret in "${TRACING_SECRETS[@]}"; do
-  version=$(version_number "$(query gcloud secrets versions describe latest --secret="$secret" \
-    --project="$PROJECT_ID" --format='value(name)')")
-  if [[ -n $version ]]; then TRACED+=("$secret"); TRACE_PINS+=("$secret=$secret:$version")
+  version=$(query gcloud secrets versions list "$secret" --filter=state:ENABLED \
+    --sort-by=~createTime --limit=1 --project="$PROJECT_ID" --format='value(name)')
+  version="${version##*/}"  # the full name or the number alone: the number
+  if [[ $version =~ ^[0-9]+$ ]]; then TRACED+=("$secret"); TRACE_PINS+=("$secret=$secret:$version")
   else LACKING+=("$secret"); fi
 done
-if [[ ${#LACKING[@]} -eq 0 ]]; then
+if [[ $DRY == yes ]]; then
+  TRACED=()
+  say "(dry run: Secret Manager not read; with both ${TRACING_SECRETS[*]} there, the deploy pins them)"
+elif [[ ${#LACKING[@]} -eq 0 ]]; then
   PINNED+=("${TRACE_PINS[@]}"); ok "Tracing on: Langfuse's keys ${TRACE_PINS[*]}"
 else
   TRACED=()
-  say "${Y}Tracing stays off: Secret Manager has no ${LACKING[*]} (DEPLOY.md, Tracing, puts them there).${N}"
+  say "${Y}Tracing stays off: Secret Manager has no enabled ${LACKING[*]} (DEPLOY.md, Tracing, puts them there).${N}"
 fi
 
 step  # Access

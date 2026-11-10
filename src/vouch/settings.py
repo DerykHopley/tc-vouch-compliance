@@ -236,21 +236,21 @@ def load_database_url(env: Mapping[str, str] | None = None) -> SecretStr | None:
 
 def load_langfuse_keys(env: Mapping[str, str] | None = None) -> LangfuseKeys | None:
     """The Langfuse keys in `env` (the process environment by default): None, tracing off, when
-    either key is unset, the missing one logged by name when the other is set. Raises
-    SettingsError for a LANGFUSE_BASE_URL that isn't an origin."""
+    either key is unset, the missing one logged by name when the other is set. With both, raises
+    SettingsError for a LANGFUSE_BASE_URL that isn't an origin (a trailing / is dropped)."""
     env = os.environ if env is None else env
     public, secret = (_read(env, name) for name in LANGFUSE_KEY_ENVS)
-    base_url = _read(env, LANGFUSE_BASE_URL_ENV)
-    if base_url is not None and not ORIGIN.fullmatch(base_url):
-        raise SettingsError(
-            f"{LANGFUSE_BASE_URL_ENV} must be an origin, such as {LANGFUSE_CLOUD} (no path)"
-        )
     if public is None or secret is None:
         if public or secret:
             missing = LANGFUSE_PUBLIC_KEY_ENV if public is None else LANGFUSE_SECRET_KEY_ENV
             log.warning("%s is not set, so tracing is off", missing)
-        return None
-    return LangfuseKeys(public, SecretStr(secret), base_url or LANGFUSE_CLOUD)
+        return None  # LANGFUSE_BASE_URL unread: a wrong one can't stop an app that doesn't trace
+    base_url = (_read(env, LANGFUSE_BASE_URL_ENV) or LANGFUSE_CLOUD).rstrip("/")
+    if not ORIGIN.fullmatch(base_url):
+        raise SettingsError(
+            f"{LANGFUSE_BASE_URL_ENV} must be an origin, such as {LANGFUSE_CLOUD} (no path)"
+        )
+    return LangfuseKeys(public, SecretStr(secret), base_url)
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:

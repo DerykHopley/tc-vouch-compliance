@@ -52,7 +52,8 @@ time.sleep(120)
 # exit 3 after n answers (a negative n: at once; 0: never); CRASH_AFTER=hang, never listen.
 FAKE_SERVER = """
 import http.server, json, os, sys, time
-names = ("ASSESS_FAKE_SCRIPT", "OPENROUTER_API_KEY", "VOUCH_API", "VOUCH_AUTH_MODE")
+names = ("ASSESS_FAKE_SCRIPT", "OPENROUTER_API_KEY", "VOUCH_API", "VOUCH_AUTH_MODE",
+         "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
 env = {k: os.environ.get(k) for k in names}
 log = os.path.join(os.environ["FAKE_ENV_LOG"], os.environ["FAKE_TOOL"] + ".json")
 with open(log + ".tmp", "w") as f:
@@ -278,11 +279,14 @@ def test_the_api_gets_no_key_and_an_absolute_fake_script(tmp_path: Path) -> None
         cwd=elsewhere,
         ASSESS_FAKE_SCRIPT="scripts/demo.json",
         OPENROUTER_API_KEY="sk-or-fake-not-a-key",
+        LANGFUSE_PUBLIC_KEY="pk-lf-fake-not-a-key",
+        LANGFUSE_SECRET_KEY="sk-lf-fake-not-a-key",
     )
     assert "Vouch is running" in output
     api = seen_env(tmp_path, "uv")
     assert api["ASSESS_FAKE_SCRIPT"] == str(elsewhere / "scripts" / "demo.json")
     assert api["OPENROUTER_API_KEY"] is None
+    assert api["LANGFUSE_PUBLIC_KEY"] is None and api["LANGFUSE_SECRET_KEY"] is None  # #460
     vouch_api = seen_env(tmp_path, "npm")["VOUCH_API"]
     assert vouch_api is not None and vouch_api.startswith("http://127.0.0.1:")
 

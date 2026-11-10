@@ -223,7 +223,7 @@ keeps the count down.
 The live app traces each assessment, chat turn and profile pass in Langfuse once two more secrets
 are in Secret Manager: `LANGFUSE_PUBLIC_KEY` (keyring `langfuse-vouch-public`) and
 `LANGFUSE_SECRET_KEY` (keyring `langfuse-vouch-secret`). The wizard never creates or writes them:
-when both exist it pins each one's latest version and grants the service's account Secret Accessor
+when both have an enabled version it pins each one's newest enabled version and grants the service's account Secret Accessor
 on them; when either is missing it says "Tracing stays off" and deploys without them, so a deploy
 before they exist runs as before (*checked*, `tests/test_deploy_wizard.py`). Put them there once,
 by hand, each through a pipe:
@@ -240,7 +240,8 @@ secret-tool lookup service langfuse-vouch-secret | gcloud secrets create LANGFUS
 then `scripts/deploy-wizard.sh --db-ready`. A project in Langfuse's US region also needs a
 `LANGFUSE_BASE_URL=https://us.cloud.langfuse.com` line in `wizard.env` (not a secret); without
 one, traces go to the EU region, `https://cloud.langfuse.com`. To turn tracing off again, disable
-or delete either secret and deploy.
+every version of either secret (or delete it) and deploy. `scripts/dev.sh` drops both keys, so a
+local preview never traces to the live project; a local check of tracing runs the API itself.
 
 ## 6 and 7. The URL, and the health check
 

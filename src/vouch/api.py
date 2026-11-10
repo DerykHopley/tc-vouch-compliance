@@ -1839,8 +1839,8 @@ def chat(
     (vouch.model_choice): OpenRouter when a key is set, else the chat's canned fake. Its tokens
     and cost are metered and kept with the assessments' (vouch.spending), whether the reply
     ends in `done` or an `error`: the calls were made. An assessment it starts is counted and
-    metered as one from the working paper is. With the Langfuse keys set, the turn is one trace,
-    an assessment it starts inside it (vouch.tracing, #460)."""
+    metered as one from the working paper is. With the Langfuse keys set, the turn is one trace, and
+    an assessment it starts another (vouch.tracing, #460)."""
     meter = UsageMeter(chosen)
     thread_id = request.thread_id or new_thread_id()
     turn = ShownTurn(request.message)
