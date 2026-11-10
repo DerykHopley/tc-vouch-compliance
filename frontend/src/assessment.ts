@@ -36,6 +36,17 @@ export const verdictWord = (verdict: Verdict, language?: string): string =>
 /** The `lang` of `verdictWord`'s words: the answer language when it has its own, none for the interface's English. */
 export const verdictLang = (language?: string): string | undefined => wordsIn(language) ? language : undefined
 
+/** A stale citation's flag word in each answer language besides English: the report's stale label
+ * (`vouch.report.WORDS`), as the cap's note says it (`vouch.language.CAP_WORDS`, #354). */
+const STALE_WORDS_IN: Record<string, string> = { de: 'Prüfung überfällig' }
+
+/** A stale citation's flag: its word and the reason, which the API serves in the answer language (#359); and its
+ * `lang`, the answer language when it has its own word, none for the interface's English. */
+export function staleFlag(because: string | null, language?: string): { text: string; lang?: string } {
+  const own = language ? STALE_WORDS_IN[language] : undefined
+  return { text: `${own ?? 'Stale'}: ${because}`, lang: own ? language : undefined }
+}
+
 /** The column a requirement comes from (`vouch.isa.Column`). */
 export type Column = 'must' | 'should' | 'high' | 'very high' | 'overlay'
 

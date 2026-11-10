@@ -1,6 +1,7 @@
 import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
-  type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
+  type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, staleFlag, usageWords, type Verdict,
+  VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, isReviewState, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
@@ -543,15 +544,18 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                 </td>
                 <td className="quotes-cell"><div>
                   <p className="why reason" lang={language}>{r.reason}</p>
-                  {r.citations.map((c, i) => (
-                    // By position: two quotes may read alike once redacted.
-                    <CitedQuote key={i} quote={c.quote}>
-                      <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
-                      <span className={`kind kind-${c.kind}`}>{c.kind}</span>
-                      {c.stale && <span className="flag">Stale: {c.stale_because}</span>}
-                      <span>Quote verified</span>
-                    </CitedQuote>
-                  ))}
+                  {r.citations.map((c, i) => {
+                    const flag = c.stale ? staleFlag(c.stale_because, language) : null
+                    return (
+                      // By position: two quotes may read alike once redacted.
+                      <CitedQuote key={i} quote={c.quote}>
+                        <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
+                        <span className={`kind kind-${c.kind}`}>{c.kind}</span>
+                        {flag && <span className="flag" lang={flag.lang}>{flag.text}</span>}
+                        <span>Quote verified</span>
+                      </CitedQuote>
+                    )
+                  })}
                   {item && items.threadId && (
                     // A new key when the item changes, so its fields start from the kept values.
                     <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}

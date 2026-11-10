@@ -88,6 +88,7 @@ from vouch.isa import (
     UnknownControlError,
     load_base_framework,
 )
+from vouch.language import stale_reason
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
     Memory,
@@ -592,9 +593,17 @@ def assessment_data(
     of the review it waits at (#372; null once reviewed), and `before_three_step_review`, true
     for one reviewed before the three-step review (#373): it still counts as reviewed, and
     nothing stored is rewritten. Each item carries its priority and done mark in the improvement
-    plan (`marks`, #410), in both goals."""
+    plan (`marks`, #410), in both goals. A stale citation's reason is in the assessment's
+    answer language (#359), as the cap's note says it; the stored assessment keeps English's."""
     review = assessment.review
-    return assessment.to_dict() | {
+    served = assessment.to_dict()
+    for requirement in served["requirements"]:
+        for citation in requirement["citations"]:
+            if citation["stale"]:
+                citation["stale_because"] = stale_reason(
+                    citation["stale_because"], assessment.answer_language
+                )
+    return served | {
         "remediation": remediation.shown_items(assessment, decided or {}, marks),
         "review_step": remediation.review_step(assessment, decided or {}),
         "before_three_step_review": review is not None and not review.three_step,
