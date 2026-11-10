@@ -115,7 +115,9 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     expect(control_row(report, "4.1.2").locator(".chip")).to_have_text("Partly evidenced")
     proposed = control_row(report, "5.2.9")
     expect(proposed).to_contain_text("Open")
-    expect(proposed).to_contain_text("Open: not yet accepted, so it has no reviewed verdict.")
+    # Its status word alone (#463): no repeated sentence, its verdict cell empty.
+    expect(proposed).not_to_contain_text("not yet accepted")
+    expect(proposed.locator("[data-label=Verdict]")).to_have_text("")
     expect(proposed.locator(".chip")).to_have_count(0)
     expect(proposed).not_to_contain_text(LOCAL_USER)
 
@@ -158,7 +160,7 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
         ]
     )
     for kept in (trail.nth(0), trail.nth(5), trail.filter(has_text="Accepted").last):
-        expect(kept.locator("td").nth(8)).to_have_text(re.compile(r"\S+ v\S+"))
+        expect(kept.locator("td[data-label=Evidence]")).to_have_text(re.compile(r"\S+ v\S+"))
     # Every trail cell stays a table cell, so a row's rule lines up across it.
     displays = trail.locator("td").evaluate_all(
         "cells => cells.map(c => getComputedStyle(c).display)"
@@ -211,6 +213,133 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
         )
         assert not scrolls, f"the report scrolls sideways at 400px in {scheme}"
         assert small_targets(page) == []
+
+
+# --- The controls and trail tables fit (#463) ---------------------------------------------------
+
+TABLES = ("table.report-controls", "table.report-trail")
+
+
+def with_a_full_trail(page: Page) -> None:
+    """The report as served, with the recorded Nordlicht trail and a long entry added, so the trail
+    has every column filled (long notes, evidence ids, model names) whatever this server holds."""
+    recorded = json.loads(NORDLICHT_REPORT.read_text())["trail"]["entries"]
+
+    def patched(route: Route) -> None:
+        served = route.fetch().json()
+        served["trail"] = {"entries": [*recorded, long_entry()], "next": None}
+        route.fulfill(json=served)
+
+    page.route("**/api/report", patched)
+
+
+def tables_overflowing(report: Locator) -> list[str]:
+    """Each controls or trail table wider than its container, with its widths."""
+    return report.evaluate(
+        """(el, selectors) => selectors.flatMap((s) => [...el.querySelectorAll(s)].map((t) => {
+          const box = t.parentElement
+          const wide = Math.max(t.scrollWidth, box.scrollWidth)
+          return wide > box.clientWidth ? `${s}: ${wide} in ${box.clientWidth}` : null
+        })).filter(Boolean)""",
+        list(TABLES),
+    )
+
+
+def set_goal(page: Page, url: str, profile: str, goal: str) -> None:
+    """The profile's goal set through the API."""
+    answer = page.request.put(
+        f"{url}/api/goal", data={"goal": goal}, headers={"X-Vouch-Profile": profile}
+    )
+    assert answer.ok, answer.text()
+
+
+@pytest.mark.parametrize("goal", ["audit-readiness", "internal-improvement"])
+def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, goal):
+    """#463: the trail was 1,231-1,250px in a 902px sheet at 1440, and the controls table carried
+    empty columns. Nordlicht's report is English, Alpenwerk's German. The improvement report has a
+    server of its own, as its goal would change what the readiness checks read."""
+    url = request.getfixturevalue("report_url" if goal == "audit-readiness" else "improvement_url")
+    if goal != "audit-readiness":  # each profile's default
+        for profile in ("nordlicht", "alpenwerk"):
+            set_goal(page, url, profile, goal)
+    accepted(page.request, url, "4.1.2", "alpenwerk")  # a German reviewed row: chip, reviewer, day
+    with_a_full_trail(page)
+    for profile in ("nordlicht", "alpenwerk"):
+        page.add_init_script(f"window.localStorage.setItem('vouch.profile', '{profile}')")
+        for width in (1440, 1024):
+            page.set_viewport_size({"width": width, "height": 900})
+            report = open_report(page, url)
+            expect(report.locator("table.report-trail tbody tr").first).to_be_visible()
+            if goal == "audit-readiness":
+                expect(report.locator("table.report-controls")).to_be_visible()
+            assert tables_overflowing(report) == [], (profile, width)
+            if goal == "audit-readiness" and profile == "alpenwerk":
+                # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
+                days = report.locator("table.report-controls td.report-day").evaluate_all(
+                    "cells => cells.filter(c => c.textContent.trim())"
+                    ".map(c => { const r = document.createRange(); r.selectNodeContents(c);"
+                    " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
+                )
+                assert days and all(lines == 1 for lines in days), (profile, width, days)
+
+
+def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
+    page: Page, report_url, nordlicht_report
+):
+    page.set_viewport_size({"width": 390, "height": 900})
+    nordlicht_report["trail"]["entries"].append(long_entry())
+    page.route("**/api/report", lambda route: route.fulfill(json=nordlicht_report))
+    for scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=scheme)
+        report = open_report(page, report_url)
+        expect(report.locator("table.report-controls")).to_be_visible()
+        scrolls = page.evaluate(
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        )
+        assert not scrolls, f"the report scrolls sideways at 390px in {scheme}"
+        assert tables_overflowing(report) == [], scheme
+
+        # The first control (1.1.1, accepted): its Status, Verdict and Reviewed by on screen.
+        first = report.locator("table.report-controls tbody tr").first
+        # The shown column name is not read with the value: the header row still names it.
+        expect(first.get_by_role("cell", name="Accepted", exact=True)).to_have_count(1)
+        for label in ("Status", "Verdict", "Reviewed by"):
+            cell = first.locator(f"[data-label='{label}']")
+            cell.scroll_into_view_if_needed()
+            expect(cell).to_be_in_viewport(ratio=1)
+            expect(cell).not_to_have_text("")
+
+        # Every filled cell of every row lies within the screen, stacked: one cell a line.
+        for selector in TABLES:
+            cells = report.locator(f"{selector} tbody tr:not(.report-quote-row) > :not(:empty)")
+            boxes = cells.evaluate_all(
+                """cells => cells.map((c) => {
+                  const r = c.getBoundingClientRect()
+                  return [c.dataset.label, r.left, r.right, getComputedStyle(c).display]
+                })"""
+            )
+            outside = [b for b in boxes if b[1] < 0 or b[2] > 390.5]
+            assert outside == [], (selector, outside[:5])
+            assert {b[3] for b in boxes} == {"grid"}, (selector, {b[3] for b in boxes})
+        assert small_targets(page) == []
+
+
+def long_entry() -> dict:
+    """A trail entry with a long note and a long model name, filling every column."""
+    return {
+        "id": 1,
+        "at": "2026-11-06T14:05:00+00:00",
+        "reviewer_name": LOCAL_USER,
+        "control_id": "4.1.2",
+        "requirement_id": "M1",
+        "action": "accept",
+        "note": LONG_NOTE,
+        "verdict_before": "partly-evidenced",
+        "verdict_after": "partly-evidenced",
+        "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],
+        "model": "scripted-fake-model-with-a-long-name",
+        "prompt_version": "assess-2026-11-01",
+    }
 
 
 # --- Export (#57, story 9; #308, story 4 of spec #321) ---------------------------------------
@@ -325,21 +454,7 @@ def with_older_entries(page: Page) -> None:
 
     def patched(route: Route) -> None:
         served = route.fetch().json()
-        added = {
-            "id": 1,
-            "at": "2026-11-06T14:05:00+00:00",
-            "reviewer_name": LOCAL_USER,
-            "control_id": "4.1.2",
-            "requirement_id": "M1",
-            "action": "accept",
-            "note": LONG_NOTE,
-            "verdict_before": "partly-evidenced",
-            "verdict_after": "partly-evidenced",
-            "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],
-            "model": "scripted-fake-model-with-a-long-name",
-            "prompt_version": "assess-2026-11-01",
-        }
-        served["trail"] = {"entries": [*served["trail"]["entries"], added], "next": 1}
+        served["trail"] = {"entries": [*served["trail"]["entries"], long_entry()], "next": 1}
         route.fulfill(json=served)
 
     page.route("**/api/report", patched)
@@ -546,12 +661,7 @@ def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_export
     page: Page, improvement_url
 ):
     request = page.request
-    goal = request.put(
-        f"{improvement_url}/api/goal",
-        data={"goal": "internal-improvement"},
-        headers={"X-Vouch-Profile": "nordlicht"},
-    )
-    assert goal.ok, goal.text()
+    set_goal(page, improvement_url, "nordlicht", "internal-improvement")
     thread_id = accepted(
         request,
         improvement_url,
