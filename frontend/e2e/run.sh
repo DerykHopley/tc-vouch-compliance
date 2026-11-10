@@ -27,6 +27,8 @@
 #     and would add a profile to the other servers' switchers;
 #   - a fourteenth, for company setup's first profile pass (#447): every create on the thirteenth
 #     now runs a pass, and the passes' daily limit (3) would refuse story 5's own;
+#   - a fifteenth, for removing a company made in setup (#418): its three creates each run a pass
+#     (#447), which with the thirteenth's two would pass the daily limit (3);
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 # Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):
@@ -57,6 +59,7 @@ SERVERS=(
   vouch:VOUCH_URL dossier:DOSSIER_URL profiles:PROFILES_URL paper:PAPER_URL chat:CHAT_URL
   report:REPORT_URL afresh:AFRESH_URL pass:PASS_URL rounds:ROUNDS_URL plan:PLAN_URL
   questions:QUESTIONS_URL improvement:IMPROVEMENT_URL setup:SETUP_URL firstpass:FIRST_PASS_URL
+  removal:REMOVAL_URL
 )
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done

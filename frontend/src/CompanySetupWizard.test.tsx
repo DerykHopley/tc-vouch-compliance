@@ -302,43 +302,59 @@ describe('company setup', () => {
     expect(screen.queryByText('Choose a protection level.')).toBeNull()
   })
 
-  it('Next on step 3 with a level opens step 4, the Goal, Internal improvement chosen; Back from step 5 keeps it',
+  /** Steps 1 to 3 answered, a Normal level chosen, then Next onto step 4. */
+  async function toStep4() {
+    await toStep3()
+    await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
+    await next()
+  }
+  const goalRadio = (name: RegExp) => screen.getByRole<HTMLInputElement>('radio', { name })
+
+  it('Next on step 3 with a level opens step 4, the Goal, Internal improvement chosen', async () => {
+    api()
+    wizard()
+    await toStep4()
+    expect(screen.getByText('Step 4 of 7')).toBeTruthy()
+    expect(document.activeElement).toBe(heading('Goal'))
+    const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
+    expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, 'step', null, null, null])
+    expect(screen.queryByText(/not yet available/)).toBeNull()
+  })
+
+  it('step 4 offers both Goals with their lines, Internal improvement first and chosen, and says it can change later',
     async () => {
-      api()
-      wizard()
-      await toStep3()
-      await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
-      await next()
-      expect(screen.getByText('Step 4 of 7')).toBeTruthy()
-      expect(document.activeElement).toBe(heading('Goal'))
-      const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
-      expect(steps.map((s) => s.className)).toEqual(['', '', '', '', '', '', ''])
-      expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, 'step', null, null, null])
-      expect(screen.queryByText(/not yet available/)).toBeNull()
-      const goals = screen.getByRole('group', { name: 'Goal' })
-      expect(within(goals).getAllByRole('radio').map((r) => r.closest('label')?.textContent)).toEqual([
-        "Internal improvementImproving the company's own security, with no audit planned.",
-        'Audit readinessPreparing for an external audit.',
-      ])
-      expect((screen.getByRole('radio', { name: /^Internal improvement/ }) as HTMLInputElement).checked).toBe(true)
-      expect(goals.textContent).toContain('You can change the Goal later on the overview.')
-      await next() // a Goal is always chosen: Next never refuses step 4
-      expect(screen.getByText('Step 5 of 7')).toBeTruthy()
-      expect(document.activeElement).toBe(heading('Not applicable'))
-      await back()
-      expect(screen.getByText('Step 4 of 7')).toBeTruthy()
-      expect((screen.getByRole('radio', { name: /^Internal improvement/ }) as HTMLInputElement).checked).toBe(true)
-      await back()
-      expect(heading('Protection level')).toBeTruthy()
-    })
+    api()
+    wizard()
+    await toStep4()
+    const goals = screen.getByRole('group', { name: 'Goal' })
+    expect(within(goals).getAllByRole('radio').map((r) => r.closest('label')?.textContent)).toEqual([
+      "Internal improvementImproving the company's own security, with no audit planned.",
+      'Audit readinessPreparing for an external audit.',
+    ])
+    expect(goalRadio(/^Internal improvement/).checked).toBe(true)
+    expect(goals.textContent).toContain('You can change the Goal later on the overview.')
+  })
+
+  it('Next on step 4 opens step 5, a Goal always being chosen; Back returns to it with the answer kept, then to step 3',
+    async () => {
+    api()
+    wizard()
+    await toStep4()
+    await next()
+    expect(screen.getByText('Step 5 of 7')).toBeTruthy()
+    expect(document.activeElement).toBe(heading('Not applicable'))
+    await back()
+    expect(screen.getByText('Step 4 of 7')).toBeTruthy()
+    expect(goalRadio(/^Internal improvement/).checked).toBe(true)
+    await back()
+    expect(heading('Protection level')).toBeTruthy()
+  })
 
   it('keeps Audit readiness through step 7 and back; step 7 shows it and says a profile pass runs', async () => {
     api()
     wizard()
-    await toStep3()
-    await userEvent.click(await screen.findByRole('radio', { name: /^Normal/ }))
-    await next()
-    await userEvent.click(screen.getByRole('radio', { name: /^Audit readiness/ }))
+    await toStep4()
+    await userEvent.click(goalRadio(/^Audit readiness/))
     await next()
     await findControl('1.1.1')
     await next()
@@ -353,8 +369,8 @@ describe('company setup', () => {
     await back()
     await back()
     expect(screen.getByText('Step 4 of 7')).toBeTruthy()
-    expect((screen.getByRole('radio', { name: /^Audit readiness/ }) as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByRole('radio', { name: /^Internal improvement/ }) as HTMLInputElement).checked).toBe(false)
+    expect(goalRadio(/^Audit readiness/).checked).toBe(true)
+    expect(goalRadio(/^Internal improvement/).checked).toBe(false)
   })
 
   it('step 5 lists every control unticked, under the sentence that says what not applicable means', async () => {
@@ -534,7 +550,6 @@ describe('company setup', () => {
     expect(document.activeElement).toBe(heading('Evidence'))
     const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
     expect(steps[5].textContent).toBe('6Evidence')
-    expect(steps[5].className).toBe('')
     expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, null, null, 'step', null])
     await back()
     expect((reason('1.6.1') as HTMLTextAreaElement).value).toBe(' No prototype vehicles ')
@@ -662,7 +677,6 @@ describe('company setup', () => {
       expect(screen.getByText('Step 7 of 7')).toBeTruthy()
       expect(document.activeElement).toBe(heading('Finish'))
       const steps = within(screen.getByRole('list', { name: 'Setup steps' })).getAllByRole('listitem')
-      expect(steps.map((s) => s.className)).toEqual(['', '', '', '', '', '', ''])
       expect(steps.map((s) => s.getAttribute('aria-current'))).toEqual([null, null, null, null, null, null, 'step'])
       expect(screen.queryByRole('button', { name: 'Next' })).toBeNull()
       expect(screen.queryByText(/not built yet/)).toBeNull()

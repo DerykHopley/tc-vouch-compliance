@@ -2,32 +2,27 @@
 switcher, a reload doesn't bring it back, and making it again gives a new id, as the removed
 one's audit trail stays under the old.
 
-On the setup server (setup_url), as company setup's create is: the companies made there stay in
-that process, so no other check's switcher lists them. Its name is its own, so the create check
-there is unaffected.
+On a server of its own (removal_url): the companies made there stay in that process, so no other
+check's switcher lists them, and each create runs a profile pass (#447), whose daily limit (3) the
+setup server's creates share.
 """
 
 import re
 
 from playwright.sync_api import Page, expect
-from test_company_setup import PROFILES, open_setup, press, to_step_7
+from test_company_setup import create_company, open_setup, to_step_7
 
 COMPANY = "Musterfirma Süd GmbH"
 COMPANY_ID = "musterfirma-sud-gmbh"
 FELL_BACK = "Your last profile is no longer available: showing Nordlicht Komponenten GmbH."
 
 
-def create(page: Page, setup_url: str, company: str = COMPANY) -> str:
-    """Makes `company` through company setup; the id it was given. The app lands on it."""
-    open_setup(page, setup_url)
+def create(page: Page, url: str, company: str = COMPANY) -> str:
+    """Makes `company` through company setup; the id it was given. The app lands on it, its profile
+    pass answered."""
+    open_setup(page, url)
     to_step_7(page, company)
-    with (
-        page.expect_response(lambda r: r.url.endswith(PROFILES)) as created,
-        page.expect_response(lambda r: r.url.endswith("/api/overview")),
-    ):
-        press(page, "Create company")
-    assert created.value.status == 201
-    return created.value.json()["id"]
+    return create_company(page).json()["id"]
 
 
 def switcher_companies(page: Page) -> list[str]:
@@ -38,9 +33,9 @@ def switcher_companies(page: Page) -> list[str]:
     return names
 
 
-def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Page, setup_url):
+def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Page, removal_url):
     page.set_viewport_size({"width": 1280, "height": 900})
-    assert create(page, setup_url) == COMPANY_ID
+    assert create(page, removal_url) == COMPANY_ID
     banner = page.get_by_role("banner")
     expect(banner.get_by_role("button", name=re.compile(rf"^Profile: {COMPANY}"))).to_be_visible()
 
@@ -76,11 +71,11 @@ def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Pag
     expect(
         banner.get_by_role("button", name=re.compile(r"^Profile: Nordlicht Komponenten GmbH"))
     ).to_be_visible()
-    expect(page).to_have_url(f"{setup_url}/developer")
+    expect(page).to_have_url(f"{removal_url}/developer")
     expect(page.get_by_role("region", name="Developer settings")).to_be_visible()
     assert not any(name.startswith(COMPANY) for name in switcher_companies(page))
     expect(sheet.get_by_role("button", name=f"Remove {COMPANY}")).to_have_count(0)
-    under = page.request.get(f"{setup_url}/api/overview", headers={"X-Vouch-Profile": COMPANY_ID})
+    under = page.request.get(f"{removal_url}/api/overview", headers={"X-Vouch-Profile": COMPANY_ID})
     assert under.status == 404
 
     with page.expect_response(lambda r: r.url.endswith("/api/profiles")):
@@ -90,16 +85,18 @@ def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Pag
     ).to_be_visible()
     assert not any(name.startswith(COMPANY) for name in switcher_companies(page))
 
-    assert create(page, setup_url) == f"{COMPANY_ID}-2"
+    assert create(page, removal_url) == f"{COMPANY_ID}-2"
     page.get_by_role("link", name="Developer").click()
     expect(sheet.get_by_text(f"{COMPANY_ID}-2", exact=True)).to_be_visible()
     expect(sheet.get_by_text(COMPANY_ID, exact=True)).to_have_count(0)
 
 
-def test_removing_a_company_not_shown_keeps_the_profile_and_focuses_the_note(page: Page, setup_url):
+def test_removing_a_company_not_shown_keeps_the_profile_and_focuses_the_note(
+    page: Page, removal_url
+):
     company = "Abriss Werk GmbH"
     page.set_viewport_size({"width": 1280, "height": 900})
-    made = create(page, setup_url, company)
+    made = create(page, removal_url, company)
     banner = page.get_by_role("banner")
     banner.get_by_role("button", name=re.compile(rf"^Profile: {company}")).click()
     with page.expect_response(lambda r: r.url.endswith("/api/overview")):

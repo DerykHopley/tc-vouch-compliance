@@ -669,15 +669,32 @@ describe('the first pass on a company just made, issue 447', () => {
   const PASS_DONE = { assessments: [{ thread_id: 't1', control_id: '1.1.1', status: 'waiting-for-review',
     verdict: 'partly-evidenced' }], skipped: [] }
   const LIMIT = 'The daily limit of profile passes is reached. It resets at midnight UTC.'
+  const NOT_SET = 'The company was created, but its Goal could not be set to Internal improvement. Use Change goal to '
+    + 'set it.'
+  const NEVER = () => new Promise<Response>(() => {})
 
-  /** The API for a developer on the setup page: Nordlicht and Testwerk listed, Musterfirma too once made. PUT
-   * /api/goal answers `goalAnswer` (and keeps the goal on a 2xx, so the overview shows it), the pass `passAnswer`. */
-  function serveSetup(goalAnswer: () => Response = () => Response.json({ goal: 'internal-improvement' }),
-    passAnswer: () => Response = () => Response.json(PASS_DONE)) {
+  type Answer = () => Response | Promise<Response>
+  type Setup = {
+    /** PUT /api/goal's answer; a 2xx keeps the goal, so the overview shows it. */
+    goalAnswer?: Answer
+    /** POST /api/profile-pass's answer. */
+    passAnswer?: Answer
+    /** Each read of the new company's overview, answered as `overviewAnswer(goalSent)` says (`goalSent`: a Goal change
+     * has answered), null for the usual; a 2xx answer stands for the usual one. */
+    overviewAnswer?: (goalSent: boolean) => Promise<Response> | null
+    /** The new company's Goal before any change. */
+    startingGoal?: Goal
+  }
+
+  /** The API for a developer on the setup page: Nordlicht and Testwerk listed, Musterfirma too once made. */
+  function serveSetup({ goalAnswer = () => Response.json({ goal: 'internal-improvement' }),
+    passAnswer = () => Response.json(PASS_DONE), overviewAnswer = () => null, startingGoal = 'audit-readiness',
+  }: Setup = {}) {
     const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
     const answered = fetch.getMockImplementation()!
     let listings = 0
-    let goal: Goal = 'audit-readiness'
+    let goalSent = false
+    let goal: Goal = startingGoal
     fetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
       if (url === '/api/profiles') {
@@ -685,16 +702,20 @@ describe('the first pass on a company just made, issue 447', () => {
         return Promise.resolve(Response.json({ profiles, default: 'nordlicht' }))
       }
       if (url === '/api/goal' && init?.method === 'PUT') {
-        const answer = goalAnswer()
-        if (answer.ok) goal = (JSON.parse(String(init.body)) as { goal: Goal }).goal
-        return Promise.resolve(answer)
+        return Promise.resolve(goalAnswer()).then((answer) => {
+          if (answer.ok) goal = (JSON.parse(String(init.body)) as { goal: Goal }).goal
+          goalSent = true
+          return answer
+        })
       }
       if (url === '/api/profile-pass' && init?.method === 'POST') return Promise.resolve(passAnswer())
       if (url === '/api/overview') {
         const named = new Headers(init?.headers).get('X-Vouch-Profile')
         const company = [NORDLICHT, TESTWERK, MUSTERFIRMA].find((p) => p.id === named)?.company ?? NORDLICHT.company
-        return Promise.resolve(Response.json({ ...overviewOf(company), goal: named === 'musterfirma-gmbh' ? goal
-          : 'audit-readiness' }))
+        const usual = () => Response.json({ ...overviewOf(company), goal: named === 'musterfirma-gmbh' ? goal
+          : 'audit-readiness' })
+        if (named !== 'musterfirma-gmbh') return Promise.resolve(usual())
+        return overviewAnswer(goalSent)?.then((answer) => answer.ok ? usual() : answer) ?? Promise.resolve(usual())
       }
       return answered(url, init)
     })
@@ -705,17 +726,22 @@ describe('the first pass on a company just made, issue 447', () => {
     .filter(([url, init]) => (url === '/api/goal' && init?.method === 'PUT') || url === '/api/profile-pass')
     .map(([url, init]) => [url, new Headers(init?.headers).get('X-Vouch-Profile'), init?.body ?? null])
   const passes = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')
+  const goalButton = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Change goal' })
 
   async function createFromSetup(button = 'Created', strict = true) {
     window.history.replaceState(null, '', '/developer/setup')
     render(strict ? <StrictMode><ProfiledApp /></StrictMode> : <ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: button }))
+  }
+  /** As createFromSetup, then waits for the new company's Dossier. */
+  async function createAndOpen(button = 'Created') {
+    await createFromSetup(button)
     await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
   }
 
   it('sets Internal improvement under the new company, then runs one pass, once under StrictMode', async () => {
     const fetch = serveSetup()
-    await createFromSetup()
+    await createAndOpen()
     expect(await screen.findByText('1 assessment waiting for your review.')).toBeTruthy()
     expect(firstPassCalls(fetch)).toEqual([
       ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
@@ -725,23 +751,83 @@ describe('the first pass on a company just made, issue 447', () => {
   })
 
   it('shows the running state on the hero while the pass runs', async () => {
-    serveSetup(undefined, () => { throw new Error('held') })
-    const fetch = vi.mocked(globalThis.fetch)
-    const answered = fetch.getMockImplementation()!
-    fetch.mockImplementation((url, init) => url === '/api/profile-pass' ? new Promise<Response>(() => {})
-      : answered(url, init))
-    await createFromSetup()
+    serveSetup({ passAnswer: NEVER })
+    await createAndOpen()
     expect(await screen.findByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
     expect(screen.getByText('Vouch is assessing every open control in one run. This can take a few minutes.'))
       .toBeTruthy()
   })
 
+  it('waits for the first overview read before changing the Goal, so that read is shown, not dropped', async () => {
+    let release: () => void = () => {}
+    const first = new Promise<Response>((resolve) => { release = () => resolve(new Response(null)) })
+    let released = false
+    let sentWhileHeld = false
+    const fetch = serveSetup({ overviewAnswer: () => released ? null : first, passAnswer: NEVER, goalAnswer: () => {
+      sentWhileHeld ||= !released
+      return Response.json({ goal: 'internal-improvement' })
+    } })
+    await createFromSetup()
+    await waitFor(() => expect(overviewCalls(fetch)).toContain('musterfirma-gmbh'))
+    released = true
+    release()
+    expect(await screen.findByText('Goal: Internal improvement')).toBeTruthy()
+    await screen.findByRole('button', { name: 'Running the profile pass…' })
+    expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal', '/api/profile-pass'])
+    expect(sentWhileHeld).toBe(false) // the Goal change waited for the first read
+  })
+
+  it("when the read after the Goal change fails, shows the overview with the new Goal, not 'Opening' for ever",
+    async () => {
+    let failed = false // the one read after the change fails
+    serveSetup({ passAnswer: NEVER, overviewAnswer: (goalSent) => goalSent && !failed && (failed = true)
+      ? Promise.resolve(new Response(null, { status: 503 })) : null })
+    await createAndOpen()
+    expect(await screen.findByText('Goal: Internal improvement')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    expect(screen.queryByText('Opening the dossier…')).toBeNull()
+  })
+
   it('with Audit readiness chosen, sends no goal change and still runs the pass', async () => {
     const fetch = serveSetup()
-    await createFromSetup('Created for audit')
+    await createAndOpen('Created for audit')
     await screen.findByText('1 assessment waiting for your review.')
     expect(firstPassCalls(fetch)).toEqual([['/api/profile-pass', 'musterfirma-gmbh', null]])
     expect(screen.getByText('Goal: Audit readiness')).toBeTruthy()
+  })
+
+  it("sends no change for a Goal the overview already has", async () => {
+    const fetch = serveSetup({ startingGoal: 'internal-improvement' })
+    await createAndOpen()
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(fetch)).toEqual([['/api/profile-pass', 'musterfirma-gmbh', null]])
+  })
+
+  it("sends Audit readiness when the overview has another Goal", async () => {
+    const changed = serveSetup({ startingGoal: 'internal-improvement' })
+    await createAndOpen('Created for audit')
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(changed)).toEqual([
+      ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'audit-readiness' })],
+      ['/api/profile-pass', 'musterfirma-gmbh', null],
+    ])
+    expect(await screen.findByText('Goal: Audit readiness')).toBeTruthy()
+  })
+
+  it('while the Goal change is out, Change goal and Run a profile pass wait', async () => {
+    let answer: () => void = () => {}
+    const held = new Promise<Response>((resolve) => {
+      answer = () => resolve(Response.json({ goal: 'internal-improvement' }))
+    })
+    const fetch = serveSetup({ goalAnswer: () => held, passAnswer: NEVER })
+    await createAndOpen()
+    await waitFor(() => expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal']))
+    expect(goalButton().disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Run a profile pass' }).disabled).toBe(true)
+    answer()
+    await screen.findByRole('button', { name: 'Running the profile pass…' })
+    expect(passes(fetch)).toHaveLength(1)
+    expect(goalButton().disabled).toBe(false)
   })
 
   it('a switch away and back, then a fresh start, start no pass again', async () => {
@@ -751,7 +837,7 @@ describe('the first pass on a company just made, issue 447', () => {
     fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/progress/fresh-start'
       ? Promise.resolve(Response.json({ fresh_start: '2026-11-10T10:00:00+00:00' }))
       : answered(url, init))
-    await createFromSetup()
+    await createAndOpen()
     await screen.findByText('1 assessment waiting for your review.')
     await switchTo('nordlicht')
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
@@ -781,29 +867,46 @@ describe('the first pass on a company just made, issue 447', () => {
   })
 
   it('a failed goal change says so under the Goal line, and the pass still runs', async () => {
-    const fetch = serveSetup(() => new Response(null, { status: 503 }))
-    await createFromSetup()
-    const alert = await screen.findByText('The company was created, but its Goal could not be set to Internal '
-      + 'improvement. Use Change goal to set it.')
+    const fetch = serveSetup({ goalAnswer: () => new Response(null, { status: 503 }) })
+    await createAndOpen()
+    const alert = await screen.findByText(NOT_SET)
     expect(alert.getAttribute('role')).toBe('alert')
     expect(screen.getByText('Goal: Audit readiness')).toBeTruthy()
     await screen.findByText('1 assessment waiting for your review.')
     expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal', '/api/profile-pass'])
   })
 
+  it('the note that the Goal was not set ends with the next Goal change that goes through, for good', async () => {
+    let changes = 0
+    serveSetup({ goalAnswer: () => ++changes === 1 ? new Response(null, { status: 503 })
+      : Response.json({ goal: 'internal-improvement' }) })
+    vi.stubGlobal('confirm', () => true)
+    await createAndOpen()
+    await screen.findByText(NOT_SET)
+    await screen.findByText('1 assessment waiting for your review.')
+    await userEvent.click(goalButton())
+    await screen.findByText('Goal: Internal improvement')
+    expect(screen.queryByText(NOT_SET)).toBeNull()
+    await userEvent.click(goalButton()) // back to Audit readiness: the note stays gone
+    await screen.findByText('Goal: Audit readiness')
+    expect(screen.queryByText(NOT_SET)).toBeNull()
+  })
+
   it('a goal change answering 401 signs out and starts no pass', async () => {
-    const fetch = serveSetup(() => new Response(null, { status: 401 }))
+    const fetch = serveSetup({ goalAnswer: () => new Response(null, { status: 401 }) })
     const signOut = vi.fn()
     setOnSignedOut(signOut)
-    await createFromSetup()
+    await createAndOpen()
     await waitFor(() => expect(signOut).toHaveBeenCalled())
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    // The sequence is over once the hero offers the pass again; starting one would have shown it running.
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Run a profile pass' }).disabled)
+      .toBe(false))
     expect(passes(fetch)).toHaveLength(0)
   })
 
   it("the pass's daily limit leaves the company open, with the limit sentence and the per-control way on", async () => {
-    serveSetup(undefined, () => Response.json({ detail: LIMIT, limit: 'profile-pass' }, { status: 429 }))
-    await createFromSetup()
+    serveSetup({ passAnswer: () => Response.json({ detail: LIMIT, limit: 'profile-pass' }, { status: 429 }) })
+    await createAndOpen()
     expect(await screen.findByText(LIMIT)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Assess 1.1.1 on its own' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()

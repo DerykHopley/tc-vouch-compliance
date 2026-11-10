@@ -540,7 +540,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
                     <CitedQuote key={i} quote={c.quote}>
-                      <span className="mono">{c.doc_id} v{c.version} · {c.section}</span>
+                      <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
                       <span className={`kind kind-${c.kind}`}>{c.kind}</span>
                       {c.stale && <span className="flag">Stale: {c.stale_because}</span>}
                       <span>Quote verified</span>

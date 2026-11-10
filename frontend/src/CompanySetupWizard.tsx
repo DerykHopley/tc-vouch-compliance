@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ProtectionLevel } from './assessment.ts'
 import DocumentTable from './DocumentTable.tsx'
-import { GOAL_WORDS } from './overview.ts'
+import { GOAL_LINES, GOAL_WORDS } from './overview.ts'
 import type { ProfileSummary } from './profiles.ts'
 import type { Goal } from './report.ts'
 import {
@@ -20,12 +20,8 @@ const NOT_APPLICABLE = 5
 const EVIDENCE = 6
 const FINISH = 7
 
-/** Step 4's Goals in the order shown, Internal improvement first (the default), each with its line from GLOSSARY.md
- * (#447). */
-const GOALS: { goal: Goal; line: string }[] = [
-  { goal: 'internal-improvement', line: "Improving the company's own security, with no audit planned." },
-  { goal: 'audit-readiness', line: 'Preparing for an external audit.' },
-]
+/** Step 4's Goals in the order shown, Internal improvement first (chosen at the start) (#447). */
+const GOALS: Goal[] = ['internal-improvement', 'audit-readiness']
 
 /** A press of its own (detail 1) within this long of the last move is that move's press landing again (two quick
  * clicks, a double-tap) on the new step's Next, Back or Create company: it is ignored, so each press moves one step and
@@ -400,12 +396,12 @@ function GoalStep({ answers, answer }: StepProps) {
   return (
     <fieldset className="setup-choices" aria-describedby={noteId}>
       <legend>Goal</legend>
-      {GOALS.map(({ goal, line }) => (
+      {GOALS.map((goal) => (
         <label key={goal} className="setup-choice setup-option">
           <input type="radio" name="goal" value={goal} checked={answers.goal === goal} onChange={() => answer({ goal })} />
           <span className="setup-option-text">
             <span className="setup-option-name">{GOAL_WORDS[goal]}</span>
-            <span className="field-note">{line}</span>
+            <span className="field-note">{GOAL_LINES[goal]}</span>
           </span>
         </label>
       ))}

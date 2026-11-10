@@ -122,6 +122,12 @@ export const GOAL_WORDS: Record<Goal, string> = {
   'internal-improvement': 'Internal improvement',
 }
 
+/** Each goal in one line, as GLOSSARY.md has it: company setup's step 4 (#447) shows it under the goal's name. */
+export const GOAL_LINES: Record<Goal, string> = {
+  'audit-readiness': 'Preparing for an external audit.',
+  'internal-improvement': "Improving the company's own security, with no audit planned.",
+}
+
 /** How a goal change went: changed, the session ended (a 401: signed out already, so nothing more to say), or failed
  * any other way. */
 export type GoalChange = 'changed' | 'signed-out' | 'failed'

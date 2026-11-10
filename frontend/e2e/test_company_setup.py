@@ -13,13 +13,14 @@ passes' daily limit (3).
 import re
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Response, expect
 from test_developer_page import as_compliance_lead
 
 LEVELS = "/api/developer/protection-levels"
 CONTROLS = "/api/developer/controls"
 LIBRARY = "/api/developer/sample-library"
 PROFILES = "/api/developer/profiles"
+PROFILE_PASS = "/api/profile-pass"
 # The wizard ignores a press of its own within 400 ms of the last move (two quick clicks, a
 # double-tap); a person's separate presses come further apart, so each helper move waits this long
 # first. A double-click's second press is kept from acting whenever it comes.
@@ -45,6 +46,21 @@ def to_step_3(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
     with page.expect_response(lambda r: LEVELS in r.url) as answer:
         press(page, "Next")
     assert answer.value.status == 200
+
+
+def create_company(page: Page) -> Response:
+    """Presses Create company on step 7; the create's answer, once the profile pass the new company
+    opens with (#447) has answered too, so nothing after it races that pass."""
+    with (
+        page.expect_response(
+            lambda r: r.url.endswith(PROFILES) and r.request.method == "POST"
+        ) as created,
+        page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed,
+    ):
+        press(page, "Create company")
+    assert created.value.status == 201
+    assert passed.value.ok, passed.value.status
+    return created.value
 
 
 def to_step_4(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
@@ -510,19 +526,14 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
     expect(page.get_by_role("table", name="Records").get_by_role("row")).to_have_count(2)
     expect(page.get_by_role("checkbox")).to_have_count(0)
 
-    with (
-        page.expect_response(lambda r: PROFILES in r.url) as created,
-        page.expect_response(lambda r: r.url.endswith("/api/overview")),
-    ):
-        press(page, "Create company")
-    assert created.value.status == 201
-    sent = created.value.request.post_data_json
+    created = create_company(page)
+    sent = created.request.post_data_json
     assert sent["company"] == "Musterfirma Nord GmbH"
     assert sent["not_applicable"] == [
         {"control": "1.6.1", "reason": "We build no prototype vehicles."},
         {"control": "5.1.1", "reason": "No cryptography in our own products"},
     ]
-    profile = created.value.json()
+    profile = created.json()
     assert profile["company"] == "Musterfirma Nord GmbH"
 
     expect(page).to_have_url(f"{setup_url}/")
@@ -532,7 +543,7 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
         banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
     ).to_be_visible()
     expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
-    # Its Goal is set and its profile pass starts (#447): story 5's check follows the pass through.
+    # Its Goal is set and its profile pass has run (#447): story 5's check follows the pass through.
     expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
     expect(page.get_by_role("region", name="Profile pass")).to_be_visible()
     banner.get_by_role("button", name=re.compile(r"^Profile: ")).click()
@@ -671,9 +682,9 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
     page: Page, first_pass_url
 ):
     """Story 5 end to end (#447): setup with Internal improvement left chosen on step 4 and a few
-    library documents, Create company, then the new company's Overview with its Goal set and the
-    profile pass running; it finishes with every card waiting for review, and an opened working
-    paper cites only chosen documents."""
+    library documents, Create company, then the new company's Overview with its Goal set and its
+    profile pass's result: every card waiting for review, and an opened working paper citing only
+    chosen documents."""
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, first_pass_url)
     to_step_4(page, "Erstpass GmbH")
@@ -693,26 +704,14 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
         page.get_by_text(re.compile(r"Then Vouch sets its Goal and runs a profile pass"))
     ).to_be_visible()
 
-    with (
-        page.expect_response(lambda r: r.url.endswith(PROFILES)) as created,
-        page.expect_response(
-            lambda r: r.url.endswith("/api/goal") and r.request.method == "PUT"
-        ) as goal,
-        page.expect_response(lambda r: r.url.endswith("/api/profile-pass")) as passed,
-    ):
-        press(page, "Create company")
-        running = page.get_by_role("button", name="Running the profile pass…")
-        expect(running).to_be_disabled()
-        expect(page.get_by_role("status")).to_have_text(
-            "Vouch is assessing every open control in one run. This can take a few minutes."
-        )
-    assert created.value.status == 201
-    profile = created.value.json()["id"]
+    with page.expect_response(
+        lambda r: r.url.endswith("/api/goal") and r.request.method == "PUT"
+    ) as goal:
+        created = create_company(page)
+    profile = created.json()["id"]
     assert goal.value.ok, goal.value.status
     assert goal.value.request.post_data_json == {"goal": "internal-improvement"}
     assert goal.value.request.headers["x-vouch-profile"] == profile
-    assert passed.value.ok, passed.value.status
-    assert passed.value.request.headers["x-vouch-profile"] == profile
 
     expect(page).to_have_url(f"{first_pass_url}/")
     expect(
@@ -731,7 +730,7 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
     with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
         panel.get_by_role("button", name="Open 1.1.1").click()
     paper = page.get_by_role("region", name="Working paper")
-    cited = paper.locator(".quotes-cell .mono")
+    cited = paper.locator("[data-doc-id]")
     expect(cited.first).to_be_visible()
-    for doc in cited.all_text_contents():
-        assert doc.split(" v")[0] in CHOSEN.values(), doc
+    for doc in cited.evaluate_all("spans => spans.map(s => s.dataset.docId)"):
+        assert doc in CHOSEN.values(), doc

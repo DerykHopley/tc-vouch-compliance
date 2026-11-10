@@ -6,7 +6,7 @@ documents). Local mode, the scripted fake model."""
 import re
 
 from playwright.sync_api import Page, expect
-from test_company_setup import PROFILES, open_setup, press, to_step_7
+from test_company_setup import create_company, open_setup, to_step_7
 from test_profiles import assessed as assessed_in
 
 DOCUMENTS = "**/api/documents"
@@ -63,12 +63,7 @@ def test_a_company_made_through_setup_lists_only_its_chosen_document(page: Page,
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
     to_step_7(page, "Belegfirma GmbH")  # German, the Backup policy chosen
-    with (
-        page.expect_response(lambda r: PROFILES in r.url) as created,
-        page.expect_response(lambda r: r.url.endswith("/api/overview")),
-    ):
-        press(page, "Create company")
-    assert created.value.status == 201
+    create_company(page)
     expect(
         page.get_by_role("button", name=re.compile(r"^Profile: Belegfirma GmbH"))
     ).to_be_visible()
