@@ -5,8 +5,11 @@ Nothing leaves the machine: a traced test hands the Langfuse client an in-memory
 runs with sockets disabled.
 """
 
+import asyncio
 import json
 import logging
+import threading
+import time
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator
@@ -287,7 +290,135 @@ def test_a_profile_pass_is_one_trace_with_its_model_call_and_each_control_s_step
     assert "profile:nordlicht" in attributes["langfuse.trace.tags"]
 
 
-# --- Each generation's cost and model (#504) ----------------------------------------------------
+# --- Sent inside the request (#510) --------------------------------------------------------------
+#
+# On Cloud Run a request has CPU only until its response is done: a trace sent after that may
+# wait for the next request, or be lost. So a run's trace is sent before its response ends,
+# waiting at most TRACE_SEND_WAIT_SECONDS for Langfuse.
+
+
+class SlowExporter(InMemorySpanExporter):
+    """An exporter that takes `seconds` to send, as Langfuse over the network does; with `hang`,
+    it answers only once released (or after HANG_SECONDS), as a Langfuse that is down."""
+
+    HANG_SECONDS = 8.0
+
+    def __init__(self, seconds: float = 0.0, *, hang: bool = False) -> None:
+        super().__init__()
+        self.seconds, self.hang = seconds, hang
+        self.released = threading.Event()
+
+    def export(self, spans):
+        if self.hang:
+            self.released.wait(self.HANG_SECONDS)
+        else:
+            time.sleep(self.seconds)
+        return super().export(spans)
+
+
+def tracing_to(exporter: SlowExporter) -> Tracing:
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), LOCAL)
+    return Tracing(keys, span_exporter=exporter, tracer_provider=TracerProvider())
+
+
+@pytest.fixture
+def slow() -> Iterator[tuple[Tracing, SlowExporter]]:
+    """Tracing on, each export taking a third of a second: a send left to the background can't
+    finish before the response does."""
+    exporter = SlowExporter(0.3)
+    on = tracing_to(exporter)
+    yield on, exporter
+    on.shutdown()
+
+
+@pytest.fixture
+def down() -> Iterator[tuple[Tracing, SlowExporter]]:
+    """Tracing on, to a Langfuse that never answers."""
+    exporter = SlowExporter(hang=True)
+    on = tracing_to(exporter)
+    yield on, exporter
+    exporter.released.set()
+    on.shutdown()
+
+
+def sent_by_the_end(on: Tracing, exporter: InMemorySpanExporter, response) -> None:
+    """Every span the run made was exported by the time its response ended: none comes later."""
+    at_the_end = len(exporter.get_finished_spans())
+    assert at_the_end > 0, response.text
+    on.flush()
+    assert len(exporter.get_finished_spans()) == at_the_end
+
+
+def test_an_assessment_s_trace_is_sent_before_its_stream_ends(slow):
+    on, exporter = slow
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
+
+    assert "event: result" in response.text
+    sent_by_the_end(on, exporter, response)
+
+
+def test_a_chat_turn_s_trace_and_its_assessment_s_are_sent_before_its_stream_ends(slow):
+    on, exporter = slow
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    response = client.post(
+        "/api/chat", json={"page": "dossier", "message": "Assess 4.1.2"}, headers=lead
+    )
+
+    assert "event: done" in response.text
+    sent_by_the_end(on, exporter, response)
+    found = traces(on, exporter).values()
+    assert {trace_attributes(s)["langfuse.trace.name"] for s in found} == {
+        "assessment",
+        "chat turn",
+    }
+
+
+def test_a_profile_pass_s_trace_is_sent_before_its_answer(slow):
+    on, exporter = slow
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    response = client.post("/api/profile-pass", headers=lead)
+
+    assert response.status_code == 200, response.text
+    sent_by_the_end(on, exporter, response)
+
+
+def test_a_langfuse_that_never_answers_holds_the_response_at_most_the_bound(
+    down, monkeypatch, caplog
+):
+    on, _ = down
+    monkeypatch.setattr(tracing_module, "TRACE_SEND_WAIT_SECONDS", 0.5)
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="vouch.tracing"):
+        response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
+    took = time.monotonic() - started
+
+    assert "event: result" in response.text
+    assert took < 0.5 + 2.5  # the bound, and the fake run's own time
+    assert "wasn't sent to Langfuse within 0.5 s" in caplog.text
+
+
+def test_a_stream_closed_on_the_event_loop_never_waits_for_langfuse(down):
+    """A stream the client leaves is closed when it's collected, which may be on the event
+    loop: there, the trace goes in the background, so no other request stalls."""
+    on, _ = down
+    facts = TraceFacts("assessment", "u", "nordlicht", None, PROMPT_VERSION)
+
+    async def run_and_close() -> float:
+        started = time.monotonic()
+        with traced(on, facts) as config:
+            run_traced(config, "assessment", lambda: 42)
+        return time.monotonic() - started
+
+    assert asyncio.run(run_and_close()) < 0.5
+
+
+# --- Each generation's cost and model (#504)----------------------------------------------------
 
 COST = "langfuse.observation.cost_details"
 MODEL = "langfuse.observation.model.name"
