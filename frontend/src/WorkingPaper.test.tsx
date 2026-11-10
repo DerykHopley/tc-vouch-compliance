@@ -208,6 +208,28 @@ describe('the working paper of an assessed control', () => {
   })
 })
 
+describe("a stale citation's flag on a German profile, issue 359", () => {
+  const GERMAN_REASON = 'freigegeben am 2022-03-14, jährlich zu prüfen, fällig am 2023-03-14' // as the API serves it
+  const german = judged.map((r) => r.id !== 'S1' ? r
+    : { ...r, citations: r.citations.map((c) => ({ ...c, stale_because: GERMAN_REASON })) })
+
+  it('reads in German, the served stale word and reason, marked German', () => {
+    const assessment = { ...ASSESSED, answer_language: 'de', stale_word: 'Prüfung überfällig', requirements: german }
+    show({ run: { status: 'done', steps: [], assessment }, language: 'de' })
+    const flag = within(row('S1')).getByText(`Prüfung überfällig: ${GERMAN_REASON}`)
+    expect(flag.className).toBe('flag')
+    expect(flag.getAttribute('lang')).toBe('de')
+  })
+
+  it('stays English on an English profile, and reads "Stale" from an API that serves no stale word', () => {
+    show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, answer_language: 'en', stale_word: 'Stale' } } })
+    expect(within(row('S1')).getByText('Stale: approved 2022-03-14, yearly review').getAttribute('lang')).toBe('en')
+    cleanup()
+    show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+    expect(within(row('S1')).getByText('Stale: approved 2022-03-14, yearly review')).toBeTruthy()
+  })
+})
+
 describe('the working paper of a control not yet assessed', () => {
   it('lists its requirements, not-applicable ones with their reason, and an Assess button', async () => {
     const onAssess = vi.fn()

@@ -129,6 +129,33 @@ export const GOAL_WORDS: Record<Goal, string> = {
   'internal-improvement': 'Internal improvement',
 }
 
+/** What the page says it is for, in the goal's terms: the top bar's label and the Dossier hero's headline, and the
+ * `lang` of the words when they aren't the interface's English. */
+export type GoalWording = { label: string; headline: string; lang?: string }
+
+const AUDIT_WORDING: GoalWording = {
+  label: 'Audit preparation', headline: 'Prepared for audit. One piece of evidence at a time.',
+}
+
+/** Internal improvement's words (#440), in the interface's English. */
+const IMPROVEMENT_WORDING: GoalWording = {
+  label: 'Security improvement', headline: 'Improving security. One piece of evidence at a time.',
+}
+
+/** Internal improvement's words in each answer language besides English, as `VERDICT_WORDS_IN` (assessment.ts). */
+const IMPROVEMENT_WORDING_IN: Record<string, Omit<GoalWording, 'lang'>> = {
+  de: { label: 'Sicherheitsverbesserung', headline: 'Sicherheit verbessern. Ein Nachweis nach dem anderen.' },
+}
+
+/** The words for the goal (#440): Audit readiness's are English in every language, as before; Internal improvement's
+ * follow the profile's answer language (ISO 639-1) when it has its own, marked with it. No goal (no profile read yet):
+ * Audit readiness's. */
+export function goalWording(goal?: Goal, language?: string): GoalWording {
+  if (goal !== 'internal-improvement') return AUDIT_WORDING
+  const own = language ? IMPROVEMENT_WORDING_IN[language] : undefined
+  return own ? { ...own, lang: language } : IMPROVEMENT_WORDING
+}
+
 /** Each goal in one line, as GLOSSARY.md has it: company setup's step 4 (#447) shows it under the goal's name. */
 export const GOAL_LINES: Record<Goal, string> = {
   'audit-readiness': 'Preparing for an external audit.',

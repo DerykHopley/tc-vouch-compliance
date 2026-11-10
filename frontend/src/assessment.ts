@@ -87,6 +87,8 @@ export type Assessment = {
   answer: string
   /** The profile's (ISO 639-1): the answer and its verdict words are in it; the interface stays English. */
   answer_language?: string
+  /** A stale citation's flag word in the answer language, the report's (#359); each stale reason is in it too. */
+  stale_word?: string
   status?: ReviewStatus
   requirements?: RequirementVerdict[]
   /** The thread to review it by (#38, #39). */

@@ -179,6 +179,20 @@ _STALE_BECAUSE = re.compile(
 )
 
 
+def stale_reason(because: str | None, code: str) -> str:
+    """Why a document is stale (`because`, as vouch.documents gives it, in English) in the
+    answer language `code`, in the cap note's words: the cap's note and the working paper's
+    stale flag (#359) say it alike. A reason vouch.documents didn't write stays as it is."""
+    words = CAP_WORDS.get(code, CAP_WORDS["en"])
+    if because in (None, CAP_WORDS["en"].no_review_date):
+        return words.no_review_date
+    found = _STALE_BECAUSE.fullmatch(because)
+    if not found:
+        return because
+    cycle = words.cycles.get(found["cycle"], found["cycle"])
+    return words.because.format(approved=found["approved"], cycle=cycle, due=found["due"])
+
+
 def cap_note(
     stale: dict[str, str | None],
     documented_only: bool,
@@ -186,22 +200,13 @@ def cap_note(
     statements: Iterable[str] = (),
 ) -> str | None:
     """The cap's note in the answer language `code`: each stale document and why (`stale`, its
-    reason as vouch.documents gives it, in English), each lead statement cited (`statements`,
-    by id, #422), then the documented-only clause; None when nothing caps it. A reason
-    vouch.documents didn't write stays as it is."""
+    reason as vouch.documents gives it, in English, said again by stale_reason), each lead
+    statement cited (`statements`, by id, #422), then the documented-only clause; None when
+    nothing caps it."""
     words = CAP_WORDS.get(code, CAP_WORDS["en"])
-    english = CAP_WORDS["en"]
-
-    def because(text: str | None) -> str:
-        if text in (None, english.no_review_date):
-            return words.no_review_date
-        found = _STALE_BECAUSE.fullmatch(text)
-        if not found:
-            return text
-        cycle = words.cycles.get(found["cycle"], found["cycle"])
-        return words.because.format(approved=found["approved"], cycle=cycle, due=found["due"])
-
-    why = [words.stale.format(doc=doc, because=because(text)) for doc, text in stale.items()]
+    why = [
+        words.stale.format(doc=doc, because=stale_reason(text, code)) for doc, text in stale.items()
+    ]
     why += [words.lead_statement.format(doc=doc) for doc in statements]
     if documented_only:
         why.append(words.documented_only)
