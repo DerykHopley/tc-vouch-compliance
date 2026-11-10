@@ -838,3 +838,29 @@ describe("the open questions' reasons on the Dossier (ticket 414)", () => {
     expect(notes('1.1.1')).toEqual(['Question answered: assess again', 'Question overdue: assess again'])
   })
 })
+
+describe("the hero's headline in each goal (ticket 440)", () => {
+  function headline(goal: Goal, language: string) {
+    render(<Dossier state={{ status: 'ready', overview: { ...seeded(), goal, answer_language: language } }}
+      onRetry={() => {}} onOpen={() => {}} running={null} {...NO_PASS} {...NO_GOAL} />)
+    return screen.getByRole('heading', { level: 1 })
+  }
+
+  it.each(['en', 'de'])('speaks of audit preparation under Audit readiness (%s), in English as before', (language) => {
+    const h1 = headline('audit-readiness', language)
+    expect(h1.textContent).toBe('Prepared for audit. One piece of evidence at a time.')
+    expect(h1.getAttribute('lang')).toBeNull()
+  })
+
+  it('speaks of improving security under Internal improvement', () => {
+    const h1 = headline('internal-improvement', 'en')
+    expect(h1.textContent).toBe('Improving security. One piece of evidence at a time.')
+    expect(h1.getAttribute('lang')).toBeNull()
+  })
+
+  it('speaks of improving security in German under Internal improvement for a German profile, marked German', () => {
+    const h1 = headline('internal-improvement', 'de')
+    expect(h1.textContent).toBe('Sicherheit verbessern. Ein Nachweis nach dem anderen.')
+    expect(h1.getAttribute('lang')).toBe('de')
+  })
+})
