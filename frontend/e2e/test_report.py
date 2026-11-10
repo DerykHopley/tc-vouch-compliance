@@ -16,8 +16,10 @@ from urllib.request import urlopen
 import pdf_words
 import pytest
 from fonts import FONTS_SETTLED, without_web_fonts
+from hyphen_breaks import UNHYPHENATED_BREAKS
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
+from test_working_paper import as_company
 from touch_targets import small_targets
 
 LOCAL_USER = "Local user"
@@ -214,6 +216,30 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
         )
         assert not scrolls, f"the report scrolls sideways at 400px in {scheme}"
         assert small_targets(page) == []
+
+
+def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
+    page: Page, report_url
+):
+    """#521: just above the phone layout the controls table's Question column is narrow, and
+    Alpenwerk's questions broke mid-word with no hyphen ("Information" / "ssicherheit"). They are
+    marked in the answer language and hyphenate in it, as the quotes do since #511."""
+    accepted(page.request, report_url, "4.1.2", "alpenwerk")  # the reviewed columns narrow it
+    page.set_viewport_size({"width": 701, "height": 900})
+    as_company(page, "alpenwerk")
+
+    report = open_report(page, report_url)
+
+    expect(report).to_have_attribute("lang", "de")
+    questions = report.locator("table.report-controls td.report-q")
+    expect(questions.first).to_be_visible()
+    marks = questions.evaluate_all(
+        "cells => cells.map((c) => ({ lang: c.lang, hyphens: getComputedStyle(c).hyphens }))"
+    )
+    assert marks and all(m == {"lang": "de", "hyphens": "auto"} for m in marks), marks
+    found = page.evaluate(UNHYPHENATED_BREAKS, "table.report-controls td.report-q")
+    assert found["words"], "Alpenwerk's report shows no question to measure"
+    assert found["breaks"] == [], f"question words broken without a hyphen: {found['breaks']}"
 
 
 # --- The controls and trail tables fit (#463) ---------------------------------------------------

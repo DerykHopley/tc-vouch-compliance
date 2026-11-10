@@ -422,6 +422,9 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-table th[scope="row"], .report-table td { border-bottom: 1px solid var(--rule); padding: 7px 8px; vertical-align: top;
   text-align: left; font-weight: 400; }
 .report-table .report-q { max-width: 52ch; overflow-wrap: anywhere; }
+/* The controls' Question column hyphenates in the answer language (its `lang`), as the quotes do (#511), breaking a
+   word without a hyphen only when it can't fit otherwise (#521). */
+.report-controls .report-q { hyphens: auto; overflow-wrap: break-word; }
 /* A control's quotes sit under its row, as one entry with it: no rule between them. */
 .report-controls tbody tr:has(+ .report-quote-row) > * { border-bottom-color: transparent; }
 .report-table .report-quote-row td { padding: 0 8px 12px 24px; }

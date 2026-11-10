@@ -98,8 +98,8 @@ const filled = (sentence: string, values: Record<string, number | string>) =>
 
 /** A column of the controls or trail table (#463): its served name and what it shows for a row. A column empty in
  * every row is left out, and each cell carries its column's name (`data-label`), which the phone's stacked rows show
- * beside the value, as they hide the header row. */
-type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean }
+ * beside the value, as they hide the header row. `lang` marks a column whose text is in the answer language (#521). */
+type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean; lang?: string }
 
 // `false` too: a cell written `a && b` gives it when `a` is empty.
 const blank = (value: ReactNode) => value === null || value === undefined || value === '' || value === false
@@ -113,9 +113,9 @@ function ColumnHeads<T>({ columns }: { columns: Column<T>[] }) {
 }
 
 function Cells<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
-  return columns.map(({ label, cell, className, rowHeader }, i) => rowHeader
-    ? <th key={i} scope="row" className={className} data-label={label}>{cell(row)}</th>
-    : <td key={i} className={className} data-label={label}>{cell(row)}</td>)
+  return columns.map(({ label, cell, className, rowHeader, lang }, i) => rowHeader
+    ? <th key={i} scope="row" className={className} data-label={label} lang={lang}>{cell(row)}</th>
+    : <td key={i} className={className} data-label={label} lang={lang}>{cell(row)}</td>)
 }
 
 function Document({ report }: { report: ReadinessReport }) {
@@ -326,11 +326,12 @@ function Questions({ report: { questions, words } }: { report: ImprovementReport
 /** A control's reviewed verdict, or none while it is open: its status word says so (#463). */
 const reviewedVerdict = (c: ReportControl) => c.status === 'accepted' && c.verdict ? c.verdict : null
 
-function Controls({ report: { controls, words } }: { report: AuditReadinessReport }) {
+function Controls({ report: { controls, words, head } }: { report: AuditReadinessReport }) {
   const { labels } = words
   const columns = shownColumns<ReportControl>([
     { label: labels.control, cell: (c) => c.id, className: 'mono', rowHeader: true },
-    { label: labels.question, cell: (c) => c.question, className: 'report-q' },
+    // The edition's question, in the answer language, as the working paper marks it (#521).
+    { label: labels.question, cell: (c) => c.question, className: 'report-q', lang: head.answer_language },
     { label: labels.status, cell: (c) => <span data-word>{words.statuses[c.status]}</span> },
     { label: labels.verdict, cell: (c) => {
       const verdict = reviewedVerdict(c)
