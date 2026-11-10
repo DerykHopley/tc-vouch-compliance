@@ -413,6 +413,9 @@ def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
         assert small_targets(page) == []
 
 
+# An owner role a reviewer types on approving an item: the standard German title, one word (#534's
+# verify: it stuck out of its card by 25-31px).
+GERMAN_OWNER = "Informationssicherheitsbeauftragter"
 # The remediation table's column names, in each profile's report language (#534).
 REMEDIATION_LABELS = {
     "nordlicht": ("Requirement", "Missing", "Owner role", "Due date"),
@@ -422,14 +425,18 @@ REMEDIATION_LABELS = {
 
 def with_a_german_remediation_item(page: Page) -> None:
     """Alpenwerk's report as served (as_company's header: this route answers before its), with one
-    more remediation group whose Missing is GERMAN_REASON, long compounds that must break in a
-    phone's card: they hyphenate in German or the check sees it."""
+    more remediation group: an item whose Missing is GERMAN_REASON and one whose owner role is
+    GERMAN_OWNER, long compounds that must break in a phone's card: they hyphenate in German or
+    the check sees it."""
 
     def patched(route: Route) -> None:
         headers = {**route.request.headers, "x-vouch-profile": "alpenwerk"}
         served = route.fetch(headers=headers).json()
         group = unbreakable_remediation()
-        group["items"] = [{**group["items"][0], "missing": GERMAN_REASON}]
+        group["items"] = [
+            {**group["items"][0], "missing": GERMAN_REASON},
+            {**group["items"][1], "missing": GERMAN_REASON, "owner_role": GERMAN_OWNER},
+        ]
         served["remediation"] = [*served["remediation"], group]
         route.fulfill(json=served)
 
@@ -457,6 +464,7 @@ def test_each_remediation_item_reads_as_a_stacked_card_on_a_phone(page: Page, re
         expect(tables.first).to_be_visible()
         if profile == "alpenwerk":
             expect(tables.last).to_contain_text(GERMAN_REASON)
+            expect(tables.last).to_contain_text(GERMAN_OWNER)
         rows = tables.locator("tbody tr")
         displays = set(rows.evaluate_all("rows => rows.map((r) => getComputedStyle(r).display)"))
         if width > 700:
@@ -464,20 +472,25 @@ def test_each_remediation_item_reads_as_a_stacked_card_on_a_phone(page: Page, re
             continue
         assert displays == {"block"}, (profile, displays)
         assert tables_overflowing(report, (REMEDIATION,)) == [], (profile, width)
-        # Every cell of the first item inside its box, named by its column in the report's language
-        # (the header row still names it for a screen reader).
-        cells = rows.first.locator("th, td").evaluate_all(
-            """cells => cells.map((c) => {
+        # Every cell of every item, and its text, inside its box, named by its column in the
+        # report's language (the header row still names it for a screen reader).
+        items = rows.evaluate_all(
+            """rows => rows.map((row) => [...row.querySelectorAll('th, td')].map((c) => {
               const box = c.closest('.table-wrap').getBoundingClientRect()
-              const r = c.getBoundingClientRect()
-              return { label: c.dataset.label ?? null, inside: r.left >= box.left - 0.5
-                && r.right <= box.right + 0.5, shown: getComputedStyle(c, '::before').content }
-            })"""
+              const text = document.createRange()
+              text.selectNodeContents(c)
+              const within = (r) => r.left >= box.left - 0.5 && r.right <= box.right + 0.5
+              return { label: c.dataset.label ?? null, text: c.textContent.slice(0, 40),
+                inside: within(c.getBoundingClientRect()) && within(text.getBoundingClientRect()),
+                shown: getComputedStyle(c, '::before').content }
+            }))"""
         )
-        assert [c["label"] for c in cells] == list(labels), (profile, cells)
-        assert all(c["inside"] and c["shown"] != "none" for c in cells), (profile, width, cells)
+        named = [[c["label"] for c in cells] for cells in items]
+        assert named and all(n == list(labels) for n in named), (profile, named)
+        outside = [c for cells in items for c in cells if not c["inside"] or c["shown"] == "none"]
+        assert outside == [], (profile, width, outside)
         if profile == "alpenwerk" and width == 390:
-            assert_hyphenated_in_german(page, {"missing": f"{REMEDIATION} td.report-q"})
+            assert_hyphenated_in_german(page, {"free text": f"{REMEDIATION} td.report-q"})
 
 
 def long_entry() -> dict:

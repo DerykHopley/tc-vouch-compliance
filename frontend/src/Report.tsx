@@ -393,7 +393,7 @@ function Remediation({ report: { remediation, words, head } }: { report: AuditRe
   const columns: Column<ReportItem>[] = [
     { label: labels.requirement, cell: (item) => item.requirement_id, className: 'mono', rowHeader: true },
     { label: labels.missing, cell: (item) => <Prose text={item.missing} />, ...answerText(head) },
-    { label: labels.owner_role, cell: (item) => item.owner_role },
+    { label: labels.owner_role, cell: (item) => item.owner_role, ...answerText(head) }, // typed on approval (#534)
     { label: labels.due_date, cell: (item) => item.due_date, className: 'mono' },
   ]
   return (
