@@ -361,6 +361,66 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert item["width"] <= width, item
 
 
+# Each quote word on the judged table that breaks across lines without a hyphen, read once the
+# fonts have loaded and layout has settled (as CARD_PARTS). A word's range has one rect per line it
+# is on; Chromium gives a hyphen it inserts a rect of its own at the end of the line, so a word
+# broken with a hyphen has two rects on every line but its last, and one broken anywhere has one.
+UNHYPHENATED_BREAKS = r"""async () => {
+  await document.fonts.ready
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const words = []
+  const breaks = []
+  for (const quote of document.querySelectorAll('table.reqs.judged .quotes-cell blockquote')) {
+    const walk = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT)
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+      for (const word of node.data.matchAll(/\p{L}+/gu)) {
+        const range = document.createRange()
+        range.setStart(node, word.index)
+        range.setEnd(node, word.index + word[0].length)
+        const perLine = new Map()
+        for (const r of range.getClientRects()) {
+          const top = Math.round(r.top)
+          perLine.set(top, (perLine.get(top) ?? 0) + 1)
+        }
+        words.push(word[0])
+        const lines = [...perLine.keys()].sort((a, b) => a - b)
+        if (lines.slice(0, -1).some((top) => perLine.get(top) < 2)) breaks.push(word[0])
+      }
+    }
+  }
+  return { words: words.length, breaks }
+}"""
+
+
+def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
+    page: Page, paper_url, nordlicht_later
+):
+    """#511: just above the phone layout the quotes column is narrow (#464), and Alpenwerk's
+    quotes ("Administratorkonten") broke mid-word with no hyphen. They hyphenate in the answer
+    language (German, as Alpenwerk's documents are), or don't break."""
+    response = page.request.post(
+        f"{paper_url}/api/assessments",
+        data={"control_id": WIDE},
+        headers={"X-Vouch-Profile": "alpenwerk"},
+    )
+    assert response.ok, response.status
+    assert "event: result" in response.text()
+    page.set_viewport_size({"width": 701, "height": 900})
+    nordlicht_later(paper_url)
+    make_current(page.request, paper_url, "alpenwerk")  # #480: the paper opens under it
+    paper = open_paper(page, paper_url, WIDE, assessed=True)
+    expect(paper.get_by_text("Answer language: German")).to_be_visible()
+    # Chromium's English rules also find breaks in these words, so the quote must say it's German.
+    quotes = paper.locator(".cite blockquote")
+    expect(quotes.first).to_be_visible()
+    assert set(quotes.evaluate_all("qs => qs.map((q) => q.lang)")) == {"de"}
+
+    found = page.evaluate(UNHYPHENATED_BREAKS)
+
+    assert found["words"], f"Alpenwerk's {WIDE} shows no quote to measure"
+    assert found["breaks"] == [], f"quote words broken without a hyphen: {found['breaks']}"
+
+
 def test_on_a_german_profile_a_stale_citations_flag_is_german(
     page: Page, report_url, nordlicht_later
 ):

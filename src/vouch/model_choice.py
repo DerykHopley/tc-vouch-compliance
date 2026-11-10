@@ -423,9 +423,12 @@ class ModelChoice:
             return CannedChatModel(callbacks=callbacks, language=answer_language)
         return self.openrouter.chat_model(chosen, callbacks)
 
-    def traced(self, facts: TraceFacts) -> AbstractContextManager[RunnableConfig]:
-        """The run config that traces one run (empty with tracing off), sent when it ends."""
-        return traced(self.tracing, facts)
+    def traced(
+        self, facts: TraceFacts, *, wait: bool = True
+    ) -> AbstractContextManager[RunnableConfig]:
+        """The run config that traces one run (empty with tracing off), sent when it ends;
+        without `wait`, in the background only (vouch.tracing.traced)."""
+        return traced(self.tracing, facts, wait=wait)
 
     def close(self) -> None:
         if self.openrouter is not None:
