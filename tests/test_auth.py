@@ -410,7 +410,11 @@ def test_no_token_or_secret_reaches_the_log(client, clerk, caplog):
 # --- Startup and shutdown ----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("jwt_key", ["-----BEGIN PUBLIC KEY-----marker", "not a key", PUBLIC[:80]])
+@pytest.mark.parametrize(
+    "jwt_key",
+    ["-----BEGIN PUBLIC KEY-----marker", "not a key", PUBLIC[:80]],
+    ids=["pem-header-only", "not-a-key", "truncated-pem"],
+)
 def test_a_malformed_jwt_key_stops_the_app_at_startup_naming_it(jwt_key):
     keys = ClerkKeys(KEYS.secret_key, KEYS.publishable_key, SecretStr(jwt_key), (ORIGIN,))
 
