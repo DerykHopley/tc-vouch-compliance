@@ -21,6 +21,7 @@ from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from test_working_paper import as_company
 from touch_targets import small_targets
+from unbreakable import LONG_QUOTES, UNBREAKABLE
 
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
@@ -261,18 +262,6 @@ def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
 
 TABLES = ("table.report-controls", "table.report-trail")
 REMEDIATION = "section[aria-labelledby='report-remediation'] table"
-# Free texts holding a token no hyphenation can break (#530's verify), each of which widened its
-# column past the sheet while the cells broke words only at hyphens or spaces: a link, a signed
-# link (a browser may break a link after a slash, not in its id and signature), a file name under
-# 31 characters, and a German compound in Nordlicht's English report.
-UNBREAKABLE = {
-    "link": "Siehe https://intranet.alpenwerk.example/isms/richtlinien/"
-    "Protokollierungsrichtlinie_Version3_freigegeben.pdf für Details.",
-    "signed link": "Kein Nachweis unter https://intranet.alpenwerk.example/isms/dokument?"
-    "id=8f14e45fceea167a5a36dedd4bea2543&sig=c9a1b2d3e4f506178f14e45fceea167a5a36dedd hinterlegt.",
-    "file name": "Siehe Zugriffsmatrix_Q3_2026_v2.xlsx dazu.",
-    "compound": "The Informationssicherheitsmanagementsystem was signed off.",
-}
 
 
 def with_a_full_trail(page: Page) -> None:
@@ -370,6 +359,64 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
                     " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
                 )
                 assert days and all(lines == 1 for lines in days), (profile, width, days)
+
+
+CONTROLS_WIDTH = (
+    "async (el) => {"
+    + FONTS_SETTLED
+    + """  const table = el.querySelector('table.report-controls')
+  const box = table.parentElement
+  return { wide: Math.max(table.scrollWidth, box.scrollWidth), room: box.clientWidth }
+}"""
+)
+"""The controls table's width (its own or its box's scroll width) and its box's, once the fonts
+have settled."""
+
+
+def with_long_quotes(page: Page, profile: str) -> None:
+    """The profile's report as served (as_company's header: this route answers before its), with
+    an accepted control's quotes holding LONG_QUOTES: one quote each, copying its first."""
+
+    def patched(route: Route) -> None:
+        headers = {**route.request.headers, "x-vouch-profile": profile}
+        served = route.fetch(headers=headers).json()
+        control = next(c for c in served["controls"] if c["status"] == "accepted" and c["quotes"])
+        first = control["quotes"][0]
+        control["quotes"] = [{**first, "quote": quote} for quote in LONG_QUOTES]
+        route.fulfill(json=served)
+
+    page.route("**/api/report", patched)
+
+
+@pytest.mark.parametrize("width", [701, 390])
+def test_a_quote_holding_a_long_link_or_path_does_not_widen_the_controls_table(
+    page: Page, report_url, width
+):
+    """#538: a quote broke only at hyphens or spaces (#511), and the quote row spans the controls
+    table, so a link, a signed link or a path widened the table to its own width (653 in 603 at
+    701, 645 in 324 at 390). A token too long for the line breaks anywhere, as #530's columns do.
+    Alpenwerk's table is about 16px too wide at 701 with its served quotes already (its Verdict
+    column, a separate bug): there it is no wider with the long ones."""
+    page.set_viewport_size({"width": width, "height": 900})
+    for profile in ("nordlicht", "alpenwerk"):
+        accepted(page.request, report_url, "4.1.2", profile)
+        page.unroute_all()
+        as_company(page, profile)
+        served = open_report(page, report_url)
+        expect(served.locator("table.report-controls blockquote").first).to_be_visible()
+        before = served.evaluate(CONTROLS_WIDTH)
+
+        with_long_quotes(page, profile)
+        report = open_report(page, report_url)
+        quotes = report.locator("table.report-controls blockquote")
+        for quote in LONG_QUOTES:
+            expect(quotes.filter(has_text=quote)).to_have_count(1)
+        after = report.evaluate(CONTROLS_WIDTH)
+
+        if profile == "alpenwerk" and width == 701:
+            assert after["wide"] <= before["wide"] + 1, (profile, width, before, after)
+        else:
+            assert after["wide"] <= after["room"], (profile, width, after)
 
 
 def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(

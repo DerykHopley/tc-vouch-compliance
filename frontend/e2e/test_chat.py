@@ -7,8 +7,10 @@ import json
 
 import pytest
 from dossier_cards import click_on_card
+from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from touch_targets import small_targets
+from unbreakable import LONG_QUOTES
 
 # Wide enough to pin the chat at any width from 360px to 720px: pinning is offered from 1402px, and the
 # page keeps 1042px beside it (chatWidth.ts, #465).
@@ -421,6 +423,45 @@ def test_a_numbered_list_stays_one_list_across_blank_lines_and_sub_bullets(page:
             expect(items).to_have_count(2)
             expect(items.first.locator("ul.prose-list > li")).to_have_text(["Datum"])
             expect(items.last).to_have_text("Bewerten")
+
+
+LOG_WIDTH = (
+    "async (log) => {"
+    + FONTS_SETTLED
+    + "  return { scroll: log.scrollWidth, room: log.clientWidth }\n}"
+)
+"""The chat log's width against its box's, once the fonts have settled."""
+
+
+@pytest.mark.parametrize("width", [1440, 390])
+def test_a_quote_holding_a_long_link_or_path_stays_inside_the_chat(page: Page, chat_url, width):
+    """#538: a quote broke only at hyphens or spaces (#511), overriding the message's break
+    anywhere, so a cited link, signed link or path widened the message past the bubble and its log
+    scrolled sideways (by 200-285px). Answered as a routed reply: no model call."""
+    question = "Wo liegen die Nachweise?"
+    cited = "Die Nachweise:\n" + "\n".join(
+        f'- <cite doc="logging-policy">{quote}</cite>' for quote in LONG_QUOTES
+    )
+
+    def answer(route):  # the chat's opening greeting is a POST too: it gets a plain hello
+        asked = route.request.post_data_json.get("message") == question
+        text = cited if asked else "Hello."
+        events = [("thread", {"thread_id": "t-538"}), ("token", {"text": text}), ("done", {})]
+        sse = "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
+        route.fulfill(status=200, content_type="text/event-stream", body=sse)
+
+    page.route("**/api/chat", answer)
+    open_page(page, chat_url, width)
+    page.get_by_role("button", name="Ask Vouch").click()
+    page.get_by_role("textbox", name="Message to Vouch").fill(question)
+    with page.expect_response("**/api/chat"):
+        page.get_by_role("button", name="Send").click()
+
+    log = chat(page).get_by_role("log")
+    for quote in LONG_QUOTES:
+        expect(log.locator("blockquote").filter(has_text=quote)).to_have_count(1)
+    measured = log.evaluate(LOG_WIDTH)
+    assert measured["scroll"] <= measured["room"], (width, measured)
 
 
 def test_with_the_chat_endpoint_down_a_message_shows_and_the_typed_text_stays(page: Page, chat_url):

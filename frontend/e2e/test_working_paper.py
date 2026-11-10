@@ -10,7 +10,8 @@ import re
 import pytest
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
-from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
+from unbreakable import LONG_QUOTES
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
 UNASSESSED = "5.1.2"  # assessed by one check only; Nordlicht marks its S3 not applicable
@@ -561,6 +562,71 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page
 
     # Chromium's English rules also find breaks in these words, so the quote must say it's German.
     assert_hyphenated_in_german(page, {"quotes": quotes})
+
+
+STORED = re.compile(r"/api/assessments/[^/]+$")
+JUDGED_WIDTH = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  const table = document.querySelector('table.reqs.judged')
+  return { scroll: table.scrollWidth, room: table.parentElement.clientWidth }
+}"""
+)
+"""The judged table's width against its wrapper's, once the fonts have settled."""
+
+
+def with_long_quotes(page: Page, profile: str) -> None:
+    """The profile's stored assessment as served (as_company's header: this route answers before
+    its), its first quotes holding LONG_QUOTES, one each."""
+
+    def patched(route: Route) -> None:
+        headers = {**route.request.headers, "x-vouch-profile": profile}
+        served = route.fetch(headers=headers).json()
+        requirements = served["assessment"]["requirements"]
+        citations = [c for r in requirements for c in r["citations"]]
+        assert len(citations) >= len(LONG_QUOTES), citations
+        for citation, quote in zip(citations, LONG_QUOTES, strict=False):
+            citation["quote"] = quote
+        route.fulfill(json=served)
+
+    page.route(STORED, patched)
+
+
+@pytest.mark.parametrize("width", [701, 1024, 390])
+def test_a_quote_holding_a_long_link_or_path_does_not_widen_the_requirements_table(
+    page: Page, paper_url, width
+):
+    """#538: a quote broke only at hyphens or spaces (#511), and the quotes column sizes to its
+    longest unbreakable run, so a link, a signed link or a path widened the judged table (1144 in
+    669 at 701). A token too long for the line breaks anywhere, as #530's report columns do.
+    Alpenwerk's table is about 16px too wide at 701 with its served quotes already (its Verdict
+    column, a separate bug): there it is no wider with the long ones."""
+    page.set_viewport_size({"width": width, "height": 900})
+    for profile in ("nordlicht", "alpenwerk"):
+        response = page.request.post(
+            f"{paper_url}/api/assessments",
+            data={"control_id": ASSESSED},
+            headers={"X-Vouch-Profile": profile},
+        )
+        assert response.ok, response.status
+        assert "event: result" in response.text()
+        page.unroute_all()  # the last company's routes give way to this one's
+        as_company(page, profile)
+        served = open_paper(page, paper_url, ASSESSED, assessed=True)
+        expect(served.locator("table.reqs.judged blockquote").first).to_be_visible()
+        before = page.evaluate(JUDGED_WIDTH)
+
+        with_long_quotes(page, profile)
+        paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+        quotes = paper.locator("table.reqs.judged blockquote")
+        for quote in LONG_QUOTES:
+            expect(quotes.filter(has_text=quote)).to_have_count(1)
+        after = page.evaluate(JUDGED_WIDTH)
+
+        if profile == "alpenwerk" and width == 701:
+            assert after["scroll"] <= before["scroll"] + 1, (profile, width, before, after)
+        else:
+            assert after["scroll"] <= after["room"], (profile, width, after)
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
