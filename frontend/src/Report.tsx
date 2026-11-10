@@ -126,14 +126,12 @@ const answerText = (head: { answer_language: string }) => ({ className: 'report-
 const LONG_TOKEN = /(\S{31,})/
 const WORD = /^\p{P}*[\p{L}­-]+\p{P}*$/u
 
-/** Text the team typed (a note, a question, an answer), its words hyphenating in its cell: a long token that is no
- * word (a link, a file name, an id) may break anywhere instead, as no hyphenation can, so it can't widen its column
- * past the sheet (#530). */
-function Typed({ text }: { text: string }) {
-  return text.split(LONG_TOKEN).map((part, i) => i % 2 === 1 && !WORD.test(part)
-    ? <span key={i} className="report-token">{part}</span>
-    : <Fragment key={i}>{part}</Fragment>)
-}
+/** A free-text cell's text (a note, a question, an answer, what's missing), its words hyphenating in its cell: a long
+ * token that is no word (a link, a file name, an id) may break anywhere instead, as no hyphenation can, so it can't
+ * widen its column past the sheet (#530). Prose takes it to set each run of the model's text. */
+const freeText = (text: string): ReactNode => text.split(LONG_TOKEN).map((part, i) => i % 2 === 1 && !WORD.test(part)
+  ? <span key={i} className="report-token">{part}</span>
+  : <Fragment key={i}>{part}</Fragment>)
 
 function Document({ report }: { report: ReadinessReport }) {
   const { head, words } = report
@@ -283,11 +281,11 @@ function Plan({ report: { plan, words, head } }: { report: ImprovementReport }) 
                     <tr key={`${item.control_id} ${item.requirement_id}`}>
                       <th scope="row" className="mono">{item.control_id}</th>
                       <td className="mono">{item.requirement_id}</td>
-                      <td {...answerText(head)}><Prose text={item.missing} /></td>
+                      <td {...answerText(head)}><Prose text={item.missing} set={freeText} /></td>
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                       <td><span data-word>{words.item_statuses[item.status]}</span></td>
-                      <td {...answerText(head)}>{item.note && <Typed text={item.note} />}</td>
+                      <td {...answerText(head)}>{item.note && freeText(item.note)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -325,11 +323,11 @@ function Questions({ report: { questions, words, head } }: { report: Improvement
               {questions.map((q) => (
                 <tr key={q.id}>
                   <th scope="row" className="mono">{q.control_id}</th>
-                  <td {...answerText(head)}><Typed text={q.question} /></td>
+                  <td {...answerText(head)}>{freeText(q.question)}</td>
                   <td>{q.asked_of}</td>
                   <td className="mono">{q.due_date}</td>
                   <td><span data-word>{words.question_statuses[questionStatus(q)]}</span></td>
-                  <td {...answerText(head)}>{q.answer && <Typed text={q.answer} />}</td>
+                  <td {...answerText(head)}>{q.answer && freeText(q.answer)}</td>
                 </tr>
               ))}
             </tbody>
@@ -421,7 +419,7 @@ function Remediation({ report: { remediation, words, head } }: { report: AuditRe
                   {group.items.map((item) => (
                     <tr key={item.requirement_id}>
                       <th scope="row" className="mono">{item.requirement_id}</th>
-                      <td {...answerText(head)}><Prose text={item.missing} /></td>
+                      <td {...answerText(head)}><Prose text={item.missing} set={freeText} /></td>
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                     </tr>
@@ -478,7 +476,7 @@ function Trail({ report: { trail, words, head } }: { report: ReadinessReport }) 
     { label: labels.action, cell: (e) => <span data-word>{actionWord(e, words)}</span> },
     { label: labels.verdict_before, cell: (e) => verdict(e.verdict_before) },
     { label: labels.verdict_after, cell: (e) => verdict(e.verdict_after) },
-    { label: labels.note, cell: (e) => e.note && <Typed text={e.note} />, ...answerText(head) },
+    { label: labels.note, cell: (e) => e.note && freeText(e.note), ...answerText(head) },
     { label: labels.evidence, className: 'mono', cell: (e) =>
       e.evidence.map((d) => <span key={`${d.doc_id} ${d.version}`} className="report-line">{d.doc_id} v{d.version}</span>) },
     { label: labels.model, cell: (e) => e.model, className: 'mono' },

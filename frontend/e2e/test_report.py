@@ -266,13 +266,19 @@ URL_NOTE = (
     "Siehe https://intranet.alpenwerk.example/isms/richtlinien/"
     "Protokollierungsrichtlinie_Version3_freigegeben.pdf für Details."
 )
+# As the model might draft a Missing, naming the document the evidence should be: a browser may break
+# a link after a slash and hyphenate the words in it, but not a signed link's id and signature.
+URL_MISSING = (
+    "Kein Nachweis unter https://intranet.alpenwerk.example/isms/dokument?"
+    "id=8f14e45fceea167a5a36dedd4bea2543&sig=c9a1b2d3e4f506178f14e45fceea167a5a36dedd hinterlegt."
+)
 
 
 def with_a_full_trail(page: Page) -> None:
     """The report as served, with the recorded Nordlicht trail and a long entry added, so the trail
     has every column filled (long notes, evidence ids, model names) whatever this server holds; and
-    a note holding a long link, in the trail and, in the improvement report, as a question's answer
-    (#530)."""
+    a text holding a long link, in the trail and, in the improvement report, as a question's answer
+    and a plan item's Missing (#530)."""
     recorded = json.loads(NORDLICHT_REPORT.read_text())["trail"]["entries"]
 
     def patched(route: Route) -> None:
@@ -280,6 +286,9 @@ def with_a_full_trail(page: Page) -> None:
         served["trail"] = {"entries": [*recorded, long_entry(), url_entry()], "next": None}
         if "questions" in served:
             served["questions"] = [*served["questions"], url_question()]
+            plan = served["plan"] or [{"priority": "low", "items": []}]
+            plan[-1]["items"].append(url_plan_item())
+            served["plan"] = plan
         route.fulfill(json=served)
 
     page.route("**/api/report", patched)
@@ -338,7 +347,8 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
                 assert tables_overflowing(report) == [], (profile, width)
             else:
                 expect(report.locator("table.report-questions")).to_contain_text(URL_NOTE)
-                shown = (*TABLES, "table.report-questions")
+                expect(report.locator("table.report-plan").last).to_contain_text(URL_MISSING)
+                shown = (*TABLES, "table.report-questions", "table.report-plan")
                 assert tables_overflowing(report, shown) == [], (profile, width)
             if goal == "audit-readiness" and profile == "alpenwerk":
                 # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
@@ -412,6 +422,19 @@ def long_entry() -> dict:
 def url_entry() -> dict:
     """A trail entry whose typed note holds a long link (#530's verify)."""
     return {**long_entry(), "id": 2, "action": "override", "note": URL_NOTE}
+
+
+def url_plan_item() -> dict:
+    """A plan item whose Missing, as the model drafted it, holds a long link (#530)."""
+    return {
+        "control_id": "4.1.2",
+        "requirement_id": "M2",
+        "missing": URL_MISSING,
+        "owner_role": "IT-Leiter",
+        "due_date": "2026-12-31",
+        "status": "open",
+        "note": "",
+    }
 
 
 def url_question() -> dict:

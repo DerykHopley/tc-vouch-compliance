@@ -362,6 +362,18 @@ describe('A typed note with a long token (ticket 530)', () => {
     expect(cell?.textContent).toBe(note)
     expect([...cell!.querySelectorAll('.report-token')].map((t) => t.textContent)).toEqual([link])
   })
+
+  it("does the same in the model's Missing, keeping its Markdown", async () => {
+    const link = 'https://intranet.alpenwerk.example/isms/dokument?id=8f14e45fceea167a5a36dedd4bea2543'
+    const [group] = REPORT.remediation
+    serve({ ...REPORT, remediation: [{ ...group, items: [{ ...group.items[0], missing: `No **record** at ${link}.` }] }] })
+    render(<Report />)
+    const report = await shown()
+
+    const cell = within(report).getByRole('region', { name: 'Remediation items' }).querySelector('td.report-q')
+    expect(cell?.querySelector('strong')?.textContent).toBe('record')
+    expect([...cell!.querySelectorAll('.report-token')].map((t) => t.textContent)).toEqual([`${link}.`])
+  })
 })
 
 describe('The improvement report (ticket 420)', () => {
