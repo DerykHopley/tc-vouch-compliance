@@ -1,33 +1,42 @@
 """The Ask Vouch button covers nothing (#462), measured.
 
-`under_the_button(page)` lists every visible field, button and line of text whose box meets the
-floating Ask Vouch button's box, with the page as it stands, so a page's browser test can assert
-it's empty. A line of text is measured by its own line boxes, not its element's box, so a paragraph
-that only reaches the button's height with a short last line is not counted."""
+Three measures, each with the page as it stands, so a page's browser test can assert on them:
+- `under_the_button(page)`: every visible field, button, link and line of text whose box meets the
+  floating Ask Vouch button's box. A line of text is measured by its own line boxes, not its
+  element's box, so a paragraph whose short last line stops left of the button is not counted;
+- `under_the_button_when_brought_into_view(page)`: the fields, buttons and links in main that still
+  meet it once each is brought into view as the browser does when it is tabbed or scrolled to;
+- `clearance_at_the_bottom(page)`: scrolled to the bottom, how far the page's content ends above
+  the button."""
 
 from playwright.sync_api import Page
 
-# Each line box of each visible text node, and each visible input, button, select and textarea,
-# outside the button itself, that meets the button's box. 1px of slack, for sub-pixel rounding.
-UNDER = """() => {
-  const fab = document.querySelector('.fab')
-  if (!fab) return ['no Ask Vouch button']
-  const f = fab.getBoundingClientRect()
-  const meets = r => r.width > 0 && r.height > 0 &&
+# Shared by the three scripts: the button's box, whether a box meets it (1px of slack, for
+# sub-pixel rounding), the controls measured, whether one is shown, and its name in a report.
+COMMON = """
+const fab = document.querySelector('.fab')
+if (!fab) throw new Error('no Ask Vouch button on the page')
+const button = () => fab.getBoundingClientRect()
+const meets = r => {
+  const f = button()
+  return r.width > 0 && r.height > 0 &&
     r.left < f.right - 1 && r.right > f.left + 1 && r.top < f.bottom - 1 && r.bottom > f.top + 1
-  const shown = el => {
-    if (fab.contains(el) || el.closest('[inert], [aria-hidden=true]')) return false
-    const s = getComputedStyle(el)
-    return s.visibility !== 'hidden' && s.display !== 'none'
-  }
-  const hits = []
-  const fields = 'input:not([type=hidden]), button, select, textarea'
-  for (const el of document.querySelectorAll(fields)) {
-    if (shown(el) && meets(el.getBoundingClientRect())) {
-      const name = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('name') || '').trim()
-      hits.push(`${el.tagName.toLowerCase()} "${name.slice(0, 40)}"`)
-    }
-  }
+}
+const CONTROLS = 'input:not([type=hidden]), button, select, textarea, a[href]'
+const shown = el => !fab.contains(el) && !el.closest('[inert], [aria-hidden=true]') &&
+  el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+const named = el => {
+  const name = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('name') || '').trim()
+  return `${el.tagName.toLowerCase()} "${name.slice(0, 40)}"`
+}
+"""
+
+UNDER = (
+    "() => {"
+    + COMMON
+    + """
+  const hits = [...document.querySelectorAll(CONTROLS)]
+    .filter(el => shown(el) && meets(el.getBoundingClientRect())).map(named)
   const walker = document.createTreeWalker(document.querySelector('#root') || document.body, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (!node.textContent.trim() || !node.parentElement || !shown(node.parentElement)) continue
@@ -39,49 +48,48 @@ UNDER = """() => {
   }
   return hits
 }"""
+)
 
-# How far the page's content ends above the button's top once scrolled to the bottom: the lowest
-# visible box inside main; negative when it ends under the button.
-CLEARANCE = """() => {
-  window.scrollTo(0, document.documentElement.scrollHeight)
-  const fab = document.querySelector('.fab').getBoundingClientRect()
-  const ends = [...document.querySelectorAll('main *')].map(el => el.getBoundingClientRect())
-    .filter(r => r.width > 1 && r.height > 1).map(r => r.bottom)
-  return fab.top - Math.max(...ends)
-}"""
-
-
-# Each field and button in main brought into view as the browser does when it is tabbed to or
-# scrolled to (scrollIntoView, which keeps clear of the page's scroll padding), then measured
-# against the button: the ones that still meet it.
-BROUGHT_INTO_VIEW = """() => {
-  const f = document.querySelector('.fab').getBoundingClientRect()
+# scrollIntoView keeps clear of the page's scroll padding, as tabbing to a field does.
+BROUGHT_INTO_VIEW = (
+    "() => {"
+    + COMMON
+    + """
   const hits = []
-  for (const el of document.querySelectorAll('main :is(input:not([type=hidden]), button, select, textarea, a[href])')) {
-    if (el.closest('[inert], [aria-hidden=true]') || getComputedStyle(el).visibility === 'hidden') continue
-    if (!el.getClientRects().length) continue
+  for (const el of document.querySelectorAll(`main :is(${CONTROLS})`)) {
+    if (!shown(el)) continue
     el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    const r = el.getBoundingClientRect()
-    if (r.left < f.right - 1 && r.right > f.left + 1 && r.top < f.bottom - 1 && r.bottom > f.top + 1) {
-      const name = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('name') || '').trim()
-      hits.push(`${el.tagName.toLowerCase()} "${name.slice(0, 40)}"`)
-    }
+    if (meets(el.getBoundingClientRect())) hits.push(named(el))
   }
   return hits
 }"""
+)
+
+# The lowest visible box inside main; negative when it ends under the button.
+CLEARANCE = (
+    "() => {"
+    + COMMON
+    + """
+  window.scrollTo(0, document.documentElement.scrollHeight)
+  const ends = [...document.querySelectorAll('main *')].map(el => el.getBoundingClientRect())
+    .filter(r => r.width > 1 && r.height > 1).map(r => r.bottom)
+  if (!ends.length) throw new Error('nothing in main to measure')
+  return button().top - Math.max(...ends)
+}"""
+)
 
 
 def under_the_button(page: Page) -> list[str]:
-    """Each field, button or line of text under the Ask Vouch button, as `tag "name"`."""
+    """Each field, button, link or line of text under the Ask Vouch button, as `tag "name"`."""
     return page.evaluate(UNDER)
-
-
-def scrolled_to_the_bottom(page: Page) -> float:
-    """Scrolls to the page's bottom and returns how many px its last content ends above the
-    button (negative: under it)."""
-    return page.evaluate(CLEARANCE)
 
 
 def under_the_button_when_brought_into_view(page: Page) -> list[str]:
     """Each field, button or link in main that, brought into view, still sits under the button."""
     return page.evaluate(BROUGHT_INTO_VIEW)
+
+
+def clearance_at_the_bottom(page: Page) -> float:
+    """Scrolls to the page's bottom and returns how many px its content ends above the button
+    (negative: under it)."""
+    return page.evaluate(CLEARANCE)

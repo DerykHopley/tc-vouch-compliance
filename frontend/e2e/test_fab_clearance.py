@@ -2,7 +2,9 @@
 
 On the Overview, a working paper, the Report and the Developer page, at 1440, 1024 and 390: each
 field, button and link brought into view (tabbed or scrolled to) stops clear of the button, and
-scrolled to the bottom the page's last content ends above it, with nothing under it.
+scrolled to the bottom the page's last content ends above it, with nothing under it. The pages that
+need an assessment loop over the widths, so each spends one from its server's daily limit; the
+others are a case per width.
 
 Not checked: the page as it opens. A fixed button over a scrolling page sits over whatever reaches
 the viewport's bottom right as the page scrolls, the first screen included; keeping that clear
@@ -13,8 +15,9 @@ remediation item (its due-date field, which the button covered at 1440)."""
 
 import re
 
+import pytest
 from fab_clearance import (
-    scrolled_to_the_bottom,
+    clearance_at_the_bottom,
     under_the_button,
     under_the_button_when_brought_into_view,
 )
@@ -36,7 +39,7 @@ def opened(page: Page, size: tuple[int, int], url: str, answer: str | re.Pattern
 def covers_nothing(page: Page) -> None:
     width = page.viewport_size["width"] if page.viewport_size else None
     assert under_the_button_when_brought_into_view(page) == [], width
-    assert scrolled_to_the_bottom(page) >= 0, width
+    assert clearance_at_the_bottom(page) >= 0, width
     assert under_the_button(page) == [], width
 
 
@@ -48,7 +51,6 @@ def test_on_the_overview(page: Page, profiles_url):
 
 
 def test_on_a_working_paper_with_a_remediation_item(page: Page, paper_url):
-    # Once, not per width: each assessment counts towards the server's daily limit.
     confirmed_with_an_item(page.request, paper_url)
     for size in WIDTHS:
         opened(page, size, f"{paper_url}/controls/4.1.2", re.compile(r"/api/assessments/[^/]+$"))
@@ -56,13 +58,13 @@ def test_on_a_working_paper_with_a_remediation_item(page: Page, paper_url):
         covers_nothing(page)
 
 
-def test_on_the_report(page: Page, report_url):
-    for size in WIDTHS:
-        opened(page, size, f"{report_url}/report", "**/api/report")
-        covers_nothing(page)
+@pytest.mark.parametrize("size", WIDTHS, ids=lambda size: str(size[0]))
+def test_on_the_report(page: Page, report_url, size):
+    opened(page, size, f"{report_url}/report", "**/api/report")
+    covers_nothing(page)
 
 
-def test_on_the_developer_page(page: Page, profiles_url):
-    for size in WIDTHS:
-        opened(page, size, f"{profiles_url}/developer", "**/api/developer/settings")
-        covers_nothing(page)
+@pytest.mark.parametrize("size", WIDTHS, ids=lambda size: str(size[0]))
+def test_on_the_developer_page(page: Page, profiles_url, size):
+    opened(page, size, f"{profiles_url}/developer", "**/api/developer/settings")
+    covers_nothing(page)
