@@ -689,3 +689,20 @@ def test_setup_lets_a_trail_made_before_369_keep_a_goal_and_changes_nothing_on_a
             conn.execute(statement)
         refused.append("append-only" in str(error.value))
     assert refused == [True, True, True]
+
+
+def test_a_review_refused_while_another_holds_it_says_so_plainly_with_nothing_internal():
+    # #396: the 409 once read 'assessment ["local-user", "nordlicht"]be93… is being reviewed'.
+    trail = audit.ProcessTrail()
+    key = '["local-user", "nordlicht"]be93f00d'
+
+    with (
+        trail.holding(key),
+        pytest.raises(audit.NotWaitingForReviewError) as refused,
+        trail.holding(key),
+    ):
+        pass
+
+    assert str(refused.value) == audit.BEING_REVIEWED
+    for internal in ("local-user", "nordlicht", "be93f00d", "["):
+        assert internal not in str(refused.value)
