@@ -96,11 +96,13 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
+  // Nothing assessed yet (#495): until the first pass, the pass's note says what it costs.
+  const nothingAssessed = readiness.controls > 0 && count['not-assessed'] === readiness.controls
   if (readiness.controls === 0) {
     // Every control is not applicable as a whole under the profile (#454): nothing to assess or review.
     headline = 'No control applies under this profile.'
     detail = 'There is nothing to assess.'
-  } else if (count['not-assessed'] === readiness.controls) {
+  } else if (nothingAssessed) {
     headline = 'Nothing is assessed yet.'
     detail = next ? `Start with ${next.control_id}: assess it, then review what Vouch finds.` : ''
   } else {
@@ -115,7 +117,6 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
   const wording = goalWording(overview.goal, overview.answer_language)
   return (
     <section className="hero">
-      <span className="pill">{overview.company} · {overview.country}</span>
       <GoalRow overview={overview} onChanged={onGoalChanged} arriving={arriving} notSet={goalNotSet} />
       <RoundRow overview={overview} onChanged={onRoundChanged} />
       <h1 ref={heading} tabIndex={-1} lang={wording.lang}>{wording.headline}</h1>
@@ -141,8 +142,8 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
         </p>
         : <p id="pass-note" className="field-note">
           {running !== null ? `Vouch is assessing ${running}. One run at a time.`
-            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, '
-              + `a pass over ${readiness.controls} controls costs about $0.30–0.50.`}
+            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped.'
+              + (nothingAssessed ? ` On Sonnet 5.5, a pass over ${readiness.controls} controls costs about $0.30–0.50.` : '')}
         </p>)}
     </section>
   )

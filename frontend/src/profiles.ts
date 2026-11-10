@@ -83,7 +83,7 @@ function countryCode(country: string): string | null {
   return codes.get(country) ?? null
 }
 
-/** The profile button's tag (#222): its country's code and its answer language's, "DE · EN"; the country's name where
- * it has no code. */
-export const profileTag = (p: ProfileSummary) =>
+/** A company's tag in the top bar (#222, #495): its country's code and its answer language's, "DE · EN"; the
+ * country's name where it has no code. A profile's summary fits it, and so does the overview's company. */
+export const profileTag = (p: Pick<ProfileSummary, 'country' | 'answer_language'>) =>
   `${countryCode(p.country) ?? p.country} · ${p.answer_language.toUpperCase()}`

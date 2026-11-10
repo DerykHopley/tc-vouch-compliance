@@ -181,21 +181,34 @@ const overviewCalls = (fetch: ReturnType<typeof serve>) =>
   fetch.mock.calls.filter(([url]) => url === '/api/overview')
     .map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))
 
+/** The company the top bar names (ticket 495), or null when it names none. */
+const barName = () => screen.getByRole('banner').querySelector('.top-name')?.textContent ?? null
+
+/** The Dossier under `company`: the top bar names it, and its overview is read (the hero is shown). */
+async function dossierOf(company: string) {
+  await waitFor(() => {
+    expect(barName()).toBe(company)
+    expect(document.querySelector('.hero')).not.toBeNull()
+  })
+}
+
 const currentChanges = (fetch: ReturnType<typeof serve>) =>
   fetch.mock.calls.filter(([url]) => url === '/api/developer/current-company')
     .map(([, init]) => JSON.parse(String(init?.body)) as { company: string })
 
 describe('ProfiledApp, issue 480', () => {
-  it('opens under the current company, with no profile switcher, and keeps nothing in the browser', async () => {
+  it('opens under the current company, named in the top bar with no switcher (ticket 495), and keeps nothing in the browser',
+    async () => {
     const fetch = serve([NORDLICHT, TESTWERK], 'testwerk')
     const stored = vi.spyOn(Storage.prototype, 'setItem')
     render(<ProfiledApp />)
-    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Testwerk Prüfstand GmbH')
     expect(overviewCalls(fetch)).toEqual(['testwerk'])
     expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'testwerk' })
     const banner = screen.getByRole('banner')
     expect(within(banner).queryByRole('button', { name: /^Profile/ })).toBeNull()
-    expect(within(banner).queryByText(/Testwerk/)).toBeNull()
+    expect(within(banner).getByText('Somewhere · EN')).toBeTruthy() // the overview's, once read (this fixture's country)
+    expect(within(banner).getByText('Testwerk Prüfstand GmbH').closest('button, a')).toBeNull()
     expect(stored.mock.calls.filter(([key]) => key === 'vouch.profile')).toEqual([])
     expect(window.localStorage.getItem('vouch.profile')).toBeNull()
   })
@@ -204,7 +217,7 @@ describe('ProfiledApp, issue 480', () => {
     window.localStorage.setItem('vouch.profile', 'testwerk')
     const fetch = serve([NORDLICHT, TESTWERK])
     render(<ProfiledApp />)
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Nordlicht Komponenten GmbH')
     expect(overviewCalls(fetch)).toEqual(['nordlicht'])
   })
 
@@ -223,7 +236,7 @@ describe('ProfiledApp, issue 480', () => {
 
     await userEvent.click(await screen.findByRole('menuitem', { name: `Start ${NORDLICHT.company} afresh…` }))
 
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Nordlicht Komponenten GmbH')
     expect(window.location.pathname).toBe('/')
     expect(overviewCalls(fetch)).toEqual(['nordlicht'])
     const freshStart = fetch.mock.calls.filter(([url]) => url === '/api/progress/fresh-start')
@@ -237,8 +250,46 @@ describe('ProfiledApp, issue 480', () => {
       : Promise.resolve(new Response(null, { status: 500 })))
     render(<ProfiledApp />)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy()
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Nordlicht Komponenten GmbH')
     expect(await authHeaders()).toEqual({})
+  })
+
+  it("without the list, the top bar names the overview's company once it's read, and none before (ticket 495)", async () => {
+    let answer: (response: Response) => void = () => {}
+    vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
+      ? new Promise<Response>((resolve) => { answer = resolve })
+      : Promise.resolve(new Response(null, { status: 500 })))
+    render(<ProfiledApp />)
+    await screen.findByRole('navigation', { name: 'Main' })
+    const banner = screen.getByRole('banner')
+    expect(banner.querySelector('.top-company')).toBeNull()
+    expect(banner.querySelector('.top-rule')).toBeNull()
+    answer(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
+    await dossierOf('Nordlicht Komponenten GmbH')
+    expect(within(banner).getByText('Somewhere · EN')).toBeTruthy() // a country with no ISO code by its name
+    // The user menu's fresh start names the company the bar names.
+    await userEvent.click(within(banner).getByRole('button', { name: 'Your menu' }))
+    expect(screen.getByRole('menuitem', { name: 'Start Nordlicht Komponenten GmbH afresh…' })).toBeTruthy()
+  })
+
+  it('without the list, names no company on a page that reads no overview (ticket 495)', async () => {
+    window.history.replaceState(null, '', '/report')
+    vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
+      ? Promise.resolve(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
+      : url === '/api/profiles' ? Promise.resolve(new Response(null, { status: 500 })) : new Promise<Response>(() => {}))
+    render(<ProfiledApp />)
+    await screen.findByRole('navigation', { name: 'Main' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.getByRole('banner').querySelector('.top-company')).toBeNull()
+  })
+
+  it('names the current company in the top bar on a page that reads no overview, from the list (ticket 495)', async () => {
+    window.history.replaceState(null, '', '/company')
+    const fetch = serve([NORDLICHT, TESTWERK], 'testwerk')
+    render(<ProfiledApp />)
+    await waitFor(() => expect(barName()).toBe('Testwerk Prüfstand GmbH'))
+    expect(within(screen.getByRole('banner')).getByText('AT · DE')).toBeTruthy()
+    expect(overviewCalls(fetch)).toEqual([])
   })
 })
 
@@ -295,7 +346,7 @@ describe('a company made in company setup, issue 409', () => {
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
 
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Musterfirma GmbH')
     expect(window.location.pathname).toBe('/')
     expect(currentChanges(fetch)).toEqual([{ company: 'musterfirma-gmbh' }])
     const order = fetch.mock.calls.map(([url]) => url).filter((url) =>
@@ -310,7 +361,7 @@ describe('a company made in company setup, issue 409', () => {
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
 
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Musterfirma GmbH')
     expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh'])
     await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
     expect(screen.getByRole('menuitem', { name: `Start ${MUSTERFIRMA.company} afresh…` })).toBeTruthy()
@@ -322,7 +373,7 @@ describe('a company made in company setup, issue 409', () => {
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
 
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Musterfirma GmbH')
     expect(window.location.pathname).toBe('/')
     expect(currentChanges(fetch)).toEqual([{ company: 'musterfirma-gmbh' }])
   })
@@ -332,7 +383,7 @@ describe('a company made in company setup, issue 409', () => {
     serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Musterfirma GmbH')
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 })))
   })
 
@@ -592,7 +643,7 @@ describe('the first pass on a company just made, issue 447', () => {
   /** As createFromSetup, then waits for the new company's Dossier. */
   async function createAndOpen(button = 'Created') {
     await createFromSetup(button)
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Musterfirma GmbH')
   }
 
   it('sets Internal improvement under the new company, then runs one pass, once under StrictMode', async () => {
@@ -711,7 +762,7 @@ describe('the first pass on a company just made, issue 447', () => {
       ? Promise.resolve(Response.json(listOf([NORDLICHT, TESTWERK, MUSTERFIRMA], 'musterfirma-gmbh')))
       : answered(url, init))(fetch.getMockImplementation()!))
     render(<StrictMode><ProfiledApp /></StrictMode>)
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await dossierOf('Musterfirma GmbH')
     await screen.findByRole('button', { name: 'Run a profile pass' })
     expect(firstPassCalls(fetch)).toEqual([])
   })
@@ -760,6 +811,6 @@ describe('the first pass on a company just made, issue 447', () => {
     expect(await screen.findByText(LIMIT)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Assess 1.1.1 on its own' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
-    expect(screen.getByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })).toBeTruthy()
+    expect(barName()).toBe('Musterfirma GmbH')
   })
 })

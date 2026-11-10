@@ -24,7 +24,7 @@ describe('the countries company setup offers', () => {
     const regions = new Intl.DisplayNames(['en'], { type: 'region' })
     for (const { code, name } of COUNTRIES) {
       expect(regions.of(code)).toBe(name)
-      expect(profileTag({ id: 'x', company: 'X', country: name, answer_language: 'en' })).toBe(`${code} · EN`)
+      expect(profileTag({ country: name, answer_language: 'en' })).toBe(`${code} · EN`)
     }
   })
 })

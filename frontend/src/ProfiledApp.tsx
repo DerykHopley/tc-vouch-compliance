@@ -114,8 +114,8 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   useEffect(() => () => setProfile(null), []) // signing out leaves no company for the next sign-in
 
   if (listing.status === 'reading') return <TopBar />
-  const company = listing.profiles?.profiles.find((p) => p.id === chosen)?.company
-  return <App key={`${chosen ?? ''}:${opens}`} onSignOut={onSignOut} userName={userName} company={company}
+  const profile = listing.profiles?.profiles.find((p) => p.id === chosen)
+  return <App key={`${chosen ?? ''}:${opens}`} onSignOut={onSignOut} userName={userName} profile={profile}
     onStartedAfresh={startedAfresh} onCompanyCreated={created} onCompanyRemoved={removed} onMadeCurrent={madeCurrent}
     developerNote={developerNote ?? undefined} onNoteShown={forgetNote} arrival={arrival} onArrivalUsed={arrivalUsed} />
 }

@@ -13,6 +13,7 @@ import re
 from current_company import nordlicht_after
 from playwright.sync_api import Browser, Page, expect
 from test_company_setup import create_company, open_setup, to_step_7
+from top_bar import bar_company, from_user_menu
 
 COMPANY = "Musterfirma Süd GmbH"
 COMPANY_ID = "musterfirma-sud-gmbh"
@@ -62,9 +63,9 @@ def test_story_3_removing_the_current_company_makes_nordlicht_current_for_everyo
     page.set_viewport_size({"width": 1280, "height": 900})
     with nordlicht_after(page.request, removal_url):
         assert create(page, removal_url) == COMPANY_ID
-        expect(page.locator(".pill").first).to_contain_text(COMPANY)
+        expect(bar_company(page)).to_have_text(COMPANY)
 
-        page.get_by_role("link", name="Developer").click()  # the settings read as the app opened
+        from_user_menu(page, "Developer page")  # the settings read as the app opened
         sheet = page.get_by_role("region", name="Companies")
         row = sheet.get_by_role("listitem").filter(has_text=COMPANY_ID)
         expect(row.get_by_text("Current", exact=True)).to_be_visible()
@@ -110,7 +111,7 @@ def test_story_3_removing_the_current_company_makes_nordlicht_current_for_everyo
             with second.expect_response(lambda r: r.url.endswith("/api/overview")) as read:
                 second.goto(removal_url)
             assert read.value.request.header_value("X-Vouch-Profile") == "nordlicht"
-            expect(second.locator(".pill").first).to_contain_text(NORDLICHT)
+            expect(bar_company(second)).to_have_text(NORDLICHT)
         finally:
             other.close()
 
@@ -120,7 +121,7 @@ def test_story_3_removing_the_current_company_makes_nordlicht_current_for_everyo
         assert COMPANY not in listed(page)
 
         assert create(page, removal_url) == f"{COMPANY_ID}-2"
-        page.get_by_role("link", name="Developer").click()
+        from_user_menu(page, "Developer page")
         expect(sheet.get_by_text(f"{COMPANY_ID}-2", exact=True)).to_be_visible()
         expect(sheet.get_by_text(COMPANY_ID, exact=True)).to_have_count(0)
 

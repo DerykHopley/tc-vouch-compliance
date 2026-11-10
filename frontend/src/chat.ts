@@ -102,7 +102,7 @@ const PAGE_WORDS: Record<PageContext['page'], string> = {
   paper: 'Working paper',
   developer: 'Developer',
   report: 'Report', // the top bar's word for the readiness report (#268)
-  documents: 'Documents', // the top bar's word for the Documents tab (#424)
+  documents: 'Company', // the documents' page is the Company tab (#424, #495); the API's page stays 'documents'
 }
 
 /** The chat header's "on …": the page, and on a working paper its control first. */

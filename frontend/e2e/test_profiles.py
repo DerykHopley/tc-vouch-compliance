@@ -15,6 +15,7 @@ import pytest
 from current_company import current_company, nordlicht_after
 from playwright.sync_api import APIRequestContext, Browser, Page, expect
 from reviewing import reviewed
+from top_bar import bar_company, bar_tag
 
 TESTWERK = "Testwerk Prüfstand GmbH"
 
@@ -62,14 +63,16 @@ def seeded(request: APIRequestContext, url: str) -> None:
 
 
 def shows_nordlicht(page: Page) -> None:
-    expect(page.locator(".pill").first).to_have_text("Nordlicht Komponenten GmbH · Germany")
+    expect(bar_company(page)).to_have_text("Nordlicht Komponenten GmbH")  # the top bar's (#495)
+    expect(bar_tag(page)).to_have_text("DE · EN")
     expect(accepted_tile(page).locator("b")).to_have_text("1")
     expect(card(page, "4.1.2")).to_contain_text("Accepted")
     expect(card(page, "1.1.1")).to_contain_text("Not assessed")
 
 
 def shows_testwerk(page: Page) -> None:
-    expect(page.locator(".pill").first).to_have_text("Testwerk Prüfstand GmbH · Austria")
+    expect(bar_company(page)).to_have_text("Testwerk Prüfstand GmbH")
+    expect(bar_tag(page)).to_contain_text("AT · ")
     expect(accepted_tile(page).locator("b")).to_have_text("0")
     expect(card(page, "4.1.2")).to_contain_text("Not assessed")
     expect(card(page, "1.1.1")).to_contain_text("Proposed")

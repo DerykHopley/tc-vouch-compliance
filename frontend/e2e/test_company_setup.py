@@ -15,6 +15,7 @@ import re
 import pytest
 from playwright.sync_api import Page, Response, expect
 from test_developer_page import as_compliance_lead
+from top_bar import bar_company, from_user_menu
 from touch_targets import small_targets
 
 LEVELS = "/api/developer/protection-levels"
@@ -35,8 +36,9 @@ def press(page: Page, button: str) -> None:
 
 
 def open_setup(page: Page, profiles_url: str) -> None:
-    page.goto(f"{profiles_url}/developer")
-    page.get_by_role("button", name="Set up a company").click()
+    with page.expect_response("**/api/developer/settings"):
+        page.goto(profiles_url)
+    from_user_menu(page, "Set up a company")  # the user menu's, since #495
 
 
 def to_step_3(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
@@ -100,14 +102,21 @@ def reason(page: Page, control_id: str):
     return page.get_by_role("textbox", name=f"Why {control_id} doesn't apply")
 
 
-def test_a_developer_opens_company_setup_from_the_developer_page(page: Page, profiles_url):
+def test_a_developer_opens_company_setup_from_the_user_menu(page: Page, profiles_url):
     open_setup(page, profiles_url)
 
     expect(page).to_have_url(re.compile(r"/developer/setup$"))
     expect(page.get_by_role("heading", name="Company setup")).to_be_visible()
     expect(page.get_by_text("Step 1 of 7")).to_be_visible()
-    developer = page.get_by_role("navigation", name="Main").get_by_role("link", name="Developer")
-    expect(developer).to_have_attribute("aria-current", "page")
+    # no tab is the setup's own: the developer's pages are in the user menu (#495)
+    expect(page.locator("nav[aria-label=Main] [aria-current=page]")).to_have_count(0)
+
+
+def test_a_developer_opens_company_setup_from_the_developer_page(page: Page, profiles_url):
+    page.goto(f"{profiles_url}/developer")
+    page.get_by_role("button", name="Set up a company").click()
+    expect(page).to_have_url(re.compile(r"/developer/setup$"))
+    expect(page.get_by_text("Step 1 of 7")).to_be_visible()
 
 
 def test_a_compliance_lead_at_the_setup_address_gets_the_dossier(page: Page, profiles_url):
@@ -547,7 +556,7 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url, no
 
     expect(page).to_have_url(f"{setup_url}/")
     expect(page.get_by_role("heading", level=1)).to_be_focused()
-    expect(page.locator(".pill").first).to_contain_text("Musterfirma Nord GmbH")
+    expect(bar_company(page)).to_have_text("Musterfirma Nord GmbH")
     expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
     # Its Goal is set and its profile pass has run (#447): story 5's check follows the pass through.
     expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
@@ -570,7 +579,7 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url, no
     with page.expect_response(lambda r: r.url.endswith("/api/overview")) as reread:
         page.reload()
     assert reread.value.request.header_value("X-Vouch-Profile") == profile["id"]
-    expect(page.locator(".pill").first).to_contain_text("Musterfirma Nord GmbH")
+    expect(bar_company(page)).to_have_text("Musterfirma Nord GmbH")
 
 
 def test_a_double_click_on_step_6s_next_lands_on_step_7_and_creates_nothing(
@@ -645,7 +654,7 @@ def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(
     document(page, "Backup policy").check()
     press(page, "Next")
     create_company(page)
-    expect(page.locator(".pill").first).to_contain_text("Ausnahmefirma GmbH")
+    expect(bar_company(page)).to_have_text("Ausnahmefirma GmbH")
 
     card = page.get_by_role("article", name="Control 5.2.9")
     expect(card.locator(".chip")).to_have_class("chip v-not-applicable")
@@ -776,7 +785,7 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
     assert goal.value.request.headers["x-vouch-profile"] == profile
 
     expect(page).to_have_url(f"{first_pass_url}/")
-    expect(page.locator(".pill").first).to_contain_text("Erstpass GmbH")
+    expect(bar_company(page)).to_have_text("Erstpass GmbH")
     assert current_of(page, first_pass_url) == profile  # every user's company now (#480)
     expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
     panel = page.get_by_role("region", name="Profile pass")

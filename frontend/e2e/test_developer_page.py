@@ -12,6 +12,7 @@ import re
 
 import pytest
 from playwright.sync_api import Page, Route, expect
+from top_bar import from_user_menu
 
 DEVELOPERS_ONLY = '{"detail": "This is available to developers only."}'
 
@@ -26,8 +27,9 @@ def as_compliance_lead(page: Page) -> None:
 def test_a_developer_opens_the_page_and_sees_the_model_the_prompt_version_and_the_fake_model(
     page: Page, profiles_url
 ):
-    page.goto(profiles_url)
-    page.get_by_role("link", name="Developer").click()
+    with page.expect_response("**/api/developer/settings"):
+        page.goto(profiles_url)
+    from_user_menu(page, "Developer page")  # in the user menu since #495
 
     expect(page).to_have_url(re.compile(r"/developer$"))
     settings = page.get_by_role("region", name="Developer settings")
@@ -84,9 +86,12 @@ def test_a_compliance_lead_has_no_developer_link_and_gets_the_dossier_at_its_add
         [
             "Overview",
             "Report",
-            "Documents",
-        ]  # no Developer; Report and Documents are everyone's (#56, #424)
+            "Company",
+        ]  # Report and Company are everyone's (#56, #495); no Developer tab for anyone
     )
+    page.get_by_role("banner").get_by_role("button", name="Your menu").click()
+    expect(page.get_by_role("menuitem", name="Developer page")).to_have_count(0)
+    expect(page.get_by_role("menuitem", name="Set up a company")).to_have_count(0)
     expect(page.get_by_role("region", name="Developer settings")).to_have_count(0)
 
 

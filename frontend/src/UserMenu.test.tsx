@@ -38,10 +38,10 @@ describe('starting afresh (issue 285)', () => {
     return { fetch, started }
   }
 
-  it('names the company above the theme item, and only "Start afresh…" without one', async () => {
+  it('names the company, last in the menu (ticket 495), and only "Start afresh…" without one', async () => {
     await opened(() => new Promise(() => {}))
     const items = screen.getAllByRole('menuitem').map((item) => item.textContent)
-    expect(items).toEqual([`Start ${COMPANY} afresh…`, 'Dark theme'])
+    expect(items).toEqual(['Dark theme', `Start ${COMPANY} afresh…`])
     cleanup()
     await opened(() => new Promise(() => {}), {})
     expect(screen.getByRole('menuitem', { name: 'Start afresh…' })).toBeTruthy()
@@ -93,5 +93,80 @@ describe('starting afresh (issue 285)', () => {
     await new Promise((resolve) => setTimeout(resolve, 0)) // the answer is handled
     expect(alert).not.toHaveBeenCalled()
     expect(started).not.toHaveBeenCalled()
+  })
+})
+
+describe('the user menu in the Letterhead order (ticket 495)', () => {
+  const COMPANY = 'Nordlicht Komponenten GmbH'
+  const developerTools = { onPage: () => {}, onSetup: () => {} }
+  /** The open menu's contents in order: each item's words, the note's, and '—' for a separator. */
+  const contents = () => [...screen.getByRole('menu').children].map((el) =>
+    el.getAttribute('role') === 'separator' ? '—' : el.textContent)
+
+  it('for a developer in local mode: the theme, Developer page, Set up a company, then the reset', async () => {
+    render(<UserMenu theme="light" onTheme={() => {}} company={COMPANY} onStartedAfresh={() => {}}
+      developerTools={developerTools} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    expect(contents()).toEqual(['Dark theme', '—', 'Developer page', 'Set up a company', '—',
+      `Start ${COMPANY} afresh…`])
+  })
+
+  it('in clerk mode: "Signed in as", the theme, the developer items, Sign out, then the reset', async () => {
+    render(<UserMenu name="Anna Berg" theme="dark" onTheme={() => {}} onSignOut={() => {}} company={COMPANY}
+      onStartedAfresh={() => {}} developerTools={developerTools} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Anna Berg: your menu' }))
+    expect(contents()).toEqual(['Signed in as Anna Berg', 'Light theme', '—', 'Developer page', 'Set up a company',
+      '—', 'Sign out', '—', `Start ${COMPANY} afresh…`])
+  })
+
+  it("for a lead, no developer items and no empty group's separator", async () => {
+    render(<UserMenu theme="light" onTheme={() => {}} company={COMPANY} onStartedAfresh={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    expect(contents()).toEqual(['Dark theme', '—', `Start ${COMPANY} afresh…`])
+    cleanup()
+    render(<UserMenu theme="light" onTheme={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    expect(contents()).toEqual(['Dark theme'])
+  })
+
+  it('opens the developer page and company setup, closing the menu', async () => {
+    const onPage = vi.fn()
+    const onSetup = vi.fn()
+    render(<UserMenu theme="light" onTheme={() => {}} developerTools={{ onPage, onSetup }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Developer page' }))
+    expect(onPage).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('menu')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Set up a company' }))
+    expect(onSetup).toHaveBeenCalledOnce()
+  })
+
+  it('the arrow keys move between the items and skip the separators', async () => {
+    render(<UserMenu theme="light" onTheme={() => {}} company={COMPANY} onStartedAfresh={() => {}}
+      developerTools={developerTools} />)
+    screen.getByRole('button', { name: 'Your menu' }).focus()
+    await userEvent.keyboard('{ArrowDown}')
+    const visited = [document.activeElement?.textContent]
+    for (let i = 0; i < 4; i++) {
+      await userEvent.keyboard('{ArrowDown}')
+      visited.push(document.activeElement?.textContent)
+    }
+    expect(visited).toEqual(['Dark theme', 'Developer page', 'Set up a company', `Start ${COMPANY} afresh…`,
+      'Dark theme'])
+  })
+
+  it('keeps focus on the reset when the developer tools arrive while the menu is open', async () => {
+    const props = { name: 'Anna Berg', theme: 'light' as const, onTheme: () => {}, onSignOut: () => {},
+      company: COMPANY, onStartedAfresh: () => {} }
+    const { rerender } = render(<UserMenu {...props} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Anna Berg: your menu' }))
+    const reset = screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` })
+    reset.focus()
+    rerender(<UserMenu {...props} developerTools={developerTools} />)
+    expect(document.activeElement).toBe(reset)
+    expect(document.activeElement?.textContent).toBe(`Start ${COMPANY} afresh…`)
+    expect(contents()).toEqual(['Signed in as Anna Berg', 'Dark theme', '—', 'Developer page', 'Set up a company',
+      '—', 'Sign out', '—', `Start ${COMPANY} afresh…`])
   })
 })
