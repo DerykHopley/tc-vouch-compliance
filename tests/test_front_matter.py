@@ -39,3 +39,13 @@ def test_without_a_closed_block_the_whole_text_is_body(text):
 )
 def test_a_block_that_isnt_a_mapping_gives_no_data_but_is_still_cut_from_the_body(head):
     assert split_front_matter(f"---\n{head}\n---\n# Top\n") == (None, "# Top\n")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-13-01", "2026-02-30", "2026-01-01 25:00:00", "0000-01-01"],
+    ids=["month-13", "february-30", "hour-25", "year-0"],
+)
+def test_an_impossible_unquoted_date_reads_as_no_front_matter(value):
+    # YAML reads these as timestamps, and building the date raises ValueError, not YAMLError.
+    assert split_front_matter(f"---\napproval_date: {value}\n---\n# Top\n") == (None, "# Top\n")
