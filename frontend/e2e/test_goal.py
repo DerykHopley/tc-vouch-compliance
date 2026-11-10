@@ -8,6 +8,7 @@ every control is at least 44px. Each run ends on Audit readiness, as it began.""
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
+from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from touch_targets import small_targets
 
@@ -104,6 +105,35 @@ def test_the_lead_changes_the_goal_and_back_and_the_trail_shows_both(
     change_goal(page, dialogs, "Audit readiness")
     expect(goal).to_contain_text("Goal: Audit readiness")
     assert newest_trail_actions(page, dossier_url, 2) == [TO_READINESS, TO_IMPROVEMENT]
+    no_dialog(dialogs)
+
+
+def test_a_double_click_on_the_confirm_presses_nothing_after_it(page: Page, dossier_url):
+    """#527: at 400px the ask's collapse moves the Review round line up under the pointer, and the
+    second click of a double-click on the confirm landed on Close round and opened its ask. Now it
+    presses nothing: one PUT, no Close round ask, and the line names the new goal."""
+    dialogs = dialogs_of(page)
+    page.set_viewport_size({"width": 400, "height": 900})
+    open_dossier(page, dossier_url)
+    page.evaluate("async () => {" + FONTS_SETTLED + "}")  # the layout the misfire depends on
+    goal = page.locator(".hero .goal")
+    expect(goal).to_contain_text("Goal: Audit readiness")
+    puts: list[str] = []
+    page.on(
+        "request",
+        lambda r: puts.append(r.url) if r.method == "PUT" and "/api/goal" in r.url else None,
+    )
+
+    ask(page, dialogs, "Internal improvement")
+    with page.expect_response("**/api/goal"), page.expect_response("**/api/overview"):
+        page.locator(".hero .inline-confirm").get_by_role("button", name="Change goal").dblclick()
+    expect(goal).to_contain_text("Goal: Internal improvement")
+    expect(page.locator("[role=alert]", has_text="Close the review round")).to_have_count(0)
+    assert len(puts) == 1, puts
+
+    # Ends on Audit readiness, as it began.
+    change_goal(page, dialogs, "Audit readiness")
+    expect(goal).to_contain_text("Goal: Audit readiness")
     no_dialog(dialogs)
 
 

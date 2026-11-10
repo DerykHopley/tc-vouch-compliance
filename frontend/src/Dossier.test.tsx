@@ -59,6 +59,9 @@ async function confirmed(name: string) {
   await userEvent.click(screen.getByRole('button', { name }))
 }
 
+/** A person's next click comes after a double-click's would: within 500ms of a confirm, the ask presses nothing (#527). */
+const pastDoubleClick = () => new Promise((done) => setTimeout(done, 500))
+
 /** The verdict chip on a control's card. */
 const cardChip = (id: string) =>
   within(screen.getByRole('article', { name: `Control ${id}` })).getByText(/./, { selector: '.chip' })
@@ -542,6 +545,7 @@ describe('the goal on the Dossier (ticket 369)', () => {
       expect((await screen.findByRole('alert')).textContent).toBe(STALE)
       expect(onGoalChanged).toHaveBeenCalledWith('internal-improvement')
       onGoalChanged.mockResolvedValue(true)
+      await pastDoubleClick()
       await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
       expect(onGoalChanged).toHaveBeenCalledTimes(2)
       expect(onGoalChanged).toHaveBeenLastCalledWith('internal-improvement')
@@ -652,6 +656,7 @@ describe('the review round on the Dossier (ticket 402)', () => {
     expect((await screen.findByRole('alert')).textContent)
       .toBe('The review round was changed, but the overview could not be read again just now.')
     onRoundChanged.mockResolvedValue(true)
+    await pastDoubleClick()
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRoundChanged).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())

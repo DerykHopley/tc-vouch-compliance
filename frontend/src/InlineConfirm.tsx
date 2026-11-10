@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type KeyboardEvent, useEffect, useRef, useState } from 'react'
+import { type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
 
 /** The trigger's own attributes: its class (a ghost pill unless given), `disabled` (can't be pressed or focused),
  * `aria-disabled` (can't be pressed, keeps focus: busy), `aria-busy`, `aria-label`. */
@@ -22,12 +22,37 @@ type Props = {
   trigger?: Trigger
 }
 
+/** The longest common double-click interval. */
+const DOUBLE_CLICK_MS = 500
+
+/**
+ * Swallows the next pointer click anywhere on the page, if it comes within `DOUBLE_CLICK_MS` (#527): a double-click
+ * on the ask's confirm collapses the ask, and its second click would land on whatever moves up under the
+ * pointer. A keyboard click (`detail === 0`) is never swallowed. Returns the function that takes the guard away.
+ */
+function swallowNextPointerClick(): () => void {
+  const swallow = (e: MouseEvent) => {
+    if (e.detail === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    disarm()
+  }
+  const timer = window.setTimeout(() => disarm(), DOUBLE_CLICK_MS)
+  function disarm() {
+    window.clearTimeout(timer)
+    document.removeEventListener('click', swallow, true)
+  }
+  document.addEventListener('click', swallow, true)
+  return disarm
+}
+
 /**
  * The in-app ask (#441; `docs/design.md`, Components: Goal, and Review bar's Assess again, #437): a button which,
  * pressed, gives its place to the question, the confirm button (primary) and Cancel (ghost). Never the browser's
  * confirm. Focus moves to Cancel as it opens; Cancel, or Esc inside it (which goes no further, so an open chat or the
  * phone bar stays open), closes it with focus back on the button, as does confirming. While the trigger is
- * `aria-disabled` it opens nothing but keeps focus, so a busy control holds the keyboard user's place.
+ * `aria-disabled` it opens nothing but keeps focus, so a busy control holds the keyboard user's place. After a pointer
+ * press on the confirm, the second click of a double-click presses nothing (#527).
  */
 export default function InlineConfirm({ label, confirmLabel = label, cancelLabel = 'Cancel', question, onConfirm,
   confirmDisabled = false, ask = true, subject = question, trigger = {} }: Props) {
@@ -48,7 +73,18 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
     wasOpen.current = open
     ;(open ? cancel : button).current?.focus()
   }, [open])
+  // The double-click guard set by the last pointer confirm, taken away when this unmounts.
+  const disarm = useRef<(() => void) | null>(null)
+  useEffect(() => () => disarm.current?.(), [])
   if (open) {
+    const confirm = (e: ReactMouseEvent<HTMLButtonElement>) => {
+      if (e.detail > 0) {
+        disarm.current?.()
+        disarm.current = swallowNextPointerClick()
+      }
+      setOpen(false)
+      onConfirm()
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       e.preventDefault()
@@ -60,7 +96,7 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
         <p className="field-note" role="alert">{question}</p>
         <div className="review-actions">
           <button type="button" className="btn btn-primary" disabled={confirmDisabled}
-            onClick={() => { setOpen(false); onConfirm() }}>
+            onClick={confirm}>
             {confirmLabel}
           </button>
           <button type="button" ref={cancel} className="btn btn-ghost" onClick={() => setOpen(false)}>
