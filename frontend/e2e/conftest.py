@@ -90,7 +90,8 @@ def improvement_url() -> str:
 @pytest.fixture
 def setup_url() -> str:
     """A thirteenth Vouch like vouch_url, for company setup's create (#409): the company it makes
-    stays in that process (local mode), so no other check's profile switcher lists it. Its three
+    stays in that process (local mode), so no other check lists it; a create makes it current
+    there (#480), so each create check puts Nordlicht back (nordlicht_later). Its three
     creates (#409, #424, #454) each run a profile pass: the passes' daily limit (3 a user), so a
     fourth create needs a server of its own."""
     return os.environ["SETUP_URL"]
@@ -109,6 +110,18 @@ def removal_url() -> str:
     creates each run a profile pass (#447), and with setup_url's three they would pass the
     passes' daily limit (3 a user)."""
     return os.environ["REMOVAL_URL"]
+
+
+@pytest.fixture
+def nordlicht_later(page):
+    """Registers a server whose current company this check changes (#480: a create makes its
+    company current); Nordlicht is made current there again once the check ends, pass or fail."""
+    from current_company import make_current
+
+    urls: list[str] = []
+    yield urls.append
+    for url in urls:
+        make_current(page.request, url, "nordlicht")
 
 
 @pytest.fixture

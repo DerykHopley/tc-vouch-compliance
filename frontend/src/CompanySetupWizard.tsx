@@ -73,7 +73,7 @@ function failureWords(created: Exclude<CompanyCreated, { status: 'created' | 'si
   }
   if (created.status === 'unavailable') return 'The database is unavailable just now. Nothing was saved; try again in a moment.'
   if (created.status === 'unknown')
-    return 'The company may not have been created. Check the profile switcher before trying again.'
+    return 'The company may not have been created. Check the Companies section of the Developer page before trying again.'
   return 'The company could not be created. Nothing was saved.'
 }
 

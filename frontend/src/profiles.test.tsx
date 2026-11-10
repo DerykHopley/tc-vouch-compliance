@@ -32,13 +32,8 @@ vi.mock('./profiles.ts', async (original) => {
 })
 import type { DeveloperSettings } from './developer.ts'
 import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
-import {
-  fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile, withoutProfile, withProfile,
-} from './profiles.ts'
-import ProfileSwitcher from './ProfileSwitcher.tsx'
-import {
-  authHeaders, rememberedProfile, rememberProfile, setOnSignedOut, setProfile, setTokenSource,
-} from './session.ts'
+import { fetchProfiles, type Profiles, type ProfileSummary, startAfresh, withoutProfile, withProfile } from './profiles.ts'
+import { authHeaders, setOnSignedOut, setProfile, setTokenSource } from './session.ts'
 
 const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany',
   answer_language: 'en' }
@@ -64,21 +59,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('profileLabel', () => {
-  it('names the company, the country and the answer language in English', () => {
-    expect(profileLabel(NORDLICHT)).toBe('Nordlicht Komponenten GmbH · Germany · English')
-    expect(profileLabel(TESTWERK)).toBe('Testwerk Prüfstand GmbH · Austria · German')
-  })
-})
-
 describe('authHeaders', () => {
-  it('names the chosen profile on every call, and none before one is chosen', async () => {
+  it('names the company the app opened under on every call, and none before one is', async () => {
     expect(await authHeaders()).toEqual({})
     setProfile('testwerk')
     expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'testwerk' })
   })
 
-  it('names the profile chosen when the call started, even if a switch lands while the token is fetched', async () => {
+  it('names the company set when the call started, even if the app reopens while the token is fetched', async () => {
     let giveToken: (token: string) => void = () => {}
     setTokenSource(() => new Promise((resolve) => { giveToken = resolve }))
     setProfile('nordlicht')
@@ -89,77 +77,41 @@ describe('authHeaders', () => {
   })
 })
 
-describe('the remembered profile, issue 201', () => {
-  it('is the one last remembered, and none before', () => {
-    expect(rememberedProfile()).toBeNull()
-    rememberProfile('testwerk')
-    expect(rememberedProfile()).toBe('testwerk')
-  })
-
-  it('is none, without failing, where the browser keeps no storage', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('denied') })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('denied') })
-    expect(() => rememberProfile('testwerk')).not.toThrow()
-    expect(rememberedProfile()).toBeNull()
-  })
-})
-
-describe('startingProfile', () => {
-  const both = { profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }
-
-  it('is the remembered profile while it is listed', () => {
-    expect(startingProfile(both, 'testwerk')).toEqual({ id: 'testwerk', fellBack: false })
-  })
-
-  it('is the default, saying it fell back, when the remembered one is no longer listed', () => {
-    expect(startingProfile(both, 'alpenwerk')).toEqual({ id: 'nordlicht', fellBack: true })
-  })
-
-  it('is the default, or the first listed, with none remembered', () => {
-    expect(startingProfile(both, null)).toEqual({ id: 'nordlicht', fellBack: false })
-    expect(startingProfile(both, '')).toEqual({ id: 'nordlicht', fellBack: false })
-    expect(startingProfile({ profiles: [TESTWERK], default: null }, null)).toEqual({ id: 'testwerk', fellBack: false })
-  })
-
-  it("is none without a list: the API's default answers", () => {
-    expect(startingProfile(null, 'testwerk')).toEqual({ id: null, fellBack: false })
-  })
+/** A list as GET /api/profiles answers it: Nordlicht the default while listed, `current` the current company. */
+const listOf = (profiles: ProfileSummary[], current: string | null = 'nordlicht'): Profiles => ({
+  profiles, default: profiles.some((p) => p.id === 'nordlicht') ? 'nordlicht' : null, current,
 })
 
 describe('withProfile, issue 409', () => {
-  it('adds the profile to the list held, unless it is listed already', () => {
-    const held = { profiles: [NORDLICHT], default: 'nordlicht' }
-    expect(withProfile(held, MUSTERFIRMA)).toEqual({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' })
-    expect(withProfile({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }, MUSTERFIRMA))
-      .toEqual({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' })
+  it('adds a company made in setup at the end of the list held, once', () => {
+    const held = listOf([NORDLICHT])
+    expect(withProfile(held, MUSTERFIRMA)).toEqual(listOf([NORDLICHT, MUSTERFIRMA]))
+    expect(withProfile(listOf([NORDLICHT, MUSTERFIRMA]), MUSTERFIRMA)).toEqual(listOf([NORDLICHT, MUSTERFIRMA]))
   })
 
-  it('with no list held, is a list of that profile alone, with no default', () => {
-    expect(withProfile(null, MUSTERFIRMA)).toEqual({ profiles: [MUSTERFIRMA], default: null })
+  it('with nothing held, is that company alone', () => {
+    expect(withProfile(null, MUSTERFIRMA)).toEqual({ profiles: [MUSTERFIRMA], default: null, current: null })
   })
 })
 
 describe('withoutProfile, issue 418', () => {
-  it('leaves the profile out of the list held, keeping its default', () => {
-    const held = { profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }
-    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: 'nordlicht' })
+  it('drops the company from the list held, and from its default and current when it was either', () => {
+    const held = listOf([NORDLICHT, MUSTERFIRMA])
+    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual(listOf([NORDLICHT]))
     expect(withoutProfile(held, 'nobody')).toEqual(held)
+    expect(withoutProfile(listOf([NORDLICHT, MUSTERFIRMA], 'musterfirma-gmbh'), 'musterfirma-gmbh'))
+      .toEqual(listOf([NORDLICHT], null))
   })
 
-  it('with the profile as the default, leaves no default, so the first listed opens (review of issue 418)', () => {
-    const held = { profiles: [MUSTERFIRMA, NORDLICHT], default: 'musterfirma-gmbh' }
-    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: null })
-  })
-
-  it('with no list held, is none', () => {
+  it('is none when nothing is held', () => {
     expect(withoutProfile(null, 'musterfirma-gmbh')).toBeNull()
   })
 })
 
 describe('fetchProfiles', () => {
-  it('reads the list, or null when it cannot', async () => {
-    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ profiles: [NORDLICHT], default: 'nordlicht' })))
-    expect(await fetchProfiles()).toEqual({ profiles: [NORDLICHT], default: 'nordlicht' })
+  it('reads the list with its current company, or null when it cannot', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json(listOf([NORDLICHT]))))
+    expect(await fetchProfiles()).toEqual(listOf([NORDLICHT]))
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 500 })))
     expect(await fetchProfiles()).toBeNull()
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
@@ -196,50 +148,6 @@ describe('startAfresh, issue 285', () => {
   })
 })
 
-describe('ProfileSwitcher', () => {
-  it('opens the app only once the list has answered, under the default profile', async () => {
-    let answer: (response: Response) => void = () => {}
-    const fetch = vi.fn((url: string, _init?: RequestInit) => {
-      if (url === '/api/profiles') return new Promise<Response>((resolve) => { answer = resolve })
-      if (url === '/api/overview') return Promise.resolve(Response.json(overviewOf(NORDLICHT.company)))
-      return new Promise<Response>(() => {})
-    })
-    vi.stubGlobal('fetch', fetch)
-    render(<ProfiledApp />)
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/profiles', expect.anything()))
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/profiles'])
-    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
-
-    answer(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
-
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    expect(overviewCalls(fetch)).toEqual(['nordlicht'])
-  })
-
-  it('with one profile, shows its name and tag and no menu', () => {
-    render(<ProfileSwitcher profiles={[NORDLICHT]} selected="nordlicht" onSwitch={() => {}} />)
-    expect(screen.queryByRole('button')).toBeNull()
-    expect(screen.getByLabelText('Profile: Nordlicht Komponenten GmbH · Germany · English').textContent)
-      .toBe('Nordlicht Komponenten GmbH' + 'DE · EN')
-  })
-
-  it('with two, is a dropdown button naming the company and its tag, and switches to the one chosen (issue 222)',
-    async () => {
-      const onSwitch = vi.fn()
-      render(<ProfileSwitcher profiles={[NORDLICHT, TESTWERK]} selected="nordlicht" onSwitch={onSwitch} />)
-      const button = screen.getByRole('button', { name: 'Profile: Nordlicht Komponenten GmbH · Germany · English' })
-      expect(button.getAttribute('aria-haspopup')).toBe('menu')
-      expect(button.textContent).toBe('Nordlicht Komponenten GmbH' + 'DE · EN' + '▾')
-      await userEvent.click(button)
-      const choices = screen.getAllByRole('menuitemradio')
-      expect(choices.map((o) => [o.textContent, o.getAttribute('aria-checked')])).toEqual([
-        ['Nordlicht Komponenten GmbH · Germany · English', 'true'],
-        ['Testwerk Prüfstand GmbH · Austria · German', 'false']])
-      await userEvent.click(choices[1])
-      expect(onSwitch).toHaveBeenCalledWith('testwerk')
-    })
-})
-
 /** An overview with nothing assessed, for `company`. */
 const overviewOf = (company: string): Overview => ({
   company, country: 'Somewhere', protection_level: 'normal', answer_language: 'en', goal: 'audit-readiness',
@@ -252,15 +160,17 @@ const overviewOf = (company: string): Overview => ({
   quotes: [],
 })
 
-/** The API with these profiles: each overview is the company of the profile the call names (the default without). */
-function serve(profiles: ProfileSummary[], fallback: string | null = 'nordlicht') {
+/** The API with these profiles and `current` the current company: each overview is the company of the profile the
+ * call names (the current one without); a Make current answers the developer settings. */
+function serve(profiles: ProfileSummary[], current: string | null = 'nordlicht') {
   const fetch = vi.fn((url: string, init?: RequestInit) => {
-    const named = new Headers(init?.headers).get('X-Vouch-Profile') ?? fallback
-    if (url === '/api/profiles') return Promise.resolve(Response.json({ profiles, default: fallback }))
+    const named = new Headers(init?.headers).get('X-Vouch-Profile') ?? current
+    if (url === '/api/profiles') return Promise.resolve(Response.json(listOf(profiles, current)))
     if (url === '/api/overview') {
       const profile = profiles.find((p) => p.id === named)
       return Promise.resolve(profile ? Response.json(overviewOf(profile.company)) : new Response(null, { status: 500 }))
     }
+    if (url === '/api/developer/current-company') return Promise.resolve(Response.json(DEVELOPER_SETTINGS))
     return new Promise<Response>(() => {})
   })
   vi.stubGlobal('fetch', fetch)
@@ -271,73 +181,31 @@ const overviewCalls = (fetch: ReturnType<typeof serve>) =>
   fetch.mock.calls.filter(([url]) => url === '/api/overview')
     .map(([, init]) => new Headers(init?.headers).get('X-Vouch-Profile'))
 
-/** Switches profile in the top bar's dropdown (#222): opens it, and chooses the profile whose id is `id`. */
-async function switchTo(id: string) {
-  await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
-  const label = { nordlicht: NORDLICHT, testwerk: TESTWERK }[id as 'nordlicht' | 'testwerk']
-  await userEvent.click(screen.getByRole('menuitemradio', { name: profileLabel(label) }))
-}
+const currentChanges = (fetch: ReturnType<typeof serve>) =>
+  fetch.mock.calls.filter(([url]) => url === '/api/developer/current-company')
+    .map(([, init]) => JSON.parse(String(init?.body)) as { company: string })
 
-describe('ProfiledApp', () => {
-  it('switching loads the chosen profile\'s overview, and keeps the theme', async () => {
-    const fetch = serve([NORDLICHT, TESTWERK])
-    render(<ProfiledApp />)
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    await screen.findByRole('button', { name: /^Profile: / })
-    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Dark theme' }))
-
-    await switchTo('testwerk')
-
-    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
-    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'testwerk'])
-    expect(screen.getByRole('button', { name: /^Profile: Testwerk/ })).toBeTruthy()
-    expect(document.documentElement.dataset.theme).toBe('dark')
-    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
-    expect(screen.getByRole('menuitem', { name: 'Light theme' })).toBeTruthy()
-  })
-
-  it('opens the profile chosen before a reload, and remembers each switch, issue 201', async () => {
-    rememberProfile('testwerk')
-    const fetch = serve([NORDLICHT, TESTWERK])
+describe('ProfiledApp, issue 480', () => {
+  it('opens under the current company, with no profile switcher, and keeps nothing in the browser', async () => {
+    const fetch = serve([NORDLICHT, TESTWERK], 'testwerk')
+    const stored = vi.spyOn(Storage.prototype, 'setItem')
     render(<ProfiledApp />)
     await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
     expect(overviewCalls(fetch)).toEqual(['testwerk'])
-    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
-
-    await switchTo('nordlicht')
-
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    expect(rememberedProfile()).toBe('nordlicht')
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'testwerk' })
+    const banner = screen.getByRole('banner')
+    expect(within(banner).queryByRole('button', { name: /^Profile/ })).toBeNull()
+    expect(within(banner).queryByText(/Testwerk/)).toBeNull()
+    expect(stored.mock.calls.filter(([key]) => key === 'vouch.profile')).toEqual([])
+    expect(window.localStorage.getItem('vouch.profile')).toBeNull()
   })
 
-  it('a remembered profile no longer listed opens the default, and the top bar says so, issue 201', async () => {
-    rememberProfile('alpenwerk')
+  it('ignores a profile an earlier version kept in the browser', async () => {
+    window.localStorage.setItem('vouch.profile', 'testwerk')
     const fetch = serve([NORDLICHT, TESTWERK])
     render(<ProfiledApp />)
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
     expect(overviewCalls(fetch)).toEqual(['nordlicht'])
-    const notice = within(screen.getByRole('banner')).getByRole('status')
-    expect(notice.textContent).toBe('Your last profile is no longer available: showing Nordlicht Komponenten GmbH.')
-    expect(rememberedProfile()).toBeNull() // said once: the next reload opens the default quietly
-
-    await switchTo('testwerk')
-    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
-    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
-  })
-
-  it('with one profile, shows its name in the top bar and no menu', async () => {
-    serve([NORDLICHT])
-    render(<ProfiledApp />)
-    await screen.findByLabelText('Profile: Nordlicht Komponenten GmbH · Germany · English')
-    expect(within(screen.getByRole('banner')).queryByRole('button', { name: /^Profile: / })).toBeNull()
-  })
-
-  it('with the default profile left out, chooses the first listed', async () => {
-    const fetch = serve([TESTWERK], null)
-    render(<ProfiledApp />)
-    await screen.findByText('Testwerk Prüfstand GmbH · Somewhere', { selector: '.pill' })
-    expect(overviewCalls(fetch)).toEqual(['testwerk'])
   })
 
   it('starting afresh from the user menu opens the Overview afresh, at its address, issue 285', async () => {
@@ -349,11 +217,11 @@ describe('ProfiledApp', () => {
       : answered(url, init))
     vi.stubGlobal('confirm', () => true)
     render(<ProfiledApp />)
-    await screen.findByRole('button', { name: /^Profile: / })
+    await screen.findByRole('navigation', { name: 'Main' })
     expect(overviewCalls(fetch)).toEqual([]) // the report reads no overview
     await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
 
-    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${NORDLICHT.company} afresh…` }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: `Start ${NORDLICHT.company} afresh…` }))
 
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
     expect(window.location.pathname).toBe('/')
@@ -363,103 +231,65 @@ describe('ProfiledApp', () => {
     expect(screen.getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBe('page')
   })
 
-  it('without the list, shows no switcher and the app as before', async () => {
+  it('without the list, names no company, so the API\'s current company answers', async () => {
     vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
       ? Promise.resolve(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
       : Promise.resolve(new Response(null, { status: 500 })))
     render(<ProfiledApp />)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeTruthy()
     await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    expect(screen.queryByRole('button', { name: /^Profile: / })).toBeNull()
+    expect(await authHeaders()).toEqual({})
   })
 })
 
-describe('switching profile on a working paper', () => {
-  const judged = [{ id: 'M1', column: 'must', text: 'Transfers are encrypted.', verdict: 'partly-evidenced',
-    reason: 'Only some.', citations: [] }]
-  const proposed = { control_id: '5.1.2', verdict: 'partly-evidenced', answer: 'Partly.', status: 'waiting-for-review',
-    thread_id: 't1', requirements: judged }
-  const paperOverview = (company: string): Overview => ({
-    ...overviewOf(company),
-    controls: [{ id: '5.1.2', question: 'Question 5.1.2?', iso_27001: 'A.5.14', status: 'waiting-for-review',
-      verdict: 'partly-evidenced' }],
-    requirements: { '5.1.2': [{ id: 'M1', column: 'must', text: 'Transfers are encrypted.', source: 'VDA ISA 2027.1',
-      not_applicable: null }] },
-  })
+const SETTINGS = DEVELOPER_SETTINGS
 
-  function serveTwo() {
-    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
-      const named = new Headers(init?.headers).get('X-Vouch-Profile')
-      const company = named === 'testwerk' ? TESTWERK.company : NORDLICHT.company
-      if (url === '/api/profiles') {
-        return Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
-      }
-      if (url === '/api/overview') return Promise.resolve(Response.json(paperOverview(company)))
-      if (url === '/api/assessments') return Promise.resolve(Response.json({ assessments: [proposed] }))
-      if (url === '/api/assessments/t1') return Promise.resolve(Response.json({ assessment: proposed }))
-      return new Promise<Response>(() => {})
+describe('Make current on the developer page, issue 480', () => {
+  it('opens the app afresh under the new current company, on the developer page, saying so', async () => {
+    window.history.replaceState(null, '', '/developer')
+    const fetch = serve([NORDLICHT, TESTWERK])
+    const answered = fetch.getMockImplementation()!
+    const listed = [...SETTINGS.listed_companies, TESTWERK]
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json({ ...SETTINGS, listed_companies: listed }))
+      if (url === '/api/developer/current-company')
+        return Promise.resolve(Response.json({ ...SETTINGS, listed_companies: listed, current_company: 'testwerk' }))
+      return answered(url, init)
     })
-  }
-  const row = async () => (await screen.findByText('M1', { selector: 'th .mono' })).closest('tr')!
-  /** Nordlicht's 5.1.2 paper, with M1 overridden and saved, not yet recorded. */
-  async function overriddenPaper() {
-    window.history.replaceState(null, '', '/controls/5.1.2')
-    serveTwo()
     render(<ProfiledApp />)
-    await userEvent.click(within(await row()).getByRole('button', { name: 'Change M1' }))
-    const editor = screen.getByRole('form', { name: 'Override M1' })
-    await userEvent.selectOptions(within(editor).getByLabelText('Verdict'), 'evidenced')
-    await userEvent.type(within(editor).getByLabelText('Reason (required)'), 'The rollout record shows it.')
-    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }))
-    expect(within(await row()).getByText('Overridden from Partly evidenced')).toBeTruthy()
-  }
+    await userEvent.click(await screen.findByRole('button', { name: 'Make Testwerk Prüfstand GmbH current' }))
 
-  it('asks first, and Cancel keeps the profile and the override (issue 182)', async () => {
-    await overriddenPaper()
-    const confirm = vi.fn(() => false)
-    vi.stubGlobal('confirm', confirm)
-
-    await switchTo('testwerk')
-
-    expect(confirm).toHaveBeenCalledWith('You have 1 override not yet recorded. Leave and drop it?')
-    expect(screen.getByRole('button', { name: /^Profile: Nordlicht/ })).toBeTruthy()
-    expect(within(await row()).getByText('Overridden from Partly evidenced')).toBeTruthy()
-    expect(rememberedProfile()).toBeNull()
-  })
-
-  it("drops the paper's unsaved overrides, which belonged to the other profile's assessment", async () => {
-    await overriddenPaper()
-    vi.stubGlobal('confirm', () => true) // the lead leaves (#182)
-
-    await switchTo('testwerk')
-
-    await screen.findByText(/Working paper · Testwerk/)
-    expect(within(await row()).queryByText(/Overridden from/)).toBeNull()
-    expect(within(await row()).queryByText('The rollout record shows it.')).toBeNull()
+    const note = await within(await screen.findByRole('region', { name: 'Companies' })).findByRole('status')
+    expect(note.textContent).toBe('Testwerk Prüfstand GmbH is now the current company.')
+    await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'testwerk' }))
+    expect(window.location.pathname).toBe('/developer')
+    expect(currentChanges(fetch)).toEqual([{ company: 'testwerk' }])
+    // Opened afresh: the developer settings are read again by the new app.
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/developer/settings')).toHaveLength(2)
   })
 })
 
 describe('a company made in company setup, issue 409', () => {
-  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
-    kept_in: 'memory', daily_limit: 10 }
-
-  /** The API as `serve` answers it, for a developer, the list read again answering `relisted` (null: a 500). */
-  function serveDeveloper(relisted: ProfileSummary[] | null) {
+  /** The API as `serve` answers it, for a developer, the list read again answering `relisted` (null: a 500) with the new
+   * company current, and the Make current answering `madeCurrent`. */
+  function serveDeveloper(relisted: ProfileSummary[] | null, madeCurrent: () => Response = () =>
+    Response.json(SETTINGS)) {
     const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
     const answered = fetch.getMockImplementation()!
     let listings = 0
     fetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/developer/current-company') return Promise.resolve(madeCurrent())
       if (url === '/api/profiles' && ++listings > 1)
-        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
+        return Promise.resolve(relisted ? Response.json(listOf(relisted, 'musterfirma-gmbh'))
           : new Response(null, { status: 500 }))
-      if (url === '/api/profiles') return Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
+      if (url === '/api/profiles') return Promise.resolve(Response.json(listOf([NORDLICHT, TESTWERK])))
       return answered(url, init)
     })
     return fetch
   }
 
-  it('reads the list again and opens under the new company, on the Dossier, remembered for the next reload', async () => {
+  it('makes it current, reads the list again and opens under it, on the Dossier', async () => {
     window.history.replaceState(null, '', '/developer/setup')
     const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
     render(<ProfiledApp />)
@@ -467,36 +297,56 @@ describe('a company made in company setup, issue 409', () => {
 
     await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
     expect(window.location.pathname).toBe('/')
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/profiles')).toHaveLength(2)
+    expect(currentChanges(fetch)).toEqual([{ company: 'musterfirma-gmbh' }])
+    const order = fetch.mock.calls.map(([url]) => url).filter((url) =>
+      url === '/api/profiles' || url === '/api/developer/current-company')
+    expect(order).toEqual(['/api/profiles', '/api/developer/current-company', '/api/profiles'])
     expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
-    expect(rememberedProfile()).toBe('musterfirma-gmbh')
-    expect(screen.getByRole('button', { name: /^Profile: Musterfirma GmbH/ })).toBeTruthy()
-    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
-    expect(screen.getAllByRole('menuitemradio').map((m) => m.getAttribute('aria-checked')))
-      .toEqual(['false', 'false', 'true'])
   })
 
-  it('when the list can\'t be read again, still opens under the new company, which the switcher names', async () => {
+  it('when the list can\'t be read again, still opens under the new company, which the user menu names', async () => {
     window.history.replaceState(null, '', '/developer/setup')
     const fetch = serveDeveloper(null)
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
 
     await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
-    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
-    expect(rememberedProfile()).toBe('musterfirma-gmbh')
-    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: Musterfirma/ }))
-    expect(screen.getAllByRole('menuitemradio').map((m) => m.textContent?.startsWith('Musterfirma GmbH')))
-      .toEqual([false, false, true])
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh'])
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    expect(screen.getByRole('menuitem', { name: `Start ${MUSTERFIRMA.company} afresh…` })).toBeTruthy()
   })
 
-  it('lands focus on the Dossier\'s main heading, not the profile dropdown', async () => {
+  it('lands focus on the Dossier\'s main heading', async () => {
     window.history.replaceState(null, '', '/developer/setup')
     serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
     await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 })))
+  })
+
+  it('not made current (a 503): opens the developer page under the current company, saying so, the company listed '
+    + 'once', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA],
+      () => Response.json({ detail: 'The database is unavailable just now.', unavailable: 'database' }, { status: 503 }))
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/profiles' && ++listings > 1
+      ? Promise.resolve(Response.json(listOf([NORDLICHT, TESTWERK, MUSTERFIRMA]))) // Nordlicht still current
+      : answered(url, init))
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    const note = await within(await screen.findByRole('region', { name: 'Companies' })).findByRole('status')
+    expect(note.textContent)
+      .toBe('Musterfirma GmbH was made but could not be made current. Use Make current to try again.')
+    expect(window.location.pathname).toBe('/developer')
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' })
+    expect(currentChanges(fetch)).toEqual([{ company: 'musterfirma-gmbh' }]) // once: nothing made twice
+    expect(fetch.mock.calls.filter(([url, init]) => url === '/api/developer/profiles' && init?.method === 'POST'))
+      .toEqual([])
+    expect(screen.queryByText('Goal: Internal improvement')).toBeNull()
   })
 
   /** serveDeveloper, the list read again held until the returned function answers it. */
@@ -511,60 +361,59 @@ describe('a company made in company setup, issue 409', () => {
     return (answer: Response) => release(answer)
   }
 
-  it('stays on the setup address until the list answers again, and after closing neither opens nor remembers it',
-    async () => {
-      window.history.replaceState(null, '', '/developer/setup')
-      const release = heldRelisting()
-      const { unmount } = render(<ProfiledApp />)
-      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
-      expect(window.location.pathname).toBe('/developer/setup')
-      unmount()
-      release(Response.json({ profiles: [NORDLICHT, TESTWERK, MUSTERFIRMA], default: 'nordlicht' }))
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(rememberedProfile()).toBeNull()
-      expect(await authHeaders()).toEqual({})
-      expect(window.location.pathname).toBe('/developer/setup')
-    })
+  it('stays on the setup address until the list answers again, and after closing opens nothing', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const release = heldRelisting()
+    const { unmount } = render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+    await waitFor(() => expect(reads).toHaveLength(2))
+    expect(window.location.pathname).toBe('/developer/setup')
+    unmount()
+    release(Response.json(listOf([NORDLICHT, TESTWERK, MUSTERFIRMA], 'musterfirma-gmbh')))
+    await reads[1]
+    expect(await authHeaders()).toEqual({})
+    expect(window.location.pathname).toBe('/developer/setup')
+  })
 
-  it('a 401 on the list read again signs out, and neither opens nor remembers the new company', async () => {
+  it('a 401 on the list read again signs out, and opens nothing', async () => {
     window.history.replaceState(null, '', '/developer/setup')
     const release = heldRelisting()
     const signOut = vi.fn()
     setOnSignedOut(signOut) // as ClerkApp's: the sign-in replaces the app on its next render, after this answer
     render(<ProfiledApp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+    await waitFor(() => expect(reads).toHaveLength(2))
     release(new Response(null, { status: 401 }))
-    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(rememberedProfile()).toBeNull()
+    await reads[1]
+    expect(signOut).toHaveBeenCalledOnce()
     expect(window.location.pathname).toBe('/developer/setup')
-    expect(screen.queryByRole('button', { name: /^Profile: Musterfirma/ })).toBeNull()
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' })
   })
 })
 
-describe('a company removed on the developer page, issue 418', () => {
+describe('a company removed on the developer page, issues 418 and 480', () => {
   const MADE = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', created_at: '2026-11-09T10:15:00+00:00' }
-  const SETTINGS = { ...DEVELOPER_SETTINGS, companies: [MADE] } satisfies DeveloperSettings
+  const WITH_MADE = { ...SETTINGS, companies: [MADE], listed_companies: [...SETTINGS.listed_companies, MUSTERFIRMA] }
 
-  /** The API as `serve` answers it, for a developer on the developer page with Musterfirma made in setup: the
-   * DELETE answers the settings without it, and the list read again answers `relisted` (null: a 500), or is held
-   * until `release` answers it when `hold` is set. */
-  function serveRemoval(relisted: ProfileSummary[] | null, hold = false,
-    listed: ProfileSummary[] = [NORDLICHT, TESTWERK, MUSTERFIRMA], fallback = 'nordlicht') {
+  /** The API, for a developer on the developer page with Musterfirma made in setup and `current` the current company:
+   * the DELETE answers the settings without it (Nordlicht current), and the list read again answers `relisted` (null:
+   * a 500) with Nordlicht current, or is held until `release` answers it when `hold` is set. */
+  function serveRemoval(relisted: ProfileSummary[] | null, current = 'nordlicht', hold = false,
+    listed: ProfileSummary[] = [NORDLICHT, TESTWERK, MUSTERFIRMA]) {
     window.history.replaceState(null, '', '/developer')
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetch = serve(listed, fallback)
+    const fetch = serve(listed, current)
     const answered = fetch.getMockImplementation()!
     let listings = 0
     let release: (answer: Response) => void = () => {}
+    const settings: DeveloperSettings = { ...WITH_MADE, current_company: current }
     fetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(settings))
       if (url === '/api/developer/profiles/musterfirma-gmbh' && init?.method === 'DELETE')
-        return Promise.resolve(Response.json({ ...SETTINGS, companies: [] }))
+        return Promise.resolve(Response.json(SETTINGS))
       if (url === '/api/profiles' && ++listings > 1) {
         if (hold) return new Promise<Response>((resolve) => { release = resolve })
-        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
-          : new Response(null, { status: 500 }))
+        return Promise.resolve(relisted ? Response.json(listOf(relisted)) : new Response(null, { status: 500 }))
       }
       return answered(url, init)
     })
@@ -572,72 +421,50 @@ describe('a company removed on the developer page, issue 418', () => {
   }
 
   const listings = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/profiles')
+  const settingsReads = (fetch: ReturnType<typeof serve>) =>
+    fetch.mock.calls.filter(([url]) => url === '/api/developer/settings')
+  const companies = () => screen.findByRole('region', { name: 'Companies' })
 
   async function removeMusterfirma() {
-    const sheet = await screen.findByRole('region', { name: 'Company setup' })
-    await userEvent.click(await within(sheet).findByRole('button', { name: 'Remove Musterfirma GmbH' }))
+    await userEvent.click(await within(await companies()).findByRole('button', { name: 'Remove Musterfirma GmbH' }))
   }
 
-  async function switcherCompanies() {
-    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
-    const names = screen.getAllByRole('menuitemradio').map((m) => m.textContent?.split(' · ')[0])
-    await userEvent.keyboard('{Escape}')
-    return names
-  }
+  it('one not current: the list is read again; the app stays under the current company, saying only Removed',
+    async () => {
+      const { fetch } = serveRemoval([NORDLICHT, TESTWERK])
+      render(<ProfiledApp />)
+      await removeMusterfirma()
 
-  it('one not shown: the list is read again and the switcher drops it; the page and the profile stay', async () => {
-    const { fetch } = serveRemoval([NORDLICHT, TESTWERK])
-    render(<ProfiledApp />)
-    await removeMusterfirma()
-
-    await waitFor(() => expect(listings(fetch)).toHaveLength(2))
-    await waitFor(async () => expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH',
-      'Testwerk Prüfstand GmbH']))
-    expect(screen.getByRole('status').textContent).toBe('Removed Musterfirma GmbH.')
-    expect(window.location.pathname).toBe('/developer')
-    expect(screen.getByRole('button', { name: /^Profile: Nordlicht/ })).toBeTruthy()
-    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
-  })
+      await waitFor(() => expect(listings(fetch)).toHaveLength(2))
+      await reads[1]
+      expect(within(await companies()).getByRole('status').textContent).toBe('Removed Musterfirma GmbH.')
+      expect(window.location.pathname).toBe('/developer')
+      expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' })
+      expect(settingsReads(fetch)).toHaveLength(1) // not opened afresh
+    })
 
   it.each([
     ['read again', [NORDLICHT, TESTWERK]],
     ["held, less it, when the list can't be read again", null],
-  ])('the one shown: opens the default on the developer page with the fallback note, forgotten (%s)',
-    async (_, relisted) => {
-      rememberProfile('musterfirma-gmbh')
-      serveRemoval(relisted)
-      render(<ProfiledApp />)
-      await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
-      await removeMusterfirma()
-
-      await screen.findByRole('button', { name: /^Profile: Nordlicht/ })
-      expect(within(screen.getByRole('banner')).getByRole('status').textContent)
-        .toBe('Your last profile is no longer available: showing Nordlicht Komponenten GmbH.')
-      expect(rememberedProfile()).toBeNull()
-      expect(window.location.pathname).toBe('/developer')
-      expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
-      // The note is carried through the app opened afresh (#418 review), and focus goes to it, not the heading.
-      const note = await within(screen.getByRole('region', { name: 'Company setup' })).findByRole('status')
-      expect(note.textContent).toBe('Removed Musterfirma GmbH.')
-      expect(document.activeElement).not.toBe(screen.queryByRole('heading', { level: 1 }))
-      expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH', 'Testwerk Prüfstand GmbH'])
-    })
-
-  it("the one shown, the default, with no list read again: leaves it for the profile the held list has left",
-    async () => {
-      serveRemoval(null, false, [MUSTERFIRMA, NORDLICHT], 'musterfirma-gmbh')
-      render(<ProfiledApp />)
-      await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
-      await removeMusterfirma()
-
-      await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' }))
-    })
-
-  it("the one shown, and no other profile can be had: opens with none named, not under the one removed", async () => {
-    serveRemoval(null, false, [MUSTERFIRMA], 'musterfirma-gmbh')
+  ])('the current one: opens Nordlicht afresh on the developer page, saying so (%s)', async (_, relisted) => {
+    const { fetch } = serveRemoval(relisted, 'musterfirma-gmbh')
     render(<ProfiledApp />)
-    await screen.findByRole('button', { name: 'Remove Musterfirma GmbH' })
-    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' })
+    await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' }))
+    await removeMusterfirma()
+
+    await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' }))
+    await waitFor(() => expect(settingsReads(fetch)).toHaveLength(2)) // opened afresh
+    expect(window.location.pathname).toBe('/developer')
+    // The note is carried through the app opened afresh (#418 review), and focus goes to it, not the heading.
+    const note = await within(await companies()).findByRole('status')
+    expect(note.textContent).toBe('Removed Musterfirma GmbH. Nordlicht Komponenten GmbH is now the current company.')
+    expect(document.activeElement).toBe(note)
+  })
+
+  it("the current one, and no other company can be had: opens with none named, not under the one removed", async () => {
+    serveRemoval(null, 'musterfirma-gmbh', false, [MUSTERFIRMA])
+    render(<ProfiledApp />)
+    await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' }))
     await removeMusterfirma()
 
     await waitFor(async () => expect(await authHeaders()).toEqual({}))
@@ -645,21 +472,17 @@ describe('a company removed on the developer page, issue 418', () => {
   })
 
   it('a list read again that answers after a sign-out changes nothing', async () => {
-    rememberProfile('musterfirma-gmbh')
-    const { release } = serveRemoval(null, true)
+    const { release } = serveRemoval(null, 'musterfirma-gmbh', true)
     const signOut = vi.fn()
     setOnSignedOut(signOut)
     render(<ProfiledApp />)
-    await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
     await removeMusterfirma()
-    await screen.findByText('Removed Musterfirma GmbH.')
+    await screen.findByText('Removed Musterfirma GmbH. Nordlicht Komponenten GmbH is now the current company.')
     await waitFor(() => expect(reads).toHaveLength(2))
     release(new Response(null, { status: 401 }))
     await reads[1] // ProfiledApp has handled the late answer by now
     expect(signOut).toHaveBeenCalledOnce()
-    expect(rememberedProfile()).toBe('musterfirma-gmbh')
-    expect(screen.getByRole('button', { name: /^Profile: Musterfirma/ })).toBeTruthy()
-    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' })
   })
 })
 
@@ -698,8 +521,9 @@ describe('the first pass on a company just made, issue 447', () => {
     fetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
       if (url === '/api/profiles') {
-        const profiles = ++listings > 1 ? [NORDLICHT, TESTWERK, MUSTERFIRMA] : [NORDLICHT, TESTWERK]
-        return Promise.resolve(Response.json({ profiles, default: 'nordlicht' }))
+        const made = ++listings > 1 // made current by then
+        return Promise.resolve(Response.json(made ? listOf([NORDLICHT, TESTWERK, MUSTERFIRMA], 'musterfirma-gmbh')
+          : listOf([NORDLICHT, TESTWERK])))
       }
       if (url === '/api/goal' && init?.method === 'PUT') {
         return Promise.resolve(goalAnswer()).then((answer) => {
@@ -830,7 +654,7 @@ describe('the first pass on a company just made, issue 447', () => {
     expect(goalButton().disabled).toBe(false)
   })
 
-  it('a switch away and back, then a fresh start, start no pass again', async () => {
+  it('a fresh start starts no pass again', async () => {
     const fetch = serveSetup()
     vi.stubGlobal('confirm', () => true)
     const answered = fetch.getMockImplementation()!
@@ -839,11 +663,6 @@ describe('the first pass on a company just made, issue 447', () => {
       : answered(url, init))
     await createAndOpen()
     await screen.findByText('1 assessment waiting for your review.')
-    await switchTo('nordlicht')
-    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
-    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
-    await userEvent.click(screen.getByRole('menuitemradio', { name: profileLabel(MUSTERFIRMA) }))
-    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
     const before = overviewCalls(fetch).length
     await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
     await userEvent.click(screen.getByRole('menuitem', { name: `Start ${MUSTERFIRMA.company} afresh…` }))
@@ -855,10 +674,9 @@ describe('the first pass on a company just made, issue 447', () => {
   })
 
   it('a fresh mount (a reload) under the new company starts no pass', async () => {
-    rememberProfile('musterfirma-gmbh')
     const fetch = serveSetup()
     fetch.mockImplementation(((answered) => (url: string, init?: RequestInit) => url === '/api/profiles'
-      ? Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK, MUSTERFIRMA], default: 'nordlicht' }))
+      ? Promise.resolve(Response.json(listOf([NORDLICHT, TESTWERK, MUSTERFIRMA], 'musterfirma-gmbh')))
       : answered(url, init))(fetch.getMockImplementation()!))
     render(<StrictMode><ProfiledApp /></StrictMode>)
     await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })

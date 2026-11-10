@@ -941,7 +941,7 @@ describe('company setup', () => {
       await toStep7()
       await create()
       expect((await screen.findByRole('alert')).textContent)
-        .toBe('The company may not have been created. Check the profile switcher before trying again.')
+        .toBe('The company may not have been created. Check the Companies section of the Developer page before trying again.')
       expect(onCreated).not.toHaveBeenCalled()
       expect(document.activeElement).toBe(createButton())
     })

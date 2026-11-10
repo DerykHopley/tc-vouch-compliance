@@ -1,12 +1,13 @@
-"""The top bar (#222, the owner's option D): underlined page tabs, the profile dropdown, a user
-menu for the theme (and sign out, in clerk mode), a breadcrumb on the working paper, and one Menu
-button on a phone. Local mode, on the fake model: the user menu holds the theme only."""
+"""The top bar (#222, the owner's option D): underlined page tabs, a user menu for the theme (and
+sign out, in clerk mode), a breadcrumb on the working paper, and one Menu button on a phone; no
+profile dropdown since #480 (test_profiles.py checks it is gone). Local mode, on the fake model:
+the user menu holds the fresh start and the theme."""
 
 import re
 
 import pytest
 from playwright.sync_api import Page, expect
-from top_bar import back_to_overview, overview_tab, profile_button
+from top_bar import back_to_overview, overview_tab
 from touch_targets import small_targets
 
 ASSESSED = "4.1.2"
@@ -72,16 +73,6 @@ def test_the_user_menu_opens_by_click_or_keyboard_closes_with_esc_and_flips_the_
     expect(user).to_be_focused()
 
 
-def test_the_profile_dropdown_is_a_bordered_button_naming_the_company_and_its_tag(
-    page: Page, profiles_url
-):
-    opened(page, profiles_url)
-    button = profile_button(page)
-    expect(button).to_have_attribute("aria-haspopup", "menu")
-    expect(button).to_contain_text("Nordlicht Komponenten GmbH")
-    expect(button.locator(".prof-tag")).to_have_text("DE · EN")
-
-
 def test_the_working_paper_breadcrumb_goes_back_to_the_overview(page: Page, paper_url):
     response = page.request.post(f"{paper_url}/api/assessments", data={"control_id": ASSESSED})
     assert response.ok, response.status
@@ -98,9 +89,7 @@ def test_the_working_paper_breadcrumb_goes_back_to_the_overview(page: Page, pape
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
-def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
-    page: Page, profiles_url, scheme
-):
+def test_on_a_phone_one_menu_button_holds_the_tabs_and_user_menu(page: Page, profiles_url, scheme):
     page.emulate_media(color_scheme=scheme)
     opened(page, profiles_url, 400)
     bar = page.get_by_role("banner")
@@ -109,14 +98,13 @@ def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
     report_tab = page.get_by_role("link", name="Report", exact=True)
     expect(overview_tab(page)).to_be_hidden()
     expect(report_tab).to_be_hidden()  # in the menu too (#56)
-    expect(profile_button(page)).to_be_hidden()
+    expect(bar.get_by_role("button", name="Your menu")).to_be_hidden()
     assert not scrolls_sideways(page)
 
     toggle.click()
     expect(toggle).to_have_attribute("aria-expanded", "true")
     expect(overview_tab(page)).to_be_visible()
     expect(report_tab).to_be_visible()
-    expect(profile_button(page)).to_be_visible()
     expect(bar.get_by_role("button", name="Your menu")).to_be_visible()
     assert not scrolls_sideways(page)
     assert small_targets(page) == []
@@ -129,13 +117,15 @@ def test_on_a_phone_one_menu_button_holds_the_tabs_profile_and_user_menu(
     expect(toggle).to_have_attribute("aria-expanded", "false")
 
 
-def test_the_profile_menu_moves_with_the_arrows_and_tab_closes_it(page: Page, profiles_url):
-    # Keyboard and focus get a browser test (agent-rules.md): jsdom only models them.
+def test_the_user_menu_moves_with_the_arrows_and_tab_closes_it(page: Page, profiles_url):
+    # Keyboard and focus get a browser test (agent-rules.md): jsdom only models them. Once the
+    # profile menu's check; the user menu is the same Menu since the dropdown went (#480).
     opened(page, profiles_url)
-    button = profile_button(page)
+    button = page.get_by_role("banner").get_by_role("button", name="Your menu")
     button.focus()
     page.keyboard.press("Enter")
-    choices = page.get_by_role("banner").get_by_role("menuitemradio")
+    choices = page.get_by_role("banner").get_by_role("menuitem")
+    expect(choices).to_have_count(2)  # the fresh start and the theme
     expect(choices.nth(0)).to_be_focused()
     page.keyboard.press("ArrowDown")
     expect(choices.nth(1)).to_be_focused()
@@ -158,11 +148,14 @@ def test_esc_closes_a_top_bar_menu_but_leaves_an_open_chat_open(page: Page, prof
     expect(chat).to_be_visible()
 
 
-def test_on_a_phone_the_fallback_note_shows_with_the_menu_closed(page: Page, profiles_url):
-    """#201's note that the remembered profile is gone stays in view behind the closed Menu."""
+def test_on_a_phone_a_profile_kept_by_an_earlier_version_changes_nothing(page: Page, profiles_url):
+    """#201's remembered profile is gone (#480): a value left under its key opens the current
+    company, with no note, the Menu closed."""
     page.add_init_script("localStorage.setItem('vouch.profile', 'gone')")
-    opened(page, profiles_url, 400)
-    expect(page.get_by_role("banner").get_by_role("status")).to_be_visible()
+    with page.expect_response(lambda r: r.url.endswith("/api/overview")) as read:
+        opened(page, profiles_url, 400)
+    assert read.value.request.header_value("X-Vouch-Profile") == "nordlicht"
+    expect(page.get_by_role("banner").get_by_role("status")).to_have_count(0)
     expect(
         page.get_by_role("banner").get_by_role("button", name="Menu", exact=True)
     ).to_have_attribute("aria-expanded", "false")

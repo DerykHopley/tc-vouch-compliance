@@ -218,7 +218,7 @@ describe('creating a company, issue 409', () => {
 })
 
 describe('newlyListed', () => {
-  const before = { profiles: [NORDLICHT, CREATED], default: 'nordlicht' }
+  const before = { profiles: [NORDLICHT, CREATED], default: 'nordlicht', current: 'nordlicht' }
   const twin = { ...CREATED, id: 'musterfirma-gmbh-2' }
 
   it('is the profile of that name whose id was not listed before', () => {

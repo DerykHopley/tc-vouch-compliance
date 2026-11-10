@@ -1,21 +1,26 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { count, dollars, plural } from './assessment.ts'
 import {
-  changeDailyLimit, changeModel, type CompanyRemoval, developerSettings, type DeveloperSettings, type MadeCompany,
-  removeCompany, type RunTotals, type SettingChange, UNAVAILABLE,
+  changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, developerSettings, type DeveloperSettings,
+  makeCurrent, type MadeCompany, removeCompany, type RunTotals, type SettingChange, UNAVAILABLE,
 } from './developer.ts'
+import type { ProfileSummary } from './profiles.ts'
 
 type Props = {
   settings: DeveloperSettings | typeof UNAVAILABLE
   onChange: (settings: DeveloperSettings) => void
   /** Opens company setup (#403). */
   onSetup: () => void
-  /** A company made in setup was removed (#418): ProfiledApp reads the profile list again. */
-  onRemoved?: (id: string) => void
-  /** The company just removed, when it was the one shown, so the app opened afresh (#418): said once, on arrival. */
-  removedCompany?: string
-  /** The removedCompany note was shown: ProfiledApp forgets it, so it isn't said again. */
-  onRemovedShown?: () => void
+  /** A company made in setup was removed (#418), with the note saying so: ProfiledApp reads the list again, and opens
+   * the app afresh under the current company when the one shown is no longer it (#480), carrying the note. */
+  onRemoved?: (id: string, note: string) => void
+  /** A company was made current (#480), with the note saying so: ProfiledApp opens the app afresh under it, here. */
+  onMadeCurrent?: (id: string, note: string) => void
+  /** A note carried through the app opened afresh (a removal, a Make current, a company made but not made current):
+   * said once, on arrival. */
+  developerNote?: string
+  /** The developerNote was shown: ProfiledApp forgets it, so it isn't said again. */
+  onNoteShown?: () => void
 }
 
 const FAKE_BECAUSE: Record<NonNullable<DeveloperSettings['fake_reason']>, string> = {
@@ -26,12 +31,14 @@ const FAKE_BECAUSE: Record<NonNullable<DeveloperSettings['fake_reason']>, string
 type Saving = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; settings: DeveloperSettings } | { status: 'refused'; message: string }
 
 /**
- * The developer page (#34): the model assessments run on, and a form to change it; the prompt version; each user's
- * daily limit, and a form to change it; every assessment's usage totalled, and a link to OpenRouter's (#35); the way into
- * company setup (#403), and the companies made in it, each of which can be removed (#418). Only a developer reaches it
- * (App.tsx); the compliance lead never sees it.
+ * The developer page (#34): the Companies section (#480: every listed company, the current one marked, Make current on
+ * the others, Remove on those made in setup, #418), under the way into company setup (#403); the model assessments run
+ * on, and a form to change it; the prompt version; each user's daily limit, and a form to change it; every
+ * assessment's usage totalled, and a link to OpenRouter's (#35). Only a developer reaches it (App.tsx); the compliance
+ * lead never sees it.
  */
-export default function DeveloperPage({ settings, onChange, onSetup, onRemoved, removedCompany, onRemovedShown }: Props) {
+export default function DeveloperPage({ settings, onChange, onSetup, onRemoved, onMadeCurrent, developerNote,
+  onNoteShown }: Props) {
   return (
     <section className="paper wrap" aria-label="Developer settings">
       <div className="paper-head">
@@ -44,11 +51,11 @@ export default function DeveloperPage({ settings, onChange, onSetup, onRemoved, 
         </p>
       ) : (
         <>
-          <section className="sheet" aria-label="Company setup">
-            <span className="lbl">Company setup</span>
+          <section className="sheet" aria-label="Companies">
+            <span className="lbl">Companies</span>
             <button type="button" className="btn btn-primary" onClick={onSetup}>Set up a company</button>
-            <Companies settings={settings} onChange={onChange} onRemoved={onRemoved} removedCompany={removedCompany}
-              onRemovedShown={onRemovedShown} />
+            <Companies settings={settings} onChange={onChange} onRemoved={onRemoved} onMadeCurrent={onMadeCurrent}
+              developerNote={developerNote} onNoteShown={onNoteShown} />
           </section>
           <Settings settings={settings} onChange={onChange} />
         </>
@@ -57,13 +64,21 @@ export default function DeveloperPage({ settings, onChange, onSetup, onRemoved, 
   )
 }
 
-type Removing = { status: 'idle' } | { status: 'removing'; id: string } | { status: 'done'; note: string }
-  | { status: 'problem'; message: string }
+/** What the Companies section is doing: nothing, removing or making current one company, done (its note), or a
+ * problem (its message). */
+type Acting = { status: 'idle' } | { status: 'removing'; id: string } | { status: 'making'; id: string }
+  | { status: 'done'; note: string } | { status: 'problem'; message: string }
 
 /** What a removal that didn't happen says, but for a refusal, which says the API's reason. */
 const REMOVE_PROBLEM: Record<Extract<CompanyRemoval['status'], 'unavailable' | 'failed'>, string> = {
   unavailable: 'The database is unavailable just now. Nothing was removed; try again in a moment.',
   failed: 'The company could not be removed. Nothing changed.',
+}
+
+/** What a Make current that didn't happen says, but for a refusal, which says the API's reason. */
+const CURRENT_PROBLEM: Record<Extract<CurrentChange['status'], 'unavailable' | 'failed'>, string> = {
+  unavailable: 'The database is unavailable just now. Nothing changed; try again in a moment.',
+  failed: 'The company could not be made current. Nothing changed.',
 }
 
 /** "9 Nov 2026": the day a company was made, in the reader's time zone; as written when it doesn't parse. */
@@ -72,36 +87,70 @@ const madeOn = (iso: string) => {
   return Number.isNaN(at.getTime()) ? iso : at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-/** `settings` less the company `id`: the list held, when the settings can't be read again after a removal. */
-const without = (settings: DeveloperSettings, id: string): DeveloperSettings =>
-  ({ ...settings, companies: settings.companies && settings.companies.filter((c) => c.id !== id) })
+/** `settings` less the company `id`: the lists held, when the settings can't be read again after a removal. */
+const without = (settings: DeveloperSettings, id: string): DeveloperSettings => ({
+  ...settings,
+  companies: settings.companies && settings.companies.filter((c) => c.id !== id),
+  listed_companies: settings.listed_companies.filter((c) => c.id !== id),
+})
+
+/** The company the current one falls back to once `id` is removed, by the API's rule (vouch.current_company): Nordlicht
+ * while listed, else the first listed. From the settings held, when they can't be read after the removal. */
+function fallbackOf(settings: DeveloperSettings, id: string): ProfileSummary | undefined {
+  const left = settings.listed_companies.filter((c) => c.id !== id)
+  return left.find((c) => c.id === 'nordlicht') ?? left[0]
+}
+
+/** The note a removal ends with: when the company removed was the current one, it names the company now current too
+ * (#480, decision 8). */
+function removedNote(company: string, wasCurrent: boolean, now: ProfileSummary | undefined): string {
+  return wasCurrent && now ? `Removed ${company}. ${now.company} is now the current company.` : `Removed ${company}.`
+}
+
+/** One row of the Companies list: a listed company (Current, or Make current), with Remove when made in setup; or a
+ * company made in setup that isn't listed (broken, or its id taken by a profile folder since), with Remove only. */
+type Row = { id: string; company: string; listed: boolean; made: MadeCompany | undefined }
+
+/** Every listed company in the API's order, then the companies made in setup that aren't listed. A company made in
+ * setup is listed when it isn't among the profiles left out: a shadowed one is, and its id lists the file one. */
+function rowsOf(settings: DeveloperSettings): Row[] {
+  const left = new Set(settings.broken_profiles.map((b) => b.id))
+  const made = settings.companies ?? []
+  const listedMade = new Map(made.filter((c) => !left.has(c.id)).map((c) => [c.id, c]))
+  return [
+    ...settings.listed_companies.map((c) => ({ id: c.id, company: c.company, listed: true, made: listedMade.get(c.id) })),
+    ...made.filter((c) => left.has(c.id)).map((c) => ({ id: c.id, company: c.company, listed: false, made: c })),
+  ]
+}
 
 /**
- * The companies made in company setup (#418), each with its id, the day it was made and a Remove button. Remove asks
- * with the browser's own confirm (the user menu's fresh start's way), then removes it once, however often pressed; a
- * refusal says why under the list, which stays. One removed elsewhere already leaves the list all the same. A 401 has
- * signed out already: nothing to say. The note that it was removed takes focus, as the button pressed is gone; it is
- * carried through the app opened afresh when the company was the one shown (`removedCompany`).
+ * The Companies section's list (#480, decision 7): every company listed for users, with its name and id; the current
+ * one marked Current, each other one with Make current; a company made in setup also with the day it was made and
+ * Remove (#418), and one made but not listed with Remove only. Make current and Remove each send their change once,
+ * however often pressed (every button disabled while one is out). Make current opens the app afresh under the new
+ * current company, here; refused, it reads the settings again and says why. Remove asks with the browser's own confirm
+ * first; removing the current company makes Nordlicht current (decision 8), and the note says so. A problem is said
+ * under the list, which stays. A 401 has signed out already: nothing to say. A note takes focus, as the button pressed
+ * may be gone; it is carried through the app opened afresh (`developerNote`).
  */
-function Companies({ settings, onChange, onRemoved, removedCompany, onRemovedShown }: {
+function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote, onNoteShown }: {
   settings: DeveloperSettings; onChange: Props['onChange']; onRemoved: Props['onRemoved']
-  removedCompany: Props['removedCompany']; onRemovedShown: Props['onRemovedShown']
+  onMadeCurrent: Props['onMadeCurrent']; developerNote: Props['developerNote']; onNoteShown: Props['onNoteShown']
 }) {
-  const [removing, setRemoving] = useState<Removing>(
-    removedCompany ? { status: 'done', note: `Removed ${removedCompany}.` } : { status: 'idle' })
+  const [acting, setActing] = useState<Acting>(
+    developerNote ? { status: 'done', note: developerNote } : { status: 'idle' })
   const busy = useRef(false) // set at once, so a second press before the next render sends nothing
   const note = useRef<HTMLParagraphElement>(null)
-  const { companies } = settings
 
-  const arriving = useRef(Boolean(removedCompany)) // said once, on arrival: the note is held here from now on
+  const arriving = useRef(Boolean(developerNote)) // said once, on arrival: the note is held here from now on
   useEffect(() => {
     if (!arriving.current) return
     arriving.current = false
-    onRemovedShown?.()
-  }, [onRemovedShown])
+    onNoteShown?.()
+  }, [onNoteShown])
   useEffect(() => {
-    if (removing.status === 'done') note.current?.focus()
-  }, [removing])
+    if (acting.status === 'done') note.current?.focus()
+  }, [acting])
 
   const remove = async ({ id, company }: MadeCompany) => {
     if (busy.current) return
@@ -109,51 +158,95 @@ function Companies({ settings, onChange, onRemoved, removedCompany, onRemovedSho
       + 'Its audit trail is kept.'
     if (!window.confirm(question)) return
     busy.current = true
-    setRemoving({ status: 'removing', id })
+    setActing({ status: 'removing', id })
     const result = await removeCompany(id)
+    let done: string | null = null
     if (result.status === 'removed') {
-      onChange(result.settings ?? without(settings, id))
+      const after = result.settings
+      onChange(after ?? without(settings, id))
+      const now = after ? after.listed_companies.find((c) => c.id === after.current_company) : fallbackOf(settings, id)
+      done = removedNote(company, settings.current_company === id, now)
     } else if (result.status === 'gone') {
       const again = await developerSettings()
       onChange(again && again !== UNAVAILABLE ? again : without(settings, id))
+      done = `${company} was already removed.`
     }
     busy.current = false
-    if (result.status === 'removed' || result.status === 'gone') {
-      setRemoving({ status: 'done', note: result.status === 'removed' ? `Removed ${company}.` : `${company} was already removed.` })
-      onRemoved?.(id)
+    if (done !== null) {
+      setActing({ status: 'done', note: done })
+      onRemoved?.(id, done)
     } else if (result.status === 'refused') {
-      setRemoving({ status: 'problem', message: `Vouch could not remove this company: ${result.problem}` })
+      setActing({ status: 'problem', message: `Vouch could not remove this company: ${result.problem}` })
     } else if (result.status === 'signed-out') {
-      setRemoving({ status: 'idle' })
-    } else {
-      setRemoving({ status: 'problem', message: REMOVE_PROBLEM[result.status] })
+      setActing({ status: 'idle' })
+    } else if (result.status === 'unavailable' || result.status === 'failed') {
+      setActing({ status: 'problem', message: REMOVE_PROBLEM[result.status] })
     }
   }
 
+  const makeCurrentOf = async ({ id, company }: Row) => {
+    if (busy.current) return
+    busy.current = true
+    setActing({ status: 'making', id })
+    const result = await makeCurrent(id)
+    if (result.status === 'refused') {
+      const again = await developerSettings()
+      if (again && again !== UNAVAILABLE) onChange(again)
+    }
+    busy.current = false
+    if (result.status === 'made') {
+      onChange(result.settings)
+      const done = `${company} is now the current company.`
+      setActing({ status: 'done', note: done })
+      onMadeCurrent?.(id, done)
+    } else if (result.status === 'refused') {
+      setActing({ status: 'problem', message: `Vouch could not make this company current: ${result.problem}` })
+    } else if (result.status === 'signed-out') {
+      setActing({ status: 'idle' })
+    } else {
+      setActing({ status: 'problem', message: CURRENT_PROBLEM[result.status] })
+    }
+  }
+
+  const out = acting.status === 'removing' || acting.status === 'making'
   return (
     <>
-      {companies === null ? <p className="field-note">The companies made in setup can't be read just now.</p>
-        : companies.length === 0 ? <p className="field-note">No companies made in setup yet.</p>
-        : (
-          <ul className="companies">
-            {companies.map((c) => {
-              const out = removing.status === 'removing' && removing.id === c.id
-              return (
-                <li key={c.id}>
-                  <span className="company-name">{c.company}</span>
-                  <span className="mono">{c.id}</span>
-                  <time className="field-note" dateTime={c.created_at}>Made {madeOn(c.created_at)}</time>
-                  <button type="button" className="btn" disabled={removing.status === 'removing'} aria-busy={out}
-                    aria-label={out ? undefined : `Remove ${c.company}`} onClick={() => void remove(c)}>
-                    {out ? 'Removing…' : 'Remove'}
+      <ul className="companies">
+        {rowsOf(settings).map((row) => {
+          const removing = acting.status === 'removing' && acting.id === row.id
+          const making = acting.status === 'making' && acting.id === row.id
+          const current = row.listed && row.id === settings.current_company
+          return (
+            <li key={`${row.id}:${row.listed ? 'listed' : 'made'}`}>
+              <span className="company-name">{row.company}</span>
+              <span className="mono">{row.id}</span>
+              {row.made && (
+                <time className="field-note" dateTime={row.made.created_at}>Made {madeOn(row.made.created_at)}</time>
+              )}
+              <span className="company-actions">
+                {current && <span className="company-current">Current</span>}
+                {row.listed && !current && (
+                  <button type="button" className="btn" disabled={out} aria-busy={making}
+                    aria-label={making ? undefined : `Make ${row.company} current`}
+                    onClick={() => void makeCurrentOf(row)}>
+                    {making ? 'Making current…' : 'Make current'}
                   </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      {removing.status === 'problem' && <p className="notice field-note" role="alert">{removing.message}</p>}
-      {removing.status === 'done' && <p ref={note} className="field-note" role="status" tabIndex={-1}>{removing.note}</p>}
+                )}
+                {row.made && (
+                  <button type="button" className="btn" disabled={out} aria-busy={removing}
+                    aria-label={removing ? undefined : `Remove ${row.company}`}
+                    onClick={() => { if (row.made) void remove(row.made) }}>
+                    {removing ? 'Removing…' : 'Remove'}
+                  </button>
+                )}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {settings.companies === null && <p className="field-note">The companies made in setup can't be read just now.</p>}
+      {acting.status === 'problem' && <p className="notice field-note" role="alert">{acting.message}</p>}
+      {acting.status === 'done' && <p ref={note} className="field-note" role="status" tabIndex={-1}>{acting.note}</p>}
     </>
   )
 }
@@ -215,8 +308,8 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
       )}
       {settings.kept_in === 'memory' && (
         <p className="field-note">
-          No database is set, so the model choice, the daily limit and counts, and the usage are kept until the server
-          restarts.
+          No database is set, so the model choice, the current company, the daily limit and counts, and the usage are
+          kept until the server restarts.
         </p>
       )}
     </>

@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import { type Arrival, useFirstPass } from './arrival.ts'
 import AskVouch from './AskVouch.tsx'
@@ -70,22 +70,26 @@ function viewAt(path: string): View {
 type AppProps = {
   /** Clerk mode's sign out, in the user menu; local mode has nobody to sign out. */
   onSignOut?: () => void
-  /** The top bar's profile switcher (ProfiledApp.tsx, #47). */
-  profileSwitcher?: ReactNode
   /** The signed-in user's name, for the user menu (#222); none in local mode. */
   userName?: string
   /** The company of the profile shown, for the user menu's fresh start (#285); none without a profile list. */
   company?: string
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
-  /** Company setup made a company (#409), with the Goal chosen in it (#447): ProfiledApp opens the app afresh under it. */
+  /** Company setup made a company (#409), with the Goal chosen in it (#447): ProfiledApp makes it current (#480) and
+   * opens the app afresh under it. */
   onCompanyCreated?: (profile: ProfileSummary, goal: Goal) => void
-  /** A company made in setup was removed on the developer page (#418): ProfiledApp reads the profile list again. */
-  onCompanyRemoved?: (id: string) => void
-  /** The company shown was removed, so the app opened afresh (#418): the developer page says so, once. */
-  removedCompany?: string
-  /** The developer page said removedCompany. */
-  onRemovedShown?: () => void
+  /** A company made in setup was removed on the developer page (#418), with the page's note: ProfiledApp reads the
+   * profile list again, and opens the app afresh under the current company when it changed (#480). */
+  onCompanyRemoved?: (id: string, note: string) => void
+  /** A company was made current on the developer page (#480), with the page's note: ProfiledApp opens the app afresh
+   * under it. */
+  onMadeCurrent?: (id: string, note: string) => void
+  /** The app opened afresh on the developer page with a note for it (a removal, a Make current, a company made but not
+   * made current): the developer page says it, once. */
+  developerNote?: string
+  /** The developer page said developerNote. */
+  onNoteShown?: () => void
   /** The app opens on a company just made: the Dossier's heading takes focus, until the first move elsewhere (#409),
    * and the arrival sequence sets the Goal chosen in setup and runs a profile pass (#447). Only a create sets it; it is
    * taken once, as the app mounts, and `onArrivalUsed` then lets ProfiledApp clear it, so no later mount reruns it. */
@@ -93,10 +97,10 @@ type AppProps = {
   onArrivalUsed?: () => void
 }
 
-/** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
- * Menu button on a phone), then the page shown, and the chat. */
-export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh, onCompanyCreated,
-  onCompanyRemoved, removedCompany, onRemovedShown, arrival = null, onArrivalUsed }: AppProps = {}) {
+/** The app: the top bar (#222, the owner's option D: page tabs and the user menu, behind one Menu button on a phone;
+ * no profile switcher since #480), then the page shown, and the chat. */
+export default function App({ onSignOut, userName, company, onStartedAfresh, onCompanyCreated, onCompanyRemoved,
+  onMadeCurrent, developerNote, onNoteShown, arrival = null, onArrivalUsed }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -300,7 +304,6 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
                 onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'developer' }) }}>Developer</a>
             )}
           </nav>
-          {profileSwitcher}
           <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut}
             company={company} onStartedAfresh={onStartedAfresh} />
         </div>
@@ -310,7 +313,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         : shown === 'developer' && developer ? (
           <main>
             <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })}
-              onRemoved={onCompanyRemoved} removedCompany={removedCompany} onRemovedShown={onRemovedShown} />
+              onRemoved={onCompanyRemoved} onMadeCurrent={onMadeCurrent} developerNote={developerNote}
+              onNoteShown={onNoteShown} />
           </main>
         )
         : shown === 'setup' && developer ? (

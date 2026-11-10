@@ -28,16 +28,8 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .tabs a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; color: var(--muted); font-weight: 500; text-decoration: none; border-bottom: 2px solid transparent; }
 .tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--brass); }
 .tabs a:hover { color: var(--ink); }
-/* The profile switcher (#47): a bordered dropdown button, the company, its "DE · EN" tag and a chevron. */
-.prof { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
-.prof-button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; padding: 0 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); font: inherit; }
-button.prof-button:hover { border-color: var(--navy); }
-.prof-company { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.prof-tag { font: 500 11px var(--f-mono); color: var(--muted); border: 1px solid var(--rule); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
-.chevron { color: var(--muted); }
 /* The user menu: the initials in a circle. */
-.user-menu { margin-left: auto; } /* at the right edge, with or without a profile switcher before it */
-.prof + .user-menu { margin-left: 0; }
+.user-menu { margin-left: auto; } /* at the right edge */
 .user-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--rule); border-radius: 50%; background: var(--paper); color: var(--ink); font: 600 13px var(--f-body); }
 .user-button:hover { border-color: var(--navy); }
 /* A menu's popup (Menu.tsx): its items 44px tall; the one chosen checked. */
@@ -50,7 +42,6 @@ button.prof-button:hover { border-color: var(--navy); }
 /* The working paper's breadcrumb: "Overview › 5.1.1". */
 .crumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .crumbs a { display: inline-flex; align-items: center; min-height: 44px; color: var(--navy); }
-.prof-note { flex-basis: 100%; text-align: right; font-size: 12px; color: var(--muted); }
 
 /* Buttons and chips */
 /* A link on its own line meets the 44px touch-target floor (design.md, Accessibility floor). */
@@ -170,7 +161,9 @@ button.prof-button:hover { border-color: var(--navy); }
 .companies li:last-child { border-bottom: 1px solid var(--rule); }
 .companies .company-name { font-weight: 600; min-width: 0; }
 .companies .mono, .companies time { min-width: 0; }
-.companies .btn { margin-left: auto; }
+/* #480: the current company is marked as the current tab is, with the brass underline; the others' buttons beside. */
+.companies .company-actions { margin-left: auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.companies .company-current { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; font-weight: 600; box-shadow: inset 0 -2px 0 var(--brass); }
 .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .mono { font-family: var(--f-mono); text-transform: none; }
 .sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 16px; display: grid; gap: 8px; justify-items: start; margin: 0; }
@@ -341,15 +334,12 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .wp-index { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 260px; overflow: auto; }
 }
 @media (max-width: 700px) {
-  /* The top bar on a phone (#222): the tabs, the profile and the user menu behind one Menu button, stacked. */
+  /* The top bar on a phone (#222): the tabs and the user menu behind one Menu button, stacked. */
   .bar-toggle { display: inline-flex; margin-left: auto; }
   .bar-menu { flex-basis: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
   .bar-menu.open { padding-bottom: 8px; }
-  /* Closed, the panel shows nothing but #201's fallback note, which must still be seen and announced. */
-  .bar-menu:not(.open) > :not(.prof), .bar-menu:not(.open) .prof > :not(.prof-note) { display: none; }
+  .bar-menu:not(.open) > * { display: none; } /* closed, the panel shows nothing */
   .bar-menu .tabs { flex-direction: column; }
-  .bar-menu .prof { margin-left: 0; justify-content: flex-start; }
-  .bar-menu .prof-note { text-align: left; }
   .bar-menu .menu-popup { position: static; margin-top: 4px; box-shadow: none; }
   .bubble, .bubble.enlarged, .bubble.pinned { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
   .shortcut-hint { display: none; }

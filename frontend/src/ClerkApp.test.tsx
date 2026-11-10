@@ -35,6 +35,7 @@ vi.mock('@clerk/react', () => ({
 const ONE_PROFILE = {
   profiles: [{ id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' }],
   default: 'nordlicht',
+  current: 'nordlicht', // #480: the app opens under the current company
 }
 
 /** GET /api/access answers `status` with `body`, and GET /api/profiles one profile (#47: the app
