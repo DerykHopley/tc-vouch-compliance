@@ -2,8 +2,9 @@
 
 With both Langfuse keys set (vouch.settings.LangfuseKeys), each assessment run, chat turn and
 profile pass is one trace: its LangGraph steps, each model call (prompt, answer, model, tokens,
-and the cost Vouch records for it, #504: cost_details), and each tool call, tagged with the
-profile, the control, the model and the prompt version, its user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
+and the cost Vouch records for it, #504: cost_details; a failed call's too, or none, #508),
+and each tool call, tagged with the profile, the control, the model and the prompt version, its
+user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
 client is made, nothing is imported from it, and no call is sent.
 
 A run is traced by its RunnableConfig: `traced` gives one holding a fresh Langfuse LangChain
@@ -20,15 +21,17 @@ address reaches a trace. A batch that can't be redacted is dropped, never sent. 
 session tokens never enter a run.
 """
 
+import asyncio
 import base64
 import json
 import logging
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from langchain_core.outputs import LLMResult
@@ -41,7 +44,11 @@ from opentelemetry.trace import Status
 from vouch.settings import LangfuseKeys
 
 if TYPE_CHECKING:
+    import requests
     from opentelemetry.sdk.trace import TracerProvider
+
+    from vouch.settings import Settings
+    from vouch.spending import Usage
 
 log = logging.getLogger(__name__)
 
@@ -136,10 +143,23 @@ class Tracing:
         except Exception:
             log.exception("the traces could not be sent to Langfuse")
 
-    def flush_soon(self) -> None:
-        """`flush` in a thread of its own: a run never waits on Langfuse, and a stream closed on
-        the event loop never blocks it."""
-        threading.Thread(target=self.flush, name="langfuse-flush", daemon=True).start()
+    def flush_soon(self) -> threading.Thread:
+        """`flush` in a thread of its own, started: a stream closed on the event loop never
+        blocks it."""
+        thread = threading.Thread(target=self.flush, name="langfuse-flush", daemon=True)
+        thread.start()
+        return thread
+
+    def flush_within(self, seconds: float) -> None:
+        """`flush`, waiting at most `seconds` for it (#510): a slow or down Langfuse holds a run
+        no longer, and the send goes on in the background, logged."""
+        sending = self.flush_soon()
+        sending.join(seconds)
+        if sending.is_alive():
+            log.warning(
+                "the trace wasn't sent to Langfuse within %.1f s; it goes on in the background",
+                seconds,
+            )
 
     def shutdown(self) -> None:
         """Send what the client holds and stop it, when the app or the eval runner ends; a
@@ -157,12 +177,31 @@ def cost_details(response: LLMResult, model: str | None) -> dict[str, float] | N
     proportion of the model's list prices; the total alone for a model PRICES doesn't list.
     None when the cost can't be known, so nothing counts as $0."""
     # Imported here: vouch.spending imports vouch.model_choice, which imports this module.
-    from vouch.model_choice import DEFAULT_MODEL
-    from vouch.spending import PRICES, UsageMeter
+    from vouch.spending import UsageMeter
 
     meter = UsageMeter(model)
     meter.on_llm_end(response)
-    usage = meter.usage()
+    return _metered_cost(meter.usage(), model)
+
+
+def error_cost_details(
+    error: BaseException, response: LLMResult | None, model: str | None
+) -> dict[str, float] | None:
+    """A failed model call's cost as `cost_details` gives a call's (#508): the cost Vouch
+    records for it (UsageMeter.on_llm_error: what its error's body carries); None when the
+    error carries none, as the call may still have been billed."""
+    from vouch.spending import UsageMeter
+
+    meter = UsageMeter(model)
+    meter.on_llm_error(error, response=response)
+    return _metered_cost(meter.usage(), model)
+
+
+def _metered_cost(usage: "Usage", model: str | None) -> dict[str, float] | None:
+    """One call's usage, as its UsageMeter recorded it, as `cost_details`."""
+    from vouch.model_choice import DEFAULT_MODEL
+    from vouch.spending import PRICES
+
     if not usage.cost_complete:
         return None
     total = usage.cost_usd
@@ -212,7 +251,33 @@ def _costing_handler() -> type[Any]:
                 log.exception("a model call's cost couldn't be added to its trace")
             return super().on_llm_end(response, run_id=run_id, **kwargs)
 
+        def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> Any:
+            # Langfuse's own error path (5.2.0's `on_llm_error`, through `generation.update`;
+            # the #508 tests go red if a later version ends it another way) ends the generation
+            # with `cost_details={"total": 0}`,
+            # though the call may have been billed (#508). The generation's update is made to
+            # send the cost Vouch records for the call instead: none at all when it's unknown,
+            # including when it can't be worked out.
+            cost = None
+            try:
+                cost = error_cost_details(error, kwargs.get("response"), self.vouch_model)
+            except Exception:
+                log.exception("a failed model call's cost couldn't be added to its trace")
+            generation = self._runs.get(run_id)
+            if isinstance(generation, LangfuseGeneration):
+                generation.update = _forcing_cost(generation.update, cost)  # type: ignore[method-assign]
+            return super().on_llm_error(error, run_id=run_id, **kwargs)
+
     return CostingCallbackHandler
+
+
+def _forcing_cost(update: Callable[..., Any], cost: dict[str, float] | None) -> Callable[..., Any]:
+    """A generation's `update`, its `cost_details` always `cost` (None: none sent)."""
+
+    def costed(**fields: Any) -> Any:
+        return update(**fields | {"cost_details": cost})
+
+    return costed
 
 
 def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
@@ -220,12 +285,30 @@ def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
     return Tracing(keys) if keys is not None else None
 
 
+def announce_tracing(settings: "Settings") -> None:
+    """The served app's one startup line (#536): `tracing on (<host>)`, or `tracing off: <why>`,
+    naming the keys left unset (never a key's value). A WARNING when one key is set without the
+    other, a deploy that lost one; INFO otherwise."""
+    if settings.langfuse is not None:
+        log.info("tracing on (%s)", urlsplit(settings.langfuse.base_url).netloc)
+        return
+    unset = settings.langfuse_keys_unset
+    log.log(
+        logging.WARNING if len(unset) == 1 else logging.INFO,
+        "tracing off: %s %s not set",
+        " and ".join(unset) or "no Langfuse key",
+        "is" if len(unset) <= 1 else "are",
+    )
+
+
 @contextmanager
-def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfig]:
+def traced(
+    tracing: Tracing | None, facts: TraceFacts, *, wait: bool = True
+) -> Iterator[RunnableConfig]:
     """The run config for one traced run (empty with tracing off, or when its handler can't be
-    made: logged, and the run goes on untraced), its trace sent as the run ends, in the
-    background (`flush_soon`): on Cloud Run an instance may have little CPU between requests, so
-    it isn't left to the client's own five-second schedule."""
+    made: logged, and the run goes on untraced), its trace sent as the run ends (`send_trace`).
+    With `wait` False it's sent in the background only: a run inside another traced run's
+    request (an assessment the chat starts), whose own bounded send carries it."""
     if tracing is None:
         yield {}
         return
@@ -238,7 +321,28 @@ def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfi
     try:
         yield config
     finally:
-        tracing.flush_soon()
+        if wait:
+            send_trace(tracing)
+        else:
+            tracing.flush_soon()
+
+
+TRACE_SEND_WAIT_SECONDS = 3.0
+"""The longest a run's response waits for its trace to reach Langfuse (#510)."""
+
+
+def send_trace(tracing: Tracing) -> None:
+    """Send a run's trace before its response ends, waiting at most TRACE_SEND_WAIT_SECONDS
+    (#510). On Cloud Run a request has CPU only until its response is done; a send left to the
+    background after it waits for the next request, or is lost when the instance stops. A stream
+    the client leaves is closed when it's collected, which may be on the event loop: there it is
+    sent in the background, so no other request waits (as api.record_off_the_event_loop)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:  # no loop in this thread: the threadpool, a worker, or the CLI
+        tracing.flush_within(TRACE_SEND_WAIT_SECONDS)
+        return
+    tracing.flush_soon()
 
 
 def with_run_config(config: RunnableConfig, run_config: RunnableConfig | None) -> RunnableConfig:
@@ -357,15 +461,22 @@ LANGFUSE_EXPORT_TIMEOUT_SECONDS = 5.0
 """As the Langfuse SDK's own exporter: one export's limit."""
 
 
+LANGFUSE_MAX_REQUEST_BYTES = 64 * 1024 * 1024
+"""The largest batch sent, serialized, before compression: the OTLP exporter's own default
+(64 MiB), set here so a batch dropped for its size is named with both sizes."""
+
+
 def langfuse_exporter(keys: LangfuseKeys) -> SpanExporter:
     """The exporter that sends to the keys' Langfuse project over OTLP/HTTP, as the Langfuse SDK
     builds its own: basic auth with the key pair, and the ingestion version that shows a trace
-    at once (without it, up to ten minutes later)."""
+    at once (without it, up to ten minutes later). What Langfuse answers each send is logged
+    (ReportingSpanExporter, #536)."""
     from opentelemetry.exporter.otlp.proto.http import Compression
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
+    attempts = _Attempts()
     pair = f"{keys.public_key}:{keys.secret_key.get_secret_value()}"
-    return OTLPSpanExporter(
+    sending = OTLPSpanExporter(
         endpoint=keys.base_url + LANGFUSE_TRACES_PATH,
         headers={
             "Authorization": "Basic " + base64.b64encode(pair.encode()).decode("ascii"),
@@ -374,4 +485,192 @@ def langfuse_exporter(keys: LangfuseKeys) -> SpanExporter:
         },
         timeout=LANGFUSE_EXPORT_TIMEOUT_SECONDS,
         compression=Compression.Gzip,
+        session=_recording_session(attempts),
+        max_request_size=LANGFUSE_MAX_REQUEST_BYTES,
     )
+    return ReportingSpanExporter(sending, attempts, max_request_bytes=LANGFUSE_MAX_REQUEST_BYTES)
+
+
+class _Attempts(threading.local):
+    """The HTTP attempts of the send under way in this thread: each a response, or the
+    exception raised instead of one. None outside a send."""
+
+    taken: list[Any] | None = None
+
+    def add(self, outcome: Any) -> None:
+        if self.taken is not None:
+            self.taken.append(outcome)
+
+
+def _recording_session(attempts: _Attempts) -> "requests.Session":
+    """A requests.Session (the OTLP exporter's public `session` argument) that keeps each
+    attempt's outcome in `attempts`: the exporter itself reads only a status, and drops a
+    connection error's exception after logging it."""
+    import requests
+
+    class RecordingSession(requests.Session):
+        def send(self, request: Any, **kwargs: Any) -> Any:
+            try:
+                response = super().send(request, **kwargs)
+            except Exception as error:
+                attempts.add(error)
+                raise
+            attempts.add(response)
+            return response
+
+    return RecordingSession()
+
+
+class ReportingSpanExporter(SpanExporter):
+    """The OTLP exporter that sends to Langfuse (`inner`), each send's outcome logged (#536).
+
+    OTLPSpanExporter reads only an answer's status, and takes any 2xx or 3xx as success: a 200
+    whose `partial_success` names rejected spans (the OTLP/HTTP spec's partial success) passes
+    unseen. Its session records each attempt (_recording_session); one line per send says the
+    last: INFO on full success, with the span count and the batch's size; WARNING on a non-2xx,
+    rejected spans, or no answer (with why: the connection's error, the batch's size over the
+    limit, a batch that couldn't be encoded, or an exporter shut down)."""
+
+    def __init__(self, inner: SpanExporter, attempts: _Attempts, *, max_request_bytes: int):
+        self._inner = inner
+        self._attempts = attempts
+        self._max_request_bytes = max_request_bytes
+        self._shut = False
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        self._attempts.taken = []
+        try:
+            result = self._inner.export(spans)
+        finally:
+            taken, self._attempts.taken = self._attempts.taken, None
+        try:
+            if taken:
+                _report_send(len(spans), taken)
+            else:
+                log.warning("%s: %s", _unsent(len(spans)), self._why_not_sent(spans))
+        except Exception:
+            log.exception("what Langfuse answered a send couldn't be read")
+        return result
+
+    def _why_not_sent(self, spans: Sequence[ReadableSpan]) -> str:
+        """Why the exporter made no request (its own checks, before any)."""
+        from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+
+        if self._shut:
+            return "the exporter was shut down"
+        try:
+            size = encode_spans(spans).ByteSize()
+        except Exception as error:  # noqa: BLE001 - as the exporter's own encoding step catches
+            return f"the batch couldn't be encoded ({_error_text(error)})"
+        if 0 < self._max_request_bytes < size:
+            return f"the batch is {size} bytes, over the {self._max_request_bytes}-byte limit"
+        return "no request was made"
+
+    def shutdown(self) -> None:
+        self._shut = True
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
+def _spans(count: int) -> str:
+    return f"{count} span{'s' if count != 1 else ''}"
+
+
+def _unsent(count: int) -> str:
+    return f"{_spans(count)} {'were' if count != 1 else 'was'}n't sent to Langfuse"
+
+
+def _report_send(count: int, attempts: list[Any]) -> None:
+    """Log one send's outcome: its last attempt (the exporter retries a connection error, 429
+    and 5xx), counting every try, those with no answer too."""
+    last = attempts[-1]
+    tries = f", after {len(attempts)} tries" if len(attempts) > 1 else ""
+    if isinstance(last, BaseException):
+        log.warning("%s: no answer (%s)%s", _unsent(count), _error_text(last), tries)
+        return
+    spans, size, status = _spans(count), _batch_size(last.request.body), last.status_code
+    kind = _otlp_kind(last.headers.get("Content-Type", ""))
+    if not 200 <= status < 300:
+        said = _loggable(_refusal_message(last.content, kind))
+        log.warning("Langfuse refused %s, %s: %s %s%s", spans, size, status, said, tries)
+        return
+    rejected, message = _partial_success(last.content, kind) if kind else (0, "")
+    said = f": {_loggable(message)}" if message else ""
+    if rejected:
+        log.warning("Langfuse rejected %d of %s, %s%s%s", rejected, spans, size, said, tries)
+    else:
+        log.info("sent %s to Langfuse, %s: %s%s%s", spans, size, status, said, tries)
+
+
+def _batch_size(body: bytes | None) -> str:
+    """A sent batch's size: serialized, and as sent (gzip). A gzip stream ends with its input's
+    size modulo 2³² (RFC 1952's ISIZE), so the batch needn't be decompressed to be measured."""
+    body = body or b""
+    if body[:2] == b"\x1f\x8b" and len(body) >= 18:
+        return f"{int.from_bytes(body[-4:], 'little')} bytes ({len(body)} gzipped)"
+    return f"{len(body)} bytes"
+
+
+def _otlp_kind(content_type: str) -> Literal["json", "protobuf"] | None:
+    """How an answer's body is encoded, by its content type: OTLP's JSON or protobuf, or
+    neither (None: a body that is no OTLP message, never parsed as one)."""
+    media = content_type.split(";")[0].strip().lower()
+    if media == "application/json" or media.endswith("+json"):
+        return "json"
+    if media in ("application/x-protobuf", "application/protobuf"):
+        return "protobuf"
+    return None
+
+
+def _partial_success(body: bytes, kind: Literal["json", "protobuf"]) -> tuple[int, str]:
+    """A 2xx answer's `partial_success` (an ExportTraceServiceResponse): the spans it rejected,
+    and its message; (0, "") for an empty body. JSON's int64 may come as a string."""
+    if not body.strip():
+        return 0, ""
+    if kind == "json":
+        decoded = json.loads(body)
+        partial = decoded.get("partialSuccess", {}) if isinstance(decoded, dict) else {}
+        partial = partial if isinstance(partial, dict) else {}
+        return int(partial.get("rejectedSpans") or 0), str(partial.get("errorMessage") or "")
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+        ExportTraceServiceResponse,
+    )
+
+    answer = ExportTraceServiceResponse.FromString(body).partial_success
+    return answer.rejected_spans, answer.error_message
+
+
+def _refusal_message(body: bytes, kind: Literal["json", "protobuf"] | None) -> str:
+    """A refusal's message: a google.rpc.Status's (OTLP's 4xx and 5xx body, protobuf or JSON),
+    else the body as text."""
+    from google.protobuf.message import DecodeError
+    from google.rpc.status_pb2 import Status
+
+    # A body that isn't what its content type says is shown as text.
+    with suppress(ValueError, DecodeError):
+        if kind == "protobuf":
+            return Status.FromString(body).message
+        if kind == "json":
+            decoded = json.loads(body)
+            if isinstance(decoded, dict) and isinstance(decoded.get("message"), str):
+                return decoded["message"]
+    return body.decode("utf-8", errors="replace")
+
+
+ANSWER_TEXT_LIMIT = 300
+"""The most of Langfuse's message, or an error's, a log line carries."""
+
+
+def _error_text(error: BaseException) -> str:
+    return _loggable(f"{type(error).__name__}: {error}")
+
+
+def _loggable(text: str) -> str:
+    """Text from outside as a log line carries it: redacted (security layer 4), on one line
+    (a control character escaped, never written raw), cut short."""
+    from vouch.redaction import redact
+
+    shown = "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
+    return redact(shown)[0][:ANSWER_TEXT_LIMIT]

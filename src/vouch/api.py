@@ -128,7 +128,7 @@ from vouch.profile_pass import (
     run_profile_pass,
 )
 from vouch.redaction import (
-    install_log_redaction,
+    configure_logging,
     redact,
     redact_data,
     redacted_event,
@@ -166,7 +166,7 @@ from vouch.spending import (
     count_assessment,
     spending_store,
 )
-from vouch.tracing import TraceFacts, run_traced
+from vouch.tracing import TraceFacts, announce_tracing, run_traced
 
 log = logging.getLogger(__name__)
 
@@ -793,7 +793,9 @@ def create_assessment(
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, a `requirement` event per judged requirement, one
     `result` (the proposed Assessment, waiting for review, with the `thread_id` to review it
-    by), then close; or one `error`, then close. Each request is a new assessment; with a
+    by), then close; or one `error`, then close. The `result` waits for the run's trace to be
+    sent, at most vouch.tracing's bound (#541), as a client may stop reading at it. Each
+    request is a new assessment; with a
     `note`, a rejected control assessed again, the note passed to the model.
 
     The model is vouch.model_choice's: OpenRouter when a key is set (in clerk mode only a
@@ -820,6 +822,9 @@ def create_assessment(
         control_id=control.id,
         thread_id=thread_id,
     )
+    # The `result` is held until the run's trace is sent (#541): a client may stop reading at
+    # `result` (the browser does), and a send after it would run once the response is over.
+    held_result: list[ServerSentEvent] = []
     try:
         with run.models.traced(facts) as run_config:
             events = assessment_events(
@@ -832,11 +837,17 @@ def create_assessment(
                 run_config=run_config,
             )
             for event, data in events:
-                if isinstance(data, Assessment):
+                is_result = isinstance(data, Assessment)
+                if is_result:
                     usage = run.meter.usage().to_dict()
                     data = {"assessment": assessment_data(data), "usage": usage}
                 for name, clean in redacted_event(event, data):
-                    yield ServerSentEvent(event=name, data=clean)
+                    sse = ServerSentEvent(event=name, data=clean)
+                    if is_result:
+                        held_result.append(sse)
+                    else:
+                        yield sse
+        yield from held_result  # the trace sent, within its bound (vouch.tracing.send_trace)
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": ASSESSMENT_FAILED})
@@ -2262,4 +2273,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
-install_log_redaction()  # security layer 4, once: by import time uvicorn's handlers exist
+# Once: by import time uvicorn's handlers exist. vouch's INFO lines written, every line redacted
+# (security layer 4), then the startup line, which needs both (#536).
+configure_logging()
+announce_tracing(app.state.settings)

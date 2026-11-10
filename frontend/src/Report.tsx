@@ -98,8 +98,8 @@ const filled = (sentence: string, values: Record<string, number | string>) =>
 
 /** A column of the controls or trail table (#463): its served name and what it shows for a row. A column empty in
  * every row is left out, and each cell carries its column's name (`data-label`), which the phone's stacked rows show
- * beside the value, as they hide the header row. */
-type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean }
+ * beside the value, as they hide the header row. `lang` marks a column whose text is in the answer language (#521). */
+type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean; lang?: string }
 
 // `false` too: a cell written `a && b` gives it when `a` is empty.
 const blank = (value: ReactNode) => value === null || value === undefined || value === '' || value === false
@@ -113,10 +113,14 @@ function ColumnHeads<T>({ columns }: { columns: Column<T>[] }) {
 }
 
 function Cells<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
-  return columns.map(({ label, cell, className, rowHeader }, i) => rowHeader
-    ? <th key={i} scope="row" className={className} data-label={label}>{cell(row)}</th>
-    : <td key={i} className={className} data-label={label}>{cell(row)}</td>)
+  return columns.map(({ label, cell, className, rowHeader, lang }, i) => rowHeader
+    ? <th key={i} scope="row" className={className} data-label={label} lang={lang}>{cell(row)}</th>
+    : <td key={i} className={className} data-label={label} lang={lang}>{cell(row)}</td>)
 }
+
+/** A free-text cell's props (a question, an answer, a note, what's missing): written in the answer language, drafted
+ * or typed by the team, so it is marked in it and hyphenates in it (#521, #530). A `<td>` takes them, and a `Column`. */
+const answerText = (head: { answer_language: string }) => ({ className: 'report-q', lang: head.answer_language })
 
 function Document({ report }: { report: ReadinessReport }) {
   const { head, words } = report
@@ -239,7 +243,7 @@ function Comparison({ report: { comparison: c, words } }: { report: ImprovementR
 
 /** The improvement plan (#420): a table per priority, High, then Medium, then Low, each item with its status and done
  * note. */
-function Plan({ report: { plan, words } }: { report: ImprovementReport }) {
+function Plan({ report: { plan, words, head } }: { report: ImprovementReport }) {
   const { labels } = words
   return (
     <section className="report-part" aria-labelledby="report-plan">
@@ -266,11 +270,11 @@ function Plan({ report: { plan, words } }: { report: ImprovementReport }) {
                     <tr key={`${item.control_id} ${item.requirement_id}`}>
                       <th scope="row" className="mono">{item.control_id}</th>
                       <td className="mono">{item.requirement_id}</td>
-                      <td className="report-q"><Prose text={item.missing} /></td>
+                      <td {...answerText(head)}><Prose text={item.missing} /></td>
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                       <td><span data-word>{words.item_statuses[item.status]}</span></td>
-                      <td className="report-q">{item.note}</td>
+                      <td {...answerText(head)}>{item.note}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -286,7 +290,7 @@ function Plan({ report: { plan, words } }: { report: ImprovementReport }) {
 const questionStatus = (q: ReportQuestion): QuestionState => q.answer !== null ? 'answered' : q.overdue ? 'overdue' : 'open'
 
 /** The open questions (#420), in the base framework's control order, oldest first within a control. */
-function Questions({ report: { questions, words } }: { report: ImprovementReport }) {
+function Questions({ report: { questions, words, head } }: { report: ImprovementReport }) {
   const { labels } = words
   return (
     <section className="report-part" aria-labelledby="report-questions">
@@ -308,11 +312,11 @@ function Questions({ report: { questions, words } }: { report: ImprovementReport
               {questions.map((q) => (
                 <tr key={q.id}>
                   <th scope="row" className="mono">{q.control_id}</th>
-                  <td className="report-q">{q.question}</td>
+                  <td {...answerText(head)}>{q.question}</td>
                   <td>{q.asked_of}</td>
                   <td className="mono">{q.due_date}</td>
                   <td><span data-word>{words.question_statuses[questionStatus(q)]}</span></td>
-                  <td className="report-q">{q.answer ?? ''}</td>
+                  <td {...answerText(head)}>{q.answer ?? ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -326,11 +330,11 @@ function Questions({ report: { questions, words } }: { report: ImprovementReport
 /** A control's reviewed verdict, or none while it is open: its status word says so (#463). */
 const reviewedVerdict = (c: ReportControl) => c.status === 'accepted' && c.verdict ? c.verdict : null
 
-function Controls({ report: { controls, words } }: { report: AuditReadinessReport }) {
+function Controls({ report: { controls, words, head } }: { report: AuditReadinessReport }) {
   const { labels } = words
   const columns = shownColumns<ReportControl>([
     { label: labels.control, cell: (c) => c.id, className: 'mono', rowHeader: true },
-    { label: labels.question, cell: (c) => c.question, className: 'report-q' },
+    { label: labels.question, cell: (c) => c.question, ...answerText(head) },
     { label: labels.status, cell: (c) => <span data-word>{words.statuses[c.status]}</span> },
     { label: labels.verdict, cell: (c) => {
       const verdict = reviewedVerdict(c)
@@ -381,7 +385,7 @@ function ControlRows({ control: c, columns, words }: { control: ReportControl; c
   )
 }
 
-function Remediation({ report: { remediation, words } }: { report: AuditReadinessReport }) {
+function Remediation({ report: { remediation, words, head } }: { report: AuditReadinessReport }) {
   const { labels } = words
   return (
     <section className="report-part" aria-labelledby="report-remediation">
@@ -404,7 +408,7 @@ function Remediation({ report: { remediation, words } }: { report: AuditReadines
                   {group.items.map((item) => (
                     <tr key={item.requirement_id}>
                       <th scope="row" className="mono">{item.requirement_id}</th>
-                      <td className="report-q"><Prose text={item.missing} /></td>
+                      <td {...answerText(head)}><Prose text={item.missing} /></td>
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                     </tr>
@@ -438,7 +442,7 @@ function NotApplicableList({ report: { not_applicable: listed, words } }: { repo
 
 type Older = { status: 'idle' } | { status: 'reading' } | { status: 'failed'; message: string }
 
-function Trail({ report: { trail, words } }: { report: ReadinessReport }) {
+function Trail({ report: { trail, words, head } }: { report: ReadinessReport }) {
   const { labels } = words
   const [entries, setEntries] = useState<TrailEntry[]>(trail.entries)
   const [next, setNext] = useState<number | null>(trail.next)
@@ -461,7 +465,7 @@ function Trail({ report: { trail, words } }: { report: ReadinessReport }) {
     { label: labels.action, cell: (e) => <span data-word>{actionWord(e, words)}</span> },
     { label: labels.verdict_before, cell: (e) => verdict(e.verdict_before) },
     { label: labels.verdict_after, cell: (e) => verdict(e.verdict_after) },
-    { label: labels.note, cell: (e) => e.note, className: 'report-q' },
+    { label: labels.note, cell: (e) => e.note, ...answerText(head) },
     { label: labels.evidence, className: 'mono', cell: (e) =>
       e.evidence.map((d) => <span key={`${d.doc_id} ${d.version}`} className="report-line">{d.doc_id} v{d.version}</span>) },
     { label: labels.model, cell: (e) => e.model, className: 'mono' },

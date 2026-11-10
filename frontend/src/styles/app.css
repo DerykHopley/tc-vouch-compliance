@@ -241,7 +241,7 @@ button.prof-button:hover { border-color: var(--navy); }
 .reqs .evidence { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .quotes-cell > div { display: grid; gap: 8px; }
 .cite { margin: 0; display: grid; gap: 2px; }
-.cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); overflow-wrap: anywhere; }
+.cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); hyphens: auto; overflow-wrap: break-word; }
 .cite figcaption { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 12px; }
 /* The review (#42): "Change" under a requirement's verdict opens the override row (a verdict and a required reason).
    The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). Unlike the prototype
@@ -431,7 +431,11 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   border-bottom: 1px solid var(--ink); padding: 6px 8px; font-weight: 600; vertical-align: bottom; }
 .report-table th[scope="row"], .report-table td { border-bottom: 1px solid var(--rule); padding: 7px 8px; vertical-align: top;
   text-align: left; font-weight: 400; }
-.report-table .report-q { max-width: 52ch; overflow-wrap: anywhere; }
+/* The free-text columns (questions, notes, answers, what's missing) hyphenate in the answer language (their `lang`), as
+   the quotes do (#511, #521, #530). A token no hyphenation can break (a link, a file name, a word in another language)
+   breaks anywhere, so it can't widen the table past the sheet; the 14ch floor keeps the column wide enough that a
+   word hyphenates rather than breaking bare (the owner's option A on #530). */
+.report-table .report-q { min-width: 14ch; max-width: 52ch; hyphens: auto; overflow-wrap: anywhere; }
 /* A control's quotes sit under its row, as one entry with it: no rule between them. */
 .report-controls tbody tr:has(+ .report-quote-row) > * { border-bottom-color: transparent; }
 .report-table .report-quote-row td { padding: 0 8px 12px 24px; }
@@ -439,7 +443,11 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-quotes h3 { margin: 0; }
 /* Eleven columns in the sheet (#463): the trail set at 12px, narrower gutters and the Note's least width 16ch, as in
    print, so the German heads fit too; the day kept whole on its line (10ch of its mono), the time under it. */
-.report-trail { font-size: 12px; }
+.report-trail { font-size: 12px; font-family: "Manrope", "Manrope Fallback", var(--f-body); }
+/* #512: until Manrope loads, or if it never does, Linux sets the trail in DejaVu Sans, whose German heads are wider
+   (KONTROLLE, ANFORDERUNG): 963px of trail in the 902px sheet. Scaled to Manrope's widths, they fit; Manrope unchanged. */
+@font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans"); font-weight: 400 500; size-adjust: 85%; }
+@font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans Bold"); font-weight: 600 800; size-adjust: 85%; }
 .report-table.report-trail :is(th, td) { padding-inline: 5px; }
 .report-table.report-trail .report-q { min-width: 16ch; }
 .report-trail .report-at > .report-line { min-width: 10ch; }
@@ -511,9 +519,9 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
      narrows its column's least width, so an auto-laid table fits the page. */
   .report-table th, .report-table td { overflow-wrap: break-word; }
   .report-table .mono { overflow-wrap: anywhere; }
-  /* The question and note cells too: on screen they break anywhere, which in print squeezed the trail's Note to a
-     word's width, breaking its words (#296). */
-  .report-table .report-q { max-width: none; overflow-wrap: break-word; }
+  /* The free-text cells too, unhyphenated: on screen they hyphenate in the answer language and break a long token
+     anywhere (#530), but a printed page is wide enough for prose to wrap at spaces, and a note prints whole (#296). */
+  .report-table .report-q { max-width: none; overflow-wrap: break-word; hyphens: manual; }
   .report-table:not(.report-trail) .report-q { min-width: 0; }
   .report-trail .mono { font-size: 9px; }
   .report-table.report-trail .report-q { min-width: 16ch; }

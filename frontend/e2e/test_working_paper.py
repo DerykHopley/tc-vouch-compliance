@@ -8,6 +8,8 @@ server's checks already spend most of that."""
 import re
 
 import pytest
+from fonts import FONTS_SETTLED, without_web_fonts
+from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -198,20 +200,26 @@ def test_after_assess_each_step_names_its_node_in_a_chip_and_the_answer_shows_at
         assert not scrolls_sideways(page), f"the working paper scrolls sideways at {width}px"
 
 
+# Each requirement's id and its row, as a JS array: not its override's or remediation item's
+# row (#464).
+REQUIREMENT_ROWS = """[...document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')]
+    .map((th) => [th.querySelector('.mono').textContent, th.closest('tr')])"""
+
 # Every card's parts, read in one go once the fonts have loaded and layout has settled (two frames):
 # measured one call at a time, a late font or a toggle showing or hiding moved the rows between
 # reads on CI (#211). Page coordinates, so scrolling can't skew them either.
-CARD_PARTS = """async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const rect = (el) => {
+CARD_PARTS = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  const rect = (el) => {
     const r = el.getBoundingClientRect()
     return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left, width: r.width }
   }
   const cards = {}
-  for (const th of document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')) {
-    const tr = th.closest('tr') // a requirement's row: not its override or remediation item's (#464)
-    cards[tr.querySelector('th[scope=row] .mono').textContent] = {
+  for (const [id, tr] of """
+    + REQUIREMENT_ROWS
+    + """) {
+    cards[id] = {
       card: rect(tr), head: rect(tr.querySelector('th[scope=row]')),
       verdict: rect(tr.querySelector('.verdict-cell .chip')), text: rect(tr.querySelector('.rq-text')),
       evidence: rect(tr.querySelector('.evidence')), reason: rect(tr.querySelector('.reason')),
@@ -219,6 +227,7 @@ CARD_PARTS = """async () => {
   }
   return cards
 }"""
+)
 
 
 def settled_cards(page: Page) -> dict:
@@ -268,16 +277,45 @@ def test_on_a_phone_show_full_requirement_works_from_the_keyboard(page: Page, pa
     assert box(text)["height"] == clamped
 
 
-def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(page: Page, paper_url):
-    # #211's verifier: a toggle that expands nothing is noise. A long text gets one, a short none.
+# Whether the clamp hides some of each requirement's text, read once the fonts have settled (as
+# CARD_PARTS): the measure the toggle must agree with.
+CUT_TEXTS = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  return Object.fromEntries("""
+    + REQUIREMENT_ROWS
+    + """.map(([id, tr]) => {
+      const text = tr.querySelector('.rq-text')
+      return [id, text.scrollHeight > text.clientHeight + 1]
+    }))
+}"""
+)
+
+
+@pytest.mark.parametrize("fonts", ["web", "fallback"])
+def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(
+    page: Page, paper_url, fonts
+):
+    """#211's verifier: a toggle that expands nothing is noise. A long text gets one, a short
+    none. #516: the web font arrived after the first measure and took S2 to 3 lines in a box the
+    clamp kept 2 lines high, so no toggle, and its third line hidden. Again without the web fonts,
+    as on a slow network (#512's case). Each cut text, expanded, shows all its lines."""
+    if fonts == "fallback":
+        without_web_fonts(page)
     assessed(page.request, paper_url, ASSESSED)
     page.set_viewport_size({"width": 400, "height": 900})
     paper = open_paper(page, paper_url, ASSESSED, assessed=True)
-    for requirement_id in ("M1", "M2", "S1", "S2", "S3"):
-        text = row(paper, requirement_id).locator(".rq-text")
-        cut = text.evaluate("el => el.scrollHeight > el.clientHeight + 1")
-        expect(row(paper, requirement_id).locator(".rq-toggle")).to_have_count(1 if cut else 0)
-    expect(row(paper, "M1").locator(".rq-toggle")).to_have_count(1)
+    cut = page.evaluate(CUT_TEXTS)
+
+    assert sorted(cut) == ["M1", "M2", "S1", "S2", "S3"], cut
+    assert cut["M1"], cut
+    for requirement_id, hidden in cut.items():
+        toggle = row(paper, requirement_id).locator(".rq-toggle")
+        expect(toggle).to_have_count(1 if hidden else 0)
+        if hidden:
+            toggle.click()
+            text = row(paper, requirement_id).locator(".rq-text")
+            assert text.evaluate("el => el.scrollHeight <= el.clientHeight + 1"), requirement_id
 
 
 def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, paper_url):
@@ -296,10 +334,10 @@ REQUIREMENT_MIN = 200
 # The judged table, read in one go once the fonts have loaded and layout has settled (as
 # CARD_PARTS): its width against its wrapper's, the narrowest Requirement cell, each text's
 # hyphenation and language, and where each remediation item sits against its requirement's row.
-TABLE_LAYOUT = """async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const table = document.querySelector('table.reqs.judged')
+TABLE_LAYOUT = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  const table = document.querySelector('table.reqs.judged')
   const rect = (el) => el.getBoundingClientRect()
   return {
     scroll: table.scrollWidth, room: table.parentElement.clientWidth, table: rect(table).width,
@@ -316,6 +354,7 @@ TABLE_LAYOUT = """async () => {
     }),
   }
 }"""
+)
 
 
 def as_company(page: Page, profile: str) -> None:
@@ -372,31 +411,39 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert item["width"] <= width, item
 
 
-INDEX_ROWS = """async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+INDEX_ROWS = (
+    """async () => {"""
+    + FONTS_SETTLED
+    + """
   const rect = (el) => el && el.getBoundingClientRect()
   return [...document.querySelectorAll('.wp-index .wp-row')].map((row) => {
     const q = row.querySelector('.wp-q')
+    const state = row.querySelector('.wp-state')
     return {
       id: row.querySelector('.mono').textContent, row: rect(row).height, idBox: rect(row.querySelector('.mono')),
-      state: rect(row.querySelector('.wp-state')), chip: rect(row.querySelector('.chip')),
-      tag: rect(row.querySelector('.tag')), q: rect(q), line: parseFloat(getComputedStyle(q).lineHeight),
+      state: rect(state), gap: parseFloat(getComputedStyle(state).columnGap),
+      chip: rect(row.querySelector('.chip')), tag: rect(row.querySelector('.tag')), q: rect(q),
+      line: parseFloat(getComputedStyle(q).lineHeight),
     }
   })
 }"""
+)
 
 ROW_MAX = 72
-"""An index row's height at 1440 (#466), in px, when its id, chip and tag share one line: that
-line, two lines of question and the row's padding. A row whose chip and tag don't fit beside its
-id in the 250px index (a long verdict word with a review tag) takes one more line for them."""
+"""An index row's height at 1440 (#466), in px, when its id, chip and any tag share one line: that
+line, two lines of question and the row's padding."""
+ROW_WRAPPED_MAX = 96
+"""The same when the review tag doesn't fit beside the id and chip in the 250px index (beside
+"Partly evidenced", or any German verdict word) and wraps to a line of its own below them: the
+owner's answer A on #466 (2026-11-10)."""
 
 
 @pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
-def test_at_1440_each_index_row_is_its_id_and_state_then_at_most_two_lines_of_question(
+def test_at_1440_each_index_row_is_its_id_and_chip_then_at_most_two_lines_of_question(
     page: Page, paper_url, profile
 ):
-    """#466: each row is one line of id, chip and tag, then the question clamped to two lines."""
+    """#466 (answer A): the id and chip share a line; the review tag sits on it when it fits and
+    wraps below it otherwise; then the question, clamped to two lines."""
     response = page.request.post(
         f"{paper_url}/api/assessments",
         data={"control_id": ASSESSED},  # a chip and a review tag: the row's widest state
@@ -411,15 +458,23 @@ def test_at_1440_each_index_row_is_its_id_and_state_then_at_most_two_lines_of_qu
 
     assert len(rows) == 12, rows
     assert any(r["q"]["height"] > 1.5 * r["line"] for r in rows), "no question uses a second line"
+    assert any(r["tag"] for r in rows), "no row has a review tag to place"
     for r in rows:
+        id_line = r["idBox"]
+        # The id and chip share a line: their boxes overlap vertically.
+        assert r["chip"]["top"] < id_line["bottom"] and r["chip"]["bottom"] > id_line["top"], r
         assert r["q"]["height"] <= 2 * r["line"] + 1, r  # two lines of question at most
-        assert r["chip"]["top"] < r["idBox"]["bottom"], r  # the chip on the id's line
-        assert r["q"]["top"] >= r["state"]["bottom"] - 1, r  # the question under them
-        fits = r["tag"] is None or r["chip"]["width"] + r["tag"]["width"] + 6 <= r["state"]["width"]
-        if fits:
+        assert r["q"]["top"] >= r["state"]["bottom"] - 1, r  # the question under the state
+        if r["tag"] is None:
             assert r["row"] <= ROW_MAX, r
-            if r["tag"]:
-                assert r["tag"]["top"] < r["idBox"]["bottom"], r  # the tag on the id's line too
+            continue
+        fits = r["chip"]["width"] + r["gap"] + r["tag"]["width"] <= r["state"]["width"] + 0.5
+        if fits:  # on the id and chip's line
+            assert r["tag"]["top"] < id_line["bottom"], r
+            assert r["row"] <= ROW_MAX, r
+        else:  # on a line of its own, below them
+            assert r["tag"]["top"] >= r["chip"]["bottom"] - 1, r
+            assert r["row"] <= ROW_WRAPPED_MAX, r
 
 
 def test_at_1440_the_index_stays_in_view_when_the_paper_scrolls_to_its_foot(page: Page, paper_url):
@@ -442,6 +497,28 @@ def test_at_1440_the_index_stays_in_view_when_the_paper_scrolls_to_its_foot(page
     assert box(last)["y"] + box(last)["height"] <= 900 + 1, box(last)
     moved = abs(box(index)["y"] - shown["y"])  # the top bar's height is fractional (62.67px)
     assert moved <= 1, "bringing the last row into view moved the index"
+
+
+def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page, paper_url):
+    """#511: just above the phone layout the quotes column is narrow (#464), and Alpenwerk's
+    quotes ("Administratorkonten") broke mid-word with no hyphen. They hyphenate in the answer
+    language (German, as Alpenwerk's documents are), or don't break."""
+    response = page.request.post(
+        f"{paper_url}/api/assessments",
+        data={"control_id": WIDE},
+        headers={"X-Vouch-Profile": "alpenwerk"},
+    )
+    assert response.ok, response.status
+    assert "event: result" in response.text()
+    page.set_viewport_size({"width": 701, "height": 900})
+    as_company(page, "alpenwerk")
+    paper = open_paper(page, paper_url, WIDE, assessed=True)
+    expect(paper.get_by_text("Answer language: German")).to_be_visible()
+    quotes = "table.reqs.judged .quotes-cell blockquote"
+    expect(paper.locator(quotes).first).to_be_visible()
+
+    # Chromium's English rules also find breaks in these words, so the quote must say it's German.
+    assert_hyphenated_in_german(page, {"quotes": quotes})
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):

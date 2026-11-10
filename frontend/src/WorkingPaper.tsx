@@ -470,7 +470,8 @@ type JudgedProps = {
  */
 /** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
  * "Show less" toggles it (`aria-expanded`), offered only when the clamp hides some of it (measured again as the width
- * changes; where nothing can be measured, it is offered). On a desktop the toggle is hidden and the text shown whole. */
+ * changes and as the web fonts load, #516; where nothing can be measured, it is offered). On a desktop the toggle is
+ * hidden and the text shown whole. */
 function RequirementText({ text, language }: { text: string; language?: string }) {
   const [expanded, setExpanded] = useState(false)
   const [cut, setCut] = useState(true)
@@ -481,10 +482,19 @@ function RequirementText({ text, language }: { text: string; language?: string }
     if (!el || expanded) return
     const measure = () => setCut(el.clientHeight === 0 || el.scrollHeight > el.clientHeight + 1)
     measure()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
+    // A web font that loads after this rewraps the text in a box the clamp keeps 2 lines high, so no resize fires
+    // (#516): measured again once the fonts are ready, and after any font that loads later.
+    // Stops this measure's font listeners when the text changes, it expands, or the cell goes.
+    const stopMeasuring = new AbortController()
+    const fonts = document.fonts as FontFaceSet | undefined
+    fonts?.ready.then(() => { if (!stopMeasuring.signal.aborted) measure() })
+    fonts?.addEventListener('loadingdone', measure, { signal: stopMeasuring.signal })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(el)
+    return () => {
+      stopMeasuring.abort()
+      observer?.disconnect()
+    }
   }, [expanded, text])
   return (
     <td className="rq">
@@ -575,7 +585,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   <p className="why reason" lang={language}>{r.reason}</p>
                   {r.citations.map((c, i) => (
                     // By position: two quotes may read alike once redacted.
-                    <CitedQuote key={i} quote={c.quote}>
+                    <CitedQuote key={i} quote={c.quote} lang={language}>
                       <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
                       {!c.lead_statement && ( // a statement's section names it; it has no kind (#439)
                         <span className={`kind kind-${c.kind}`}>{c.kind}</span>

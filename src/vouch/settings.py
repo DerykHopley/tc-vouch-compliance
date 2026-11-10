@@ -12,7 +12,6 @@ Tracing (#460, vouch.tracing) is on only with both Langfuse keys set; one alone 
 logged, so a deploy before both are in Secret Manager still starts.
 """
 
-import logging
 import os
 import re
 from collections.abc import Mapping
@@ -24,8 +23,6 @@ from pydantic import SecretStr
 
 from vouch.limits import RATE_REQUESTS
 from vouch.paths import FIXTURES_DIR
-
-log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # imported when called: the model's modules read settings themselves
     from vouch.fake_model import ScriptedChatModel
@@ -184,6 +181,9 @@ class Settings:
     """The profile pass's token threshold: VOUCH_PROFILE_PASS_TOKENS, else 100,000 (#432)."""
     langfuse: LangfuseKeys | None = None
     """Where runs are traced (#460, vouch.tracing); None: tracing is off."""
+    langfuse_keys_unset: tuple[str, ...] = LANGFUSE_KEY_ENVS
+    """The Langfuse key settings left unset, by name: why tracing is off, said once at startup
+    (vouch.tracing.announce_tracing, #536); () with both set."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -234,16 +234,19 @@ def load_database_url(env: Mapping[str, str] | None = None) -> SecretStr | None:
     return SecretStr(url) if url else None
 
 
+def unset_langfuse_keys(env: Mapping[str, str]) -> tuple[str, ...]:
+    """The Langfuse key settings `env` leaves unset (or blank), by name."""
+    return tuple(name for name in LANGFUSE_KEY_ENVS if _read(env, name) is None)
+
+
 def load_langfuse_keys(env: Mapping[str, str] | None = None) -> LangfuseKeys | None:
     """The Langfuse keys in `env` (the process environment by default): None, tracing off, when
-    either key is unset, the missing one logged by name when the other is set. With both, raises
-    SettingsError for a LANGFUSE_BASE_URL that isn't an origin (a trailing / is dropped)."""
+    either key is unset (Settings.langfuse_keys_unset keeps which, for the startup line). With
+    both, raises SettingsError for a LANGFUSE_BASE_URL that isn't an origin (a trailing / is
+    dropped)."""
     env = os.environ if env is None else env
     public, secret = (_read(env, name) for name in LANGFUSE_KEY_ENVS)
     if public is None or secret is None:
-        if public or secret:
-            missing = LANGFUSE_PUBLIC_KEY_ENV if public is None else LANGFUSE_SECRET_KEY_ENV
-            log.warning("%s is not set, so tracing is off", missing)
         return None  # LANGFUSE_BASE_URL unread: a wrong one can't stop an app that doesn't trace
     base_url = (_read(env, LANGFUSE_BASE_URL_ENV) or LANGFUSE_CLOUD).rstrip("/")
     if not ORIGIN.fullmatch(base_url):
@@ -304,6 +307,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             read(PROFILE_PASS_TOKENS_ENV), PROFILE_PASS_TOKENS_ENV, "tokens", PROFILE_PASS_TOKENS
         ),
         langfuse=load_langfuse_keys(env),
+        langfuse_keys_unset=unset_langfuse_keys(env),
     )
 
 
