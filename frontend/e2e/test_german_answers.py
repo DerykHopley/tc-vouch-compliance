@@ -11,8 +11,9 @@ Dossier reads back is given 4.1.2's card as the run left it."""
 import json
 import re
 
+from current_company import reopened_under
 from playwright.sync_api import Page, Route, expect
-from top_bar import back_to_overview, switch_profile
+from top_bar import back_to_overview
 
 CONTROL = "4.1.2"
 # A date at the line start and gender stars, which Markdown would turn into a list and italics (#218).
@@ -68,13 +69,13 @@ def overview_with_the_run(route: Route) -> None:
 
 
 def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier_in_an_english_interface(
-    page: Page, vouch_url
+    page: Page, vouch_url, nordlicht_later
 ):
     page.route("**/api/assessments", seeded_stream)
+    nordlicht_later(vouch_url)
     with page.expect_response("**/api/overview"):
         page.goto(vouch_url)
-    with page.expect_response("**/api/overview"):
-        switch_profile(page, "Alpenwerk Präzision GmbH · Austria · German")
+    reopened_under(page, vouch_url, "alpenwerk")
     page.get_by_role("link", name=f"Open {CONTROL}").click()
     paper = page.get_by_role("region", name="Working paper")
     expect(paper).to_contain_text("Answer language: German")
@@ -126,13 +127,15 @@ def test_alpenwerk_verdict_chips_are_german_in_the_working_paper_and_the_dossier
     expect(card).to_contain_text("Proposed")
 
 
-def test_an_unassessed_controls_paper_on_alpenwerk_shows_the_german_isa_text(page: Page, vouch_url):
+def test_an_unassessed_controls_paper_on_alpenwerk_shows_the_german_isa_text(
+    page: Page, vouch_url, nordlicht_later
+):
     """Before any assessment, the paper's title and requirements come from the overview, in
     Alpenwerk's edition of the ISA (#199). 1.6.2 is assessed by no browser check."""
+    nordlicht_later(vouch_url)
     with page.expect_response("**/api/overview"):
         page.goto(vouch_url)
-    with page.expect_response("**/api/overview"):
-        switch_profile(page, "Alpenwerk Präzision GmbH · Austria · German")
+    reopened_under(page, vouch_url, "alpenwerk")
     page.get_by_role("link", name="Open 1.6.2").click()
 
     paper = page.get_by_role("region", name="Working paper")

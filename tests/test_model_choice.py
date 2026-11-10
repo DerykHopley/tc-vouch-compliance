@@ -259,6 +259,21 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "usage": {"openrouter": NO_USAGE, "fake": NO_USAGE},
         "broken_profiles": [],  # #47: every fixture profile loads
         "companies": [],  # #418: no company made in setup
+        "listed_companies": [  # #480: the fixture companies, as GET /api/profiles lists them
+            {
+                "id": "alpenwerk",
+                "company": "Alpenwerk Präzision GmbH",
+                "country": "Austria",
+                "answer_language": "de",
+            },
+            {
+                "id": "nordlicht",
+                "company": "Nordlicht Komponenten GmbH",
+                "country": "Germany",
+                "answer_language": "en",
+            },
+        ],
+        "current_company": "nordlicht",  # #480: nothing stored
     }
 
 

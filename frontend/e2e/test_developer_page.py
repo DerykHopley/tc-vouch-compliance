@@ -194,5 +194,7 @@ def test_a_model_change_keeps_the_developer_page_showing_the_new_model(page: Pag
     expect(settings.get_by_role("status")).to_contain_text(
         "The next assessment runs on openai/gpt-5.5."
     )
-    expect(settings.locator(".sheet .mono").first).to_have_text("openai/gpt-5.5")
+    expect(
+        settings.locator(".sheet", has=page.get_by_text("Model", exact=True)).locator("span.mono")
+    ).to_have_text("openai/gpt-5.5")
     expect(page.get_by_text("Vouch could not")).to_have_count(0)

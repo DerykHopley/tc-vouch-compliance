@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 import pdf_words
 import pytest
+from current_company import make_current
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from touch_targets import small_targets
@@ -176,10 +177,13 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     expect(report.locator(".report-lead")).to_have_text("2 of 12 controls accepted")
 
 
-def test_alpenwerks_report_is_german_and_the_page_around_it_english(page: Page, report_url):
+def test_alpenwerks_report_is_german_and_the_page_around_it_english(
+    page: Page, report_url, nordlicht_later
+):
     accepted(page.request, report_url, "4.1.2", "alpenwerk")
-    # The remembered profile (#201) opens Alpenwerk.
-    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    # Alpenwerk made current (#480) opens it; Nordlicht current again after.
+    nordlicht_later(report_url)
+    make_current(page.request, report_url, "alpenwerk")
 
     report = open_report(page, report_url)
 
@@ -235,9 +239,12 @@ def test_export_markdown_downloads_one_markdown_file_under_the_servers_name(page
     expect(page.get_by_role("button", name="Export Markdown")).to_be_enabled()
 
 
-def test_export_pdf_downloads_alpenwerks_report_as_one_pdf_file(page: Page, report_url):
+def test_export_pdf_downloads_alpenwerks_report_as_one_pdf_file(
+    page: Page, report_url, nordlicht_later
+):
     accepted(page.request, report_url, "4.1.2", "alpenwerk")
-    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    nordlicht_later(report_url)
+    make_current(page.request, report_url, "alpenwerk")  # #480
     downloads = []
     page.on("download", lambda download: downloads.append(download))
     report = open_report(page, report_url)

@@ -17,4 +17,9 @@ export const DEVELOPER_SETTINGS = {
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
   broken_profiles: [],
   companies: [],
+  listed_companies: [
+    { id: 'alpenwerk', company: 'Alpenwerk Präzision GmbH', country: 'Austria', answer_language: 'de' },
+    { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' },
+  ],
+  current_company: 'nordlicht',
 } satisfies DeveloperSettings

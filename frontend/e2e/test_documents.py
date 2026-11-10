@@ -3,8 +3,6 @@ its version, approval date, review cycle, stale flag and the controls citing it,
 (Nordlicht, after 4.1.2 is assessed) and for a company made through setup (only its chosen
 documents). Local mode, the scripted fake model."""
 
-import re
-
 from playwright.sync_api import Page, expect
 from test_company_setup import create_company, open_setup, to_step_7
 from test_profiles import assessed as assessed_in
@@ -59,14 +57,15 @@ def test_at_400px_only_the_tables_scroll_sideways(page: Page, vouch_url):
     assert table.locator("xpath=..").evaluate("w => w.scrollWidth > w.clientWidth")
 
 
-def test_a_company_made_through_setup_lists_only_its_chosen_document(page: Page, setup_url):
+def test_a_company_made_through_setup_lists_only_its_chosen_document(
+    page: Page, setup_url, nordlicht_later
+):
+    nordlicht_later(setup_url)  # the create makes it current (#480)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
     to_step_7(page, "Belegfirma GmbH")  # German, the Backup policy chosen
     create_company(page)
-    expect(
-        page.get_by_role("button", name=re.compile(r"^Profile: Belegfirma GmbH"))
-    ).to_be_visible()
+    expect(page.locator(".pill").first).to_contain_text("Belegfirma GmbH")
 
     open_documents(page)
 

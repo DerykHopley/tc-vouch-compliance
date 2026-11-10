@@ -1,24 +1,8 @@
-"""The top bar's controls (#222, the owner's option D), for the browser checks: the profile
-dropdown, the breadcrumb back to the Overview, and the user menu."""
+"""The top bar's controls (#222, the owner's option D), for the browser checks: the breadcrumb back
+to the Overview, and the Overview tab. The profile dropdown is gone (#480): a check under another
+company makes it current (current_company.py)."""
 
 from playwright.sync_api import Locator, Page
-
-
-def profile_button(page: Page) -> Locator:
-    """The profile dropdown's button: its name says "Profile: " and the profile in full."""
-    return page.get_by_role("banner").get_by_role("button", name="Profile: ")
-
-
-def open_profile_menu(page: Page) -> Locator:
-    """Opens the profile dropdown: its choices, each a profile in full."""
-    profile_button(page).click()
-    return page.get_by_role("banner").get_by_role("menuitemradio")
-
-
-def switch_profile(page: Page, label: str) -> None:
-    """Chooses the profile named in full (company · country · language) in the dropdown."""
-    open_profile_menu(page)
-    page.get_by_role("banner").get_by_role("menuitemradio", name=label, exact=True).click()
 
 
 def back_to_overview(page: Page) -> None:

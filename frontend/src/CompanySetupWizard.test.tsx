@@ -775,8 +775,9 @@ describe('company setup', () => {
       const records = screen.getByRole('table', { name: 'Records' })
       expect(within(records).getAllByRole('rowheader')).toHaveLength(1)
       expect(screen.queryAllByRole('checkbox')).toEqual([])
-      expect(screen.getByText('Creating the company adds it to the profile switcher. Then Vouch sets its Goal and runs '
-        + 'a profile pass: every applicable control drafted, waiting for your review.')).toBeTruthy()
+      expect(screen.getByText('Creating the company adds it to the Companies list and makes it the current company, '
+        + 'for every user. Then Vouch sets its Goal and runs a profile pass: every applicable control drafted, waiting '
+        + 'for your review.')).toBeTruthy()
       expect(createButton().getAttribute('type')).toBe('submit')
     })
 
@@ -941,7 +942,7 @@ describe('company setup', () => {
       await toStep7()
       await create()
       expect((await screen.findByRole('alert')).textContent)
-        .toBe('The company may not have been created. Check the profile switcher before trying again.')
+        .toBe('The company may not have been created. Check the Companies section of the Developer page before trying again.')
       expect(onCreated).not.toHaveBeenCalled()
       expect(document.activeElement).toBe(createButton())
     })

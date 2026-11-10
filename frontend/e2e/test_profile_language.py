@@ -11,11 +11,10 @@ which the output check refuses for a German profile (#51)."""
 import json
 import re
 
+from current_company import reopened_under
 from playwright.sync_api import Page, Route, expect
 from test_german_answers import ALPENWERK_ASSESSMENT, CONTROL, seeded_stream
-from top_bar import switch_profile
 
-ALPENWERK = "Alpenwerk Präzision GmbH · Austria · German"
 PROPER_NAMES = ["Alpenwerk Präzision GmbH"]
 """Names, the same in every language: allowed without `lang`."""
 GERMAN_REPLY = "Für 4.1.2 fehlt die Risikobewertung der Anmeldeverfahren."
@@ -55,16 +54,17 @@ def german_reply(route: Route) -> None:
 
 
 def on_alpenwerk(page: Page, url: str) -> None:
+    """The app opened with Alpenwerk current (#480)."""
     page.set_viewport_size({"width": 1400, "height": 900})
     with page.expect_response("**/api/overview"):
         page.goto(url)
-    with page.expect_response("**/api/overview"):
-        switch_profile(page, ALPENWERK)
+    reopened_under(page, url, "alpenwerk")
 
 
-def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url):
+def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url, nordlicht_later):
     page.route("**/api/assessments", seeded_stream)
     page.route("**/api/chat", german_reply)
+    nordlicht_later(vouch_url)
     on_alpenwerk(page, vouch_url)
 
     # The overview: the controls' German questions.
