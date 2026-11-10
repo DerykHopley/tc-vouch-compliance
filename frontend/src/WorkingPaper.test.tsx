@@ -105,6 +105,43 @@ describe('the requirement text on a phone, issue 211', () => {
     expect(text.classList.contains('clamped')).toBe(true)
   })
 
+  describe('measured again once the web fonts load, issue 516', () => {
+    // A text that fits 2 lines in the first font, then needs 3 in the web font: its box stays 2 lines high (the
+    // clamp), so no ResizeObserver fires. The page's FontFaceSet is a stand-in: jsdom has none.
+    let lines = 2
+    let loaded: () => void
+    let fonts: EventTarget
+    beforeEach(() => {
+      lines = 2
+      fonts = Object.assign(new EventTarget(), { ready: new Promise<void>((done) => { loaded = done }) })
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => 40)
+      vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => lines * 20)
+      Object.defineProperty(document, 'fonts', { configurable: true, value: fonts })
+    })
+    afterEach(() => {
+      vi.restoreAllMocks()
+      Reflect.deleteProperty(document, 'fonts')
+    })
+
+    it('offers the toggle when a font that loads after the first measure takes the text past 2 lines', async () => {
+      show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+      expect(within(row('M1')).queryByRole('button', { name: 'Show full requirement' })).toBeNull()
+
+      lines = 3
+      fonts.dispatchEvent(new Event('loadingdone'))
+      expect(await within(row('M1')).findByRole('button', { name: 'Show full requirement' })).toBeTruthy()
+    })
+
+    it('measures again when the fonts are ready, too', async () => {
+      show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
+      expect(within(row('M1')).queryByRole('button', { name: 'Show full requirement' })).toBeNull()
+
+      lines = 3
+      loaded()
+      expect(await within(row('M1')).findByRole('button', { name: 'Show full requirement' })).toBeTruthy()
+    })
+  })
+
   it('keeps one toggle per requirement, each its own', async () => {
     show({ run: { status: 'done', steps: [], assessment: ASSESSED } })
     await userEvent.click(within(row('M1')).getByRole('button', { name: 'Show full requirement' }))

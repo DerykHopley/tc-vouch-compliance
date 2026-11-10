@@ -268,16 +268,45 @@ def test_on_a_phone_show_full_requirement_works_from_the_keyboard(page: Page, pa
     assert box(text)["height"] == clamped
 
 
-def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(page: Page, paper_url):
-    # #211's verifier: a toggle that expands nothing is noise. A long text gets one, a short none.
+# Whether the clamp hides some of each requirement's text, read once the fonts have settled (as
+# CARD_PARTS): the measure the toggle must agree with.
+CUT_TEXTS = """async () => {
+  await document.fonts.ready
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  return Object.fromEntries([...document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')]
+    .map((th) => {
+      const text = th.closest('tr').querySelector('.rq-text')
+      return [th.querySelector('.mono').textContent, text.scrollHeight > text.clientHeight + 1]
+    }))
+}"""
+
+
+@pytest.mark.parametrize("fonts", ["web", "fallback"])
+def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(
+    page: Page, paper_url, fonts
+):
+    """#211's verifier: a toggle that expands nothing is noise. A long text gets one, a short
+    none. #516: the web font arrived after the first measure and took S2 to 3 lines in a box the
+    clamp kept 2 lines high, so no toggle, and its third line hidden. Again without the web fonts,
+    as on a slow network (#512's case). Each cut text, expanded, shows all its lines."""
+    if fonts == "fallback":
+        page.route(
+            re.compile(r"^https://fonts\.(googleapis|gstatic)\.com/"), lambda route: route.abort()
+        )
     assessed(page.request, paper_url, ASSESSED)
     page.set_viewport_size({"width": 400, "height": 900})
     paper = open_paper(page, paper_url, ASSESSED, assessed=True)
-    for requirement_id in ("M1", "M2", "S1", "S2", "S3"):
-        text = row(paper, requirement_id).locator(".rq-text")
-        cut = text.evaluate("el => el.scrollHeight > el.clientHeight + 1")
-        expect(row(paper, requirement_id).locator(".rq-toggle")).to_have_count(1 if cut else 0)
-    expect(row(paper, "M1").locator(".rq-toggle")).to_have_count(1)
+    cut = page.evaluate(CUT_TEXTS)
+
+    assert sorted(cut) == ["M1", "M2", "S1", "S2", "S3"], cut
+    assert cut["M1"], cut
+    for requirement_id, hidden in cut.items():
+        toggle = row(paper, requirement_id).locator(".rq-toggle")
+        expect(toggle).to_have_count(1 if hidden else 0)
+        if hidden:
+            toggle.click()
+            text = row(paper, requirement_id).locator(".rq-text")
+            assert text.evaluate("el => el.scrollHeight <= el.clientHeight + 1"), requirement_id
 
 
 def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, paper_url):
