@@ -71,8 +71,8 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 |---|---|
 | under 700px | one column; the top bar's tabs, profile and user menu behind one Menu button (#222); the working paper's requirements as stacked cards (Components, Requirement row); the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide |
 | 700–1000px | the working paper's control index stacks above the paper; Dossier's hero, band and ask panel go to one column |
-| over 1000px | working paper: index (about 250px) beside the paper; a pinned chat takes a column beside the page, 480px by default, resizable from 360px to 720px, and the browser remembers the width; the page makes room for exactly that width (owner's polish list, #61, 2026-11-06; drag decided for you, #231) |
-| from 1402px | pinning is offered: the page beside a pinned chat always keeps the 1042px the working paper needs (its 250px index, two 16px gutters and the judged requirements table's 760px), so nothing in it scrolls sideways and the top bar keeps to one row; the narrowest chat, 360px, beside it makes 1402px. Narrower, the chat stays floating, and a pinned chat falls back to enlarged (#465) |
+| over 1000px | working paper: index (about 250px) beside the paper |
+| from 1402px | a pinned chat takes a column beside the page, 480px by default, resizable from 360px to 720px, and the browser remembers the width; the page makes room for exactly that width (owner's polish list, #61, 2026-11-06; drag decided for you, #231). Pinning is offered only here: the page beside a pinned chat always keeps the 1042px the working paper needs (its 250px index, two 16px gutters and the judged requirements table's 760px), so nothing in it scrolls sideways and the top bar keeps to one row; the narrowest chat, 360px, beside it makes 1402px. Narrower, the chat stays floating, and a pinned chat falls back to enlarged (#465) |
 
 At every width, the page's top scroll padding follows the sticky top bar's height (`--top-bar`, which TopBar measures; it grows at phone width), so a field scrolled to, tapped or tabbed to stops below the bar (#205).
 

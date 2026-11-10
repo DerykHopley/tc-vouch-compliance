@@ -23,7 +23,7 @@ const REMEMBERED = 'vouch.chatWidth'
 export type ChatWidthRange = { min: number; max: number }
 
 /** The window's width as the page lays out in it: the root's client width, which leaves out a scrollbar, so the page
- * really keeps its 560px. The one source for every width check. */
+ * really keeps the working paper's width (#465). The one source for every width check. */
 export const pageWidth = () => document.documentElement.clientWidth
 
 /** Whether a window this wide offers pinning (#465): below PIN_FROM the chat stays floating. */

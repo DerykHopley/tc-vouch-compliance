@@ -15,10 +15,10 @@ from itertools import pairwise
 
 import pytest
 from playwright.sync_api import Page, expect
+from test_chat import CHAT, pin
 from test_working_paper import ASSESSED, assessed
 
 PIN_FROM = 1402  # chatWidth.ts
-CHAT = "aside[aria-label='Chat with Vouch']"
 PIN = "Pin beside the page"
 
 # Words of the element's text that the browser split over two lines: none when it breaks only at
@@ -62,12 +62,6 @@ def top_bar_height(page: Page) -> float:
     return box["height"]
 
 
-def pin(page: Page) -> None:
-    page.get_by_role("button", name="Make larger").click()
-    page.get_by_role("button", name=PIN).click()
-    expect(page.locator(CHAT)).to_have_class("bubble pinned")
-
-
 def test_pinned_at_the_narrowest_pinnable_width_the_paper_keeps_its_layout(page: Page, chat_url):
     assessed(page.request, chat_url, ASSESSED)
     page.set_viewport_size({"width": PIN_FROM, "height": 900})
@@ -76,7 +70,6 @@ def test_pinned_at_the_narrowest_pinnable_width_the_paper_keeps_its_layout(page:
     page_width(page, PIN_FROM)
     one_row = top_bar_height(page)  # the top bar with the whole width to itself
 
-    page.get_by_role("button", name="Ask Vouch").click()
     pin(page)
 
     paper = page.locator(".wp .paper")

@@ -41,8 +41,8 @@ function keepFocusInSheet(e: KeyboardEvent, sheet: HTMLElement | null) {
 }
 
 /** Patch's chat pattern (design.md, Decisions: Chat): closed (the button), a bubble, enlarged, or pinned beside the
- * page (only where the page keeps the working paper's width beside it, #465). At 700px or less every open state is a full-screen sheet, and pin and enlarge are not
- * offered. */
+ * page (only where the page keeps the working paper's width beside it, #465). At 700px or less every open state is a
+ * full-screen sheet, and pin and enlarge are not offered. */
 export type ChatState = 'closed' | 'bubble' | 'enlarged' | 'pinned'
 
 /** Each state's look and the header's toggles: the size toggle's label and the state it leads to, and the state the

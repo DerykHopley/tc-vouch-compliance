@@ -190,7 +190,8 @@ button.prof-button:hover { border-color: var(--navy); }
 .crumb { margin-left: -10px; display: inline-flex; align-items: center; text-decoration: none; }
 .assess { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 
-/* Working paper (#41): the control index (about 250px) beside the paper; stacked above it at 1000px or less */
+/* Working paper (#41): the control index (about 250px) beside the paper; stacked above it at 1000px or less.
+   The index's 250px sets where pinning starts (chatWidth.ts, PAGE_KEEPS; #465): change them together. */
 .wp { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: calc(100vh - 60px); }
 .wp .paper { width: 100%; min-width: 0; }
 .wp-index { background: var(--sheet); border-right: 1px solid var(--rule); padding: 12px 0; min-width: 0; }
@@ -203,6 +204,7 @@ button.prof-button:hover { border-color: var(--navy); }
 /* The requirement rows: a wide table scrolls inside its own container, never the page (design.md, Layout) */
 .table-wrap { overflow-x: auto; width: 100%; }
 .reqs { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--sheet); }
+/* Its 760px sets where pinning starts (chatWidth.ts, PAGE_KEEPS; #465): change them together. */
 .reqs.judged { min-width: 760px; }
 .reqs thead th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--ink); padding: 6px 8px; font-weight: 600; }
 .reqs th[scope="row"], .reqs td { border-bottom: 1px solid var(--rule); padding: 8px; vertical-align: top; text-align: left; font-weight: 400; }

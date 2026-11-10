@@ -175,9 +175,10 @@ def test_a_pinned_chat_falls_back_to_enlarged_below_1402px_and_the_page_takes_th
 
     expect(chat(page)).to_have_class("bubble enlarged")
     expect(page.locator(HANDLE)).to_have_count(0)
-    assert (
-        page.evaluate("getComputedStyle(document.body).paddingRight") == "0px"
-    )  # no room kept for a column that is gone
+    # No room kept for a column that is gone: the page takes the whole width again.
+    assert page.evaluate("getComputedStyle(document.body).paddingRight") == "0px"
+    assert page.evaluate("document.documentElement.dataset.chat") is None
+    assert box(page, "header.top")["width"] == 1401
     page.keyboard.press("Escape")  # enlarged now: Esc closes it
     expect(chat(page)).to_have_count(0)
 
