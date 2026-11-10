@@ -8,7 +8,7 @@ import pytest
 from vouch.citations import Citation
 from vouch.documents import CYCLE_MONTHS, NO_REVIEW_DATE, EvidenceKind, stale_because
 from vouch.graph import CAPPED, DOCUMENTED_ONLY, RequirementVerdict, _apply_rules
-from vouch.language import cap_note, mismatch
+from vouch.language import cap_note, mismatch, statement_note
 
 
 def cited(doc_id: str, stale_because: str | None, kind: EvidenceKind = "documented") -> Citation:
@@ -75,3 +75,9 @@ def test_the_note_reads_what_vouch_documents_writes_for_every_review_cycle(cycle
 
     assert note is not None and "freigegeben am 2020-01-15" in note
     assert because not in note  # said again in German, not left in English
+
+
+def test_the_statement_note_falls_back_to_english_for_a_language_without_words():
+    # #439: the working paper's sentence under a lead's statement, beside the cap note's words.
+    assert statement_note("fr") == statement_note("en")
+    assert statement_note("de") != statement_note("en")

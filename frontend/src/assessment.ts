@@ -57,6 +57,8 @@ export type Citation = {
   kind: EvidenceKind
   stale: boolean
   stale_because: string | null
+  /** Quoted from the lead's statement, not a document (#422): its section names it, and it shows no kind (#439). */
+  lead_statement?: boolean
 }
 /** One judged requirement, as its `requirement` event and the Assessment carry it. */
 export type RequirementVerdict = {
@@ -91,6 +93,9 @@ export type Assessment = {
   stale_word?: string
   /** The evidence column's word for evidence that isn't stale, in the answer language, the Documents tab's (#484). */
   current_word?: string
+  /** Under the quotes of a requirement a lead's statement caps, in the answer language (#439): it takes a document or
+   * record to close it. */
+  statement_note?: string
   status?: ReviewStatus
   requirements?: RequirementVerdict[]
   /** The thread to review it by (#38, #39). */

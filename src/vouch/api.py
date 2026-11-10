@@ -91,7 +91,7 @@ from vouch.isa import (
     UnknownControlError,
     load_base_framework,
 )
-from vouch.language import stale_reason
+from vouch.language import stale_reason, statement_note
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
     Memory,
@@ -592,8 +592,8 @@ def _evidence_in_answer_language(served: dict[str, Any], language: str) -> dict[
     the report's stale label (as the Documents tab's, so a page and the report flag alike), and
     each stale citation's reason as the cap's note says it (vouch.language.stale_reason), for the
     stale flag (#359); and `current_word`, the Documents tab's word for a document that isn't
-    stale, which the evidence column shows in its place (#484). The stored assessment keeps
-    English's reason."""
+    stale, which the evidence column shows in its place (#484); and `statement_note`, what a lead
+    statement's cap asks for (#439). The stored assessment keeps English's reason."""
     for requirement in served["requirements"]:
         for citation in requirement["citations"]:
             if citation["stale"]:
@@ -602,6 +602,7 @@ def _evidence_in_answer_language(served: dict[str, Any], language: str) -> dict[
     return served | {
         "stale_word": report.words_for(language)["labels"]["stale"],
         "current_word": document_words["current"],
+        "statement_note": statement_note(language),
     }
 
 
