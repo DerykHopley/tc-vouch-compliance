@@ -6,19 +6,25 @@ runs with sockets disabled.
 """
 
 import asyncio
+import gzip
 import json
 import logging
+import os
+import subprocess
+import sys
 import threading
 import time
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator
 from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableLambda
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from pydantic import SecretStr
@@ -35,6 +41,7 @@ from vouch.model_choice import DEFAULT_MODEL
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.profile import load_named_profile, read_profile_once
 from vouch.settings import (
+    ENV_NAMES,
     LANGFUSE_CLOUD,
     LangfuseKeys,
     Settings,
@@ -88,6 +95,60 @@ def test_a_base_url_without_keys_is_never_read_and_a_trailing_slash_is_fine():
     assert load_settings({"LANGFUSE_BASE_URL": "not a url"}).langfuse is None
     keys = load_settings(KEYS | {"LANGFUSE_BASE_URL": "https://cloud.langfuse.com/"}).langfuse
     assert keys is not None and keys.base_url == LANGFUSE_CLOUD
+
+
+# --- The startup line (#536) --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("env", "line"),
+    [
+        (KEYS, "tracing on (cloud.langfuse.com)"),
+        (KEYS | {"LANGFUSE_BASE_URL": LOCAL}, "tracing on (localhost:3300)"),
+        ({}, "tracing off: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set"),
+        (
+            {"LANGFUSE_PUBLIC_KEY": KEYS["LANGFUSE_PUBLIC_KEY"]},
+            "tracing off: LANGFUSE_SECRET_KEY is not set",
+        ),
+        (
+            {"LANGFUSE_SECRET_KEY": KEYS["LANGFUSE_SECRET_KEY"]},
+            "tracing off: LANGFUSE_PUBLIC_KEY is not set",
+        ),
+    ],
+    ids=["both-keys", "both-keys-local", "neither", "secret-missing", "public-missing"],
+)
+def test_at_startup_one_line_says_whether_tracing_is_on_and_why_not(env, line, caplog):
+    caplog.set_level(logging.INFO, logger="vouch.tracing")
+
+    tracing_module.announce_tracing(load_settings(env).langfuse, env)
+
+    said = [r.getMessage() for r in caplog.records if r.name == "vouch.tracing"]
+    assert said == [line]
+    assert "sk-lf-test-secret" not in caplog.text
+
+
+def test_the_served_app_s_startup_line_reaches_the_log_under_uvicorn():
+    """Under uvicorn's logging the root logger has no handler, and Python's last resort writes
+    WARNING and up only: an INFO line from vouch would never reach Cloud Run's log."""
+    script = (
+        "import logging.config, uvicorn.config\n"
+        "logging.config.dictConfig(uvicorn.config.LOGGING_CONFIG)\n"
+        "import vouch.api\n"
+        "logging.getLogger('vouch.tracing').info('a send to Langfuse')\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}  # as conftest: no settings
+    done = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "tracing off: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set" in done.stderr
+    assert "a send to Langfuse" in done.stderr
 
 
 # --- No keys: no client, no handler, no call -----------------------------------------------------
@@ -725,6 +786,185 @@ def test_a_span_with_nothing_to_remove_is_sent_as_it_is(exported):
     assert json.loads(plain.attributes["langfuse.observation.output"]) == {  # type: ignore[index]
         "said": "Nordlicht's policy, § 4 (ü)"
     }
+
+
+# --- What Langfuse answered each send (#536) ------------------------------------------------------
+#
+# A fake OTLP endpoint on a spare local port: it records what each send carried and answers as
+# told. Langfuse's exporter (langfuse_exporter) is the real one, sending over HTTP.
+
+
+class OtlpEndpoint:
+    """A recording OTLP/HTTP endpoint: each trace export's spans and body sizes, kept; every
+    request answered `answer` (status, content type, body)."""
+
+    def __init__(self) -> None:
+        self.answer: tuple[int, str, bytes] = (200, "application/json", b"{}")
+        self.sends: list[dict] = []
+        self.lock = threading.Lock()
+        endpoint = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                if self.path == tracing_module.LANGFUSE_TRACES_PATH:
+                    gzipped = self.headers.get("Content-Encoding") == "gzip"
+                    raw = gzip.decompress(body) if gzipped else body
+                    request = ExportTraceServiceRequest.FromString(raw)
+                    spans = [
+                        s for r in request.resource_spans for ss in r.scope_spans for s in ss.spans
+                    ]
+                    with endpoint.lock:
+                        endpoint.sends.append(
+                            {"spans": spans, "bytes": len(raw), "sent": len(body)}
+                        )
+                status, kind, answer = endpoint.answer
+                self.send_response(status)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(answer)))
+                self.end_headers()
+                self.wfile.write(answer)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def spans(self) -> list:
+        with self.lock:
+            return [span for send in self.sends for span in send["spans"]]
+
+
+@pytest.fixture
+def otlp() -> Iterator[OtlpEndpoint]:
+    endpoint = OtlpEndpoint()
+    yield endpoint
+    endpoint.server.shutdown()
+    endpoint.server.server_close()
+
+
+def finished_spans(count: int) -> list[ReadableSpan]:
+    tracer = TracerProvider().get_tracer("t")
+    spans = []
+    for n in range(count):
+        span = tracer.start_span(f"step {n}")
+        span.end()
+        spans.append(span)
+    return spans  # type: ignore[return-value]
+
+
+def send(otlp: OtlpEndpoint, spans: list[ReadableSpan], caplog) -> list[logging.LogRecord]:
+    """`spans` exported to `otlp` by Langfuse's exporter; what vouch.tracing logged of it."""
+    keys = LangfuseKeys("pk-lf-test-public", SecretStr("sk-lf-test-secret"), otlp.url)
+    exporter = tracing_module.langfuse_exporter(keys)
+    with caplog.at_level(logging.INFO, logger="vouch.tracing"):
+        exporter.export(spans)
+    exporter.shutdown()
+    return [r for r in caplog.records if r.name == "vouch.tracing"]
+
+
+@pytest.mark.enable_socket
+def test_a_send_langfuse_takes_whole_logs_one_info_line_with_its_spans_and_bytes(otlp, caplog):
+    [said] = send(otlp, finished_spans(3), caplog)
+
+    [sent] = otlp.sends
+    assert said.levelno == logging.INFO
+    assert "3 spans" in said.getMessage()
+    assert f"{sent['bytes']} bytes" in said.getMessage()
+    assert "sk-lf-test-secret" not in caplog.text
+
+
+def partial_success_protobuf(rejected: int, message: str) -> bytes:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+        ExportTracePartialSuccess,
+        ExportTraceServiceResponse,
+    )
+
+    return ExportTraceServiceResponse(
+        partial_success=ExportTracePartialSuccess(rejected_spans=rejected, error_message=message)
+    ).SerializeToString()
+
+
+@pytest.mark.enable_socket
+@pytest.mark.parametrize(
+    "answer",
+    [
+        (
+            "application/json",
+            json.dumps(
+                {"partialSuccess": {"rejectedSpans": "2", "errorMessage": "span too large"}}
+            ).encode(),
+        ),
+        ("application/x-protobuf", partial_success_protobuf(2, "span too large")),
+    ],
+    ids=["json", "protobuf"],
+)
+def test_a_2xx_naming_rejected_spans_logs_a_warning_with_the_count_and_langfuse_s_message(
+    otlp, caplog, answer
+):
+    otlp.answer = (200, *answer)
+
+    [said] = send(otlp, finished_spans(3), caplog)
+
+    assert said.levelno == logging.WARNING
+    assert "rejected 2 of 3 spans" in said.getMessage()
+    assert "span too large" in said.getMessage()
+
+
+@pytest.mark.enable_socket
+def test_a_send_langfuse_refuses_logs_a_warning_with_its_status(otlp, caplog):
+    otlp.answer = (413, "application/json", b'{"message": "payload too large"}')
+
+    [said] = send(otlp, finished_spans(2), caplog)
+
+    assert said.levelno == logging.WARNING
+    assert "413" in said.getMessage()
+    assert "payload too large" in said.getMessage()
+    assert "2 spans" in said.getMessage()
+
+
+def observation_type(span) -> str | None:
+    return next(
+        (a.value.string_value for a in span.attributes if a.key == "langfuse.observation.type"),
+        None,
+    )
+
+
+@pytest.mark.enable_socket
+def test_five_assessments_in_one_process_each_reach_langfuse_before_their_response_ends(
+    otlp, caplog
+):
+    """The live symptom (#536): after the first run of an instance, no trace arrived. Five runs
+    in one process, one Langfuse client, each sent over HTTP before its stream ends."""
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), otlp.url)
+    on = Tracing(keys, tracer_provider=TracerProvider())
+    client, lead = TestClient(traced_app(on)), new_user()
+    seen: set[bytes] = set()
+
+    try:
+        with caplog.at_level(logging.INFO, logger="vouch.tracing"):
+            for _ in range(5):
+                response = client.post(
+                    "/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead
+                )
+                assert "event: result" in response.text
+                spans = otlp.spans()  # as the response ended: no flush since
+                new = {s.trace_id for s in spans} - seen
+                assert len(new) == 1, f"{len(new)} new traces after run {len(seen) + 1}"
+                [trace] = new
+                ran = [s for s in spans if s.trace_id == trace]
+                assert len([s for s in ran if observation_type(s) == "generation"]) == 4
+                seen |= new
+    finally:
+        on.shutdown()
+
+    sent = [
+        r for r in caplog.records if r.name == "vouch.tracing" and "to Langfuse" in r.getMessage()
+    ]
+    assert len(sent) == len(otlp.sends) >= 5
+    assert all(r.levelno == logging.INFO for r in sent)
 
 
 # --- The eval runner ---------------------------------------------------------------------------

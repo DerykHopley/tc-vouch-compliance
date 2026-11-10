@@ -234,6 +234,11 @@ def load_database_url(env: Mapping[str, str] | None = None) -> SecretStr | None:
     return SecretStr(url) if url else None
 
 
+def missing_langfuse_keys(env: Mapping[str, str]) -> list[str]:
+    """The Langfuse key settings `env` leaves unset (or blank), by name."""
+    return [name for name in LANGFUSE_KEY_ENVS if _read(env, name) is None]
+
+
 def load_langfuse_keys(env: Mapping[str, str] | None = None) -> LangfuseKeys | None:
     """The Langfuse keys in `env` (the process environment by default): None, tracing off, when
     either key is unset, the missing one logged by name when the other is set. With both, raises

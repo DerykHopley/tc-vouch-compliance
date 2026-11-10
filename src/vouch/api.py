@@ -10,6 +10,7 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -166,7 +167,7 @@ from vouch.spending import (
     count_assessment,
     spending_store,
 )
-from vouch.tracing import TraceFacts, run_traced
+from vouch.tracing import TraceFacts, announce_tracing, run_traced, show_tracing_log
 
 log = logging.getLogger(__name__)
 
@@ -2261,5 +2262,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+show_tracing_log()  # before the app: its startup line is INFO (#536)
 app = create_app()
 install_log_redaction()  # security layer 4, once: by import time uvicorn's handlers exist
+announce_tracing(app.state.settings.langfuse, os.environ)
