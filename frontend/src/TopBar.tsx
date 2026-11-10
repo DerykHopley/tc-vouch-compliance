@@ -3,15 +3,15 @@ import { goalWording } from './overview.ts'
 import { profileTag, type ProfileSummary } from './profiles.ts'
 import type { Goal } from './report.ts'
 
-/** The company the top bar names: a profile's summary, or the overview's company when no profile list was read. */
+/** The company the top bar names: the overview's company once it is read, the listed profile's summary before. */
 export type BarCompany = Pick<ProfileSummary, 'company' | 'country' | 'answer_language'>
 
-/** The top bar on every page: Vouch's name and what it is for in the profile's goal (#440: `goal` and `language`, the
- * profile's answer language, once the profile is read), then a rule and the current company's name with its tag (#495,
- * option A "Letterhead": who Vouch works for, plain text that switches nothing; none without `company`), then whatever
- * the page puts beside it. Its height, which grows
- * at phone width, is kept in `--top-bar` on the page (app.css: scroll-padding-top), so a field brought into view by
- * focus or by scrolling to it stops below the sticky bar, not under it (#205). */
+/** The top bar on every page: Vouch's name and what it is for in the profile's goal (#440: `goal` and `language`,
+ * the profile's answer language, once the profile is read), then a rule and the current company's name with its tag
+ * (#495, option A "Letterhead": who Vouch works for, plain text that switches nothing; none without `company`), then
+ * whatever the page puts beside it. Its height, which grows at phone width, is kept in `--top-bar` on the page
+ * (app.css: scroll-padding-top), so a field brought into view by focus or by scrolling to it stops below the sticky
+ * bar, not under it (#205). */
 export default function TopBar({ children, goal, language, company }:
   { children?: ReactNode; goal?: Goal; language?: string; company?: BarCompany }) {
   const bar = useRef<HTMLElement>(null)

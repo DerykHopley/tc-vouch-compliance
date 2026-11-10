@@ -74,8 +74,8 @@ type AppProps = {
   onSignOut?: () => void
   /** The signed-in user's name, for the user menu (#222); none in local mode. */
   userName?: string
-  /** The current company's summary (#495): the top bar names it, and the user menu's fresh start (#285). None without a
-   * profile list: then the top bar names the overview's company once it's read. */
+  /** The current company's summary (#495): the top bar and the user menu's fresh start (#285) name it until the
+   * overview is read, then the overview's company. None without a profile list. */
   profile?: ProfileSummary
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
@@ -110,6 +110,11 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
   }, [theme])
   const other: Theme = theme === 'light' ? 'dark' : 'light'
   const [barOpen, setBarOpen] = useState(false) // the phone's top bar menu
+  // Each count moves focus to the Menu button: a page opened from the phone's panel hides the tab or item it came from.
+  const [toToggle, setToToggle] = useState(0)
+  useEffect(() => {
+    if (toToggle > 0) document.querySelector<HTMLButtonElement>('.bar-toggle')?.focus()
+  }, [toToggle])
   useEffect(() => {
     if (!barOpen) return
     // Like the bar's own menus: Esc (unless an inner menu took it) or a tap outside the bar closes the panel.
@@ -128,13 +133,16 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
       document.removeEventListener('pointerdown', outside)
     }
   }, [barOpen])
-  const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  const [view, setView] = useState<View>(() => {
+    const { pathname, search, hash } = window.location
+    // An old link to the documents (#424) opens the Company tab, at its own address, with no new history entry (#495).
+    if (pathname === DOCUMENTS_PATH) window.history.replaceState(null, '', `${COMPANY_PATH}${search}${hash}`)
+    return viewAt(pathname)
+  })
   const [focusHeading, setFocusHeading] = useState(arrival !== null) // ends with the first move to another view
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
-    // An old link to the documents (#424) shows the Company tab, at its own address, with no new history entry (#495).
-    if (window.location.pathname === DOCUMENTS_PATH) window.history.replaceState(null, '', COMPANY_PATH)
   }, [view])
   useEffect(() => {
     // Back or Forward: the address has already changed, so staying on a paper with unsaved overrides puts it back.
@@ -254,9 +262,9 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
   // The lead's decisions made in this page (#42), by thread: newer than the run's result or the stored read.
   const [reviewed, setReviewed] = useState<Record<string, Assessment>>({})
   // The overview once read: its goal and language name the top bar's label (#440), and its company the bar's company
-  // when there is no profile list (#495).
+  // (#495), so the bar and the page never disagree; until it is read, the listed company, none without a list.
   const readOverview = overview.state.status === 'ready' ? overview.state.overview : undefined
-  const barCompany = profile ?? readOverview
+  const barCompany = readOverview ?? profile
   // In the Internal improvement goal a review or a plan mark can change a card's flags (#410: re-assessment
   // suggested, Closed), which the server works out: the overview is read again, kept as it is when that read fails.
   const improving = readOverview?.goal === 'internal-improvement'
@@ -291,10 +299,12 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     if (again) noteReviewed(again)
     return again !== null
   }
-  /** A tab or a menu item shows `next`; on a phone, the bar's panel closes as it does. */
+  /** A tab or a menu item shows `next`; on a phone, the bar's panel then closes, focus on its Menu button. When the lead
+   * stays (#182), the panel stays open as it was. */
   const go = (next: View) => {
+    if (!showView(next)) return
+    if (barOpen) setToToggle((n) => n + 1)
     setBarOpen(false)
-    showView(next)
   }
   const open = (controlId: string, assess: boolean) => {
     if (showView({ name: 'paper', controlId }) && assess && !passing) void start(controlId)
@@ -315,9 +325,9 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
               onClick={(e) => { e.preventDefault(); go({ name: 'company' }) }}>Company</a>
           </nav>
           <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut}
-            company={profile?.company} onStartedAfresh={onStartedAfresh}
-            developer={developer ? { onPage: () => go({ name: 'developer' }), onSetup: () => go({ name: 'setup' }) }
-              : undefined} />
+            company={barCompany?.company} onStartedAfresh={onStartedAfresh}
+            developerTools={developer
+              ? { onPage: () => go({ name: 'developer' }), onSetup: () => go({ name: 'setup' }) } : undefined} />
         </div>
       </TopBar>
       {shown === 'report' ? <Report />

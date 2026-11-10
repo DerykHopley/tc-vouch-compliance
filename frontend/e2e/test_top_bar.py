@@ -111,6 +111,7 @@ def test_the_user_menu_opens_by_click_or_keyboard_closes_with_esc_and_flips_the_
     page.keyboard.press("ArrowDown")
     expect(items.nth(1)).to_be_focused()
     page.keyboard.press("ArrowUp")
+    expect(items.nth(0)).to_be_focused()
     expect(items.nth(0)).to_have_text(theme)  # the theme first, since #495
     page.keyboard.press("Enter")  # the theme flips, and the menu closes back on its button
     flipped = "light" if scheme == "dark" else "dark"
@@ -163,6 +164,9 @@ def test_on_a_phone_one_menu_button_holds_the_tabs_and_user_menu(page: Page, pro
     page.get_by_role("menuitem", name="Developer page").click()  # as a tab does, closes the panel
     expect(page).to_have_url(re.compile(r"/developer$"))
     expect(toggle).to_have_attribute("aria-expanded", "false")
+    expect(
+        toggle
+    ).to_be_focused()  # the item it came from is hidden: focus on a control still shown
     expect(bar_company(page)).to_be_visible()
 
     toggle.click()

@@ -207,7 +207,7 @@ describe('ProfiledApp, issue 480', () => {
     expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'testwerk' })
     const banner = screen.getByRole('banner')
     expect(within(banner).queryByRole('button', { name: /^Profile/ })).toBeNull()
-    expect(within(banner).getByText('AT · DE')).toBeTruthy()
+    expect(within(banner).getByText('Somewhere · EN')).toBeTruthy() // the overview's, once read (this fixture's country)
     expect(within(banner).getByText('Testwerk Prüfstand GmbH').closest('button, a')).toBeNull()
     expect(stored.mock.calls.filter(([key]) => key === 'vouch.profile')).toEqual([])
     expect(window.localStorage.getItem('vouch.profile')).toBeNull()
@@ -267,6 +267,9 @@ describe('ProfiledApp, issue 480', () => {
     answer(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
     await dossierOf('Nordlicht Komponenten GmbH')
     expect(within(banner).getByText('Somewhere · EN')).toBeTruthy() // a country with no ISO code by its name
+    // The user menu's fresh start names the company the bar names.
+    await userEvent.click(within(banner).getByRole('button', { name: 'Your menu' }))
+    expect(screen.getByRole('menuitem', { name: 'Start Nordlicht Komponenten GmbH afresh…' })).toBeTruthy()
   })
 
   it('without the list, names no company on a page that reads no overview (ticket 495)', async () => {

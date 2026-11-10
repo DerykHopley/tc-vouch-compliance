@@ -4,7 +4,7 @@ names, and the user menu's items (the developer page and company setup are there
 The profile dropdown is gone (#480): a check under another company makes it current
 (current_company.py)."""
 
-from playwright.sync_api import Locator, Page
+from playwright.sync_api import Locator, Page, expect
 
 
 def back_to_overview(page: Page) -> None:
@@ -35,7 +35,9 @@ def from_user_menu(page: Page, item: str) -> None:
     from behind the Menu button first."""
     bar = page.get_by_role("banner")
     toggle = bar.get_by_role("button", name="Menu", exact=True)
+    user = bar.get_by_role("button", name="Your menu")
+    expect(toggle.or_(user).first).to_be_visible()  # the app is up: one of them shows, by width
     if toggle.is_visible() and toggle.get_attribute("aria-expanded") != "true":
         toggle.click()
-    bar.get_by_role("button", name="Your menu").click()
+    user.click()
     page.get_by_role("menuitem", name=item).click()

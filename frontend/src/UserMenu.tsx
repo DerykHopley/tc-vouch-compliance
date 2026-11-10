@@ -14,8 +14,9 @@ type Props = {
   company?: string
   /** The fresh start went through (#285): the app opens afresh. Without it, the menu offers no fresh start. */
   onStartedAfresh?: () => void
-  /** A developer's tools (#495, M9 decision 4): Developer page and Set up a company; none for a lead. */
-  developer?: { onPage: () => void; onSetup: () => void }
+  /** A developer's tools (#495, M9 decision 4): Developer page and Set up a company; none for a lead. Choosing one
+   * closes the menu, focus back on its button, then opens the page (the app moves focus on where that button hides). */
+  developerTools?: { onPage: () => void; onSetup: () => void }
 }
 
 const RUNNING = 'An assessment is running: start afresh once it has finished.'
@@ -39,7 +40,8 @@ async function confirmFreshStart(company: string | undefined, onStarted: () => v
  * the theme; Developer page and Set up a company (developers only); Sign out; the fresh start (#285), last. A separator
  * splits the groups (the arrow keys skip it), and a group with nothing in it leaves none. In local mode, with no
  * sign-in, no "Signed in as" or Sign out. */
-export default function UserMenu({ name, theme, onTheme, onSignOut, company, onStartedAfresh, developer }: Props) {
+export default function UserMenu({ name, theme, onTheme, onSignOut, company, onStartedAfresh, developerTools }:
+  Props) {
   const signedIn = Boolean(onSignOut && name)
   // Local mode's one user is "Local user"; in clerk mode, until Clerk has read the user, an ellipsis, never "LU".
   const shown = onSignOut ? name : LOCAL_USER
@@ -53,10 +55,10 @@ export default function UserMenu({ name, theme, onTheme, onSignOut, company, onS
             <MenuItem onSelect={() => { onTheme(); close() }}>{theme === 'light' ? 'Dark theme' : 'Light theme'}</MenuItem>
           </>
         )
-        const tools = developer && (
+        const tools = developerTools && (
           <>
-            <MenuItem onSelect={() => { close(); developer.onPage() }}>Developer page</MenuItem>
-            <MenuItem onSelect={() => { close(); developer.onSetup() }}>Set up a company</MenuItem>
+            <MenuItem onSelect={() => { close(); developerTools.onPage() }}>Developer page</MenuItem>
+            <MenuItem onSelect={() => { close(); developerTools.onSetup() }}>Set up a company</MenuItem>
           </>
         )
         const signOut = onSignOut && <MenuItem onSelect={() => { close(); onSignOut() }}>Sign out</MenuItem>
@@ -65,9 +67,12 @@ export default function UserMenu({ name, theme, onTheme, onSignOut, company, onS
             {`${startWords(company)}…`}
           </MenuItem>
         )
-        const groups: ReactNode[] = [you, tools, signOut, reset].filter(Boolean)
-        return groups.map((items, i) => (
-          <Fragment key={i}>
+        // Each group keyed by its name, so a group arriving while the menu is open (the developer's, once the settings
+        // are read) moves no item into another's place, and the focused item stays the one focused.
+        const groups = ([['you', you], ['tools', tools], ['sign-out', signOut], ['reset', reset]] as [string, ReactNode][])
+          .filter(([, items]) => items)
+        return groups.map(([key, items], i) => (
+          <Fragment key={key}>
             {i > 0 && <div className="menu-separator" role="separator" />}
             {items}
           </Fragment>

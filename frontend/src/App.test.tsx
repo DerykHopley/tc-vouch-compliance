@@ -346,6 +346,28 @@ describe('the working paper', () => {
         expect(within(m1()).getByText('Overridden from Partly evidenced')).toBeTruthy()
       })
 
+      it("on a phone, Cancel keeps the bar's panel open, focus on the user menu's button (ticket 495)", async () => {
+        const served = serveReview(Response.json({ assessment: READY }), READY)
+        vi.stubGlobal('fetch', (url: string, init?: RequestInit) => url === '/api/developer/settings'
+          ? Promise.resolve(Response.json(DEVELOPER_SETTINGS)) : served(url, init))
+        window.history.replaceState(null, '', '/controls/4.1.2')
+        render(<App />)
+        await screen.findByRole('region', { name: 'Review' })
+        await saveOverrideOfM1()
+        asking(false)
+        const toggle = screen.getByRole('button', { name: 'Menu' })
+
+        await userEvent.click(toggle)
+        await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+        await userEvent.click(await screen.findByRole('menuitem', { name: 'Developer page' }))
+
+        expect(toggle.getAttribute('aria-expanded')).toBe('true')
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Your menu' }))
+        await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' }))
+          .getByRole('link', { name: 'Report' }))
+        expect(toggle.getAttribute('aria-expanded')).toBe('true') // a tab's Cancel too
+      })
+
       it("Back asks; Cancel keeps the paper shown and puts its address back", async () => {
         window.history.replaceState(null, '', '/')
         window.history.pushState(null, '', '/controls/4.1.2')
@@ -613,12 +635,14 @@ describe('the Company tab (ticket 495; the documents, issue 424, until slice 4 b
     async () => {
       const fetch = serve()
       window.history.replaceState(null, '', '/')
-      window.history.pushState(null, '', '/documents')
+      window.history.pushState(null, '', '/documents?from=mail#policies')
       const entries = window.history.length
       render(<App />)
       expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
       expect(tab('Company').getAttribute('aria-current')).toBe('page')
-      await waitFor(() => expect(window.location.pathname).toBe('/company'))
+      expect(window.location.pathname).toBe('/company') // as the app opens
+      expect(window.location.search).toBe('?from=mail')
+      expect(window.location.hash).toBe('#policies')
       expect(window.history.length).toBe(entries) // replaced, no new entry
       expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
     })
@@ -1222,7 +1246,7 @@ describe('Ask Vouch', () => {
     window.history.replaceState(null, '', '/company')
     render(<App />)
     await open()
-    expect(within(bubble()!).getByText('on Documents')).toBeTruthy()
+    expect(within(bubble()!).getByText('on Company')).toBeTruthy() // the tab's word; the API's page stays 'documents'
     await waitFor(() => expect(greetings).toEqual([{ page: 'documents', control_id: null, thread_id: null }]))
     await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Which are stale?{Enter}')
     await waitFor(() => expect(asked).toEqual([{ message: 'Which are stale?', page: 'documents', control_id: null,
@@ -1460,6 +1484,45 @@ describe('Ask Vouch', () => {
     await press('Send')
     await within(bubble()!).findByText(/Vouch could not be reached/)
     expect(field.value).toBe('Where do I stand?')
+  })
+})
+
+describe('the top bar and its phone panel (ticket 495)', () => {
+  const LISTED = { id: 'nordlicht', company: 'Nordlicht (listed)', country: 'Germany', answer_language: 'en' }
+  const barName = () => screen.getByRole('banner').querySelector('.top-name')?.textContent
+
+  it("names the listed company until the overview is read, then the overview's, so bar and page agree", async () => {
+    serve()
+    render(<App profile={LISTED} />)
+    expect(barName()).toBe('Nordlicht (listed)')
+    await screen.findAllByRole('article', { name: /^Control / })
+    expect(barName()).toBe('Nordlicht Komponenten GmbH')
+  })
+
+  it("a developer item on the phone closes the bar's panel, focus on the Menu button it leaves visible", async () => {
+    const served = serve()
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => url === '/api/developer/settings'
+      ? Promise.resolve(Response.json(DEVELOPER_SETTINGS)) : served(url, init))
+    render(<App />)
+    const toggle = screen.getByRole('button', { name: 'Menu' })
+    await userEvent.click(toggle)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Developer page' }))
+
+    expect(window.location.pathname).toBe('/developer')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(toggle)
+  })
+
+  it('a developer item on a desktop leaves focus on the user menu’s button', async () => {
+    const served = serve()
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => url === '/api/developer/settings'
+      ? Promise.resolve(Response.json(DEVELOPER_SETTINGS)) : served(url, init))
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a company' }))
+    expect(window.location.pathname).toBe('/developer/setup')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Your menu' }))
   })
 })
 
