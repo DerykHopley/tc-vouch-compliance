@@ -39,6 +39,7 @@ from pydantic import PrivateAttr, SecretStr
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
 from vouch.graph import PROMPT_VERSION
+from vouch.profile import ComplianceProfile
 from vouch.settings import PROFILE_PASS_SCRIPT, Settings, demo_script, fake_model
 
 log = logging.getLogger(__name__)
@@ -348,15 +349,28 @@ class ModelChoice:
         return self.openrouter.chat_model(chosen, callbacks)
 
     def for_profile_pass(
-        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+        self,
+        chosen: str | None,
+        callbacks: list[BaseCallbackHandler] | None = None,
+        profile: ComplianceProfile | None = None,
     ) -> BaseChatModel:
         """A fresh model for one profile pass (#371), on `chosen` (from `chosen()`), within
         CALL_BUDGET calls, PROFILE_PASS_TIMEOUT_SECONDS a request and no retry
-        (PROFILE_PASS_MAX_RETRIES); on the fake,
-        ASSESS_FAKE_SCRIPT when set, else the bundled pass script (PROFILE_PASS_SCRIPT, written
-        for Nordlicht). `callbacks` see every call (the usage meter)."""
+        (PROFILE_PASS_MAX_RETRIES); on the fake, ASSESS_FAKE_SCRIPT when set, else for a
+        stored `profile` (a company made in setup: ComplianceProfile.stored) the library script
+        limited to its chosen documents (vouch.fake_model.library_pass_model, #446), else the
+        bundled pass script (PROFILE_PASS_SCRIPT, written for Nordlicht). `callbacks` see every
+        call (the usage meter)."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
-            fake = fake_model(self._settings, PROFILE_PASS_SCRIPT)
+            fake: BaseChatModel
+            if self._settings.fake_script is None and profile is not None and profile.stored:
+                from vouch.fake_model import (
+                    library_pass_model,
+                )  # imported when called, as fake_model
+
+                fake = library_pass_model(profile)
+            else:
+                fake = fake_model(self._settings, PROFILE_PASS_SCRIPT)
             fake.callbacks = callbacks
             return fake
         return self.openrouter.chat_model(

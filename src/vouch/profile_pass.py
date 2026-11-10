@@ -34,7 +34,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
 from vouch.citations import LeadStatement, QuoteChecker
-from vouch.documents import document_files, escaped, facts_of
+from vouch.documents import escaped, facts_of
 from vouch.front_matter import split_front_matter
 from vouch.graph import (
     GUARD,
@@ -178,9 +178,7 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
         if escaped(folder):
             raise refused(f"the {source} folder now points outside its allowed folder")
         try:
-            for path in document_files(folder):  # a link out of the folder left out
-                if not allowed.uses(path.stem):
-                    continue
+            for path in allowed.usable_documents():  # a link out of the folder left out
                 data, body = split_front_matter(path.read_text(encoding="utf-8"))
                 facts = facts_of(data, source, path.stem, today)
                 found.append(

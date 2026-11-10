@@ -828,7 +828,7 @@ def create_profile_pass(
         counted = True
 
     try:
-        model = models.for_profile_pass(chosen, callbacks=[meter])
+        model = models.for_profile_pass(chosen, callbacks=[meter], profile=profile)
         result = run_profile_pass(
             profile,
             memory,

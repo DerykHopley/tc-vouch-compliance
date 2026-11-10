@@ -17,7 +17,7 @@ from test_dossier import quote, seeded
 from test_memory import app_on, restart
 from test_report import every_word, reviewed, under
 
-from vouch import api, documents_tab, isa, report
+from vouch import api, documents_tab, isa, profile, report
 from vouch.database import Database
 from vouch.documents_tab import DOCUMENT_WORDS, document_words
 from vouch.documents_tab import profile_documents as documents
@@ -283,7 +283,7 @@ def test_an_unreadable_folder_is_a_500_naming_no_server_path(users, monkeypatch)
     def unreadable(folder: Path) -> list[Path]:
         raise PermissionError(13, "Permission denied", str(folder))
 
-    monkeypatch.setattr(documents_tab, "document_files", unreadable)
+    monkeypatch.setattr(profile, "document_files", unreadable)
     with TestClient(app_on(None), raise_server_exceptions=False) as client:
         response = client.get(PATH, headers=alice)
 
@@ -295,7 +295,7 @@ def test_an_unreadable_folder_is_a_500_naming_no_server_path(users, monkeypatch)
 def test_a_document_that_isnt_text_is_a_500_naming_no_server_path(users, monkeypatch, tmp_path):
     alice, _ = users
     (tmp_path / "garbled.md").write_bytes(b"\xff\xfe\x00bad")
-    monkeypatch.setattr(documents_tab, "document_files", lambda folder: [tmp_path / "garbled.md"])
+    monkeypatch.setattr(profile, "document_files", lambda folder: [tmp_path / "garbled.md"])
     with TestClient(app_on(None), raise_server_exceptions=False) as client:
         response = client.get(PATH, headers=alice)
 
