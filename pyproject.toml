@@ -16,6 +16,7 @@ dependencies = [
     "psycopg[binary]>=3.3.8,<3.4",  # vouch.database.BoundedConnection reads a private name (#119)
     "pydantic>=2.14.2",
     "fpdf2>=2.9.0",
+    "langfuse>=5.2,<6",
 ]
 
 [project.scripts]

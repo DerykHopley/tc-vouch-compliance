@@ -20,10 +20,15 @@ a judge, the faithfulness of its answer to its cited passages (vouch.faithfulnes
 the fake runs one case first, prints a cost and time estimate, and runs the rest only after a
 typed "yes". Each run's raw results are saved (git-ignored), and a copy where the owner says;
 vouch.eval_report renders the report from them without calling a model.
+
+Eval runs aren't traced to Langfuse Cloud (#460): an eval over 100 requirements could spend a
+large share of the free plan. `--trace` traces each case to a local Langfuse only
+(LOCAL_LANGFUSE), with its keys; without it no Langfuse key is read.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -33,6 +38,7 @@ from datetime import UTC, date, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from langchain_core.callbacks import BaseCallbackHandler
@@ -71,7 +77,7 @@ from vouch.faithfulness import (
     prepare_deepeval,
 )
 from vouch.fake_model import ScriptedChatModel
-from vouch.graph import JUDGED_VERDICTS, Assessment, Verdict, assess
+from vouch.graph import JUDGED_VERDICTS, PROMPT_VERSION, Assessment, Verdict, assess
 from vouch.isa import Column, UnknownControlError
 from vouch.paths import REPO_DIR
 from vouch.profile import (
@@ -81,14 +87,29 @@ from vouch.profile import (
     UnknownProfileError,
     load_named_profile,
 )
-from vouch.settings import Settings, load_model_settings
+from vouch.settings import (
+    LANGFUSE_BASE_URL_ENV,
+    LANGFUSE_KEY_ENVS,
+    LangfuseKeys,
+    Settings,
+    SettingsError,
+    load_langfuse_keys,
+    load_model_settings,
+)
 from vouch.spending import FAKE, Price, Usage, UsageMeter
+from vouch.tracing import EVAL, TraceFacts, Tracing, start_tracing, traced
 
 EXPECTED_ANSWERS = "expected-answers.yaml"  # in the profile's fixtures folder
 FAKE_SCRIPTS_DIR = REPO_DIR / "evals" / "scripts"  # one folder per profile, a script per case
 RESULTS_DIR = REPO_DIR / "evals" / "results"  # git-ignored
 CONFIRM_WORD = "yes"  # typed to run the cases after the dry run
 FAKE_MODEL = "the scripted fake model"
+LOCAL_LANGFUSE = "http://localhost:3300"
+"""The local Langfuse `--trace` sends to: any on this machine (localhost or 127.0.0.1) is let
+through, Langfuse Cloud never."""
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
+EVAL_USER = "eval-runner"
+"""An eval trace's user: the runner signs nobody in."""
 EXIT_CASES_FAILED = 1  # a case failed or was bad
 EXIT_INTERRUPTED = 130  # Ctrl-C, as a shell reports it
 
@@ -364,6 +385,30 @@ def _judged(
     }
 
 
+class TraceRefused(ValueError):
+    """`--trace` can't trace: no Langfuse keys, or a Langfuse other than a local one."""
+
+
+def trace_keys(*, trace: bool, env: Mapping[str, str]) -> LangfuseKeys | None:
+    """The Langfuse keys `--trace` traces with; None without it, and no key is read. Raises
+    TraceRefused unless both keys are set and LANGFUSE_BASE_URL is a local Langfuse."""
+    if not trace:
+        return None
+    local = f"a local Langfuse ({LANGFUSE_BASE_URL_ENV}={LOCAL_LANGFUSE})"
+    try:
+        keys = load_langfuse_keys(env)
+    except SettingsError as error:
+        raise TraceRefused(str(error)) from None
+    if keys is None:
+        raise TraceRefused(f"--trace needs {' and '.join(LANGFUSE_KEY_ENVS)}, those of {local}")
+    if urlsplit(keys.base_url).hostname not in LOCAL_HOSTS:
+        raise TraceRefused(
+            f"--trace sends to {local} only, never to {keys.base_url}: eval runs aren't traced "
+            "to Langfuse Cloud"
+        )
+    return keys
+
+
 def bad_cases(cases: Iterable[EvalCase], profile: ComplianceProfile) -> list[BadCase]:
     """The cases that don't fit the profile, so won't run."""
     found = ((case, _columns(case, profile)) for case in cases)
@@ -381,6 +426,7 @@ def run_eval(
     judge: FaithfulnessJudge | None = None,
     clock: Callable[[], float] = time.monotonic,
     on_case: Callable[[CaseScore], None] | None = None,
+    tracing: Tracing | None = None,
 ) -> EvalReport:
     """Assess each case's control on its own model and score it.
 
@@ -389,7 +435,8 @@ def run_eval(
     `today` is fixed, so the stale rule gives the same verdicts on every run. Each case is
     timed; on a metered model its calls' tokens and cost are kept (a failed case's too: they
     may have been billed); with a judge, each case that ran has its answer judged. `on_case`
-    sees each scored case as soon as it is (the runner saves it then)."""
+    sees each scored case as soon as it is (the runner saves it then). With `tracing` (`--trace`),
+    each case's assessment is one trace."""
     report = EvalReport(scores=[])
     for case in cases:
         columns = _columns(case, profile)
@@ -401,7 +448,18 @@ def run_eval(
         start = clock()
         try:
             model = models.model_for(case.control_id, callbacks)
-            assessment = assess(case.control_id, profile, model, today=today)
+            facts = TraceFacts(
+                EVAL,
+                EVAL_USER,
+                profile.id,
+                models.name,
+                PROMPT_VERSION,
+                control_id=case.control_id,
+            )
+            with traced(tracing, facts) as run_config:
+                assessment = assess(
+                    case.control_id, profile, model, today=today, run_config=run_config
+                )
         # Any exception, as a real provider raises its own kinds; the eval goes on.
         except Exception as error:  # noqa: BLE001
             failed = failed_case(case, f"{type(error).__name__}: {error}")
@@ -483,6 +541,7 @@ def run_confirmed(
     judge: FaithfulnessJudge | None = None,
     clock: Callable[[], float] = time.monotonic,
     on_case: Callable[[CaseScore], None] | None = None,
+    tracing: Tracing | None = None,
 ) -> tuple[EvalReport, bool]:
     """Run the first case that fits the profile (the dry run), print the estimate for the
     others that fit (bad cases never run), and run them only when `confirm` is answered with
@@ -490,7 +549,15 @@ def run_confirmed(
     the report and whether the rest ran."""
     fitting = [c for c in cases if isinstance(_columns(c, profile), dict)]
     report = EvalReport(scores=[], bad_cases=bad_cases(cases, profile))
-    run = partial(run_eval, profile=profile, models=models, today=today, judge=judge, clock=clock)
+    run = partial(
+        run_eval,
+        profile=profile,
+        models=models,
+        today=today,
+        judge=judge,
+        clock=clock,
+        tracing=tracing,
+    )
     if not fitting:
         return report, True
     report.extend(run(fitting[:1], on_case=on_case))
@@ -786,6 +853,12 @@ def _parser() -> argparse.ArgumentParser:
         help=f"also copy the raw results here (default: {KEPT_DIR.relative_to(REPO_DIR)})",
     )
     parser.add_argument("--models", action="store_true", help="list the models and stop")
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help=f"trace each case to a local Langfuse ({LANGFUSE_BASE_URL_ENV}={LOCAL_LANGFUSE}, "
+        f"with its {' and '.join(LANGFUSE_KEY_ENVS)}); never to Langfuse Cloud",
+    )
     return parser
 
 
@@ -800,11 +873,11 @@ def _judge_name(args: argparse.Namespace) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     """`python -m vouch.evals [--profile <name>] [--model <name>] [--judge <name>] [--results
-    <folder>] [--keep [<folder>]]`: run the profile's cases, print the summary, save the raw
-    results (after every case) and the summary. `python -m vouch.evals report ...` renders the
-    report instead. Exits 1 when a case failed or was bad, 2 when the profile, its cases, the
-    model or the judge can't be used, 3 when Ollama isn't running, 130 on Ctrl-C (the cases run
-    so far are saved). Stopping at the estimate exits 0."""
+    <folder>] [--keep [<folder>]] [--trace]`: run the profile's cases, print the summary, save
+    the raw results (after every case) and the summary. `python -m vouch.evals report ...`
+    renders the report instead. Exits 1 when a case failed or was bad, 2 when the profile, its
+    cases, the model, the judge or `--trace`'s Langfuse can't be used, 3 when Ollama isn't
+    running, 130 on Ctrl-C (the cases run so far are saved). Stopping at the estimate exits 0."""
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["report"]:
         return report_main(argv[1:])
@@ -812,6 +885,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.models:
         print(model_list())
         return 0
+    try:
+        tracing = start_tracing(trace_keys(trace=args.trace, env=os.environ))
+    except TraceRefused as error:
+        print(f"eval: {error}", file=sys.stderr)
+        return EXIT_BAD_INPUT
+    try:
+        return run_with_tracing(args, tracing)
+    finally:
+        if tracing is not None:
+            tracing.shutdown()  # sends what it holds
+
+
+def run_with_tracing(args: argparse.Namespace, tracing: Tracing | None) -> int:
+    """main's run of the cases, its options read: each case traced with `tracing`, if any."""
     judge_name = _judge_name(args)
     if judge_name is not None:
         print(f"Judge: {judge_name}" + ("" if args.judge else " (the default for this model)"))
@@ -851,11 +938,24 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if models.metered or judge is not None:
             report, confirmed = run_confirmed(
-                cases.cases, profile, models, today=cases.today, judge=judge, on_case=results.add
+                cases.cases,
+                profile,
+                models,
+                today=cases.today,
+                judge=judge,
+                on_case=results.add,
+                tracing=tracing,
             )
             status = "complete" if confirmed else "stopped at the estimate"
         else:
-            report = run_eval(cases.cases, profile, models, today=cases.today, on_case=results.add)
+            report = run_eval(
+                cases.cases,
+                profile,
+                models,
+                today=cases.today,
+                on_case=results.add,
+                tracing=tracing,
+            )
     except KeyboardInterrupt:
         report, status = results.report, "interrupted"
         print(f"\nInterrupted: the {len(report.scores)} cases run so far are saved.")

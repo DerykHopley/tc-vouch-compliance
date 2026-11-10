@@ -218,6 +218,31 @@ Secret Manager bills active versions above a small free tier (*unverified*: the 
 render, 2026-11-04); the wizard adds none for an unchanged secret, and destroying old versions
 keeps the count down.
 
+### Tracing (Langfuse, #460)
+
+The live app traces each assessment, chat turn and profile pass in Langfuse once two more secrets
+are in Secret Manager: `LANGFUSE_PUBLIC_KEY` (keyring `langfuse-cloud-public-key`) and
+`LANGFUSE_SECRET_KEY` (keyring `langfuse-cloud-secret-key`). The wizard never creates or writes them:
+when both have an enabled version it pins each one's newest enabled version and grants the service's account Secret Accessor
+on them; when either is missing it says "Tracing stays off" and deploys without them, so a deploy
+before they exist runs as before (*checked*, `tests/test_deploy_wizard.py`). Put them there once,
+by hand, each through a pipe from the keyring, where the Langfuse Cloud project's (EU) keys already
+are:
+
+```bash
+export CLOUDSDK_CORE_LOG_HTTP=false
+secret-tool lookup service langfuse-cloud-public-key | gcloud secrets create LANGFUSE_PUBLIC_KEY \
+  --replication-policy=automatic --data-file=- --project=$PROJECT_ID
+secret-tool lookup service langfuse-cloud-secret-key | gcloud secrets create LANGFUSE_SECRET_KEY \
+  --replication-policy=automatic --data-file=- --project=$PROJECT_ID
+```
+
+then `scripts/deploy-wizard.sh --db-ready`. A project in Langfuse's US region also needs a
+`LANGFUSE_BASE_URL=https://us.cloud.langfuse.com` line in `wizard.env` (not a secret); without
+one, traces go to the EU region, `https://cloud.langfuse.com`. To turn tracing off again, disable
+every version of either secret (or delete it) and deploy. `scripts/dev.sh` drops both keys, so a
+local preview never traces to the live project; a local check of tracing runs the API itself.
+
 ## 6 and 7. The URL, and the health check
 
 ```bash
