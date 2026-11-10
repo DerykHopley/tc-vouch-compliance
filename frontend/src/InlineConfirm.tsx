@@ -1,4 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
+import { swallowNextPointerClick } from './doubleClickGuard.ts'
 
 /** The trigger's own attributes: its class (a ghost pill unless given), `disabled` (can't be pressed or focused),
  * `aria-disabled` (can't be pressed, keeps focus: busy), `aria-busy`, `aria-label`. */
@@ -20,30 +21,6 @@ type Props = {
    * question that changed under them. */
   subject?: string
   trigger?: Trigger
-}
-
-/** The longest common double-click interval. */
-const DOUBLE_CLICK_MS = 500
-
-/**
- * Swallows the next pointer click anywhere on the page, if it comes within `DOUBLE_CLICK_MS` (#527): a double-click
- * on the ask's confirm collapses the ask, and its second click would land on whatever moves up under the
- * pointer. A keyboard click (`detail === 0`) is never swallowed. Returns the function that takes the guard away.
- */
-function swallowNextPointerClick(): () => void {
-  const swallow = (e: MouseEvent) => {
-    if (e.detail === 0) return
-    e.preventDefault()
-    e.stopPropagation()
-    disarm()
-  }
-  const timer = window.setTimeout(() => disarm(), DOUBLE_CLICK_MS)
-  function disarm() {
-    window.clearTimeout(timer)
-    document.removeEventListener('click', swallow, true)
-  }
-  document.addEventListener('click', swallow, true)
-  return disarm
 }
 
 /**
@@ -73,15 +50,9 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
     wasOpen.current = open
     ;(open ? cancel : button).current?.focus()
   }, [open])
-  // The double-click guard set by the last pointer confirm, taken away when this unmounts.
-  const disarm = useRef<(() => void) | null>(null)
-  useEffect(() => () => disarm.current?.(), [])
   if (open) {
     const confirm = (e: ReactMouseEvent<HTMLButtonElement>) => {
-      if (e.detail > 0) {
-        disarm.current?.()
-        disarm.current = swallowNextPointerClick()
-      }
+      if (e.detail > 0) swallowNextPointerClick()
       setOpen(false)
       onConfirm()
     }

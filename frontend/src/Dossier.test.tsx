@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Dossier from './Dossier.tsx'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
 import type { ControlCard, Overview } from './overview.ts'
 import type { Verdict } from './assessment.ts'
 import type { Goal } from './report.ts'
@@ -58,10 +59,6 @@ async function confirmed(name: string) {
   await userEvent.click(screen.getByRole('button', { name }))
   await userEvent.click(screen.getByRole('button', { name }))
 }
-
-/** A person's next click comes after a double-click's would: within 500ms of a confirm, the ask presses nothing (#527). */
-const pastDoubleClick = () => new Promise((done) => setTimeout(done, 500))
-
 /** The verdict chip on a control's card. */
 const cardChip = (id: string) =>
   within(screen.getByRole('article', { name: `Control ${id}` })).getByText(/./, { selector: '.chip' })

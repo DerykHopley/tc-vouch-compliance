@@ -32,6 +32,7 @@ vi.mock('./profiles.ts', async (original) => {
 })
 import type { DeveloperSettings } from './developer.ts'
 import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
 import { fetchProfiles, type Profiles, type ProfileSummary, startAfresh, withoutProfile, withProfile } from './profiles.ts'
 import { authHeaders, setOnSignedOut, setProfile, setTokenSource } from './session.ts'
 
@@ -788,8 +789,7 @@ describe('the first pass on a company just made, issue 447', () => {
     await userEvent.click(goalButton()) // in the in-app ask (#441)
     await screen.findByText('Goal: Internal improvement')
     expect(screen.queryByText(NOT_SET)).toBeNull()
-    // A person's next click comes after a double-click's would: within 500ms of a confirm, the ask presses nothing (#527).
-    await new Promise((done) => setTimeout(done, 500))
+    await pastDoubleClick()
     await userEvent.click(goalButton()) // back to Audit readiness: the note stays gone
     await userEvent.click(goalButton())
     await screen.findByText('Goal: Audit readiness')

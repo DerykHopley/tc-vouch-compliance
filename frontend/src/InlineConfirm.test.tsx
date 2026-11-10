@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
+import { DOUBLE_CLICK_MS } from './doubleClickGuard.ts'
 import InlineConfirm from './InlineConfirm.tsx'
 
 /** The in-app ask (#441), shared by Change goal, Close round and Assess again on a review in progress (#437). */
@@ -121,7 +123,7 @@ describe('the second click of a double-click (ticket 527)', () => {
     opened()
     confirm(1)
     expect(onConfirm).toHaveBeenCalledOnce()
-    vi.advanceTimersByTime(499)
+    vi.advanceTimersByTime(DOUBLE_CLICK_MS - 1)
     fireEvent.click(button('Close round'), { detail: 2 })
     expect(other).not.toHaveBeenCalled()
   })
@@ -146,12 +148,12 @@ describe('the second click of a double-click (ticket 527)', () => {
     expect(onConfirm).toHaveBeenCalledOnce()
   })
 
-  it('lets a click 500ms or more after the confirm through', () => {
+  it('lets a click 500ms or more after the confirm through', async () => {
     vi.useFakeTimers()
     const { other } = withOther()
     opened()
     confirm(1)
-    vi.advanceTimersByTime(500)
+    await pastDoubleClick()
     fireEvent.click(button('Close round'), { detail: 1 })
     expect(other).toHaveBeenCalledOnce()
   })
@@ -174,14 +176,24 @@ describe('the second click of a double-click (ticket 527)', () => {
     expect(other).toHaveBeenCalledOnce()
   })
 
-  it('leaves no guard behind when it unmounts within the 500ms', () => {
+  it('outlives the ask: when it unmounts, what takes its place presses nothing within 500ms, then works', async () => {
+    // Close round's ask leaves the page as the round closes, and the next round's form takes its place.
     vi.useFakeTimers()
     const other = vi.fn()
     const view = render(<InlineConfirm label="Change it" question={QUESTION} onConfirm={vi.fn()} />)
     opened()
     confirm(1)
-    view.rerender(<button type="button" onClick={other}>Close round</button>)
-    fireEvent.click(button('Close round'), { detail: 2 })
+    view.rerender(<button type="button" onClick={other}>Start round</button>)
+    fireEvent.click(button('Start round'), { detail: 2 })
+    expect(other).not.toHaveBeenCalled()
+
+    // A fresh guard, then the 500ms run out with no click: the next click works.
+    view.rerender(<InlineConfirm label="Change it" question={QUESTION} onConfirm={vi.fn()} />)
+    opened()
+    confirm(1)
+    view.rerender(<button type="button" onClick={other}>Start round</button>)
+    await pastDoubleClick()
+    fireEvent.click(button('Start round'), { detail: 1 })
     expect(other).toHaveBeenCalledOnce()
   })
 
