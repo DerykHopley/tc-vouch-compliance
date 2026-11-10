@@ -246,6 +246,7 @@ def tables_overflowing(report: Locator) -> list[str]:
 
 
 def set_goal(page: Page, url: str, profile: str, goal: str) -> None:
+    """The profile's goal set through the API."""
     answer = page.request.put(
         f"{url}/api/goal", data={"goal": goal}, headers={"X-Vouch-Profile": profile}
     )
@@ -274,9 +275,12 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
             assert tables_overflowing(report) == [], (profile, width)
 
 
-def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(page: Page, report_url):
+def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
+    page: Page, report_url, nordlicht_report
+):
     page.set_viewport_size({"width": 390, "height": 900})
-    page.route("**/api/report", lambda route: route.fulfill(json=nordlicht_with_long_entry()))
+    nordlicht_report["trail"]["entries"].append(long_entry())
+    page.route("**/api/report", lambda route: route.fulfill(json=nordlicht_report))
     for scheme in ("light", "dark"):
         page.emulate_media(color_scheme=scheme)
         report = open_report(page, report_url)
@@ -313,6 +317,7 @@ def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(page: Page, repo
 
 
 def long_entry() -> dict:
+    """A trail entry with a long note and a long model name, filling every column."""
     return {
         "id": 1,
         "at": "2026-11-06T14:05:00+00:00",
@@ -323,19 +328,10 @@ def long_entry() -> dict:
         "note": LONG_NOTE,
         "verdict_before": "partly-evidenced",
         "verdict_after": "partly-evidenced",
-        "evidence": [
-            {"doc_id": "authentication-standard", "version": "3.1"},
-            {"doc_id": "privileged-access-management-procedure", "version": "12.4"},
-        ],
-        "model": "anthropic/claude-sonnet-4.5-with-a-long-model-name",
-        "prompt_version": "m4-answer-language-2",
+        "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],
+        "model": "scripted-fake-model-with-a-long-name",
+        "prompt_version": "assess-2026-11-01",
     }
-
-
-def nordlicht_with_long_entry() -> dict:
-    served = json.loads(NORDLICHT_REPORT.read_text())
-    served["trail"]["entries"].append(long_entry())
-    return served
 
 
 # --- Export (#57, story 9; #308, story 4 of spec #321) ---------------------------------------
@@ -450,21 +446,7 @@ def with_older_entries(page: Page) -> None:
 
     def patched(route: Route) -> None:
         served = route.fetch().json()
-        added = {
-            "id": 1,
-            "at": "2026-11-06T14:05:00+00:00",
-            "reviewer_name": LOCAL_USER,
-            "control_id": "4.1.2",
-            "requirement_id": "M1",
-            "action": "accept",
-            "note": LONG_NOTE,
-            "verdict_before": "partly-evidenced",
-            "verdict_after": "partly-evidenced",
-            "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],
-            "model": "scripted-fake-model-with-a-long-name",
-            "prompt_version": "assess-2026-11-01",
-        }
-        served["trail"] = {"entries": [*served["trail"]["entries"], added], "next": 1}
+        served["trail"] = {"entries": [*served["trail"]["entries"], long_entry()], "next": 1}
         route.fulfill(json=served)
 
     page.route("**/api/report", patched)
@@ -671,12 +653,7 @@ def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_export
     page: Page, improvement_url
 ):
     request = page.request
-    goal = request.put(
-        f"{improvement_url}/api/goal",
-        data={"goal": "internal-improvement"},
-        headers={"X-Vouch-Profile": "nordlicht"},
-    )
-    assert goal.ok, goal.text()
+    set_goal(page, improvement_url, "nordlicht", "internal-improvement")
     thread_id = accepted(
         request,
         improvement_url,

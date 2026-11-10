@@ -101,6 +101,7 @@ const filled = (sentence: string, values: Record<string, number | string>) =>
  * beside the value, as they hide the header row. */
 type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean }
 
+// `false` too: a cell written `a && b` gives it when `a` is empty.
 const blank = (value: ReactNode) => value === null || value === undefined || value === '' || value === false
   || (Array.isArray(value) && value.length === 0)
 
@@ -323,7 +324,7 @@ function Questions({ report: { questions, words } }: { report: ImprovementReport
 }
 
 /** A control's reviewed verdict, or none while it is open: its status word says so (#463). */
-const reviewed = (c: ReportControl) => c.status === 'accepted' && c.verdict ? c.verdict : null
+const reviewedVerdict = (c: ReportControl) => c.status === 'accepted' && c.verdict ? c.verdict : null
 
 function Controls({ report: { controls, words } }: { report: AuditReadinessReport }) {
   const { labels } = words
@@ -332,11 +333,11 @@ function Controls({ report: { controls, words } }: { report: AuditReadinessRepor
     { label: labels.question, cell: (c) => c.question, className: 'report-q' },
     { label: labels.status, cell: (c) => <span data-word>{words.statuses[c.status]}</span> },
     { label: labels.verdict, cell: (c) => {
-      const verdict = reviewed(c)
+      const verdict = reviewedVerdict(c)
       return verdict && <VerdictChip verdict={verdict} label={words.verdicts[verdict]} />
     } },
-    { label: labels.reviewer, cell: (c) => reviewed(c) && c.reviewer },
-    { label: labels.reviewed_at, cell: (c) => reviewed(c) && c.reviewed_at && dayOf(c.reviewed_at), className: 'mono' },
+    { label: labels.reviewer, cell: (c) => reviewedVerdict(c) && c.reviewer },
+    { label: labels.reviewed_at, cell: (c) => reviewedVerdict(c) && c.reviewed_at && dayOf(c.reviewed_at), className: 'mono' },
   ], controls)
   return (
     <section className="report-part" aria-labelledby="report-controls">

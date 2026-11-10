@@ -416,9 +416,8 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-table .report-quote-row td { padding: 0 8px 12px 24px; }
 .report-quotes { display: grid; gap: 8px; max-width: 72ch; }
 .report-quotes h3 { margin: 0; }
-.report-trail .mono { font-size: 12px; }
-/* Eleven columns in the sheet (#463): the trail set at 12px, narrower gutters and the Note's floor print's 16ch, so
-   the German heads fit too; the day kept whole on its line (10ch of its mono), the time under it. */
+/* Eleven columns in the sheet (#463): the trail set at 12px, narrower gutters and the Note's least width 16ch, as in
+   print, so the German heads fit too; the day kept whole on its line (10ch of its mono), the time under it. */
 .report-trail { font-size: 12px; }
 .report-table.report-trail :is(th, td) { padding-inline: 5px; }
 .report-table.report-trail .report-q { min-width: 16ch; }
