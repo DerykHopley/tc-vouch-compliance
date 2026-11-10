@@ -145,7 +145,7 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
 
 Start the app on your own machine as [setup](setup.md#run-the-app) says (`scripts/dev.sh`, then
 open the URL it prints). It runs on the scripted fake model, offline and free, with no sign-in:
-you are "Local user". The fake covers 1.1.1, 1.6.2, 4.1.2 and 5.1.1, so the steps run as on the
+you are the local user (the user menu shows **LU**). The fake covers 1.1.1, 1.6.2, 4.1.2 and 5.1.1, so the steps run as on the
 live app, with one difference:
 
 - **Step 4:** the fake recognises only some phrasings
@@ -167,7 +167,7 @@ money (on Sonnet 5.5, about $0.30–0.50 a pass over 12 controls), so the demo s
 ### Before you present
 
 - Start the local app afresh: stop `scripts/dev.sh` (Ctrl-C) and start it again
-  ([setup](setup.md#run-the-app)), then open the URL it prints. You are "Local user" on
+  ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user menu shows **LU**) on
   **Nordlicht Komponenten GmbH**. On the local app everything lives in the running process, the
   profile pass's daily limit of 3 included, so a restart starts every count and every control
   from nothing.
@@ -295,8 +295,8 @@ The company and its answers below are invented for the demo; any name works.
 ### Before you present
 
 - Start the local app afresh: stop `scripts/dev.sh` (Ctrl-C) and start it again
-  ([setup](setup.md#run-the-app)), then open the URL it prints. You are "Local user", and the
-  top bar shows **Developer**.
+  ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user menu shows **LU**), and
+  the top bar shows **Developer**.
 - Creating a company runs one profile pass, which counts towards the local app's daily limit of
   3 passes (Part 2 runs one too). After three rehearsals in one run of the app, restart it.
 
