@@ -93,8 +93,8 @@ def test_compare_counts_accepted_verdicts_only_and_lists_each_changed_control_in
         "not-applicable": {"now": 0, "then": 0},
     }
     assert shown["changed"] == [
-        {"control_id": a, "before": None, "after": "evidenced"},
-        {"control_id": b, "before": "partly-evidenced", "after": None},
+        {"control_id": a, "before": None, "after": "evidenced", "reassessing": False},
+        {"control_id": b, "before": "partly-evidenced", "after": None, "reassessing": False},
     ]
 
 
@@ -122,7 +122,9 @@ def test_a_control_frozen_but_no_longer_listed_is_left_out_and_a_new_one_reads_n
 
     shown = compare(frozen, listed, latest)
 
-    assert shown["changed"] == [{"control_id": new, "before": None, "after": "evidenced"}]
+    assert shown["changed"] == [
+        {"control_id": new, "before": None, "after": "evidenced", "reassessing": False}
+    ]
     # Counted as `changed` lists: the control no longer listed counts neither then nor now.
     assert shown["accepted"] == {"now": 1, "then": 0}
     assert shown["by_verdict"]["evidenced"] == {"now": 1, "then": 0}
@@ -136,6 +138,69 @@ def test_nothing_changed_lists_nothing():
 
     assert shown["changed"] == []
     assert shown["accepted"] == {"now": 1, "then": 1}
+
+
+def test_a_control_accepted_then_and_waiting_now_counts_its_earlier_accepted_verdict_re_assessing():
+    # #438: accepted in the closed round, assessed again and waiting for review: the comparison
+    # counts the earlier accepted verdict, not a regression, and lists the control re-assessing.
+    a, b = IDS[:2]
+    frozen = frozen_as({a: ("accepted", "evidenced"), b: ("accepted", "evidenced")})
+    latest = {
+        a: seeded(a, "partly-evidenced", "waiting-for-review"),
+        b: seeded(b, "evidenced", "accepted"),
+    }
+    earlier = {a: seeded(a, "evidenced", "accepted")}
+
+    shown = compare(frozen, CONTROLS, latest, earlier)
+
+    assert shown["accepted"] == {"now": 2, "then": 2}
+    assert shown["by_verdict"]["evidenced"] == {"now": 2, "then": 2}
+    assert shown["by_verdict"]["partly-evidenced"] == {"now": 0, "then": 0}
+    assert shown["changed"] == [
+        {"control_id": a, "before": "evidenced", "after": "evidenced", "reassessing": True}
+    ]
+
+
+def test_a_re_assessed_controls_earlier_accepted_verdict_is_compared_as_any_other():
+    # Not accepted then, accepted (partly evidenced) after the close, now waiting again.
+    a = IDS[0]
+    latest = {a: seeded(a, "evidenced", "waiting-for-review")}
+    earlier = {a: seeded(a, "partly-evidenced", "accepted")}
+
+    shown = compare(frozen_as({}), CONTROLS, latest, earlier)
+
+    assert shown["accepted"] == {"now": 1, "then": 0}
+    assert shown["by_verdict"]["partly-evidenced"] == {"now": 1, "then": 0}
+    assert shown["changed"] == [
+        {"control_id": a, "before": None, "after": "partly-evidenced", "reassessing": True}
+    ]
+
+
+def test_an_earlier_accepted_verdict_counts_only_while_the_newest_waits_for_review():
+    # Rejected now: the lead has decided, so it is not accepted, earlier acceptance or not.
+    a = IDS[0]
+    frozen = frozen_as({a: ("accepted", "evidenced")})
+    latest = {a: seeded(a, "partly-evidenced", "rejected")}
+    earlier = {a: seeded(a, "evidenced", "accepted")}
+
+    shown = compare(frozen, CONTROLS, latest, earlier)
+
+    assert shown["accepted"] == {"now": 0, "then": 1}
+    assert shown["changed"] == [
+        {"control_id": a, "before": "evidenced", "after": None, "reassessing": False}
+    ]
+
+
+def test_waiting_with_no_earlier_accepted_verdict_is_not_accepted_and_not_re_assessing():
+    a = IDS[0]
+    frozen = frozen_as({a: ("accepted", "evidenced")})
+
+    shown = compare(frozen, CONTROLS, {a: seeded(a, "evidenced", "waiting-for-review")})
+
+    assert shown["accepted"] == {"now": 0, "then": 1}
+    assert shown["changed"] == [
+        {"control_id": a, "before": "evidenced", "after": None, "reassessing": False}
+    ]
 
 
 def test_freeze_keeps_one_frozen_control_per_control_with_its_state_verdict_and_thread():
@@ -471,10 +536,46 @@ def test_the_comparison_is_with_the_newest_closed_round_and_names_what_changed(d
     assert between["against"]["name"] == "First round"
     assert between["accepted"] == {"now": 1, "then": 0}
     assert between["by_verdict"][verdict] == {"now": 1, "then": 0}
-    assert between["changed"] == [{"control_id": DEMO_CONTROL, "before": None, "after": verdict}]
+    assert between["changed"] == [
+        {"control_id": DEMO_CONTROL, "before": None, "after": verdict, "reassessing": False}
+    ]
     assert newest["against"]["name"] == "Q4 2026"
     assert newest["accepted"] == {"now": 1, "then": 1}
     assert newest["changed"] == []
+
+
+def test_a_control_assessed_again_counts_its_accepted_verdict_while_the_new_run_waits(
+    database_url, users
+):
+    # #438: accepted in Q4 2026, then assessed again (fixes done, say): until the new run is
+    # reviewed the comparison counts the accepted verdict and marks the control re-assessing;
+    # readiness still counts accepted verdicts only. The improvement report lists only the
+    # controls whose accepted verdict changed.
+    alice, _ = users
+    with TestClient(app_on(database_url)) as client:
+        close(client, alice)
+        start(client, alice, "Q4 2026")
+        verdict = accepted(client, assess(client, alice), headers=alice)["verdict"]
+        close(client, alice)
+        start(client, alice, "Q1 2027")
+        assess(client, alice)  # waiting for review
+        response = client.get("/api/overview", headers=alice)
+        assert response.status_code == 200, response.text
+        overview = response.json()
+        assert client.put(
+            "/api/goal", json={"goal": "internal-improvement"}, headers=alice
+        ).is_success
+        reported = client.get("/api/report", headers=alice).json()["comparison"]
+
+    shown = overview["rounds"]["comparison"]
+    assert shown["accepted"] == {"now": 1, "then": 1}
+    assert shown["by_verdict"][verdict] == {"now": 1, "then": 1}
+    assert shown["changed"] == [
+        {"control_id": DEMO_CONTROL, "before": verdict, "after": verdict, "reassessing": True}
+    ]
+    assert overview["readiness"]["accepted"] == 0
+    assert reported["accepted"] == {"now": 1, "then": 1}
+    assert reported["changed"] == []
 
 
 def test_a_round_closed_before_the_fresh_start_is_not_compared_with(database_url, users):

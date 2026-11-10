@@ -320,6 +320,8 @@ class Change(TypedDict):
     control_id: str
     before: Verdict | None
     after: Verdict | None
+    reassessing: bool
+    """Counted under its earlier accepted verdict while its newest assessment waits (#438)."""
 
 
 class Comparison(TypedDict):
@@ -334,26 +336,48 @@ def compare(
     frozen: Sequence[FrozenControl],
     controls: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
+    earlier: Mapping[str, Assessment] | None = None,
 ) -> Comparison:
-    """Now (the listed controls' newest assessments in `latest`: the overview's readiness)
-    against a closed round's `frozen` results (then), counted the same way: accepted verdicts
-    only. `changed` lists, in the controls' order (the base framework's), each listed control
-    whose accepted verdict differs (None when not accepted); a control frozen but no longer
-    listed is left out, of the counts too, and one new to the profile reads None then."""
+    """Now (the listed controls' newest assessments in `latest`) against a closed round's
+    `frozen` results (then), counted the same way: accepted verdicts only. A control whose
+    newest assessment waits for review while an earlier one was accepted (`earlier`: each
+    control's newest accepted assessment before its newest; read only while the newest waits)
+    counts now under that accepted verdict and is re-assessing (#438), rather than reading as a
+    regression; otherwise now is the overview's readiness. `changed` lists, in the controls'
+    order (the base framework's), each listed control whose accepted verdict differs (None when
+    not accepted) and each one re-assessing; a control frozen but no longer listed is left out,
+    of the counts too, and one new to the profile reads None then."""
     controls = list(controls)
+    earlier = earlier or {}
     listed = {c.id for c in controls}
-    standing = readiness(controls, latest)
+    reassessing = {
+        c.id
+        for c in controls
+        if (a := latest.get(c.id)) is not None
+        and a.status == "waiting-for-review"
+        and (prior := earlier.get(c.id)) is not None
+        and prior.status == "accepted"
+    }
+    counted = {**latest, **{i: earlier[i] for i in reassessing}}
+    standing = readiness(controls, counted)
     then_accepted = {
         f.control_id: f.verdict for f in frozen if f.status == "accepted" and f.control_id in listed
     }
     then_verdicts = Counter(then_accepted.values())
     changed: list[Change] = []
     for control in controls:
-        assessment = latest.get(control.id)
+        assessment = counted.get(control.id)
         after = assessment.verdict if assessment and assessment.status == "accepted" else None
         before = then_accepted.get(control.id)
-        if before != after:
-            changed.append({"control_id": control.id, "before": before, "after": after})
+        if before != after or control.id in reassessing:
+            changed.append(
+                {
+                    "control_id": control.id,
+                    "before": before,
+                    "after": after,
+                    "reassessing": control.id in reassessing,
+                }
+            )
     return {
         "accepted": {"now": standing["accepted"], "then": len(then_accepted)},
         "by_verdict": {

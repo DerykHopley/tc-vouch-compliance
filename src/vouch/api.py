@@ -80,6 +80,7 @@ from vouch.graph import (
     NotWaitingForReviewError,
     ReviewDecision,
     UnknownAssessmentError,
+    assessment_loader,
     load_assessment,
     new_thread_id,
     state_serializer,
@@ -1308,7 +1309,7 @@ def dossier_overview(
     return clean | {
         "requirements": paper_requirements(profile, scope.controls),
         "goal": current,
-        "rounds": _rounds(review, memory, scope.applicable, latest),
+        "rounds": _rounds(review, memory, saver, scope.applicable, latest),
     }
 
 
@@ -1345,27 +1346,66 @@ def _plan_reads(
     return history, decided, marked
 
 
+def _accepted_earlier(
+    memory: Memory, saver: BaseCheckpointSaver, latest: dict[str, Assessment]
+) -> dict[str, Assessment]:
+    """Each control whose newest assessment waits for review: its newest accepted assessment
+    before that one, listed since the fresh start (a control with none left out), which the
+    comparison counts while the new run waits (#438). Only those controls' runs are loaded."""
+    waiting = {i: a.thread_id for i, a in latest.items() if a.status == "waiting-for-review"}
+    if not waiting:
+        return {}
+    load = assessment_loader(saver, scope=memory.scope)
+    found: dict[str, Assessment] = {}
+    for entry in memory.entries():  # newest first
+        control_id = entry.control_id
+        if control_id not in waiting or control_id in found:
+            continue
+        if entry.thread_id == waiting[control_id]:
+            continue
+        assessment = load(entry.thread_id)
+        if assessment is not None and assessment.status == "accepted":
+            found[control_id] = assessment
+    return found
+
+
 def _comparison(
     review: rounds.ReviewRounds,
     memory: Memory,
+    saver: BaseCheckpointSaver,
     controls: list[IsaControl],
     latest: dict[str, Assessment],
 ) -> report.ReportComparison | None:
     """Now compared with the last round closed since the fresh start (None when there is none):
-    the overview's (#402) and the improvement report's (#420). `controls`: the applicable ones
-    (the standing's, #454)."""
+    the overview's (#402) and the improvement report's (#420), a control assessed again
+    counted under its earlier accepted verdict while the new run waits (#438). `controls`: the
+    applicable ones (the standing's, #454)."""
     against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
     if against is None or against.closed_at is None:
         return None
+    earlier = _accepted_earlier(memory, saver, latest)
     return {
         "against": {"name": against.name, "closed_at": against.closed_at.isoformat()},
-        **rounds.compare(against.results, controls, latest),
+        **rounds.compare(against.results, controls, latest, earlier),
     }
+
+
+def _verdict_changes_only(
+    comparison: report.ReportComparison | None,
+) -> report.ReportComparison | None:
+    """The comparison as the improvement report shows it: its changed controls only those whose
+    accepted verdict changed, a control re-assessing under the same verdict left out (#438), as
+    the report's table has no column for it."""
+    if comparison is None:
+        return None
+    changed = [c for c in comparison["changed"] if c["before"] != c["after"]]
+    return {**comparison, "changed": changed}
 
 
 def _rounds(
     review: rounds.ReviewRounds,
     memory: Memory,
+    saver: BaseCheckpointSaver,
     controls: list[IsaControl],
     latest: dict[str, Assessment],
 ) -> dict[str, Any]:
@@ -1374,7 +1414,7 @@ def _rounds(
     current = review.current(memory.user_id, memory.profile_id)
     return {
         "current": None if current is None else _opened(current),
-        "comparison": _comparison(review, memory, controls, latest),
+        "comparison": _comparison(review, memory, saver, controls, latest),
     }
 
 
@@ -1574,7 +1614,9 @@ def _report(
             decided=decided,
             marks=marked,
             flags=plan.card_flags(history, decided, marked, current),
-            comparison=_comparison(stores.review, memory, scope.applicable, latest),
+            comparison=_verdict_changes_only(
+                _comparison(stores.review, memory, saver, scope.applicable, latest)
+            ),
             questions=listed,
             trail=read_trail(),
             today=report.today(),
