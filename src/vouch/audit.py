@@ -22,6 +22,7 @@ The trail also keeps two steps of one thread's review apart: the second is refus
 Nothing offers an update or a delete: the table refuses both too (vouch-db-setup's trigger).
 """
 
+import logging
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -57,6 +58,8 @@ Action = AuditAction
 DEFAULT_PAGE = 100
 MAX_PAGE = 500
 """How many entries one read of the trail returns, unless asked for fewer; at most."""
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, order=True)
@@ -231,8 +234,14 @@ class AuditTrail(Protocol):
         ...
 
 
+BEING_REVIEWED = "This control is being reviewed in another tab; try again in a moment."
+"""The 409 a lead sees while another review of the same assessment holds it (#396): plain, with
+nothing internal (the thread key names the user, the profile and the thread)."""
+
+
 def _busy(key: str) -> NotWaitingForReviewError:
-    return NotWaitingForReviewError(f"assessment {key} is being reviewed")
+    log.info("a review of %s was refused: another holds it", key)
+    return NotWaitingForReviewError(BEING_REVIEWED)
 
 
 class ProcessTrail:
