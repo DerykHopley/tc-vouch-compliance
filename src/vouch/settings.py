@@ -7,8 +7,12 @@ Auth mode `local`, the default, is for a developer's machine: no sign-in, one de
 any Clerk key set, the mode must be set too: keys and a blank mode refuse to start (#151). The
 container sets `clerk` (Dockerfile), and then the Clerk keys and CLERK_AUTHORIZED_PARTIES (the
 origins Vouch's pages are served from; not secret, so not in `.envrc`) are required.
+
+Tracing (#460, vouch.tracing) is on only with both Langfuse keys set; one alone leaves it off,
+logged, so a deploy before both are in Secret Manager still starts.
 """
 
+import logging
 import os
 import re
 from collections.abc import Mapping
@@ -20,6 +24,8 @@ from pydantic import SecretStr
 
 from vouch.limits import RATE_REQUESTS
 from vouch.paths import FIXTURES_DIR
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # imported when called: the model's modules read settings themselves
     from vouch.fake_model import ScriptedChatModel
@@ -41,6 +47,13 @@ PROFILES_DIR_ENV = "VOUCH_PROFILES_DIR"
 LOCAL_USER_NAME_ENV = "VOUCH_LOCAL_USER_NAME"
 RATE_REQUESTS_ENV = "VOUCH_RATE_REQUESTS"
 PROFILE_PASS_TOKENS_ENV = "VOUCH_PROFILE_PASS_TOKENS"
+LANGFUSE_PUBLIC_KEY_ENV = "LANGFUSE_PUBLIC_KEY"
+LANGFUSE_SECRET_KEY_ENV = "LANGFUSE_SECRET_KEY"
+LANGFUSE_BASE_URL_ENV = "LANGFUSE_BASE_URL"
+LANGFUSE_KEY_ENVS = (LANGFUSE_PUBLIC_KEY_ENV, LANGFUSE_SECRET_KEY_ENV)
+LANGFUSE_CLOUD = "https://cloud.langfuse.com"
+"""Langfuse Cloud's EU region, the Langfuse SDK's own default too: where traces go unless
+LANGFUSE_BASE_URL names another (the US region, or a local Langfuse for the eval runner)."""
 PROFILE_PASS_TOKENS = 100_000
 """The profile pass's token threshold (#371, #432): a pass whose prompt and expected reply are
 estimated over it is refused, and the per-control agent is the way on (docs/requirements.md,
@@ -59,6 +72,7 @@ ENV_NAMES = frozenset(
     | {DATABASE_URL_ENV, PROFILES_DIR_ENV}
     | {DATABASE_URL_ENV, LOCAL_USER_NAME_ENV}
     | {RATE_REQUESTS_ENV, PROFILE_PASS_TOKENS_ENV}
+    | {*LANGFUSE_KEY_ENVS, LANGFUSE_BASE_URL_ENV}
 )
 
 DEMO_DIR = Path(__file__).parent / "demo"
@@ -140,6 +154,15 @@ class ClerkKeys:
 
 
 @dataclass(frozen=True)
+class LangfuseKeys:
+    """Where Vouch's runs are traced (#460): a Langfuse project's keys and its base URL."""
+
+    public_key: str
+    secret_key: SecretStr
+    base_url: str = LANGFUSE_CLOUD
+
+
+@dataclass(frozen=True)
 class Settings:
     """Secrets are SecretStr: printed or logged, they show as '**********'."""
 
@@ -159,6 +182,8 @@ class Settings:
     """A user's requests a minute before 429: VOUCH_RATE_REQUESTS, else vouch.limits's 60."""
     profile_pass_tokens: int = PROFILE_PASS_TOKENS
     """The profile pass's token threshold: VOUCH_PROFILE_PASS_TOKENS, else 100,000 (#432)."""
+    langfuse: LangfuseKeys | None = None
+    """Where runs are traced (#460, vouch.tracing); None: tracing is off."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -207,6 +232,25 @@ def load_database_url(env: Mapping[str, str] | None = None) -> SecretStr | None:
     setup reads only this, so the API's sign-in checks never stop it (#190)."""
     url = _read(os.environ if env is None else env, DATABASE_URL_ENV)
     return SecretStr(url) if url else None
+
+
+def load_langfuse_keys(env: Mapping[str, str] | None = None) -> LangfuseKeys | None:
+    """The Langfuse keys in `env` (the process environment by default): None, tracing off, when
+    either key is unset, the missing one logged by name when the other is set. With both, raises
+    SettingsError for a LANGFUSE_BASE_URL that isn't an origin (a trailing / is dropped)."""
+    env = os.environ if env is None else env
+    public, secret = (_read(env, name) for name in LANGFUSE_KEY_ENVS)
+    if public is None or secret is None:
+        if public or secret:
+            missing = LANGFUSE_PUBLIC_KEY_ENV if public is None else LANGFUSE_SECRET_KEY_ENV
+            log.warning("%s is not set, so tracing is off", missing)
+        return None  # LANGFUSE_BASE_URL unread: a wrong one can't stop an app that doesn't trace
+    base_url = (_read(env, LANGFUSE_BASE_URL_ENV) or LANGFUSE_CLOUD).rstrip("/")
+    if not ORIGIN.fullmatch(base_url):
+        raise SettingsError(
+            f"{LANGFUSE_BASE_URL_ENV} must be an origin, such as {LANGFUSE_CLOUD} (no path)"
+        )
+    return LangfuseKeys(public, SecretStr(secret), base_url)
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -259,6 +303,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         profile_pass_tokens=_above_zero(
             read(PROFILE_PASS_TOKENS_ENV), PROFILE_PASS_TOKENS_ENV, "tokens", PROFILE_PASS_TOKENS
         ),
+        langfuse=load_langfuse_keys(env),
     )
 
 
