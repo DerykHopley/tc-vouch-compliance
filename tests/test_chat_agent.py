@@ -946,7 +946,7 @@ def test_the_assessed_controls_leave_a_control_not_applicable_as_a_whole_out(mon
     assert "1.1.1" not in not_assessed
 
 
-def test_explaining_a_control_not_applicable_as_a_whole_says_so_and_suggests_no_assessment():
+def test_explaining_a_control_not_applicable_as_a_whole_says_so_and_suggests_nothing():
     tools, _ = chat_tools(WITHOUT_1_1_1)
     written: list = []
 
@@ -954,7 +954,8 @@ def test_explaining_a_control_not_applicable_as_a_whole_says_so_and_suggests_no_
 
     assert said.startswith("1.1.1 is not applicable in this profile.")
     assert WHOLE_REASON in said
-    assert ("suggestion", {"control_id": "1.1.1", "action": "assess"}) not in written
+    # Nothing to assess and nothing to review there: no chip (#454's verifier).
+    assert [event for event in written if event[0] == "suggestion"] == []
 
 
 def test_the_chat_refuses_to_assess_a_control_not_applicable_as_a_whole_and_counts_nothing(

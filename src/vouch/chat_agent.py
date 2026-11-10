@@ -673,13 +673,13 @@ class ChatTools:
         as data (an instruction-like reason or quote flagged with a guard step), and its working
         paper as a suggestion; asked to sign off (`sign_off`), only why that is the lead's, and
         where. Nothing is written: no review, no override. A control not applicable as a whole
-        under the profile: only that, with the profile's reason, and its working paper (#454)."""
+        under the profile: only that, with the profile's reason, and no suggestion (#454)."""
         try:
             control = self.profile.isa_control(control_id)
         except UnknownControlError:
             return unknown_control(control_id)
         if (reason := applicability(self.profile, [control]).reasons.get(control.id)) is not None:
-            write(_suggest(control.id, "review"))
+            # No suggestion: nothing to assess there, and nothing to review (#454).
             self.note_returned(reason)
             return not_applicable_words(control.id, reason)
         assessment = newest_assessment(self.memory, self.run.saver, control.id)
