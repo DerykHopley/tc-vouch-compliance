@@ -63,7 +63,14 @@ from vouch.chat_agent import (
 from vouch.citations import LeadStatement
 from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.documents import library_summaries
-from vouch.dossier import PaperRequirement, overview, requirements_by_control
+from vouch.dossier import (
+    Applicability,
+    PaperRequirement,
+    applicability,
+    not_applicable_refusal,
+    overview,
+    requirements_by_control,
+)
 from vouch.graph import (
     Assessment,
     ConfirmFindings,
@@ -473,13 +480,17 @@ def requested_assessment(
 ) -> RequestedAssessment:
     """The control is looked up, in the request's profile's ISA edition (#48), before the
     stream starts, so an unknown one is a plain 404 and an unreadable edition a plain 500, not
-    an event."""
+    an event. A control not applicable as a whole under the profile is a 409 (#454): nothing
+    could review its result. Each is refused before the run is held or counted."""
     try:
-        return RequestedAssessment(profile.isa_control(request.control_id), request.note)
+        control = profile.isa_control(request.control_id)
     except UnknownControlError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BaseFrameworkError:
         raise _unreadable_edition(profile, ASSESSMENT_FAILED) from None
+    if applicability(profile, [control]).reasons:
+        raise HTTPException(status_code=409, detail=not_applicable_refusal(control.id))
+    return RequestedAssessment(control, request.note)
 
 
 def profile_tools(profile: Profile) -> frozenset[str]:
@@ -1182,19 +1193,31 @@ def paper_requirements(
     return kept[1]
 
 
+class Standing(NamedTuple):
+    """What the overview, the report, the review rounds and the Documents tab are built from
+    (`_standing`): which of the profile's controls apply (#454), each applicable control's
+    newest assessment, and the accepted ones' thread ids (whose remediation decisions count)."""
+
+    scope: Applicability
+    latest: dict[str, Assessment]
+    accepted: list[str]
+
+
 def _standing(
     profile: ComplianceProfile, memory: Memory, saver: BaseCheckpointSaver, failed: str
-) -> tuple[list[IsaControl], dict[str, Assessment], list[str]]:
-    """What the overview and the report are built from: the profile's controls in its ISA
-    edition (unreadable: the plain 500 with `failed`), each control's newest assessment, and the
-    accepted ones' thread ids (whose remediation decisions count)."""
-    latest = newest_by_control(memory, saver)  # from each control's newest thread
-    accepted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+) -> Standing:
+    """The standing under the profile: its controls in its ISA edition (unreadable: the plain
+    500 with `failed`), decided applicable or not once; the newest assessment of each applicable
+    one, an assessment of a control not applicable as a whole left out, so nothing reading them
+    counts it."""
     try:
         controls = profile.isa_edition().controls
     except BaseFrameworkError:
         raise _unreadable_edition(profile, failed) from None
-    return list(controls), latest, accepted
+    scope = applicability(profile, controls)
+    latest = scope.counted(newest_by_control(memory, saver))  # from each control's newest thread
+    accepted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    return Standing(scope, latest, accepted)
 
 
 @router.get("/overview")
@@ -1217,7 +1240,7 @@ def dossier_overview(
     flags (#410); the open questions asked since the fresh start, by control id, oldest first,
     and the reasons they suggest a re-assessment for, in both goals (#414). Redacted as the
     stream's events are."""
-    controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    scope, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
     approved = {key for key, item in decided.items() if item.status == "approved"}
@@ -1227,12 +1250,12 @@ def dossier_overview(
     flags = plan.with_reasons(
         _plan_flags(current, memory, saver, items, marks), questions.reasons(latest, listed, at)
     )
-    shown = dict(overview(profile, controls, latest, discarded, approved, flags))
+    shown = dict(overview(profile, scope, latest, discarded, approved, flags))
     clean, _ = redact_data(shown | {"questions": questions.by_control(listed, at)})
     return clean | {
-        "requirements": paper_requirements(profile, controls),
+        "requirements": paper_requirements(profile, scope.controls),
         "goal": current,
-        "rounds": _rounds(review, memory, controls, latest),
+        "rounds": _rounds(review, memory, scope.applicable, latest),
     }
 
 
@@ -1276,7 +1299,8 @@ def _comparison(
     latest: dict[str, Assessment],
 ) -> report.ReportComparison | None:
     """Now compared with the last round closed since the fresh start (None when there is none):
-    the overview's (#402) and the improvement report's (#420)."""
+    the overview's (#402) and the improvement report's (#420). `controls`: the applicable ones
+    (the standing's, #454)."""
     against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
     if against is None or against.closed_at is None:
         return None
@@ -1338,12 +1362,13 @@ def close_round(
 ) -> dict[str, Any]:
     """The lead closes the open review round under the profile (#402): its results frozen (each
     control's newest assessment as it stands now) with its audit entry, together (when the
-    entry can't be written, neither is: a 503). With none open, a 409 with nothing written."""
-    controls, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    entry can't be written, neither is: a 503). With none open, a 409 with nothing written. A
+    control not applicable as a whole under the profile isn't frozen (#454)."""
+    scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
     try:
         closed = rounds.close(
             review,
-            rounds.freeze(controls, latest),
+            rounds.freeze(scope.applicable, latest),
             reviewer=audit.Reviewer(user.id, name),
             profile_id=profile.id,
         )
@@ -1475,13 +1500,13 @@ def _report(
     ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads. Under the
     user's Goal: the readiness report, or in Internal improvement the improvement report (#420),
     its plan, comparison and questions read as the overview reads them."""
-    controls, latest, accepted = _standing(profile, memory, saver, failed)
+    scope, latest, accepted = _standing(profile, memory, saver, failed)
     current = stores.goals.goal(memory.user_id, memory.profile_id)
     built: Mapping[str, Any]
     if current != plan.IMPROVEMENT:
         decided = items.decided(memory.user_id, memory.profile_id, accepted)
         built = report.readiness_report(
-            profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
+            profile, scope, latest, decided=decided, trail=read_trail(), today=report.today()
         )
     else:
         history, decided, marked = _plan_reads(memory, saver, items, stores.marks)
@@ -1490,13 +1515,13 @@ def _report(
         )
         built = report.improvement_report(
             profile,
-            controls,
+            scope,
             latest,
             history=history,
             decided=decided,
             marks=marked,
             flags=plan.card_flags(history, decided, marked, current),
-            comparison=_comparison(stores.review, memory, controls, latest),
+            comparison=_comparison(stores.review, memory, scope.applicable, latest),
             questions=listed,
             trail=read_trail(),
             today=report.today(),
@@ -1539,11 +1564,12 @@ def profile_documents_tab(
 ) -> dict[str, Any]:
     """The Documents tab (#424), for every signed-in user: each evidence document the profile
     uses, with its summary, whether it is stale today and the controls whose newest assessment
-    cites it (vouch.documents_tab), and the tab's words in the profile's language. Redacted as
-    the overview is; an unreadable ISA edition, folder or document a plain 500 naming no path."""
-    controls, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
+    cites it (vouch.documents_tab; a control not applicable as a whole under the profile names
+    none, #454), and the tab's words in the profile's language. Redacted as the overview is;
+    an unreadable ISA edition, folder or document a plain 500 naming no path."""
+    scope, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
     try:
-        listed = documents_tab.profile_documents(profile, controls, latest, report.today())
+        listed = documents_tab.profile_documents(profile, scope.applicable, latest, report.today())
     except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
         log.exception("the documents of %s could not be read", profile.id)
         raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None

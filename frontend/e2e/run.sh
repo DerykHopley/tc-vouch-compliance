@@ -24,11 +24,12 @@
 #   - a twelfth, for the improvement report's check (#420): its goal is Internal improvement and a
 #     round is closed, which would change the report the sixth server's checks read;
 #   - a thirteenth, for company setup's create (#409): the company it makes stays in that process,
-#     and would add a profile to the other servers' switchers;
+#     and would add a profile to the other servers' switchers. Its three creates (#409, #424,
+#     #454) each run a pass: the passes' daily limit (3), so a fourth goes on a server of its own;
 #   - a fourteenth, for company setup's first profile pass (#447): every create on the thirteenth
 #     now runs a pass, and the passes' daily limit (3) would refuse story 5's own;
 #   - a fifteenth, for removing a company made in setup (#418): its three creates each run a pass
-#     (#447), which with the thirteenth's two would pass the daily limit (3);
+#     (#447), which with the thirteenth's three would pass the daily limit (3);
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 # Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):

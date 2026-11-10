@@ -328,3 +328,25 @@ def test_with_the_database_down_the_documents_answer_503(users):
 
     assert response.status_code == 503
     assert response.json()["unavailable"] == "database"
+
+
+def test_an_assessment_of_a_control_not_applicable_as_a_whole_cites_nothing(
+    users, pinned, monkeypatch
+):
+    # #454 review: as the overview leaves it out, Cited by never names it.
+    alice, _ = users
+    body = MUSTERFIRMA | {
+        "evidence": {"policies": ["backup-policy"], "records": []},
+        "not_applicable": [{"control": "5.2.9", "requirement": None, "reason": "Not ours."}],
+    }
+    newest = {
+        "5.2.9": citing("5.2.9", "backup-policy"),
+        "1.1.1": citing("1.1.1", "backup-policy"),
+    }
+    monkeypatch.setattr(api, "newest_by_control", lambda *_: newest)
+    with TestClient(app_on(None)) as client:
+        made = client.post("/api/developer/profiles", json=body, headers=alice)
+        assert made.status_code == 201, made.text
+        shown = documents_of(client, under(alice, MUSTERFIRMA_ID))
+
+    assert by_id(shown["documents"], "backup-policy")["cited_by"] == ["1.1.1"]

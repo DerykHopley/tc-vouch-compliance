@@ -9,7 +9,7 @@ import DeveloperPage from './DeveloperPage.tsx'
 import Documents from './Documents.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
-import { controlPath, useOverview } from './overview.ts'
+import { controlPath, isReviewState, useOverview } from './overview.ts'
 import { type PassAssessment, useProfilePass } from './profilePass.ts'
 import type { ProfileSummary } from './profiles.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
@@ -207,7 +207,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   // one this page's run is of, which holds its result: each read counts to the rate limit.
   const paperId = control ? control.id : null
   const ownRun = runFor === control?.id && run !== overtaken // the paper's control's run in this page, still its newest
-  const readStored = control !== undefined && control.status !== 'not-assessed' && !ownRun
+  // A control not assessed, or not applicable as a whole (#454), has nothing stored to read.
+  const readStored = control !== undefined && isReviewState(control.status) && !ownRun
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
   const [paperReloads, setPaperReloads] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
   const [documentsReloads, setDocumentsReloads] = useState(0) // bumped to read the documents again (Cited by changed)

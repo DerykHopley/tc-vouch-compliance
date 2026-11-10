@@ -15,6 +15,7 @@ import re
 import pytest
 from playwright.sync_api import Page, Response, expect
 from test_developer_page import as_compliance_lead
+from touch_targets import small_targets
 
 LEVELS = "/api/developer/protection-levels"
 CONTROLS = "/api/developer/controls"
@@ -622,6 +623,63 @@ def test_a_double_click_on_a_next_that_moves_leaves_focus_on_the_new_heading(
     page.wait_for_timeout(SETTLE_MS)
     page.get_by_role("button", name="Next").dblclick()
     expect(page.get_by_role("heading", name="Finish")).to_be_focused()
+
+
+def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(page: Page, setup_url):
+    """#454: 5.2.9 marked not applicable on step 5. Its card has the Not applicable chip, no review
+    tag and the reason; readiness counts the 11 others; opening it reads no stored assessment
+    (each read counts to the rate limit), while opening an assessed control does. Its working
+    paper has the chip and the reason, and no Assess button (#454 review)."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    open_setup(page, setup_url)
+    to_step_5(page, "Ausnahmefirma GmbH")
+    control(page, "5.2.9").check()
+    reason(page, "5.2.9").fill("We run no web applications of our own.")
+    with page.expect_response(lambda r: LIBRARY in r.url):
+        press(page, "Next")
+    document(page, "Backup policy").check()
+    press(page, "Next")
+    create_company(page)
+    expect(
+        page.get_by_role("button", name=re.compile(r"^Profile: Ausnahmefirma GmbH"))
+    ).to_be_visible()
+
+    card = page.get_by_role("article", name="Control 5.2.9")
+    expect(card.locator(".chip")).to_have_class("chip v-not-applicable")
+    expect(card.locator(".chip")).to_have_text("Nicht anwendbar")  # the company answers in German
+    expect(card.locator(".tag")).to_have_count(0)
+    expect(card.locator(".field-note")).to_have_text("We run no web applications of our own.")
+    expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+    expect(page.locator(".hero")).to_contain_text("of 11 controls accepted.")
+    expect(page.get_by_role("heading", name="12 controls")).to_be_visible()
+    # The new card state meets the touch-target floor at phone width (the check lives here, not in
+    # test_touch_targets.py, so it costs no fourth create on setup_url: the passes' daily limit).
+    page.set_viewport_size({"width": 400, "height": 900})
+    card.scroll_into_view_if_needed()
+    assert small_targets(page) == []
+    page.set_viewport_size({"width": 1280, "height": 900})
+
+    reads: list[str] = []
+    page.on(
+        "request", lambda r: reads.append(r.url) if r.url.endswith("/api/assessments") else None
+    )
+    card.get_by_role("link", name="Open 5.2.9").click()
+    expect(page).to_have_url(re.compile(r"/controls/5\.2\.9$"))
+    page.wait_for_load_state("networkidle")
+    assert reads == []
+    # Its working paper says so too, and offers no assessment: nothing could review its result.
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.locator(".paper-meta .chip")).to_have_text("Nicht anwendbar")
+    expect(paper.locator(".paper-head .field-note")).to_have_text(
+        "We run no web applications of our own."
+    )
+    expect(paper.get_by_text("Not assessed yet")).to_have_count(0)
+    expect(paper.get_by_role("button", name=re.compile(r"^Assess"))).to_have_count(0)
+    assessed = page.get_by_role("navigation", name="Controls").get_by_role(
+        "link", name=re.compile(r"^1\.1\.1")
+    )
+    with page.expect_request(lambda r: r.url.endswith("/api/assessments")):
+        assessed.click()  # proposed by the profile pass: its paper reads it
 
 
 RING = "el => getComputedStyle(el).outlineStyle"

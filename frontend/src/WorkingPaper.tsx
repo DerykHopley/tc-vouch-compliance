@@ -2,7 +2,7 @@ import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutE
 import {
   type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
-import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
+import { type ControlCard, controlPath, isoLabel, isReviewState, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
@@ -194,6 +194,8 @@ export default function WorkingPaper(props: PaperProps) {
   const closed = improving && review === 'accepted' && card.closed === true
   // The open questions' reasons (#414), in both goals, while the control's newest assessment is accepted.
   const questionReasons = review === 'accepted' ? card.reassess_reasons ?? [] : []
+  // Not applicable as a whole under the profile (#454): its chip and the profile's reason, and no assessment to start.
+  const excluded = card.status === 'not-applicable'
   return (
     <div className="wp">
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
@@ -214,9 +216,13 @@ export default function WorkingPaper(props: PaperProps) {
           </div>
           {!checking && (
             <div className="paper-meta">
-              <span>Verdict</span><RunChip run={run} />
+              <span>Verdict</span>
+              {excluded ? <VerdictChip verdict="not-applicable" language={overview.answer_language} /> : <RunChip run={run} />}
               {review && <span className={`tag tag-${review}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[review]}</span>}
             </div>
+          )}
+          {excluded && card.not_applicable && (
+            <p className="field-note" lang={overview.answer_language}>{card.not_applicable}</p>
           )}
           {!checking && explained && (
             <p className="field-note roll-up" lang={verdictLang(overview.answer_language)}>{explained}</p>
@@ -249,7 +255,7 @@ export default function WorkingPaper(props: PaperProps) {
             {(run.status === 'failed' || run.status === 'unreachable') && (
               <p className="sheet notice" role="alert">{run.message}</p>
             )}
-            {review !== 'rejected' && <div className="assess">
+            {review !== 'rejected' && !excluded && <div className="assess">
               {run.status === 'idle' && (
                 <p className="field-note">
                   Not assessed yet. {plural(applying, 'requirement')} {applying === 1 ? 'applies' : 'apply'} in this
@@ -347,7 +353,7 @@ function ControlIndex({ controls, openId, running, run, onOpen, language, improv
             const done = open && run.status === 'done' ? run.assessment : null
             const assessing = open ? run.status === 'running' : card.id === running
             const verdict = done ? done.verdict : card.verdict
-            const status = done ? done.status : card.status === 'not-assessed' ? undefined : card.status
+            const status = done ? done.status : isReviewState(card.status) ? card.status : undefined
             return (
               <PaperLink key={card.id} id={card.id} onOpen={onOpen} className="wp-row"
                 aria-current={open ? 'page' : undefined}>

@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useId, useRef, useState } from 'react'
 import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, type NextStep, type Overview,
+import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, isReviewState, type NextStep, type Overview,
   type OverviewState, type Readiness, type ReassessReason, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
   from './overview.ts'
 import type { PassState } from './profilePass.ts'
@@ -62,7 +62,7 @@ export default function Dossier({ state, onRetry, onOpen, running, focusHeading 
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
           <span className="pill">The controls</span>
-          <h2 id="controls-title">{overview.readiness.controls} controls</h2>
+          <h2 id="controls-title">{overview.controls.length} controls</h2>
           <p>Open a control to work through its working paper.</p>
         </div>
         <div className="cards">
@@ -96,7 +96,11 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
-  if (count['not-assessed'] === readiness.controls) {
+  if (readiness.controls === 0) {
+    // Every control is not applicable as a whole under the profile (#454): nothing to assess or review.
+    headline = 'No control applies under this profile.'
+    detail = 'There is nothing to assess.'
+  } else if (count['not-assessed'] === readiness.controls) {
     headline = 'Nothing is assessed yet.'
     detail = next ? `Start with ${next.control_id}: assess it, then review what Vouch finds.` : ''
   } else {
@@ -136,7 +140,8 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
         </p>
         : <p id="pass-note" className="field-note">
           {running !== null ? `Vouch is assessing ${running}. One run at a time.`
-            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'}
+            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, '
+              + `a pass over ${readiness.controls} controls costs about $0.30–0.50.`}
         </p>)}
     </section>
   )
@@ -405,7 +410,7 @@ function PassPanel({ overview, pass, onOpen, onPass, running }:
               <li key={a.thread_id} className="pass-row" aria-label={`Control ${a.control_id}`}>
                 <b className="mono">{a.control_id}</b>
                 <VerdictChip verdict={verdict} language={overview.answer_language} />
-                {status !== 'not-assessed' && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
+                {isReviewState(status) && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
                 <span className="pass-actions">
                   <button className="btn" onClick={() => onOpen(a.control_id, false)}>Open {a.control_id}</button>
                   {shortOf(verdict) && running === null && (
@@ -516,11 +521,14 @@ function Card({ card, onOpen, assessing, language, improving }:
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
         onClick={(e) => openInPlace(e, () => onOpen(card.id, false))}>
         <b>{card.id}</b>
-        {card.status !== 'not-assessed' && (
+        {isReviewState(card.status) && (
           <span className={`tag tag-${card.status}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[card.status]}</span>
         )}
       </a>
       <div className="control-title" lang={language}>{card.question}</div>
+      {card.status === 'not-applicable' && card.not_applicable && (
+        <p className="field-note" lang={language}>{card.not_applicable}</p>
+      )}
       {reasons.map((r) => <p key={r} className="field-note">{REASON_WORDS[r]}</p>)}
       <div className="card-meta">
         <span className="mono">{isoLabel(card.iso_27001)}</span>
