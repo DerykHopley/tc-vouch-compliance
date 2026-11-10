@@ -81,20 +81,22 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .hero h1 { font-size: clamp(30px, 4.2vw, 50px); margin: 10px 0 14px; }
 .hero p { max-width: 52ch; margin: 0; color: var(--muted); }
 .hero p b { color: var(--ink); }
-.hero .next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+/* The hero's buttons, and the Goal and round controls' Retry row wherever they sit (`.goal-controls`: the Dossier's
+   hero and the Company page's Goal and Review rounds panels, #505). */
+.hero .next, .goal-controls .next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 /* The goal (#369, design.md Components: Goal): its own line at the top of the hero (#495), Change goal beside it. */
-:is(.hero, .company-panel) .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 0; color: var(--muted); }
+.goal-controls .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 0; color: var(--muted); }
 /* The review round (#402, design.md Components: Review round): its own line under the goal, as the goal's; with none
    open, the next round's name field between the words and Start round. */
-:is(.hero, .company-panel) .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
-:is(.hero, .company-panel) .round .field { flex: 0 1 240px; }
+.goal-controls .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
+.goal-controls .round .field { flex: 0 1 240px; }
 /* The round comparison (#402, design.md Components: Round comparison): counts now and their change, then the changed
    controls, each a link to its working paper at least 44px tall. */
 .compare-counts, .compare-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .compare-rows { display: grid; gap: 0; }
 .compare-rows a { display: inline-flex; align-items: center; min-height: 44px; }/* The profile pass (#390, design.md Components: Profile pass): its note under the hero's buttons, then its result as a
    sheet, one row per new assessment: the id, verdict chip and review state tag, then Open and Assess again. */
-:is(.hero, .company-panel) .field-note { margin-top: 8px; }
+.goal-controls .field-note { margin-top: 8px; }
 /* The in-app ask (#441, design.md Components: Goal): in the button's place, on a row of its own under the line's
    words, the question over its two buttons; wherever the controls are placed (the hero, the Company page, #505), so
    after the hero's note margin. In the working paper's assess row (#437) its parts stay the row's own items. */
@@ -197,7 +199,6 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .company-head { display: grid; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 14px; min-width: 0; }
 .company-head h1 { font-size: clamp(26px, 3.4vw, 36px); overflow-wrap: anywhere; }
 .company-facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
-.company-facts dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .company-facts dd { margin: 0; overflow-wrap: anywhere; }
 .company-note { margin: 0; color: var(--muted); max-width: 72ch; }
 .company-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }

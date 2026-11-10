@@ -1,9 +1,10 @@
 import { type ReactNode, useEffect, useId, useState } from 'react'
-import { plural } from './assessment.ts'
+import { type Column, plural } from './assessment.ts'
 import { type CompanyFacts, COMPANY_FAILED, fetchCompany } from './company.ts'
+import { useDocuments } from './documents.ts'
 import Documents from './Documents.tsx'
 import { GoalControl, RoundControl } from './GoalControls.tsx'
-import type { OverviewState } from './overview.ts'
+import type { Overview, OverviewState } from './overview.ts'
 import { COLUMN_WORDS } from './paper.ts'
 import type { Goal } from './report.ts'
 import { SESSION_ENDED } from './session.ts'
@@ -15,7 +16,7 @@ import { LANGUAGES, PROTECTION_LEVELS } from './setup.ts'
  * not-applicable reasons) carries that `lang`. The facts are read each time the page opens; the Goal and review
  * rounds are the overview's, which App reads. */
 
-type Read = { status: 'loading' } | { status: 'ready'; company: CompanyFacts } | { status: 'failed'; message: string }
+type State = { status: 'loading' } | { status: 'ready'; company: CompanyFacts } | { status: 'failed'; message: string }
 
 const NOTES: Record<CompanyFacts['defined_in'], string> = {
   files: "This company is defined in files: its details can't be changed here, apart from the Goal.",
@@ -38,7 +39,7 @@ type CompanyPageProps = {
 
 export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, onRoundChanged, arriving, goalNotSet,
   documentsReloads = 0 }: CompanyPageProps) {
-  const [read, setRead] = useState<Read>({ status: 'loading' })
+  const [read, setRead] = useState<State>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0) // bumped by Try again to read the company again
   useEffect(() => {
     const answer = { wanted: true } // until the page closes or reads again
@@ -46,16 +47,24 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
       ? { status: 'ready', company: got.company } : { status: 'failed', message: got.message }))
     return () => { answer.wanted = false }
   }, [attempt])
+  // Read alongside the company, so the panel is ready with the page; a company Try again leaves them as read.
+  const documents = useDocuments(documentsReloads)
+  // The overview as last read: a later read that fails (on arriving, after a pass or a chat assessment) keeps it, as
+  // useOverview's refresh does, so only a first read that fails shows the notice.
+  const [kept, setKept] = useState<Overview | null>(overview.status === 'ready' ? overview.overview : null)
+  if (overview.status === 'ready' && overview.overview !== kept) setKept(overview.overview)
+  const shownOverview = overview.status === 'ready' ? overview.overview : kept
+  const overviewFailed = shownOverview === null && overview.status === 'failed' ? overview.message : null
   const tryAgain = () => {
     if (read.status === 'failed') {
       setRead({ status: 'loading' })
       setAttempt((n) => n + 1)
     }
-    if (overview.status === 'failed') onRetryOverview()
+    if (overviewFailed !== null) onRetryOverview()
   }
 
   const failed = read.status === 'failed' ? read.message
-    : overview.status === 'failed' ? (overview.message === SESSION_ENDED ? SESSION_ENDED : COMPANY_FAILED) : null
+    : overviewFailed !== null ? (overviewFailed === SESSION_ENDED ? SESSION_ENDED : COMPANY_FAILED) : null
   if (failed !== null) {
     return (
       <main className="company wrap">
@@ -66,7 +75,7 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
       </main>
     )
   }
-  if (read.status !== 'ready' || overview.status !== 'ready') {
+  if (read.status !== 'ready' || shownOverview === null) {
     return <main className="company wrap"><p className="lbl" role="status">Loading the company…</p></main>
   }
   const { company } = read
@@ -76,12 +85,12 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
       <div className="company-head">
         <h1>{company.company}</h1>
         <dl className="company-facts">
-          <div><dt>Country</dt><dd>{company.country}</dd></div>
-          <div><dt>Answer language</dt><dd>{LANGUAGES.find((l) => l.code === lang)?.name ?? lang}</dd></div>
-          <div><dt>Base framework</dt><dd>{company.base_framework}</dd></div>
-          <div><dt>Protection level</dt><dd>{PROTECTION_LEVELS[company.protection_level].name}</dd></div>
+          <div><dt className="lbl">Country</dt><dd>{company.country}</dd></div>
+          <div><dt className="lbl">Answer language</dt><dd>{LANGUAGES.find((l) => l.code === lang)?.name ?? lang}</dd></div>
+          <div><dt className="lbl">Base framework</dt><dd>{company.base_framework}</dd></div>
+          <div><dt className="lbl">Protection level</dt><dd>{PROTECTION_LEVELS[company.protection_level].name}</dd></div>
           <div>
-            <dt>Overlays</dt>
+            <dt className="lbl">Overlays</dt>
             <dd>{company.overlays.length === 0 ? 'None'
               : company.overlays.map((o, i) => <span key={i}>{i > 0 && ', '}<span lang={lang}>{o.name}</span></span>)}
             </dd>
@@ -92,12 +101,12 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
       <div className="company-grid">
         {/* The panels come first in the page, as a phone shows them, so the reading order is the visual one. */}
         <div className="company-panels">
-          <Panel title="Goal">
-            <GoalControl overview={overview.overview} onChanged={onGoalChanged} arriving={arriving}
+          <Panel title="Goal" className="goal-controls">
+            <GoalControl overview={shownOverview} onChanged={onGoalChanged} arriving={arriving}
               notSet={goalNotSet} />
           </Panel>
-          <Panel title="Review rounds">
-            <RoundControl overview={overview.overview} onChanged={onRoundChanged} />
+          <Panel title="Review rounds" className="goal-controls">
+            <RoundControl overview={shownOverview} onChanged={onRoundChanged} />
           </Panel>
           <Panel title="Scope"><Scope company={company} /></Panel>
           <Panel title="Not applicable"><NotApplicable company={company} /></Panel>
@@ -106,26 +115,35 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
           </Panel>
         </div>
         <section className="company-documents" aria-label="Documents">
-          <Documents reloads={documentsReloads} />
+          <Documents state={documents.state} tryAgain={documents.tryAgain} />
         </section>
       </div>
     </main>
   )
 }
 
-function Panel({ title, children }: { title: string; children: ReactNode }) {
+/** One panel: a sheet headed by its title; `className` adds to it (`goal-controls` where the Goal or round control
+ * sits, as on the Dossier's hero). */
+function Panel({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
   const id = useId()
   return (
-    <section className="sheet company-panel" aria-labelledby={id}>
+    <section className={`sheet company-panel${className ? ` ${className}` : ''}`} aria-labelledby={id}>
       <h2 id={id}>{title}</h2>
       {children}
     </section>
   )
 }
 
+/** The base framework's columns in its order (vouch.isa.COLUMN_PREFIX): the order the Scope panel lists them in. */
+const BASE_COLUMNS: Column[] = ['must', 'should', 'high', 'very high']
+
 function Scope({ company }: { company: CompanyFacts }) {
   const { scope, overlays, answer_language: lang } = company
   const level = PROTECTION_LEVELS[scope.level].name
+  const brought: [Column, number][] = BASE_COLUMNS.flatMap((column): [Column, number][] => {
+    const n = scope.requirements[column]
+    return n === undefined ? [] : [[column, n]]
+  })
   return (
     <>
       <p>
@@ -133,9 +151,7 @@ function Scope({ company }: { company: CompanyFacts }) {
         {plural(scope.controls, 'control')}.
       </p>
       <ul className="company-list">
-        {Object.entries(scope.requirements).map(([column, n]) => (
-          <li key={column}>{COLUMN_WORDS[column as keyof typeof COLUMN_WORDS] ?? column}: {n}</li>
-        ))}
+        {brought.map(([column, n]) => <li key={column}>{COLUMN_WORDS[column]}: {n}</li>)}
       </ul>
       {overlays.length === 0 ? <p>No country overlay applies.</p>
         : overlays.map((o, i) => (

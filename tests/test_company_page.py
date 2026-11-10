@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from test_auth import FakeClerk, bearer, clerk_app, token
 from test_memory import app_on, restart
 
-from vouch import profile
+from vouch import company_page, profile
 from vouch.api import PROFILE_HEADER, create_app
 from vouch.company_page import company_facts
 from vouch.isa import BaseFrameworkError
@@ -159,4 +159,24 @@ def test_an_unreadable_base_framework_is_a_plain_500_naming_no_server_path(monke
     assert response.json() == {"detail": "The company could not be loaded."}
     assert "/srv" not in response.text
     assert "controls.yaml" not in response.text
-    assert "base framework" in caplog.text
+    assert "could not be read" in caplog.text  # logged, with the error
+
+
+def test_a_level_the_framework_brings_nothing_in_for_is_a_base_framework_error(monkeypatch):
+    """A protection level with no scope worked out (the framework's columns changed) is the
+    unreadable framework's error, not a bare ValueError: the route answers its plain 500."""
+    monkeypatch.setattr(company_page, "protection_scope", lambda: ())
+
+    with pytest.raises(BaseFrameworkError):
+        company_facts(load_named_profile("nordlicht"))
+
+
+def test_a_level_with_no_scope_is_the_plain_500(monkeypatch, caplog):
+    monkeypatch.setattr(company_page, "protection_scope", lambda: ())
+    client = TestClient(create_app(Settings()), raise_server_exceptions=False)
+
+    response = client.get(PATH)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "The company could not be loaded."}
+    assert "could not be read" in caplog.text

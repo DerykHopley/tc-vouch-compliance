@@ -5,7 +5,8 @@ from the profile and the base framework alone, so it reads no table and keeps no
 from dataclasses import asdict
 from typing import Any, Literal
 
-from vouch.profile import ComplianceProfile, protection_scope
+from vouch.isa import CONTROLS_FILE, BaseFrameworkError
+from vouch.profile import ComplianceProfile, ProtectionScope, protection_scope
 
 DefinedIn = Literal["files", "setup"]
 
@@ -16,12 +17,21 @@ def defined_in(profile: ComplianceProfile) -> DefinedIn:
     return "setup" if profile.stored else "files"
 
 
+def level_scope(profile: ComplianceProfile) -> ProtectionScope:
+    """What the profile's protection level brings in; BaseFrameworkError when the framework
+    can't be read, or gives the level no scope (its columns changed)."""
+    for scope in protection_scope():
+        if scope.level == profile.protection_level:
+            return scope
+    raise BaseFrameworkError(CONTROLS_FILE, f"no scope for {profile.protection_level} protection")
+
+
 def company_facts(profile: ComplianceProfile) -> dict[str, Any]:
     """The profile's company facts, its country overlays with the requirements each adds, its
     protection level's scope as GET /api/developer/protection-levels sends it, and its
     not-applicable entries in its order (`requirement_id` None for a whole control).
-    BaseFrameworkError when the base framework can't be read."""
-    [scope] = [s for s in protection_scope() if s.level == profile.protection_level]
+    BaseFrameworkError when the base framework can't be read (level_scope)."""
+    scope = level_scope(profile)
     return {
         "company": profile.company,
         "country": profile.country,

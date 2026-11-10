@@ -624,7 +624,7 @@ describe('the Company tab (ticket 495; the Company page, ticket 505)', () => {
       expect(tab('Company').getAttribute('aria-current')).toBe('page')
       expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Nordlicht Komponenten GmbH')
       await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
-      expect(overviewReads(fetch)).toBe(before) // read already: none on opening the Company page
+      expect(overviewReads(fetch)).toBe(before + 1) // read again on arriving, as on the Dossier: another tab may have changed it
 
       act(() => window.history.back())
       await waitFor(() => expect(window.location.pathname).toBe('/'))
@@ -661,6 +661,29 @@ describe('the Company tab (ticket 495; the Company page, ticket 505)', () => {
       expect(window.history.length).toBe(entries) // replaced, no new entry
       expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Nordlicht Komponenten GmbH')
     })
+
+  it('reads the overview again on each arrival, and keeps the page when that read fails', async () => {
+    let reads = 0
+    const fetch = vi.fn((url: string) => {
+      if (url === '/api/overview') {
+        reads += 1
+        return reads === 1 ? Promise.resolve(Response.json(OVERVIEW))
+          : Promise.resolve(Response.json({ detail: 'Too many requests.' }, { status: 429 }))
+      }
+      if (url === '/api/company') return Promise.resolve(Response.json(COMPANY))
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    render(<App />)
+    await screen.findAllByRole('article', { name: /^Control / })
+
+    await userEvent.click(tab('Company'))
+    await waitFor(() => expect(reads).toBe(2))
+    const goalPanel = await screen.findByRole('region', { name: 'Goal' })
+    expect(within(goalPanel).getByText('Goal: Audit readiness')).toBeTruthy()
+    expect(screen.queryByText('The company could not be loaded.')).toBeNull()
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Nordlicht Komponenten GmbH')
+  })
 
   it("changes the Goal from the Goal panel's in-app ask: one PUT, the overview read again, panel and bar follow",
     async () => {

@@ -1,29 +1,14 @@
-import { useEffect, useState } from 'react'
 import DocumentTable from './DocumentTable.tsx'
-import { fetchDocuments, type ProfileDocument, type ProfileDocuments, wordFor } from './documents.ts'
+import { type DocumentsState, type ProfileDocument, type ProfileDocuments, wordFor } from './documents.ts'
 
 /** The Documents tab (#424), the Company page's Documents panel since #505: each evidence document the profile uses,
  * read-only, one table per source, with the controls citing it. Its words are the served ones, and the sheet carries
  * their language (`words_language`); the panel around it (loading, the notice, Try again) stays English, as the
- * report's does. Read each time it opens; its states stay inside the panel, so the rest of the page stays up. */
+ * report's does. Read each time the page opens, alongside the company (documents.ts' `useDocuments`, which the page calls); its states
+ * stay inside the panel, so the rest of the page stays up. */
 
-type State = { status: 'loading' } | { status: 'ready'; documents: ProfileDocuments } | { status: 'failed'; message: string }
-
-/** `reloads`: bumped to read the documents again without the loading line (a chat assessment changes Cited by). */
-export default function Documents({ reloads = 0 }: { reloads?: number }) {
-  const [state, setState] = useState<State>({ status: 'loading' })
-  const [attempt, setAttempt] = useState(0) // bumped by Try again to read the documents again
-  useEffect(() => {
-    const answer = { wanted: true } // until the page closes or reads again
-    void fetchDocuments().then((read) => answer.wanted && setState(read.ok
-      ? { status: 'ready', documents: read.documents } : { status: 'failed', message: read.message }))
-    return () => { answer.wanted = false }
-  }, [attempt, reloads])
-  const tryAgain = () => {
-    setState({ status: 'loading' })
-    setAttempt((n) => n + 1)
-  }
-
+/** The Documents panel's content for `state`: the loading line, the notice with Try again, or the sheet. */
+export default function Documents({ state, tryAgain }: { state: DocumentsState; tryAgain: () => void }) {
   if (state.status === 'loading') {
     return <p className="lbl" role="status">Loading the documents…</p>
   }

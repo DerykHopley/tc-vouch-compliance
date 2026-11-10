@@ -47,9 +47,10 @@ const pathOf = (view: View) =>
     : view.name === 'company' ? COMPANY_PATH : view.name === 'developer' ? DEVELOPER_PATH
       : view.name === 'setup' ? SETUP_PATH : '/'
 
-/** The page the chat says the lead is on for the view shown: company setup is the developer page's, the Company tab
- * the documents' (#495: the API's pages and the chat's prompts are unchanged), and the not-found page (no view shown)
- * speaks as the Dossier, where its way back leads. */
+/** The page the chat says the lead is on for the view shown: company setup is the developer page's, and the Company
+ * page the documents' (#495), so the chat knows only its Documents panel, not the facts, scope or not-applicable
+ * panels (#505 left the chat's page out of scope; a 'company' page would change the chat's prompt and its version).
+ * The not-found page (no view shown) speaks as the Dossier, where its way back leads. */
 const chatPage = (shown: View['name'] | null): PageContext['page'] =>
   shown === 'setup' ? 'developer' : shown === 'company' ? 'documents' : shown ?? 'dossier'
 
@@ -187,15 +188,17 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
   const { load, noteAssessed, refresh: refreshOverview } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
-  // The report shows none of it (#56): it is read on leaving it for a view that does. The Company page shows the Goal
-  // and review rounds (#505), so it reads it once if not yet read, as a working paper does.
+  // The report shows none of it (#56): it is read on leaving it for a view that does. The Company page's Goal and
+  // review round panels act on it (#505), so it is read afresh on each arrival there too, as on the Dossier: another
+  // tab may have changed them. A read that fails there keeps the page (CompanyPage keeps the overview last read).
   const needsOverview = view.name !== 'report'
+  const onCompany = view.name === 'company'
   const read = useRef(false)
   useEffect(() => {
     if (!needsOverview) return
-    if (onDossier || !read.current) void load()
+    if (onDossier || onCompany || !read.current) void load()
     read.current = true
-  }, [load, onDossier, needsOverview])
+  }, [load, onDossier, onCompany, needsOverview])
   // The run sits above the views, so it carries on when the lead leaves its paper. A finished run puts its verdict on
   // its card (the working paper's index), and reads the overview afresh when the Dossier is showing (readiness too).
   const finished = useCallback((assessment: Assessment) => {

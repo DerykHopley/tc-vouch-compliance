@@ -250,6 +250,42 @@ describe('the Company page (ticket 505)', () => {
     expect(fetch.mock.calls.filter(([url]) => url === '/api/company')).toHaveLength(2)
   })
 
+  it('keeps the page when a later overview read fails, the overview shown as last read', async () => {
+    serve()
+    const { rerender } = show()
+    await screen.findByRole('region', { name: 'Documents' })
+    expect(within(panel('Goal')).getByText('Goal: Audit readiness')).toBeTruthy()
+
+    rerender(<CompanyPage overview={{ status: 'failed', message: 'The overview could not be loaded just now. Please try again.' }}
+      onRetryOverview={() => {}} onGoalChanged={async () => true} onRoundChanged={async () => true} arriving={false} />)
+
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Nordlicht Komponenten GmbH')
+    expect(within(panel('Goal')).getByText('Goal: Audit readiness')).toBeTruthy()
+    expect(screen.queryByText('The company could not be loaded.')).toBeNull()
+  })
+
+  it('reads the documents alongside the company, not after it', async () => {
+    const fetch = serve(() => new Promise<Response>(() => {}))
+    show({ status: 'loading' })
+
+    expect(screen.getByRole('status').textContent).toBe('Loading the company…')
+    await waitFor(() => expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/company', '/api/documents']))
+  })
+
+  it("reads the company again on Try again, not the documents already read", async () => {
+    let fails = true
+    const fetch = serve(() => fails ? json({}, 500) : json(NORDLICHT))
+    show()
+    await screen.findByRole('alert')
+    await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/documents')).toHaveLength(1))
+
+    fails = false
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    const documents = await screen.findByRole('region', { name: 'Documents' })
+    expect(within(documents).getByRole('table')).toBeTruthy()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/documents')).toHaveLength(1)
+  })
+
   it("says the company couldn't be loaded when the overview failed, and Try again reads that again too", async () => {
     serve()
     const retry = vi.fn()

@@ -1761,10 +1761,9 @@ def company_page(profile: Profile) -> dict[str, Any]:
     try:
         facts = company_facts(profile)
     except BaseFrameworkError:
-        log.exception("the base framework could not be read for the company of %s", profile.id)
-        raise HTTPException(status_code=500, detail=COMPANY_FAILED) from None
+        raise _unreadable_edition(profile, COMPANY_FAILED) from None
     clean, _ = redact_data(facts)
-    return dict(clean)
+    return clean
 
 
 def attachment(name: str) -> str:
