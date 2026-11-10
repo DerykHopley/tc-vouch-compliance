@@ -284,7 +284,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
 
   return (
     <>
-      <TopBar>
+      <TopBar goal={overview.state.status === 'ready' ? overview.state.overview.goal : undefined}
+        language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}>
         <button className="btn btn-ghost bar-toggle" aria-expanded={barOpen} aria-controls="top-bar-menu"
           onClick={() => setBarOpen((now) => !now)}>Menu</button>
         <div id="top-bar-menu" className={barOpen ? 'bar-menu open' : 'bar-menu'}>
