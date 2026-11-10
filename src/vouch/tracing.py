@@ -235,9 +235,13 @@ def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
 
 
 @contextmanager
-def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfig]:
+def traced(
+    tracing: Tracing | None, facts: TraceFacts, *, wait: bool = True
+) -> Iterator[RunnableConfig]:
     """The run config for one traced run (empty with tracing off, or when its handler can't be
-    made: logged, and the run goes on untraced), its trace sent as the run ends (`send_trace`)."""
+    made: logged, and the run goes on untraced), its trace sent as the run ends (`send_trace`).
+    With `wait` False it's sent in the background only: a run inside another traced run's
+    request (an assessment the chat starts), whose own bounded send carries it."""
     if tracing is None:
         yield {}
         return
@@ -250,7 +254,10 @@ def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfi
     try:
         yield config
     finally:
-        send_trace(tracing)
+        if wait:
+            send_trace(tracing)
+        else:
+            tracing.flush_soon()
 
 
 TRACE_SEND_WAIT_SECONDS = 3.0

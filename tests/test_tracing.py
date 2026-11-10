@@ -411,6 +411,26 @@ def test_a_langfuse_that_never_answers_holds_the_response_at_most_the_bound(
     assert "wasn't sent to Langfuse within 0.5 s" in caplog.text
 
 
+def test_a_chat_turn_that_starts_an_assessment_waits_for_langfuse_once(down, monkeypatch, caplog):
+    """The turn's one bounded send carries the assessment it started too (one Langfuse client):
+    the assessment's worker doesn't wait a bound of its own before the turn waits its."""
+    on, _ = down
+    monkeypatch.setattr(tracing_module, "TRACE_SEND_WAIT_SECONDS", 2.0)
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="vouch.tracing"):
+        response = client.post(
+            "/api/chat", json={"page": "dossier", "message": "Assess 4.1.2"}, headers=lead
+        )
+    took = time.monotonic() - started
+
+    assert "event: assessment" in response.text
+    assert "event: done" in response.text
+    assert took < 2.0 + 1.5  # one bound and the fake run's own time; two bounds are 4 s
+    assert caplog.text.count("wasn't sent to Langfuse within") == 1
+
+
 def test_a_stream_closed_on_the_event_loop_never_waits_for_langfuse(down):
     """A stream the client leaves is closed when it's collected, which may be on the event
     loop: there, the trace goes in the background, so no other request stalls."""
