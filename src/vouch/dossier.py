@@ -11,7 +11,7 @@ from collections.abc import Collection, Iterable, Mapping
 from typing import Literal, TypedDict, get_args
 
 from vouch.citations import EvidenceKind
-from vouch.graph import Assessment, Status, Verdict, in_review
+from vouch.graph import Assessment, Status, Verdict
 from vouch.isa import Column, IsaControl, Requirement
 from vouch.plan import CardFlags, ReassessReason
 from vouch.profile import ComplianceProfile, ProtectionLevel
@@ -51,9 +51,6 @@ class ControlCard(TypedDict):
     reassess_suggested: bool
     reassess_reasons: list[ReassessReason]
     closed: bool
-    # Its newest assessment's review is in progress (#437, vouch.graph.in_review): a profile
-    # pass skips it, and the pass result's Assess again opens its paper without a run.
-    in_review: bool
 
 
 class Quote(TypedDict):
@@ -202,7 +199,6 @@ def _card(
         "reassess_suggested": bool(assessment and flags and flags.reassess_suggested),
         "reassess_reasons": list(flags.reasons) if assessment and flags else [],
         "closed": bool(assessment and flags and flags.closed),
-        "in_review": assessment is not None and in_review(assessment),
     }
 
 

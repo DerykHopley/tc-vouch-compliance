@@ -215,24 +215,6 @@ def test_each_card_has_its_review_state_and_verdict():
     assert cards["4.1.2"]["iso_27001"] == "ISO 27001:2022: A.5.15, A.8.5"
 
 
-def test_a_card_says_whether_its_review_is_in_progress():
-    confirmed = replace(seeded("4.1.2", "partly-evidenced", "waiting-for-review"), confirmed=[])
-    latest = {
-        "1.1.1": seeded("1.1.1", "evidenced", "accepted"),
-        "1.6.1": seeded("1.6.1", "evidenced", "waiting-for-review"),  # at Confirm findings
-        "4.1.2": confirmed,  # findings confirmed: Plan fixes or Accept (#437)
-    }
-
-    cards = {c["id"]: c for c in overview(NORDLICHT, CONTROLS, latest)["controls"]}
-
-    assert [cards[c]["in_review"] for c in ("1.1.1", "1.6.1", "4.1.2", "5.2.9")] == [
-        False,
-        False,
-        True,
-        False,
-    ]
-
-
 @pytest.mark.parametrize(
     ("statuses", "expected"),
     [
@@ -398,7 +380,6 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
             "reassess_suggested": False,  # the improvement plan's (#410)
             "reassess_reasons": [],  # the open questions' too (#414)
             "closed": False,
-            "in_review": False,  # findings not confirmed yet (#437)
         }
         assert proposed["readiness"]["accepted"] == 0
         assert proposed["readiness"]["by_verdict"]["partly-evidenced"] == 0

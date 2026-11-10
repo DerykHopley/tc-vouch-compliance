@@ -21,7 +21,7 @@ const NO_GOAL = { onGoalChanged: () => Promise.resolve(true), onRoundChanged: ()
 
 const IDS = ['1.1.1', '1.6.1', '1.6.2', '2.1.3', '4.1.2', '4.1.3', '4.2.1', '5.1.1', '5.1.2', '5.2.4', '5.2.5', '5.2.9']
 
-function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verdict' | 'in_review'>>> = {}): Overview {
+function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verdict'>>> = {}): Overview {
   const controls = IDS.map((id) => ({
     id, question: `Question ${id}?`, iso_27001: 'ISO 27001:2022: A.5.1',
     ...(cards[id] ?? { status: 'not-assessed' as const, verdict: null }),
@@ -335,16 +335,10 @@ describe('the profile pass on the Dossier (ticket 390)', () => {
       expect(panel().textContent).toContain('1 control in review skipped: 4.1.2.')
     })
 
-  it.each([
-    ['in review', true],
-    // The card may be stale (findings confirmed in another tab, or before the overview is read again): it never
-    // decides on its own whether a review would be set aside.
-    ['waiting, the card not saying in review', false],
-  ])('on a row whose control is %s, Assess <id> again opens its paper and starts nothing (ticket 437)',
-    async (_, inReviewNow) => {
-      const overview = seeded({
-        '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced', in_review: inReviewNow },
-      })
+  // The row can't know whether the review moved on (findings confirmed in another tab, say): the paper decides.
+  it('on a row whose control waits for review, Assess <id> again opens its paper and starts nothing (ticket 437)',
+    async () => {
+      const overview = seeded({ '4.1.2': { status: 'waiting-for-review', verdict: 'partly-evidenced' } })
       const { onOpen } = shown({ kind: 'done', skipped: [], assessments: [proposed('4.1.2', 'partly-evidenced')] },
         { overview })
       await userEvent.click(within(row('4.1.2')).getByRole('button', { name: 'Assess 4.1.2 again' }))

@@ -1,6 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Assessment } from './assessment.ts'
 import { controlPath, isoLabel, type Overview, useOverview } from './overview.ts'
 
 afterEach(() => {
@@ -58,27 +57,5 @@ describe('the overview after a goal change (ticket 369)', () => {
 
     expect(read).toBe(false)
     expect(result.current.state).toEqual({ status: 'ready', overview: { ...OVERVIEW, goal: 'internal-improvement' } })
-  })
-})
-
-describe("a control's card after its assessment changes in this page (ticket 437)", () => {
-  const CARD = { id: '4.1.2', question: 'Q?', iso_27001: 'A.5.1', status: 'waiting-for-review' as const,
-    verdict: 'partly-evidenced' as const, in_review: false }
-  const WAITING = { control_id: '4.1.2', verdict: 'partly-evidenced', status: 'waiting-for-review', remediation: [] }
-
-  it.each([
-    ['at Confirm findings', { review_step: 'confirm-findings' }, false],
-    ['at Plan fixes', { review_step: 'plan-fixes', remediation: [{ status: 'draft' }] }, true],
-    ['at Accept', { review_step: 'accept' }, true],
-    ['accepted', { status: 'accepted', review_step: null }, false],
-  ] as const)('%s, says whether its review is in progress', async (_, change, inReview) => {
-    serve(ok({ ...OVERVIEW, controls: [CARD] }))
-    const { result } = renderHook(() => useOverview())
-    await act(() => result.current.load())
-
-    act(() => result.current.noteAssessed({ ...WAITING, ...change } as unknown as Assessment))
-
-    const state = result.current.state
-    expect(state.status === 'ready' && state.overview.controls[0].in_review).toBe(inReview)
   })
 })

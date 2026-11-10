@@ -2,7 +2,6 @@ import { useCallback, useRef, useState } from 'react'
 import type { Assessment, Citation, ReviewStatus, Verdict } from './assessment.ts'
 import type { OpenQuestion } from './questions.ts'
 import type { PaperRequirement } from './paper.ts'
-import { reviewStep } from './review.ts'
 import type { Goal } from './report.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
@@ -27,8 +26,6 @@ export type ControlCard = {
   reassess_suggested?: boolean
   reassess_reasons?: ReassessReason[]
   closed?: boolean
-  /** Its newest assessment's review is in progress (#437): findings confirmed, at Plan fixes or Accept. */
-  in_review?: boolean
 }
 
 /** Counted from accepted verdicts only; `open` is every control not accepted. */
@@ -190,13 +187,6 @@ export type OverviewState =
  * finished run's verdict and review state on its control's card without a read (each counts to the rate limit), so
  * the working paper's index stays current; the Dossier reads the overview afresh anyway.
  */
-/** Whether the assessment's review is in progress (#437): findings confirmed, at Plan fixes or Accept, as the server's
- * `vouch.graph.in_review` says. */
-function inReview(assessment: Assessment): boolean {
-  const step = reviewStep({ ...assessment, status: assessment.status ?? 'waiting-for-review' })
-  return step === 'plan-fixes' || step === 'accept'
-}
-
 export function useOverview() {
   const [state, setState] = useState<OverviewState>({ status: 'loading' })
   const latest = useRef(0)
@@ -217,10 +207,9 @@ export function useOverview() {
         ...now.overview,
         // The improvement plan's flags (#410) and the questions' reasons (#414) are the server's to work out: off until
         // the overview is read again (a new run or review clears every question reason anyway).
-        // Whether its review is in progress (#437) is the page's to say too: confirmed here, the card knows at once.
         controls: now.overview.controls.map((c) => c.id !== assessment.control_id ? c
           : { ...c, verdict: assessment.verdict, status: assessment.status ?? 'waiting-for-review',
-            reassess_suggested: false, reassess_reasons: [], closed: false, in_review: inReview(assessment) }),
+            reassess_suggested: false, reassess_reasons: [], closed: false }),
       },
     })
   }, [])
