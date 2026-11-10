@@ -81,3 +81,16 @@ def test_the_stored_assessment_keeps_its_english_reason():
     assessment_data(assessment)
 
     assert assessment.requirements[0].citations[0].stale_because == STALE
+
+
+def test_the_statement_note_is_served_in_the_answer_language():
+    # #439: under the quotes of a requirement a lead's statement caps, the working paper says it
+    # takes a document or record to close it, in the profile's language.
+    assert assessment_data(assessed("en"))["statement_note"] == (
+        "A lead's statement can't fully evidence a requirement: a document or record that shows "
+        "it is needed to close it."
+    )
+    assert assessment_data(assessed("de"))["statement_note"] == (
+        "Eine Aussage der Compliance-Leitung kann eine Anforderung nicht vollständig nachweisen: "
+        "Um sie zu schließen, ist ein Dokument oder eine Aufzeichnung nötig, die sie belegt."
+    )
