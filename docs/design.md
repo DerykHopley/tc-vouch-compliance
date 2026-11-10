@@ -70,11 +70,13 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 
 | Width | What changes |
 |---|---|
-| under 700px | one column; the top bar's tabs, profile and user menu behind one Menu button (#222); the working paper's requirements as stacked cards (Components, Requirement row); the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide; the page leaves room at its foot for the Ask Vouch button (88px of padding and scroll padding), so a field scrolled to, tapped or tabbed to stops above it (#198) |
+| under 700px | one column; the top bar's tabs, profile and user menu behind one Menu button (#222); the working paper's requirements as stacked cards (Components, Requirement row); the chat (bubble, enlarged or pinned) is a full-screen sheet; pin and make-larger hide |
 | 700–1000px | the working paper's control index stacks above the paper; Dossier's hero, band and ask panel go to one column |
 | over 1000px | working paper: index (about 250px) beside the paper; a pinned chat takes a column beside the page, 480px by default, resizable from 360px to 720px (never leaving the page under 560px), and the browser remembers the width; the page makes room for exactly that width (owner's polish list, #61, 2026-11-06; drag decided for you, #231) |
 
 At every width, the page's top scroll padding follows the sticky top bar's height (`--top-bar`, which TopBar measures; it grows at phone width), so a field scrolled to, tapped or tabbed to stops below the bar (#205).
+
+At every width, the page leaves room at its foot for the Ask Vouch button (88px of padding and of bottom scroll padding), so its last content scrolls clear of the button and a field scrolled to, tapped or tabbed to stops above it (#198 at phone width, #462 at every width; `frontend/e2e/test_fab_clearance.py` measures it). The button still floats over the page as it scrolls, the first screen included.
 
 **Checklist:** each changed screen checked at 400px, 900px and 1400px; nothing scrolls sideways (wide tables scroll inside their own container).
 

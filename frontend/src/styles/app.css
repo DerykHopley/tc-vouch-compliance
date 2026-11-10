@@ -285,6 +285,11 @@ textarea.field { resize: vertical; font-family: inherit; }
 .fab, .bubble { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; }
 .fab { background: var(--ink); color: var(--sheet); border: 0; border-radius: 999px; padding: 12px 18px; font-weight: 600; box-shadow: 0 8px 24px var(--shadow); display: flex; gap: 10px; align-items: center; }
 .fab kbd { font: 500 11px var(--f-mono); opacity: .65; }
+/* The page leaves room for the floating Ask Vouch button at every width (#198 at phone width, #462 at all): its foot
+   scrolls clear of it, and a field brought into view (scrolled to, tapped, tabbed to) stops above it. 88px: the
+   button's 45px, its 20px inset, a gap. */
+main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .bubble { width: min(390px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 16px 48px var(--shadow); display: flex; flex-direction: column; animation: rise .18s ease-out; }
 .bubble-head { display: flex; gap: 0 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
 .bubble-head .btn, .page-context { white-space: nowrap; }
@@ -347,10 +352,6 @@ textarea.field { resize: vertical; font-family: inherit; }
   .shortcut-hint { display: none; }
   .trace { grid-template-columns: minmax(0, 1fr); } /* each step's chip above its text (#232) */
   .trace li { row-gap: 2px; }
-  /* The page leaves room for the floating Ask Vouch button (#198): its foot scrolls clear of it, and a field brought
-     into view (scrolled to, tapped, tabbed to) stops above it. 88px: the button's 45px, its 20px inset, a gap. */
-  main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
-  html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   /* Phone: requirements as stacked cards (#211; the owner's option A, 2026-11-06). The same markup as the desktop
      table: each row a card, in order: id, column and verdict on one line; the text, 2 lines with a toggle; the
      evidence kinds and stale flag; the reason, quotes and remediation item. The headings stay for screen readers. */
