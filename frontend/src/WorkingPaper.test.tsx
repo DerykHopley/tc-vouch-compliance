@@ -290,7 +290,7 @@ describe("a lead's statement cited, issue 439", () => {
     expect(within(quotes('S1')).getByText(NOTE)).toBeTruthy()
   })
 
-  it('says nothing once the requirement is overridden to evidenced', () => {
+  it('says nothing on a requirement judged evidenced, as nothing caps it', () => {
     const evidenced = citedBy("Lead's statement").map((r) => r.id === 'S1' ? { ...r, verdict: 'evidenced' as const } : r)
     show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, requirements: evidenced } } })
     expect(within(quotes('S1')).queryByText(NOTE)).toBeNull()
