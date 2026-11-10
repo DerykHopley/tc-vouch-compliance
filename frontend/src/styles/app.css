@@ -424,6 +424,8 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 /* The free-text columns (questions, notes, answers, what's missing) hyphenate in the answer language (their `lang`), as
    the quotes do (#511), breaking a word without a hyphen only when it can't fit otherwise (#521, #530). */
 .report-table .report-q { max-width: 52ch; hyphens: auto; overflow-wrap: break-word; }
+/* A long token in typed text that no hyphenation can break (a link, a file name) breaks anywhere instead (#530). */
+.report-q .report-token { overflow-wrap: anywhere; }
 /* A control's quotes sit under its row, as one entry with it: no rule between them. */
 .report-controls tbody tr:has(+ .report-quote-row) > * { border-bottom-color: transparent; }
 .report-table .report-quote-row td { padding: 0 8px 12px 24px; }

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useState } from 'react'
 import type { Verdict } from './assessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
@@ -121,6 +121,19 @@ function Cells<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
 /** A free-text cell's props (a question, an answer, a note, what's missing): written in the answer language, drafted
  * or typed by the team, so it is marked in it and hyphenates in it (#521, #530). A `<td>` takes them, and a `Column`. */
 const answerText = (head: { answer_language: string }) => ({ className: 'report-q', lang: head.answer_language })
+
+// Over 30 characters with no space; a word is letters and hyphens, with any punctuation around them.
+const LONG_TOKEN = /(\S{31,})/
+const WORD = /^\p{P}*[\p{L}­-]+\p{P}*$/u
+
+/** Text the team typed (a note, a question, an answer), its words hyphenating in its cell: a long token that is no
+ * word (a link, a file name, an id) may break anywhere instead, as no hyphenation can, so it can't widen its column
+ * past the sheet (#530). */
+function Typed({ text }: { text: string }) {
+  return text.split(LONG_TOKEN).map((part, i) => i % 2 === 1 && !WORD.test(part)
+    ? <span key={i} className="report-token">{part}</span>
+    : <Fragment key={i}>{part}</Fragment>)
+}
 
 function Document({ report }: { report: ReadinessReport }) {
   const { head, words } = report
@@ -274,7 +287,7 @@ function Plan({ report: { plan, words, head } }: { report: ImprovementReport }) 
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                       <td><span data-word>{words.item_statuses[item.status]}</span></td>
-                      <td {...answerText(head)}>{item.note}</td>
+                      <td {...answerText(head)}>{item.note && <Typed text={item.note} />}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -312,11 +325,11 @@ function Questions({ report: { questions, words, head } }: { report: Improvement
               {questions.map((q) => (
                 <tr key={q.id}>
                   <th scope="row" className="mono">{q.control_id}</th>
-                  <td {...answerText(head)}>{q.question}</td>
+                  <td {...answerText(head)}><Typed text={q.question} /></td>
                   <td>{q.asked_of}</td>
                   <td className="mono">{q.due_date}</td>
                   <td><span data-word>{words.question_statuses[questionStatus(q)]}</span></td>
-                  <td {...answerText(head)}>{q.answer ?? ''}</td>
+                  <td {...answerText(head)}>{q.answer && <Typed text={q.answer} />}</td>
                 </tr>
               ))}
             </tbody>
@@ -465,7 +478,7 @@ function Trail({ report: { trail, words, head } }: { report: ReadinessReport }) 
     { label: labels.action, cell: (e) => <span data-word>{actionWord(e, words)}</span> },
     { label: labels.verdict_before, cell: (e) => verdict(e.verdict_before) },
     { label: labels.verdict_after, cell: (e) => verdict(e.verdict_after) },
-    { label: labels.note, cell: (e) => e.note, ...answerText(head) },
+    { label: labels.note, cell: (e) => e.note && <Typed text={e.note} />, ...answerText(head) },
     { label: labels.evidence, className: 'mono', cell: (e) =>
       e.evidence.map((d) => <span key={`${d.doc_id} ${d.version}`} className="report-line">{d.doc_id} v{d.version}</span>) },
     { label: labels.model, cell: (e) => e.model, className: 'mono' },

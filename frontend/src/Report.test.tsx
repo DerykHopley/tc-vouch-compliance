@@ -350,8 +350,22 @@ const IMPROVEMENT: ImprovementReport = {
   words: ENGLISH,
 }
 
+describe('A typed note with a long token (ticket 530)', () => {
+  it('lets a link or file name break anywhere, and leaves every word, however long, to hyphenate', async () => {
+    const link = 'https://intranet.alpenwerk.example/isms/Protokollierungsrichtlinie_V3.pdf'
+    const note = `Die Informationssicherheitsverantwortlichkeiten: siehe ${link} und Rollen.pdf.`
+    serve({ ...REPORT, trail: { entries: [entry(2, '2026-11-06T14:05:09+00:00', 'override', { note })], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    const cell = within(report).getByRole('table', { name: 'Audit trail' }).querySelector('td.report-q')
+    expect(cell?.textContent).toBe(note)
+    expect([...cell!.querySelectorAll('.report-token')].map((t) => t.textContent)).toEqual([link])
+  })
+})
+
 describe('The improvement report (ticket 420)', () => {
-  const opened = () => screen.findByRole('article', { name: ENGLISH.improvement_title })
+  const opened =() => screen.findByRole('article', { name: ENGLISH.improvement_title })
 
   it('shows the comparison, the plan by priority with statuses, the questions and the disclaimer', async () => {
     serve(IMPROVEMENT)

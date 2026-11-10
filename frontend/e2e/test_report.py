@@ -260,23 +260,33 @@ def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
 # --- The controls and trail tables fit (#463) ---------------------------------------------------
 
 TABLES = ("table.report-controls", "table.report-trail")
+# A typed text with a token no hyphenation can break (#530's verify): it must still break anywhere,
+# or it widens its column past the sheet, as the words around it hyphenate.
+URL_NOTE = (
+    "Siehe https://intranet.alpenwerk.example/isms/richtlinien/"
+    "Protokollierungsrichtlinie_Version3_freigegeben.pdf für Details."
+)
 
 
 def with_a_full_trail(page: Page) -> None:
     """The report as served, with the recorded Nordlicht trail and a long entry added, so the trail
-    has every column filled (long notes, evidence ids, model names) whatever this server holds."""
+    has every column filled (long notes, evidence ids, model names) whatever this server holds; and
+    a note holding a long link, in the trail and, in the improvement report, as a question's answer
+    (#530)."""
     recorded = json.loads(NORDLICHT_REPORT.read_text())["trail"]["entries"]
 
     def patched(route: Route) -> None:
         served = route.fetch().json()
-        served["trail"] = {"entries": [*recorded, long_entry()], "next": None}
+        served["trail"] = {"entries": [*recorded, long_entry(), url_entry()], "next": None}
+        if "questions" in served:
+            served["questions"] = [*served["questions"], url_question()]
         route.fulfill(json=served)
 
     page.route("**/api/report", patched)
 
 
-def tables_overflowing(report: Locator) -> list[str]:
-    """Each controls or trail table wider than its container, with its widths, once the fonts have
+def tables_overflowing(report: Locator, tables: tuple[str, ...] = TABLES) -> list[str]:
+    """Each of the tables wider than its container, with its widths, once the fonts have
     settled (#512: measured while a late web font was still loading, in the fallback's widths)."""
     return report.evaluate(
         "async (el, selectors) => {"
@@ -288,7 +298,7 @@ def tables_overflowing(report: Locator) -> list[str]:
           return wide > box.clientWidth ? `${s}: ${wide} in ${box.clientWidth}` : null
         })).filter(Boolean)
         }""",
-        list(TABLES),
+        list(tables),
     )
 
 
@@ -322,9 +332,14 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
             page.set_viewport_size({"width": width, "height": 900})
             report = open_report(page, url)
             expect(report.locator("table.report-trail tbody tr").first).to_be_visible()
+            expect(report.locator("table.report-trail")).to_contain_text(URL_NOTE)
             if goal == "audit-readiness":
                 expect(report.locator("table.report-controls")).to_be_visible()
-            assert tables_overflowing(report) == [], (profile, width)
+                assert tables_overflowing(report) == [], (profile, width)
+            else:
+                expect(report.locator("table.report-questions")).to_contain_text(URL_NOTE)
+                shown = (*TABLES, "table.report-questions")
+                assert tables_overflowing(report, shown) == [], (profile, width)
             if goal == "audit-readiness" and profile == "alpenwerk":
                 # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
                 days = report.locator("table.report-controls td.report-day").evaluate_all(
@@ -339,7 +354,7 @@ def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
     page: Page, report_url, nordlicht_report
 ):
     page.set_viewport_size({"width": 390, "height": 900})
-    nordlicht_report["trail"]["entries"].append(long_entry())
+    nordlicht_report["trail"]["entries"] += [long_entry(), url_entry()]
     page.route("**/api/report", lambda route: route.fulfill(json=nordlicht_report))
     for scheme in ("light", "dark"):
         page.emulate_media(color_scheme=scheme)
@@ -391,6 +406,26 @@ def long_entry() -> dict:
         "evidence": [{"doc_id": "authentication-standard", "version": "3.1"}],
         "model": "scripted-fake-model-with-a-long-name",
         "prompt_version": "assess-2026-11-01",
+    }
+
+
+def url_entry() -> dict:
+    """A trail entry whose typed note holds a long link (#530's verify)."""
+    return {**long_entry(), "id": 2, "action": "override", "note": URL_NOTE}
+
+
+def url_question() -> dict:
+    """An answered open question whose typed answer holds a long link (#530's verify)."""
+    return {
+        "id": 99,
+        "control_id": "1.1.1",
+        "question": "Wo liegt die Protokollierungsrichtlinie?",
+        "asked_of": "IT-Leiter",
+        "due_date": "2026-12-01",
+        "asked_at": "2026-11-06T14:05:00+00:00",
+        "answer": URL_NOTE,
+        "answered_at": "2026-11-07T09:00:00+00:00",
+        "overdue": False,
     }
 
 
