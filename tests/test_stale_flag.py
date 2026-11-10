@@ -52,6 +52,12 @@ def test_on_a_german_profile_a_stale_citations_reason_is_served_in_german():
     ]
 
 
+def test_the_stale_word_is_the_reports_in_the_answer_language():
+    # As the report and the Documents tab flag a stale document (vouch.report.WORDS).
+    assert assessment_data(assessed("de"))["stale_word"] == "Prüfung überfällig"
+    assert assessment_data(assessed("en"))["stale_word"] == "Stale"
+
+
 def test_a_current_citation_has_no_reason_in_any_language():
     assert served_reasons(assessed("de", cited("register", None))) == [None]
 

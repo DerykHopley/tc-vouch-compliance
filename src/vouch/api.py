@@ -582,6 +582,18 @@ def lead_statements(asked: OpenQuestions, memory: UserMemory) -> tuple[LeadState
 LeadStatements = Annotated[tuple[LeadStatement, ...], Depends(lead_statements)]
 
 
+def _stale_in_answer_language(served: dict[str, Any], language: str) -> dict[str, Any]:
+    """The served assessment with its stale flag in the answer language (#359): `stale_word`,
+    the report's stale label (as the Documents tab's, so a page and the report flag alike), and
+    each stale citation's reason as the cap's note says it (vouch.language.stale_reason). The
+    stored assessment keeps English's reason."""
+    for requirement in served["requirements"]:
+        for citation in requirement["citations"]:
+            if citation["stale"]:
+                citation["stale_because"] = stale_reason(citation["stale_because"], language)
+    return served | {"stale_word": report.words_for(language)["labels"]["stale"]}
+
+
 def assessment_data(
     assessment: Assessment,
     decided: dict[remediation.Key, remediation.DecidedItem] | None = None,
@@ -593,16 +605,10 @@ def assessment_data(
     of the review it waits at (#372; null once reviewed), and `before_three_step_review`, true
     for one reviewed before the three-step review (#373): it still counts as reviewed, and
     nothing stored is rewritten. Each item carries its priority and done mark in the improvement
-    plan (`marks`, #410), in both goals. A stale citation's reason is in the assessment's
-    answer language (#359), as the cap's note says it; the stored assessment keeps English's."""
+    plan (`marks`, #410), in both goals. Its stale citations are flagged in its answer
+    language (#359): `stale_word` and each reason (`_stale_in_answer_language`)."""
     review = assessment.review
-    served = assessment.to_dict()
-    for requirement in served["requirements"]:
-        for citation in requirement["citations"]:
-            if citation["stale"]:
-                citation["stale_because"] = stale_reason(
-                    citation["stale_because"], assessment.answer_language
-                )
+    served = _stale_in_answer_language(assessment.to_dict(), assessment.answer_language)
     return served | {
         "remediation": remediation.shown_items(assessment, decided or {}, marks),
         "review_step": remediation.review_step(assessment, decided or {}),
