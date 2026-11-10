@@ -64,7 +64,7 @@ def confirm_and_accept(page: Page, paper: Locator, *, approve: bool) -> None:
         bar.get_by_role("button", name="Confirm findings").click()
     assert confirmed.value.ok, confirmed.value.status
     if approve:
-        item = row(paper, "M1").get_by_role("region", name="Remediation item M1")
+        item = paper.get_by_role("region", name="Remediation item M1")  # its own row (#464)
         expect(item).to_contain_text("Priority: Medium")  # the default for partly evidenced
         with page.expect_response(re.compile(r"/remediation/M1$")):
             item.get_by_role("button", name="Approve M1").click()
@@ -89,7 +89,7 @@ def test_stories_9_and_10_priority_done_reassess_and_closed(page: Page, plan_url
     # Story 9: the control accepted with a gap, its item approved; its priority set to Low.
     assess_on_the_paper(page, paper)
     confirm_and_accept(page, paper, approve=True)
-    item = row(paper, "M1").get_by_role("region", name="Remediation item M1")
+    item = paper.get_by_role("region", name="Remediation item M1")  # its own row (#464)
     priority = item.get_by_label("Priority")
     expect(priority).to_have_value("medium")
     fits(page, f"an approved item, {width}px {scheme}")

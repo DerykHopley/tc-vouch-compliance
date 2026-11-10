@@ -212,7 +212,8 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
 
     confirmed_with_an_item(page.request, paper_url)  # Plan fixes: S1's item to approve or discard
     paper = open_paper(page, paper_url)
-    expect(row(paper, ITEM).get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
+    # The item is a row of its own under its requirement (#464), so it's found on the paper.
+    expect(paper.get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
     assert small_targets(page) == []
 
     # #437: Assess again on a review in progress warns first, with two pills in its place.

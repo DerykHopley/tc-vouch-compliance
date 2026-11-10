@@ -634,7 +634,7 @@ describe('the review in three steps (issue 372)', () => {
     expect(within(bar()).getByText('1 of 3 remediation items decided.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Change / })).toBeNull()
     expect(within(row('M2')).getByText('Overridden from Evidenced')).toBeTruthy()
-    expect(within(row('M2')).getByRole('button', { name: 'Approve M2' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Approve M2' })).toBeTruthy()
   })
 
   it('counts an item decided on the page at once, and offers Accept once none is left a draft', () => {
@@ -847,9 +847,18 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     expect(within(item()).getByText('A record of access reviews.').getAttribute('lang')).not.toBe('de')
   })
 
-  it("shows the draft in its requirement's row: what's missing, the owner role and the due date", () => {
+  it('shows the draft on its own row under its requirement, spanning the table, not in the quotes cell, issue 464', () => {
     review({ assessment: ACCEPTED })
-    expect(within(row('S1')).getByRole('region', { name: 'Remediation item S1' })).toBeTruthy()
+    const own = item().closest('tr')!
+    expect(own).not.toBe(row('S1'))
+    expect(row('S1').nextElementSibling).toBe(own)
+    expect(own.querySelectorAll('td')).toHaveLength(1)
+    expect(own.querySelector('td')!.colSpan).toBe(screen.getAllByRole('columnheader').length)
+    expect(row('S1').querySelector('.quotes-cell .remediation')).toBeNull()
+  })
+
+  it("shows the draft: what's missing, the owner role and the due date", () => {
+    review({ assessment: ACCEPTED })
     expect(within(item()).getByText('A record of access reviews.')).toBeTruthy()
     expect((within(item()).getByLabelText('Owner role') as HTMLInputElement).value).toBe('IT operations lead')
     expect((within(item()).getByLabelText('Due date') as HTMLInputElement).value).toBe('2027-02-01')

@@ -161,7 +161,8 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .empty { color: var(--muted); justify-self: center; text-align: center; max-width: 60ch; }
 
 /* Working paper (minimal until M2): head ruled in ink, the agent's steps in mono, then the verdict and draft answer */
-.paper { max-width: 900px; margin: 0 auto; padding-block: 24px 110px; display: grid; gap: 16px; }
+/* The full width, with the .wrap gutters (design.md, Layout: Full width; #464); its prose keeps its own measure. */
+.paper { padding-block: 24px 110px; display: grid; gap: 16px; }
 .paper-head { display: grid; gap: 6px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
 .paper-head h2 { font-size: clamp(22px, 3vw, 30px); overflow-wrap: anywhere; }
 .paper-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
@@ -218,18 +219,20 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 /* The requirement rows: a wide table scrolls inside its own container, never the page (design.md, Layout) */
 .table-wrap { overflow-x: auto; width: 100%; }
 .reqs { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--sheet); }
-/* Its 760px sets where pinning starts (chatWidth.ts, PAGE_KEEPS; #465): change them together. */
-.reqs.judged { min-width: 760px; }
 .reqs thead th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--ink); padding: 6px 8px; font-weight: 600; }
 .reqs th[scope="row"], .reqs td { border-bottom: 1px solid var(--rule); padding: 8px; vertical-align: top; text-align: left; font-weight: 400; }
-.reqs th[scope="row"] { width: 7em; }
+.reqs th[scope="row"] { width: 7em; } /* .remediation-row lines up after it: change them together */
 .reqs .col { display: block; font-size: 11px; color: var(--muted); }
-.reqs .rq { max-width: 52ch; overflow-wrap: anywhere; }
+/* The requirement text hyphenates in its own language (its `lang`), never breaking mid-word without a hyphen (#464).
+   In the judged table it keeps a quarter of the width, at least 200px: the browser test's REQUIREMENT_MIN. */
+.reqs .rq { max-width: 52ch; hyphens: auto; overflow-wrap: break-word; }
+.reqs.judged .rq { width: 25%; min-width: 200px; max-width: none; }
+/* A citation's document id may break anywhere (an id, not a word), so a long one doesn't widen the quotes column. */
+.reqs .cite figcaption .mono { overflow-wrap: anywhere; }
 .rq-text { display: block; }
 .rq-toggle { display: none; } /* phone only (#211) */
 .reqs .why { color: var(--muted); font-size: 12px; margin: 0; }
 .reqs .evidence { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.quotes-cell { min-width: 280px; }
 .quotes-cell > div { display: grid; gap: 8px; }
 .cite { margin: 0; display: grid; gap: 2px; }
 .cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); overflow-wrap: anywhere; }
@@ -256,9 +259,14 @@ textarea.field { resize: vertical; font-family: inherit; }
 .review-steps li { counter-increment: review-step; padding: 2px 0; border-bottom: 2px solid transparent; }
 .review-steps li::before { content: counter(review-step) ". "; }
 .review-steps li[aria-current="step"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
-/* Remediation item (#43, design.md Components): under a not-evidenced requirement's reason, ruled off from the quotes;
-   a draft's form takes the override editor's grid, Approve in the sign-off colour. */
+/* Remediation item (#43, design.md Components): on a row of its own under a not-evidenced requirement, spanning the
+   table (#464), lined up with the requirement's text and ruled off from it; the requirement's row gives up its rule to
+   the item's row. A draft's form takes the override editor's grid, Approve in the sign-off colour. */
+.reqs tr.has-item > * { border-bottom: 0; }
+.remediation-row td { padding: 0 8px 12px calc(7em + 8px); }
 .remediation { display: grid; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--rule); }
+.remediation-row .remediation { margin-top: 0; }
+.remediation-row .remediation-missing { max-width: 72ch; } /* running prose keeps a readable measure (Full width) */
 .remediation p { margin: 0; }
 .remediation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .remediation-missing { overflow-wrap: anywhere; }
@@ -372,12 +380,15 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .reqs.judged .verdict-col { grid-row: 1; grid-column: 2; justify-self: end; }
   .reqs.judged .verdict-cell { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0 4px; }
   .reqs.judged .verdict-cell .btn-ghost { margin-left: 0; }
-  .reqs.judged .rq { grid-row: 2; grid-column: 1 / -1; }
+  .reqs.judged .rq { grid-row: 2; grid-column: 1 / -1; width: auto; min-width: 0; }
   .reqs.judged .evidence-col { grid-row: 3; grid-column: 1 / -1; }
   .reqs.judged .quotes-cell { grid-row: 4; grid-column: 1 / -1; min-width: 0; }
   .rq-text.clamped { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .rq-toggle { display: inline-flex; align-items: center; margin-left: -10px; }
   .reqs.judged .override-row, .reqs.judged .override-row td { display: block; }
+  /* A requirement's remediation item closes its card, as when it sat under the quotes (#464). */
+  .reqs.judged tbody tr.has-item { border-bottom: 0; padding-bottom: 0; }
+  .reqs.judged tbody tr.remediation-row { display: block; padding: 10px 8px 12px; border-bottom: 1px solid var(--rule); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
