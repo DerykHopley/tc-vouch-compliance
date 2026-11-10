@@ -275,6 +275,23 @@ def test_a_developer_changes_the_model_and_the_next_assessment_uses_it(client, c
     assert chat.models and set(chat.models) == {OTHER_MODEL}
 
 
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/developer/model", {"model": OTHER_MODEL}),
+        ("/api/developer/daily-limit", {"daily_limit": 7}),
+    ],
+)
+def test_a_change_answers_the_whole_developer_page_as_the_settings_read_does(client, path, body):
+    # #455: the changes answered without broken_profiles, so the page rendering their answer threw
+    # (".length of undefined") and the live app fell back to the Discord gate until a reload.
+    changed = client.put(path, json=body)
+    read = client.get("/api/developer/settings")
+
+    assert changed.status_code == 200, changed.text
+    assert changed.json() == read.json()
+
+
 def test_the_id_is_checked_against_every_page_of_openrouters_models(client, catalogue):
     """The last page holds it: the list is read to its end, with the key."""
     response = client.put("/api/developer/model", json={"model": "google/gemini-3-flash"})

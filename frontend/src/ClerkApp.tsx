@@ -1,6 +1,7 @@
 import { ClerkFailed, ClerkLoaded, ClerkLoading, ClerkProvider, SignIn, useAuth, useClerk, useUser } from '@clerk/react'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { type Access, checkAccess } from './access.ts'
+import AppFailed from './AppFailed.tsx'
 import type { Gate } from './authConfig.ts'
 import Invitation, { Page, SignInFailed } from './Invitation.tsx'
 import ProfiledApp from './ProfiledApp.tsx'
@@ -74,7 +75,10 @@ function SignedInApp({ gate }: { gate: Gate }) {
     setAttempt((n) => n + 1)
   }
   const leave = () => void signOut()
-  if (access === 'allowed') return <ProfiledApp onSignOut={leave} userName={name} />
+  if (access === 'allowed') {
+    // Its own boundary: a render error inside the app is never shown as the sign-in page (issue 455).
+    return <AppFailed><ProfiledApp onSignOut={leave} userName={name} /></AppFailed>
+  }
   const [title, text] = BEFORE_THE_APP[access]
   return (
     <Page pill={(gate === 'discord-server' ? COURSE_MEMBERS : BY_INVITATION).pill} title={title} text={text}>

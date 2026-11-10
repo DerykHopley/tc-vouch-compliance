@@ -1721,9 +1721,17 @@ class DailyLimitRequest(BaseModel):
 
 
 def _developer_page(
-    models: ModelChoice, spending: SpendingGuard, model: str | None = None
+    models: ModelChoice,
+    spending: SpendingGuard,
+    settings: Settings,
+    user: User,
+    model: str | None = None,
 ) -> dict[str, Any]:
-    return models.settings(model) | spending.settings()
+    """The whole developer page, the same for its read and for each change's answer (#455: the
+    changes once left out the broken profiles, and the page rendering their answer failed)."""
+    broken = user_profiles(settings, user).broken
+    page = models.settings(model) | spending.settings()
+    return page | {"broken_profiles": [asdict(b) for b in broken]}
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
@@ -1733,22 +1741,33 @@ def developer_settings(
     """The model, where assessments run (and why on the fake), the prompt version, the daily
     limit, every assessment's usage totalled, and the compliance profiles left out of the
     profile switcher because they can't be loaded (#47), each with its problem."""
-    broken = user_profiles(settings, user).broken
-    return _developer_page(models, spending) | {"broken_profiles": [asdict(b) for b in broken]}
+    return _developer_page(models, spending, settings, user)
 
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)
 def change_daily_limit(
-    request: DailyLimitRequest, models: AppModels, spending: AppSpending
+    request: DailyLimitRequest,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
 ) -> dict[str, Any]:
-    """Each user may start `daily_limit` assessments a day, from the next one on."""
+    """Each user may start `daily_limit` assessments a day, from the next one on. The answer is
+    the whole developer page, as `developer_settings` reads it (#455)."""
     spending.set_daily_limit(request.daily_limit)
-    return _developer_page(models, spending)
+    return _developer_page(models, spending, settings, user)
 
 
 @router.put("/developer/model", dependencies=DEVELOPERS)
-def change_model(request: ModelRequest, models: AppModels, spending: AppSpending) -> dict[str, Any]:
-    """The next assessment runs on `model`, once OpenRouter's model list has it."""
+def change_model(
+    request: ModelRequest,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
+) -> dict[str, Any]:
+    """The next assessment runs on `model`, once OpenRouter's model list has it. The answer is
+    the whole developer page, as `developer_settings` reads it (#455)."""
     try:
         model = models.change(request.model)
     except NoKey:
@@ -1758,7 +1777,7 @@ def change_model(request: ModelRequest, models: AppModels, spending: AppSpending
         raise HTTPException(status_code=422, detail=detail) from None
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
-    return _developer_page(models, spending, model)
+    return _developer_page(models, spending, settings, user, model)
 
 
 @router.get("/access")
