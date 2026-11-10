@@ -258,7 +258,9 @@ def set_goal(page: Page, url: str, profile: str, goal: str) -> None:
 
 
 @pytest.mark.parametrize("goal", ["audit-readiness", "internal-improvement"])
-def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, goal):
+def test_at_1440_and_1024_neither_table_scrolls_sideways(
+    page: Page, request, goal, nordlicht_later
+):
     """#463: the trail was 1,231-1,250px in a 902px sheet at 1440, and the controls table carried
     empty columns. Nordlicht's report is English, Alpenwerk's German. The improvement report has a
     server of its own, as its goal would change what the readiness checks read."""
@@ -268,8 +270,9 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
             set_goal(page, url, profile, goal)
     accepted(page.request, url, "4.1.2", "alpenwerk")  # a German reviewed row: chip, reviewer, day
     with_a_full_trail(page)
+    nordlicht_later(url)
     for profile in ("nordlicht", "alpenwerk"):
-        page.add_init_script(f"window.localStorage.setItem('vouch.profile', '{profile}')")
+        make_current(page.request, url, profile)  # #480: the report opens under the current company
         for width in (1440, 1024):
             page.set_viewport_size({"width": width, "height": 900})
             report = open_report(page, url)
