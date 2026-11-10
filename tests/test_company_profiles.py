@@ -588,6 +588,19 @@ def test_a_developer_removes_a_company_it_leaves_every_list_and_its_id_is_never_
     assert made == f"{MUSTERFIRMA_ID}-2"
 
 
+def test_a_removal_answers_the_whole_developer_page_as_the_settings_read_does(users):
+    # #455: a developer change answering less than the page's read left the page rendering a
+    # missing field, and the app fell back to the sign-in gate; a removal answers in full too.
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        create(client, alice)
+        removed = remove(client, alice)
+        read = client.get("/api/developer/settings", headers=alice)
+
+    assert removed.status_code == 200, removed.text
+    assert removed.json() == read.json()
+
+
 PROFILE_ROUTES = [
     ("GET", "/api/overview", None),
     ("GET", "/api/report", None),

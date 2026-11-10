@@ -15,6 +15,17 @@ from test_company_setup import create_company, open_setup, to_step_7
 COMPANY = "Musterfirma Süd GmbH"
 COMPANY_ID = "musterfirma-sud-gmbh"
 FELL_BACK = "Your last profile is no longer available: showing Nordlicht Komponenten GmbH."
+NEVER_AFTER_REMOVE = re.compile(
+    "Vouch could not be loaded|Vouch could not show this page|Open to course members"
+    "|Please sign in again"
+)
+"""#455's failure, for a removal: the app's error page or the sign-in gate in place of the page."""
+
+
+def kept_the_developer_page(page: Page) -> None:
+    """The removal's answer rendered: the Developer page shows, never the gate or an error (#455)."""
+    expect(page.get_by_role("region", name="Developer settings")).to_be_visible()
+    expect(page.get_by_text(NEVER_AFTER_REMOVE)).to_have_count(0)
 
 
 def create(page: Page, url: str, company: str = COMPANY) -> str:
@@ -72,7 +83,7 @@ def test_a_developer_removes_the_company_shown_and_it_never_comes_back(page: Pag
         banner.get_by_role("button", name=re.compile(r"^Profile: Nordlicht Komponenten GmbH"))
     ).to_be_visible()
     expect(page).to_have_url(f"{removal_url}/developer")
-    expect(page.get_by_role("region", name="Developer settings")).to_be_visible()
+    kept_the_developer_page(page)
     assert not any(name.startswith(COMPANY) for name in switcher_companies(page))
     expect(sheet.get_by_role("button", name=f"Remove {COMPANY}")).to_have_count(0)
     under = page.request.get(f"{removal_url}/api/overview", headers={"X-Vouch-Profile": COMPANY_ID})
@@ -115,6 +126,7 @@ def test_removing_a_company_not_shown_keeps_the_profile_and_focuses_the_note(
     note = sheet.get_by_role("status")
     expect(note).to_have_text(f"Removed {company}.")
     expect(note).to_be_focused()
+    kept_the_developer_page(page)
     expect(sheet.get_by_text(made, exact=True)).to_have_count(0)
     expect(banner.get_by_role("status")).to_have_count(0)
     expect(
