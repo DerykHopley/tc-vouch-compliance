@@ -310,3 +310,10 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report
     )
     expect(flag).to_have_attribute("lang", "de")
     expect(paper.get_by_text(re.compile(r"^Stale: "))).to_have_count(0)
+    # #484: the evidence column's labels are the served words too, stale and current.
+    stale = row(paper, "S4").locator(".evidence-col .flag")
+    expect(stale).to_have_text("Prüfung überfällig")
+    expect(stale).to_have_attribute("lang", "de")
+    current = row(paper, "M1").locator(".evidence-col .why")
+    expect(current).to_have_text("Aktuell")
+    expect(current).to_have_attribute("lang", "de")
