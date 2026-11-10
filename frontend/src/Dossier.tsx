@@ -1,6 +1,6 @@
-import { type MouseEvent, useId, useState } from 'react'
+import { type MouseEvent, useEffect, useId, useRef, useState } from 'react'
 import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, type NextStep, type Overview,
+import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, isReviewState, type NextStep, type Overview,
   type OverviewState, type Readiness, type ReassessReason, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
   from './overview.ts'
 import type { PassState } from './profilePass.ts'
@@ -17,6 +17,8 @@ type Props = {
   onOpen: (controlId: string, assess: boolean) => void
   /** The control being assessed just now, if any: its card says so, and the hero offers no second run. */
   running: string | null
+  /** The app opened on a company just made (#409): the headline takes focus once it shows. */
+  focusHeading?: boolean
   /** The page's profile pass (#390): held above the views, so its result waits here. */
   pass: PassState
   /** Starts a profile pass. */
@@ -26,10 +28,16 @@ type Props = {
   onGoalChanged: (goal: Goal) => Promise<boolean>
   /** A review round was started or closed (#402): reads the overview again; whether it was read. */
   onRoundChanged: () => Promise<boolean>
+  /** The arrival sequence on a company just made is under way (#447): the Goal change or the pass is still to come, so
+   * Change goal and Run a profile pass wait. */
+  arriving?: boolean
+  /** The Goal chosen in company setup that couldn't be set on arrival (#447): said under the Goal line until a later
+   * Goal change goes through. */
+  goalNotSet?: Goal
 }
 
-export default function Dossier({ state, onRetry, onOpen, running, pass, onPass, onGoalChanged, onRoundChanged }:
-  Props) {
+export default function Dossier({ state, onRetry, onOpen, running, focusHeading = false, pass, onPass, onGoalChanged,
+  onRoundChanged, arriving = false, goalNotSet }: Props) {
   if (state.status === 'loading') {
     return <main className="dossier wrap"><p className="lbl" role="status">Opening the dossier…</p></main>
   }
@@ -46,15 +54,15 @@ export default function Dossier({ state, onRetry, onOpen, running, pass, onPass,
   const { overview } = state
   return (
     <main className="dossier wrap">
-      <Hero overview={overview} onOpen={onOpen} running={running} pass={pass} onPass={onPass}
-        onGoalChanged={onGoalChanged} onRoundChanged={onRoundChanged} />
+      <Hero overview={overview} onOpen={onOpen} running={running} focus={focusHeading} pass={pass} onPass={onPass}
+        onGoalChanged={onGoalChanged} onRoundChanged={onRoundChanged} arriving={arriving} goalNotSet={goalNotSet} />
       <PassPanel overview={overview} pass={pass} onOpen={onOpen} onPass={onPass} running={running} />
       <Band readiness={overview.readiness} />
       <Comparison overview={overview} onOpen={onOpen} />
       <section className="controls" aria-labelledby="controls-title">
         <div className="head">
           <span className="pill">The controls</span>
-          <h2 id="controls-title">{overview.readiness.controls} controls</h2>
+          <h2 id="controls-title">{overview.controls.length} controls</h2>
           <p>Open a control to work through its working paper.</p>
         </div>
         <div className="cards">
@@ -75,14 +83,24 @@ const NEXT_WORDS: Record<NonNullable<NextStep>['action'], (id: string) => string
   assess: (id) => `Assess ${id}`,
 }
 
-type HeroProps = { overview: Overview; onOpen: Props['onOpen']; running: string | null; pass: PassState;
-  onPass: () => void; onGoalChanged: Props['onGoalChanged']; onRoundChanged: Props['onRoundChanged'] }
+type HeroProps = { overview: Overview; onOpen: Props['onOpen']; running: string | null; focus: boolean;
+  pass: PassState; onPass: () => void; onGoalChanged: Props['onGoalChanged']; onRoundChanged: Props['onRoundChanged'];
+  arriving: boolean; goalNotSet?: Goal }
 
-function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundChanged }: HeroProps) {
+function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, onRoundChanged, arriving,
+  goalNotSet }: HeroProps) {
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (focus) heading.current?.focus()
+  }, [focus])
   const { readiness, by_status: count, next_step: next } = overview
   let headline: string
   let detail: string
-  if (count['not-assessed'] === readiness.controls) {
+  if (readiness.controls === 0) {
+    // Every control is not applicable as a whole under the profile (#454): nothing to assess or review.
+    headline = 'No control applies under this profile.'
+    detail = 'There is nothing to assess.'
+  } else if (count['not-assessed'] === readiness.controls) {
     headline = 'Nothing is assessed yet.'
     detail = next ? `Start with ${next.control_id}: assess it, then review what Vouch finds.` : ''
   } else {
@@ -97,9 +115,9 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundC
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
-      <GoalRow overview={overview} onChanged={onGoalChanged} />
+      <GoalRow overview={overview} onChanged={onGoalChanged} arriving={arriving} notSet={goalNotSet} />
       <RoundRow overview={overview} onChanged={onRoundChanged} />
-      <h1>Prepared for audit. One piece of evidence at a time.</h1>
+      <h1 ref={heading} tabIndex={-1}>Prepared for audit. One piece of evidence at a time.</h1>
       <p><b>{headline}</b> {detail}</p>
       {(next || readiness.open > 0) && (
         <div className="next">
@@ -109,8 +127,8 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundC
             </button>
           )}
           {readiness.open > 0 && (
-            <button className="btn btn-ghost" onClick={onPass} disabled={passing || running !== null}
-              aria-busy={passing || undefined} aria-describedby="pass-note">
+            <button className="btn btn-ghost" onClick={onPass} disabled={passing || arriving || running !== null}
+              aria-busy={passing || arriving || undefined} aria-describedby="pass-note">
               {passing ? 'Running the profile pass…' : 'Run a profile pass'}
             </button>
           )}
@@ -122,7 +140,8 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundC
         </p>
         : <p id="pass-note" className="field-note">
           {running !== null ? `Vouch is assessing ${running}. One run at a time.`
-            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'}
+            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, '
+              + `a pass over ${readiness.controls} controls costs about $0.30–0.50.`}
         </p>)}
     </section>
   )
@@ -134,9 +153,12 @@ const GOAL_STALE = 'The goal was changed, but the overview could not be read aga
 /**
  * The profile's goal on the hero (`docs/design.md`, Components: Goal, #369): "Goal: <goal>" and a ghost Change goal,
  * which asks first (the browser's own confirm, as the fresh start does) and changes it to the other goal. The change
- * starts no run, so it stays usable while one goes on. A failure says so, and the line keeps the old goal.
+ * starts no run, so it stays usable while one goes on. A failure says so, and the line keeps the old goal. On a company
+ * just made (#447), it waits while the arrival sequence changes the Goal (`arriving`); `notSet`: the Goal chosen in
+ * setup couldn't be set then, said until a later change goes through.
  */
-function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props['onGoalChanged'] }) {
+function GoalRow({ overview, onChanged, arriving, notSet }: { overview: Overview; onChanged: Props['onGoalChanged'];
+  arriving: boolean; notSet?: Goal }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   // The change was kept but the overview wasn't read again: the line shows the new goal; Retry reads it again.
@@ -162,10 +184,16 @@ function GoalRow({ overview, onChanged }: { overview: Overview; onChanged: Props
     <>
       <div className="goal">
         <span>Goal: {GOAL_WORDS[overview.goal]}</span>
-        <button className="btn btn-ghost" onClick={() => void change()} disabled={busy} aria-busy={busy || undefined}>
+        <button className="btn btn-ghost" onClick={() => void change()} disabled={busy || arriving}
+          aria-busy={busy || arriving || undefined}>
           Change goal
         </button>
       </div>
+      {notSet !== undefined && (
+        <p role="alert" className="field-note notice">
+          The company was created, but its Goal could not be set to {GOAL_WORDS[notSet]}. Use Change goal to set it.
+        </p>
+      )}
       {failed && <p role="alert" className="field-note notice">{GOAL_FAILED}</p>}
       {stale !== null && (
         <div className="next">
@@ -382,7 +410,7 @@ function PassPanel({ overview, pass, onOpen, onPass, running }:
               <li key={a.thread_id} className="pass-row" aria-label={`Control ${a.control_id}`}>
                 <b className="mono">{a.control_id}</b>
                 <VerdictChip verdict={verdict} language={overview.answer_language} />
-                {status !== 'not-assessed' && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
+                {isReviewState(status) && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
                 <span className="pass-actions">
                   <button className="btn" onClick={() => onOpen(a.control_id, false)}>Open {a.control_id}</button>
                   {shortOf(verdict) && running === null && (
@@ -493,11 +521,14 @@ function Card({ card, onOpen, assessing, language, improving }:
       <a className={`card-head edge-${edge}`} href={controlPath(card.id)} aria-label={`Open ${card.id}`}
         onClick={(e) => openInPlace(e, () => onOpen(card.id, false))}>
         <b>{card.id}</b>
-        {card.status !== 'not-assessed' && (
+        {isReviewState(card.status) && (
           <span className={`tag tag-${card.status}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[card.status]}</span>
         )}
       </a>
       <div className="control-title" lang={language}>{card.question}</div>
+      {card.status === 'not-applicable' && card.not_applicable && (
+        <p className="field-note" lang={language}>{card.not_applicable}</p>
+      )}
       {reasons.map((r) => <p key={r} className="field-note">{REASON_WORDS[r]}</p>)}
       <div className="card-meta">
         <span className="mono">{isoLabel(card.iso_27001)}</span>

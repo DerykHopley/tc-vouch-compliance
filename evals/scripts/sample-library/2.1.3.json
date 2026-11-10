@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "information handling arising respect"}},
+    {"tool": "search_records", "args": {"query": "information handling arising respect"}},
+    {"answer": "Draft answer for 2.1.3, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The 2026 courses are recorded, with 205 of 212 staff trained.", "citations": [{"doc_id": "awareness-training-concept", "quote": "Some groups get an extra module on their own risks: managers, administrators, staff who work in customers' networks, and the production staff on the shop floor."}, {"doc_id": "training-record", "quote": "Yearly security course | All staff | March to May 2026 | 212 | 205"}]},
+      {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "The concept covers the policy, malware, passwords, compliance, NDAs and outside services, but not security events.", "citations": [{"doc_id": "awareness-training-concept", "quote": "non-disclosure agreements before sharing protected information,"}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Managers, administrators, staff in customers' networks and production staff get their own modules.", "citations": [{"doc_id": "awareness-training-concept", "quote": "Some groups get an extra module on their own risks: managers, administrators, staff who work in customers' networks, and the production staff on the shop floor."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "The managing directors approved the concept on 31 August 2026.", "citations": [{"doc_id": "awareness-training-concept", "quote": "The managing directors approved this concept on 31 August 2026."}]},
+      {"requirement_id": "S4", "verdict": "evidenced", "reason": "A yearly course, plus an extra session after the fake invoice emails in August.", "citations": [{"doc_id": "awareness-training-concept", "quote": "After a serious incident, or when a new kind of attack appears, the information security officer sends a short awareness note or holds an extra session."}, {"doc_id": "training-record", "quote": "The September session was added after several fake invoice emails reached accounting in August."}]},
+      {"requirement_id": "S5", "verdict": "evidenced", "reason": "The record lists each course with how many were expected and took part.", "citations": [{"doc_id": "training-record", "quote": "The seven staff who missed the yearly course were on long leave and take it when they return."}]},
+      {"requirement_id": "S6", "verdict": "partly-evidenced", "reason": "The security officer is named as the contact on the intranet, but nothing shows staff know it.", "citations": [{"doc_id": "information-security-policy", "quote": "When a change affects staff, the information security officer sends a short summary of it to all employees; when a change affects suppliers or service providers, purchasing sends them the summary with the next order."}]}
+    ]
+  }
+}

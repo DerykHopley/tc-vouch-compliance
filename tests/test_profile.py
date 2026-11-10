@@ -5,6 +5,7 @@ from typing import Any, get_args
 
 import pytest
 import yaml
+from chosen_documents import CHOSEN, chosen_profile, chosen_profile_path
 from isa_editions import GERMAN_5_1_1
 
 from vouch import isa
@@ -331,3 +332,92 @@ def test_a_broken_german_edition_is_a_profile_error_naming_it(tmp_path, monkeypa
 
     with pytest.raises(ProfileError, match="controls-de.yaml"):
         load_profile(write_profile(tmp_path, answer_language="de"))
+
+
+def test_a_source_names_no_chosen_documents_unless_given():
+    profile = load_profile(NORDLICHT_PROFILE)
+
+    assert {s.documents for s in profile.evidence_sources.values()} == {None}
+    assert profile.document_choices() == {}
+
+
+def test_a_source_may_choose_documents_of_its_folder(tmp_path):
+    profile = chosen_profile(tmp_path)
+
+    assert profile.evidence_sources["policies"].documents == CHOSEN
+    assert profile.evidence_sources["records"].documents is None
+    assert profile.document_choices() == {"policies": list(CHOSEN)}
+
+
+# Each bad list of chosen documents, and the problem its error must name.
+BAD_CHOICES = {
+    "empty": ([], "evidence_sources.policies.documents: Tuple should have at least 1 item"),
+    "repeated id": (
+        ["backup-policy", "backup-policy"],
+        "evidence_sources.policies.documents: backup-policy is named twice",
+    ),
+    "repeated id, once with .md": (
+        ["backup-policy", "backup-policy.md"],
+        "evidence_sources.policies.documents: backup-policy is named twice",
+    ),
+    "missing document": (
+        ["backup-policy", "no-such-policy"],
+        "evidence_sources.policies.documents: no document no-such-policy in the folder",
+    ),
+    "an id with .md twice": (
+        ["backup-policy.md.md"],
+        "evidence_sources.policies.documents: no document backup-policy.md in the folder",
+    ),
+    "a path out of the folder": (
+        ["../nordlicht/policies/x"],
+        "evidence_sources.policies.documents: no document ../nordlicht/policies/x in the folder",
+    ),
+}
+
+
+@pytest.mark.parametrize(("documents", "expected"), BAD_CHOICES.values(), ids=BAD_CHOICES.keys())
+def test_a_bad_list_of_chosen_documents_fails_with_an_error_naming_the_field(
+    tmp_path, documents, expected
+):
+    path = chosen_profile_path(tmp_path, documents)
+
+    with pytest.raises(ProfileError) as raised:
+        load_profile(path)
+
+    assert expected in str(raised.value)
+
+
+def test_a_chosen_document_linking_out_of_its_folder_fails(tmp_path):
+    path = chosen_profile_path(tmp_path, ["backup-policy", "outside"])
+    outside = tmp_path / "outside.md"
+    outside.write_text("# Outside\n", encoding="utf-8")
+    (path.parent / "policies" / "outside.md").symlink_to(outside)
+
+    with pytest.raises(ProfileError, match=r"documents: no document outside in the folder"):
+        load_profile(path)
+
+
+def test_a_chosen_id_given_with_md_is_kept_without_it(tmp_path):
+    profile = load_profile(chosen_profile_path(tmp_path, [f"{d}.md" for d in CHOSEN]))
+
+    assert profile.evidence_sources["policies"].documents == CHOSEN
+
+
+def test_choosing_documents_of_a_folder_that_has_escaped_says_the_folder_is_refused(
+    tmp_path, monkeypatch
+):
+    """Only a folder swapped for a link between the two checks gets here, so both modules'
+    `escaped` stand in for it."""
+    from vouch import documents, profile
+
+    monkeypatch.setattr(documents, "escaped", lambda folder: True)
+    monkeypatch.setattr(profile, "escaped", lambda folder: True, raising=False)
+    path = chosen_profile_path(tmp_path)
+
+    with pytest.raises(ProfileError) as raised:
+        load_profile(path)
+
+    assert (
+        "evidence_sources.policies.documents: the folder policies now points outside its "
+        "allowed folder" in str(raised.value)
+    )

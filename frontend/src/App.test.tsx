@@ -51,7 +51,7 @@ const OVERVIEW: Overview = {
   readiness: { controls: 12, accepted: 0,
     by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 }, open: 12,
     remediation_items: 0, remediation_approved: 0 },
-  by_status: { 'not-assessed': 12, 'waiting-for-review': 0, accepted: 0, rejected: 0 },
+  by_status: { 'not-assessed': 12, 'waiting-for-review': 0, accepted: 0, rejected: 0, 'not-applicable': 0 },
   next_step: { control_id: '1.1.1', action: 'assess' },
   controls: IDS.map((id) => ({ id, question: `Question ${id}?`, iso_27001: 'ISO 27001:2022: A.5.1', status: 'not-assessed',
     verdict: null })),
@@ -535,6 +535,39 @@ describe('the working paper', () => {
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', { name: 'Overview' }))
     expect(window.location.pathname).toBe('/')
     expect(paper()).toBeNull()
+  })
+})
+
+describe('the Documents tab (issue 424)', () => {
+  const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name })
+
+  it('sits after Report for every user, opens straight at /documents marked current, and Back returns', async () => {
+    serve()
+    render(<App />)
+    await screen.findAllByRole('article', { name: /^Control / })
+    const names = within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
+    expect(names).toEqual(['Overview', 'Report', 'Documents'])
+
+    await userEvent.click(tab('Documents'))
+    expect(window.location.pathname).toBe('/documents')
+    expect(tab('Documents').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+
+    act(() => window.history.back())
+    await waitFor(() => expect(window.location.pathname).toBe('/'))
+    expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
+    expect(tab('Documents').getAttribute('aria-current')).toBeNull()
+  })
+
+  it('opened directly (a reload), shows the Documents page with its tab current and reads no overview', async () => {
+    const fetch = serve()
+    window.history.replaceState(null, '', '/documents')
+    render(<App />)
+    expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
+    expect(tab('Documents').getAttribute('aria-current')).toBe('page')
+    expect(tab('Overview').getAttribute('aria-current')).toBeNull()
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/documents')).toBe(true))
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/overview')).toHaveLength(0)
   })
 })
 
@@ -1116,6 +1149,41 @@ describe('Ask Vouch', () => {
     await waitFor(() => expect(greetings).toEqual([{ page: 'report', control_id: null, thread_id: null }]))
     await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'What is left?{Enter}')
     await waitFor(() => expect(asked).toEqual([{ message: 'What is left?', page: 'report', control_id: null, thread_id: 't0' }]))
+  })
+
+  it('on the Documents tab, sends the greeting and messages with the documents as the page (issue 424)', async () => {
+    const greetings: ChatBody[] = []
+    const asked: ChatBody[] = []
+    serveChat((body) => { asked.push(body); return QUIET() }, (body) => { greetings.push(body); return QUIET() })
+    window.history.replaceState(null, '', '/documents')
+    render(<App />)
+    await open()
+    expect(within(bubble()!).getByText('on Documents')).toBeTruthy()
+    await waitFor(() => expect(greetings).toEqual([{ page: 'documents', control_id: null, thread_id: null }]))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Which are stale?{Enter}')
+    await waitFor(() => expect(asked).toEqual([{ message: 'Which are stale?', page: 'documents', control_id: null,
+      thread_id: 't0' }]))
+  })
+
+  it('an assessment from the chat on the Documents tab reads the documents again, for Cited by (issue 424)', async () => {
+    serveChat(() => Promise.resolve(sse([
+      'event: assessment\ndata: {"control_id":"4.1.2","verdict":"evidenced","status":"waiting-for-review","thread_id":"a1"}\n\n',
+      'event: token\ndata: {"text":"The assessment of control 4.1.2 has finished."}\n\n',
+      'event: done\ndata: {}\n\n'])))
+    const served = fetch
+    const documentReads: string[] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url === '/api/documents') documentReads.push(url)
+      return served(url, init)
+    })
+    window.history.replaceState(null, '', '/documents')
+    render(<App />)
+    await waitFor(() => expect(documentReads).toHaveLength(1))
+    await open()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message to Vouch' }), 'Assess 4.1.2{Enter}')
+    await within(within(bubble()!).getByRole('log')).findByText('The assessment of control 4.1.2 has finished.')
+
+    await waitFor(() => expect(documentReads).toHaveLength(2))
   })
 
   it('on the not-found page, speaks as on the Dossier (issue 268)', async () => {

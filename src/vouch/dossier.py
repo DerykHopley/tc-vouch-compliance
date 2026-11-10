@@ -7,8 +7,10 @@ rejected assessment shows on its control's card, but not in the counts.
 
 import itertools
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping
-from typing import Literal, TypedDict, get_args
+from collections.abc import Collection, Iterable, Iterator, Mapping
+from dataclasses import dataclass
+from functools import cached_property
+from typing import Literal, TypedDict, TypeVar, get_args
 
 from vouch.citations import EvidenceKind
 from vouch.graph import Assessment, Status, Verdict
@@ -18,9 +20,10 @@ from vouch.profile import ComplianceProfile, ProtectionLevel
 
 QUOTES_SHOWN = 6  # the evidence quote cards on the overview, at most
 
-CardStatus = Status | Literal["not-assessed"]
+CardStatus = Status | Literal["not-assessed", "not-applicable"]
 NOT_ASSESSED: CardStatus = "not-assessed"
-CARD_STATUSES: tuple[CardStatus, ...] = (NOT_ASSESSED, *get_args(Status))
+NOT_APPLICABLE: CardStatus = "not-applicable"  # the control as a whole, under the profile (#454)
+CARD_STATUSES: tuple[CardStatus, ...] = (NOT_ASSESSED, *get_args(Status), NOT_APPLICABLE)
 VERDICTS: tuple[Verdict, ...] = ("evidenced", "partly-evidenced", "not-evidenced", "not-applicable")
 
 NextAction = Literal["review", "assess-again", "assess"]
@@ -51,6 +54,8 @@ class ControlCard(TypedDict):
     reassess_suggested: bool
     reassess_reasons: list[ReassessReason]
     closed: bool
+    # The profile's reason when the control is not applicable as a whole (#454); None otherwise.
+    not_applicable: str | None
 
 
 class Quote(TypedDict):
@@ -109,6 +114,64 @@ def control_requirements(profile: ComplianceProfile, control: IsaControl) -> lis
     ]
 
 
+_Kept = TypeVar("_Kept")
+
+
+@dataclass(frozen=True)
+class Applicability:
+    """Which of the listed controls apply under the profile (#454), decided once per request
+    (`applicability`) and passed to everything that reads the controls. A control applies when
+    it has an applicable requirement; one with none (marked not applicable as a whole, or each
+    of its requirements marked) is not applicable as a whole: it has a card that says so, but
+    readiness, the next step, the quotes, the reports, the review rounds, the documents' Cited
+    by, the chat and the profile pass leave it out, and no assessment of it starts."""
+
+    controls: tuple[IsaControl, ...]  # every listed control, in the order given
+    reasons: Mapping[str, str]  # each control not applicable as a whole: the profile's reason
+
+    @cached_property
+    def applicable(self) -> list[IsaControl]:
+        """The controls that apply, in the order given."""
+        return [c for c in self.controls if c.id not in self.reasons]
+
+    def counted(self, latest: Mapping[str, _Kept]) -> dict[str, _Kept]:
+        """`latest` (by control id) without the controls not applicable as a whole."""
+        return {cid: kept for cid, kept in latest.items() if cid not in self.reasons}
+
+
+def applicability(
+    profile: ComplianceProfile, controls: "Iterable[IsaControl] | Applicability"
+) -> Applicability:
+    """Which of the listed controls apply under the profile: the one place this is decided,
+    reading each control's requirements once. Given an Applicability, it is kept as it is. A
+    reason is the excluded requirements' distinct reasons, in their order, joined with "; " (one,
+    when the whole control was marked)."""
+    if isinstance(controls, Applicability):
+        return controls
+    listed = tuple(controls)
+    reasons: dict[str, str] = {}
+    for control in listed:
+        requirements = profile.requirements_for(control)
+        if not requirements.applicable:
+            reasons[control.id] = "; ".join(
+                dict.fromkeys(n.reason for n in requirements.not_applicable)
+            )
+    return Applicability(listed, reasons)
+
+
+def not_applicable_refusal(control_id: str) -> str:
+    """Why no assessment of a control not applicable as a whole starts (#454): nothing could
+    review its result. The API's 409 and the chat say it, and nothing is counted."""
+    return f"{control_id} is not applicable in this profile."
+
+
+def applicable_controls(
+    profile: ComplianceProfile, controls: Iterable[IsaControl]
+) -> list[IsaControl]:
+    """The listed controls that apply under the profile, in the order given (`applicability`)."""
+    return applicability(profile, controls).applicable
+
+
 def requirements_by_control(
     profile: ComplianceProfile, controls: Iterable[IsaControl]
 ) -> dict[str, list[PaperRequirement]]:
@@ -146,7 +209,7 @@ def readiness(
 
 def overview(
     profile: ComplianceProfile,
-    controls: Iterable[IsaControl],
+    controls: Iterable[IsaControl] | Applicability,
     latest: Mapping[str, Assessment],
     discarded: Collection[tuple[str, str]] = (),
     approved: Collection[tuple[str, str]] = (),
@@ -159,22 +222,30 @@ def overview(
     `discarded` names the remediation items the lead discarded, by thread and requirement id:
     the band counts the others (#43); `approved` those approved, counted apart (#310). `flags`
     are the improvement plan's and the open questions' per control (#410, #414; none: no flag
-    set)."""
-    controls = list(controls)
-    listed = {c.id: latest[c.id] for c in controls if c.id in latest}
+    set). A control not applicable as a whole under the profile (`applicability`, decided
+    here unless given) has a card that says so, with the profile's reason, whatever its newest
+    assessment; everything else leaves it out (#454)."""
+    scope = applicability(profile, controls)
+    applicable = scope.applicable
+    listed = {c.id: latest[c.id] for c in applicable if c.id in latest}
     flags = flags or {}
-    cards = [_card(control, listed.get(control.id), flags.get(control.id)) for control in controls]
+    cards = [
+        _not_applicable_card(control, reason)
+        if (reason := scope.reasons.get(control.id)) is not None
+        else _card(control, listed.get(control.id), flags.get(control.id))
+        for control in scope.controls
+    ]
     statuses = Counter(card["status"] for card in cards)
     return {
         "company": profile.company,
         "country": profile.country,
         "protection_level": profile.protection_level,
         "answer_language": profile.answer_language,
-        "readiness": readiness(controls, listed, discarded, approved),
+        "readiness": readiness(applicable, listed, discarded, approved),
         "by_status": {status: statuses[status] for status in CARD_STATUSES},
         "next_step": _next_step(cards),
         "controls": cards,
-        "quotes": _quotes(controls, listed),
+        "quotes": _quotes(applicable, listed),
     }
 
 
@@ -199,6 +270,16 @@ def _card(
         "reassess_suggested": bool(assessment and flags and flags.reassess_suggested),
         "reassess_reasons": list(flags.reasons) if assessment and flags else [],
         "closed": bool(assessment and flags and flags.closed),
+        "not_applicable": None,
+    }
+
+
+def _not_applicable_card(control: IsaControl, reason: str) -> ControlCard:
+    """A control not applicable as a whole: no assessment, its own status and the reason."""
+    return _card(control, None, None) | {
+        "status": NOT_APPLICABLE,
+        "verdict": "not-applicable",
+        "not_applicable": reason,
     }
 
 
@@ -210,16 +291,25 @@ def _next_step(cards: list[ControlCard]) -> NextStep | None:
     return None
 
 
+def cited_assessments(
+    controls: Iterable[IsaControl], latest: Mapping[str, Assessment]
+) -> Iterator[tuple[IsaControl, Assessment]]:
+    """Each control, in order, with its newest assessment, whose citations count as evidence:
+    none for a control not assessed or whose newest assessment is rejected (the lead turned its
+    evidence down). The overview's quotes and the Documents tab's Cited by (#424) both read it."""
+    for control in controls:
+        assessment = latest.get(control.id)
+        if assessment is not None and assessment.status != "rejected":
+            yield control, assessment
+
+
 def _quotes(controls: list[IsaControl], latest: Mapping[str, Assessment]) -> list[Quote]:
     """Each checked quote once, up to QUOTES_SHOWN, spread across the assessed controls: one
     from each in control order, then a second from each, and so on (#147), so the first
     control's evidence doesn't fill them all. None from a rejected assessment, whose evidence
     the lead turned down."""
     per_control: list[list[Quote]] = []
-    for control in controls:
-        assessment = latest.get(control.id)
-        if assessment is None or assessment.status == "rejected":
-            continue
+    for control, assessment in cited_assessments(controls, latest):
         per_control.append(
             [
                 {

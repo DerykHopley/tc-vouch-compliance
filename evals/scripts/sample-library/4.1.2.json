@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "services secured systems access"}},
+    {"tool": "search_records", "args": {"query": "services secured systems access"}},
+    {"answer": "Draft answer for 4.1.2, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "The standard says each system's login method follows a risk assessment, but no record shows that assessment was done.", "citations": [{"doc_id": "authentication-standard", "quote": "For each system, IT and the information security officer weigh the risk before deciding how users sign in: what information the system holds, who uses it, and whether it can be reached from the internet."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "The rules follow national guidance on passwords and multi-factor sign-in.", "citations": [{"doc_id": "authentication-standard", "quote": "The login methods follow recognised good practice, such as the national guidance on secure passwords and multi-factor sign-in."}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "The standard defines the login methods and the settings check shows them in force on the directory, the VPN and the internet-facing systems.", "citations": [{"doc_id": "authentication-standard", "quote": "Screens lock after ten minutes without use, and sessions on internet-facing systems end after eight hours."}, {"doc_id": "sign-in-settings-record", "quote": "On 13 October 2026 an administrator compared the live settings of the directory, the VPN and the internet-facing systems with the authentication standard and the user account standard, and tried each rule with a test account."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Passwords of 12 characters checked against leaked lists are required, and the settings check found a leaked password refused.", "citations": [{"doc_id": "authentication-standard", "quote": "Every user signs in with a personal password of at least 12 characters, checked against lists of known leaked passwords."}, {"doc_id": "sign-in-settings-record", "quote": "Password length and leaked-password check | Authentication standard | 12 characters at least; a known leaked password was refused"}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Administrators sign in with a hardware token through the administration server, and the settings check found other sign-ins refused.", "citations": [{"doc_id": "authentication-standard", "quote": "Administrator accounts always sign in with a hardware token, through the administration server."}, {"doc_id": "sign-in-settings-record", "quote": "Administrator sign-in | Authentication standard | Hardware token, only from the administration server; a sign-in from a laptop was refused"}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Lockout, screen locks and alerts on unusual sign-ins are set out, and the settings check found them on, with three alerts followed up.", "citations": [{"doc_id": "authentication-standard", "quote": "For each system, IT and the information security officer weigh the risk before deciding how users sign in: what information the system holds, who uses it, and whether it can be reached from the internet."}, {"doc_id": "sign-in-settings-record", "quote": "Unusual sign-in alerts | Authentication standard | On; three alerts this quarter, each looked into by IT the same day"}]}
+    ]
+  }
+}

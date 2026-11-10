@@ -8,6 +8,7 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import asyncio
+import json
 import logging
 import re
 import threading
@@ -21,12 +22,25 @@ from typing import Annotated, Any, NamedTuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, goal, plan, questions, remediation, report, report_pdf, rounds
+from vouch import (
+    audit,
+    company_profiles,
+    documents_tab,
+    goal,
+    plan,
+    questions,
+    remediation,
+    report,
+    report_pdf,
+    rounds,
+)
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -48,7 +62,15 @@ from vouch.chat_agent import (
 )
 from vouch.citations import LeadStatement
 from vouch.database import Connection, Database, DatabaseUnavailable, Goal
-from vouch.dossier import PaperRequirement, overview, requirements_by_control
+from vouch.documents import library_summaries
+from vouch.dossier import (
+    Applicability,
+    PaperRequirement,
+    applicability,
+    not_applicable_refusal,
+    overview,
+    requirements_by_control,
+)
 from vouch.graph import (
     Assessment,
     ConfirmFindings,
@@ -64,6 +86,7 @@ from vouch.isa import (
     BaseFrameworkError,
     IsaControl,
     UnknownControlError,
+    load_base_framework,
 )
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
@@ -80,11 +103,17 @@ from vouch.model_choice import (
     UnknownModel,
     model_store,
 )
+from vouch.paths import SAMPLE_LIBRARY_DIR
 from vouch.profile import (
     DEFAULT_PROFILE,
+    SAMPLE_LIBRARY,
     BrokenProfile,
     ComplianceProfile,
+    ProfileError,
     ProfileScan,
+    load_problem,
+    profile_folder_names,
+    protection_scope,
     scan_profiles,
 )
 from vouch.profile_pass import (
@@ -138,12 +167,20 @@ log = logging.getLogger(__name__)
 SIGNED_OUT = "Sign in to use Vouch."
 CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again shortly."
 DEVELOPERS_ONLY = "This is available to developers only."
+PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
+CONTROLS_FAILED = "The framework's controls could not be read."
+SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
+DOCUMENTS_FAILED = "The documents could not be read."
+# The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
+# in the order step 6 lists them.
+LIBRARY_SOURCES = ("policies", "records")
 NOT_A_MEMBER = (
     "Vouch is open to members of the course's Discord server. This Discord account is not in it."
 )
 SIGN_IN_AGAIN = "Please sign in with Discord again, so Vouch can check your Discord servers."
 DATABASE_UNAVAILABLE = "The database is unavailable just now. Please try again shortly."
 UNKNOWN_PROFILE = "There is no such compliance profile."
+NOT_A_MADE_COMPANY = "Only a company made in company setup can be removed."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
 EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
@@ -319,6 +356,14 @@ def _refused(detail: str, reason: str) -> HTTPException:
     return _Refused(status_code=403, detail={"detail": detail, "reason": reason})
 
 
+def request_refused(request: Request, error: Exception) -> Response:
+    """FastAPI's own 422 for a request its checks refuse, written as ASCII JSON: the input it
+    echoes may hold a lone surrogate, which no UTF-8 body can carry (#385)."""
+    assert isinstance(error, RequestValidationError)
+    body = json.dumps({"detail": jsonable_encoder(error.errors())}, ensure_ascii=True)
+    return Response(body, status_code=422, media_type="application/json")
+
+
 def refused(request: Request, error: Exception) -> JSONResponse:
     """A _Refused 403 as `{"detail": ..., "reason": ...}`, beside FastAPI's own `detail`."""
     assert isinstance(error, _Refused)
@@ -333,22 +378,85 @@ def rate_limit(request: Request, user: CurrentUser) -> None:
         raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS, headers=headers)
 
 
-def user_profiles(settings: Settings, user: User) -> ProfileScan:
-    """The one place that decides which compliance profiles a user may see and use (#47): for
-    now every profile in the profiles folder, for every user, each read once. A broken one is
-    left out (and listed for the developer page), never a failure."""
-    return scan_profiles(settings.profiles_dir)
+def app_company_profiles(db: AppDatabase) -> company_profiles.CompanyProfiles:
+    """Where companies made in the app are kept (#385): Postgres with a database URL, else this
+    process."""
+    if db is None:
+        return company_profiles.process_company_profiles()
+    return company_profiles.PostgresCompanyProfiles(db)
+
+
+CompanyProfiles = Annotated[company_profiles.CompanyProfiles, Depends(app_company_profiles)]
+
+
+def file_profiles(settings: Settings) -> ProfileScan:
+    """Every profile in the profiles folder, each read once, except the sample library's
+    reference profile, which is no company (#370)."""
+    scan = scan_profiles(settings.profiles_dir)
+    return ProfileScan(
+        tuple(p for p in scan.loaded if p.id != SAMPLE_LIBRARY),
+        tuple(p for p in scan.broken if p.id != SAMPLE_LIBRARY),
+    )
+
+
+SHADOWED = "its id is now a file profile's"
+"""Why a company made in the app is left out when a profile folder of its id was added since."""
+
+
+def user_profiles(settings: Settings, user: User, companies: CompanyProfiles) -> ProfileScan:
+    """The compliance profiles a user is shown (#47), the profile switcher's and the developer
+    page's: for now, for every user, the profiles folder's (file_profiles), then the companies
+    made in the app, oldest first (#385), each read once. A broken one is left out (and listed
+    for the developer page), never a failure; so is a stored one whose id a file profile has
+    taken since, as the file profile is the one opened. When the stored ones can't be read, the
+    file ones (logged). Which profile a request is under is compliance_profile's to decide,
+    with the same file-first rule; a per-user choice must change both (#163)."""
+    return _profile_scan(settings, _stored_companies(companies))
+
+
+def _stored_companies(companies: CompanyProfiles) -> list[company_profiles.StoredProfile] | None:
+    """Every live company made in the app, oldest first; None when they can't be read (logged)."""
+    try:
+        return companies.all()
+    except DatabaseUnavailable:
+        log.warning("the companies made in the app can't be read: listing the file profiles only")
+        return None
+
+
+def _profile_scan(
+    settings: Settings, rows: list[company_profiles.StoredProfile] | None
+) -> ProfileScan:
+    files = file_profiles(settings)
+    if rows is None:
+        return files
+    file_ids = {p.id for p in files.loaded} | {p.id for p in files.broken}
+    stored: list[ComplianceProfile | BrokenProfile] = [
+        BrokenProfile(row.id, SHADOWED)
+        if row.id in file_ids
+        else company_profiles.read_stored_once(row)
+        for row in rows
+    ]
+    return ProfileScan(
+        (*files.loaded, *(p for p in stored if isinstance(p, ComplianceProfile))),
+        (*files.broken, *(p for p in stored if isinstance(p, BrokenProfile))),
+    )
 
 
 def compliance_profile(
     settings: AppSettings,
     user: CurrentUser,
+    companies: CompanyProfiles,
     chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
 ) -> ComplianceProfile:
-    """The profile the request names, else the default, from the user's profiles. Settled
-    before the stream starts: one the user doesn't have is a 404; a broken one a plain 500."""
+    """The profile the request names, else the default: a file profile first, so a request
+    under one never reads the database, else a company made in the app (the file-first rule
+    user_profiles lists by). Settled before the stream starts: one there is none of is a 404; a
+    broken one a plain 500; a stored company's that can't be read a 503."""
     name = chosen or DEFAULT_PROFILE
-    found = user_profiles(settings, user).find(name)
+    found = file_profiles(settings).find(name)
+    if found is None and company_profiles.is_profile_name(name):
+        row = companies.one(name)
+        found = None if row is None else company_profiles.read_stored_once(row)
     if found is None:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
     if isinstance(found, BrokenProfile):
@@ -372,13 +480,17 @@ def requested_assessment(
 ) -> RequestedAssessment:
     """The control is looked up, in the request's profile's ISA edition (#48), before the
     stream starts, so an unknown one is a plain 404 and an unreadable edition a plain 500, not
-    an event."""
+    an event. A control not applicable as a whole under the profile is a 409 (#454): nothing
+    could review its result. Each is refused before the run is held or counted."""
     try:
-        return RequestedAssessment(profile.isa_control(request.control_id), request.note)
+        control = profile.isa_control(request.control_id)
     except UnknownControlError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BaseFrameworkError:
         raise _unreadable_edition(profile, ASSESSMENT_FAILED) from None
+    if applicability(profile, [control]).reasons:
+        raise HTTPException(status_code=409, detail=not_applicable_refusal(control.id))
+    return RequestedAssessment(control, request.note)
 
 
 def profile_tools(profile: Profile) -> frozenset[str]:
@@ -727,7 +839,7 @@ def create_profile_pass(
         counted = True
 
     try:
-        model = models.for_profile_pass(chosen, callbacks=[meter])
+        model = models.for_profile_pass(chosen, callbacks=[meter], profile=profile)
         result = run_profile_pass(
             profile,
             memory,
@@ -1040,23 +1152,27 @@ def read_audit_trail(
 
 
 @router.get("/profiles")
-def list_profiles(settings: AppSettings, user: CurrentUser) -> dict[str, Any]:
+def list_profiles(
+    settings: AppSettings, user: CurrentUser, companies: CompanyProfiles
+) -> dict[str, Any]:
     """The compliance profiles the user may switch between (#47): each one's id, company,
     country and answer language. A profile that can't be loaded is left out (the developer page
     names it). `default` is the profile a request without X-Vouch-Profile is under; null when
     that one is left out."""
-    scan = user_profiles(settings, user)
-    listed = [
-        {
-            "id": p.id,
-            "company": p.company,
-            "country": p.country,
-            "answer_language": p.answer_language,
-        }
-        for p in scan.loaded
-    ]
+    scan = user_profiles(settings, user, companies)
+    listed = [listed_profile(p) for p in scan.loaded]
     default = scan.find(DEFAULT_PROFILE)
     return {"profiles": listed, "default": default.id if default in scan.loaded else None}
+
+
+def listed_profile(profile: ComplianceProfile) -> dict[str, str]:
+    """A profile as the profile switcher lists it."""
+    return {
+        "id": profile.id,
+        "company": profile.company,
+        "country": profile.country,
+        "answer_language": profile.answer_language,
+    }
 
 
 _paper_requirements: dict[str, tuple[ComplianceProfile, Any]] = {}
@@ -1077,19 +1193,31 @@ def paper_requirements(
     return kept[1]
 
 
+class Standing(NamedTuple):
+    """What the overview, the report, the review rounds and the Documents tab are built from
+    (`_standing`): which of the profile's controls apply (#454), each applicable control's
+    newest assessment, and the accepted ones' thread ids (whose remediation decisions count)."""
+
+    scope: Applicability
+    latest: dict[str, Assessment]
+    accepted: list[str]
+
+
 def _standing(
     profile: ComplianceProfile, memory: Memory, saver: BaseCheckpointSaver, failed: str
-) -> tuple[list[IsaControl], dict[str, Assessment], list[str]]:
-    """What the overview and the report are built from: the profile's controls in its ISA
-    edition (unreadable: the plain 500 with `failed`), each control's newest assessment, and the
-    accepted ones' thread ids (whose remediation decisions count)."""
-    latest = newest_by_control(memory, saver)  # from each control's newest thread
-    accepted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+) -> Standing:
+    """The standing under the profile: its controls in its ISA edition (unreadable: the plain
+    500 with `failed`), decided applicable or not once; the newest assessment of each applicable
+    one, an assessment of a control not applicable as a whole left out, so nothing reading them
+    counts it."""
     try:
         controls = profile.isa_edition().controls
     except BaseFrameworkError:
         raise _unreadable_edition(profile, failed) from None
-    return list(controls), latest, accepted
+    scope = applicability(profile, controls)
+    latest = scope.counted(newest_by_control(memory, saver))  # from each control's newest thread
+    accepted = [a.thread_id for a in latest.values() if a.status == "accepted"]
+    return Standing(scope, latest, accepted)
 
 
 @router.get("/overview")
@@ -1112,7 +1240,7 @@ def dossier_overview(
     flags (#410); the open questions asked since the fresh start, by control id, oldest first,
     and the reasons they suggest a re-assessment for, in both goals (#414). Redacted as the
     stream's events are."""
-    controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    scope, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
     approved = {key for key, item in decided.items() if item.status == "approved"}
@@ -1122,12 +1250,12 @@ def dossier_overview(
     flags = plan.with_reasons(
         _plan_flags(current, memory, saver, items, marks), questions.reasons(latest, listed, at)
     )
-    shown = dict(overview(profile, controls, latest, discarded, approved, flags))
+    shown = dict(overview(profile, scope, latest, discarded, approved, flags))
     clean, _ = redact_data(shown | {"questions": questions.by_control(listed, at)})
     return clean | {
-        "requirements": paper_requirements(profile, controls),
+        "requirements": paper_requirements(profile, scope.controls),
         "goal": current,
-        "rounds": _rounds(review, memory, controls, latest),
+        "rounds": _rounds(review, memory, scope.applicable, latest),
     }
 
 
@@ -1171,7 +1299,8 @@ def _comparison(
     latest: dict[str, Assessment],
 ) -> report.ReportComparison | None:
     """Now compared with the last round closed since the fresh start (None when there is none):
-    the overview's (#402) and the improvement report's (#420)."""
+    the overview's (#402) and the improvement report's (#420). `controls`: the applicable ones
+    (the standing's, #454)."""
     against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
     if against is None or against.closed_at is None:
         return None
@@ -1233,12 +1362,13 @@ def close_round(
 ) -> dict[str, Any]:
     """The lead closes the open review round under the profile (#402): its results frozen (each
     control's newest assessment as it stands now) with its audit entry, together (when the
-    entry can't be written, neither is: a 503). With none open, a 409 with nothing written."""
-    controls, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    entry can't be written, neither is: a 503). With none open, a 409 with nothing written. A
+    control not applicable as a whole under the profile isn't frozen (#454)."""
+    scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
     try:
         closed = rounds.close(
             review,
-            rounds.freeze(controls, latest),
+            rounds.freeze(scope.applicable, latest),
             reviewer=audit.Reviewer(user.id, name),
             profile_id=profile.id,
         )
@@ -1370,13 +1500,13 @@ def _report(
     ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads. Under the
     user's Goal: the readiness report, or in Internal improvement the improvement report (#420),
     its plan, comparison and questions read as the overview reads them."""
-    controls, latest, accepted = _standing(profile, memory, saver, failed)
+    scope, latest, accepted = _standing(profile, memory, saver, failed)
     current = stores.goals.goal(memory.user_id, memory.profile_id)
     built: Mapping[str, Any]
     if current != plan.IMPROVEMENT:
         decided = items.decided(memory.user_id, memory.profile_id, accepted)
         built = report.readiness_report(
-            profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
+            profile, scope, latest, decided=decided, trail=read_trail(), today=report.today()
         )
     else:
         history, decided, marked = _plan_reads(memory, saver, items, stores.marks)
@@ -1385,13 +1515,13 @@ def _report(
         )
         built = report.improvement_report(
             profile,
-            controls,
+            scope,
             latest,
             history=history,
             decided=decided,
             marks=marked,
             flags=plan.card_flags(history, decided, marked, current),
-            comparison=_comparison(stores.review, memory, controls, latest),
+            comparison=_comparison(stores.review, memory, scope.applicable, latest),
             questions=listed,
             trail=read_trail(),
             today=report.today(),
@@ -1426,6 +1556,26 @@ def readiness_report(
 
     built = _report(profile, memory, saver, items, stores, newest_page, REPORT_FAILED)
     return built | {"words": report.words_for(profile.answer_language)}
+
+
+@router.get("/documents")
+def profile_documents_tab(
+    profile: Profile, memory: UserMemory, saver: Checkpointer
+) -> dict[str, Any]:
+    """The Documents tab (#424), for every signed-in user: each evidence document the profile
+    uses, with its summary, whether it is stale today and the controls whose newest assessment
+    cites it (vouch.documents_tab; a control not applicable as a whole under the profile names
+    none, #454), and the tab's words in the profile's language. Redacted as the overview is;
+    an unreadable ISA edition, folder or document a plain 500 naming no path."""
+    scope, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
+    try:
+        listed = documents_tab.profile_documents(profile, scope.applicable, latest, report.today())
+    except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
+        log.exception("the documents of %s could not be read", profile.id)
+        raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None
+    clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
+    language, words = documents_tab.document_words(profile.answer_language)
+    return clean | {"words": words, "words_language": language}
 
 
 def attachment(name: str) -> str:
@@ -1724,24 +1874,49 @@ def _developer_page(
     models: ModelChoice,
     spending: SpendingGuard,
     settings: Settings,
-    user: User,
+    companies: CompanyProfiles,
     model: str | None = None,
 ) -> dict[str, Any]:
     """The whole developer page, the same for its read and for each change's answer (#455: the
-    changes once left out the broken profiles, and the page rendering their answer failed)."""
-    broken = user_profiles(settings, user).broken
+    changes once left out the broken profiles, and the page rendering their answer failed),
+    the companies made in setup included (#418)."""
     page = models.settings(model) | spending.settings()
-    return page | {"broken_profiles": [asdict(b) for b in broken]}
+    return page | _company_settings(settings, companies)
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
 def developer_settings(
-    models: AppModels, spending: AppSpending, settings: AppSettings, user: CurrentUser
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
 ) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
-    limit, every assessment's usage totalled, and the compliance profiles left out of the
-    profile switcher because they can't be loaded (#47), each with its problem."""
-    return _developer_page(models, spending, settings, user)
+    limit, every assessment's usage totalled, the compliance profiles left out of the profile
+    switcher because they can't be loaded (#47), each with its problem, and the companies made
+    in setup (#418)."""
+    return _developer_page(models, spending, settings, companies)
+
+
+def _company_settings(settings: Settings, companies: CompanyProfiles) -> dict[str, Any]:
+    """The developer page's profiles: `broken_profiles`, and `companies`, each live company made
+    in setup, oldest first, broken and shadowed ones included, so any can be removed (#418);
+    None when they can't be read (logged)."""
+    rows = _stored_companies(companies)
+    broken = _profile_scan(settings, rows).broken
+    made = None if rows is None else [_made_company(row) for row in rows]
+    return {"broken_profiles": [asdict(b) for b in broken], "companies": made}
+
+
+def _made_company(row: company_profiles.StoredProfile) -> dict[str, str]:
+    """A company made in setup as the developer page lists it: its id, its name, when made."""
+    name = row.profile.get("company")
+    return {
+        "id": row.id,
+        "company": name if isinstance(name, str) else row.id,
+        "created_at": row.created_at.isoformat(),
+    }
 
 
 @router.put("/developer/daily-limit", dependencies=DEVELOPERS)
@@ -1750,12 +1925,12 @@ def change_daily_limit(
     models: AppModels,
     spending: AppSpending,
     settings: AppSettings,
-    user: CurrentUser,
+    companies: CompanyProfiles,
 ) -> dict[str, Any]:
     """Each user may start `daily_limit` assessments a day, from the next one on. The answer is
     the whole developer page, as `developer_settings` reads it (#455)."""
     spending.set_daily_limit(request.daily_limit)
-    return _developer_page(models, spending, settings, user)
+    return _developer_page(models, spending, settings, companies)
 
 
 @router.put("/developer/model", dependencies=DEVELOPERS)
@@ -1764,7 +1939,7 @@ def change_model(
     models: AppModels,
     spending: AppSpending,
     settings: AppSettings,
-    user: CurrentUser,
+    companies: CompanyProfiles,
 ) -> dict[str, Any]:
     """The next assessment runs on `model`, once OpenRouter's model list has it. The answer is
     the whole developer page, as `developer_settings` reads it (#455)."""
@@ -1777,7 +1952,108 @@ def change_model(
         raise HTTPException(status_code=422, detail=detail) from None
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
-    return _developer_page(models, spending, settings, user, model)
+    return _developer_page(models, spending, settings, companies, model)
+
+
+@router.get("/developer/protection-levels", dependencies=DEVELOPERS)
+def protection_levels() -> dict[str, Any]:
+    """What each protection level brings into scope (#403), for company setup's step 3; the
+    base framework unreadable, a plain 500 naming no file."""
+    try:
+        levels = protection_scope()
+    except BaseFrameworkError:
+        log.exception("the base framework could not be read")
+        raise HTTPException(status_code=500, detail=PROTECTION_LEVELS_FAILED) from None
+    return {"levels": [asdict(scope) for scope in levels]}
+
+
+@router.get("/developer/controls", dependencies=DEVELOPERS)
+def framework_controls() -> dict[str, Any]:
+    """Every control of the base framework's English edition, in its order (#407), for company
+    setup's step 5; the base framework unreadable, a plain 500 naming no file."""
+    try:
+        controls = load_base_framework().controls
+    except BaseFrameworkError:
+        log.exception("the base framework could not be read")
+        raise HTTPException(status_code=500, detail=CONTROLS_FAILED) from None
+    return {"controls": [{"id": c.id, "question": c.question} for c in controls]}
+
+
+@router.get("/developer/sample-library", dependencies=DEVELOPERS)
+def sample_library() -> dict[str, Any]:
+    """Every document of the sample library (#408), policies then records, each by title, with
+    what Vouch reads from it (DocumentSummary) and whether it is stale today, for company
+    setup's step 6; the library unreadable, a plain 500 naming no path."""
+    try:
+        summaries = library_summaries(SAMPLE_LIBRARY_DIR, LIBRARY_SOURCES, report.today())
+    except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
+        log.exception("the sample library could not be read")
+        raise HTTPException(status_code=500, detail=SAMPLE_LIBRARY_FAILED) from None
+    return {"documents": [asdict(s) | {"stale": s.stale_because is not None} for s in summaries]}
+
+
+@router.post("/developer/profiles", dependencies=DEVELOPERS, status_code=201)
+def create_company_profile(
+    setup: company_profiles.CompanySetup,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
+) -> dict[str, str]:
+    """A company made in the app (company setup, #385), its evidence chosen documents of the
+    sample library, kept and listed beside the file profiles; answers it as GET /api/profiles
+    lists it. A profile the checks refuse is a 422 naming the field, with nothing kept; the
+    database down, a 503."""
+    # Checked before it is kept, so a refused one keeps nothing. Its id is known only once
+    # kept (the store takes the first free one, racing creates included), and a stored
+    # profile's checks don't depend on its id, so it is checked under the id its name gives.
+    try:
+        profile = company_profiles.compliance_profile_of(
+            company_profiles.company_id(setup.company), setup
+        )
+    except ProfileError as error:
+        raise HTTPException(status_code=422, detail=load_problem(error)) from None
+    taken = profile_folder_names(settings.profiles_dir)
+    fields = setup.model_dump(mode="json")
+    profile_id = companies.create(setup.company, fields, user.id, taken)
+    log.info("company profile %s created by %s", profile_id, user.id)
+    return listed_profile(profile) | {"id": profile_id}
+
+
+@router.delete("/developer/profiles/{profile_id}", dependencies=DEVELOPERS)
+def remove_company_profile(
+    profile_id: str,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
+) -> dict[str, Any]:
+    """Remove a company made in setup (#418): it leaves every list and can't be opened, its row
+    kept so its id is never used again, its audit trail, threads, remediation items and Goal
+    left as they are. Answers the developer settings after it; when they can't be read then,
+    `settings_unavailable` (still a 200: the removal is done). A stored company is removed
+    even when a profile folder of its id was added since (the file profile stays). A profile
+    folder's name with no such company is a 409; any other id a 404; the database down a 503,
+    nothing changed. An assessment already streaming under it runs to its end."""
+    if companies.remove(profile_id, user.id):
+        log.info("company profile %s removed by %s", profile_id, user.id)
+    elif profile_id in profile_folder_names(settings.profiles_dir):
+        raise HTTPException(status_code=409, detail=NOT_A_MADE_COMPANY)
+    else:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    _forget_profile(profile_id)
+    try:
+        return _developer_page(models, spending, settings, companies)
+    except Exception:  # removed already: never answer as if nothing was (#418 review)
+        log.exception("the developer settings can't be read after removing %s", profile_id)
+        return {"settings_unavailable": True}
+
+
+def _forget_profile(profile_id: str) -> None:
+    """Drop what this process keeps under a removed company's id (#418), so the caches don't grow
+    with removals; the id is never used again."""
+    _paper_requirements.pop(profile_id, None)
+    company_profiles.read_stored_once.forget(profile_id)
 
 
 @router.get("/access")
@@ -1850,6 +2126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Vouch", lifespan=lifespan, **(no_map if clerk_mode else {}))
     app.add_exception_handler(DatabaseUnavailable, database_unavailable)
     app.add_exception_handler(_Refused, refused)
+    app.add_exception_handler(RequestValidationError, request_refused)
     app.add_exception_handler(DailyLimitReached, daily_limit_reached)
     app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
     remember_secrets(settings)  # security layer 4: its own secret values never leave it

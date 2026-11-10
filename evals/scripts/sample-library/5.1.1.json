@@ -1,0 +1,14 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "cryptographic procedures managed extent"}},
+    {"tool": "search_records", "args": {"query": "cryptographic procedures managed extent"}},
+    {"answer": "Draft answer for 5.1.1, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "Only recommended methods are allowed, and the encryption check found an old protocol on one server and switched it off.", "citations": [{"doc_id": "cryptography-standard", "quote": "We use only methods that current national technical guidelines recommend:"}, {"doc_id": "encryption-check-record", "quote": "Old test web server | TLS 1.0 | Failed; the old protocol was switched off on 24 September and the server passed a rescan"}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Methods, key strengths and the key lifecycle are set out, and the encryption check shows disks encrypted and keys renewed within two years.", "citations": [{"doc_id": "cryptography-standard", "quote": "A key is renewed at least every two years, withdrawn at once when it may have been exposed, and deleted when the data it protects is gone."}, {"doc_id": "encryption-check-record", "quote": "The key vault holds 41 keys; none is older than two years, and two were renewed this month."}]},
+      {"requirement_id": "H1", "verdict": "partly-evidenced", "reason": "The standard says we keep the keys for confidential data that providers process, but nothing shows which providers this applies to.", "citations": [{"doc_id": "cryptography-standard", "quote": "Where a service provider processes our confidential information, we keep the keys that protect it ourselves, in our key vault, unless the information security officer approves an exception in writing."}]}
+    ]
+  }
+}

@@ -22,7 +22,7 @@ import copy
 import datetime
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -33,8 +33,10 @@ from vouch.documents import (
     DOCUMENTED,
     EvidenceKind,
     Section,
+    choice_in,
     document_path,
     facts_of,
+    is_chosen,
     sections,
 )
 from vouch.front_matter import split_front_matter
@@ -161,8 +163,17 @@ def occurs(quote: str, text: str) -> bool:
     return re.search(start + re.escape(quote) + end, text) is not None
 
 
-def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Document | DropReason:
-    found = [(s, p) for s, f in sources.items() if (p := document_path(f, doc_id))]
+def _load(
+    doc_id: str,
+    sources: dict[str, Path],
+    choices: Mapping[str, Collection[str]],
+    today: datetime.date,
+) -> _Document | DropReason:
+    found = [
+        (s, p)
+        for s, f in sources.items()
+        if (p := document_path(f, doc_id)) and is_chosen(p.stem, choice_in(choices, s))
+    ]
     if not found:
         return DropReason.NO_DOCUMENT
     if len(found) > 1:  # which one the judge read can't be told, so neither is taken
@@ -183,7 +194,9 @@ def _load(doc_id: str, sources: dict[str, Path], today: datetime.date) -> _Docum
 
 class QuoteChecker:
     """Checks citations against the documents in these sources' folders (source name to
-    folder), reading each document once; staleness is judged on `today`. With `seen_as`, each
+    folder), reading each document once; staleness is judged on `today`. A source in `choices`
+    (source name to chosen ids, EvidenceSource.documents) has only those documents: a citation
+    of any other is NO_DOCUMENT. With `seen_as`, each
     block of a document is checked as the quote's writer saw it (the chat's model sees
     documents with secrets and personal data removed: vouch.redaction).
 
@@ -196,11 +209,13 @@ class QuoteChecker:
         sources: Mapping[str, str | Path],
         *,
         today: datetime.date,
+        choices: Mapping[str, Collection[str]] | None = None,
         seen_as: Callable[[str], str] | None = None,
         statements: Iterable[LeadStatement] = (),
         label: str = LEAD_STATEMENT,
     ):
         self._sources = {name: Path(folder) for name, folder in sources.items()}
+        self._choices = dict(choices or {})
         self._today = today
         self._seen_as = seen_as
         self._label = label
@@ -226,7 +241,7 @@ class QuoteChecker:
     def _document(self, doc_id: str) -> _Document | DropReason:
         key = doc_id.removesuffix(".md")
         if key not in self._documents:
-            document = _load(key, self._sources, self._today)
+            document = _load(key, self._sources, self._choices, self._today)
             if isinstance(document, _Document):
                 document = self._as_seen(document)
             self._documents[key] = document

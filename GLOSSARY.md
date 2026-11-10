@@ -47,8 +47,24 @@ What a compliance profile is used for: **Audit readiness** (preparing for an ext
 _Avoid_: Purpose, mode, use case
 
 **Company setup**:
-Creating a new compliance profile in Vouch for a company (in the demo, an invented one): its name, language, protection level and the controls that are not applicable, then its evidence. A demo/prototype process; a real SaaS product would do it differently.
+Creating a new compliance profile in Vouch for a company (in the demo, an invented one), in seven steps: its name and country, its answer language, its protection level, its Goal, the controls that are not applicable (each with a reason), its evidence chosen from the sample library, then a summary to finish. Setup ends with the new company opened, its Goal set and a first profile pass drafting every applicable control. Only a developer does it. A demo/prototype process; a real SaaS product would do it differently.
 _Avoid_: Onboarding (that word is on Audit prep's avoid list), sign-up, registration
+
+**Sample library**:
+A set of invented evidence documents (policies and records, with a few deliberate gaps) that ships with Vouch, from which a company made in company setup picks its evidence. Its documents name no company.
+_Avoid_: Document pool, template documents
+
+**Reference profile**:
+The compliance profile over the whole sample library that the eval scores; it is no company, so no user sees it.
+_Avoid_: Sample company, test profile
+
+**Documents tab**:
+The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every profile has one, for every user.
+_Avoid_: Document library, uploads, files
+
+**Remove company**:
+A developer hiding a company made in company setup everywhere: it leaves the profile switcher and can't be opened again, but its audit trail is kept and its id is never used again. File-defined profiles can't be removed.
+_Avoid_: Delete company, archive
 
 ### Assessment
 
@@ -93,7 +109,7 @@ A company document, or a passage in one, that shows a control is met.
 _Avoid_: Proof, artefact, attachment
 
 **Evidence source**:
-A place the agent may search for evidence, allowed by the compliance profile, such as the policy folder or Patch.
+A place the agent may search for evidence, allowed by the compliance profile, such as the policy folder or Patch. A source may be limited to chosen documents of its folder (a company set up in the app chooses from the sample library); then no other document of that folder exists for the profile.
 _Avoid_: Connector, integration, data source
 
 **Documented evidence**:

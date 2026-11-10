@@ -4,19 +4,34 @@ from pathlib import Path
 
 import pytest
 from assess_steps import in_order, step_texts
+from chosen_documents import (
+    CHOSEN,
+    CHOSEN_QUOTE,
+    SHARED_WORDS,
+    UNCHOSEN,
+    UNCHOSEN_QUOTE,
+    chosen_profile,
+)
 from isa_editions import GERMAN_5_1_1
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from vouch import ScriptedChatModel, UnknownControlError, assess, load_named_profile, load_profile
+from vouch.citations import Citation, CitationClaim, DropReason
 from vouch.graph import (
+    EVIDENCE_TOOLS,
     NOT_JUDGED,
     QUESTION_SHOWN,
     OutputCheckError,
     ShouldScore,
+    build_graph,
     claims_audit_result,
+    memory_checkpointer,
+    quote_checker,
+    thread_config,
 )
-from vouch.profile import NORDLICHT_PROFILE
+from vouch.profile import NORDLICHT_PROFILE, SAMPLE_LIBRARY
+from vouch.search import search_policies
 
 SCRIPTS = Path(__file__).parent / "scripts"
 NORDLICHT = load_named_profile("nordlicht")
@@ -363,3 +378,136 @@ def test_assess_steps_assesses_the_control_it_is_given_never_a_fresh_lookup():
     assert assessment.steps[0]["text"].startswith(
         "Loaded control 5.1.1: A question of the caller's own?"
     )
+
+
+def chosen_run(tmp_path, judge: list[dict]):
+    """A scripted run on 1.1.1 under a profile whose policies are limited to CHOSEN: one search
+    for words also in an unchosen policy, then this judgement. The result, and the thread's
+    state."""
+    saver = memory_checkpointer()
+    model = ScriptedChatModel(
+        script={
+            "gather": [
+                {"tool": "search_policies", "args": {"query": SHARED_WORDS, "limit": 10}},
+                {"answer": "Draft answer."},
+            ],
+            "judge": {"requirements": judge},
+        }
+    )
+    result = assess("1.1.1", chosen_profile(tmp_path), model, saver)
+    state = build_graph(None, checkpointer=saver).get_state(thread_config(result.thread_id))
+    return result, state.values
+
+
+def citing(requirement_id: str, doc_id: str, quote: str) -> dict:
+    return {
+        "requirement_id": requirement_id,
+        "verdict": "evidenced",
+        "reason": "Shown.",
+        "citations": [{"doc_id": doc_id, "quote": quote}],
+    }
+
+
+def test_an_assessments_search_finds_passages_only_in_the_chosen_documents(tmp_path):
+    _, state = chosen_run(tmp_path, [])
+
+    unlimited = search_policies(SHARED_WORDS, 10, folder=tmp_path / SAMPLE_LIBRARY / "policies")
+    assert UNCHOSEN in {p["doc_id"] for p in unlimited}  # the words are in an unchosen policy
+    found = {p["doc_id"] for p in state["evidence"]}
+    assert found and found <= set(CHOSEN)
+
+
+def test_an_assessment_drops_a_citation_of_an_unchosen_document_and_keeps_a_chosen_one(tmp_path):
+    result, state = chosen_run(
+        tmp_path,
+        [
+            citing("M1", "backup-policy", CHOSEN_QUOTE),
+            citing("M2", UNCHOSEN, UNCHOSEN_QUOTE),
+        ],
+    )
+
+    by_id = {r.id: r for r in result.requirements}
+    assert [c.doc_id for c in by_id["M1"].citations] == ["backup-policy"]
+    assert by_id["M2"].citations == ()
+    assert [(d.requirement_id, d.doc_id, d.reason) for d in state["dropped_citations"]] == [
+        ("M2", UNCHOSEN, DropReason.NO_DOCUMENT)
+    ]
+
+
+def test_an_assessment_keeps_the_chosen_documents_in_its_state(tmp_path):
+    _, state = chosen_run(tmp_path, [])
+
+    assert state["document_choices"] == {"policies": list(CHOSEN)}
+    assert set(state["document_folders"]) == {"policies", "records"}
+
+
+def test_an_assessment_under_a_profile_choosing_nothing_keeps_no_choices():
+    saver = memory_checkpointer()
+    result = assess(
+        "4.1.2", NORDLICHT, ScriptedChatModel.from_file(SCRIPTS / "isa_4_1_2.json"), saver
+    )
+
+    state = build_graph(None, checkpointer=saver).get_state(thread_config(result.thread_id))
+    assert state.values["document_choices"] == {}
+
+
+def test_a_state_saved_before_document_choices_is_quote_checked_against_the_whole_folders(
+    tmp_path,
+):
+    folder = tmp_path / SAMPLE_LIBRARY / "policies"
+    chosen_profile(tmp_path)
+    old = {"document_folders": {"policies": str(folder)}, "today": "2026-11-09"}
+    limited = {**old, "document_choices": {"policies": list(CHOSEN)}}
+    claim = CitationClaim(doc_id=UNCHOSEN, quote=UNCHOSEN_QUOTE)
+
+    assert isinstance(quote_checker(old).check(claim), Citation)
+    assert quote_checker(limited).check(claim) == DropReason.NO_DOCUMENT
+
+
+def test_patchs_status_chosen_without_its_response_is_pending_and_patch_is_never_read(
+    monkeypatch,
+):
+    from vouch import patch
+
+    def unread(folder):
+        raise AssertionError("Patch's response was read though the choice leaves it out")
+
+    run = EVIDENCE_TOOLS["vulnerability_status"].run
+    assert run is not None
+    folder = NORDLICHT.evidence_sources["patch"].folder
+    whole = run({}, folder, None)
+    monkeypatch.setattr(patch, "read_response", unread)
+
+    left_out = run({}, folder, ("another-document",))
+
+    assert isinstance(whole, list) and whole
+    assert isinstance(left_out, dict)
+    assert left_out["error"] == patch.EVIDENCE_PENDING
+    assert left_out["detail"] == f"{patch.UNREADABLE} (there is no recorded response)"
+
+
+def test_a_continued_assessment_searches_the_documents_its_state_chose_not_the_live_profiles(
+    tmp_path, monkeypatch
+):
+    """The state's choice (kept from when the assessment started) is what the quote check
+    uses, so the search uses it too, even when the live profile now chooses otherwise."""
+    from vouch.profile import ComplianceProfile
+
+    monkeypatch.setattr(
+        ComplianceProfile, "document_choices", lambda self: {"policies": [UNCHOSEN]}
+    )
+
+    _, state = chosen_run(tmp_path, [])
+
+    assert state["document_choices"] == {"policies": [UNCHOSEN]}
+    assert {p["doc_id"] for p in state["evidence"] if p["source"] == "policies"} == {UNCHOSEN}
+
+
+def test_a_state_without_document_choices_searches_the_whole_folders(tmp_path, monkeypatch):
+    from vouch.profile import ComplianceProfile
+
+    monkeypatch.setattr(ComplianceProfile, "document_choices", lambda self: {})
+
+    _, state = chosen_run(tmp_path, [])
+
+    assert UNCHOSEN in {p["doc_id"] for p in state["evidence"]}

@@ -1,7 +1,9 @@
 import pytest
+from chosen_documents import CHOSEN, SHARED_WORDS, UNCHOSEN
 
 from vouch import search_policies
-from vouch.profile import NORDLICHT_PROFILE
+from vouch.paths import FIXTURES_DIR
+from vouch.profile import NORDLICHT_PROFILE, SAMPLE_LIBRARY
 
 POLICY_DIR = NORDLICHT_PROFILE.parent / "policies"
 
@@ -97,3 +99,13 @@ def test_a_heading_without_a_blank_line_after_it_still_heads_its_passage(tmp_pat
     passages = search_policies("encrypt", folder=tmp_path)
 
     assert passages == [{"doc_id": "policy", "heading": "Sub", "text": "encrypt under sub"}]
+
+
+def test_a_search_limited_to_chosen_documents_returns_passages_only_from_them():
+    folder = FIXTURES_DIR / SAMPLE_LIBRARY / "policies"
+    assert UNCHOSEN in {p["doc_id"] for p in search_policies(SHARED_WORDS, 10, folder=folder)}
+
+    passages = search_policies(SHARED_WORDS, 10, folder=folder, documents=CHOSEN)
+
+    assert passages
+    assert {p["doc_id"] for p in passages} <= set(CHOSEN)

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { Assessment, Citation, ReviewStatus, Verdict } from './assessment.ts'
+import type { Assessment, Citation, ProtectionLevel, ReviewStatus, Verdict } from './assessment.ts'
 import type { OpenQuestion } from './questions.ts'
 import type { PaperRequirement } from './paper.ts'
 import type { Goal } from './report.ts'
@@ -7,8 +7,13 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The Dossier overview from `GET /api/overview` (#40), as `vouch.dossier.overview` sends it. */
 
-/** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected. */
-export type ReviewState = 'not-assessed' | ReviewStatus
+/** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected; or not
+ * applicable as a whole under the profile (#454), which nothing reviews or counts. */
+export type ReviewState = 'not-assessed' | 'not-applicable' | ReviewStatus
+
+/** Whether a card's state is a review state, with its tag: an assessment of the control is stored and counts. */
+export const isReviewState = (status: ReviewState): status is ReviewStatus =>
+  status !== 'not-assessed' && status !== 'not-applicable'
 
 /** Why a re-assessment is suggested (`vouch.plan.ReassessReason`), in this order: every fix done (#410, Internal
  * improvement only), an open question answered or overdue (#414, both goals). */
@@ -26,6 +31,8 @@ export type ControlCard = {
   reassess_suggested?: boolean
   reassess_reasons?: ReassessReason[]
   closed?: boolean
+  /** The profile's reason when the control is not applicable as a whole (#454); null on every other card. */
+  not_applicable?: string | null
 }
 
 /** Counted from accepted verdicts only; `open` is every control not accepted. */
@@ -54,7 +61,7 @@ export type Overview = {
   company: string
   country: string
   /** The working paper's head shows both (#41). */
-  protection_level: 'normal' | 'high' | 'very high'
+  protection_level: ProtectionLevel
   /** ISO 639-1: the language the answers are written in; the interface stays English. */
   answer_language: string
   /** What the profile is used for (#369): the user's goal under it, Audit readiness until they change it. */
@@ -120,6 +127,12 @@ export async function fetchOverview(): Promise<{ ok: true; overview: Overview } 
 export const GOAL_WORDS: Record<Goal, string> = {
   'audit-readiness': 'Audit readiness',
   'internal-improvement': 'Internal improvement',
+}
+
+/** Each goal in one line, as GLOSSARY.md has it: company setup's step 4 (#447) shows it under the goal's name. */
+export const GOAL_LINES: Record<Goal, string> = {
+  'audit-readiness': 'Preparing for an external audit.',
+  'internal-improvement': "Improving the company's own security, with no audit planned.",
 }
 
 /** How a goal change went: changed, the session ended (a 401: signed out already, so nothing more to say), or failed

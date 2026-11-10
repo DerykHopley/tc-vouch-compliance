@@ -1,0 +1,17 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "recovery services ensured backup"}},
+    {"tool": "search_records", "args": {"query": "recovery services ensured backup"}},
+    {"answer": "Draft answer for 5.2.9, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "partly-evidenced", "reason": "Backups are encrypted and kept in two places, but the backup policy is past its yearly review.", "citations": [{"doc_id": "backup-policy", "quote": "Backups are encrypted, written to a backup server in the second fire section of the building, and copied each week to a storage system at an outside data centre."}]},
+      {"requirement_id": "M2", "verdict": "partly-evidenced", "reason": "Each service has a recovery guide, but the backup policy is past its yearly review.", "citations": [{"doc_id": "backup-policy", "quote": "Each service has a recovery guide that says what is needed to restore it: the people, the hardware and the time."}]},
+      {"requirement_id": "S1", "verdict": "partly-evidenced", "reason": "Backups and restore order are set per service, but the backup policy is past its yearly review.", "citations": [{"doc_id": "backup-policy", "quote": "Each service has a recovery guide that says what is needed to restore it: the people, the hardware and the time."}]},
+      {"requirement_id": "H1", "verdict": "partly-evidenced", "reason": "A yearly review is set, and missed since February 2025.", "citations": [{"doc_id": "backup-policy", "quote": "Backups are encrypted, written to a backup server in the second fire section of the building, and copied each week to a storage system at an outside data centre."}]},
+      {"requirement_id": "H2", "verdict": "partly-evidenced", "reason": "A yearly restore test is set, but no record shows one, and the policy is past its review.", "citations": [{"doc_id": "backup-policy", "quote": "Once a year IT restores a sample of files and one whole server to a test system, to show that restores work."}]},
+      {"requirement_id": "H3", "verdict": "partly-evidenced", "reason": "RPO, RTO, resources, one-at-a-time restores and a second fire section are set, but the policy is past its review.", "citations": [{"doc_id": "backup-policy", "quote": "Backups are encrypted, written to a backup server in the second fire section of the building, and copied each week to a storage system at an outside data centre."}]}
+    ]
+  }
+}

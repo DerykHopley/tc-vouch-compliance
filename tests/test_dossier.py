@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 import test_memory
+from company_setup import MUSTERFIRMA, MUSTERFIRMA_ID
 from fastapi.testclient import TestClient
 from reviewing import reviewed
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
@@ -14,7 +15,7 @@ from test_memory import app_on, assess, restart
 
 from vouch import api, isa, memory
 from vouch.citations import Citation
-from vouch.dossier import QUOTES_SHOWN, overview, requirements_by_control
+from vouch.dossier import QUOTES_SHOWN, applicable_controls, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
     RemediationItem,
@@ -25,7 +26,7 @@ from vouch.graph import (
     Verdict,
 )
 from vouch.isa import load_base_framework
-from vouch.profile import CountryOverlay, load_named_profile
+from vouch.profile import CountryOverlay, NotApplicable, load_named_profile
 
 NORDLICHT = load_named_profile("nordlicht")
 CONTROLS = load_base_framework().controls
@@ -94,6 +95,7 @@ def test_with_nothing_assessed_every_control_is_open_and_the_first_is_the_next_s
         "waiting-for-review": 0,
         "accepted": 0,
         "rejected": 0,
+        "not-applicable": 0,
     }
     assert [c["id"] for c in shown["controls"]][:3] == ["1.1.1", "1.6.1", "1.6.2"]
     assert len(shown["controls"]) == 12
@@ -180,6 +182,7 @@ def test_the_status_counts_cover_every_listed_control():
         "waiting-for-review": 2,
         "accepted": 1,
         "rejected": 1,
+        "not-applicable": 0,
     }
 
 
@@ -341,6 +344,83 @@ def test_spread_quotes_stay_capped_each_once_and_leave_out_rejected_controls():
 # --- Through the API, on #38's memory: in memory, and on Postgres in CI's database job ---------
 
 
+# A control not applicable as a whole (#454): no requirement the profile brings in applies.
+WHOLE_REASON = "No development of our own."
+WITHOUT_1_1_1 = NORDLICHT.model_copy(
+    update={
+        "not_applicable": (
+            *NORDLICHT.not_applicable,
+            NotApplicable(control="1.1.1", reason=WHOLE_REASON),
+        )
+    }
+)
+EACH_OF_5_2_9 = NORDLICHT.model_copy(
+    update={
+        "not_applicable": (
+            *NORDLICHT.not_applicable,
+            NotApplicable(control="5.2.9", requirement="M1", reason="First reason."),
+            NotApplicable(control="5.2.9", requirement="M2", reason="Second reason."),
+            NotApplicable(control="5.2.9", requirement="S1", reason="First reason."),
+        )
+    }
+)
+
+
+def test_a_control_not_applicable_as_a_whole_is_left_out_of_the_applicable_controls():
+    kept = [c.id for c in applicable_controls(WITHOUT_1_1_1, CONTROLS)]
+
+    assert kept == [c.id for c in CONTROLS if c.id != "1.1.1"]
+    assert "5.1.2" in kept  # only S3 is not applicable: the control still is
+
+
+def test_a_control_with_every_requirement_marked_separately_is_left_out_too():
+    kept = [c.id for c in applicable_controls(EACH_OF_5_2_9, CONTROLS)]
+
+    assert kept == [c.id for c in CONTROLS if c.id != "5.2.9"]
+
+
+def test_a_control_not_applicable_as_a_whole_has_its_own_card_with_the_reason():
+    cards = {c["id"]: c for c in overview(WITHOUT_1_1_1, CONTROLS, {})["controls"]}
+
+    assert len(cards) == len(CONTROLS)
+    assert cards["1.1.1"]["status"] == "not-applicable"
+    assert cards["1.1.1"]["verdict"] == "not-applicable"
+    assert cards["1.1.1"]["not_applicable"] == WHOLE_REASON
+    assert all(c["not_applicable"] is None for cid, c in cards.items() if cid != "1.1.1")
+
+
+def test_requirements_marked_separately_give_their_distinct_reasons_in_order():
+    cards = {c["id"]: c for c in overview(EACH_OF_5_2_9, CONTROLS, {})["controls"]}
+
+    assert cards["5.2.9"]["status"] == "not-applicable"
+    assert cards["5.2.9"]["not_applicable"] == "First reason.; Second reason."
+
+
+def test_a_control_not_applicable_as_a_whole_is_left_out_of_readiness_and_the_next_step():
+    shown = overview(WITHOUT_1_1_1, CONTROLS, {})
+
+    assert shown["readiness"]["controls"] == len(CONTROLS) - 1
+    assert shown["readiness"]["open"] == len(CONTROLS) - 1
+    assert shown["by_status"]["not-applicable"] == 1
+    assert shown["by_status"]["not-assessed"] == len(CONTROLS) - 1
+    assert shown["next_step"] == {"control_id": "1.6.1", "action": "assess"}
+
+
+def test_an_assessment_of_a_control_not_applicable_changes_neither_its_card_nor_a_count():
+    accepted = seeded(
+        "1.1.1", "evidenced", "accepted", citations=(quote("doc", "Q."),), remediation=1
+    )
+    before = overview(WITHOUT_1_1_1, CONTROLS, {})
+
+    shown = overview(WITHOUT_1_1_1, CONTROLS, {"1.1.1": accepted})
+
+    assert shown["controls"] == before["controls"]
+    assert shown["readiness"] == before["readiness"]
+    assert shown["by_status"] == before["by_status"]
+    assert shown["next_step"] == before["next_step"]
+    assert shown["quotes"] == []
+
+
 def overview_of(client: TestClient, user: dict[str, str]) -> dict:
     response = client.get("/api/overview", headers=user)
     assert response.status_code == 200, response.text
@@ -380,6 +460,7 @@ def test_an_assessment_shows_as_proposed_and_counts_only_once_accepted(database_
             "reassess_suggested": False,  # the improvement plan's (#410)
             "reassess_reasons": [],  # the open questions' too (#414)
             "closed": False,
+            "not_applicable": None,  # applicable under the profile (#454)
         }
         assert proposed["readiness"]["accepted"] == 0
         assert proposed["readiness"]["by_verdict"]["partly-evidenced"] == 0
@@ -569,3 +650,41 @@ def test_a_broken_german_edition_is_a_plain_500_on_the_overview(users, monkeypat
     assert response.status_code == 500
     assert response.json()["detail"] == api.OVERVIEW_FAILED
     assert str(tmp_path) not in response.text
+
+
+def test_a_company_made_with_a_control_not_applicable_shows_it_so_on_the_overview(users):
+    # #454: made in setup with 5.2.9 not applicable as a whole.
+    alice, _ = users
+    body = MUSTERFIRMA | {
+        "not_applicable": [{"control": "5.2.9", "requirement": None, "reason": "Not ours."}]
+    }
+    with TestClient(app_on(None)) as client:
+        made = client.post("/api/developer/profiles", json=body, headers=alice)
+        assert made.status_code == 201, made.text
+        shown = overview_of(client, alice | {api.PROFILE_HEADER: MUSTERFIRMA_ID})
+
+    assert card(shown, "5.2.9")["status"] == "not-applicable"
+    assert card(shown, "5.2.9")["not_applicable"] == "Not ours."
+    assert len(shown["controls"]) == len(CONTROLS)
+    assert shown["readiness"]["controls"] == len(CONTROLS) - 1
+
+
+def test_an_assessment_of_a_control_not_applicable_as_a_whole_is_refused_and_not_counted(users):
+    # #454 review: nothing could review its result, so no run starts; the day's one assessment
+    # is still there afterwards.
+    alice, _ = users
+    headers = alice | {api.PROFILE_HEADER: MUSTERFIRMA_ID}
+    body = MUSTERFIRMA | {
+        "not_applicable": [{"control": "5.2.9", "requirement": None, "reason": "Not ours."}]
+    }
+    app = app_on(None)
+    app.state.spending.set_daily_limit(1)
+    with TestClient(app) as client:
+        made = client.post("/api/developer/profiles", json=body, headers=alice)
+        assert made.status_code == 201, made.text
+        refused = client.post("/api/assessments", json={"control_id": "5.2.9"}, headers=headers)
+        allowed = client.post("/api/assessments", json={"control_id": "1.1.1"}, headers=headers)
+
+    assert refused.status_code == 409
+    assert refused.json() == {"detail": "5.2.9 is not applicable in this profile."}
+    assert allowed.status_code == 200, allowed.text

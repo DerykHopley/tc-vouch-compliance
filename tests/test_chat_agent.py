@@ -14,6 +14,14 @@ from datetime import UTC, datetime
 
 import pytest
 import test_memory
+from chosen_documents import (
+    CHOSEN,
+    CHOSEN_QUOTE,
+    SHARED_WORDS,
+    UNCHOSEN,
+    UNCHOSEN_QUOTE,
+    chosen_profile,
+)
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
@@ -21,7 +29,7 @@ from profiles_dir import SECOND, make_profiles
 from reviewing import reviewed
 from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
-from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1
+from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1, WHOLE_REASON, WITHOUT_1_1_1, seeded
 from test_memory import app_on, as_user, restart
 
 from vouch import api, chat_agent
@@ -40,12 +48,14 @@ from vouch.chat_agent import (
     chat_graph,
     chat_prompt,
     chat_turn,
+    progress_words,
     verdict_words_for,
 )
 from vouch.chat_fake import CannedChatModel
-from vouch.citations import Citation
+from vouch.citations import Citation, DropReason
 from vouch.database import Database
 from vouch.documents import EvidenceKind
+from vouch.dossier import overview
 from vouch.graph import (
     Assessment,
     RequirementVerdict,
@@ -57,7 +67,14 @@ from vouch.graph import (
 from vouch.isa import load_base_framework
 from vouch.memory import Memory, process_checkpointer
 from vouch.model_choice import MemoryModelStore, ModelChoice
-from vouch.profile import DEFAULT_PROFILE, load_named_profile, read_profile_once
+from vouch.profile import (
+    DEFAULT_PROFILE,
+    SAMPLE_LIBRARY,
+    ComplianceProfile,
+    NotApplicable,
+    load_named_profile,
+    read_profile_once,
+)
 from vouch.runs import RUNNING_ALREADY, AssessmentRun, RunningAssessments
 from vouch.settings import Settings
 from vouch.spending import DailyLimitReached, MemorySpendingStore, SpendingGuard, UsageMeter
@@ -430,9 +447,9 @@ def test_the_thread_is_named_first_so_a_failed_first_turn_keeps_it(client, fake)
     thread_of(events)
 
 
-def chat_tools() -> tuple[ChatTools, list[str]]:
-    """The chat's tools for a lead in memory, on the fakes; and the controls whose usage they
-    recorded."""
+def chat_tools(profile: ComplianceProfile | None = None) -> tuple[ChatTools, list[str]]:
+    """The chat's tools for a lead in memory, on the fakes (under Nordlicht, or `profile`); and the
+    controls whose usage they recorded."""
     memory = Memory(InMemoryStore(), "lead-left", DEFAULT_PROFILE)
     models = ModelChoice(Settings(), MemoryModelStore())
     saver = memory_checkpointer()
@@ -440,7 +457,7 @@ def chat_tools() -> tuple[ChatTools, list[str]]:
     recorded: list[str] = []
     spending = SpendingGuard(MemorySpendingStore())
     tools = ChatTools(
-        load_named_profile(DEFAULT_PROFILE),
+        profile or load_named_profile(DEFAULT_PROFILE),
         memory,
         run,
         spending,
@@ -448,6 +465,34 @@ def chat_tools() -> tuple[ChatTools, list[str]]:
         lambda control_id, usage: recorded.append(control_id),
     )
     return tools, recorded
+
+
+def chosen_tools(tmp_path) -> ChatTools:
+    """The chat's tools under a profile whose policies are limited to CHOSEN (#384)."""
+    profile = chosen_profile(tmp_path)
+    memory = Memory(InMemoryStore(), "lead-chosen", profile.id)
+    models = ModelChoice(Settings(), MemoryModelStore())
+    run = AssessmentRun(
+        models, None, frozenset(), memory_checkpointer(), UsageMeter(None), memory.scope
+    )
+    spending = SpendingGuard(MemorySpendingStore())
+    return ChatTools(profile, memory, run, spending, RunningAssessments(), lambda c, u: None)
+
+
+def test_the_chats_search_finds_passages_only_in_the_chosen_documents(tmp_path):
+    words = chosen_tools(tmp_path).search_evidence(SHARED_WORDS, lambda event: None)
+
+    found = set(re.findall(r'"doc_id": "([^"]+)"', words))
+    assert found & set(CHOSEN)
+    records = {p.stem for p in (tmp_path / SAMPLE_LIBRARY / "records").glob("*.md")}
+    assert found <= set(CHOSEN) | records  # records chooses nothing: its whole folder
+
+
+def test_a_chat_answer_citing_an_unchosen_document_is_dropped_and_a_chosen_one_kept(tmp_path):
+    tools = chosen_tools(tmp_path)
+
+    assert tools.check_quote(UNCHOSEN_QUOTE, UNCHOSEN) == str(DropReason.NO_DOCUMENT)
+    assert tools.check_quote(CHOSEN_QUOTE, "backup-policy") is None
 
 
 def test_a_chat_left_mid_assessment_neither_waits_for_it_nor_ends_its_run_early(monkeypatch):
@@ -817,7 +862,7 @@ def test_alpenwerks_chat_prompt_names_the_german_verdict_words_and_nordlichts_do
 
     assert all(word in german for word in GERMAN_VERDICTS)
     assert not any(word in english for word in GERMAN_VERDICTS)
-    assert CHAT_PROMPT_VERSION == "chat-7"
+    assert CHAT_PROMPT_VERSION == "chat-8"
 
 
 def tool_words(fake: CannedChatModel, name: str) -> str:
@@ -859,3 +904,79 @@ def test_assessed_controls_and_start_assessment_on_alpenwerk_write_the_german_wo
     )
     assert not ENGLISH_VERDICT.search(requirements.split(" evidence. ", 1)[1])
     assert any(word in requirements for word in GERMAN_VERDICTS)
+
+
+def test_progress_leaves_a_control_not_applicable_as_a_whole_out_of_its_counts():
+    # #454: 1.1.1 is not applicable under the profile, so 11 controls are counted.
+    controls = WITHOUT_1_1_1.isa_edition().controls
+    nothing = overview(WITHOUT_1_1_1, controls, {})
+    some = overview(WITHOUT_1_1_1, controls, {"4.1.2": seeded("4.1.2", "evidenced", "accepted")})
+
+    assert progress_words(
+        nothing["readiness"]["controls"], nothing["by_status"], None, nothing["next_step"]
+    ).startswith("You have not assessed any of the 11 controls yet.")
+    said = progress_words(some["readiness"]["controls"], some["by_status"], None, some["next_step"])
+    assert "Of the 11 controls, 1 is accepted, and 10 are not assessed." in said
+    assert "not applicable" not in said
+
+
+# A control not applicable as a whole (#454 review): nothing in the chat counts, lists, suggests
+# or assesses it.
+EVERY_CONTROL_OUT = load_named_profile(DEFAULT_PROFILE).model_copy(
+    update={
+        "not_applicable": tuple(NotApplicable(control=c, reason="Not ours.") for c in CONTROL_IDS)
+    }
+)
+
+
+def test_the_assessed_controls_leave_a_control_not_applicable_as_a_whole_out(monkeypatch):
+    tools, _ = chat_tools(WITHOUT_1_1_1)
+    newest = {"1.1.1": seeded("1.1.1", "evidenced", "accepted")}
+    monkeypatch.setattr(chat_agent, "newest_by_control", lambda *_: newest)
+    written: list = []
+
+    said = tools.assessed_controls(written.append)
+
+    [papers] = [data for name, data in written if name == "papers"]
+    assert papers == {"control_ids": [c for c in CONTROL_IDS if c != "1.1.1"]}
+    assert "- 1.1.1" not in said
+    assert said.splitlines()[0] == "Each control's newest assessment under this profile:"
+    assert any(x.startswith("- 1.6.1: not assessed yet.") for x in said.splitlines())
+    [not_assessed] = [x for x in said.splitlines() if x.startswith("Not assessed yet:")]
+    assert "1.1.1" not in not_assessed
+
+
+def test_explaining_a_control_not_applicable_as_a_whole_says_so_and_suggests_nothing():
+    tools, _ = chat_tools(WITHOUT_1_1_1)
+    written: list = []
+
+    said = tools.explain_control("1.1.1", None, written.append)
+
+    assert said.startswith("1.1.1 is not applicable in this profile.")
+    assert WHOLE_REASON in said
+    # Nothing to assess and nothing to review there: no chip (#454's verifier).
+    assert [event for event in written if event[0] == "suggestion"] == []
+
+
+def test_the_chat_refuses_to_assess_a_control_not_applicable_as_a_whole_and_counts_nothing(
+    monkeypatch,
+):
+    tools, recorded = chat_tools(WITHOUT_1_1_1)
+    counted: list = []
+    monkeypatch.setattr(tools.spending, "start", lambda *a, **k: counted.append(a))
+    written: list = []
+
+    said = tools.start_assessment("1.1.1", written.append, threading.Event())
+
+    assert said == "1.1.1 is not applicable in this profile."
+    assert counted == [] and recorded == [] and written == []
+    assert not is_held(tools.running, tools.memory.scope)
+
+
+def test_progress_with_every_control_not_applicable_says_no_control_applies():
+    controls = EVERY_CONTROL_OUT.isa_edition().controls
+    view = overview(EVERY_CONTROL_OUT, controls, {})
+
+    said = progress_words(view["readiness"]["controls"], view["by_status"], None, view["next_step"])
+
+    assert said == "No control applies under this profile, so there is nothing to assess."

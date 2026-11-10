@@ -34,12 +34,14 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
 from vouch.citations import LeadStatement, QuoteChecker
-from vouch.documents import document_path, escaped, facts_of
+from vouch.documents import escaped, facts_of
+from vouch.dossier import applicable_controls
 from vouch.front_matter import split_front_matter
 from vouch.graph import (
     GUARD,
     MAX_DUE_DAYS,
     Assessment,
+    AssessState,
     EvidencePassage,
     Judgement,
     RemediationItemReply,
@@ -62,6 +64,7 @@ from vouch.graph import (
     overlay_requirements_of,
     overlays_step,
     plural,
+    quote_checker,
     remediation_drafts,
     statement_passages,
     statements_text,
@@ -160,9 +163,10 @@ class _Included:
 
 
 def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
-    """Every document of every evidence source the profile allows, whole, with its source, kind
-    and staleness on `today`. ProfilePassRefused for a source whose folder can't be read
-    (missing, unreadable, or `escaped` since the profile loaded)."""
+    """Every document of every evidence source the profile allows (only the chosen ones, where
+    it chose: EvidenceSource.documents), whole, with its source, kind and staleness on `today`.
+    ProfilePassRefused for a source whose folder can't be read (missing, unreadable, or
+    `escaped` since the profile loaded)."""
 
     def refused(why: str) -> ProfilePassRefused:
         return ProfilePassRefused(
@@ -175,11 +179,7 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
         if escaped(folder):
             raise refused(f"the {source} folder now points outside its allowed folder")
         try:
-            if not folder.is_dir():
-                raise FileNotFoundError(folder)
-            for path in sorted(folder.glob("*.md")):
-                if document_path(folder, path.stem) is None:  # a link out of the folder
-                    continue
+            for path in allowed.usable_documents():  # a link out of the folder left out
                 data, body = split_front_matter(path.read_text(encoding="utf-8"))
                 facts = facts_of(data, source, path.stem, today)
                 found.append(
@@ -343,7 +343,8 @@ def _pass_step(controls: int, documents: int, rejected: str | None) -> dict[str,
 def _write(
     assessed: dict[str, _Assessed],
     head: list[dict[str, str]],
-    shared: dict[str, Any],
+    shared: AssessState,
+    profile: ComplianceProfile,
     memory: Memory,
     saver: BaseCheckpointSaver,
 ) -> list[str]:
@@ -360,11 +361,11 @@ def _write(
             made.append(thread_id)
             config = thread_config(thread_id, memory.scope)
             control = part.values["control"]
-            loaded = loaded_step(control, shared["profile"]).to_dict()
+            loaded = loaded_step(control, profile).to_dict()
             # The agent's own overlay step; no overlay_branch step, as the pass gathers nothing.
             overlays = overlays_step(part.values["overlay_requirements"]).to_dict()
             values = {
-                **{k: v for k, v in shared.items() if k != "profile"},
+                **shared,
                 **part.values,
                 "steps": [loaded, overlays, *head, *part.values["steps"]],
             }
@@ -407,10 +408,8 @@ def run_profile_pass(
     newest = newest_by_control(memory, saver)
     included: list[_Included] = []
     skipped: list[SkippedControl] = []
-    for control in profile.isa_edition().controls:
+    for control in applicable_controls(profile, profile.isa_edition().controls):
         requirements = profile.requirements_for(control)
-        if not requirements.applicable:
-            continue
         reason = _skip_reason(newest.get(control.id))
         if reason is not None:
             skipped.append(SkippedControl(control.id, reason))
@@ -433,10 +432,25 @@ def run_profile_pass(
             f"threshold of {max_tokens:,}. Assess the controls one at a time instead."
         )
     count()
-    folders: dict[str, str] = {name: str(s.folder) for name, s in profile.evidence_sources.items()}
-    checker = QuoteChecker(
-        folders, today=today, label=lead_statement_label(profile.answer_language)
-    )
+    shared: AssessState = {
+        "profile_id": profile.id,
+        "model": model_name_of(model),
+        "prompt_version": PROFILE_PASS_PROMPT_VERSION,
+        "answer_language": profile.answer_language,
+        "evidence": [],
+        "warnings": [],
+        "pending": {},
+        "pending_ids": [],
+        "searches_run": 0,
+        "searches_refused": 0,
+        "usage": [],
+        "today": today.isoformat(),
+        "note": "",
+        "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
+        "document_choices": profile.document_choices(),
+        "claims": {},
+    }
+    checker = quote_checker(shared, label=lead_statement_label(profile.answer_language))
     by_id = {i.control.id: i for i in included}
     paragraphs = [p["text"] for d in documents for p in passages_of(d["doc_id"], d["text"])]
     paragraphs += [p["text"] for i in included for p in i.passages]
@@ -467,26 +481,8 @@ def run_profile_pass(
         _pass_step(len(included), len(documents), rejected),
         *(Step(GUARD, {"text": text}).to_dict() for text in flagged_steps(documents)),
     ]
-    shared = {
-        "profile": profile,
-        "profile_id": profile.id,
-        "model": model_name_of(model),
-        "prompt_version": PROFILE_PASS_PROMPT_VERSION,
-        "answer_language": profile.answer_language,
-        "evidence": [],
-        "warnings": [],
-        "pending": {},
-        "pending_ids": [],
-        "searches_run": 0,
-        "searches_refused": 0,
-        "usage": [],
-        "today": today.isoformat(),
-        "note": "",
-        "document_folders": folders,
-        "claims": {},
-    }
     log.info("a profile pass of %d controls used %s", len(included), usage)
-    thread_ids = _write(assessed, head, shared, memory, saver)
+    thread_ids = _write(assessed, head, shared, profile, memory, saver)
     load = assessment_loader(saver, scope=memory.scope)
     loaded = [load(thread_id) for thread_id in thread_ids]
     return ProfilePassResult([a for a in loaded if a is not None], skipped)

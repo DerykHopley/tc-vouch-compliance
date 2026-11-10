@@ -258,6 +258,7 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "daily_limit": 30,  # vouch.spending (#35)
         "usage": {"openrouter": NO_USAGE, "fake": NO_USAGE},
         "broken_profiles": [],  # #47: every fixture profile loads
+        "companies": [],  # #418: no company made in setup
     }
 
 

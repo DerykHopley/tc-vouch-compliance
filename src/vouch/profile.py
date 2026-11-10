@@ -8,8 +8,10 @@ and risks.
 
 import logging
 import re
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
@@ -18,6 +20,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     StringConstraints,
     ValidationError,
     ValidationInfo,
@@ -25,7 +28,16 @@ from pydantic import (
     model_validator,
 )
 
+from vouch.documents import (
+    SUFFIX,
+    DocumentChoice,
+    document_files,
+    document_path,
+    escaped,
+    is_chosen,
+)
 from vouch.isa import (
+    COLUMN_PREFIX,
     SOURCE,
     BaseFramework,
     BaseFrameworkError,
@@ -35,13 +47,19 @@ from vouch.isa import (
     UnknownControlError,
     load_base_framework,
 )
-from vouch.paths import FIXTURES_DIR
+from vouch.paths import FIXTURES_DIR, SAMPLE_LIBRARY_DIR
 
 log = logging.getLogger(__name__)
 
 PROFILE_FILE = "profile.yaml"
 DEFAULT_PROFILE = "nordlicht"  # a request naming no profile is under this one (#47)
 NORDLICHT_PROFILE = FIXTURES_DIR / "nordlicht" / PROFILE_FILE
+# The sample library's reference profile (#370): the eval judges the library under it, and it is
+# no company, so no user sees it (vouch.api.user_profiles).
+SAMPLE_LIBRARY = "sample-library"
+
+STORED = "stored"
+"""The validation context's flag for a profile kept in the database (load_stored_profile)."""
 
 ProtectionLevel = Literal["normal", "high", "very high"]
 EvidenceSourceName = Literal["policies", "records", "patch"]
@@ -53,6 +71,51 @@ PROTECTION_COLUMNS: dict[ProtectionLevel, frozenset[Column]] = {
     "high": frozenset({"must", "should", "high"}),
     "very high": frozenset({"must", "should", "high", "very high"}),
 }
+
+
+@dataclass(frozen=True)
+class ProtectionScope:
+    """What one protection level brings into scope from the base framework (#403)."""
+
+    level: ProtectionLevel
+    requirements: Mapping[Column, int]  # the base requirements in each column it brings in
+    total: int
+    controls: int  # the controls with a requirement in scope
+    added: int  # the requirements it adds over the level below; 0 for normal
+    added_controls: tuple[str, ...]  # the controls where it adds them, in the framework's order
+
+
+def in_scope(requirement: Requirement, level: ProtectionLevel) -> bool:
+    """Whether the protection level brings this base requirement into scope (its column)."""
+    return requirement.column in PROTECTION_COLUMNS[level]
+
+
+@cache
+def protection_scope() -> tuple[ProtectionScope, ...]:
+    """Each protection level in order, normal to very high, and what it brings in, counted in
+    the English edition (the German one carries the same requirements); or BaseFrameworkError.
+    PROTECTION_COLUMNS lists the levels lowest first, each including the one before, so the
+    level below is the previous entry."""
+    controls = load_base_framework().controls
+    scopes: list[ProtectionScope] = []
+    below: ProtectionLevel | None = None
+    for level, columns in PROTECTION_COLUMNS.items():
+        brought = [[r for r in c.requirements if in_scope(r, level)] for c in controls]
+        added = [[r for r in rs if below is not None and not in_scope(r, below)] for rs in brought]
+        counts = Counter(r.column for rs in brought for r in rs)
+        requirements = {column: counts[column] for column in COLUMN_PREFIX if column in columns}
+        scopes.append(
+            ProtectionScope(
+                level=level,
+                requirements=requirements,  # the base framework's columns, in its order
+                total=sum(requirements.values()),
+                controls=sum(bool(rs) for rs in brought),
+                added=sum(len(rs) for rs in added),
+                added_controls=tuple(c.id for c, rs in zip(controls, added, strict=True) if rs),
+            )
+        )
+        below = level
+    return tuple(scopes)
 
 
 @dataclass(frozen=True)
@@ -114,6 +177,43 @@ class EvidenceSource(_Strict):
             raise ValueError(f"folder {resolved} does not exist")
         return resolved
 
+    # The documents of the folder the profile may use (ids: file names without .md); None, the
+    # whole folder. A company set up in the app chooses from the sample library (#384).
+    # An id given with `.md` is kept without it.
+    documents: DocumentChoice = Field(default=None, min_length=1)
+
+    @field_validator("documents", mode="after")
+    @classmethod
+    def _documents_in_folder(
+        cls, documents: DocumentChoice, info: ValidationInfo
+    ) -> DocumentChoice:
+        folder = info.data.get("folder")
+        if documents is None or folder is None:  # no choice, or the folder already refused
+            return documents
+        if escaped(folder):  # swapped for a link since its own check: none of it may be read
+            raise ValueError(f"the folder {folder.name} now points outside its allowed folder")
+        ids = tuple(doc_id.removesuffix(SUFFIX) for doc_id in documents)
+        seen: set[str] = set()
+        for doc_id in ids:
+            if doc_id in seen:
+                raise ValueError(f"{doc_id} is named twice")
+            seen.add(doc_id)
+            # An id stripped of one .md must not end in another: document_path would strip it
+            # again and find the file, while every reader compares the stored id (#384).
+            if doc_id.endswith(SUFFIX) or document_path(folder, doc_id) is None:
+                raise ValueError(f"no document {doc_id} in the folder {folder.name}")
+        return ids
+
+    def uses(self, doc_id: str) -> bool:
+        """Whether the profile may use this document of the folder (every one, with no choice)."""
+        return is_chosen(doc_id, self.documents)
+
+    def usable_documents(self) -> list[Path]:
+        """The documents of the folder (document_files) the profile may use (`uses`), by file
+        name: what the profile pass reads, the Documents tab lists and the fake's library pass
+        is limited to. An unreadable folder raises OSError."""
+        return [path for path in document_files(self.folder) if self.uses(path.stem)]
+
 
 class CountryOverlayRequirement(_Strict):
     control: str  # the base framework control it adds to; the profile checks it exists
@@ -146,10 +246,28 @@ class ComplianceProfile(_Strict):
     evidence_sources: dict[EvidenceSourceName, EvidenceSource]
     asset_register: tuple[dict[str, Any], ...] = ()
     risks: tuple[dict[str, Any], ...] = ()
+    _stored: bool = PrivateAttr(default=False)
+
+    @property
+    def stored(self) -> bool:
+        """Whether the profile is a company made in the app, kept in the database
+        (load_stored_profile), rather than a profile file (#446)."""
+        return self._stored
+
+    @model_validator(mode="after")
+    def _origin(self, info: ValidationInfo) -> Self:
+        """Marks a profile validated as stored. Never unmarks one: pydantic runs this again,
+        with no context, on a profile passed into another model (vouch.fake_model)."""
+        if isinstance(info.context, dict) and info.context.get(STORED):
+            self._stored = True
+        return self
 
     @field_validator("id", mode="after")
     @classmethod
     def _id_is_folder_name(cls, profile_id: str, info: ValidationInfo) -> str:
+        """A file profile's id is its folder's name; a stored one's is its row's (#385)."""
+        if isinstance(info.context, dict) and info.context.get(STORED):
+            return profile_id
         folder = _profile_dir(info).name
         if profile_id != folder:
             raise ValueError(f"must be the profile's folder name, {folder}")
@@ -215,6 +333,15 @@ class ComplianceProfile(_Strict):
                 )
         return self
 
+    def document_choices(self) -> dict[str, list[str]]:
+        """Each source limited to chosen documents, to its chosen ids; a source using its whole
+        folder is absent. An assessment keeps it in its state (`document_choices`)."""
+        return {
+            name: list(source.documents)
+            for name, source in self.evidence_sources.items()
+            if source.documents is not None
+        }
+
     def isa_edition(self) -> BaseFramework:
         """The base framework in the ISA edition of this profile's answer language (English
         when the ISA isn't shipped in it), or BaseFrameworkError naming the file."""
@@ -241,8 +368,7 @@ class ComplianceProfile(_Strict):
 
     def _brought_in(self, control: IsaControl) -> tuple[Requirement, ...]:
         """The base requirements in the protection level's columns, then the overlays' ones."""
-        columns = PROTECTION_COLUMNS[self.protection_level]
-        base = tuple(r for r in control.requirements if r.column in columns)
+        base = tuple(r for r in control.requirements if in_scope(r, self.protection_level))
         return base + self._overlay_requirements(control.id)
 
     def _overlay_requirements(self, control_id: str) -> tuple[Requirement, ...]:
@@ -261,11 +387,17 @@ class ComplianceProfile(_Strict):
         return None
 
 
-def _describe(error: ValidationError) -> str:
-    """Each problem as `field.path: message`, so the error names the field."""
+Location = tuple[int | str, ...]
+
+
+def field_problems(
+    error: ValidationError, field_of: Callable[[Location], Location] = lambda loc: loc
+) -> str:
+    """Each problem as `field.path: message`, so the error names the field; `field_of` turns a
+    location into the field a reader knows."""
     problems = []
     for item in error.errors():
-        field = ".".join(str(part) for part in item["loc"])
+        field = ".".join(str(part) for part in field_of(item["loc"]))
         message = item["msg"].removeprefix("Value error, ")
         problems.append(f"{field}: {message}" if field else message)
     return "; ".join(problems)
@@ -286,13 +418,50 @@ def load_profile(path: Path) -> ComplianceProfile:
     try:
         return ComplianceProfile.model_validate(data, context={"base_dir": path.parent})
     except ValidationError as error:
-        raise ProfileError(path, _describe(error)) from error
+        raise ProfileError(path, field_problems(error)) from error
     except BaseFrameworkError as error:  # the controls it names couldn't be looked up
         raise ProfileError(path, str(error)) from error
     except OSError as error:  # a backstop: a path it names the file system refuses
         raise ProfileError(
             path, f"a path it names can't be used: {error.strerror or error}"
         ) from error
+
+
+def load_stored_profile(
+    profile_id: str,
+    fields: Mapping[str, Any],
+    documents: Mapping[str, Sequence[str]],
+    library: Path = SAMPLE_LIBRARY_DIR,
+) -> ComplianceProfile:
+    """The validated profile of a company made in the app (#385), from its own `fields` (each a
+    ComplianceProfile field: company, country, ...) and the `documents` chosen from each of the
+    sample library's folders: the ISA with no overlays, its evidence those documents, its id the
+    stored one. A folder with no document chosen is left out. ProfileError (its path the id) when
+    it doesn't validate; a problem with a folder's documents is named `evidence.<folder>`, the
+    company setup's field."""
+    data: dict[str, Any] = {
+        **fields,
+        "id": profile_id,
+        "base_framework": SOURCE,
+        "overlays": [],
+        "evidence_sources": {
+            name: {"folder": name, "documents": ids} for name, ids in documents.items() if ids
+        },
+    }
+    try:
+        return ComplianceProfile.model_validate(data, context={"base_dir": library, STORED: True})
+    except ValidationError as error:
+        raise ProfileError(Path(profile_id), field_problems(error, _setup_field)) from error
+    except BaseFrameworkError as error:
+        raise ProfileError(Path(profile_id), str(error)) from error
+
+
+def _setup_field(loc: Location) -> Location:
+    """`evidence_sources.<folder>.documents` (or `.folder`) as the company setup names it,
+    `evidence.<folder>`."""
+    if len(loc) >= 2 and loc[0] == "evidence_sources":
+        return ("evidence", loc[1], *loc[3:])
+    return loc
 
 
 PROFILE_LOAD_ERRORS: tuple[type[Exception], ...] = (ProfileError, BaseFrameworkError)
@@ -418,3 +587,13 @@ def profile_names(folder: Path) -> tuple[str, ...]:
         log.exception("the compliance profiles in %s could not be listed", folder)
         return ()
     return tuple(sorted(name for name in found if PROFILE_NAME.fullmatch(name)))
+
+
+def profile_folder_names(folder: Path) -> set[str]:
+    """Every folder's name in `folder`, a profile in it or not: no company made in the app may
+    take one (#385). None when the folder can't be read."""
+    try:
+        return {path.name for path in folder.iterdir() if path.is_dir()}
+    except OSError:
+        log.exception("the profile folders in %s could not be listed", folder)
+        return set()

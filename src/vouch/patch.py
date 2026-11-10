@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from vouch.documents import document_path, escaped
+from vouch.documents import DocumentChoice, document_path, escaped, is_chosen
 from vouch.front_matter import split_front_matter
 from vouch.search import ErrorResult, Passage, folder_escaped, passages_of
 
@@ -26,6 +26,7 @@ TIMED_OUT = "timed_out"  # also pending; asking again in the same run would only
 # Patch can take about 90 seconds to wake from idle; a recorded response answers at once.
 TIMEOUT_SECONDS: float = 120
 UNREADABLE = "Patch's vulnerability status could not be read"
+NO_RESPONSE = "there is no recorded response"
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def read_response(folder: Path) -> list[Passage]:
     read once. Raises ResponseError when it is missing, unreadable or malformed."""
     path = document_path(folder, RESPONSE_ID)
     if path is None:
-        raise ResponseError("there is no recorded response")
+        raise ResponseError(NO_RESPONSE)
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
@@ -60,17 +61,20 @@ def read_response(folder: Path) -> list[Passage]:
 
 
 def vulnerability_status(
-    folder: Path, *, timeout: float | None = None
+    folder: Path, documents: DocumentChoice = None, *, timeout: float | None = None
 ) -> list[Passage] | ErrorResult:
     """Patch's response as passages, or an error result; nothing is raised.
 
     `folder` is the patch folder the profile allows; one that has `escaped` is refused with
-    `folder_escaped`. The read runs in a daemon thread, so one that hangs past `timeout`
+    `folder_escaped`. `documents`, the folder's documents the profile chose (None: every one):
+    a choice leaving out the response is no recorded response, and Patch isn't read. The read runs in a daemon thread, so one that hangs past `timeout`
     seconds (default TIMEOUT_SECONDS) is left behind, `timed_out`, and never keeps the process
     from exiting.
     """
     if escaped(folder):
         return folder_escaped()
+    if not is_chosen(RESPONSE_ID, documents):
+        return ErrorResult(error=EVIDENCE_PENDING, detail=f"{UNREADABLE} ({NO_RESPONSE})")
     limit = TIMEOUT_SECONDS if timeout is None else timeout
     outcome: dict[str, Any] = {}
     done = threading.Event()

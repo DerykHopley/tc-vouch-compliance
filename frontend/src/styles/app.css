@@ -5,6 +5,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
 h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: uppercase; letter-spacing: .02em; line-height: 1.1; text-wrap: balance; margin: 0; }
 .wrap { padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+/* Text for a screen reader only. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Top bar, with the glen-check strip under it */
 .top { position: sticky; top: 0; z-index: 20; background: var(--sheet); border-bottom: 1px solid var(--rule); }
@@ -161,6 +163,14 @@ button.prof-button:hover { border-color: var(--navy); }
 .paper-head { display: grid; gap: 6px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
 .paper-head h2 { font-size: clamp(22px, 3vw, 30px); overflow-wrap: anywhere; }
 .paper-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+/* The companies made in company setup, on the developer page (#418): one row each, name, id and day, Remove at its end;
+   the row wraps at phone width, and a long name or id breaks rather than scroll the page sideways. */
+.companies { list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; }
+.companies li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--rule); overflow-wrap: anywhere; }
+.companies li:last-child { border-bottom: 1px solid var(--rule); }
+.companies .company-name { font-weight: 600; min-width: 0; }
+.companies .mono, .companies time { min-width: 0; }
+.companies .btn { margin-left: auto; }
 .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .mono { font-family: var(--f-mono); text-transform: none; }
 .sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 16px; display: grid; gap: 8px; justify-items: start; margin: 0; }
@@ -380,10 +390,10 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
 .report-doc h2 { font-size: 20px; margin-bottom: 8px; }
 .report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
-.report-head { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
-.report-head dt, .report-reason dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+.report-head, .setup-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
+.report-head dt, .report-reason dt, .setup-summary dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
   font-weight: 600; padding-top: 2px; }
-.report-head dd, .report-reason dd { margin: 0; overflow-wrap: anywhere; }
+.report-head dd, .report-reason dd, .setup-summary dd { margin: 0; overflow-wrap: anywhere; }
 .report-part { --report-part-gap: 10px; display: grid; gap: var(--report-part-gap); min-width: 0; }
 .report-lead { margin: 0; font-weight: 600; }
 .report .report-bar { box-shadow: inset 0 0 0 1px var(--rule); background: var(--paper); }
@@ -469,3 +479,72 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .report-doc h2, .report-quotes h3, .report-group-head { break-after: avoid; }
   .report-doc a[href]::after { content: " (" attr(href) ")"; overflow-wrap: anywhere; }
 }
+
+/* Company setup (#403, pending design pass): the step list, each step's sheet, its fields and choice cards, from the
+   existing tokens. The current step is ink with an ink number. */
+.setup-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink); }
+.setup-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.setup-steps li[aria-current="step"] { color: var(--ink); font-weight: 700; }
+.setup-step-n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; }
+.setup-steps li[aria-current="step"] .setup-step-n { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.setup-step { justify-items: stretch; gap: 12px; }
+.setup-step h3 { margin: 0; font-size: 18px; }
+.setup-field { display: grid; gap: 6px; }
+.setup-field label { font-weight: 500; }
+.setup-field .field { flex: none; width: 100%; max-width: 480px; }
+.setup-choices { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.setup-choices legend { font-weight: 500; padding: 0; margin-bottom: 8px; }
+/* A radio is its own 44px target (the touch floor measures the input), drawn as an 18px ring: --muted on --sheet as a
+   field's edge, an --ink dot when chosen. */
+.setup-choice { display: flex; align-items: center; gap: 4px; min-height: 44px; cursor: pointer; }
+.setup-choice input { appearance: none; flex: none; width: 44px; height: 44px; margin: 0 0 0 -12px; border-radius: 999px; cursor: pointer;
+  background: radial-gradient(circle, var(--sheet) 0 7px, var(--muted) 7.5px 9px, transparent 9.5px); }
+.setup-choice input:checked { background: radial-gradient(circle, var(--ink) 0 5px, var(--sheet) 5.5px 7px, var(--ink) 7.5px 9px, transparent 9.5px); }
+.setup-option { padding: 4px 12px; border: 1px solid var(--rule); border-radius: 4px; }
+.setup-option:hover { border-color: var(--muted); } /* as a control card's hover */
+.setup-option:has(input:checked) { border-color: var(--ink); }
+.setup-option input { margin-left: -8px; }
+.setup-option-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.setup-option-name { font-weight: 600; }
+/* Step 5 (#407): a control's checkbox is drawn as the radio is, a 44px target holding an 18px box (--muted edge on
+   --sheet; ticked, --ink with a --sheet tick drawn from two strokes); its reason field sits under the question. */
+.setup-na { display: grid; gap: 4px; }
+.setup-check { align-items: flex-start; }
+.setup-check .setup-option-text { display: block; padding-top: 11px; }
+.setup-check input { border-radius: 4px; background:
+  linear-gradient(var(--sheet), var(--sheet)) center / 14px 14px no-repeat,
+  linear-gradient(var(--muted), var(--muted)) center / 18px 18px no-repeat; }
+.setup-check input:checked { background:
+  linear-gradient(45deg, transparent 32%, var(--sheet) 32% 68%, transparent 68%) 16px 21px / 5px 5px no-repeat,
+  linear-gradient(135deg, transparent 40%, var(--sheet) 40% 60%, transparent 60%) 19px 16px / 10px 10px no-repeat,
+  linear-gradient(var(--ink), var(--ink)) center / 18px 18px no-repeat; }
+.setup-reason { margin-left: 32px; }
+/* Forced colours (Windows High Contrast) drop the drawn ring and box above, leaving an empty target: give the radio
+   and the checkbox back the system's own, which draws in the system colours. */
+@media (forced-colors: active) {
+  .setup-choice input { appearance: auto; width: 18px; height: 18px; margin: 13px 13px 13px 1px; }
+}
+.setup-alert { display: grid; gap: 8px; justify-items: start; }
+.setup-alert p { margin: 0; }
+.setup-nav { display: flex; gap: 8px; }
+.setup-nav .btn-primary { margin-left: auto; }
+/* Step 6 (#408): the sample library in DocumentTable, the report's ruled table under a caption per folder; wide, it
+   scrolls inside its own .table-wrap (design.md, Layout). A row leads with step 5's 44px checkbox. */
+.doc-table { min-width: 640px; }
+/* The container may shrink below the table in a grid, so the table scrolls in it, not the page; and it holds the
+   rows' screen-reader text (.sr-only, positioned), which would otherwise widen the page from outside it. */
+.doc-table-wrap { position: relative; min-width: 0; }
+.doc-table caption { text-align: left; font-weight: 600; padding: 4px 0 6px; }
+.doc-table .doc-title { display: block; overflow-wrap: anywhere; }
+.doc-table .doc-id { display: block; font-size: 12px; color: var(--muted); }
+.doc-table .doc-current { color: var(--muted); }
+.doc-table td.doc-choose { width: 44px; padding: 0 4px 0 0; vertical-align: middle; }
+.doc-table .doc-choose .setup-choice input { margin: 0; }
+/* Forced colours draw the system's 18px box (above); its margin makes the 44px target again, the label around it taking
+   the press, as on step 5. */
+@media (forced-colors: active) {
+  .doc-table .doc-choose .setup-choice input { margin: 13px; }
+}
+.setup-ready { font-variant-numeric: tabular-nums; }
+/* Step 7's summary (#409): the report head's label and value grid; a marked control per line. */
+.setup-summary-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

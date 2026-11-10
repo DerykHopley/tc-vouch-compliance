@@ -1,13 +1,19 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
+import { type Arrival, useFirstPass } from './arrival.ts'
 import AskVouch from './AskVouch.tsx'
-import { developerSettings, type DeveloperSettings, type UNAVAILABLE } from './developer.ts'
+import type { PageContext } from './chat.ts'
+import { developerSettings, type DeveloperSettings, UNAVAILABLE } from './developer.ts'
+import CompanySetupWizard from './CompanySetupWizard.tsx'
 import DeveloperPage from './DeveloperPage.tsx'
+import Documents from './Documents.tsx'
 import Dossier from './Dossier.tsx'
 import { mayLeave, unsavedCount } from './leaving.ts'
-import { controlPath, useOverview } from './overview.ts'
+import { controlPath, isReviewState, useOverview } from './overview.ts'
 import { type PassAssessment, useProfilePass } from './profilePass.ts'
+import type { ProfileSummary } from './profiles.ts'
 import { type RemediationItem, withItem } from './remediation.ts'
+import type { Goal } from './report.ts'
 import Report from './Report.tsx'
 import TopBar from './TopBar.tsx'
 import UserMenu from './UserMenu.tsx'
@@ -23,23 +29,35 @@ function startingTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-type View = { name: 'dossier' } | { name: 'report' } | { name: 'developer' } | { name: 'paper'; controlId: string }
+type View = { name: 'dossier' } | { name: 'report' } | { name: 'documents' } | { name: 'developer' } | { name: 'setup' }
+  | { name: 'paper'; controlId: string }
 
 const DEVELOPER_PATH = '/developer'
+const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
+const DOCUMENTS_PATH = '/documents'
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 
-/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the developer
- * page at /developer, the Dossier at /. */
+/** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the profile's
+ * documents at /documents (#424), the developer page at /developer and its company setup at /developer/setup (#403),
+ * the Dossier at /. */
 const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
-    : view.name === 'developer' ? DEVELOPER_PATH : '/'
+    : view.name === 'documents' ? DOCUMENTS_PATH : view.name === 'developer' ? DEVELOPER_PATH
+      : view.name === 'setup' ? SETUP_PATH : '/'
+
+/** The page the chat says the lead is on for the view shown: company setup is the developer page's, and the
+ * not-found page (no view shown) speaks as the Dossier, where its way back leads. */
+const chatPage = (shown: View['name'] | null): PageContext['page'] =>
+  shown === 'setup' ? 'developer' : shown ?? 'dossier'
 
 /** The view an address shows; the Dossier for one it does not know. An id with a broken escape stays as written,
  * so its paper says not found. */
 function viewAt(path: string): View {
   if (path === DEVELOPER_PATH) return { name: 'developer' }
+  if (path === SETUP_PATH) return { name: 'setup' }
   if (path === REPORT_PATH) return { name: 'report' }
+  if (path === DOCUMENTS_PATH) return { name: 'documents' }
   const control = CONTROL_PATH.exec(path)
   if (!control) return { name: 'dossier' }
   try {
@@ -60,11 +78,25 @@ type AppProps = {
   company?: string
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
+  /** Company setup made a company (#409), with the Goal chosen in it (#447): ProfiledApp opens the app afresh under it. */
+  onCompanyCreated?: (profile: ProfileSummary, goal: Goal) => void
+  /** A company made in setup was removed on the developer page (#418): ProfiledApp reads the profile list again. */
+  onCompanyRemoved?: (id: string) => void
+  /** The company shown was removed, so the app opened afresh (#418): the developer page says so, once. */
+  removedCompany?: string
+  /** The developer page said removedCompany. */
+  onRemovedShown?: () => void
+  /** The app opens on a company just made: the Dossier's heading takes focus, until the first move elsewhere (#409),
+   * and the arrival sequence sets the Goal chosen in setup and runs a profile pass (#447). Only a create sets it; it is
+   * taken once, as the app mounts, and `onArrivalUsed` then lets ProfiledApp clear it, so no later mount reruns it. */
+  arrival?: Arrival | null
+  onArrivalUsed?: () => void
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs, the profile dropdown and the user menu, behind one
  * Menu button on a phone), then the page shown, and the chat. */
-export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh }: AppProps = {}) {
+export default function App({ onSignOut, profileSwitcher, userName, company, onStartedAfresh, onCompanyCreated,
+  onCompanyRemoved, removedCompany, onRemovedShown, arrival = null, onArrivalUsed }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -90,6 +122,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     }
   }, [barOpen])
   const [view, setView] = useState<View>(() => viewAt(window.location.pathname))
+  const [focusHeading, setFocusHeading] = useState(arrival !== null) // ends with the first move to another view
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
@@ -101,6 +134,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         window.history.pushState(null, '', shownPath.current)
         return
       }
+      setFocusHeading(false)
       setView(viewAt(window.location.pathname))
     }
     // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
@@ -120,11 +154,12 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     const path = pathOf(next)
     if (path !== shownPath.current && !mayLeave()) return false // the view shown again asks nothing
     if (window.location.pathname !== path) window.history.pushState(null, '', path)
+    setFocusHeading(false)
     setView(next)
     return true
   }
-  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer
-  // shows the Dossier.
+  // A developer's settings (or that they're unavailable), or null: then there's no Developer link, and /developer and
+  // /developer/setup show the Dossier.
   const [developer, setDeveloper] = useState<DeveloperSettings | typeof UNAVAILABLE | null>(null)
   useEffect(() => {
     let current = true
@@ -135,8 +170,8 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   const { load, noteAssessed, refresh: refreshOverview } = overview
   const onDossier = view.name === 'dossier'
   // Read on opening, then afresh on each return to the Dossier (not on leaving it: each read counts to the rate limit).
-  // The report shows none of it (#56): it is read on leaving the report for a view that does.
-  const needsOverview = view.name !== 'report'
+  // The report and the documents show none of it (#56, #424): it is read on leaving them for a view that does.
+  const needsOverview = view.name !== 'report' && view.name !== 'documents'
   const read = useRef(false)
   useEffect(() => {
     if (!needsOverview) return
@@ -164,27 +199,43 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
   const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
-  const shown: View['name'] | null = view.name === 'report' ? 'report'
-    : view.name === 'developer' && developer ? 'developer' : control ? 'paper'
+  const shown: View['name'] | null = view.name === 'report' || view.name === 'documents' ? view.name
+    : (view.name === 'developer' || view.name === 'setup') && developer ? view.name : control ? 'paper'
     : notFound !== null ? null : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
   // is read for a control its card says is not assessed (a run in this page puts its result on the card), nor for the
   // one this page's run is of, which holds its result: each read counts to the rate limit.
   const paperId = control ? control.id : null
   const ownRun = runFor === control?.id && run !== overtaken // the paper's control's run in this page, still its newest
-  const readStored = control !== undefined && control.status !== 'not-assessed' && !ownRun
+  // A control not assessed, or not applicable as a whole (#454), has nothing stored to read.
+  const readStored = control !== undefined && isReviewState(control.status) && !ownRun
   const [stored, setStored] = useState<{ controlId: string; assessment: Assessment | null } | null>(null)
   const [paperReloads, setPaperReloads] = useState(0) // bumped to read the paper's newest again (the chat assessed it)
+  const [documentsReloads, setDocumentsReloads] = useState(0) // bumped to read the documents again (Cited by changed)
   // The profile pass sits above the views too (#390): its result waits on the Dossier. A finished pass reads the
-  // overview afresh, so the cards (the working paper's index too) show what it proposed, and the open paper's newest.
+  // overview afresh, so the cards (the working paper's index too) show what it proposed, the open paper's newest, and
+  // the documents if shown (their Cited by, #424).
   const passed = useCallback((made: PassAssessment[]) => {
     void load()
     setPaperReloads((n) => n + 1)
+    setDocumentsReloads((n) => n + 1)
     const { run: last, runFor: lastFor } = latestRun.current
     if (made.some((a) => a.control_id === lastFor)) setOvertaken(last)
   }, [load])
   const { pass, start: startPass } = useProfilePass(passed)
   const passing = pass.kind === 'running' // one run at a time: a working paper's Assess waits for the pass
+  // A company just made (#447): its Goal is set, then its first pass runs, once (useFirstPass). The arrival is used
+  // up as the app opens.
+  const { arriving, goalNotSet, goalSet } = useFirstPass(arrival, { overview: overview.state,
+    goalChanged: overview.goalChanged, pass, startPass })
+  useEffect(() => {
+    if (arrival !== null) onArrivalUsed?.()
+  }, [arrival, onArrivalUsed])
+  const { goalChanged } = overview
+  const changedGoal = useCallback((goal: Goal) => {
+    goalSet()
+    return goalChanged(goal)
+  }, [goalChanged, goalSet])
   useEffect(() => {
     if (paperId === null || !readStored) return
     const answer = { wanted: true } // until the paper changes
@@ -242,8 +293,10 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
               onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'dossier' }) }}>Overview</a>
             <a href={REPORT_PATH} aria-current={shown === 'report' ? 'page' : undefined}
               onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'report' }) }}>Report</a>
+            <a href={DOCUMENTS_PATH} aria-current={shown === 'documents' ? 'page' : undefined}
+              onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'documents' }) }}>Documents</a>
             {developer && (
-              <a href={DEVELOPER_PATH} aria-current={shown === 'developer' ? 'page' : undefined}
+              <a href={DEVELOPER_PATH} aria-current={shown === 'developer' || shown === 'setup' ? 'page' : undefined}
                 onClick={(e) => { e.preventDefault(); setBarOpen(false); showView({ name: 'developer' }) }}>Developer</a>
             )}
           </nav>
@@ -253,7 +306,22 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         </div>
       </TopBar>
       {shown === 'report' ? <Report />
-        : shown === 'developer' && developer ? <main><DeveloperPage settings={developer} onChange={setDeveloper} /></main>
+        : shown === 'documents' ? <Documents reloads={documentsReloads} />
+        : shown === 'developer' && developer ? (
+          <main>
+            <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })}
+              onRemoved={onCompanyRemoved} removedCompany={removedCompany} onRemovedShown={onRemovedShown} />
+          </main>
+        )
+        : shown === 'setup' && developer ? (
+          <main>
+            {/* settings unreadable just now: the developer page's notice, not the wizard */}
+            {developer === UNAVAILABLE
+              ? <DeveloperPage settings={developer} onChange={setDeveloper} onSetup={() => showView({ name: 'setup' })} />
+              : <CompanySetupWizard developerPath={DEVELOPER_PATH} onDeveloper={() => showView({ name: 'developer' })}
+                onCreated={onCompanyCreated} />}
+          </main>
+        )
         : control && overview.state.status === 'ready' ? (
           <main>
             <WorkingPaper overview={overview.state.overview} card={control} running={running}
@@ -265,18 +333,19 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
         )
           : notFound !== null ? <main><ControlNotFound controlId={notFound} onOverview={() => showView({ name: 'dossier' })} /></main>
           : <Dossier state={overview.state} onRetry={overview.retry} onOpen={open} running={running}
-            pass={pass} onPass={() => void startPass()} onGoalChanged={overview.goalChanged}
-            onRoundChanged={overview.roundChanged} />}
-      {/* On the not-found page (no view current) the chat speaks as on the Dossier, where its way back leads; on the
-          readiness report it knows the report page (#268). An assessment from the chat reads the overview afresh (its card,
-          readiness), and its paper's newest if open. */}
-      <AskVouch context={{ page: shown ?? 'dossier',
+            focusHeading={focusHeading} pass={pass} onPass={() => void startPass()}
+            onGoalChanged={changedGoal} onRoundChanged={overview.roundChanged}
+            arriving={arriving} goalNotSet={goalNotSet} />}
+      {/* An assessment from the chat reads the overview afresh (its card, readiness), its paper's newest if open, and
+          the documents if shown (their Cited by, #424). */}
+      <AskVouch context={{ page: chatPage(shown),
         controlId: shown === 'paper' && control ? control.id : null }}
         onOpen={(controlId) => open(controlId, false)}
         language={overview.state.status === 'ready' ? overview.state.overview.answer_language : undefined}
         onAssessed={(controlId) => {
           void load()
           if (controlId === paperId) setPaperReloads((n) => n + 1)
+          if (shown === 'documents') setDocumentsReloads((n) => n + 1)
         }} />
     </>
   )

@@ -1,0 +1,20 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "observations information relevant reported"}},
+    {"tool": "search_records", "args": {"query": "observations information relevant reported"}},
+    {"answer": "Draft answer for 1.6.1, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "not-evidenced", "reason": "No document defines what counts as a security event that staff must pass on.", "citations": []},
+      {"requirement_id": "M2", "verdict": "not-evidenced", "reason": "No document sets out how staff pass on a security event.", "citations": []},
+      {"requirement_id": "M3", "verdict": "not-evidenced", "reason": "No channel for talking with the people who raise an event is described.", "citations": []},
+      {"requirement_id": "S1", "verdict": "not-evidenced", "reason": "No common point of contact for security events is named.", "citations": []},
+      {"requirement_id": "S2", "verdict": "not-evidenced", "reason": "No channels by severity are described.", "citations": []},
+      {"requirement_id": "S3", "verdict": "not-evidenced", "reason": "No document obliges staff to pass on events, and the training topics leave it out.", "citations": []},
+      {"requirement_id": "S4", "verdict": "not-evidenced", "reason": "No channel for outside parties is described.", "citations": []},
+      {"requirement_id": "S5", "verdict": "not-evidenced", "reason": "There is no information for staff on how to pass on an event.", "citations": []},
+      {"requirement_id": "S6", "verdict": "not-evidenced", "reason": "No feedback to the people who raise an event is described.", "citations": []}
+    ]
+  }
+}

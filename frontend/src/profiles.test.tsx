@@ -1,9 +1,40 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview } from './overview.ts'
 import ProfiledApp from './ProfiledApp.tsx'
-import { fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile } from './profiles.ts'
+import type { Goal } from './report.ts'
+
+// Company setup stands in as buttons that report the company made (#409) with the Goal chosen on step 4 (#447): its
+// steps are tested on their own.
+vi.mock('./CompanySetupWizard.tsx', () => {
+  const made = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de' }
+  return {
+    default: ({ onCreated }: { onCreated: (profile: ProfileSummary, goal: Goal) => void }) => (
+      <>
+        <button type="button" onClick={() => onCreated(made, 'internal-improvement')}>Created</button>
+        <button type="button" onClick={() => onCreated(made, 'audit-readiness')}>Created for audit</button>
+      </>
+    ),
+  }
+})
+// Each list read is kept, so a test can wait on a late one's answer having been handled (#418 review): ProfiledApp's
+// own `.then` on it runs before a test's `await` on the same promise.
+const reads = vi.hoisted(() => [] as Promise<unknown>[])
+vi.mock('./profiles.ts', async (original) => {
+  const actual = await original<typeof import('./profiles.ts')>()
+  return { ...actual, fetchProfiles: () => {
+    const read = actual.fetchProfiles()
+    reads.push(read)
+    return read
+  } }
+})
+import type { DeveloperSettings } from './developer.ts'
+import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
+import {
+  fetchProfiles, type ProfileSummary, profileLabel, startAfresh, startingProfile, withoutProfile, withProfile,
+} from './profiles.ts'
 import ProfileSwitcher from './ProfileSwitcher.tsx'
 import {
   authHeaders, rememberedProfile, rememberProfile, setOnSignedOut, setProfile, setTokenSource,
@@ -11,6 +42,8 @@ import {
 
 const NORDLICHT: ProfileSummary = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany',
   answer_language: 'en' }
+const MUSTERFIRMA: ProfileSummary = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany',
+  answer_language: 'de' }
 const TESTWERK: ProfileSummary = { id: 'testwerk', company: 'Testwerk Prüfstand GmbH', country: 'Austria',
   answer_language: 'de' }
 
@@ -20,6 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  reads.length = 0
   setProfile(null)
   setTokenSource(null)
   setOnSignedOut(null)
@@ -89,6 +123,36 @@ describe('startingProfile', () => {
 
   it("is none without a list: the API's default answers", () => {
     expect(startingProfile(null, 'testwerk')).toEqual({ id: null, fellBack: false })
+  })
+})
+
+describe('withProfile, issue 409', () => {
+  it('adds the profile to the list held, unless it is listed already', () => {
+    const held = { profiles: [NORDLICHT], default: 'nordlicht' }
+    expect(withProfile(held, MUSTERFIRMA)).toEqual({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' })
+    expect(withProfile({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }, MUSTERFIRMA))
+      .toEqual({ profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' })
+  })
+
+  it('with no list held, is a list of that profile alone, with no default', () => {
+    expect(withProfile(null, MUSTERFIRMA)).toEqual({ profiles: [MUSTERFIRMA], default: null })
+  })
+})
+
+describe('withoutProfile, issue 418', () => {
+  it('leaves the profile out of the list held, keeping its default', () => {
+    const held = { profiles: [NORDLICHT, MUSTERFIRMA], default: 'nordlicht' }
+    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: 'nordlicht' })
+    expect(withoutProfile(held, 'nobody')).toEqual(held)
+  })
+
+  it('with the profile as the default, leaves no default, so the first listed opens (review of issue 418)', () => {
+    const held = { profiles: [MUSTERFIRMA, NORDLICHT], default: 'musterfirma-gmbh' }
+    expect(withoutProfile(held, 'musterfirma-gmbh')).toEqual({ profiles: [NORDLICHT], default: null })
+  })
+
+  it('with no list held, is none', () => {
+    expect(withoutProfile(null, 'musterfirma-gmbh')).toBeNull()
   })
 })
 
@@ -182,7 +246,7 @@ const overviewOf = (company: string): Overview => ({
   requirements: {}, rounds: { current: { name: 'First round', opened_at: null }, comparison: null },
   readiness: { controls: 1, accepted: 0, by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0,
     'not-applicable': 0 }, open: 1, remediation_items: 0, remediation_approved: 0 },
-  by_status: { 'not-assessed': 1, 'waiting-for-review': 0, accepted: 0, rejected: 0 },
+  by_status: { 'not-assessed': 1, 'waiting-for-review': 0, accepted: 0, rejected: 0, 'not-applicable': 0 },
   next_step: { control_id: '1.1.1', action: 'assess' },
   controls: [{ id: '1.1.1', question: 'Question?', iso_27001: 'A.5.1', status: 'not-assessed', verdict: null }],
   quotes: [],
@@ -372,5 +436,480 @@ describe('switching profile on a working paper', () => {
     await screen.findByText(/Working paper · Testwerk/)
     expect(within(await row()).queryByText(/Overridden from/)).toBeNull()
     expect(within(await row()).queryByText('The rollout record shows it.')).toBeNull()
+  })
+})
+
+describe('a company made in company setup, issue 409', () => {
+  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
+    kept_in: 'memory', daily_limit: 10 }
+
+  /** The API as `serve` answers it, for a developer, the list read again answering `relisted` (null: a 500). */
+  function serveDeveloper(relisted: ProfileSummary[] | null) {
+    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/profiles' && ++listings > 1)
+        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
+          : new Response(null, { status: 500 }))
+      if (url === '/api/profiles') return Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK], default: 'nordlicht' }))
+      return answered(url, init)
+    })
+    return fetch
+  }
+
+  it('reads the list again and opens under the new company, on the Dossier, remembered for the next reload', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(window.location.pathname).toBe('/')
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/profiles')).toHaveLength(2)
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    expect(screen.getByRole('button', { name: /^Profile: Musterfirma GmbH/ })).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    expect(screen.getAllByRole('menuitemradio').map((m) => m.getAttribute('aria-checked')))
+      .toEqual(['false', 'false', 'true'])
+  })
+
+  it('when the list can\'t be read again, still opens under the new company, which the switcher names', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const fetch = serveDeveloper(null)
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    expect(overviewCalls(fetch)).toEqual(['nordlicht', 'musterfirma-gmbh']) // the setup page's, then the new company's
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: Musterfirma/ }))
+    expect(screen.getAllByRole('menuitemradio').map((m) => m.textContent?.startsWith('Musterfirma GmbH')))
+      .toEqual([false, false, true])
+  })
+
+  it('lands focus on the Dossier\'s main heading, not the profile dropdown', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 })))
+  })
+
+  /** serveDeveloper, the list read again held until the returned function answers it. */
+  function heldRelisting() {
+    const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let release: (answer: Response) => void = () => {}
+    let listings = 0
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/profiles' && ++listings > 1
+      ? new Promise<Response>((resolve) => { release = resolve })
+      : answered(url, init))
+    return (answer: Response) => release(answer)
+  }
+
+  it('stays on the setup address until the list answers again, and after closing neither opens nor remembers it',
+    async () => {
+      window.history.replaceState(null, '', '/developer/setup')
+      const release = heldRelisting()
+      const { unmount } = render(<ProfiledApp />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+      expect(window.location.pathname).toBe('/developer/setup')
+      unmount()
+      release(Response.json({ profiles: [NORDLICHT, TESTWERK, MUSTERFIRMA], default: 'nordlicht' }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(rememberedProfile()).toBeNull()
+      expect(await authHeaders()).toEqual({})
+      expect(window.location.pathname).toBe('/developer/setup')
+    })
+
+  it('a 401 on the list read again signs out, and neither opens nor remembers the new company', async () => {
+    window.history.replaceState(null, '', '/developer/setup')
+    const release = heldRelisting()
+    const signOut = vi.fn()
+    setOnSignedOut(signOut) // as ClerkApp's: the sign-in replaces the app on its next render, after this answer
+    render(<ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+    release(new Response(null, { status: 401 }))
+    await waitFor(() => expect(signOut).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(rememberedProfile()).toBeNull()
+    expect(window.location.pathname).toBe('/developer/setup')
+    expect(screen.queryByRole('button', { name: /^Profile: Musterfirma/ })).toBeNull()
+  })
+})
+
+describe('a company removed on the developer page, issue 418', () => {
+  const MADE = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', created_at: '2026-11-09T10:15:00+00:00' }
+  const SETTINGS = { ...DEVELOPER_SETTINGS, companies: [MADE] } satisfies DeveloperSettings
+
+  /** The API as `serve` answers it, for a developer on the developer page with Musterfirma made in setup: the
+   * DELETE answers the settings without it, and the list read again answers `relisted` (null: a 500), or is held
+   * until `release` answers it when `hold` is set. */
+  function serveRemoval(relisted: ProfileSummary[] | null, hold = false,
+    listed: ProfileSummary[] = [NORDLICHT, TESTWERK, MUSTERFIRMA], fallback = 'nordlicht') {
+    window.history.replaceState(null, '', '/developer')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetch = serve(listed, fallback)
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    let release: (answer: Response) => void = () => {}
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/developer/profiles/musterfirma-gmbh' && init?.method === 'DELETE')
+        return Promise.resolve(Response.json({ ...SETTINGS, companies: [] }))
+      if (url === '/api/profiles' && ++listings > 1) {
+        if (hold) return new Promise<Response>((resolve) => { release = resolve })
+        return Promise.resolve(relisted ? Response.json({ profiles: relisted, default: 'nordlicht' })
+          : new Response(null, { status: 500 }))
+      }
+      return answered(url, init)
+    })
+    return { fetch, release: (answer: Response) => release(answer) }
+  }
+
+  const listings = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/profiles')
+
+  async function removeMusterfirma() {
+    const sheet = await screen.findByRole('region', { name: 'Company setup' })
+    await userEvent.click(await within(sheet).findByRole('button', { name: 'Remove Musterfirma GmbH' }))
+  }
+
+  async function switcherCompanies() {
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    const names = screen.getAllByRole('menuitemradio').map((m) => m.textContent?.split(' · ')[0])
+    await userEvent.keyboard('{Escape}')
+    return names
+  }
+
+  it('one not shown: the list is read again and the switcher drops it; the page and the profile stay', async () => {
+    const { fetch } = serveRemoval([NORDLICHT, TESTWERK])
+    render(<ProfiledApp />)
+    await removeMusterfirma()
+
+    await waitFor(() => expect(listings(fetch)).toHaveLength(2))
+    await waitFor(async () => expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH',
+      'Testwerk Prüfstand GmbH']))
+    expect(screen.getByRole('status').textContent).toBe('Removed Musterfirma GmbH.')
+    expect(window.location.pathname).toBe('/developer')
+    expect(screen.getByRole('button', { name: /^Profile: Nordlicht/ })).toBeTruthy()
+    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
+  })
+
+  it.each([
+    ['read again', [NORDLICHT, TESTWERK]],
+    ["held, less it, when the list can't be read again", null],
+  ])('the one shown: opens the default on the developer page with the fallback note, forgotten (%s)',
+    async (_, relisted) => {
+      rememberProfile('musterfirma-gmbh')
+      serveRemoval(relisted)
+      render(<ProfiledApp />)
+      await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
+      await removeMusterfirma()
+
+      await screen.findByRole('button', { name: /^Profile: Nordlicht/ })
+      expect(within(screen.getByRole('banner')).getByRole('status').textContent)
+        .toBe('Your last profile is no longer available: showing Nordlicht Komponenten GmbH.')
+      expect(rememberedProfile()).toBeNull()
+      expect(window.location.pathname).toBe('/developer')
+      expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+      // The note is carried through the app opened afresh (#418 review), and focus goes to it, not the heading.
+      const note = await within(screen.getByRole('region', { name: 'Company setup' })).findByRole('status')
+      expect(note.textContent).toBe('Removed Musterfirma GmbH.')
+      expect(document.activeElement).not.toBe(screen.queryByRole('heading', { level: 1 }))
+      expect(await switcherCompanies()).toEqual(['Nordlicht Komponenten GmbH', 'Testwerk Prüfstand GmbH'])
+    })
+
+  it("the one shown, the default, with no list read again: leaves it for the profile the held list has left",
+    async () => {
+      serveRemoval(null, false, [MUSTERFIRMA, NORDLICHT], 'musterfirma-gmbh')
+      render(<ProfiledApp />)
+      await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
+      await removeMusterfirma()
+
+      await waitFor(async () => expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' }))
+    })
+
+  it("the one shown, and no other profile can be had: opens with none named, not under the one removed", async () => {
+    serveRemoval(null, false, [MUSTERFIRMA], 'musterfirma-gmbh')
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: 'Remove Musterfirma GmbH' })
+    expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'musterfirma-gmbh' })
+    await removeMusterfirma()
+
+    await waitFor(async () => expect(await authHeaders()).toEqual({}))
+    expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+  })
+
+  it('a list read again that answers after a sign-out changes nothing', async () => {
+    rememberProfile('musterfirma-gmbh')
+    const { release } = serveRemoval(null, true)
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    render(<ProfiledApp />)
+    await screen.findByRole('button', { name: /^Profile: Musterfirma/ })
+    await removeMusterfirma()
+    await screen.findByText('Removed Musterfirma GmbH.')
+    await waitFor(() => expect(reads).toHaveLength(2))
+    release(new Response(null, { status: 401 }))
+    await reads[1] // ProfiledApp has handled the late answer by now
+    expect(signOut).toHaveBeenCalledOnce()
+    expect(rememberedProfile()).toBe('musterfirma-gmbh')
+    expect(screen.getByRole('button', { name: /^Profile: Musterfirma/ })).toBeTruthy()
+    expect(within(screen.getByRole('banner')).queryByRole('status')).toBeNull()
+  })
+})
+
+describe('the first pass on a company just made, issue 447', () => {
+  const SETTINGS = { model: 'm', runs_on: 'fake', fake_reason: 'no_key', prompt_version: 'v', usage_url: '',
+    kept_in: 'memory', daily_limit: 10 }
+  const PASS_DONE = { assessments: [{ thread_id: 't1', control_id: '1.1.1', status: 'waiting-for-review',
+    verdict: 'partly-evidenced' }], skipped: [] }
+  const LIMIT = 'The daily limit of profile passes is reached. It resets at midnight UTC.'
+  const NOT_SET = 'The company was created, but its Goal could not be set to Internal improvement. Use Change goal to '
+    + 'set it.'
+  const NEVER = () => new Promise<Response>(() => {})
+
+  type Answer = () => Response | Promise<Response>
+  type Setup = {
+    /** PUT /api/goal's answer; a 2xx keeps the goal, so the overview shows it. */
+    goalAnswer?: Answer
+    /** POST /api/profile-pass's answer. */
+    passAnswer?: Answer
+    /** Each read of the new company's overview, answered as `overviewAnswer(goalSent)` says (`goalSent`: a Goal change
+     * has answered), null for the usual; a 2xx answer stands for the usual one. */
+    overviewAnswer?: (goalSent: boolean) => Promise<Response> | null
+    /** The new company's Goal before any change. */
+    startingGoal?: Goal
+  }
+
+  /** The API for a developer on the setup page: Nordlicht and Testwerk listed, Musterfirma too once made. */
+  function serveSetup({ goalAnswer = () => Response.json({ goal: 'internal-improvement' }),
+    passAnswer = () => Response.json(PASS_DONE), overviewAnswer = () => null, startingGoal = 'audit-readiness',
+  }: Setup = {}) {
+    const fetch = serve([NORDLICHT, TESTWERK, MUSTERFIRMA])
+    const answered = fetch.getMockImplementation()!
+    let listings = 0
+    let goalSent = false
+    let goal: Goal = startingGoal
+    fetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(SETTINGS))
+      if (url === '/api/profiles') {
+        const profiles = ++listings > 1 ? [NORDLICHT, TESTWERK, MUSTERFIRMA] : [NORDLICHT, TESTWERK]
+        return Promise.resolve(Response.json({ profiles, default: 'nordlicht' }))
+      }
+      if (url === '/api/goal' && init?.method === 'PUT') {
+        return Promise.resolve(goalAnswer()).then((answer) => {
+          if (answer.ok) goal = (JSON.parse(String(init.body)) as { goal: Goal }).goal
+          goalSent = true
+          return answer
+        })
+      }
+      if (url === '/api/profile-pass' && init?.method === 'POST') return Promise.resolve(passAnswer())
+      if (url === '/api/overview') {
+        const named = new Headers(init?.headers).get('X-Vouch-Profile')
+        const company = [NORDLICHT, TESTWERK, MUSTERFIRMA].find((p) => p.id === named)?.company ?? NORDLICHT.company
+        const usual = () => Response.json({ ...overviewOf(company), goal: named === 'musterfirma-gmbh' ? goal
+          : 'audit-readiness' })
+        if (named !== 'musterfirma-gmbh') return Promise.resolve(usual())
+        return overviewAnswer(goalSent)?.then((answer) => answer.ok ? usual() : answer) ?? Promise.resolve(usual())
+      }
+      return answered(url, init)
+    })
+    return fetch
+  }
+  /** Each goal change and pass sent, in order, with the profile it named. */
+  const firstPassCalls = (fetch: ReturnType<typeof serve>) => fetch.mock.calls
+    .filter(([url, init]) => (url === '/api/goal' && init?.method === 'PUT') || url === '/api/profile-pass')
+    .map(([url, init]) => [url, new Headers(init?.headers).get('X-Vouch-Profile'), init?.body ?? null])
+  const passes = (fetch: ReturnType<typeof serve>) => fetch.mock.calls.filter(([url]) => url === '/api/profile-pass')
+  const goalButton = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Change goal' })
+
+  async function createFromSetup(button = 'Created', strict = true) {
+    window.history.replaceState(null, '', '/developer/setup')
+    render(strict ? <StrictMode><ProfiledApp /></StrictMode> : <ProfiledApp />)
+    await userEvent.click(await screen.findByRole('button', { name: button }))
+  }
+  /** As createFromSetup, then waits for the new company's Dossier. */
+  async function createAndOpen(button = 'Created') {
+    await createFromSetup(button)
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+  }
+
+  it('sets Internal improvement under the new company, then runs one pass, once under StrictMode', async () => {
+    const fetch = serveSetup()
+    await createAndOpen()
+    expect(await screen.findByText('1 assessment waiting for your review.')).toBeTruthy()
+    expect(firstPassCalls(fetch)).toEqual([
+      ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
+      ['/api/profile-pass', 'musterfirma-gmbh', null],
+    ])
+    expect(await screen.findByText('Goal: Internal improvement')).toBeTruthy()
+  })
+
+  it('shows the running state on the hero while the pass runs', async () => {
+    serveSetup({ passAnswer: NEVER })
+    await createAndOpen()
+    expect(await screen.findByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    expect(screen.getByText('Vouch is assessing every open control in one run. This can take a few minutes.'))
+      .toBeTruthy()
+  })
+
+  it('waits for the first overview read before changing the Goal, so that read is shown, not dropped', async () => {
+    let release: () => void = () => {}
+    const first = new Promise<Response>((resolve) => { release = () => resolve(new Response(null)) })
+    let released = false
+    let sentWhileHeld = false
+    const fetch = serveSetup({ overviewAnswer: () => released ? null : first, passAnswer: NEVER, goalAnswer: () => {
+      sentWhileHeld ||= !released
+      return Response.json({ goal: 'internal-improvement' })
+    } })
+    await createFromSetup()
+    await waitFor(() => expect(overviewCalls(fetch)).toContain('musterfirma-gmbh'))
+    released = true
+    release()
+    expect(await screen.findByText('Goal: Internal improvement')).toBeTruthy()
+    await screen.findByRole('button', { name: 'Running the profile pass…' })
+    expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal', '/api/profile-pass'])
+    expect(sentWhileHeld).toBe(false) // the Goal change waited for the first read
+  })
+
+  it("when the read after the Goal change fails, shows the overview with the new Goal, not 'Opening' for ever",
+    async () => {
+    let failed = false // the one read after the change fails
+    serveSetup({ passAnswer: NEVER, overviewAnswer: (goalSent) => goalSent && !failed && (failed = true)
+      ? Promise.resolve(new Response(null, { status: 503 })) : null })
+    await createAndOpen()
+    expect(await screen.findByText('Goal: Internal improvement')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Running the profile pass…' })).toBeTruthy()
+    expect(screen.queryByText('Opening the dossier…')).toBeNull()
+  })
+
+  it('with Audit readiness chosen, sends no goal change and still runs the pass', async () => {
+    const fetch = serveSetup()
+    await createAndOpen('Created for audit')
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(fetch)).toEqual([['/api/profile-pass', 'musterfirma-gmbh', null]])
+    expect(screen.getByText('Goal: Audit readiness')).toBeTruthy()
+  })
+
+  it("sends no change for a Goal the overview already has", async () => {
+    const fetch = serveSetup({ startingGoal: 'internal-improvement' })
+    await createAndOpen()
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(fetch)).toEqual([['/api/profile-pass', 'musterfirma-gmbh', null]])
+  })
+
+  it("sends Audit readiness when the overview has another Goal", async () => {
+    const changed = serveSetup({ startingGoal: 'internal-improvement' })
+    await createAndOpen('Created for audit')
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(changed)).toEqual([
+      ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'audit-readiness' })],
+      ['/api/profile-pass', 'musterfirma-gmbh', null],
+    ])
+    expect(await screen.findByText('Goal: Audit readiness')).toBeTruthy()
+  })
+
+  it('while the Goal change is out, Change goal and Run a profile pass wait', async () => {
+    let answer: () => void = () => {}
+    const held = new Promise<Response>((resolve) => {
+      answer = () => resolve(Response.json({ goal: 'internal-improvement' }))
+    })
+    const fetch = serveSetup({ goalAnswer: () => held, passAnswer: NEVER })
+    await createAndOpen()
+    await waitFor(() => expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal']))
+    expect(goalButton().disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Run a profile pass' }).disabled).toBe(true)
+    answer()
+    await screen.findByRole('button', { name: 'Running the profile pass…' })
+    expect(passes(fetch)).toHaveLength(1)
+    expect(goalButton().disabled).toBe(false)
+  })
+
+  it('a switch away and back, then a fresh start, start no pass again', async () => {
+    const fetch = serveSetup()
+    vi.stubGlobal('confirm', () => true)
+    const answered = fetch.getMockImplementation()!
+    fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/progress/fresh-start'
+      ? Promise.resolve(Response.json({ fresh_start: '2026-11-10T10:00:00+00:00' }))
+      : answered(url, init))
+    await createAndOpen()
+    await screen.findByText('1 assessment waiting for your review.')
+    await switchTo('nordlicht')
+    await screen.findByText('Nordlicht Komponenten GmbH · Somewhere', { selector: '.pill' })
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: /^Profile: / }))
+    await userEvent.click(screen.getByRole('menuitemradio', { name: profileLabel(MUSTERFIRMA) }))
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    const before = overviewCalls(fetch).length
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${MUSTERFIRMA.company} afresh…` }))
+    await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/progress/fresh-start')).toHaveLength(1))
+    await waitFor(() => expect(overviewCalls(fetch).length).toBeGreaterThan(before)) // the app opened afresh
+    await screen.findByRole('button', { name: 'Run a profile pass' })
+    expect(passes(fetch)).toHaveLength(1)
+    expect(screen.queryByText('Running the profile pass…')).toBeNull()
+  })
+
+  it('a fresh mount (a reload) under the new company starts no pass', async () => {
+    rememberProfile('musterfirma-gmbh')
+    const fetch = serveSetup()
+    fetch.mockImplementation(((answered) => (url: string, init?: RequestInit) => url === '/api/profiles'
+      ? Promise.resolve(Response.json({ profiles: [NORDLICHT, TESTWERK, MUSTERFIRMA], default: 'nordlicht' }))
+      : answered(url, init))(fetch.getMockImplementation()!))
+    render(<StrictMode><ProfiledApp /></StrictMode>)
+    await screen.findByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })
+    await screen.findByRole('button', { name: 'Run a profile pass' })
+    expect(firstPassCalls(fetch)).toEqual([])
+  })
+
+  it('a failed goal change says so under the Goal line, and the pass still runs', async () => {
+    const fetch = serveSetup({ goalAnswer: () => new Response(null, { status: 503 }) })
+    await createAndOpen()
+    const alert = await screen.findByText(NOT_SET)
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(screen.getByText('Goal: Audit readiness')).toBeTruthy()
+    await screen.findByText('1 assessment waiting for your review.')
+    expect(firstPassCalls(fetch).map(([url]) => url)).toEqual(['/api/goal', '/api/profile-pass'])
+  })
+
+  it('the note that the Goal was not set ends with the next Goal change that goes through, for good', async () => {
+    let changes = 0
+    serveSetup({ goalAnswer: () => ++changes === 1 ? new Response(null, { status: 503 })
+      : Response.json({ goal: 'internal-improvement' }) })
+    vi.stubGlobal('confirm', () => true)
+    await createAndOpen()
+    await screen.findByText(NOT_SET)
+    await screen.findByText('1 assessment waiting for your review.')
+    await userEvent.click(goalButton())
+    await screen.findByText('Goal: Internal improvement')
+    expect(screen.queryByText(NOT_SET)).toBeNull()
+    await userEvent.click(goalButton()) // back to Audit readiness: the note stays gone
+    await screen.findByText('Goal: Audit readiness')
+    expect(screen.queryByText(NOT_SET)).toBeNull()
+  })
+
+  it('a goal change answering 401 signs out and starts no pass', async () => {
+    const fetch = serveSetup({ goalAnswer: () => new Response(null, { status: 401 }) })
+    const signOut = vi.fn()
+    setOnSignedOut(signOut)
+    await createAndOpen()
+    await waitFor(() => expect(signOut).toHaveBeenCalled())
+    // The sequence is over once the hero offers the pass again; starting one would have shown it running.
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Run a profile pass' }).disabled)
+      .toBe(false))
+    expect(passes(fetch)).toHaveLength(0)
+  })
+
+  it("the pass's daily limit leaves the company open, with the limit sentence and the per-control way on", async () => {
+    serveSetup({ passAnswer: () => Response.json({ detail: LIMIT, limit: 'profile-pass' }, { status: 429 }) })
+    await createAndOpen()
+    expect(await screen.findByText(LIMIT)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Assess 1.1.1 on its own' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
+    expect(screen.getByText('Musterfirma GmbH · Somewhere', { selector: '.pill' })).toBeTruthy()
   })
 })

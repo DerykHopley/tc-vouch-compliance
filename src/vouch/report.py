@@ -37,7 +37,13 @@ from typing import Any, Literal, TypedDict, TypeGuard
 from vouch import audit
 from vouch.citations import EvidenceKind
 from vouch.database import Priority
-from vouch.dossier import Readiness, control_requirements, readiness
+from vouch.dossier import (
+    Applicability,
+    Readiness,
+    applicability,
+    control_requirements,
+    readiness,
+)
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
 from vouch.plan import IMPROVEMENT, CardFlags
@@ -479,7 +485,7 @@ def _head(profile: ComplianceProfile, today: date) -> Head:
 
 def readiness_report(
     profile: ComplianceProfile,
-    controls: Iterable[IsaControl],
+    controls: Iterable[IsaControl] | Applicability,
     latest: Mapping[str, Assessment],
     *,
     decided: Mapping[Key, DecidedItem],
@@ -489,21 +495,26 @@ def readiness_report(
     """The report for the profile's `controls` (its ISA edition's, in order), from each
     control's newest assessment (`latest`, vouch.memory.newest_by_control), the lead's decided
     remediation items of the accepted ones (`decided`), and a page of the trail. Its words,
-    the same for every report in the language, are `words_for(profile.answer_language)`."""
-    controls = list(controls)
-    shown = [_control(control, latest.get(control.id)) for control in controls]
+    the same for every report in the language, are `words_for(profile.answer_language)`. A
+    control not applicable as a whole under the profile (vouch.dossier.applicability, decided
+    here unless given) has no row, and readiness, remediation and the disclaimer leave it out,
+    as the overview's do; its requirements stay in the not-applicable list (#454)."""
+    scope = applicability(profile, controls)
+    applicable = scope.applicable
+    latest = scope.counted(latest)
+    shown = [_control(control, latest.get(control.id)) for control in applicable]
     reviewers = [row["reviewer"] for row in shown if row["reviewer"] is not None]
-    remediation = _remediation(controls, latest, decided)
+    remediation = _remediation(applicable, latest, decided)
     approved = sum(len(group["items"]) for group in remediation)
     return {
         "goal": "audit-readiness",
         "head": _head(profile, today),
         # The accepted counts as the overview's; the items as the report lists them.
-        "readiness": readiness(controls, latest)
+        "readiness": readiness(applicable, latest)
         | {"remediation_items": approved, "remediation_approved": approved},
         "controls": shown,
         "remediation": remediation,
-        "not_applicable": _not_applicable(profile, controls),
+        "not_applicable": _not_applicable(profile, scope.controls),
         "trail": {"entries": [e.to_dict() for e in trail.entries], "next": trail.next},
         "disclaimer": disclaimer(reviewers, profile.answer_language),
     }
@@ -586,7 +597,7 @@ def _remediation(
 
 
 def _not_applicable(
-    profile: ComplianceProfile, controls: list[IsaControl]
+    profile: ComplianceProfile, controls: Sequence[IsaControl]
 ) -> list[NotApplicableEntry]:
     return [
         {
@@ -606,7 +617,7 @@ def _not_applicable(
 
 def improvement_report(
     profile: ComplianceProfile,
-    controls: Iterable[IsaControl],
+    controls: Iterable[IsaControl] | Applicability,
     latest: Mapping[str, Assessment],
     *,
     history: Sequence[Assessment],
@@ -625,23 +636,28 @@ def improvement_report(
     `assessments`), the lead's decisions and marks on them and the cards' `flags`
     (vouch.plan.card_flags); the open questions listed since the fresh start, each overdue or not
     as of `today`; a page of the trail; and the internal self-assessment disclaimer. No controls
-    table, remediation by control or not-applicable list: those are an auditor's."""
-    controls = list(controls)
-    plan = _plan(controls, history, decided, marks, flags)
+    table, remediation by control or not-applicable list: those are an auditor's. A control not
+    applicable as a whole under the profile (vouch.dossier.applicability, decided here unless
+    given) is left out of readiness, the plan, the questions and the disclaimer (#454)."""
+    scope = applicability(profile, controls)
+    applicable = scope.applicable
+    latest = scope.counted(latest)
+    plan = _plan(applicable, history, decided, marks, flags)
     listed = sum(len(group["items"]) for group in plan)
     reviewers = [
         row["reviewer"]
-        for row in (_control(control, latest.get(control.id)) for control in controls)
+        for row in (_control(control, latest.get(control.id)) for control in applicable)
         if row["reviewer"] is not None
     ]
+    asked = [q for q in questions if q.control_id not in scope.reasons]
     return {
         "goal": "internal-improvement",
         "head": _head(profile, today),
-        "readiness": readiness(controls, latest)
+        "readiness": readiness(applicable, latest)
         | {"remediation_items": listed, "remediation_approved": listed},
         "comparison": comparison,
         "plan": plan,
-        "questions": _questions(controls, questions, today),
+        "questions": _questions(applicable, asked, today),
         "trail": {"entries": [e.to_dict() for e in trail.entries], "next": trail.next},
         "disclaimer": disclaimer(reviewers, profile.answer_language, improvement=True),
     }

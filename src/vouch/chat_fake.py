@@ -232,6 +232,16 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
         r"Der nächste Schritt ist, Kontrolle \1 zu bewerten.",
     ),
     (re.compile(r"Every control is accepted\."), "Alle Kontrollen sind akzeptiert."),
+    (
+        re.compile(r"No control applies under this profile, so there is nothing to assess\."),
+        "Unter diesem Profil ist keine Kontrolle anwendbar, es gibt also nichts zu bewerten.",
+    ),
+    # A control not applicable as a whole (#454): refused, or explained with the reason
+    (
+        re.compile(rf"{_ID} is not applicable in this profile\."),
+        r"\1 ist in diesem Profil nicht anwendbar.",
+    ),
+    (re.compile(r"The profile's reason: "), "Die Begründung des Profils: "),
     # assessed_words
     (
         _line(rf"Control {_ID}, {_QUOTED}: its newest assessment is (.+?), {_STATUS}\."),

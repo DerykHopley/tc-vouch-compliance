@@ -1,0 +1,18 @@
+{
+  "gather": [
+    {"tool": "search_policies", "args": {"query": "information protected transfer during"}},
+    {"tool": "search_records", "args": {"query": "information protected transfer during"}},
+    {"answer": "Draft answer for 5.1.2, from the evidence found."}
+  ],
+  "judge": {
+    "requirements": [
+      {"requirement_id": "M1", "verdict": "evidenced", "reason": "The standard lists each network service with what it carries.", "citations": [{"doc_id": "data-transfer-standard", "quote": "IT keeps this table current and adds a service before it is used."}]},
+      {"requirement_id": "M2", "verdict": "evidenced", "reason": "Channels are set per classification, and the encryption check found every sampled confidential email attachment encrypted.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Confidential information goes only through the file exchange, or by email in an encrypted attachment with the password sent another way."}, {"doc_id": "encryption-check-record", "quote": "Of 30 emails with confidential attachments, all had the attachment encrypted."}]},
+      {"requirement_id": "M3", "verdict": "evidenced", "reason": "Transfers are protected per service, and the encryption check found each internet-facing service passing a scan.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Internet line | Everything above, plus browsing | Firewall, only the ports these services need"}, {"doc_id": "encryption-check-record", "quote": "An outside scan of every internet-facing service on 22 September 2026:"}]},
+      {"requirement_id": "S1", "verdict": "evidenced", "reason": "Senders check addresses and shares go to one named person, and the encryption check's sample of shares bears this out.", "citations": [{"doc_id": "data-transfer-standard", "quote": "The file exchange sends each share to one named person and ends it after 14 days."}, {"doc_id": "encryption-check-record", "quote": "A sample of 50 shares on the file exchange in September: each went to one named person and ended after 14 days at the latest."}]},
+      {"requirement_id": "S2", "verdict": "evidenced", "reason": "Connections are encrypted and confidential files encrypted too, and the encryption check found both in place.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Email | Day-to-day business mail | TLS between mail servers; confidential content only in encrypted attachments"}, {"doc_id": "encryption-check-record", "quote": "Of 30 emails with confidential attachments, all had the attachment encrypted."}]},
+      {"requirement_id": "S3", "verdict": "evidenced", "reason": "Remote access is only through the VPN with a second factor, and the encryption check found every VPN account using one.", "citations": [{"doc_id": "data-transfer-standard", "quote": "Remote access to our network is possible only through the VPN, with a personal account and a second factor."}, {"doc_id": "encryption-check-record", "quote": "Every VPN account in use has a second factor."}]},
+      {"requirement_id": "H1", "verdict": "evidenced", "reason": "Everything leaving the network is encrypted in transit, and the encryption check found outgoing mail and the file exchange using TLS.", "citations": [{"doc_id": "data-transfer-standard", "quote": "All information that leaves our network is encrypted in transit at least by the connection; confidential information is also encrypted as a file."}, {"doc_id": "encryption-check-record", "quote": "Mail gateway | TLS 1.2 and 1.3 | Passed; 99.6 percent of outgoing mail in September left over TLS"}]}
+    ]
+  }
+}

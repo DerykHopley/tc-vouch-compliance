@@ -91,6 +91,20 @@ def test_on_the_readiness_report_the_model_is_told_so_and_not_the_dossier_overvi
     assert "Dossier overview" not in system.content
 
 
+def test_on_the_documents_tab_the_model_is_told_so_and_not_the_dossier_overview(
+    client, monkeypatch
+):
+    fake = CannedChatModel()
+    monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
+
+    response = chat(client, message="Which documents are stale?", page="documents")
+
+    assert response.status_code == 200
+    system, _ = fake.prompts[0]
+    assert "the Documents tab" in system.content
+    assert "Dossier overview" not in system.content
+
+
 def test_a_model_failure_ends_the_stream_with_one_formal_error_event(client, monkeypatch):
     fake = CannedChatModel(fail_with=RuntimeError("socket on fire"))
     monkeypatch.setattr(ModelChoice, "for_chat", lambda self, chosen, callbacks=None, **_: fake)
