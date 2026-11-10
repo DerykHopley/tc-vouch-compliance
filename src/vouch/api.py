@@ -69,6 +69,7 @@ from vouch.dossier import (
     Applicability,
     PaperRequirement,
     applicability,
+    applicable_controls,
     not_applicable_refusal,
     overview,
     requirements_by_control,
@@ -128,6 +129,7 @@ from vouch.profile_pass import (
     ProfilePassRefused,
     run_profile_pass,
 )
+from vouch.prompts import prompt_previews
 from vouch.redaction import (
     install_log_redaction,
     redact,
@@ -176,6 +178,8 @@ CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again 
 DEVELOPERS_ONLY = "This is available to developers only."
 PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
 CONTROLS_FAILED = "The framework's controls could not be read."
+PROMPTS_FAILED = "The prompts could not be built."
+NOT_A_PROMPT_CONTROL = "{control} is not a control the current company applies."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
 DOCUMENTS_FAILED = "The documents could not be read."
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
@@ -2203,6 +2207,37 @@ def framework_controls() -> dict[str, Any]:
         log.exception("the base framework could not be read")
         raise HTTPException(status_code=500, detail=CONTROLS_FAILED) from None
     return {"controls": [{"id": c.id, "question": c.question} for c in controls]}
+
+
+@router.get("/developer/prompts", dependencies=DEVELOPERS)
+def developer_prompts(
+    settings: AppSettings,
+    companies: CompanyProfiles,
+    current: AppCurrentCompany,
+    control: str | None = None,
+) -> dict[str, Any]:
+    """Every prompt the agent gets (#496), built for the current company, always (the request's
+    profile header isn't read), and `control`, one of its applicable controls (default: the
+    first): `company`, `controls` (every applicable one, for the picker), `control` and the six
+    `prompts` (vouch.prompts). A control not applicable to the company, or unknown, is a 404
+    naming it, nothing built; the base framework unreadable, a plain 500 naming no file."""
+    profile = _current_profile(settings, companies, current)
+    try:
+        controls = applicable_controls(profile, profile.isa_edition().controls)
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, PROMPTS_FAILED) from None
+    chosen = next((c for c in controls if c.id == control), None) if control else None
+    if control is not None and chosen is None:
+        raise HTTPException(status_code=404, detail=NOT_A_PROMPT_CONTROL.format(control=control))
+    chosen = chosen or (controls[0] if controls else None)
+    if chosen is None:  # every control not applicable: company setup refuses such a company
+        raise HTTPException(status_code=404, detail="The current company applies no control.")
+    return {
+        "company": {"id": profile.id, "name": profile.company},
+        "controls": [{"id": c.id, "question": c.question} for c in controls],
+        "control": {"id": chosen.id, "question": chosen.question},
+        "prompts": [p.to_dict() for p in prompt_previews(profile, chosen)],
+    }
 
 
 @router.get("/developer/sample-library", dependencies=DEVELOPERS)
