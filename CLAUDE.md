@@ -95,20 +95,21 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 | Lane | What | Goes |
 |---|---|---|
 | **Current spec** | meets the "joins an open spec" rule above (Spec level) | a ticket on the integration branch |
-| **Fixes** | a bug already on main, a process fix (tooling, CI, hooks, agent docs), or a small change: one PR, no design question (no `docs/design.md` decision, no change to a user-facing layout) | its own PR straight into main, through the Fixes lane below |
-| **Idea pool** | a feature or a bigger change; tag ideas that improve the open spec "follow-up to <spec>" | the `Next` milestone |
+| **Fixes** | a bug already on main, a process fix (tooling, CI, hooks, agent docs), or a small enhancement (below) | its own PR straight into main, through the Fixes lane below |
+| **Idea pool** | a feature, a new screen, a data or model change, or anything else bigger than a small enhancement; tag ideas that improve the open spec "follow-up to <spec>" | the `Next` milestone |
 | **Architecture** | a change to the code's structure | grouped into its own small spec, after the open one |
 
 - **Who files what (on trial):** a bug on main with a way to reproduce it may be filed straight in as a Fix (`ready-for-agent`, with a `Touches` section). Anything else an agent or a retro files lands as `needs-triage`, and the triage pass sorts it. Vouch, 2026-11-06: 18 issues filed in one day went straight to `ready-for-agent`, and a top-bar redesign ran as a Fix beside the spec redesigning the same screens.
 - **Triage when a spec lands (on trial):** `/rig:spec-close`'s Landed part sorts `needs-triage` into lanes, marks duplicates, closes stale or superseded issues with the reason (reopening is the overrule), and groups the idea pool into candidate specs. Each move is flagged; making a new spec from a group is the owner's, with `/grill-with-docs`.
+- **A small enhancement (on trial)** is a Fix when all of these hold: one change you can say in a sentence; one PR of about 300 changed lines at most; and every design choice in it is reversible: wording, placement, sizing, spacing or layout on a screen that already exists. A new screen, a new feature, a data or model change, or a change to a `docs/design.md` decision is the idea pool. Its choices are decided and flagged on the issue (`**Decided for you:**`, the `decided` label); a follow-up Fix is the overrule. Vouch, 2026-11-10: M9 bundled eight separate polish items (hero wording, review bar placement, chat button sizing, report tables on a phone) into a 10-slice spec only because a Fix couldn't carry a layout choice.
 - For a backlog that needs a proper sort between specs, suggest `/triage`.
 
 ### The Fixes lane (on trial)
 
-- **One Fixes thread** works the lane (under `/rig:spec-run`, the coordinator starts it and keeps its queue), up to 2 Fixes at once when their `Touches` lines share no file or area.
+- **One Fixes thread** works the lane (under `/rig:spec-run`, the coordinator starts it and keeps its queue), up to 3 Fixes at once when their `Touches` lines share no file or area.
 - **Order, by what waiting costs:** a bug users hit on main; then anything blocking a spec; then tooling and process fixes; then small enhancements, oldest first.
-- **Checked against open specs before it starts:** compare its `Touches` with each open spec's changed files (`git diff --name-only origin/main...origin/spec/<n>-<slug>`) and its running tickets' `Touches`. A bug users hit goes ahead, and the spec's thread is told while the Fix's PR is still open, so the spec can add its cases to that PR. Anything else waits until that spec lands.
-- **A Fix keeps its PR** (CI and a one-merge revert), and its loop scales with its size: **under about 100 changed lines with no UI change**, the implementer's test seen red then green plus CI are the check, with no Standards review and no verifier; anything bigger, or any UI change, takes the full ticket loop.
+- **Checked against open specs before it starts:** compare its `Touches` with each open spec's changed files (`git diff --name-only origin/main...origin/spec/<n>-<slug>`) and its running tickets' `Touches`. A bug users hit goes ahead, and the spec's thread is told while the Fix's PR is still open, so the spec can add its cases to that PR. Anything else that overlaps a spec still building is offered to that spec's thread as a slice (`fix #<n> overlaps your <files>: take it as a slice?`); if the spec takes it, it leaves the queue. It waits only when the spec declines, or is at Ready.
+- **A Fix keeps its PR** (CI and a one-merge revert), and its loop scales with its size: **under about 100 changed lines with no UI change**, the implementer's test seen red then green plus CI are the check, with no Standards review and no verifier; anything bigger, or any UI change, takes the full ticket loop. A UI change merges on green after its verifier, and goes on `STATUS.md`'s "ready to check" list with what to try, so the owner checks enhancements in batches rather than one at a time.
 
 
 ### CI
@@ -143,7 +144,7 @@ The Throughput rules above hold. Factory adds a queue agents work through on the
   The owner answers in the comment and puts `ready-for-agent` back; the ticket rejoins the queue and is built on from its draft PR's branch.
 - **Size target, not a cap:** aim for a PR under 400 changed lines, lockfiles left out. Over it, don't park: the ticket loop's deeper review runs, the PR merges, and the report names it with its size.
 - **Hard stops park.** Factory never does one of the ticket loop's hard stops; a ticket that needs one parks. Any other choice is decided and flagged, and the queue moves on.
-- **Report when the queue stops:** when no unparked ticket can start, one message: what merged, each parked ticket with its question, anything unexplained, and last the ready-to-check list (each merged ticket and what to test by hand, with its size when over 400). That list replaces Throughput's `STATUS.md`, which Factory doesn't keep. Then stop.
+- **Report when the queue stops:** when no unparked ticket can start, one message: what merged, each parked ticket with its question, anything unexplained, and last the ready-to-check list (each merged ticket and what to test by hand, with its size when over 400). The same list is `STATUS.md`'s "ready to check", which the Fixes lane keeps current: each UI change goes on it when it merges, with what to try. Then stop.
 - **A full-lane red** still becomes a Fix ticket (`ready-for-agent`); a red that breaks the deployed app is reverted first, then the queue goes on.
 
 ### This project
