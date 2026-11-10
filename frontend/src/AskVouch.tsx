@@ -8,20 +8,20 @@ import {
 } from './chat.ts'
 import ChatReply from './ChatReply.tsx'
 import {
-  CHAT_WIDTH_STEP, type ChatWidthRange, chatWidthRange, clampChatWidth, pageWidth, rememberChatWidth, rememberedChatWidth,
+  canPinChat, CHAT_WIDTH_STEP, type ChatWidthRange, chatWidthRange, clampChatWidth, pageWidth, rememberChatWidth,
+  rememberedChatWidth,
 } from './chatWidth.ts'
 import { controlPath, type NextStep } from './overview.ts'
 import StepText from './StepText.tsx'
 
-// Must match the breakpoints in app.css: the sheet at 700px or less; the pinned column only over 1000px.
+// Must match the breakpoint in app.css: the sheet at 700px or less. Pinning follows the page's width (chatWidth.ts,
+// PIN_FROM, and app.css's pinned column from the same width; #465).
 const SHEET_QUERY = '(max-width: 700px)'
-const NO_PIN_QUERY = '(max-width: 1000px)'
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
 
 /** How close to the log's bottom (px) still counts as reading the newest message. */
 const NEAR_BOTTOM = 48
 const isSheet = () => window.matchMedia?.(SHEET_QUERY).matches ?? false
-const canPin = () => !(window.matchMedia?.(NO_PIN_QUERY).matches ?? false)
 
 /** While the bubble is a full-screen sheet, Tab and Shift+Tab cycle inside it, wherever focus starts:
  * the page behind can't be seen. Listens on the document, so a click that leaves focus on the body is covered. */
@@ -41,8 +41,8 @@ function keepFocusInSheet(e: KeyboardEvent, sheet: HTMLElement | null) {
 }
 
 /** Patch's chat pattern (design.md, Decisions: Chat): closed (the button), a bubble, enlarged, or pinned beside the
- * page (only over 1000px). At 700px or less every open state is a full-screen sheet, and pin and enlarge are not
- * offered. */
+ * page (only where the page keeps the working paper's width beside it, #465). At 700px or less every open state is a
+ * full-screen sheet, and pin and enlarge are not offered. */
 export type ChatState = 'closed' | 'bubble' | 'enlarged' | 'pinned'
 
 /** Each state's look and the header's toggles: the size toggle's label and the state it leads to, and the state the
@@ -200,19 +200,13 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // The width, followed while open: at 700px or less the sheet; at 1000px or less no pin, and a pinned chat falls back
-  // to enlarged.
+  // At 700px or less the sheet, followed while mounted.
   const [sheet, setSheet] = useState(isSheet)
-  const [pinnable, setPinnable] = useState(canPin)
   useEffect(() => {
-    const queries = [SHEET_QUERY, NO_PIN_QUERY].map((q) => window.matchMedia?.(q))
-    const onChange = () => {
-      setSheet(isSheet())
-      setPinnable(canPin())
-      if (!canPin()) setState((s) => (s === 'pinned' ? 'enlarged' : s))
-    }
-    for (const query of queries) query?.addEventListener?.('change', onChange)
-    return () => { for (const query of queries) query?.removeEventListener?.('change', onChange) }
+    const query = window.matchMedia?.(SHEET_QUERY)
+    const onChange = () => setSheet(isSheet())
+    query?.addEventListener?.('change', onChange)
+    return () => query?.removeEventListener?.('change', onChange)
   }, [])
 
   // While the sheet covers the page, the page behind it (the sheet's siblings) is inert:
@@ -225,18 +219,21 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     return () => { for (const el of behind) el.removeAttribute('inert') }
   }, [open, sheet])
 
-  // The pinned column's width (#231): the lead's choice as remembered, clamped only when shown, to what the window
-  // allows now; the window's width is followed only while pinned.
+  // The page's width, followed while the chat is open: pinning is offered only where the narrowest chat leaves the
+  // page the working paper's width (#465), and the pinned column (#231) is the lead's choice as remembered, clamped
+  // only when shown, to what the window allows now.
   const [chosenWidth, setChosenWidth] = useState(rememberedChatWidth)
   const [windowWidth, setWindowWidth] = useState(pageWidth)
-  const isPinned = state === 'pinned'
   useEffect(() => {
-    if (!isPinned) return
+    if (!open) return
     const onResize = () => setWindowWidth(pageWidth())
-    onResize() // it may have changed while not pinned
+    onResize() // it may have changed while closed
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [isPinned])
+  }, [open])
+  const pinnable = !sheet && canPinChat(windowWidth)
+  // Too narrow now, a pinned chat falls back to enlarged: set while rendering, so the page never paints it pinned.
+  if (state === 'pinned' && !pinnable) setState('enlarged')
   const widthRange = chatWidthRange(windowWidth)
   const pinnedWidth = clampChatWidth(chosenWidth, widthRange)
   const chooseWidth = (width: number) => {
@@ -394,13 +391,16 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
   const { className, size, pin } = STATES[state]
   return (
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
-      {state === 'pinned' && !sheet && pinnable && (
+      {state === 'pinned' && pinnable && (
         <WidthHandle width={pinnedWidth} range={widthRange} onChange={chooseWidth} />
       )}
       <div className="bubble-head">
-        <b>Vouch</b>
-        <span className="page-context" title={pageLabel(context)}>{pageLabel(context)}</span>
-        {!sheet && pinnable && pin && (
+        {/* The page tag beside the name, or under it where the header has no room: always whole (#465). */}
+        <div className="bubble-title">
+          <b>Vouch</b>
+          <span className="page-context">{pageLabel(context)}</span>
+        </div>
+        {pinnable && pin && (
           <button className="btn btn-ghost" aria-pressed={state === 'pinned'} onClick={() => setState(pin)}>
             Pin beside the page
           </button>
