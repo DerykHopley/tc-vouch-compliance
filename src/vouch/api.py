@@ -128,7 +128,7 @@ from vouch.profile_pass import (
     run_profile_pass,
 )
 from vouch.redaction import (
-    install_log_redaction,
+    configure_logging,
     redact,
     redact_data,
     redacted_event,
@@ -166,7 +166,7 @@ from vouch.spending import (
     count_assessment,
     spending_store,
 )
-from vouch.tracing import TraceFacts, run_traced
+from vouch.tracing import TraceFacts, announce_tracing, run_traced
 
 log = logging.getLogger(__name__)
 
@@ -2262,4 +2262,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
-install_log_redaction()  # security layer 4, once: by import time uvicorn's handlers exist
+# Once: by import time uvicorn's handlers exist. vouch's INFO lines written, every line redacted
+# (security layer 4), then the startup line, which needs both (#536).
+configure_logging()
+announce_tracing(app.state.settings)
