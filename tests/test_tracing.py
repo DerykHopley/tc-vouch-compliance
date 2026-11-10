@@ -454,6 +454,7 @@ def served(app) -> Iterator[str]:
     finally:
         server.should_exit = True
         running.join(10)
+        assert not running.is_alive(), "the test server didn't stop"
 
 
 def at_result[T](url: str, headers: dict[str, str], seen: Callable[[], T]) -> T:

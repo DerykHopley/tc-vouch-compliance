@@ -793,7 +793,9 @@ def create_assessment(
 ) -> Iterable[ServerSentEvent]:
     """A `step` event per agent step, a `requirement` event per judged requirement, one
     `result` (the proposed Assessment, waiting for review, with the `thread_id` to review it
-    by), then close; or one `error`, then close. Each request is a new assessment; with a
+    by), then close; or one `error`, then close. The `result` waits for the run's trace to be
+    sent, at most vouch.tracing's bound (#541), as a client may stop reading at it. Each
+    request is a new assessment; with a
     `note`, a rejected control assessed again, the note passed to the model.
 
     The model is vouch.model_choice's: OpenRouter when a key is set (in clerk mode only a
@@ -822,7 +824,7 @@ def create_assessment(
     )
     # The `result` is held until the run's trace is sent (#541): a client may stop reading at
     # `result` (the browser does), and a send after it would run once the response is over.
-    result: list[ServerSentEvent] = []
+    held_result: list[ServerSentEvent] = []
     try:
         with run.models.traced(facts) as run_config:
             events = assessment_events(
@@ -835,17 +837,17 @@ def create_assessment(
                 run_config=run_config,
             )
             for event, data in events:
-                held = isinstance(data, Assessment)
-                if held:
+                is_result = isinstance(data, Assessment)
+                if is_result:
                     usage = run.meter.usage().to_dict()
                     data = {"assessment": assessment_data(data), "usage": usage}
                 for name, clean in redacted_event(event, data):
                     sse = ServerSentEvent(event=name, data=clean)
-                    if held:
-                        result.append(sse)
+                    if is_result:
+                        held_result.append(sse)
                     else:
                         yield sse
-        yield from result  # the trace sent, within its bound (vouch.tracing.send_trace)
+        yield from held_result  # the trace sent, within its bound (vouch.tracing.send_trace)
     except Exception:  # any failure reaches the browser as one formal sentence
         log.exception("assessment of %s failed", control.id)
         yield ServerSentEvent(event="error", data={"message": ASSESSMENT_FAILED})
