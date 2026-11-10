@@ -9,8 +9,8 @@ export const CHAT_WIDTH = 480
 const NARROWEST = 360
 const WIDEST = 720
 /** The page beside a pinned chat keeps the working paper's width (#465), so nothing in it scrolls sideways and the top
- * bar keeps to one row: its index (250px), the page's two 16px gutters, and the judged requirements table's 760px
- * (app.css, .wp and .reqs.judged: change them together). */
+ * bar keeps to one row: its index (250px, app.css .wp: change them together), the page's two 16px gutters, and 760px
+ * for the judged requirements table, which since #464 has no minimum width of its own. */
 const PAGE_KEEPS = 250 + 2 * 16 + 760
 /** The narrowest page width that offers pinning: the narrowest chat beside the page's width, 1402px. */
 export const PIN_FROM = PAGE_KEEPS + NARROWEST
