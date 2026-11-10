@@ -4,4 +4,4 @@ The owner checks merged changes in batches (CLAUDE.md, The Fixes lane): each UI 
 
 ## Ready to check
 
-Nothing yet.
+- **#455** (PR #457): changing a developer setting keeps the Developer page. Once deployed: on the live app's Developer page, change the model; the page stays, showing the new model, with no reload and no Discord gate.
