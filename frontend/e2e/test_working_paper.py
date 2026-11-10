@@ -8,6 +8,7 @@ server's checks already spend most of that."""
 import re
 
 import pytest
+from current_company import make_current
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -288,7 +289,9 @@ def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, p
     expect(paper.get_by_role("button", name="Show full requirement")).to_have_count(0)
 
 
-def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
+def test_on_a_german_profile_a_stale_citations_flag_is_german(
+    page: Page, report_url, nordlicht_later
+):
     # #359: Alpenwerk's 1.1.1 on the German demo script cites the logging policy, approved
     # 2023-05-10 for a yearly review, so stale; the API serves its reason in German. On the
     # report's server (Alpenwerk on the demo fake): the paper's server spends its whole daily
@@ -300,7 +303,10 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report
     )
     assert response.ok, response.status
     assert "event: result" in response.text()
-    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    nordlicht_later(report_url)
+    make_current(
+        page.request, report_url, "alpenwerk"
+    )  # #480: Alpenwerk opens as the current company
 
     paper = open_paper(page, report_url, "1.1.1", assessed=True)
 
@@ -310,3 +316,10 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report
     )
     expect(flag).to_have_attribute("lang", "de")
     expect(paper.get_by_text(re.compile(r"^Stale: "))).to_have_count(0)
+    # #484: the evidence column's labels are the served words too, stale and current.
+    stale = row(paper, "S4").locator(".evidence-col .flag")
+    expect(stale).to_have_text("Prüfung überfällig")
+    expect(stale).to_have_attribute("lang", "de")
+    current = row(paper, "M1").locator(".evidence-col .why")
+    expect(current).to_have_text("Aktuell")
+    expect(current).to_have_attribute("lang", "de")

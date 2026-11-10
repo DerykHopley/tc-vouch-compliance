@@ -283,7 +283,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
-                language={answerLanguage(run)} staleWord={assessed?.stale_word}
+                language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
                   // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
@@ -444,6 +444,9 @@ type JudgedProps = {
   /** A stale citation's flag word, served in the answer language with each stale reason (#359); English's when the
    * API sends none. */
   staleWord?: string
+  /** The evidence column's word for evidence that isn't stale, served in the answer language (#484); English's when
+   * the API sends none. */
+  currentWord?: string
 }
 
 /**
@@ -484,7 +487,7 @@ function RequirementText({ text, language }: { text: string; language?: string }
 }
 
 function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language,
-  staleWord = 'Stale' }: JudgedProps) {
+  staleWord = 'Stale', currentWord = 'Current' }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   // Closing a requirement's override (Save or Cancel) gives focus back to its "Change" (#226): only when focus fell
   // to the page with the form, never taken from where the lead has moved it meanwhile.
@@ -540,7 +543,9 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   {applies && (kinds.length === 0 ? <span className="why">No evidence</span> : (
                     <span className="evidence">
                       {kinds.map((k) => <span key={k} className={`kind kind-${k}`}>{k}</span>)}
-                      <span className={stale ? 'flag' : 'why'}>{stale ? 'Stale' : 'Current'}</span>
+                      <span className={stale ? 'flag' : 'why'} lang={language}>
+                        {stale ? staleWord : currentWord}
+                      </span>
                     </span>
                   ))}
                 </td>

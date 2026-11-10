@@ -1,8 +1,75 @@
 """The browser check runs against servers that are already up: run.sh starts them on free ports."""
 
+import json
 import os
+import urllib.request
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
+
+SERVERS = (
+    "VOUCH_URL",
+    "DOSSIER_URL",
+    "PROFILES_URL",
+    "PAPER_URL",
+    "CHAT_URL",
+    "REPORT_URL",
+    "AFRESH_URL",
+    "PASS_URL",
+    "ROUNDS_URL",
+    "PLAN_URL",
+    "QUESTIONS_URL",
+    "IMPROVEMENT_URL",
+    "SETUP_URL",
+    "FIRST_PASS_URL",
+    "REMOVAL_URL",
+    "FAILING_API_URL",
+)
+"""Every test server's URL variable, as run.sh exports them."""
+DEFAULT_LIMIT_SERVERS = ("PROFILES_URL",)
+"""Servers left on the app's default daily assessment limit (30): the developer page's checks
+there read it ("30 assessments per user per day") and change it and set it back to 30."""
+E2E_DAILY_LIMIT = 1_000
+"""The daily assessment limit every other test server starts with (#489): far above what any
+server's checks start (the busiest, the working paper's, starts 30), so no check is refused with a
+429 for the assessments its neighbours on the server started. Set through the app's own setting
+(PUT /api/developer/daily-limit; local mode's one user is a developer): the limit is a stored
+setting, not an environment variable."""
+
+
+def _developer_settings(url: str, limit: int | None = None) -> dict[str, Any]:
+    """The developer page's settings, as read, or as answered after the daily limit is changed
+    to `limit`."""
+    if limit is None:
+        request = urllib.request.Request(f"{url}/api/developer/settings")
+    else:
+        request = urllib.request.Request(
+            f"{url}/api/developer/daily-limit",
+            data=json.dumps({"daily_limit": limit}).encode(),
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+        )
+    with urllib.request.urlopen(request, timeout=30) as answer:
+        return json.load(answer)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def daily_limit_above_the_suite() -> Iterator[None]:
+    """Every test server but DEFAULT_LIMIT_SERVERS starts with E2E_DAILY_LIMIT (#489). After the
+    suite, each still has room for one more assessment: a server whose checks used its whole daily
+    limit answers the next one 429, which a check added there would meet."""
+    for server in SERVERS:
+        if server not in DEFAULT_LIMIT_SERVERS:
+            _developer_settings(os.environ[server], E2E_DAILY_LIMIT)
+    yield
+    full = []
+    for server in SERVERS:
+        settings = _developer_settings(os.environ[server])
+        used, limit = settings["usage"]["fake"]["assessments"], settings["daily_limit"]
+        if used >= limit:
+            full.append(f"{server} used {used} assessments of its daily limit {limit}")
+    assert not full, f"test servers at their daily assessment limit: {full}"
 
 
 @pytest.fixture
