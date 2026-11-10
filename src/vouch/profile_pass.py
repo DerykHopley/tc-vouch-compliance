@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from vouch.citations import LeadStatement, QuoteChecker
 from vouch.documents import escaped, facts_of
+from vouch.dossier import applicable_controls
 from vouch.front_matter import split_front_matter
 from vouch.graph import (
     GUARD,
@@ -407,10 +408,8 @@ def run_profile_pass(
     newest = newest_by_control(memory, saver)
     included: list[_Included] = []
     skipped: list[SkippedControl] = []
-    for control in profile.isa_edition().controls:
+    for control in applicable_controls(profile, profile.isa_edition().controls):
         requirements = profile.requirements_for(control)
-        if not requirements.applicable:
-            continue
         reason = _skip_reason(newest.get(control.id))
         if reason is not None:
             skipped.append(SkippedControl(control.id, reason))

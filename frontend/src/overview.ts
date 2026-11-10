@@ -12,7 +12,7 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 export type ReviewState = 'not-assessed' | 'not-applicable' | ReviewStatus
 
 /** Whether a card's state is a review state, with its tag: an assessment of the control is stored and counts. */
-export const isReviewed = (status: ReviewState): status is ReviewStatus =>
+export const isReviewState = (status: ReviewState): status is ReviewStatus =>
   status !== 'not-assessed' && status !== 'not-applicable'
 
 /** Why a re-assessment is suggested (`vouch.plan.ReassessReason`), in this order: every fix done (#410, Internal

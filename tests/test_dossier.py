@@ -667,3 +667,24 @@ def test_a_company_made_with_a_control_not_applicable_shows_it_so_on_the_overvie
     assert card(shown, "5.2.9")["not_applicable"] == "Not ours."
     assert len(shown["controls"]) == len(CONTROLS)
     assert shown["readiness"]["controls"] == len(CONTROLS) - 1
+
+
+def test_an_assessment_of_a_control_not_applicable_as_a_whole_is_refused_and_not_counted(users):
+    # #454 review: nothing could review its result, so no run starts; the day's one assessment
+    # is still there afterwards.
+    alice, _ = users
+    headers = alice | {api.PROFILE_HEADER: MUSTERFIRMA_ID}
+    body = MUSTERFIRMA | {
+        "not_applicable": [{"control": "5.2.9", "requirement": None, "reason": "Not ours."}]
+    }
+    app = app_on(None)
+    app.state.spending.set_daily_limit(1)
+    with TestClient(app) as client:
+        made = client.post("/api/developer/profiles", json=body, headers=alice)
+        assert made.status_code == 201, made.text
+        refused = client.post("/api/assessments", json={"control_id": "5.2.9"}, headers=headers)
+        allowed = client.post("/api/assessments", json={"control_id": "1.1.1"}, headers=headers)
+
+    assert refused.status_code == 409
+    assert refused.json() == {"detail": "5.2.9 is not applicable in this profile."}
+    assert allowed.status_code == 200, allowed.text

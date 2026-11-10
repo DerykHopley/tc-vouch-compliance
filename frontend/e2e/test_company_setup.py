@@ -628,7 +628,8 @@ def test_a_double_click_on_a_next_that_moves_leaves_focus_on_the_new_heading(
 def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(page: Page, setup_url):
     """#454: 5.2.9 marked not applicable on step 5. Its card has the Not applicable chip, no review
     tag and the reason; readiness counts the 11 others; opening it reads no stored assessment
-    (each read counts to the rate limit), while opening an assessed control does."""
+    (each read counts to the rate limit), while opening an assessed control does. Its working
+    paper has the chip and the reason, and no Assess button (#454 review)."""
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
     to_step_5(page, "Ausnahmefirma GmbH")
@@ -666,6 +667,14 @@ def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(page: 
     expect(page).to_have_url(re.compile(r"/controls/5\.2\.9$"))
     page.wait_for_load_state("networkidle")
     assert reads == []
+    # Its working paper says so too, and offers no assessment: nothing could review its result.
+    paper = page.get_by_role("region", name="Working paper")
+    expect(paper.locator(".paper-meta .chip")).to_have_text("Nicht anwendbar")
+    expect(paper.locator(".paper-head .field-note")).to_have_text(
+        "We run no web applications of our own."
+    )
+    expect(paper.get_by_text("Not assessed yet")).to_have_count(0)
+    expect(paper.get_by_role("button", name=re.compile(r"^Assess"))).to_have_count(0)
     assessed = page.get_by_role("navigation", name="Controls").get_by_role(
         "link", name=re.compile(r"^1\.1\.1")
     )

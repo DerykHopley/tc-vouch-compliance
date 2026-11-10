@@ -54,8 +54,14 @@ from vouch.chat import PageContext
 from vouch.chat_citations import CITE, UNCITED, checked_reply
 from vouch.citations import Citation, CitationClaim, QuoteChecker, normalise
 from vouch.documents import EvidenceKind
-from vouch.dossier import NOT_APPLICABLE as NOT_APPLICABLE_CARD
-from vouch.dossier import CardStatus, NextAction, NextStep, overview
+from vouch.dossier import (
+    CardStatus,
+    NextAction,
+    NextStep,
+    applicability,
+    not_applicable_refusal,
+    overview,
+)
 from vouch.graph import (
     EVIDENCE_TOOLS,
     GUARD,
@@ -311,12 +317,16 @@ Write = Callable[[tuple[str, dict[str, Any]]], None]
 
 
 def progress_words(
-    by_status: dict[CardStatus, int], last_worked: datetime | None, next_step: NextStep | None
+    total: int,
+    by_status: dict[CardStatus, int],
+    last_worked: datetime | None,
+    next_step: NextStep | None,
 ) -> str:
-    """Where the lead stands, in plain sentences: when they last worked, how many controls are
-    in each review state, and the next step. A control not applicable as a whole under the
-    profile is no control to work on: left out of the total and the counts (#454)."""
-    total = sum(n for status, n in by_status.items() if status != NOT_APPLICABLE_CARD)
+    """Where the lead stands, in plain sentences: when they last worked, how many of the `total`
+    controls (readiness's: the applicable ones, #454) are in each review state, and the next
+    step. With no control applicable, only that."""
+    if total == 0:
+        return NO_CONTROL_APPLIES
     if by_status["not-assessed"] == total:
         said = [f"You have not assessed any of the {total} controls yet."]
     else:
@@ -334,6 +344,8 @@ def progress_words(
     said.append(_next_words(next_step))
     return " ".join(said)
 
+
+NO_CONTROL_APPLIES = "No control applies under this profile, so there is nothing to assess."
 
 _STATUS_WORDS: tuple[tuple[CardStatus, str], ...] = (
     ("accepted", "accepted"),
@@ -452,6 +464,12 @@ def sign_off_words(control_id: str, sign_off: SignOff, *, assessed: bool) -> str
         else f"accept or reject control {control_id}, with a note,"
     )
     return said + f"You can {where} at the foot of its working paper, linked below."
+
+
+def not_applicable_words(control_id: str, reason: str) -> str:
+    """A control not applicable as a whole under the profile (#454): that, and the profile's
+    reason; nothing to assess."""
+    return f"{not_applicable_refusal(control_id)} The profile's reason: {reason}"
 
 
 def not_assessed_words(control: IsaControl, profile: ComplianceProfile) -> str:
@@ -586,15 +604,22 @@ class ChatTools:
         view = overview(self.profile, self.profile.isa_edition().controls, lead_progress.controls)
         if (next_step := view["next_step"]) is not None:
             write(_suggest(next_step["control_id"], next_step["action"]))
-        return progress_words(view["by_status"], lead_progress.last_worked, view["next_step"])
+        return progress_words(
+            view["readiness"]["controls"],
+            view["by_status"],
+            lead_progress.last_worked,
+            view["next_step"],
+        )
 
     def assessed_controls(self, write: Write) -> str:
         """Every control's newest assessment by this lead under this profile, at once (#210): the
         memory is the lead's and the profile's, so no other user's assessment is read. A `papers`
         event lists the controls, so the chat links each one the answer names to its working
-        paper (#217): the links come from here, never from the model's text."""
-        controls = self.profile.isa_edition().controls
-        latest = newest_by_control(self.memory, self.run.saver)
+        paper (#217): the links come from here, never from the model's text. A control not
+        applicable as a whole under the profile is neither listed nor linked (#454)."""
+        scope = applicability(self.profile, self.profile.isa_edition().controls)
+        controls = scope.applicable
+        latest = scope.counted(newest_by_control(self.memory, self.run.saver))
         said = f"Read the newest assessments of {plural(len(latest), 'control')}."
         write(("step", {"node": ASSESSED_CONTROLS, "text": said}))
         write(("papers", {"control_ids": [control.id for control in controls]}))
@@ -602,12 +627,15 @@ class ChatTools:
 
     def start_assessment(self, control_id: str, write: Write, stop: threading.Event) -> str:
         """Assess the control as the assessment stream would (vouch.runs.begin_run), its steps
-        written into the chat; declined for an unknown control, while another of the lead's runs
+        written into the chat; declined for an unknown control, a control not applicable as a
+        whole under the profile (#454: nothing held or counted), while another of the lead's runs
         is going, or at the daily limit."""
         try:
             control = self.profile.isa_control(control_id)
         except UnknownControlError:
             return unknown_control(control_id)
+        if applicability(self.profile, [control]).reasons:
+            return not_applicable_refusal(control.id)
         run = self.run.metered_afresh()
         paid = run.chosen is not None
         try:
@@ -644,11 +672,16 @@ class ChatTools:
         """What the control asks and its newest assessment found, its findings and kept quotes
         as data (an instruction-like reason or quote flagged with a guard step), and its working
         paper as a suggestion; asked to sign off (`sign_off`), only why that is the lead's, and
-        where. Nothing is written: no review, no override."""
+        where. Nothing is written: no review, no override. A control not applicable as a whole
+        under the profile: only that, with the profile's reason, and its working paper (#454)."""
         try:
             control = self.profile.isa_control(control_id)
         except UnknownControlError:
             return unknown_control(control_id)
+        if (reason := applicability(self.profile, [control]).reasons.get(control.id)) is not None:
+            write(_suggest(control.id, "review"))
+            self.note_returned(reason)
+            return not_applicable_words(control.id, reason)
         assessment = newest_assessment(self.memory, self.run.saver, control.id)
         if sign_off is not None:
             write(_suggest(control.id, "review"))

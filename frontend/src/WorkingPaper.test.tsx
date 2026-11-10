@@ -238,6 +238,26 @@ describe('the working paper of a control not yet assessed', () => {
   })
 })
 
+describe('the working paper of a control not applicable as a whole (ticket 454)', () => {
+  it("shows the Not applicable chip and the profile's reason, and offers no assessment", () => {
+    const reason = 'No transfers leave the company.'
+    const excluded = LISTED.map((r) => ({ ...r, not_applicable: reason }))
+    const card: ControlCard = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION,
+      status: 'not-applicable', verdict: 'not-applicable', not_applicable: reason }
+    render(<WorkingPaper overview={{ ...OVERVIEW, requirements: { '5.1.2': excluded }, goal: 'audit-readiness' }}
+      card={card} running={null} run={{ status: 'idle', steps: [] }} onAssess={() => {}} onOpen={() => {}}
+      onOverview={() => {}} onReviewed={() => {}} onRefresh={() => Promise.resolve(true)} onItemDecided={() => {}}
+      onQuestionsChanged={() => {}} />)
+    const chip = screen.getByText('Not applicable', { selector: '.paper-meta .chip' })
+    expect(chip.className).toBe('chip v-not-applicable')
+    const why = screen.getByText(reason, { selector: '.paper-head p' })
+    expect(why.className).toBe('field-note')
+    expect(why.getAttribute('lang')).toBe('en')
+    expect(screen.queryByText(/Not assessed yet/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Assess/ })).toBeNull()
+  })
+})
+
 describe('the working paper while its stored assessment is read', () => {
   it('shows a neutral loading state: no verdict, no Assess, no requirement table', () => {
     show({ checking: true })

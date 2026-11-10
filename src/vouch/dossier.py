@@ -8,7 +8,9 @@ rejected assessment shows on its control's card, but not in the counts.
 import itertools
 from collections import Counter
 from collections.abc import Collection, Iterable, Iterator, Mapping
-from typing import Literal, TypedDict, get_args
+from dataclasses import dataclass
+from functools import cached_property
+from typing import Literal, TypedDict, TypeVar, get_args
 
 from vouch.citations import EvidenceKind
 from vouch.graph import Assessment, Status, Verdict
@@ -112,22 +114,62 @@ def control_requirements(profile: ComplianceProfile, control: IsaControl) -> lis
     ]
 
 
+_Kept = TypeVar("_Kept")
+
+
+@dataclass(frozen=True)
+class Applicability:
+    """Which of the listed controls apply under the profile (#454), decided once per request
+    (`applicability`) and passed to everything that reads the controls. A control applies when
+    it has an applicable requirement; one with none (marked not applicable as a whole, or each
+    of its requirements marked) is not applicable as a whole: it has a card that says so, but
+    readiness, the next step, the quotes, the reports, the review rounds, the documents' Cited
+    by, the chat and the profile pass leave it out, and no assessment of it starts."""
+
+    controls: tuple[IsaControl, ...]  # every listed control, in the order given
+    reasons: Mapping[str, str]  # each control not applicable as a whole: the profile's reason
+
+    @cached_property
+    def applicable(self) -> list[IsaControl]:
+        """The controls that apply, in the order given."""
+        return [c for c in self.controls if c.id not in self.reasons]
+
+    def counted(self, latest: Mapping[str, _Kept]) -> dict[str, _Kept]:
+        """`latest` (by control id) without the controls not applicable as a whole."""
+        return {cid: kept for cid, kept in latest.items() if cid not in self.reasons}
+
+
+def applicability(
+    profile: ComplianceProfile, controls: "Iterable[IsaControl] | Applicability"
+) -> Applicability:
+    """Which of the listed controls apply under the profile: the one place this is decided,
+    reading each control's requirements once. Given an Applicability, it is kept as it is. A
+    reason is the excluded requirements' distinct reasons, in their order, joined with "; " (one,
+    when the whole control was marked)."""
+    if isinstance(controls, Applicability):
+        return controls
+    listed = tuple(controls)
+    reasons: dict[str, str] = {}
+    for control in listed:
+        requirements = profile.requirements_for(control)
+        if not requirements.applicable:
+            reasons[control.id] = "; ".join(
+                dict.fromkeys(n.reason for n in requirements.not_applicable)
+            )
+    return Applicability(listed, reasons)
+
+
+def not_applicable_refusal(control_id: str) -> str:
+    """Why no assessment of a control not applicable as a whole starts (#454): nothing could
+    review its result. The API's 409 and the chat say it, and nothing is counted."""
+    return f"{control_id} is not applicable in this profile."
+
+
 def applicable_controls(
     profile: ComplianceProfile, controls: Iterable[IsaControl]
 ) -> list[IsaControl]:
-    """The listed controls that apply under the profile, in the order given: those with an
-    applicable requirement (#454). A control with none (marked not applicable as a whole, or
-    each of its requirements marked) is not applicable as a whole: it has a card, but readiness,
-    the next step, the quotes, the report's controls table and the review rounds leave it out.
-    The one place this is decided."""
-    return [c for c in controls if profile.requirements_for(c).applicable]
-
-
-def _not_applicable_reason(profile: ComplianceProfile, control: IsaControl) -> str:
-    """Why a control not applicable as a whole is: its requirements' distinct reasons, in their
-    order, joined with "; " (one, when the whole control was marked)."""
-    excluded = profile.requirements_for(control).not_applicable
-    return "; ".join(dict.fromkeys(n.reason for n in excluded))
+    """The listed controls that apply under the profile, in the order given (`applicability`)."""
+    return applicability(profile, controls).applicable
 
 
 def requirements_by_control(
@@ -167,7 +209,7 @@ def readiness(
 
 def overview(
     profile: ComplianceProfile,
-    controls: Iterable[IsaControl],
+    controls: Iterable[IsaControl] | Applicability,
     latest: Mapping[str, Assessment],
     discarded: Collection[tuple[str, str]] = (),
     approved: Collection[tuple[str, str]] = (),
@@ -180,19 +222,18 @@ def overview(
     `discarded` names the remediation items the lead discarded, by thread and requirement id:
     the band counts the others (#43); `approved` those approved, counted apart (#310). `flags`
     are the improvement plan's and the open questions' per control (#410, #414; none: no flag
-    set). A control not applicable as a whole under the profile (applicable_controls) has a
-    card that says so, with the profile's reason, whatever its newest assessment; everything
-    else leaves it out (#454)."""
-    controls = list(controls)
-    applicable = applicable_controls(profile, controls)
-    applies = {c.id for c in applicable}
+    set). A control not applicable as a whole under the profile (`applicability`, decided
+    here unless given) has a card that says so, with the profile's reason, whatever its newest
+    assessment; everything else leaves it out (#454)."""
+    scope = applicability(profile, controls)
+    applicable = scope.applicable
     listed = {c.id: latest[c.id] for c in applicable if c.id in latest}
     flags = flags or {}
     cards = [
-        _card(control, listed.get(control.id), flags.get(control.id))
-        if control.id in applies
-        else _not_applicable_card(control, _not_applicable_reason(profile, control))
-        for control in controls
+        _not_applicable_card(control, reason)
+        if (reason := scope.reasons.get(control.id)) is not None
+        else _card(control, listed.get(control.id), flags.get(control.id))
+        for control in scope.controls
     ]
     statuses = Counter(card["status"] for card in cards)
     return {
@@ -234,15 +275,10 @@ def _card(
 
 
 def _not_applicable_card(control: IsaControl, reason: str) -> ControlCard:
-    return {
-        "id": control.id,
-        "question": control.question,
-        "iso_27001": control.iso_27001,
+    """A control not applicable as a whole: no assessment, its own status and the reason."""
+    return _card(control, None, None) | {
         "status": NOT_APPLICABLE,
         "verdict": "not-applicable",
-        "reassess_suggested": False,
-        "reassess_reasons": [],
-        "closed": False,
         "not_applicable": reason,
     }
 

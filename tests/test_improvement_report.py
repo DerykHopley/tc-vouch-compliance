@@ -631,3 +631,25 @@ def test_a_control_not_applicable_as_a_whole_is_out_of_the_readiness():
     assert shown["readiness"]["controls"] == len(CONTROLS) - 1
     assert shown["readiness"]["accepted"] == 1
     assert shown["readiness"]["open"] == len(CONTROLS) - 2
+
+
+def test_a_control_not_applicable_as_a_whole_has_no_plan_item_question_or_reviewer():
+    # #454 review: the plan, the questions and the disclaimer leave it out, as readiness does.
+    excluded = assessment("x", {"M1": "not-evidenced"}, control_id="1.1.1")
+    kept = assessment("k", {"M1": "not-evidenced"}, control_id="1.6.1")
+    decided = {("x", "M1"): approved("x", "M1"), ("k", "M1"): approved("k", "M1")}
+    asked = [question(1, "1.1.1", TODAY), question(2, "1.6.1", TODAY)]
+
+    shown = built(
+        {"1.1.1": excluded},
+        history=[excluded, kept],
+        decided=decided,
+        questions=asked,
+        profile=WITHOUT_1_1_1,
+    )
+
+    assert [i["control_id"] for g in shown["plan"] for i in g["items"]] == ["1.6.1"]
+    assert [q["control_id"] for q in shown["questions"]] == ["1.6.1"]
+    assert shown["disclaimer"] == (
+        "Internal self-assessment, drafted by an AI assistant; nothing has been reviewed yet."
+    )

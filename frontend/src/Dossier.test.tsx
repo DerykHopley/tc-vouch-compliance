@@ -144,7 +144,25 @@ describe('the Dossier overview', () => {
       // The heading counts the cards, readiness the applicable ones.
       expect(screen.getByRole('heading', { name: '12 controls' })).toBeTruthy()
       expect(within(screen.getByRole('region', { name: 'Readiness' })).getByText('accepted of 11')).toBeTruthy()
+      // The profile pass's cost note counts the controls that apply.
+      expect(screen.getByText(/a pass over 11 controls costs/)).toBeTruthy()
     })
+
+  it('with every control not applicable as a whole, the hero says no control applies (ticket 454)', () => {
+    const overview = seeded()
+    overview.controls = overview.controls.map((c) => ({ ...c, status: 'not-applicable', verdict: 'not-applicable',
+      not_applicable: 'Not ours.' }))
+    overview.readiness = { ...overview.readiness, controls: 0, accepted: 0, open: 0,
+      by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0, 'not-applicable': 0 } }
+    overview.by_status = { 'not-assessed': 0, 'waiting-for-review': 0, accepted: 0, rejected: 0, 'not-applicable': 12 }
+    overview.next_step = null
+    render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null}
+      {...NO_PASS} {...NO_GOAL} />)
+    const hero = screen.getByRole('heading', { level: 1 }).parentElement!
+    expect(hero.textContent).toContain('No control applies under this profile.')
+    expect(hero.textContent).not.toContain('Nothing is assessed yet.')
+    expect(hero.textContent).not.toContain('Every control is accepted')
+  })
 
   it("shows a German profile's card verdicts in German, marked lang=\"de\" (ticket 200)", () => {
     const overview = { ...seeded(ALL_VERDICTS), company: 'Alpenwerk Präzision GmbH', country: 'Austria',

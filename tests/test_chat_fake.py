@@ -30,6 +30,7 @@ from vouch.chat_agent import (
     SignOff,
     assessed_controls_words,
     assessed_words,
+    not_applicable_words,
     not_assessed_words,
     progress_words,
     sign_off_words,
@@ -39,7 +40,7 @@ from vouch.chat_agent import (
 from vouch.chat_citations import CITE
 from vouch.chat_fake import CHAT_REPLY, CannedChatModel, _cited, german_answer
 from vouch.citations import Citation
-from vouch.dossier import NextAction, NextStep
+from vouch.dossier import NextAction, NextStep, not_applicable_refusal
 from vouch.graph import (
     Assessment,
     RequirementVerdict,
@@ -192,7 +193,7 @@ def controls() -> list[IsaControl]:
 
 
 def by_status(**counts: int) -> dict:
-    statuses = ("accepted", "rejected", "waiting-for-review", "not-assessed")
+    statuses = ("accepted", "rejected", "waiting-for-review", "not-assessed", "not-applicable")
     return {s: counts.get(s.replace("-", "_"), 0) for s in statuses}
 
 
@@ -278,23 +279,32 @@ def _stale_and_implemented() -> str:
 
 TOOL_WORDS = {
     "progress none assessed": lambda: progress_words(
-        by_status(not_assessed=12), None, next_step("assess")
+        12, by_status(not_assessed=12), None, next_step("assess")
     ),
     "progress every state, review next": lambda: progress_words(
+        12,
         by_status(accepted=2, rejected=1, waiting_for_review=3, not_assessed=6),
         LAST_WORKED,
         next_step("review"),
     ),
     "progress one of each, assess again": lambda: progress_words(
+        12,
         by_status(accepted=1, rejected=1, waiting_for_review=1, not_assessed=9),
         LAST_WORKED,
         next_step("assess-again"),
     ),
     "progress one waiting, assess next": lambda: progress_words(
-        by_status(waiting_for_review=1, not_assessed=11), LAST_WORKED, next_step("assess")
+        12, by_status(waiting_for_review=1, not_assessed=11), LAST_WORKED, next_step("assess")
     ),
     "progress every control accepted": lambda: progress_words(
-        by_status(accepted=12), LAST_WORKED, None
+        12, by_status(accepted=12), LAST_WORKED, None
+    ),
+    "progress no control applies": lambda: progress_words(
+        0, by_status(not_applicable=12), None, None
+    ),
+    "not applicable, refused": lambda: not_applicable_refusal("5.2.9"),
+    "not applicable, explained": lambda: not_applicable_words(
+        "5.2.9", "Keine eigene Softwareentwicklung."
     ),
     "assessed partly, waiting": lambda: assessed_words(control("4.1.2"), demo_assessment(), "de"),
     "assessed evidenced, accepted": lambda: assessed_words(
@@ -363,14 +373,14 @@ def test_on_en_and_fr_the_fakes_answer_to_each_tools_words_is_the_words_cited(ca
 
 
 def test_the_progress_greeting_reads_in_german():
-    answer = answer_to(progress_words(by_status(not_assessed=12), None, next_step("assess")))
+    answer = answer_to(progress_words(12, by_status(not_assessed=12), None, next_step("assess")))
     assert written_in(answer) == "de"
     assert "12" in answer and "1.1.1" in answer
 
 
 def test_a_last_worked_date_has_its_month_in_german():
     words = progress_words(
-        by_status(waiting_for_review=1, not_assessed=11), LAST_WORKED, next_step("assess")
+        12, by_status(waiting_for_review=1, not_assessed=11), LAST_WORKED, next_step("assess")
     )
     assert "3. März 2026" in answer_to(words)
 
