@@ -249,7 +249,9 @@ def _costing_handler() -> type[Any]:
             return super().on_llm_end(response, run_id=run_id, **kwargs)
 
         def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> Any:
-            # Langfuse's own error path ends the generation with `cost_details={"total": 0}`,
+            # Langfuse's own error path (5.2.0's `on_llm_error`, through `generation.update`;
+            # the #508 tests go red if a later version ends it another way) ends the generation
+            # with `cost_details={"total": 0}`,
             # though the call may have been billed (#508). The generation's update is made to
             # send the cost Vouch records for the call instead: none at all when it's unknown,
             # including when it can't be worked out.
@@ -260,13 +262,13 @@ def _costing_handler() -> type[Any]:
                 log.exception("a failed model call's cost couldn't be added to its trace")
             generation = self._runs.get(run_id)
             if isinstance(generation, LangfuseGeneration):
-                generation.update = _with_cost(generation.update, cost)  # type: ignore[method-assign]
+                generation.update = _forcing_cost(generation.update, cost)  # type: ignore[method-assign]
             return super().on_llm_error(error, run_id=run_id, **kwargs)
 
     return CostingCallbackHandler
 
 
-def _with_cost(update: Callable[..., Any], cost: dict[str, float] | None) -> Callable[..., Any]:
+def _forcing_cost(update: Callable[..., Any], cost: dict[str, float] | None) -> Callable[..., Any]:
     """A generation's `update`, its `cost_details` always `cost` (None: none sent)."""
 
     def costed(**fields: Any) -> Any:
