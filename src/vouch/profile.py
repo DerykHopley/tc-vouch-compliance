@@ -20,6 +20,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     StringConstraints,
     ValidationError,
     ValidationInfo,
@@ -27,7 +28,14 @@ from pydantic import (
     model_validator,
 )
 
-from vouch.documents import SUFFIX, DocumentChoice, document_path, escaped, is_chosen
+from vouch.documents import (
+    SUFFIX,
+    DocumentChoice,
+    document_files,
+    document_path,
+    escaped,
+    is_chosen,
+)
 from vouch.isa import (
     COLUMN_PREFIX,
     SOURCE,
@@ -200,6 +208,12 @@ class EvidenceSource(_Strict):
         """Whether the profile may use this document of the folder (every one, with no choice)."""
         return is_chosen(doc_id, self.documents)
 
+    def usable_documents(self) -> list[Path]:
+        """The documents of the folder (document_files) the profile may use (`uses`), by file
+        name: what the profile pass reads, the Documents tab lists and the fake's library pass
+        is limited to. An unreadable folder raises OSError."""
+        return [path for path in document_files(self.folder) if self.uses(path.stem)]
+
 
 class CountryOverlayRequirement(_Strict):
     control: str  # the base framework control it adds to; the profile checks it exists
@@ -232,6 +246,21 @@ class ComplianceProfile(_Strict):
     evidence_sources: dict[EvidenceSourceName, EvidenceSource]
     asset_register: tuple[dict[str, Any], ...] = ()
     risks: tuple[dict[str, Any], ...] = ()
+    _stored: bool = PrivateAttr(default=False)
+
+    @property
+    def stored(self) -> bool:
+        """Whether the profile is a company made in the app, kept in the database
+        (load_stored_profile), rather than a profile file (#446)."""
+        return self._stored
+
+    @model_validator(mode="after")
+    def _origin(self, info: ValidationInfo) -> Self:
+        """Marks a profile validated as stored. Never unmarks one: pydantic runs this again,
+        with no context, on a profile passed into another model (vouch.fake_model)."""
+        if isinstance(info.context, dict) and info.context.get(STORED):
+            self._stored = True
+        return self
 
     @field_validator("id", mode="after")
     @classmethod

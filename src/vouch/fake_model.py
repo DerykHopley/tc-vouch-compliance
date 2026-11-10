@@ -2,7 +2,7 @@
 
 import json
 import math
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -23,7 +23,9 @@ from vouch.graph import (
     RequirementJudgement,
     SubmitAnswer,
 )
+from vouch.profile import ComplianceProfile
 from vouch.profile_pass import ControlAssessmentReply, ProfilePassReply
+from vouch.settings import LIBRARY_PASS_SCRIPT
 
 FAKE_CHARS_PER_TOKEN = 4
 """The fake's own token count, four characters a token: its usage figures are estimates by design,
@@ -32,13 +34,50 @@ kept apart from the profile pass's measured rates (#432) so spending tests don't
 
 NONE_CHOSEN = "None of the chosen documents shows this."
 """The reason for a requirement whose scripted citations were all of documents not chosen."""
-NONE_CHOSEN_ITEM = RemediationItemReply(
-    requirement_id="",
-    missing="A document that shows this; none of the chosen documents does.",
-    owner_role="Information security officer",
-    due_in_days=60,
-)
-"""The remediation item such a requirement gets, if the script drafted it none."""
+NONE_CHOSEN_ANSWER = "None of the chosen documents shows what this control asks for."
+"""The draft answer for a control left with nothing shown once its citations were limited."""
+VERY_HIGH_NONE = "The sample library holds no evidence for very high protection."
+"""The library script's reason for each very-high requirement (#446): the library has none."""
+GENERIC_OWNER = "Information security officer"
+GENERIC_DUE_DAYS = 60
+
+
+def part_chosen(doc_ids: Iterable[str]) -> str:
+    """The reason for a requirement that kept only some of its scripted citations: what the
+    chosen documents left show part of it, naming only them."""
+    return f"The chosen documents show part of this: {', '.join(doc_ids)}."
+
+
+def _generic_item(requirement_id: str, missing: str) -> RemediationItemReply:
+    return RemediationItemReply(
+        requirement_id=requirement_id,
+        missing=missing,
+        owner_role=GENERIC_OWNER,
+        due_in_days=GENERIC_DUE_DAYS,
+    )
+
+
+def none_chosen_item(requirement_id: str) -> RemediationItemReply:
+    """The remediation item of a requirement turned not evidenced (NONE_CHOSEN), in place of the
+    script's own, which may assume a document not chosen."""
+    return _generic_item(
+        requirement_id, "A document that shows this; none of the chosen documents does."
+    )
+
+
+def part_chosen_item(requirement_id: str) -> RemediationItemReply:
+    """The remediation item of a requirement capped at partly evidenced (part_chosen), in place
+    of the script's own."""
+    return _generic_item(
+        requirement_id, "A document that shows the rest of this; the chosen documents show part."
+    )
+
+
+def very_high_item(requirement_id: str) -> RemediationItemReply:
+    """The library script's remediation item for each very-high requirement (VERY_HIGH_NONE)."""
+    return _generic_item(
+        requirement_id, "Evidence for this very high protection requirement, which none shows."
+    )
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -248,24 +287,90 @@ class ScriptedReply(BaseChatModel):
 
 
 def chosen_documents_only(reply: ProfilePassReply, chosen: Collection[str]) -> ProfilePassReply:
-    """The pass reply limited to the `chosen` documents (ids), before the fake plays it (#446): a
-    citation of another document left out; a requirement evidenced or partly evidenced with no
-    citation left turned not evidenced (NONE_CHOSEN), with a remediation item (NONE_CHOSEN_ITEM)
-    if it had none. One with citations left keeps its verdict: the agent's own rules then apply
-    to it as to any reply. `reply` is left as it was."""
+    """The pass reply limited to the `chosen` documents (ids), before the fake plays it (#446),
+    so its drafts never overstate a company's evidence. A citation of another document is left
+    out. A requirement evidenced or partly evidenced that lost every citation becomes not
+    evidenced (NONE_CHOSEN, none_chosen_item); one that lost some is capped at partly evidenced
+    (part_chosen, naming the documents left, and part_chosen_item). Either's scripted remediation
+    item is replaced, and a control that lost any citation gets an answer built only from what
+    is left (each requirement still shown, with its reason; NONE_CHOSEN_ANSWER when none is),
+    so no text names or describes a document not chosen. The agent's own rules then apply as to
+    any reply. `reply` is left as it was."""
 
     def limited(control: ControlAssessmentReply) -> ControlAssessmentReply:
         requirements: list[RequirementJudgement] = []
-        items = list(control.remediation)
-        drafted = {i.requirement_id for i in items}
+        replaced: dict[str, RemediationItemReply] = {}
+        filtered = False
         for r in control.requirements:
             kept = [c for c in r.citations if c.doc_id in chosen]
-            if r.citations and not kept and r.verdict in SHOWN_VERDICTS:
-                r = r.model_copy(update={"verdict": "not-evidenced", "reason": NONE_CHOSEN})
-                if r.requirement_id not in drafted:
-                    item = NONE_CHOSEN_ITEM.model_copy(update={"requirement_id": r.requirement_id})
-                    items.append(item)
-            requirements.append(r.model_copy(update={"citations": kept}))
-        return control.model_copy(update={"requirements": requirements, "remediation": items})
+            if len(kept) == len(r.citations):
+                requirements.append(r)
+                continue
+            filtered = True
+            update: dict[str, object] = {"citations": kept}
+            if r.verdict in SHOWN_VERDICTS and kept:
+                ids = dict.fromkeys(c.doc_id for c in kept)
+                update |= {"verdict": "partly-evidenced", "reason": part_chosen(ids)}
+                replaced[r.requirement_id] = part_chosen_item(r.requirement_id)
+            elif r.verdict in SHOWN_VERDICTS:
+                update |= {"verdict": "not-evidenced", "reason": NONE_CHOSEN}
+                replaced[r.requirement_id] = none_chosen_item(r.requirement_id)
+            requirements.append(r.model_copy(update=update))
+        if not filtered:
+            return control
+        items = [i for i in control.remediation if i.requirement_id not in replaced]
+        shown = [
+            f"{r.requirement_id}: {r.reason}" for r in requirements if r.verdict in SHOWN_VERDICTS
+        ]
+        return control.model_copy(
+            update={
+                "answer": " ".join(shown) or NONE_CHOSEN_ANSWER,
+                "requirements": requirements,
+                "remediation": [*items, *replaced.values()],
+            }
+        )
 
     return ProfilePassReply(controls=[limited(c) for c in reply.controls])
+
+
+def _library_script(profile: ComplianceProfile) -> Script:
+    """LIBRARY_PASS_SCRIPT with its pass replies limited to the documents the profile may use
+    (chosen_documents_only). A bad script raises ScriptError; an unreadable folder, OSError."""
+    script = _load_script(LIBRARY_PASS_SCRIPT)
+    usable = {
+        path.stem
+        for source in profile.evidence_sources.values()
+        for path in source.usable_documents()
+    }
+    given = script.profile_pass
+    replies = given if isinstance(given, list) else [given]
+    limited = [chosen_documents_only(reply, usable) for reply in replies]
+    return script.model_copy(update={"profile_pass": limited})
+
+
+def _no_script_yet() -> Script:
+    return Script(profile_pass=ProfilePassReply())
+
+
+class LibraryPassModel(ScriptedChatModel):
+    """The fake for a company made in setup's profile pass (#446): plays the library script
+    limited to the profile's chosen documents (_library_script), read and limited on the first
+    structured reply asked for, so a pass that calls no model reads nothing."""
+
+    script: Script = Field(default_factory=_no_script_yet)
+    profile: ComplianceProfile
+    loaded: bool = False
+
+    def next_reply(self, schema: type[BaseModel], messages: list[BaseMessage]) -> BaseModel:
+        if not self.loaded:
+            self.script = _library_script(self.profile)
+            self.loaded = True
+        return super().next_reply(schema, messages)
+
+
+def library_pass_model(
+    profile: ComplianceProfile, callbacks: list[BaseCallbackHandler] | None = None
+) -> LibraryPassModel:
+    """The fake playing the library pass script for `profile` (LibraryPassModel). `callbacks`
+    see every call (a usage meter)."""
+    return LibraryPassModel(profile=profile, callbacks=callbacks)

@@ -75,9 +75,12 @@ PROFILE_PASS_SCRIPT = DEMO_DIR / "profile-pass.json"
 when no ASSESS_FAKE_SCRIPT is set."""
 LIBRARY_PASS_SCRIPT = DEMO_DIR / "profile-pass-library.json"
 """The bundled profile pass script for a company made in setup (#446), over the sample library's
-12 controls, its verdicts and citations those of fixtures/sample-library/expected-answers.yaml:
-the pass's fake, limited to the company's chosen documents (vouch.fake_model.chosen_documents_only),
-for a profile whose evidence is all sample-library folders, when no ASSESS_FAKE_SCRIPT is set."""
+12 controls: its verdicts and citations those of fixtures/sample-library/expected-answers.yaml, as
+tests/test_library_pass.py's
+test_the_library_script_covers_the_twelve_controls_with_the_expected_verdicts_and_citations pins;
+its very-high requirements not evidenced. The pass's fake for a stored profile
+(ComplianceProfile.stored), limited to the company's chosen documents
+(vouch.fake_model.library_pass_model), when no ASSESS_FAKE_SCRIPT is set."""
 
 
 @dataclass(frozen=True)
