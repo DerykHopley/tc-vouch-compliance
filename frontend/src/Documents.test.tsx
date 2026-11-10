@@ -46,7 +46,7 @@ function serve(answer: () => Promise<Response>) {
   return fetch
 }
 
-describe('the Documents page', () => {
+describe('the Documents panel of the Company page (ticket 505: its title an h2)', () => {
   it('says it is loading, then shows the sheet in the words language: one table per source, with Cited by', async () => {
     serve(() => json(NORDLICHT))
     render(<Documents />)
@@ -54,7 +54,7 @@ describe('the Documents page', () => {
 
     const sheet = await screen.findByRole('article', { name: 'Documents' })
     expect(sheet.getAttribute('lang')).toBe('en')
-    expect(within(sheet).getByRole('heading', { level: 1 }).textContent).toBe('Documents')
+    expect(within(sheet).getByRole('heading', { level: 2 }).textContent).toBe('Documents')
     const tables = within(sheet).getAllByRole('table')
     expect(tables.map((t) => t.querySelector('caption')?.textContent)).toEqual(['Policies', 'Records'])
     const [policies] = tables
