@@ -2,8 +2,8 @@
 
 With both Langfuse keys set (vouch.settings.LangfuseKeys), each assessment run, chat turn and
 profile pass is one trace: its LangGraph steps, each model call (prompt, answer, model, tokens,
-and the cost Vouch records for it, #504: cost_details), and each tool call, tagged with the profile, the control, the model and the prompt version, its
-user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
+and the cost Vouch records for it, #504: cost_details), and each tool call, tagged with the
+profile, the control, the model and the prompt version, its user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
 client is made, nothing is imported from it, and no call is sent.
 
 A run is traced by its RunnableConfig: `traced` gives one holding a fresh Langfuse LangChain
@@ -174,14 +174,12 @@ def cost_details(response: LLMResult, model: str | None) -> dict[str, float] | N
     return {"input": total * share, "output": total * (1 - share), "total": total}
 
 
-def _served_or(response: LLMResult, model: str | None) -> str:
-    """The model a generation names: the one OpenRouter's answer says served it, else the one
-    asked for, else the fake's tag."""
-    output = response.llm_output or {}
-    first = next((g for generations in response.generations for g in generations), None)
-    metadata = getattr(getattr(first, "message", None), "response_metadata", None) or {}
-    served = output.get("model_name") or metadata.get("model_name")
-    return served if isinstance(served, str) and served else model or FAKE_MODEL_TAG
+def _generation_model(response: LLMResult, model: str | None) -> str:
+    """The model a generation names: the one OpenRouter's answer says served it, read as the
+    usage meter reads it, else the one asked for, else the fake's tag."""
+    from vouch.spending import _served_model
+
+    return _served_model(response) or model or FAKE_MODEL_TAG
 
 
 @cache
@@ -201,16 +199,17 @@ def _costing_handler() -> type[Any]:
             self.vouch_model = model
 
         def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> Any:
-            # The generation is still open here; the handler's own on_llm_end ends it.
-            generation = self._runs.get(run_id)
-            if isinstance(generation, LangfuseGeneration):
-                try:
+            # The generation is still open here (`_runs`, the handler's own open runs); its
+            # on_llm_end ends it. A failure loses the cost, never the generation.
+            try:
+                generation = self._runs.get(run_id)
+                if isinstance(generation, LangfuseGeneration):
                     generation.update(
-                        model=_served_or(response, self.vouch_model),
+                        model=_generation_model(response, self.vouch_model),
                         cost_details=cost_details(response, self.vouch_model),
                     )
-                except Exception:
-                    log.exception("a model call's cost couldn't be added to its trace")
+            except Exception:
+                log.exception("a model call's cost couldn't be added to its trace")
             return super().on_llm_end(response, run_id=run_id, **kwargs)
 
     return CostingCallbackHandler
