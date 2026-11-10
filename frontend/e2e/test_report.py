@@ -350,7 +350,7 @@ def shown(locator: Locator) -> bool:
 
 
 def test_printed_only_the_report_shows_and_its_tables_fit_the_page(page: Page, report_url):
-    page.set_viewport_size({"width": 1400, "height": 900})
+    page.set_viewport_size({"width": 1440, "height": 900})  # pinning needs 1402px (#465)
     with_older_entries(page)
     report = open_report(page, report_url)
     older = report.get_by_text(OLDER_ENTRIES)

@@ -282,13 +282,14 @@ main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .bubble { width: min(390px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 16px 48px var(--shadow); display: flex; flex-direction: column; animation: rise .18s ease-out; }
 .bubble-head { display: flex; gap: 0 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
-.bubble-head .btn, .page-context { white-space: nowrap; }
-.bubble-head .btn { font-size: 12px; padding-inline: 8px; min-width: 44px; }
+.bubble-head .btn { font-size: 12px; padding-inline: 8px; min-width: 44px; white-space: nowrap; flex-shrink: 0; }
 /* An icon button (design.md, Components: Icon button, #72): a body-font glyph about 20px, in a box at least 44 by 44px. */
 .bubble-head .btn-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 0; font-size: 20px; line-height: 1; }
 .bubble-head b { font: 400 16px var(--f-display); letter-spacing: .04em; text-transform: uppercase; }
-/* One row (#251): the page tag gives way, cut short with its full text as a tooltip, never the controls. */
-.page-context { font-size: 11px; background: var(--paper); border-radius: 999px; padding: 1px 9px; color: var(--muted); margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The controls keep to one row, each whole (#251); the page tag is never cut (#465): beside the name where it fits,
+   else under it, and only in a header too narrow for it whole on its own line do its words wrap. */
+.bubble-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; flex: 1 1 auto; }
+.page-context { font-size: 11px; background: var(--paper); border-radius: 999px; padding: 1px 9px; color: var(--muted); }
 .bubble-log { flex: 1; overflow: auto; padding: 12px; display: grid; gap: 8px; align-content: start; }
 .msg { margin: 0; background: var(--paper); border-radius: 3px; padding: 8px 10px; max-width: 92%; overflow-wrap: anywhere; white-space: pre-wrap; }
 .msg:empty { display: none; }
@@ -307,9 +308,9 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 /* Enlarged: wider and taller, still floating. Pinned: a column beside the page, which makes room for exactly its width:
    --chat-width, set by AskVouch (dragged from 360px to 720px; #231). The 480px fallback is CHAT_WIDTH in
    chatWidth.ts: change both together.
-   (design.md, Layout: only over 1000px; AskVouch offers no pin at 1000px or less). */
+   (design.md, Layout: only from a 1402px page, PIN_FROM in chatWidth.ts, which AskVouch checks; #465). */
 .bubble.enlarged { width: min(640px, calc(100vw - 32px)); height: calc(100vh - 120px); }
-@media (min-width: 1001px) {
+@media (min-width: 1402px) {
   :root[data-chat="pinned"] body { padding-right: var(--chat-width, 480px); }
   .bubble.pinned { top: 0; right: 0; bottom: 0; width: var(--chat-width, 480px); height: auto; border-width: 0 0 0 1px; border-radius: 0; box-shadow: none; animation: none; }
 }
