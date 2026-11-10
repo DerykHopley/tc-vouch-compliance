@@ -17,12 +17,14 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableLambda
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -56,6 +58,7 @@ from vouch.tracing import TraceFacts, Tracing, run_traced, traced
 KEYS = {"LANGFUSE_PUBLIC_KEY": "pk-lf-test-public", "LANGFUSE_SECRET_KEY": "sk-lf-test-secret"}
 LOCAL = "http://localhost:3300"
 DEMO_CONTROL = "4.1.2"
+local_only = pytest.mark.allow_hosts(["127.0.0.1"])
 
 
 # --- The settings -------------------------------------------------------------------------------
@@ -435,6 +438,53 @@ def sent_by_the_end(on: Tracing, exporter: InMemorySpanExporter, response) -> No
     assert len(exporter.get_finished_spans()) == at_the_end
 
 
+@contextmanager
+def served(app) -> Iterator[str]:
+    """`app` served by uvicorn on a free local port, its base URL: unlike TestClient, which runs
+    the whole response before handing it over, a real client can leave the stream part way."""
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
+    running = threading.Thread(target=server.run, daemon=True)
+    running.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started:
+            assert running.is_alive() and time.monotonic() < deadline, "uvicorn didn't start"
+            time.sleep(0.01)
+        yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        running.join(10)
+
+
+def at_result[T](url: str, headers: dict[str, str], seen: Callable[[], T]) -> T:
+    """Start an assessment and read its stream only until `result`, then close it, as the
+    browser's postEvents does; `seen()` as `result` arrived."""
+    with (
+        httpx.Client(base_url=url, timeout=30) as client,
+        client.stream(
+            "POST", "/api/assessments", json={"control_id": DEMO_CONTROL}, headers=headers
+        ) as response,
+    ):
+        for line in response.iter_lines():
+            if line == "event: result":
+                return seen()
+    raise AssertionError("the stream ended with no result")
+
+
+@local_only
+def test_an_assessment_s_trace_is_sent_before_its_result_to_a_client_that_leaves_there(slow):
+    """The live symptom (#541): the browser stops reading at `result`, so a trace sent after it
+    is sent once the response is over, when Cloud Run gives the instance no CPU."""
+    on, exporter = slow
+
+    with served(traced_app(on)) as url:
+        spans = at_result(url, new_user(), exporter.get_finished_spans)
+
+    assert len(of_type(list(spans), "generation")) == 4  # the whole run, before its result
+    on.flush()
+    assert len(exporter.get_finished_spans()) == len(spans)  # and nothing after
+
+
 def test_an_assessment_s_trace_is_sent_before_its_stream_ends(slow):
     on, exporter = slow
     client, lead = TestClient(traced_app(on)), new_user()
@@ -472,19 +522,22 @@ def test_a_profile_pass_s_trace_is_sent_before_its_answer(slow):
     sent_by_the_end(on, exporter, response)
 
 
-def test_a_langfuse_that_never_answers_holds_the_response_at_most_the_bound(
+@local_only
+def test_a_langfuse_that_never_answers_holds_the_result_at_most_the_bound(
     down, monkeypatch, caplog
 ):
     on, _ = down
     monkeypatch.setattr(tracing_module, "TRACE_SEND_WAIT_SECONDS", 0.5)
-    client, lead = TestClient(traced_app(on)), new_user()
 
-    started = time.monotonic()
-    with caplog.at_level(logging.WARNING, logger="vouch.tracing"):
-        response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
-    took = time.monotonic() - started
+    with (
+        served(traced_app(on)) as url,
+        caplog.at_level(logging.WARNING, logger="vouch.tracing"),
+    ):
+        started = time.monotonic()
+        warned = at_result(url, new_user(), lambda: "wasn't sent to Langfuse within" in caplog.text)
+        took = time.monotonic() - started
 
-    assert "event: result" in response.text
+    assert warned  # the bound ran out before the result was sent
     assert took < 0.5 + 2.5  # the bound, and the fake run's own time
     assert "wasn't sent to Langfuse within 0.5 s" in caplog.text
 
@@ -875,9 +928,6 @@ def otlp() -> Iterator[OtlpEndpoint]:
     endpoint.server.server_close()
 
 
-local_only = pytest.mark.allow_hosts(["127.0.0.1"])
-
-
 def finished_spans(count: int) -> list[ReadableSpan]:
     tracer = TracerProvider().get_tracer("t")
     spans = []
@@ -1082,6 +1132,29 @@ def test_five_assessments_in_one_process_each_reach_langfuse_before_their_respon
     sent = [r for r in tracing_lines(caplog) if "to Langfuse" in r.getMessage()]
     assert len(sent) == len(otlp.sends) >= 5
     assert all(r.levelno == logging.INFO for r in sent)
+
+
+@local_only
+def test_an_assessment_s_send_is_logged_before_its_result_to_a_client_that_leaves_there(
+    otlp, caplog
+):
+    """#536's send line, sent over HTTP to a local endpoint, logged before the result (#541)."""
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), otlp.url)
+    on = Tracing(keys, tracer_provider=TracerProvider())
+
+    def sent() -> tuple[list[str], int]:
+        lines = [r.getMessage() for r in tracing_lines(caplog) if "to Langfuse" in r.getMessage()]
+        return lines, len(otlp.spans())
+
+    try:
+        with served(traced_app(on)) as url, caplog.at_level(logging.INFO, logger="vouch.tracing"):
+            lines, spans = at_result(url, new_user(), sent)
+    finally:
+        on.shutdown()
+
+    assert spans > 0
+    assert len(lines) == len(otlp.sends) >= 1
+    assert all(line.startswith("sent ") for line in lines), lines
 
 
 # --- The eval runner ---------------------------------------------------------------------------
