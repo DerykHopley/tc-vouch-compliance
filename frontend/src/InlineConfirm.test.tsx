@@ -1,6 +1,8 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
+import { DOUBLE_CLICK_MS } from './doubleClickGuard.ts'
 import InlineConfirm from './InlineConfirm.tsx'
 
 /** The in-app ask (#441), shared by Change goal, Close round and Assess again on a review in progress (#437). */
@@ -88,5 +90,120 @@ describe('the in-app ask (ticket 441)', () => {
     await userEvent.click(button('Change it'))
     expect(onConfirm).toHaveBeenCalledOnce()
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+/** #527: a double-click on the confirm collapses the ask, and its second click lands on whatever moves up
+ * under the pointer. After a pointer press, the next pointer click within 500ms presses nothing. */
+describe('the second click of a double-click (ticket 527)', () => {
+  function withOther() {
+    const onConfirm = vi.fn()
+    const other = vi.fn()
+    render(
+      <>
+        <InlineConfirm label="Change it" question={QUESTION} onConfirm={onConfirm} />
+        <button type="button" onClick={other}>Close round</button>
+      </>,
+    )
+    return { onConfirm, other }
+  }
+  const opened = (detail = 1) => {
+    fireEvent.click(button('Change it'), { detail })
+    expect(screen.getByRole('alert')).toBeTruthy()
+  }
+  const confirmButton = () =>
+    within(document.querySelector('.inline-confirm') as HTMLElement).getByRole('button', { name: 'Change it' })
+  const confirm = (detail: number) => fireEvent.click(confirmButton(), { detail })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it('presses nothing within 500ms of a pointer confirm, wherever it lands', () => {
+    vi.useFakeTimers()
+    const { onConfirm, other } = withOther()
+    opened()
+    confirm(1)
+    expect(onConfirm).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(DOUBLE_CLICK_MS - 1)
+    fireEvent.click(button('Close round'), { detail: 2 })
+    expect(other).not.toHaveBeenCalled()
+  })
+
+  it('swallows one click only: the next one works', () => {
+    vi.useFakeTimers()
+    const { other } = withOther()
+    opened()
+    confirm(1)
+    fireEvent.click(button('Close round'), { detail: 2 })
+    fireEvent.click(button('Close round'), { detail: 1 })
+    expect(other).toHaveBeenCalledOnce()
+  })
+
+  it('swallows a second click that lands on its own trigger, so the ask stays closed', () => {
+    vi.useFakeTimers()
+    const { onConfirm } = withOther()
+    opened()
+    confirm(1)
+    fireEvent.click(button('Change it'), { detail: 2 })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(onConfirm).toHaveBeenCalledOnce()
+  })
+
+  it('lets a click 500ms or more after the confirm through', async () => {
+    vi.useFakeTimers()
+    const { other } = withOther()
+    opened()
+    confirm(1)
+    await pastDoubleClick()
+    fireEvent.click(button('Close round'), { detail: 1 })
+    expect(other).toHaveBeenCalledOnce()
+  })
+
+  it('sets no guard on a keyboard confirm (detail 0)', () => {
+    const { onConfirm, other } = withOther()
+    opened(0)
+    confirm(0)
+    expect(onConfirm).toHaveBeenCalledOnce()
+    fireEvent.click(button('Close round'), { detail: 0 })
+    expect(other).toHaveBeenCalledOnce()
+  })
+
+  it('never swallows a keyboard click, even inside a pointer guard', () => {
+    vi.useFakeTimers()
+    const { other } = withOther()
+    opened()
+    confirm(1)
+    fireEvent.click(button('Close round'), { detail: 0 })
+    expect(other).toHaveBeenCalledOnce()
+  })
+
+  it('outlives the ask: when it unmounts, what takes its place presses nothing within 500ms, then works', async () => {
+    // Close round's ask leaves the page as the round closes, and the next round's form takes its place.
+    vi.useFakeTimers()
+    const other = vi.fn()
+    const view = render(<InlineConfirm label="Change it" question={QUESTION} onConfirm={vi.fn()} />)
+    opened()
+    confirm(1)
+    view.rerender(<button type="button" onClick={other}>Start round</button>)
+    fireEvent.click(button('Start round'), { detail: 2 })
+    expect(other).not.toHaveBeenCalled()
+
+    // A fresh guard, then the 500ms run out with no click: the next click works.
+    view.rerender(<InlineConfirm label="Change it" question={QUESTION} onConfirm={vi.fn()} />)
+    opened()
+    confirm(1)
+    view.rerender(<button type="button" onClick={other}>Start round</button>)
+    await pastDoubleClick()
+    fireEvent.click(button('Start round'), { detail: 1 })
+    expect(other).toHaveBeenCalledOnce()
+  })
+
+  it('still confirms once on a single click, closes, and puts focus back on the trigger', async () => {
+    const { onConfirm, other } = withOther()
+    await userEvent.click(button('Change it'))
+    await userEvent.click(confirmButton())
+    expect(onConfirm).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(document.activeElement).toBe(button('Change it'))
+    expect(other).not.toHaveBeenCalled()
   })
 })

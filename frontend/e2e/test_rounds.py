@@ -24,6 +24,9 @@ CLOSE_FIRST = (
     'Close the review round "First round"? Its results are frozen, and the overview compares '
     "later work with them. The close is recorded in the audit trail."
 )
+# InlineConfirm's DOUBLE_CLICK_MS (#527): for that long after a pointer confirm, the next click
+# anywhere presses nothing, even once the ask has left the page.
+DOUBLE_CLICK_MS = 500
 
 
 def open_dossier(page: Page, url: str) -> None:
@@ -53,6 +56,7 @@ def close_round(page: Page, dialogs: list[str]) -> str:
         page.locator(".hero .inline-confirm").get_by_role("button", name="Close round").click()
     assert closed.value.ok, closed.value.status
     expect(page.get_by_role("textbox", name="Name of the next round")).to_be_focused()
+    page.wait_for_timeout(DOUBLE_CLICK_MS)  # a person names the round after a double-click's time
     return asked
 
 
