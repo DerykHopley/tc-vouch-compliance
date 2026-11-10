@@ -283,7 +283,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
-                language={answerLanguage(run)}
+                language={answerLanguage(run)} staleWord={assessed?.stale_word}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
                   // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
@@ -441,6 +441,9 @@ type JudgedProps = {
   items: RemediationItems
   /** The assessment's answer language: its requirements' verdicts are in it (#200). */
   language?: string
+  /** A stale citation's flag word, served in the answer language with each stale reason (#359); English's when the
+   * API sends none. */
+  staleWord?: string
 }
 
 /**
@@ -480,8 +483,8 @@ function RequirementText({ text, language }: { text: string; language?: string }
   )
 }
 
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language }:
-  JudgedProps) {
+function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language,
+  staleWord = 'Stale' }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
   // Closing a requirement's override (Save or Cancel) gives focus back to its "Change" (#226): only when focus fell
   // to the page with the form, never taken from where the lead has moved it meanwhile.
@@ -548,7 +551,11 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                     <CitedQuote key={i} quote={c.quote}>
                       <span className="mono" data-doc-id={c.doc_id}>{c.doc_id} v{c.version} · {c.section}</span>
                       <span className={`kind kind-${c.kind}`}>{c.kind}</span>
-                      {c.stale && <span className="flag">Stale: {c.stale_because}</span>}
+                      {c.stale && ( // in the answer language, like the reason (#359)
+                        <span className="flag" lang={language}>
+                          {c.stale_because ? `${staleWord}: ${c.stale_because}` : staleWord}
+                        </span>
+                      )}
                       <span>Quote verified</span>
                     </CitedQuote>
                   ))}

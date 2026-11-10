@@ -66,7 +66,9 @@ def test_starting_nordlicht_afresh_shows_every_control_open_and_keeps_the_trail(
     report = page.locator("article.report-doc")
     rows = report.locator("table.report-controls tbody tr")
     expect(rows).to_have_count(12)
-    expect(rows.filter(has_text="Open: not yet accepted")).to_have_count(12)
+    # Each open, in its status word (#463): with nothing reviewed, no Verdict column at all.
+    expect(rows.locator("[data-label=Status]")).to_have_text(["Open"] * 12)
+    expect(report.locator("table.report-controls th", has_text="Verdict")).to_have_count(0)
     expect(rows.locator(".chip")).to_have_count(0)  # no reviewed verdict on any control
     expect(report.get_by_role("region", name="Readiness").locator(".report-lead")).to_have_text(
         "0 of 12 controls accepted"
