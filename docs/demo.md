@@ -3,15 +3,18 @@
 This is the presenter's script: what to show, in what order, and what to say. It has three parts,
 which run alone or one after the other:
 
-- **[Part 1, Audit readiness](#part-1-audit-readiness)** (6 minutes 45 seconds): a company
+- **[Part 1, Audit readiness](#part-1-audit-readiness)** (7 minutes 15 seconds): a company
   preparing its TISAX audit, on the live app.
 - **[Part 2, Keep improving](#part-2-keep-improving)** (6 minutes 40 seconds): the same company
   improving its own security with no audit planned, on the local app.
-- **[Part 3, Company setup](#part-3-company-setup)** (6 minutes): a developer sets up a new
-  company, which opens with every applicable control drafted, on the local app.
+- **[Part 3, Company setup](#part-3-company-setup)** (6 minutes 10 seconds): a developer sets up
+  a new company, which opens with every applicable control drafted, on the local app.
 
-All three take 19 minutes 25 seconds. The goals, the three-step review and company setup shown
-here are a demo/prototype process: a real SaaS product might do it differently.
+All three take 20 minutes 5 seconds. Vouch works for one **current company** at a time, the same
+for every user, and a developer makes a company current on the Developer page. The current
+company, the goals, the three-step review and company setup shown here are a demo/prototype
+process: a real SaaS product might do it differently, for example giving each lead their own
+companies ([#163](https://github.com/DerykHopley/tc-vouch-compliance/issues/163)).
 
 It is not the fake model's bundled demo script, the scripted answers
 [setup](setup.md#run-the-app) means when it says the local run plays one.
@@ -36,18 +39,26 @@ security to improve, round by round, with a plan its team can follow.
 
 ### Before you present
 
-- Sign in to the live app, <https://vouch-828715466396.europe-west1.run.app>, and open it once a
-  minute before you start, so Cloud Run is awake.
-- Choose **Nordlicht Komponenten GmbH** in the profile switcher in the top bar.
-- Start Nordlicht afresh before each run: in the user menu (your initials, top right), choose
-  **Start Nordlicht Komponenten GmbH afresh…** and OK the question. Do the same under Alpenwerk
-  (switch to it, **Start Alpenwerk Präzision GmbH afresh…**, then switch back), so step 5's 1.6.2
-  shows **Assess**, not **Assess again**. Every control is "Not
+- Sign in to the live app, <https://vouch-828715466396.europe-west1.run.app>, as a developer
+  (your user menu offers **Developer page**), and open it once a minute before you start, so
+  Cloud Run is awake. Steps 5 and 6 change the current company on the Developer page.
+- Making a company current changes it for every user of the live app, not only for you: anyone
+  else using it during the demo sees the switch too.
+- The top bar must name **Nordlicht Komponenten GmbH**, the current company. If it names another,
+  make Nordlicht current: in the user menu (your initials, top right), choose **Developer page**,
+  and under "Companies" select **Make current** in Nordlicht Komponenten GmbH's row.
+- Start Alpenwerk afresh, so step 5's 1.6.2 shows **Assess**, not **Assess again**: on the
+  Developer page, under "Companies", select **Make current** in Alpenwerk Präzision GmbH's row.
+  Then in the user menu choose **Start Alpenwerk Präzision GmbH afresh…** and OK the question.
+  Back on the Developer page, select **Make current** in Nordlicht Komponenten GmbH's row.
+- Start Nordlicht afresh before each run: in the user menu, choose **Start Nordlicht Komponenten
+  GmbH afresh…** and OK the question. Every control is "Not
   assessed" again and the chat opens a new conversation, so each run starts from the same place.
   Nothing is deleted: the report's audit trail still lists every earlier rehearsal's entries. Wait
   until no assessment is running, or Vouch asks you to.
 - The Overview must read "Goal: Audit readiness". A fresh start keeps the goal: if Part 2 left it
-  on Internal improvement, select **Change goal** and OK the question.
+  on Internal improvement, select **Change goal**, then the **Change goal** that appears with the
+  question in its place.
 - A fresh start doesn't give back assessments: the earlier rehearsals still count towards
   today's limit.
 - Each assessment counts towards your daily limit. One run of the script makes two (5.1.1 and
@@ -55,13 +66,13 @@ security to improve, round by round, with a plan its team can follow.
 
 ### The steps
 
-Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
+Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:15 + 1:30 = 7 minutes 15 seconds.
 
 #### 1. The overview (0:45)
 
 1. Open **Overview** (the Dossier). Point at "Where you stand": its figures count only verdicts
    you accepted.
-2. Point at "The controls": the 12 controls in this profile, each with its status ("Not
+2. Point at "The controls": Nordlicht's 12 controls, each with its status ("Not
    assessed", "Proposed" or "Accepted").
 
 > This is where Nordlicht stands today. Only verdicts the compliance lead has accepted count here,
@@ -112,11 +123,13 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
 > The chat answers from the company's own documents and cites them. It can't accept anything:
 > asked to accept a verdict, it sends me back to the working paper, where only I can.
 
-#### 5. Switch to Alpenwerk and assess 1.6.2 (1:00)
+#### 5. Switch to Alpenwerk and assess 1.6.2 (1:15)
 
-1. In the profile switcher, choose **Alpenwerk Präzision GmbH · Austria · German**.
-2. Open **1.6.2** from the control index (the switch keeps you on 5.1.1's address) and select
-   **Assess**.
+1. Developer page → Alpenwerk → Make current: in the user menu, choose **Developer page**, and
+   under "Companies" select **Make current** in Alpenwerk Präzision GmbH's row. The app opens
+   afresh on the Developer page, reading "Alpenwerk Präzision GmbH is now the current company.",
+   and the top bar names Alpenwerk Präzision GmbH.
+2. Select **Overview** in the top bar, open **1.6.2** from its card and select **Assess**.
 3. Point at the steps: `apply_overlays` names the country overlay "AT NIS2 (illustrativ)", which
    adds O1, and `overlay_branch` gathers evidence for it. O1 is in the requirements table, marked
    "Country overlay".
@@ -126,14 +139,17 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
 > A second client, in Austria. The country overlay adds a requirement, and the assessment takes an
 > extra branch to find evidence for it. Alpenwerk works in German, so Vouch answers in German.
 
-#### 6. The report (1:15)
+#### 6. The report (1:30)
 
-1. Switch back to **Nordlicht Komponenten GmbH** and select **Report** in the top bar.
+1. Developer page → Nordlicht Komponenten GmbH → Make current: in the user menu, choose
+   **Developer page**, and under "Companies" select **Make current** in Nordlicht Komponenten
+   GmbH's row. Then select **Report** in the top bar.
 2. Point at "Readiness": it counts only accepted verdicts.
 3. Point at "Controls": 5.1.1 "Accepted", with its verdict, who reviewed it and on which day.
-4. Point at "Remediation items" (the approved items), "Not applicable" (what the profile excludes,
-   each with its reason), the "Audit trail" (your override, with its reason as the note, the
-   findings confirmed, each item approved and the acceptance) and the disclaimer at the foot.
+4. Point at "Remediation items" (the approved items), "Not applicable" (what the company's
+   compliance profile excludes, each with its reason), the "Audit trail" (your override, with its
+   reason as the note, the findings confirmed, each item approved and the acceptance) and the
+   disclaimer at the foot.
 5. Select **Export PDF**: `readiness-report-nordlicht-<date>.pdf` downloads, plain A4 with the
    report's parts in the page's order. **Export Markdown** downloads the same report as Markdown.
 
@@ -145,8 +161,9 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:00 + 1:15 = 6 minutes 45 seconds.
 
 Start the app on your own machine as [setup](setup.md#run-the-app) says (`scripts/dev.sh`, then
 open the URL it prints). It runs on the scripted fake model, offline and free, with no sign-in:
-you are the local user (the user menu shows **LU**). The fake covers 1.1.1, 1.6.2, 4.1.2 and 5.1.1, so the steps run as on the
-live app, with one difference:
+you are the local user (the user menu shows **LU**), a developer, so the user menu offers
+**Developer page** and Make current works as on the live app. The fake covers 1.1.1, 1.6.2, 4.1.2
+and 5.1.1, so the steps run as on the live app, with one difference:
 
 - **Step 4:** the fake recognises only some phrasings
   ([features](features.md#3-ask-a-question)): ask "What's missing for 5.1.1?" or "Is there
@@ -167,10 +184,11 @@ money (on Sonnet 5.5, about $0.30–0.50 a pass over 12 controls), so the demo s
 ### Before you present
 
 - Start the local app afresh: stop `scripts/dev.sh` (Ctrl-C) and start it again
-  ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user menu shows **LU**) on
-  **Nordlicht Komponenten GmbH**. On the local app everything lives in the running process, the
+  ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user
+  menu shows **LU**), and **Nordlicht Komponenten GmbH** is the current company, named in the top
+  bar. On the local app everything lives in the running process, the current company and the
   profile pass's daily limit of 3 included, so a restart starts every count and every control
-  from nothing.
+  from nothing, on Nordlicht.
 - A rehearsal that runs more than 3 profile passes in one run of the app is refused until you
   restart it.
 - The Overview reads "Goal: Audit readiness" and "Review round: First round, open since the
@@ -182,14 +200,15 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 
 #### 1. Goal (0:30)
 
-1. On the Overview (the Dossier), select **Change goal** and OK the question ("Change this
-   profile's goal to Internal improvement? The change is recorded in the audit trail.").
+1. On the Overview (the Dossier), select **Change goal**. The question takes the button's place,
+   "Change this profile's goal to Internal improvement? The change is recorded in the audit
+   trail.", with **Change goal** and **Cancel** under it: select **Change goal**.
 2. Point at "Goal: Internal improvement" and the round line, "Review round: First round, open
    since the start".
 
-> No audit this year, but the company wants to get better. The goal says what this profile is
-> for; the change itself is in the audit trail. The assessments stay the same: what changes is
-> the plan and the report.
+> No audit this year, but the company wants to get better. The goal says what the company uses
+> Vouch for; the change itself is in the audit trail. The assessments stay the same: what changes
+> is the plan and the report.
 
 #### 2. Profile pass (1:00)
 
@@ -219,8 +238,9 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 
 #### 4. Review round (0:30)
 
-1. Back on the Overview, select **Close round** and OK the question ("Close the review round
-   "First round"? Its results are frozen, …"). The round line reads "No review round open."
+1. Back on the Overview, select **Close round**. The question takes the button's place, "Close
+   the review round "First round"? Its results are frozen, …", with **Close round** and
+   **Cancel** under it: select **Close round**. The round line reads "No review round open."
 2. Type "Q4 2026" as the name of the next round and select **Start round**: "Review round: Q4
    2026, open since" today.
 
@@ -285,34 +305,38 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 
 A developer sets up a new company in Vouch: its name and country, its language, its protection
 level, its Goal, the controls that don't apply, and its evidence, picked from the sample library.
-Vouch then opens the new company with every applicable control drafted from the documents chosen,
-and nothing else. Part 3 runs on the **local app with the scripted fake model** only, as Part 2
-does: company setup is for developers only, and on the live app the new company's first profile
-pass runs the real model and costs money. On the local app, "Local user" is a developer.
+Vouch then opens the new company, now the current company, with every applicable control drafted
+from the documents chosen, and nothing else. Part 3 runs on the **local app with the scripted fake
+model** only, as Part 2 does: company setup is for developers only, and on the live app the new
+company's first profile pass runs the real model and costs money. On the local app, "Local user"
+is a developer.
 
 The company and its answers below are invented for the demo; any name works.
 
 ### Before you present
 
 - Start the local app afresh: stop `scripts/dev.sh` (Ctrl-C) and start it again
-  ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user menu shows **LU**), and
-  the top bar shows **Developer**.
+  ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user
+  menu shows **LU**), a developer: the user menu offers **Developer page** and **Set up a
+  company**. The top bar names **Nordlicht Komponenten GmbH**, the current company.
 - Creating a company runs one profile pass, which counts towards the local app's daily limit of
   3 passes (Part 2 runs one too). After three rehearsals in one run of the app, restart it.
 
 ### The steps
 
-Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:40 + 0:30 = 6 minutes.
+Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:50 + 0:30 = 6 minutes 10 seconds.
 
-#### 1. The developer page (0:20)
+#### 1. The Developer page (0:20)
 
-1. Select **Developer** in the top bar. Under "Company setup", point at "No companies made in
-   setup yet.", then select **Set up a company**.
+1. In the user menu, choose **Developer page**. Under "Companies", point at the list: Alpenwerk
+   Präzision GmbH with **Make current**, and Nordlicht Komponenten GmbH marked "Current". Select
+   **Set up a company** above the list.
 2. Point at the seven steps along the top: Company, Language, Protection level, Goal, Not
    applicable, Evidence, Finish. The current one is marked, and "Step 1 of 7" heads the form.
 
-> Setting up a company is a developer's job, so it lives on the developer page. Seven steps, and
-> I can go back to any of them without losing an answer.
+> Setting up a company is a developer's job, so it lives on the Developer page, beside the
+> companies Vouch already has. Seven steps, and I can go back to any of them without losing an
+> answer.
 
 #### 2. Company, Language and Protection level (1:00)
 
@@ -367,52 +391,58 @@ Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:40 + 0:30 = 6 minute
 
 1. Point at the summary: Company, Country, Answer language, Protection level, Goal, "Not
    applicable" (5.2.9 with its reason), "Ready to cite", and the chosen documents.
-2. Point at the line above the buttons: "Creating the company adds it to the profile switcher.
-   Then Vouch sets its Goal and runs a profile pass: every applicable control drafted, waiting for
-   your review."
+2. Point at the line above the buttons: "Creating the company adds it to the Companies list and
+   makes it the current company, for every user. Then Vouch sets its Goal and runs a profile pass:
+   every applicable control drafted, waiting for your review."
 3. Select **Create company** ("Creating…" while it runs).
 
 > One last look at every answer, then one press makes the company.
 
 #### 7. The new company (1:00)
 
-1. The app opens under **Hafenblick Logistik GmbH** in the profile switcher, on its overview:
-   "Goal: Internal improvement", and "Review round: First round, open since the start". Within a
-   few seconds the profile pass has run: "Profile pass", "11 assessments waiting for your
-   review.", each control with its verdict and "Proposed".
+1. The app opens on the overview of **Hafenblick Logistik GmbH**, now the current company and
+   named in the top bar: "Goal: Internal improvement", and "Review round: First round, open since
+   the start". Within a few seconds the profile pass has run: "Profile pass", "11 assessments
+   waiting for your review.", each control with its verdict and "Proposed".
 2. Point at the mix: 2.1.3, 5.1.2 and 5.2.5 **Evidenced**, most others **Partly evidenced**, and
    1.6.1 and 5.2.4 **Not evidenced**. 5.2.4 ("To what extent are event logs recorded and
    analysed?") has nothing: its logging documents were left out.
 3. Point at 5.2.9's card under "The controls": it reads **Not applicable**, with the reason you
-   gave in step 5. The pass left it out, it has no draft, and readiness counts 11 controls.
+   gave in step 4. The pass left it out, it has no draft, and readiness counts 11 controls.
 
 > The new company starts where Nordlicht did in Part 2: one pass drafted every applicable
 > control, from the chosen documents only, with the same guards. A draft never cites a document
 > that wasn't chosen, so leaving out the logging documents shows straight away as a gap. 1.6.1 is
 > one of the library's planted gaps: there's no procedure for reporting a security event.
 
-#### 8. The Documents tab (0:40)
+#### 8. The Company page (0:50)
 
-1. Select **Documents** in the top bar: under "Documents", the "Policies" and "Records" tables,
-   the 15 chosen documents only, each with its kind, version, approval date, review cycle, status
-   and "Cited by".
-2. Point at the backup policy, "Stale", cited by 1.1.1, and at "Sign-in and account settings,
+1. Select **Company** in the top bar: the Company page names Hafenblick Logistik GmbH, with its
+   country, answer language, base framework, protection level "High" and overlays "None", and
+   "This company was made in Company setup: its details can't be changed here, apart from the
+   Goal."
+2. Point at "Not applicable": "5.2.9, the whole control", with the reason given in setup.
+3. Under "Documents", the "Policies" and "Records" tables: the 15 chosen documents only, each with
+   its kind, version, approval date, review cycle, status and "Cited by".
+4. Point at the backup policy, "Stale", cited by 1.1.1, and at "Sign-in and account settings,
    checked October 2026", cited by 4.1.2, 4.1.3 and 4.2.1.
 
-> Every company has this tab, Nordlicht and Alpenwerk too: the evidence documents, read-only, and
-> which controls cite each. Upload would later live here.
+> Every company has this page, Nordlicht and Alpenwerk too: what setup decided, and the evidence
+> documents, read-only, with the controls that cite each. Upload would later live here.
 
 #### 9. Remove company (0:30)
 
-1. Select **Developer** in the top bar. Under "Company setup", point at the company's row:
-   "Hafenblick Logistik GmbH", its id `hafenblick-logistik-gmbh`, "Made" today, and **Remove**.
-2. Select **Remove** and OK the question ("Remove Hafenblick Logistik GmbH? It leaves the profile
-   switcher for everyone and can't be opened again. Its audit trail is kept."). The page reads
-   "Removed Hafenblick Logistik GmbH." and "No companies made in setup yet.", and the top bar
-   reads "Your last profile is no longer available: showing Nordlicht Komponenten GmbH."
+1. In the user menu, choose **Developer page**. Under "Companies", point at the company's row:
+   "Hafenblick Logistik GmbH", its id `hafenblick-logistik-gmbh`, "Made" today, "Current", and
+   **Remove**.
+2. Select **Remove** and OK the question ("Remove Hafenblick Logistik GmbH? It leaves the
+   Companies list for everyone and can't be opened or made current again. Its audit trail is
+   kept."). The row is gone, Nordlicht Komponenten GmbH is marked "Current", and the section reads
+   "Removed Hafenblick Logistik GmbH. Nordlicht Komponenten GmbH is now the current company." The
+   top bar names Nordlicht Komponenten GmbH.
 
 > Removing a company hides it everywhere, but nothing is deleted: its audit trail stays, and its
-> id is never used again.
+> id is never used again. It was the current company, so every user is back on Nordlicht.
 
 ### Running Part 3 again
 

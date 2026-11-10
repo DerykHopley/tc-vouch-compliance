@@ -37,9 +37,9 @@ passes `/api` to it. When both answer it prints `Vouch is running: http://127.0.
 - **What the fake covers.** Four controls have bundled demo scripts of their own: **1.1.1**
   (the Dossier's suggested first step), **1.6.2** (Alpenwerk's country overlay adds O1),
   **4.1.2** and **5.1.1** (Nordlicht's stale encryption standard). Each answers in English under
-  Nordlicht (the default profile) and in German under Alpenwerk, and judges every requirement
-  that applies. Any other control plays 4.1.2's script, whose answers don't fit it: those
-  controls are for the live app, or for an eval script (below).
+  Nordlicht (the current company by default) and in German under Alpenwerk, and judges every
+  requirement that applies. Any other control plays 4.1.2's script, whose answers don't fit it:
+  those controls are for the live app, or for an eval script (below).
 - **Kept in memory.** Without `VOUCH_DATABASE_URL`, assessments and reviews last until the API
   stops.
 
@@ -157,8 +157,8 @@ A proposed assessment waits for the lead's review (`POST /api/assessments/{threa
 `VOUCH_DATABASE_URL` set they're kept in Postgres (LangGraph's checkpointer and store, their
 tables made by `vouch-db-setup`), so a run waiting for review outlasts a restart; without it, in
 memory until the server restarts. `GET /api/report` is the readiness report's data.
-`GET /api/documents` is the Documents tab's data: each evidence document of the profile, with the
-controls citing it.
+`GET /api/documents` is the data of the Company page's Documents panel: each evidence document of
+the company's compliance profile, with the controls citing it.
 
 Company setup (`/developer/setup`) uses these routes, developers only:
 
