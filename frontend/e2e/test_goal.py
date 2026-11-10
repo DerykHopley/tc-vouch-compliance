@@ -39,12 +39,13 @@ def change_goal(page: Page, to: str) -> list[str]:
 
 
 def newest_trail_actions(page: Page, url: str, n: int) -> list[str]:
-    """The Action cells of the report's newest `n` audit trail rows."""
+    """The Action cells of the report's newest `n` audit trail rows: found by their column's name,
+    as a column empty in every row is left out (#463)."""
     with page.expect_response("**/api/report"):
         page.goto(f"{url}/report")
     rows = page.get_by_role("table", name="Audit trail").locator("tbody tr")
     expect(rows.first).to_be_visible()
-    return [rows.nth(i).locator("td").nth(4).inner_text() for i in range(n)]
+    return [rows.nth(i).locator("td[data-label=Action]").inner_text() for i in range(n)]
 
 
 def fits(page: Page, scheme: str) -> None:

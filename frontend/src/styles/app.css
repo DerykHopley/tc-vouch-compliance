@@ -400,9 +400,10 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; color: var(--muted);
   font-size: 13px; font-variant-numeric: tabular-nums; }
 .report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.report-controls { min-width: 680px; }
-.report-trail { min-width: 1100px; }
-/* The improvement report's plan and questions (#420): scrolled in their container on a phone, as the controls. */
+/* The controls and trail tables fit the sheet at desktop width (#463): no least width, a column empty in every row
+   left out (Report), and the mono values (ids, document and model names) breaking anywhere when they must. */
+.report-controls .mono, .report-trail .mono { overflow-wrap: anywhere; }
+/* The improvement report's plan and questions (#420): scrolled in their container on a phone. */
 .report-plan { min-width: 760px; }
 .report-questions { min-width: 680px; }
 .report-table thead th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
@@ -416,9 +417,14 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-quotes { display: grid; gap: 8px; max-width: 72ch; }
 .report-quotes h3 { margin: 0; }
 .report-trail .mono { font-size: 12px; }
-.report-trail .report-q { min-width: 28ch; }
-/* A value on a line of its own, never broken: the trail's time, and each evidence version stacked under the last. */
-.report-line { white-space: nowrap; display: block; }
+/* Eleven columns in the sheet (#463): the trail set at 12px, narrower gutters and the Note's floor print's 16ch, so
+   the German heads fit too; the day kept whole on its line (10ch of its mono), the time under it. */
+.report-trail { font-size: 12px; }
+.report-table.report-trail :is(th, td) { padding-inline: 5px; }
+.report-table.report-trail .report-q { min-width: 16ch; }
+.report-trail .report-at > .report-line { min-width: 10ch; }
+/* A value on a line of its own: the trail's time, and each evidence version stacked under the last. */
+.report-line { display: block; }
 .report-muted { color: var(--muted); margin: 0; }
 .report-group { --report-group-gap: 6px; display: grid; gap: var(--report-group-gap); }
 .report-group-head { margin: 0; font-weight: 600; font-size: inherit; }
@@ -431,6 +437,23 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .report-doc { padding: 20px 16px; }
   .report-head { grid-template-columns: minmax(0, 1fr); }
   .report-head dd { margin-bottom: 6px; }
+  /* Phone: the controls and trail as stacked rows (#463), after the working paper's cards (#211): each row a card
+     ruled off from the next, each filled cell a line of its column's name (the cell's data-label) and its value. The
+     header row stays for screen readers (the table keeps its roles), so the shown name has empty alt text and isn't
+     read twice; a browser without alt text in `content` keeps the first declaration. An empty cell is not shown. */
+  .report-controls, .report-trail, .report-controls tbody, .report-trail tbody { display: block; }
+  .report-controls thead, .report-trail thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); }
+  .report-controls tbody tr, .report-trail tbody tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .report-controls tbody tr:has(+ .report-quote-row) { border-bottom: 0; padding-bottom: 4px; }
+  .report-table:is(.report-controls, .report-trail) tbody tr > * { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
+    gap: 0 12px; justify-items: start; padding: 2px 0; border-bottom: 0; max-width: none; min-width: 0; }
+  .report-table:is(.report-controls, .report-trail) tbody tr > :empty { display: none; }
+  .report-table:is(.report-controls, .report-trail) tbody tr > * > * { grid-column: 2; }
+  .report-table:is(.report-controls, .report-trail) tbody tr > [data-label]::before { content: attr(data-label);
+    content: attr(data-label) / ""; grid-column: 1; font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+    padding-top: 2px; overflow-wrap: anywhere; }
+  .report-table.report-controls .report-quote-row td { display: block; padding: 0 0 12px 16px; }
 }
 /* Export (#57): its button and any failure message above the report, outside the report's language. */
 .report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

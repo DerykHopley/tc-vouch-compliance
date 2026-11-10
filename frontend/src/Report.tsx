@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import type { Verdict } from './assessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { SEGMENTS } from './overview.ts'
@@ -95,6 +95,27 @@ const timeOf = (iso: string) => {
 /** A served sentence with its `{name}` places filled in. */
 const filled = (sentence: string, values: Record<string, number | string>) =>
   sentence.replace(/\{(\w+)\}/g, (all, name: string) => Object.hasOwn(values, name) ? String(values[name]) : all)
+
+/** A column of the controls or trail table (#463): its served name and what it shows for a row. A column empty in
+ * every row is left out, and each cell carries its column's name (`data-label`), which the phone's stacked rows show
+ * beside the value, as they hide the header row. */
+type Column<T> = { label: string; cell: (row: T) => ReactNode; className?: string; rowHeader?: boolean }
+
+const blank = (value: ReactNode) => value === null || value === undefined || value === '' || value === false
+  || (Array.isArray(value) && value.length === 0)
+
+const shownColumns = <T,>(columns: Column<T>[], rows: T[]) =>
+  rows.length === 0 ? columns : columns.filter((column) => rows.some((row) => !blank(column.cell(row))))
+
+function ColumnHeads<T>({ columns }: { columns: Column<T>[] }) {
+  return <thead><tr>{columns.map((column, i) => <th key={i} scope="col">{column.label}</th>)}</tr></thead>
+}
+
+function Cells<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
+  return columns.map(({ label, cell, className, rowHeader }, i) => rowHeader
+    ? <th key={i} scope="row" className={className} data-label={label}>{cell(row)}</th>
+    : <td key={i} className={className} data-label={label}>{cell(row)}</td>)
+}
 
 function Document({ report }: { report: ReadinessReport }) {
   const { head, words } = report
@@ -301,25 +322,30 @@ function Questions({ report: { questions, words } }: { report: ImprovementReport
   )
 }
 
+/** A control's reviewed verdict, or none while it is open: its status word says so (#463). */
+const reviewed = (c: ReportControl) => c.status === 'accepted' && c.verdict ? c.verdict : null
+
 function Controls({ report: { controls, words } }: { report: AuditReadinessReport }) {
   const { labels } = words
+  const columns = shownColumns<ReportControl>([
+    { label: labels.control, cell: (c) => c.id, className: 'mono', rowHeader: true },
+    { label: labels.question, cell: (c) => c.question, className: 'report-q' },
+    { label: labels.status, cell: (c) => <span data-word>{words.statuses[c.status]}</span> },
+    { label: labels.verdict, cell: (c) => {
+      const verdict = reviewed(c)
+      return verdict && <VerdictChip verdict={verdict} label={words.verdicts[verdict]} />
+    } },
+    { label: labels.reviewer, cell: (c) => reviewed(c) && c.reviewer },
+    { label: labels.reviewed_at, cell: (c) => reviewed(c) && c.reviewed_at && dayOf(c.reviewed_at), className: 'mono' },
+  ], controls)
   return (
     <section className="report-part" aria-labelledby="report-controls">
       <h2 id="report-controls">{labels.controls}</h2>
       <div className="table-wrap">
         <table className="report-table report-controls" aria-labelledby="report-controls">
-          <thead>
-            <tr>
-              <th scope="col">{labels.control}</th>
-              <th scope="col">{labels.question}</th>
-              <th scope="col">{labels.status}</th>
-              <th scope="col">{labels.verdict}</th>
-              <th scope="col">{labels.reviewer}</th>
-              <th scope="col">{labels.reviewed_at}</th>
-            </tr>
-          </thead>
+          <ColumnHeads columns={columns} />
           <tbody>
-            {controls.map((c) => <ControlRows key={c.id} control={c} words={words} />)}
+            {controls.map((c) => <ControlRows key={c.id} control={c} columns={columns} words={words} />)}
           </tbody>
         </table>
       </div>
@@ -327,24 +353,16 @@ function Controls({ report: { controls, words } }: { report: AuditReadinessRepor
   )
 }
 
-function ControlRows({ control: c, words }: { control: ReportControl; words: ReportWords }) {
+function ControlRows({ control: c, columns, words }: { control: ReportControl; columns: Column<ReportControl>[];
+  words: ReportWords }) {
   return (
     <>
       <tr>
-        <th scope="row" className="mono">{c.id}</th>
-        <td className="report-q">{c.question}</td>
-        <td><span data-word>{words.statuses[c.status]}</span></td>
-        {c.status === 'accepted' && c.verdict ? (
-          <>
-            <td><VerdictChip verdict={c.verdict} label={words.verdicts[c.verdict]} /></td>
-            <td>{c.reviewer}</td>
-            <td className="mono">{c.reviewed_at ? dayOf(c.reviewed_at) : ''}</td>
-          </>
-        ) : <td colSpan={3} className="report-muted"><span data-word>{words.sentences.open_control}</span></td>}
+        <Cells columns={columns} row={c} />
       </tr>
       {c.status === 'accepted' && c.quotes.length > 0 && (
         <tr className="report-quote-row">
-          <td colSpan={6}>
+          <td colSpan={columns.length}>
             <section className="report-quotes" aria-label={`${words.labels.quotes} ${c.id}`}>
               <h3 className="lbl">{words.labels.quotes}</h3>
               {c.quotes.map((q, i) => (
@@ -433,47 +451,31 @@ function Trail({ report: { trail, words } }: { report: ReadinessReport }) {
     setNext(page.next)
     setOlder({ status: 'idle' })
   }
-  const verdict = (v: Verdict | null) => v ? <span data-word>{words.verdicts[v]}</span> : null
+  const verdict = (v: Verdict | null) => v && <span data-word>{words.verdicts[v]}</span>
+  const columns = shownColumns<TrailEntry>([
+    { label: labels.at, cell: (e) => <span className="report-line">{timeOf(e.at)}</span>, className: 'mono report-at' },
+    { label: labels.who, cell: (e) => e.reviewer_name },
+    { label: labels.control, cell: (e) => e.control_id, className: 'mono' },
+    { label: labels.requirement, cell: (e) => e.requirement_id, className: 'mono' },
+    { label: labels.action, cell: (e) => <span data-word>{actionWord(e, words)}</span> },
+    { label: labels.verdict_before, cell: (e) => verdict(e.verdict_before) },
+    { label: labels.verdict_after, cell: (e) => verdict(e.verdict_after) },
+    { label: labels.note, cell: (e) => e.note, className: 'report-q' },
+    { label: labels.evidence, className: 'mono', cell: (e) =>
+      e.evidence.map((d) => <span key={`${d.doc_id} ${d.version}`} className="report-line">{d.doc_id} v{d.version}</span>) },
+    { label: labels.model, cell: (e) => e.model, className: 'mono' },
+    { label: labels.prompt_version, cell: (e) => e.prompt_version, className: 'mono' },
+  ], entries)
   return (
     <section className="report-part" aria-labelledby="report-trail">
       <h2 id="report-trail">{labels.trail}</h2>
       {entries.length === 0 ? <p className="report-muted" data-word>{words.sentences.no_trail}</p> : (
         <div className="table-wrap">
           <table className="report-table report-trail" aria-labelledby="report-trail">
-            <thead>
-              <tr>
-                <th scope="col">{labels.at}</th>
-                <th scope="col">{labels.who}</th>
-                <th scope="col">{labels.control}</th>
-                <th scope="col">{labels.requirement}</th>
-                <th scope="col">{labels.action}</th>
-                <th scope="col">{labels.verdict_before}</th>
-                <th scope="col">{labels.verdict_after}</th>
-                <th scope="col">{labels.note}</th>
-                <th scope="col">{labels.evidence}</th>
-                <th scope="col">{labels.model}</th>
-                <th scope="col">{labels.prompt_version}</th>
-              </tr>
-            </thead>
+            <ColumnHeads columns={columns} />
             <tbody>
-              {entries.map((e, i) => (
-                // By position: an entry's id may be missing, and the pages are appended in order.
-                <tr key={i}>
-                  <td className="mono"><span className="report-line">{timeOf(e.at)}</span></td>
-                  <td>{e.reviewer_name}</td>
-                  <td className="mono">{e.control_id}</td>
-                  <td className="mono">{e.requirement_id ?? ''}</td>
-                  <td><span data-word>{actionWord(e, words)}</span></td>
-                  <td>{verdict(e.verdict_before)}</td>
-                  <td>{verdict(e.verdict_after)}</td>
-                  <td className="report-q">{e.note}</td>
-                  <td className="mono">
-                    {e.evidence.map((d) => <span key={`${d.doc_id} ${d.version}`} className="report-line">{d.doc_id} v{d.version}</span>)}
-                  </td>
-                  <td className="mono">{e.model}</td>
-                  <td className="mono">{e.prompt_version}</td>
-                </tr>
-              ))}
+              {/* By position: an entry's id may be missing, and the pages are appended in order. */}
+              {entries.map((e, i) => <tr key={i}><Cells columns={columns} row={e} /></tr>)}
             </tbody>
           </table>
         </div>

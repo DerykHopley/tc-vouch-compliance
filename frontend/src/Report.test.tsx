@@ -180,7 +180,6 @@ describe('The readiness report', () => {
     expect(within(accepted).getByText('2026-11-05')).toBeTruthy() // its day, in UTC
     const open = within(controls).getByRole('row', { name: /^5\.1\.2/ })
     expect(within(open).getByText('Open')).toBeTruthy()
-    expect(within(open).getByText(ENGLISH.sentences.open_control)).toBeTruthy()
     expect(within(open).queryByText('Local user')).toBeNull()
 
     const items = within(report).getByRole('region', { name: 'Remediation items' })
@@ -253,8 +252,63 @@ describe('The readiness report', () => {
     // The statuses, actions and sentences shown, each a served word.
     expect(within(report).getByText(words.verdicts['partly-evidenced'], { selector: '.chip' })).toBeTruthy()
     for (const word of [words.statuses.accepted, words.statuses.open, words.actions.approve, words.actions.accept,
-      words.actions.reject, words.sentences.open_control, '~1 of 12 controls accepted~']) {
+      words.actions.reject, '~1 of 12 controls accepted~']) {
       expect(within(report).getAllByText(word).length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('The controls and trail tables (ticket 463)', () => {
+  const headers = (table: HTMLElement) => within(table).getAllByRole('columnheader').map((th) => th.textContent)
+
+  it('leave out a column empty in every row: with no reviews, no Verdict, Reviewed by or Reviewed on', async () => {
+    serve(NOTHING_ACCEPTED)
+    render(<Report />)
+    const report = await shown()
+
+    const controls = within(report).getByRole('table', { name: 'Controls' })
+    expect(headers(controls)).toEqual(['Control', 'Question', 'Status'])
+  })
+
+  it("show an open control's status word, not the repeated open sentence", async () => {
+    serve(REPORT)
+    render(<Report />)
+    const report = await shown()
+
+    const controls = within(report).getByRole('table', { name: 'Controls' })
+    expect(headers(controls)).toEqual(['Control', 'Question', 'Status', 'Verdict', 'Reviewed by', 'Reviewed on'])
+    const open = within(controls).getByRole('row', { name: /^5\.1\.2/ })
+    expect(within(open).getByText('Open')).toBeTruthy()
+    expect(within(report).queryByText(ENGLISH.sentences.open_control)).toBeNull()
+    // One cell per column, so the row's rule and the phone card line up with the header.
+    expect(open.querySelectorAll('th, td')).toHaveLength(6)
+  })
+
+  it('leave out a trail column empty in every entry', async () => {
+    const goalChange = entry(3, '2026-11-06T14:10:00+00:00', 'goal', { control_id: '', verdict_before: null,
+      verdict_after: null, evidence: [], model: '', prompt_version: '', goal_before: 'audit-readiness',
+      goal_after: 'internal-improvement' })
+    serve({ ...REPORT, trail: { entries: [goalChange], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    expect(headers(within(report).getByRole('table', { name: 'Audit trail' }))).toEqual(['When', 'Who', 'Action'])
+  })
+
+  it("name each cell's column on the cell, for the phone's stacked rows", async () => {
+    serve({ ...REPORT, trail: { entries: [entry(2, '2026-11-06T14:05:09+00:00', 'approve',
+      { requirement_id: 'M1', note: 'Checked.' })], next: null } })
+    render(<Report />)
+    const report = await shown()
+
+    for (const name of ['Controls', 'Audit trail']) {
+      const table = within(report).getByRole('table', { name })
+      const names = headers(table)
+      const rows = [...table.querySelectorAll('tbody tr:not(.report-quote-row)')]
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect([...row.querySelectorAll('th, td')].map((cell) => cell.getAttribute('data-label'))).toEqual(names)
+      }
     }
   })
 })
@@ -396,7 +450,7 @@ describe('A goal change in the trail (ticket 369)', () => {
     const [, change] = within(trail).getAllByRole('row')
     const cells = within(change).getAllByRole('cell').map((c) => c.textContent)
     expect(cells).toEqual(['2026-11-06 14:10 UTC', 'Local user', '', '',
-      'Goal changed from Audit readiness to Internal improvement', '', '', '', '', '', ''])
+      'Goal changed from Audit readiness to Internal improvement', '', '', '', '', '']) // no Note: empty in each
   })
 
   it('fills it from the served words', async () => {
@@ -426,7 +480,7 @@ describe('Review round entries in the trail (ticket 402)', () => {
     const [, close] = within(trail).getAllByRole('row')
     const cells = within(close).getAllByRole('cell').map((c) => c.textContent)
     expect(cells).toEqual(['2026-11-09 10:30 UTC', 'Local user', '', '', 'Review round closed: First round',
-      '', '', '', '', '', ''])
+      '', '', '', '', '']) // no Note: empty in each
   })
 
   it('fills the start from the served words', async () => {
