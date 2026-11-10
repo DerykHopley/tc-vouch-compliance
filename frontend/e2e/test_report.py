@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 import pdf_words
 import pytest
+from fonts import FONTS_SETTLED, without_web_fonts
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from touch_targets import small_targets
@@ -237,9 +238,9 @@ def tables_overflowing(report: Locator) -> list[str]:
     """Each controls or trail table wider than its container, with its widths, once the fonts have
     settled (#512: measured while a late web font was still loading, in the fallback's widths)."""
     return report.evaluate(
-        """async (el, selectors) => {
-          await document.fonts.ready
-          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+        "async (el, selectors) => {"
+        + FONTS_SETTLED
+        + """
           return selectors.flatMap((s) => [...el.querySelectorAll(s)].map((t) => {
           const box = t.parentElement
           const wide = Math.max(t.scrollWidth, box.scrollWidth)
@@ -268,9 +269,7 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
     fallback is DejaVu Sans, whose German headers were 963px of trail in the 902px sheet."""
     url = request.getfixturevalue("report_url" if goal == "audit-readiness" else "improvement_url")
     if fonts == "fallback":
-        page.route(
-            re.compile(r"^https://fonts\.(googleapis|gstatic)\.com/"), lambda route: route.abort()
-        )
+        without_web_fonts(page)
     if goal != "audit-readiness":  # each profile's default
         for profile in ("nordlicht", "alpenwerk"):
             set_goal(page, url, profile, goal)
