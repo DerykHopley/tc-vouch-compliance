@@ -440,7 +440,8 @@ def test_at_1440_the_index_stays_in_view_when_the_paper_scrolls_to_its_foot(page
     last = index.get_by_role("link").filter(has_text="5.2.9")  # the index scrolls on its own
     last.scroll_into_view_if_needed()
     assert box(last)["y"] + box(last)["height"] <= 900 + 1, box(last)
-    assert box(index)["y"] == shown["y"], "bringing the last row into view moved the index"
+    moved = abs(box(index)["y"] - shown["y"])  # the top bar's height is fractional (62.67px)
+    assert moved <= 1, "bringing the last row into view moved the index"
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
