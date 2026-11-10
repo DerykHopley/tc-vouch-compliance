@@ -27,3 +27,23 @@ Where Vouch falls short, and what would come next. The reasons behind the design
 - **Log excerpts and live Patch as evidence sources.** v1 searches policies and records, and reads a recorded Patch response. Not in v1: log excerpts were worth it only with more logging controls in the subset, and live Patch means a network dependency with a slow wake-up; both are stretch items behind one evidence-source interface.
 - **Langfuse** for observability of each run's model calls. Not in v1: a stretch item after the must list; each run's steps, guard steps and usage are already shown and kept.
 - **Local or EU-hosted models, for confidentiality.** Evidence goes to a hosted model outside the company, through OpenRouter, today, which is fine for invented data and not for real. A real deployment needs the provider's data-retention terms read and agreed, a local or EU-hosted model, and a classification check before anything leaves the company. Not in v1: the data is invented, and the eval shows the local model tried, gpt-oss 20B, can't drive the graph yet (8% of verdicts); the EU-hosted candidate, Mistral, was blocked by the owner's OpenRouter account setting ([eval report](eval-report.md#the-local-model-what-confidentiality-costs); [decision of 2026-11-03, "invented data only"](requirements.md#decisions)).
+
+## From prototype to business
+
+The right design depends on the customer's size. A small business is well served by Vouch as it is: one compliance lead, a folder of policies and records, a handful of assessments a day. A large business needs the same agent behind different plumbing. Most of the change sits around the graphs, not in them.
+
+| | Small business (Vouch today) | Large business |
+|---|---|---|
+| Evidence sources | One folder of policies and one of records per profile, plus a recorded Patch response ([decision of 2026-11-03, "a folder per profile"](requirements.md#decisions)) | SharePoint or Confluence, Jira, the CMDB, the SIEM, MDM and a live Patch, each reached through MCP or its API |
+| Tool calls | Local and fast, so a reply's calls run one after another | Network calls, run concurrently, each with its own timeout and retries |
+| Search | Keyword search reads the folder's files on each request | A maintained index or vector store, kept up to date as documents change |
+| Assessing | One control at a time while the lead watches, or one profile pass with all the evidence in one prompt | A queue of background jobs, with progress, resume after a failure, and a report when done |
+| Failure | A source that can't be read is named and the control's run goes on; Patch past its wait marks the evidence pending; the profile pass refuses outright | Partial answers by design, each naming the missing source, and a later run filling the gap |
+| Limits | A per-user daily limit on assessments, a request rate limit, and the spending cap on the OpenRouter key ([decision of 2026-11-03, "spending guard"](requirements.md#decisions)) | Per-vendor rate limits, a budget per customer, and cached answers for unchanged evidence |
+| Tenancy | One profile per company; every signed-in user sees every profile, as the data is invented ([decision of 2026-11-05](requirements.md#decisions)) | Isolated customers, each with their own data, keys, model provider and hosting region |
+
+**The tool-call row, in the code** (checked at `e8bfac3`). Both graphs run a reply's tool calls one after another through Vouch's own tools node, not LangGraph's prebuilt one:
+- the assessment graph's `tools` node in `vouch.graph` loops over the calls;
+- the chat's `_tools` node in `vouch.chat_agent` calls each tool in turn, then redacts each reply.
+
+Each call passes the profile's allow-list (`vouch.allow_list`), the folder guards and redaction on the way, so the node is where the security layers meet. Running the calls concurrently would be a contained change in those two nodes, for example `asyncio.gather` over the calls with a timeout each, not a new graph. The guards would stay per call. For a small business it buys nothing: the tools read local files in milliseconds, and the model call around them takes seconds.
