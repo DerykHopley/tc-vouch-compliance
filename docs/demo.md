@@ -1,15 +1,17 @@
-# Demo: Vouch in two parts
+# Demo: Vouch in three parts
 
-This is the presenter's script: what to show, in what order, and what to say. It has two parts,
+This is the presenter's script: what to show, in what order, and what to say. It has three parts,
 which run alone or one after the other:
 
 - **[Part 1, Audit readiness](#part-1-audit-readiness)** (6 minutes 45 seconds): a company
   preparing its TISAX audit, on the live app.
 - **[Part 2, Keep improving](#part-2-keep-improving)** (6 minutes 40 seconds): the same company
   improving its own security with no audit planned, on the local app.
+- **[Part 3, Company setup](#part-3-company-setup)** (6 minutes): a developer sets up a new
+  company, which opens with every applicable control drafted, on the local app.
 
-Both together take 13 minutes 25 seconds. The goals and the three-step review shown here are a
-demo/prototype process: a real SaaS product might do it differently.
+All three take 19 minutes 25 seconds. The goals, the three-step review and company setup shown
+here are a demo/prototype process: a real SaaS product might do it differently.
 
 It is not the fake model's bundled demo script, the scripted answers
 [setup](setup.md#run-the-app) means when it says the local run plays one.
@@ -278,3 +280,145 @@ Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 se
 > The same report page, written for the team instead of an auditor: where we stand against the
 > last round, the plan in priority order with each item's status, and the questions still open.
 > It is an internal self-assessment, and it says so.
+
+## Part 3, Company setup
+
+A developer sets up a new company in Vouch: its name and country, its language, its protection
+level, its Goal, the controls that don't apply, and its evidence, picked from the sample library.
+Vouch then opens the new company with every applicable control drafted from the documents chosen,
+and nothing else. Part 3 runs on the **local app with the scripted fake model** only, as Part 2
+does: company setup is for developers only, and on the live app the new company's first profile
+pass runs the real model and costs money. On the local app, "Local user" is a developer.
+
+The company and its answers below are invented for the demo; any name works.
+
+### Before you present
+
+- Start the local app afresh: stop `scripts/dev.sh` (Ctrl-C) and start it again
+  ([setup](setup.md#run-the-app)), then open the URL it prints. You are "Local user", and the
+  top bar shows **Developer**.
+- Creating a company runs one profile pass, which counts towards the local app's daily limit of
+  3 passes (Part 2 runs one too). After three rehearsals in one run of the app, restart it.
+
+### The steps
+
+Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:40 + 0:30 = 6 minutes.
+
+#### 1. The developer page (0:20)
+
+1. Select **Developer** in the top bar. Under "Company setup", point at "No companies made in
+   setup yet.", then select **Set up a company**.
+2. Point at the seven steps along the top: Company, Language, Protection level, Goal, Not
+   applicable, Evidence, Finish. The current one is marked, and "Step 1 of 7" heads the form.
+
+> Setting up a company is a developer's job, so it lives on the developer page. Seven steps, and
+> I can go back to any of them without losing an answer.
+
+#### 2. Company, Language and Protection level (1:00)
+
+1. **Company:** type "Hafenblick Logistik GmbH" under "Company name", choose **Germany** under
+   "Country", and select **Next**.
+2. **Language:** leave **English** chosen under "Answer language" and point at the note: "Vouch's
+   answers, the chat and the readiness report use this language; the interface stays English."
+   Select **Next**.
+3. **Protection level:** point at what each level brings into scope. **Normal**: "Must and should
+   requirements: 85 in 12 controls." **High**: "Adds 14 high-protection requirements, in 7
+   controls (1.6.2, 4.1.2, 4.2.1, 5.1.1, 5.1.2, 5.2.4, 5.2.9): 99 in all." Choose **High** and
+   select **Next**.
+
+> A logistics company in Germany, answering in English. The protection level decides which VDA
+> ISA requirements are in scope: High adds 14 requirements on top of the must and should ones.
+
+#### 3. Goal (0:20)
+
+1. Point at **Internal improvement**, chosen already ("Improving the company's own security, with
+   no audit planned."), and **Audit readiness** ("Preparing for an external audit."), and at "You
+   can change the Goal later on the overview."
+2. Keep Internal improvement and select **Next**.
+
+> The Goal from Part 2 is chosen here, at the start. It isn't fixed: the lead can change it on
+> the overview.
+
+#### 4. Not applicable (0:40)
+
+1. Tick **5.2.9** ("To what extent is the backup and recovery of data and IT services
+   ensured?"). Select **Next** with its reason blank: "Say why 5.2.9 doesn't apply."
+2. Under "Why 5.2.9 doesn't apply", type "Backups are run by the parent company's IT, under its
+   own assessment." and select **Next**.
+
+> A control can be left out only with a reason, and the reason goes in the record. At least one
+> control must stay applicable.
+
+#### 5. Evidence (1:00)
+
+1. Point at the two tables, "Policies" and "Records": the sample library, each document with its
+   kind (documented or implemented), version, approval date, review cycle and status. The backup
+   policy reads "Stale: approved 2024-02-12 with a yearly review, due 2025-02-12".
+2. Tick every document except the **Logging standard** (a policy) and **Weekly log checks, third
+   quarter of 2026** (a record).
+3. Point at the line under the tables: "Ready to cite: 15 documents (10 documented, 5
+   implemented, 1 stale)." Select **Next**.
+
+> The sample library ships with Vouch: invented policies and records with a few deliberate gaps.
+> There's no upload in this prototype. I leave out the two logging documents, so we can see that
+> Vouch cites only what I chose.
+
+#### 6. Finish (0:30)
+
+1. Point at the summary: Company, Country, Answer language, Protection level, Goal, "Not
+   applicable" (5.2.9 with its reason), "Ready to cite", and the chosen documents.
+2. Point at the line above the buttons: "Creating the company adds it to the profile switcher.
+   Then Vouch sets its Goal and runs a profile pass: every applicable control drafted, waiting for
+   your review."
+3. Select **Create company** ("Creating…" while it runs).
+
+> One last look at every answer, then one press makes the company.
+
+#### 7. The new company (1:00)
+
+1. The app opens under **Hafenblick Logistik GmbH** in the profile switcher, on its overview:
+   "Goal: Internal improvement", and "Review round: First round, open since the start". Within a
+   few seconds the profile pass has run: "Profile pass", "11 assessments waiting for your
+   review.", each control with its verdict and "Proposed".
+2. Point at the mix: 2.1.3, 5.1.2 and 5.2.5 **Evidenced**, most others **Partly evidenced**, and
+   1.6.1 and 5.2.4 **Not evidenced**. 5.2.4 ("To what extent are event logs recorded and
+   analysed?") has nothing: its logging documents were left out.
+3. Point at 5.2.9's card under "The controls": it reads "Not assessed". It is not applicable, so
+   the pass left it out and it has no draft.
+
+> The new company starts where Nordlicht did in Part 2: one pass drafted every applicable
+> control, from the chosen documents only, with the same guards. A draft never cites a document
+> that wasn't chosen, so leaving out the logging documents shows straight away as a gap. 1.6.1 is
+> one of the library's planted gaps: there's no procedure for reporting a security event.
+
+#### 8. The Documents tab (0:40)
+
+1. Select **Documents** in the top bar: under "Documents", the "Policies" and "Records" tables,
+   the 15 chosen documents only, each with its kind, version, approval date, review cycle, status
+   and "Cited by".
+2. Point at the backup policy, "Stale", cited by 1.1.1, and at "Sign-in and account settings,
+   checked October 2026", cited by 4.1.2, 4.1.3 and 4.2.1.
+
+> Every company has this tab, Nordlicht and Alpenwerk too: the evidence documents, read-only, and
+> which controls cite each. Upload would later live here.
+
+#### 9. Remove company (0:30)
+
+1. Select **Developer** in the top bar. Under "Company setup", point at the company's row:
+   "Hafenblick Logistik GmbH", its id `hafenblick-logistik-gmbh`, "Made" today, and **Remove**.
+2. Select **Remove** and OK the question ("Remove Hafenblick Logistik GmbH? It leaves the profile
+   switcher for everyone and can't be opened again. Its audit trail is kept."). The page reads
+   "Removed Hafenblick Logistik GmbH." and "No companies made in setup yet.", and the top bar
+   reads "Your last profile is no longer available: showing Nordlicht Komponenten GmbH."
+
+> Removing a company hides it everywhere, but nothing is deleted: its audit trail stays, and its
+> id is never used again.
+
+### Running Part 3 again
+
+- **Remove company** (step 9) clears the way: the next run can use the same name, and gets a new
+  id (`hafenblick-logistik-gmbh-2`), since a removed company's id is never used again.
+- Or restart the local app: without a database, the companies made in setup live in the running
+  process, so a restart drops them, and the profile pass count with them.
+- **Fresh start** in the user menu (**Start Nordlicht Komponenten GmbH afresh…**) still serves
+  Parts 1 and 2: it doesn't touch the companies made in setup.

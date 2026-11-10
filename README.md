@@ -79,9 +79,10 @@ The optional tasks done; the full table, with the code and the app page for each
   container, the checks, keys, Cloud Run in short, and common failures.
 - [`docs/features.md`](docs/features.md): assess a control, review it, ask a question, read the
   report.
-- [`docs/demo.md`](docs/demo.md): the demo in two parts: Part 1, Audit readiness (on the live
-  app, with the local run as a fallback), and Part 2, Keep improving (the Internal improvement
-  goal and the profile pass, on the local app).
+- [`docs/demo.md`](docs/demo.md): the demo in three parts: Part 1, Audit readiness (on the live
+  app, with the local run as a fallback), Part 2, Keep improving (the Internal improvement goal
+  and the profile pass, on the local app), and Part 3, Company setup (a developer sets up a new
+  company and removes it again, on the local app).
 - [`docs/technical-decisions.md`](docs/technical-decisions.md),
   [`docs/course-tasks.md`](docs/course-tasks.md),
   [`docs/eval-summary.md`](docs/eval-summary.md) and [`docs/reflection.md`](docs/reflection.md).

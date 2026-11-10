@@ -157,6 +157,23 @@ A proposed assessment waits for the lead's review (`POST /api/assessments/{threa
 `VOUCH_DATABASE_URL` set they're kept in Postgres (LangGraph's checkpointer and store, their
 tables made by `vouch-db-setup`), so a run waiting for review outlasts a restart; without it, in
 memory until the server restarts. `GET /api/report` is the readiness report's data.
+`GET /api/documents` is the Documents tab's data: each evidence document of the profile, with the
+controls citing it.
+
+Company setup (`/developer/setup`) uses these routes, developers only:
+
+- `GET /api/developer/protection-levels`: what each protection level brings into scope (step 3).
+- `GET /api/developer/controls`: every control of the base framework, in its order (step 5).
+- `GET /api/developer/sample-library`: every sample library document, with its kind, dates and
+  staleness (step 6).
+- `POST /api/developer/profiles`: creates the company from every answer at once (step 7).
+- `DELETE /api/developer/profiles/{profile_id}`: removes a company made in setup; its id is never
+  used again and its audit trail is kept.
+
+With `VOUCH_DATABASE_URL` set, the companies made in setup are kept in the `vouch_company_profiles`
+table made by `vouch-db-setup`; without it, in memory until the server restarts. A database set up
+before #418 needs `vouch-db-setup` run again, for the table's removal columns (`removed_at`,
+`removed_by`).
 
 ## Sign-in (clerk mode)
 
