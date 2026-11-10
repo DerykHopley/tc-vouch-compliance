@@ -8,6 +8,7 @@ server's checks already spend most of that."""
 import re
 
 import pytest
+from fonts import FONTS_SETTLED, without_web_fonts
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -198,20 +199,26 @@ def test_after_assess_each_step_names_its_node_in_a_chip_and_the_answer_shows_at
         assert not scrolls_sideways(page), f"the working paper scrolls sideways at {width}px"
 
 
+# Each requirement's id and its row, as a JS array: not its override's or remediation item's
+# row (#464).
+REQUIREMENT_ROWS = """[...document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')]
+    .map((th) => [th.querySelector('.mono').textContent, th.closest('tr')])"""
+
 # Every card's parts, read in one go once the fonts have loaded and layout has settled (two frames):
 # measured one call at a time, a late font or a toggle showing or hiding moved the rows between
 # reads on CI (#211). Page coordinates, so scrolling can't skew them either.
-CARD_PARTS = """async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const rect = (el) => {
+CARD_PARTS = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  const rect = (el) => {
     const r = el.getBoundingClientRect()
     return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left, width: r.width }
   }
   const cards = {}
-  for (const th of document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')) {
-    const tr = th.closest('tr') // a requirement's row: not its override or remediation item's (#464)
-    cards[tr.querySelector('th[scope=row] .mono').textContent] = {
+  for (const [id, tr] of """
+    + REQUIREMENT_ROWS
+    + """) {
+    cards[id] = {
       card: rect(tr), head: rect(tr.querySelector('th[scope=row]')),
       verdict: rect(tr.querySelector('.verdict-cell .chip')), text: rect(tr.querySelector('.rq-text')),
       evidence: rect(tr.querySelector('.evidence')), reason: rect(tr.querySelector('.reason')),
@@ -219,6 +226,7 @@ CARD_PARTS = """async () => {
   }
   return cards
 }"""
+)
 
 
 def settled_cards(page: Page) -> dict:
@@ -270,15 +278,17 @@ def test_on_a_phone_show_full_requirement_works_from_the_keyboard(page: Page, pa
 
 # Whether the clamp hides some of each requirement's text, read once the fonts have settled (as
 # CARD_PARTS): the measure the toggle must agree with.
-CUT_TEXTS = """async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  return Object.fromEntries([...document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')]
-    .map((th) => {
-      const text = th.closest('tr').querySelector('.rq-text')
-      return [th.querySelector('.mono').textContent, text.scrollHeight > text.clientHeight + 1]
+CUT_TEXTS = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  return Object.fromEntries("""
+    + REQUIREMENT_ROWS
+    + """.map(([id, tr]) => {
+      const text = tr.querySelector('.rq-text')
+      return [id, text.scrollHeight > text.clientHeight + 1]
     }))
 }"""
+)
 
 
 @pytest.mark.parametrize("fonts", ["web", "fallback"])
@@ -290,9 +300,7 @@ def test_on_a_phone_a_requirement_that_fits_in_2_lines_offers_no_toggle(
     clamp kept 2 lines high, so no toggle, and its third line hidden. Again without the web fonts,
     as on a slow network (#512's case). Each cut text, expanded, shows all its lines."""
     if fonts == "fallback":
-        page.route(
-            re.compile(r"^https://fonts\.(googleapis|gstatic)\.com/"), lambda route: route.abort()
-        )
+        without_web_fonts(page)
     assessed(page.request, paper_url, ASSESSED)
     page.set_viewport_size({"width": 400, "height": 900})
     paper = open_paper(page, paper_url, ASSESSED, assessed=True)
@@ -325,10 +333,10 @@ REQUIREMENT_MIN = 200
 # The judged table, read in one go once the fonts have loaded and layout has settled (as
 # CARD_PARTS): its width against its wrapper's, the narrowest Requirement cell, each text's
 # hyphenation and language, and where each remediation item sits against its requirement's row.
-TABLE_LAYOUT = """async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const table = document.querySelector('table.reqs.judged')
+TABLE_LAYOUT = (
+    "async () => {"
+    + FONTS_SETTLED
+    + """  const table = document.querySelector('table.reqs.judged')
   const rect = (el) => el.getBoundingClientRect()
   return {
     scroll: table.scrollWidth, room: table.parentElement.clientWidth, table: rect(table).width,
@@ -345,6 +353,7 @@ TABLE_LAYOUT = """async () => {
     }),
   }
 }"""
+)
 
 
 def as_company(page: Page, profile: str) -> None:
@@ -405,10 +414,10 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
 # fonts have loaded and layout has settled (as CARD_PARTS). A word's range has one rect per line it
 # is on; Chromium gives a hyphen it inserts a rect of its own at the end of the line, so a word
 # broken with a hyphen has two rects on every line but its last, and one broken anywhere has one.
-UNHYPHENATED_BREAKS = r"""async () => {
-  await document.fonts.ready
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const words = []
+UNHYPHENATED_BREAKS = (
+    "async () => {"
+    + FONTS_SETTLED
+    + r"""  const words = []
   const breaks = []
   for (const quote of document.querySelectorAll('table.reqs.judged .quotes-cell blockquote')) {
     const walk = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT)
@@ -430,6 +439,7 @@ UNHYPHENATED_BREAKS = r"""async () => {
   }
   return { words: words.length, breaks }
 }"""
+)
 
 
 def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page, paper_url):

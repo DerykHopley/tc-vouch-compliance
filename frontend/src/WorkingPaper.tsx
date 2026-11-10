@@ -467,7 +467,8 @@ type JudgedProps = {
  */
 /** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
  * "Show less" toggles it (`aria-expanded`), offered only when the clamp hides some of it (measured again as the width
- * changes and as the web fonts load, #516; where nothing can be measured, it is offered). On a desktop the toggle is hidden and the text shown whole. */
+ * changes and as the web fonts load, #516; where nothing can be measured, it is offered). On a desktop the toggle is
+ * hidden and the text shown whole. */
 function RequirementText({ text, language }: { text: string; language?: string }) {
   const [expanded, setExpanded] = useState(false)
   const [cut, setCut] = useState(true)
@@ -480,14 +481,15 @@ function RequirementText({ text, language }: { text: string; language?: string }
     measure()
     // A web font that loads after this rewraps the text in a box the clamp keeps 2 lines high, so no resize fires
     // (#516): measured again once the fonts are ready, and after any font that loads later.
-    const gone = new AbortController()
+    // Stops this measure's font listeners when the text changes, it expands, or the cell goes.
+    const stopMeasuring = new AbortController()
     const fonts = document.fonts as FontFaceSet | undefined
-    fonts?.ready.then(() => { if (!gone.signal.aborted) measure() })
-    fonts?.addEventListener('loadingdone', measure, { signal: gone.signal })
+    fonts?.ready.then(() => { if (!stopMeasuring.signal.aborted) measure() })
+    fonts?.addEventListener('loadingdone', measure, { signal: stopMeasuring.signal })
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(el)
     return () => {
-      gone.abort()
+      stopMeasuring.abort()
       observer?.disconnect()
     }
   }, [expanded, text])
