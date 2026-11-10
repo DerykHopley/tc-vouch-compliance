@@ -688,8 +688,9 @@ describe('company setup', () => {
 
   /** Step 6's Select all or Deselect all (#475) for a folder, by the name a screen reader announces. */
   const folderButton = (name: string) => screen.getByRole('button', { name })
-  const ticked = () => screen.getAllByRole('checkbox').filter((b) => (b as HTMLInputElement).checked)
-    .map((b) => b.getAttribute('aria-label'))
+  /** The ticked checkboxes on step 6, by name, in page order. */
+  const ticked = () =>
+    screen.getAllByRole('checkbox').filter((b) => (b as HTMLInputElement).checked).map((b) => b.getAttribute('aria-label'))
 
   it('Select all and Deselect all choose or clear one folder, leaving the other as it is', async () => {
     api()

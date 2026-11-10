@@ -221,21 +221,17 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
     })
     setProblems((now) => now.filter((p) => p !== control && !(p === ALL_MARKED && reason === null)))
   }
-  // Step 6: ticking a document chooses it as evidence, unticking drops it; any change clears NO_EVIDENCE.
-  const choose = (id: string, source: LibrarySource) => {
-    setAnswers((now) => {
-      const chosen = now.evidence[source]
-      const evidence = { ...now.evidence, [source]: chosen.includes(id) ? chosen.filter((c) => c !== id) : [...chosen, id] }
-      return { ...now, evidence }
-    })
+  // Step 6: a folder's chosen documents become what `change` makes of them; any change clears NO_EVIDENCE.
+  const changeFolder = (source: LibrarySource, change: (chosen: string[]) => string[]) => {
+    setAnswers((now) => ({ ...now, evidence: { ...now.evidence, [source]: change(now.evidence[source]) } }))
     setProblems((now) => now.filter((p) => p !== NO_EVIDENCE))
   }
-  // Step 6's Select all and Deselect all (#475): a folder's documents become `ids` (all of them, or none); the other
-  // folder stays as it is. A change, as a tick is, so it clears NO_EVIDENCE.
-  const chooseAll = (source: LibrarySource, ids: string[]) => {
-    setAnswers((now) => ({ ...now, evidence: { ...now.evidence, [source]: ids } }))
-    setProblems((now) => now.filter((p) => p !== NO_EVIDENCE))
-  }
+  // Ticking a document chooses it as evidence, unticking drops it.
+  const choose = (id: string, source: LibrarySource) =>
+    changeFolder(source, (chosen) => chosen.includes(id) ? chosen.filter((c) => c !== id) : [...chosen, id])
+  // Select all and Deselect all (#475): the folder's chosen documents become `ids` (all of them, or none); the other
+  // folder stays as it is.
+  const setFolder = (source: LibrarySource, ids: string[]) => changeFolder(source, () => ids)
 
   return (
     <section className="paper wrap" aria-label="Company setup">
@@ -270,7 +266,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
             problems={problems} problemId={noticeId} />
         )}
         {step === EVIDENCE && (
-          <EvidenceStep chosen={answers.evidence} choose={choose} chooseAll={chooseAll} library={library} onRetry={readLibrary}
+          <EvidenceStep chosen={answers.evidence} choose={choose} setFolder={setFolder} library={library} onRetry={readLibrary}
             problem={problems.includes(NO_EVIDENCE)} problemId={noticeId} />
         )}
         {step === FINISH && <FinishStep answers={answers} controls={controls} library={library} />}
@@ -468,14 +464,15 @@ function NotApplicableStep({ marked, mark, controls, onRetry, problems, problemI
   )
 }
 
-/** Step 6's folders, in the order it lists them, each with its table's caption. */
-const FOLDERS: { source: LibrarySource; caption: string }[] = [
-  { source: 'policies', caption: 'Policies' }, { source: 'records', caption: 'Records' }]
+/** Step 6's folders, in the order it lists them, each with its table's caption and the word its Select all and
+ * Deselect all add for a screen reader ("Select all policies"). */
+const FOLDERS: { source: LibrarySource; caption: string; noun: string }[] = [
+  { source: 'policies', caption: 'Policies', noun: 'policies' }, { source: 'records', caption: 'Records', noun: 'records' }]
 
-function EvidenceStep({ chosen, choose, chooseAll, library, onRetry, problem, problemId }: {
+function EvidenceStep({ chosen, choose, setFolder, library, onRetry, problem, problemId }: {
   chosen: ChosenEvidence
   choose: (id: string, source: LibrarySource) => void
-  chooseAll: (source: LibrarySource, ids: string[]) => void
+  setFolder: (source: LibrarySource, ids: string[]) => void
   library: Library | null
   onRetry: () => void
   problem: boolean
@@ -493,24 +490,23 @@ function EvidenceStep({ chosen, choose, chooseAll, library, onRetry, problem, pr
       {(library === null || library.status === 'loading') && <p className="field-note">Loading the sample library…</p>}
       {library?.status === 'ready' && (
         <>
-          {FOLDERS.map(({ source, caption }) => {
-            const inThis = inFolder(source)
-            const noun = caption.toLowerCase()
+          {FOLDERS.map(({ source, caption, noun }) => {
+            const folder = inFolder(source)
             return (
               <div key={source} className="setup-folder">
                 {/* Above its table, so Tab reaches them before its checkboxes; each named with its folder. */}
-                {inThis.length > 0 && (
+                {folder.length > 0 && (
                   <div className="setup-folder-actions">
                     <button type="button" className="btn btn-ghost"
-                      onClick={() => chooseAll(source, inThis.map((d) => d.id))}>
+                      onClick={() => setFolder(source, folder.map((d) => d.id))}>
                       Select all{' '}<span className="sr-only">{noun}</span>
                     </button>
-                    <button type="button" className="btn btn-ghost" onClick={() => chooseAll(source, [])}>
+                    <button type="button" className="btn btn-ghost" onClick={() => setFolder(source, [])}>
                       Deselect all{' '}<span className="sr-only">{noun}</span>
                     </button>
                   </div>
                 )}
-                <DocumentTable caption={caption} documents={inThis} selected={chosen} onToggle={choose} />
+                <DocumentTable caption={caption} documents={folder} selected={chosen} onToggle={choose} />
               </div>
             )
           })}

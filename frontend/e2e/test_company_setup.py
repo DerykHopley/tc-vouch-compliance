@@ -471,7 +471,7 @@ def test_select_all_and_deselect_all_work_by_keyboard_one_folder_at_a_time(
     for i in range(policies.count()):
         expect(policies.nth(i)).not_to_be_checked()
     expect(document(page, "Security training record 2026")).to_be_checked()
-    expect(page.get_by_role("status")).to_contain_text("Ready to cite: 1 document ")
+    expect(page.get_by_role("status")).to_have_text(re.compile(r"^Ready to cite: 1 document \("))
 
 
 def test_next_while_the_library_loads_keeps_focus_on_the_heading_when_it_lands(
