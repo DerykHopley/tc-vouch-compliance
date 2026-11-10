@@ -231,15 +231,47 @@ def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
     report = open_report(page, report_url)
 
     expect(report).to_have_attribute("lang", "de")
-    questions = report.locator("table.report-controls td.report-q")
-    expect(questions.first).to_be_visible()
-    marks = questions.evaluate_all(
-        "cells => cells.map((c) => ({ lang: c.lang, hyphens: getComputedStyle(c).hyphens }))"
-    )
-    assert marks and all(m == {"lang": "de", "hyphens": "auto"} for m in marks), marks
-    found = page.evaluate(UNHYPHENATED_BREAKS, "table.report-controls td.report-q")
-    assert found["words"], "Alpenwerk's report shows no question to measure"
-    assert found["breaks"] == [], f"question words broken without a hyphen: {found['breaks']}"
+    expect(report.locator("table.report-controls td.report-q").first).to_be_visible()
+    assert_hyphenated_in_german(page, {"question": "table.report-controls td.report-q"})
+
+
+def assert_hyphenated_in_german(page: Page, columns: dict[str, str]) -> None:
+    """Every column (a name and its cells' selector) has words to measure, none broken without a
+    hyphen (UNHYPHENATED_BREAKS), and each cell marked German (`lang="de"`) and hyphenating
+    (`hyphens: auto`). The failure names each column that doesn't, with what it found."""
+    marks = "cells => cells.map((c) => ({ lang: c.lang, hyphens: getComputedStyle(c).hyphens }))"
+    wrong = {}
+    for name, selector in columns.items():
+        found = page.evaluate(UNHYPHENATED_BREAKS, selector)
+        marked = page.locator(selector).evaluate_all(marks)
+        unmarked = [m for m in marked if m != {"lang": "de", "hyphens": "auto"}]
+        if not found["words"] or found["breaks"] or unmarked:
+            wrong[name] = {"words": found["words"], "breaks": found["breaks"], "cells": unmarked}
+    assert wrong == {}, f"columns not hyphenated in German: {wrong}"
+
+
+GERMAN_REASON = (
+    "Die Protokollierungsrichtlinie regelt die Informationssicherheitsverantwortlichkeiten nicht."
+)
+
+
+@pytest.mark.parametrize("width", [701, 1024])
+def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
+    page: Page, report_url, width
+):
+    """#530: the trail's Note column is narrow at 701 and 1024, and Alpenwerk's override reasons
+    split mid-word with no hyphen ("Protokollierungsrichtlinie"). A note is typed in the answer
+    language, so it is marked in it and hyphenates, as the controls' questions do since #521."""
+    override = [{"requirement_id": "S1", "verdict": "not-evidenced", "reason": GERMAN_REASON}]
+    accepted(page.request, report_url, "4.1.2", "alpenwerk", override)
+    page.set_viewport_size({"width": width, "height": 900})
+    as_company(page, "alpenwerk")
+
+    report = open_report(page, report_url)
+
+    notes = "table.report-trail td.report-q"
+    expect(report.locator(notes).filter(has_text=GERMAN_REASON).first).to_be_visible()
+    assert_hyphenated_in_german(page, {"note": notes})
 
 
 # --- The controls and trail tables fit (#463) ---------------------------------------------------
@@ -747,3 +779,52 @@ def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_export
     assert text.startswith("# Improvement report\n")
     assert f"| Done | {DONE_NOTE} |" in text
     assert f"| 1.1.1 | {ASKED} | CEO | {DUE} | Open |" in text
+
+
+GERMAN_DONE_NOTE = "Risikobewertungsprotokoll im Informationssicherheitsordner abgelegt."
+GERMAN_QUESTION = (
+    "Wer genehmigt den Geltungsbereich des Informationssicherheitsmanagementsystems und die "
+    "Zugriffsberechtigungsüberprüfungen?"
+)
+GERMAN_ANSWER = "Die Geschäftsführung, in der jährlichen Managementbewertung."
+# The plan's and the open questions' free-text columns, each by its place in the row.
+IMPROVEMENT_COLUMNS = {
+    "plan missing": "table.report-plan tbody td.report-q:nth-child(3)",
+    "plan note": "table.report-plan tbody td.report-q:nth-child(7)",
+    "question": "table.report-questions tbody td.report-q:nth-child(2)",
+    "answer": "table.report-questions tbody td.report-q:nth-child(6)",
+}
+
+
+def test_at_701px_alpenwerks_plan_and_questions_break_words_only_with_a_hyphen(
+    page: Page, improvement_url
+):
+    """#530: at 701px the plan's Missing and Note and the open questions' Question and Answer are
+    narrow, and Alpenwerk's German split mid-word with no hyphen ("Risikobewertungsprotokoll").
+    They are marked in the answer language and hyphenate in it, as the controls' questions do
+    since #521: typed text too, as an Alpenwerk team writes in German."""
+    request = page.request
+    set_goal(page, improvement_url, "alpenwerk", "internal-improvement")
+    thread_id = accepted(
+        request,
+        improvement_url,
+        "4.1.2",
+        "alpenwerk",
+        decisions={"M1": {"decision": "approve", "owner_role": "IT-Leiter"}},
+    )
+    done = f"{improvement_url}/api/assessments/{thread_id}/remediation/M1/done"
+    post(request, done, {"note": GERMAN_DONE_NOTE}, "alpenwerk")
+    asked = {"question": GERMAN_QUESTION, "asked_of": "Geschäftsführung", "due_date": DUE}
+    logged = post(request, f"{improvement_url}/api/controls/1.1.1/questions", asked, "alpenwerk")
+    question_id = json.loads(logged)["question"]["id"]
+    answer = f"{improvement_url}/api/controls/1.1.1/questions/{question_id}/answer"
+    post(request, answer, {"answer": GERMAN_ANSWER}, "alpenwerk")
+    page.set_viewport_size({"width": 701, "height": 900})
+    as_company(page, "alpenwerk")
+
+    report = open_report(page, improvement_url)
+
+    expect(report).to_have_attribute("lang", "de")
+    expect(report.locator("table.report-plan").filter(has_text=GERMAN_DONE_NOTE)).to_be_visible()
+    expect(report.locator("table.report-questions")).to_contain_text(GERMAN_ANSWER)
+    assert_hyphenated_in_german(page, IMPROVEMENT_COLUMNS)
