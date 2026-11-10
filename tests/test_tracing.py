@@ -20,7 +20,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from pydantic import SecretStr
 from test_memory import as_user
 
-from vouch import evals
+from vouch import ScriptedChatModel, evals
+from vouch import tracing as tracing_module
 from vouch.api import create_app, current_user
 from vouch.evals import EvalModels, fake_models, load_cases, run_eval
 from vouch.graph import PROMPT_VERSION
@@ -299,6 +300,70 @@ def test_no_key_token_or_e_mail_reaches_a_trace(exported):
     assert "[removed]" in sent  # the run reached the export, masked
     for secret in (API_KEY, "abc123.def456.ghi789", EMAIL):
         assert secret not in sent
+
+
+def sent_text(spans: list[ReadableSpan]) -> str:
+    """Everything a span carries out: its attributes, its status's description, and each event's
+    name and attributes (an exception's message and stack trace among them)."""
+    return json.dumps(
+        [
+            {
+                "attributes": dict(s.attributes or {}),
+                "status": s.status.description,
+                "events": [{"name": e.name, **dict(e.attributes or {})} for e in s.events],
+            }
+            for s in spans
+        ],
+        default=str,
+    )
+
+
+def test_a_failing_run_s_error_reaches_the_trace_with_no_key_token_or_e_mail(exported, monkeypatch):
+    """The verifier's case (#460): the model's error text holds secrets, and Langfuse copies an
+    error into each failing span's status and exception events, which its attribute mask
+    doesn't reach."""
+    on, exporter = exported
+    held = f"provider said: key {API_KEY}, header {BEARER}, mail {EMAIL}"
+
+    def failing(self, *args, **kwargs):
+        raise RuntimeError(held)
+
+    monkeypatch.setattr(ScriptedChatModel, "_generate", failing)
+    client, lead = TestClient(traced_app(on)), new_user()
+
+    response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
+
+    assert "event: error" in response.text
+    [spans] = traces(on, exporter).values()
+    failed = [s for s in spans if s.status.description]
+    assert failed  # the error did reach the trace, as a status
+    sent = sent_text(spans)
+    assert "provider said" in sent and "[removed]" in sent  # kept, but masked
+    for secret in (API_KEY, "abc123.def456.ghi789", EMAIL):
+        assert secret not in sent
+
+
+def test_an_exception_event_is_redacted_and_a_batch_that_cant_be_is_never_sent(monkeypatch):
+    from opentelemetry.trace import Status, StatusCode
+
+    sending = InMemorySpanExporter()
+    exporter = tracing_module.RedactingSpanExporter(sending)
+    provider = TracerProvider()
+    span = provider.get_tracer("t").start_span("gather")
+    held = f"key {API_KEY}, mail {EMAIL}"
+    span.record_exception(RuntimeError(held))
+    span.set_status(Status(StatusCode.ERROR, held))
+    span.end()
+
+    exporter.export([span])
+    [sent] = sending.get_finished_spans()
+    text = sent_text([sent])
+    assert "exception.message" in text and "[removed]" in text
+    assert API_KEY not in text and EMAIL not in text
+
+    monkeypatch.setattr(tracing_module, "_clean", lambda value: 1 / 0)
+    assert exporter.export([span]).name == "FAILURE"
+    assert len(sending.get_finished_spans()) == 1  # nothing more went out
 
 
 def test_a_span_with_nothing_to_remove_is_sent_as_it_is(exported):

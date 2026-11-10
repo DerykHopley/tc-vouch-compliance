@@ -12,28 +12,33 @@ config takes it, and every step and model call inside inherits it. The review's 
 (Confirm findings, Accept, Reject) isn't traced: no model runs there, and its input carries the
 reviewer's name, Clerk user data a trace never holds.
 
-What leaves for Langfuse is masked as it is exported (`mask_spans`): every attribute through
+What leaves for Langfuse is redacted at the last stage of export (RedactingSpanExporter, which
+wraps the exporter that sends): every span's attributes, its status (where Langfuse puts a
+failing step's error text) and its events (an exception's message and stack trace), through
 vouch.redaction, as the API's events and log lines are, so no key, token, password or e-mail
-address reaches a trace. Headers and Clerk session tokens never enter a run.
+address reaches a trace. A batch that can't be redacted is dropped, never sent. Headers and Clerk
+session tokens never enter a run.
 """
 
+import base64
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.runnables.config import ensure_config, get_callback_manager_for_config
+from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.trace import Status
 
 from vouch.settings import LangfuseKeys
 
-if TYPE_CHECKING:  # imported when tracing is on: with no keys, Langfuse is never imported
-    from langfuse.types import MaskOtelSpansParams, MaskOtelSpansResult
+if TYPE_CHECKING:
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SpanExporter
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +95,8 @@ class Tracing:
     """One Langfuse client for the process, and a fresh handler per run (`config`).
 
     `span_exporter` and `tracer_provider` are the test seams: an in-memory exporter receives
-    what would be sent, masked; with neither, the client sends to `keys.base_url`."""
+    what would be sent, redacted; with neither, the client sends to `keys.base_url`
+    (langfuse_exporter). Either way RedactingSpanExporter wraps it."""
 
     def __init__(
         self,
@@ -102,12 +108,12 @@ class Tracing:
         from langfuse import Langfuse
 
         self.public_key = keys.public_key
+        sending = span_exporter or langfuse_exporter(keys)
         self.client = Langfuse(
             public_key=keys.public_key,
             secret_key=keys.secret_key.get_secret_value(),
             base_url=keys.base_url,
-            mask_otel_spans=mask_spans,
-            span_exporter=span_exporter,
+            span_exporter=RedactingSpanExporter(sending),
             tracer_provider=tracer_provider,
         )
 
@@ -227,19 +233,81 @@ def _clean(value: Any) -> tuple[Any, bool]:
     return value, False
 
 
-def mask_spans(*, params: "MaskOtelSpansParams") -> "MaskOtelSpansResult":
-    """Langfuse's export-stage mask: every span attribute that holds a secret or personal data
-    replaced by its redacted value. Should it raise, Langfuse drops the batch: nothing unmasked
-    is ever sent."""
-    from langfuse.types import MaskOtelSpansResult, OtelSpanPatch
+def _redacted_attributes(attributes: Mapping[str, Any] | None) -> dict[str, Any]:
+    return {key: _clean(value)[0] for key, value in (attributes or {}).items()}
 
-    patches = {}
-    for identifier, span in params.spans.items():
-        changed = {}
-        for key, value in span.attributes.items():
-            clean, removed = _clean(value)
-            if removed:
-                changed[key] = clean
-        if changed:
-            patches[identifier] = OtelSpanPatch(set_attributes=changed)
-    return MaskOtelSpansResult(span_patches=patches)
+
+def _redacted_span(span: ReadableSpan) -> ReadableSpan:
+    """The span as it may leave: its attributes, its status's description and its events'
+    attributes redacted; its name, ids, times and links as they are."""
+    from vouch.redaction import redact
+
+    status = span.status
+    if status.description:
+        status = Status(status.status_code, redact(status.description)[0])
+    events = [
+        Event(event.name, _redacted_attributes(event.attributes), event.timestamp)
+        for event in span.events
+    ]
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=_redacted_attributes(span.attributes),
+        events=events,
+        links=span.links,
+        kind=span.kind,
+        status=status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+class RedactingSpanExporter(SpanExporter):
+    """The last stage before a span leaves for Langfuse: each span redacted (_redacted_span),
+    then handed to `sending`. A batch that can't be redacted is dropped and logged, never sent."""
+
+    def __init__(self, sending: SpanExporter) -> None:
+        self.sending = sending
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        try:
+            clean = [_redacted_span(span) for span in spans]
+        except Exception:
+            log.exception("%d spans couldn't be redacted, so they weren't sent", len(spans))
+            return SpanExportResult.FAILURE
+        return self.sending.export(clean)
+
+    def shutdown(self) -> None:
+        self.sending.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return self.sending.force_flush(timeout_millis)
+
+
+LANGFUSE_TRACES_PATH = "/api/public/otel/v1/traces"
+"""Langfuse's OpenTelemetry endpoint (its OpenTelemetry integration page)."""
+LANGFUSE_EXPORT_TIMEOUT_SECONDS = 5.0
+"""As the Langfuse SDK's own exporter: one export's limit."""
+
+
+def langfuse_exporter(keys: LangfuseKeys) -> SpanExporter:
+    """The exporter that sends to the keys' Langfuse project over OTLP/HTTP, as the Langfuse SDK
+    builds its own: basic auth with the key pair, and the ingestion version that shows a trace
+    at once (without it, up to ten minutes later)."""
+    from opentelemetry.exporter.otlp.proto.http import Compression
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    pair = f"{keys.public_key}:{keys.secret_key.get_secret_value()}"
+    return OTLPSpanExporter(
+        endpoint=keys.base_url + LANGFUSE_TRACES_PATH,
+        headers={
+            "Authorization": "Basic " + base64.b64encode(pair.encode()).decode("ascii"),
+            "x-langfuse-public-key": keys.public_key,
+            "x-langfuse-ingestion-version": "4",
+        },
+        timeout=LANGFUSE_EXPORT_TIMEOUT_SECONDS,
+        compression=Compression.Gzip,
+    )
