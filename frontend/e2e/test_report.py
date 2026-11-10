@@ -16,7 +16,7 @@ from urllib.request import urlopen
 import pdf_words
 import pytest
 from fonts import FONTS_SETTLED, without_web_fonts
-from hyphen_breaks import UNHYPHENATED_BREAKS
+from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from test_working_paper import as_company
@@ -25,6 +25,9 @@ from touch_targets import small_targets
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
 NORDLICHT_REASON = "Nordlicht allows no remote access to its company network"
+GERMAN_REASON = (  # an Alpenwerk override reason, with long compounds for the trail's Note (#530)
+    "Die Protokollierungsrichtlinie regelt die Informationssicherheitsverantwortlichkeiten nicht."
+)
 DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -233,26 +236,6 @@ def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
     expect(report).to_have_attribute("lang", "de")
     expect(report.locator("table.report-controls td.report-q").first).to_be_visible()
     assert_hyphenated_in_german(page, {"question": "table.report-controls td.report-q"})
-
-
-def assert_hyphenated_in_german(page: Page, columns: dict[str, str]) -> None:
-    """Every column (a name and its cells' selector) has words to measure, none broken without a
-    hyphen (UNHYPHENATED_BREAKS), and each cell marked German (`lang="de"`) and hyphenating
-    (`hyphens: auto`). The failure names each column that doesn't, with what it found."""
-    marks = "cells => cells.map((c) => ({ lang: c.lang, hyphens: getComputedStyle(c).hyphens }))"
-    wrong = {}
-    for name, selector in columns.items():
-        found = page.evaluate(UNHYPHENATED_BREAKS, selector)
-        marked = page.locator(selector).evaluate_all(marks)
-        unmarked = [m for m in marked if m != {"lang": "de", "hyphens": "auto"}]
-        if not found["words"] or found["breaks"] or unmarked:
-            wrong[name] = {"words": found["words"], "breaks": found["breaks"], "cells": unmarked}
-    assert wrong == {}, f"columns not hyphenated in German: {wrong}"
-
-
-GERMAN_REASON = (
-    "Die Protokollierungsrichtlinie regelt die Informationssicherheitsverantwortlichkeiten nicht."
-)
 
 
 @pytest.mark.parametrize("width", [701, 1024])
@@ -724,6 +707,18 @@ def test_a_printed_a4_report_keeps_headings_clear_of_tables_and_notes_whole(
 DONE_NOTE = "Exposure record kept in the ISMS folder."
 ASKED = "Who signs off the ISMS scope each year?"
 DUE = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()  # within the horizon
+# Alpenwerk's done note, question and answer, with long compounds for the free-text columns (#530).
+GERMAN_DONE_NOTE = "Risikobewertungsprotokoll im Informationssicherheitsordner abgelegt."
+GERMAN_QUESTION = (
+    "Wer genehmigt den Geltungsbereich des Informationssicherheitsmanagementsystems und die "
+    "Zugriffsberechtigungsüberprüfungen?"
+)
+GERMAN_ANSWER = "Die Geschäftsführung, in der jährlichen Managementbewertung."
+# The plan's free-text columns (Missing, Note) and the open questions' (Question, Answer).
+IMPROVEMENT_COLUMNS = {
+    "plan": "table.report-plan tbody td.report-q",
+    "questions": "table.report-questions tbody td.report-q",
+}
 
 
 def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_exports_them(
@@ -779,21 +774,6 @@ def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_export
     assert text.startswith("# Improvement report\n")
     assert f"| Done | {DONE_NOTE} |" in text
     assert f"| 1.1.1 | {ASKED} | CEO | {DUE} | Open |" in text
-
-
-GERMAN_DONE_NOTE = "Risikobewertungsprotokoll im Informationssicherheitsordner abgelegt."
-GERMAN_QUESTION = (
-    "Wer genehmigt den Geltungsbereich des Informationssicherheitsmanagementsystems und die "
-    "Zugriffsberechtigungsüberprüfungen?"
-)
-GERMAN_ANSWER = "Die Geschäftsführung, in der jährlichen Managementbewertung."
-# The plan's and the open questions' free-text columns, each by its place in the row.
-IMPROVEMENT_COLUMNS = {
-    "plan missing": "table.report-plan tbody td.report-q:nth-child(3)",
-    "plan note": "table.report-plan tbody td.report-q:nth-child(7)",
-    "question": "table.report-questions tbody td.report-q:nth-child(2)",
-    "answer": "table.report-questions tbody td.report-q:nth-child(6)",
-}
 
 
 def test_at_701px_alpenwerks_plan_and_questions_break_words_only_with_a_hyphen(

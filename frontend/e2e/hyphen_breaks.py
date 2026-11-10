@@ -1,7 +1,8 @@
-"""Words a browser broke across lines without a hyphen (#511, #488, #521): for the checks that a
-text in a narrow column hyphenates in its language rather than splitting a word anywhere."""
+"""Words a browser broke across lines without a hyphen (#511, #488, #521, #530): for the checks
+that a text in a narrow column hyphenates in its language rather than splitting a word anywhere."""
 
 from fonts import FONTS_SETTLED
+from playwright.sync_api import Page
 
 # Each word in the elements the selector (the page function's argument) matches that breaks across
 # lines without a hyphen, read once the fonts have loaded and layout has settled. A word's letters
@@ -60,3 +61,18 @@ UNHYPHENATED_BREAKS = (
   return { words: words.length, breaks }
 }"""
 )
+
+
+def assert_hyphenated_in_german(page: Page, columns: dict[str, str]) -> None:
+    """Every column (a name and its elements' selector) has words to measure, none broken without
+    a hyphen (UNHYPHENATED_BREAKS), and each element marked German (`lang="de"`) and hyphenating
+    (`hyphens: auto`). The failure names each column that doesn't, with what it found."""
+    marks = "els => els.map((e) => ({ lang: e.lang, hyphens: getComputedStyle(e).hyphens }))"
+    wrong = {}
+    for name, selector in columns.items():
+        found = page.evaluate(UNHYPHENATED_BREAKS, selector)
+        marked = page.locator(selector).evaluate_all(marks)
+        unmarked = [m for m in marked if m != {"lang": "de", "hyphens": "auto"}]
+        if not found["words"] or found["breaks"] or unmarked:
+            wrong[name] = {"words": found["words"], "breaks": found["breaks"], "unmarked": unmarked}
+    assert wrong == {}, f"not hyphenated in German: {wrong}"

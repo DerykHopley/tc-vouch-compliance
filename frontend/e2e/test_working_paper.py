@@ -9,7 +9,7 @@ import re
 
 import pytest
 from fonts import FONTS_SETTLED, without_web_fonts
-from hyphen_breaks import UNHYPHENATED_BREAKS
+from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -426,15 +426,11 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page
     as_company(page, "alpenwerk")
     paper = open_paper(page, paper_url, WIDE, assessed=True)
     expect(paper.get_by_text("Answer language: German")).to_be_visible()
+    quotes = "table.reqs.judged .quotes-cell blockquote"
+    expect(paper.locator(quotes).first).to_be_visible()
+
     # Chromium's English rules also find breaks in these words, so the quote must say it's German.
-    quotes = paper.locator(".cite blockquote")
-    expect(quotes.first).to_be_visible()
-    assert set(quotes.evaluate_all("qs => qs.map((q) => q.lang)")) == {"de"}
-
-    found = page.evaluate(UNHYPHENATED_BREAKS, "table.reqs.judged .quotes-cell blockquote")
-
-    assert found["words"], f"Alpenwerk's {WIDE} shows no quote to measure"
-    assert found["breaks"] == [], f"quote words broken without a hyphen: {found['breaks']}"
+    assert_hyphenated_in_german(page, {"quotes": quotes})
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):

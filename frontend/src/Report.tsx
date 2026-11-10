@@ -118,6 +118,10 @@ function Cells<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
     : <td key={i} className={className} data-label={label} lang={lang}>{cell(row)}</td>)
 }
 
+/** A free-text cell's props (a question, an answer, a note, what's missing): written in the answer language, drafted
+ * or typed by the team, so it is marked in it and hyphenates in it (#521, #530). A `<td>` takes them, and a `Column`. */
+const answerText = (head: { answer_language: string }) => ({ className: 'report-q', lang: head.answer_language })
+
 function Document({ report }: { report: ReadinessReport }) {
   const { head, words } = report
   const { labels, sentences } = words
@@ -241,8 +245,6 @@ function Comparison({ report: { comparison: c, words } }: { report: ImprovementR
  * note. */
 function Plan({ report: { plan, words, head } }: { report: ImprovementReport }) {
   const { labels } = words
-  // What's missing and the done note, in the answer language: drafted in it, and typed by its team (#530).
-  const lang = head.answer_language
   return (
     <section className="report-part" aria-labelledby="report-plan">
       <h2 id="report-plan">{labels.plan}</h2>
@@ -268,11 +270,11 @@ function Plan({ report: { plan, words, head } }: { report: ImprovementReport }) 
                     <tr key={`${item.control_id} ${item.requirement_id}`}>
                       <th scope="row" className="mono">{item.control_id}</th>
                       <td className="mono">{item.requirement_id}</td>
-                      <td className="report-q" lang={lang}><Prose text={item.missing} /></td>
+                      <td {...answerText(head)}><Prose text={item.missing} /></td>
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                       <td><span data-word>{words.item_statuses[item.status]}</span></td>
-                      <td className="report-q" lang={lang}>{item.note}</td>
+                      <td {...answerText(head)}>{item.note}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -290,8 +292,6 @@ const questionStatus = (q: ReportQuestion): QuestionState => q.answer !== null ?
 /** The open questions (#420), in the base framework's control order, oldest first within a control. */
 function Questions({ report: { questions, words, head } }: { report: ImprovementReport }) {
   const { labels } = words
-  // The question and its answer, typed by the team in the answer language (#530).
-  const lang = head.answer_language
   return (
     <section className="report-part" aria-labelledby="report-questions">
       <h2 id="report-questions">{labels.open_questions}</h2>
@@ -312,11 +312,11 @@ function Questions({ report: { questions, words, head } }: { report: Improvement
               {questions.map((q) => (
                 <tr key={q.id}>
                   <th scope="row" className="mono">{q.control_id}</th>
-                  <td className="report-q" lang={lang}>{q.question}</td>
+                  <td {...answerText(head)}>{q.question}</td>
                   <td>{q.asked_of}</td>
                   <td className="mono">{q.due_date}</td>
                   <td><span data-word>{words.question_statuses[questionStatus(q)]}</span></td>
-                  <td className="report-q" lang={lang}>{q.answer ?? ''}</td>
+                  <td {...answerText(head)}>{q.answer ?? ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -334,8 +334,7 @@ function Controls({ report: { controls, words, head } }: { report: AuditReadines
   const { labels } = words
   const columns = shownColumns<ReportControl>([
     { label: labels.control, cell: (c) => c.id, className: 'mono', rowHeader: true },
-    // The edition's question, in the answer language, as the working paper marks it (#521).
-    { label: labels.question, cell: (c) => c.question, className: 'report-q', lang: head.answer_language },
+    { label: labels.question, cell: (c) => c.question, ...answerText(head) },
     { label: labels.status, cell: (c) => <span data-word>{words.statuses[c.status]}</span> },
     { label: labels.verdict, cell: (c) => {
       const verdict = reviewedVerdict(c)
@@ -409,8 +408,7 @@ function Remediation({ report: { remediation, words, head } }: { report: AuditRe
                   {group.items.map((item) => (
                     <tr key={item.requirement_id}>
                       <th scope="row" className="mono">{item.requirement_id}</th>
-                      {/* Drafted in the answer language (#530). */}
-                      <td className="report-q" lang={head.answer_language}><Prose text={item.missing} /></td>
+                      <td {...answerText(head)}><Prose text={item.missing} /></td>
                       <td>{item.owner_role}</td>
                       <td className="mono">{item.due_date}</td>
                     </tr>
@@ -467,8 +465,7 @@ function Trail({ report: { trail, words, head } }: { report: ReadinessReport }) 
     { label: labels.action, cell: (e) => <span data-word>{actionWord(e, words)}</span> },
     { label: labels.verdict_before, cell: (e) => verdict(e.verdict_before) },
     { label: labels.verdict_after, cell: (e) => verdict(e.verdict_after) },
-    // What the team typed (a reason, a question, an answer, a done note), in the answer language (#530).
-    { label: labels.note, cell: (e) => e.note, className: 'report-q', lang: head.answer_language },
+    { label: labels.note, cell: (e) => e.note, ...answerText(head) },
     { label: labels.evidence, className: 'mono', cell: (e) =>
       e.evidence.map((d) => <span key={`${d.doc_id} ${d.version}`} className="report-line">{d.doc_id} v{d.version}</span>) },
     { label: labels.model, cell: (e) => e.model, className: 'mono' },

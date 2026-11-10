@@ -507,13 +507,12 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
      narrows its column's least width, so an auto-laid table fits the page. */
   .report-table th, .report-table td { overflow-wrap: break-word; }
   .report-table .mono { overflow-wrap: anywhere; }
-  /* The question and note cells too: on screen they break anywhere, which in print squeezed the trail's Note to a
-     word's width, breaking its words (#296). */
-  .report-table .report-q { max-width: none; overflow-wrap: break-word; }
+  /* The free-text cells too, unhyphenated: on screen they hyphenate in the answer language (#521, #530), but a printed
+     page is wide enough for prose to wrap at spaces, and a note prints whole (#296). */
+  .report-table .report-q { max-width: none; overflow-wrap: break-word; hyphens: manual; }
   .report-table:not(.report-trail) .report-q { min-width: 0; }
   .report-trail .mono { font-size: 9px; }
-  /* The trail's notes print whole, as #296 has them: the page is wide enough not to need a hyphen (#530). */
-  .report-table.report-trail .report-q { min-width: 16ch; hyphens: manual; }
+  .report-table.report-trail .report-q { min-width: 16ch; }
   .report-line { white-space: normal; }
   .report-table tr { break-inside: avoid; }
   .report-table thead { display: table-header-group; }
