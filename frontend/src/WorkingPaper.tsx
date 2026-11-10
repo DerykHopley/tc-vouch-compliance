@@ -38,11 +38,49 @@ const RunChip = ({ run }: { run: Run }) =>
   <VerdictChip verdict={run.status === 'done' ? run.assessment.verdict : null} assessing={run.status === 'running'}
     language={answerLanguage(run)} />
 
-/** The assess button: busy while running, Retry when the service could not be reached; `held` while another runs. */
-function AssessButton({ id, run, held, onAssess }: { id: string; run: Run; held: boolean; onAssess: () => void }) {
+/**
+ * The assess button: busy while running, Retry when the service could not be reached; `held` while another runs. On a
+ * review in progress (`warnFirst`: at Plan fixes or Accept, #437) a click starts nothing: an in-app warning takes the
+ * button's place, with Assess <id> again anyway, which starts the run, and Keep the review, which closes it.
+ */
+function AssessButton({ id, run, held, onAssess, warnFirst = false }:
+  { id: string; run: Run; held: boolean; onAssess: () => void; warnFirst?: boolean }) {
+  const [warning, setWarning] = useState(false)
+  // The pressed button leaves the page as the warning opens or closes: focus moves to Keep the review, then back to
+  // Assess again, so a keyboard user isn't left on the page's body.
+  const toggled = useRef(false)
+  const keep = useRef<HTMLButtonElement>(null)
+  const assess = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!toggled.current) return
+    toggled.current = false
+    const next = warning ? keep : assess
+    next.current?.focus()
+  }, [warning])
+  const toggle = (open: boolean) => {
+    toggled.current = true
+    setWarning(open)
+  }
   const busy = run.status === 'running'
+  if (warning && warnFirst) {
+    return (
+      <>
+        <p className="field-note" role="alert">
+          Assessing {id} again sets its review aside: the findings you confirmed and the remediation items you decided
+          won't carry over to the new assessment. Nothing is deleted; they stay in the audit trail.
+        </p>
+        <div className="review-actions">
+          <button className="btn btn-primary" disabled={held} onClick={() => { setWarning(false); onAssess() }}>
+            Assess {id} again anyway
+          </button>
+          <button ref={keep} className="btn btn-ghost" onClick={() => toggle(false)}>Keep the review</button>
+        </div>
+      </>
+    )
+  }
   return (
-    <button className="btn btn-primary" onClick={onAssess} disabled={busy || held} aria-busy={busy}
+    <button ref={assess} className="btn btn-primary" onClick={warnFirst ? () => toggle(true) : onAssess}
+      disabled={busy || held} aria-busy={busy}
       aria-label={`${ACTION[run.status]} ${id}`}>
       {ACTION[run.status]}
     </button>
@@ -232,7 +270,9 @@ export default function WorkingPaper(props: PaperProps) {
               {questionReasons.includes('question-overdue') && (
                 <p className="field-note">An open question is overdue. Assess {card.id} again with what is known now.</p>
               )}
-              <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />
+              {/* Keyed by the assessment shown, so a warning open on one never shows on another. */}
+              <AssessButton key={assessed?.thread_id} id={card.id} run={run} held={held} onAssess={() => onAssess()}
+                warnFirst={step === 'plan-fixes' || step === 'accept'} />
               {assessingElsewhere}
             </div>}
             {judged ? (

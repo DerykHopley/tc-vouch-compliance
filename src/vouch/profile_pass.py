@@ -2,9 +2,9 @@
 accepted, assessed in one guarded model run, with all the profile's evidence in the prompt (#371).
 
 Which controls: each control of the profile's ISA edition with an applicable requirement, unless
-its newest assessment is accepted. The prompt holds the rules, those controls' applicable
-requirements and every document of every evidence source the profile allows, each passed as data
-(vouch.guards) with its kind and whether it is stale. A prompt and expected reply estimated over
+its newest assessment is accepted or its review is in progress (in_review, #437). The prompt holds
+the rules, those controls' applicable requirements and every document of every evidence source
+the profile allows, each passed as data (vouch.guards) with its kind and whether it is stale. A prompt and expected reply estimated over
 the threshold (estimate_tokens, estimate_output_tokens, by the profile's answer language), or an
 allowed source that can't be read, refuses the pass before anything is counted or called
 (ProfilePassRefused): the per-control agent is the way on.
@@ -26,7 +26,7 @@ import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
@@ -52,6 +52,7 @@ from vouch.graph import (
     checked_requirements,
     format_requirements,
     guard_steps,
+    in_review,
     judged_requirements,
     lead_rule,
     loaded_step,
@@ -121,13 +122,33 @@ class ProfilePassRefused(Exception):
     one sentence; the per-control agent is the way on (FALLBACK)."""
 
 
+SkipReason = Literal["accepted", "in-review"]
+
+
+@dataclass(frozen=True)
+class SkippedControl:
+    """A control the pass left out, and why: its newest assessment is accepted, or its review is
+    in progress (in_review, #437)."""
+
+    control_id: str
+    reason: SkipReason
+
+
 @dataclass(frozen=True)
 class ProfilePassResult:
-    """The new assessments, each waiting for review, and the ids of the controls skipped because
-    their newest assessment is accepted."""
+    """The new assessments, each waiting for review, and the controls skipped, in profile
+    order."""
 
     assessments: list[Assessment]
-    skipped: list[str]
+    skipped: list[SkippedControl]
+
+
+def _skip_reason(newest: Assessment | None) -> SkipReason | None:
+    if newest is None:
+        return None
+    if newest.status == "accepted":
+        return "accepted"
+    return "in-review" if in_review(newest) else None
 
 
 @dataclass(frozen=True)
@@ -370,13 +391,12 @@ def run_profile_pass(
     count: Callable[[], None] = lambda: None,
     statements: Iterable[LeadStatement] = (),
 ) -> ProfilePassResult:
-    """Assess every applicable control of the profile not yet accepted in one model run (see
-    the module's doc).
+    """Assess every applicable control of the profile not yet accepted, and not in review, in one
+    model run (see the module's doc).
 
-    With every applicable control accepted, nothing is counted or called. Otherwise the sources
-    are read and the prompt and reply estimated: an unreadable source, or a prompt and expected
-    reply over `max_tokens`, raises
-    ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
+    With every applicable control accepted or in review, nothing is counted or called.
+    Otherwise the sources are read and the prompt and reply estimated: an unreadable source, or a
+    prompt and expected reply over `max_tokens`, raises ProfilePassRefused. Then `count` is called (it raises when the pass can't be counted: the
     daily limit), then the model, once (twice when the output guard asks again). A second audit
     claim raises OutputCheckError; a failed model call raises its error. Either way, nothing is
     kept in the index. `today` (default: now) is what staleness is judged on and due dates count
@@ -385,14 +405,15 @@ def run_profile_pass(
     today = today or date.today()
     statements = list(statements)
     newest = newest_by_control(memory, saver)
-    included, skipped = [], []
+    included: list[_Included] = []
+    skipped: list[SkippedControl] = []
     for control in profile.isa_edition().controls:
         requirements = profile.requirements_for(control)
         if not requirements.applicable:
             continue
-        newest_one = newest.get(control.id)
-        if newest_one is not None and newest_one.status == "accepted":
-            skipped.append(control.id)
+        reason = _skip_reason(newest.get(control.id))
+        if reason is not None:
+            skipped.append(SkippedControl(control.id, reason))
         else:
             mine = [s for s in statements if s.control_id == control.id]
             passages = statement_passages(mine, profile.answer_language)
@@ -423,7 +444,7 @@ def run_profile_pass(
     def read(reply: ProfilePassReply | None) -> tuple[dict[str, _Assessed], list[str]]:
         given: dict[str, ControlAssessmentReply] = {}
         for item in reply.controls if reply else []:
-            if item.control_id in by_id:  # a control not included (unknown, accepted) is ignored
+            if item.control_id in by_id:  # a control not included (unknown, skipped) is ignored
                 given.setdefault(item.control_id, item)
         assessed = {
             cid: _assessed(i, given.get(cid), checker.for_statements(i.statements), profile, today)

@@ -18,9 +18,10 @@ const answers = (status: number, body: unknown) => {
 const ASSESSED = { thread_id: 't1', control_id: '1.1.1', status: 'waiting-for-review', verdict: 'partly-evidenced' }
 
 describe('runProfilePass', () => {
-  it('POSTs the pass and reads a 200 as done, with its assessments and the skipped ids', async () => {
-    const fetch = answers(200, { assessments: [ASSESSED], skipped: ['4.1.2'], usage: {} })
-    expect(await runProfilePass()).toEqual({ kind: 'done', assessments: [ASSESSED], skipped: ['4.1.2'] })
+  it('POSTs the pass and reads a 200 as done, with its assessments and the skipped controls with why', async () => {
+    const skipped = [{ control_id: '1.1.1', reason: 'accepted' }, { control_id: '4.1.2', reason: 'in-review' }]
+    const fetch = answers(200, { assessments: [ASSESSED], skipped, usage: {} })
+    expect(await runProfilePass()).toEqual({ kind: 'done', assessments: [ASSESSED], skipped })
     expect(fetch).toHaveBeenCalledWith('/api/profile-pass', expect.objectContaining({ method: 'POST' }))
   })
 

@@ -20,7 +20,7 @@ import yaml
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.memory import InMemoryStore
-from reviewing import reviewed
+from reviewing import confirm, reviewed
 from test_memory import as_user
 
 from vouch import ScriptedChatModel, load_named_profile
@@ -50,6 +50,7 @@ from vouch.profile_pass import (
     PROFILE_PASS_PROMPT_VERSION,
     ProfilePassRefused,
     ProfilePassReply,
+    SkippedControl,
     estimate_output_tokens,
     estimate_tokens,
     run_profile_pass,
@@ -114,6 +115,10 @@ class Lead:
     def thread_values(self, thread_id: str) -> dict:
         config = thread_config(thread_id, self.memory.scope)
         return build_graph(None, checkpointer=self.saver).get_state(config).values
+
+    def confirm(self, thread_id: str) -> None:
+        """Confirm findings, so the review goes on to Plan fixes or Accept (#372)."""
+        confirm_findings(thread_id, ConfirmFindings(), self.saver, scope=self.memory.scope)
 
     def review(self, thread_id: str, decision: str) -> None:
         if decision == "accept":
@@ -231,7 +236,56 @@ def test_with_every_applicable_control_accepted_nothing_is_counted_or_called():
     again = lead.run(model)
 
     assert again.assessments == []
-    assert again.skipped == CONTROLS
+    assert again.skipped == [SkippedControl(c, "accepted") for c in CONTROLS]
+    assert model.prompts == []
+    assert lead.counted == 1  # the first pass only
+
+
+def test_a_review_in_progress_is_skipped_as_in_review_and_keeps_its_thread():
+    lead = Lead()
+    first = {a.control_id: a for a in lead.run(fake()).assessments}
+    lead.confirm(first["4.1.2"].thread_id)  # one remediation item, a draft: Plan fixes
+    lead.confirm(first["2.1.3"].thread_id)  # no remediation item, so every one decided: Accept
+    model = fake()
+
+    again = lead.run(model)
+
+    assert again.skipped == [
+        SkippedControl("2.1.3", "in-review"),
+        SkippedControl("4.1.2", "in-review"),
+    ]
+    assert {"2.1.3", "4.1.2"}.isdisjoint(a.control_id for a in again.assessments)
+    assert "Control 4.1.2:" not in prompt_text(model)
+    newest = newest_by_control(lead.memory, lead.saver)
+    assert newest["4.1.2"].thread_id == first["4.1.2"].thread_id
+    assert newest["2.1.3"].thread_id == first["2.1.3"].thread_id
+
+
+def test_a_control_waiting_at_confirm_findings_is_assessed_again():
+    lead = Lead()
+    first = {a.control_id: a for a in lead.run(fake()).assessments}
+
+    again = lead.run(fake())
+
+    assert again.skipped == []
+    redone = {a.control_id: a for a in again.assessments}
+    assert redone["4.1.2"].thread_id != first["4.1.2"].thread_id
+
+
+def test_with_every_control_accepted_or_in_review_nothing_is_counted_or_called():
+    lead = Lead()
+    for i, assessment in enumerate(lead.run(fake()).assessments):
+        if i % 2:
+            lead.review(assessment.thread_id, "accept")
+        else:
+            lead.confirm(assessment.thread_id)
+    model = fake()
+
+    again = lead.run(model)
+
+    assert again.assessments == []
+    assert [s.reason for s in again.skipped] == ["in-review", "accepted"] * 6
+    assert [s.control_id for s in again.skipped] == CONTROLS
     assert model.prompts == []
     assert lead.counted == 1  # the first pass only
 
@@ -245,7 +299,7 @@ def test_an_accepted_control_is_skipped_and_a_rejected_one_assessed_again():
 
     again = lead.run(model)
 
-    assert again.skipped == ["1.1.1"]
+    assert again.skipped == [SkippedControl("1.1.1", "accepted")]
     assert "1.1.1" not in [a.control_id for a in again.assessments]
     assert "Control 1.1.1:" not in prompt_text(model)
     newest = newest_by_control(lead.memory, lead.saver)
@@ -619,7 +673,7 @@ def test_the_route_skips_an_accepted_control_and_assesses_a_rejected_one_again(p
 
     again = client.post(PASS, headers=lead).json()
 
-    assert again["skipped"] == ["1.1.1"]
+    assert again["skipped"] == [{"control_id": "1.1.1", "reason": "accepted"}]
     redone = {a["control_id"]: a for a in again["assessments"]}
     assert list(redone) == [c for c in CONTROLS if c != "1.1.1"]
     assert redone["4.1.2"]["thread_id"] != first["4.1.2"]["thread_id"]
@@ -627,6 +681,18 @@ def test_the_route_skips_an_accepted_control_and_assesses_a_rejected_one_again(p
     cards = {card["id"]: card["status"] for card in shown}
     assert cards["1.1.1"] == "accepted" and cards["4.1.2"] == WAITING
     assert pass_calls == [ProfilePassReply, ProfilePassReply]
+
+
+def test_the_route_lists_a_review_in_progress_as_skipped_in_review(pass_calls):
+    client, lead = TestClient(pass_app()), new_user()
+    first = {a["control_id"]: a for a in client.post(PASS, headers=lead).json()["assessments"]}
+    confirmed = confirm(client, first["4.1.2"]["thread_id"], headers=lead)
+    assert confirmed.status_code == 200, confirmed.text
+
+    again = client.post(PASS, headers=lead).json()
+
+    assert again["skipped"] == [{"control_id": "4.1.2", "reason": "in-review"}]
+    assert "4.1.2" not in [a["control_id"] for a in again["assessments"]]
 
 
 def test_a_pass_assessment_is_reviewed_through_the_route_and_counts_on_the_overview():
@@ -701,7 +767,7 @@ def test_with_every_control_accepted_the_route_answers_200_with_nothing_counted(
     assert [r.status_code for r in again] == [200] * 3
     assert again[0].json() | {"usage": None} == {
         "assessments": [],
-        "skipped": CONTROLS,
+        "skipped": [{"control_id": c, "reason": "accepted"} for c in CONTROLS],
         "usage": None,
     }
     assert pass_calls == []

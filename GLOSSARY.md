@@ -149,7 +149,7 @@ An open question's answer used as citable evidence, labelled as the lead's state
 _Avoid_: Testimony, self-declaration, manual evidence
 
 **Profile pass**:
-One model run over every applicable control of a compliance profile with all its evidence in context, producing one assessment per control, each waiting for review. Controls already accepted are skipped. Used only when its prompt and expected reply fit under a token threshold, and counted against its own daily limit, apart from the assessments'.
+One model run over every applicable control of a compliance profile with all its evidence in context, producing one assessment per control, each waiting for review. Controls already accepted are skipped, and so are reviews in progress (findings confirmed, at Plan fixes or Accept). Used only when its prompt and expected reply fit under a token threshold, and counted against its own daily limit, apart from the assessments'.
 _Avoid_: Batch run, bulk assessment, full scan
 
 **Reviewed verdict**:

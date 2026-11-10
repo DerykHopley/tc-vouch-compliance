@@ -2,8 +2,11 @@
 (PASS_URL), Nordlicht on the bundled pass script (the scripted fake model, no paid call).
 
 The tests run in this file's order on one server: the first pass assesses all 12 controls, the
-second (after one is accepted) skips that one, and the fit check reads its result. The pass's own
-daily limit is 3 a day, so the file runs two."""
+second (after one is accepted) skips that one, and the fit check reads its result; the third
+(after 4.1.2's findings are confirmed) skips that review in progress too, and its paper's Assess
+again warns first (#437). The pass's own daily limit is 3 a day, so the file runs three."""
+
+import re
 
 import reviewing
 from playwright.sync_api import Page, expect
@@ -69,12 +72,60 @@ def test_story_5_a_second_pass_skips_the_accepted_and_one_control_is_assessed_ag
     fits(page)
     again = panel(page).get_by_role("button", name="again").first
     control_id = again.inner_text().removeprefix("Assess ").removesuffix(" again")
-    with page.expect_response("**/api/assessments"):
+    # The row's control waits for review, so the row opens its paper and starts nothing (#437);
+    # at Confirm findings the paper's Assess again starts the run in one click.
+    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
         again.click()
     paper = page.get_by_role("region", name="Working paper")
+    expect(paper.get_by_role("list", name="Agent steps")).to_have_count(0)
+    with page.expect_response("**/api/assessments"):
+        paper.get_by_role("button", name=f"Assess again {control_id}").click()
     steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
     expect(steps.first).to_contain_text(f"Loaded control {control_id}: ")
     expect(steps.last).to_contain_text("Waiting for the compliance lead's review.")
+
+
+def test_a_third_pass_skips_a_review_in_progress_and_assess_again_warns_first(page: Page, pass_url):
+    # #437: 4.1.2's findings confirmed (its newest assessment, from the passes or the per-control
+    # run before), so its review waits at Plan fixes or Accept.
+    listed = page.request.get(f"{pass_url}/api/assessments").json()["assessments"]
+    newest = next(a for a in listed if a["control_id"] == "4.1.2")  # newest first
+    reviewing.confirmed(page.request, pass_url, newest["thread_id"])
+    open_dossier(page, pass_url)
+
+    run_pass(page)
+
+    expect(panel(page)).to_contain_text("1 accepted control skipped: 1.1.1.")
+    expect(panel(page)).to_contain_text(
+        "1 control in review skipped: 4.1.2. Finish their review, or assess one again from its paper."
+    )
+    expect(panel(page).get_by_role("listitem", name="Control 4.1.2")).to_have_count(0)
+
+    with page.expect_response(f"**/api/assessments/{newest['thread_id']}"):
+        card(page, "4.1.2").get_by_role("link", name="Open 4.1.2").click()
+    paper = page.get_by_role("region", name="Working paper")
+    current = paper.get_by_role("list", name="Review steps").locator("[aria-current=step]")
+    expect(current).to_have_text(re.compile("^(Plan fixes|Accept)$"))
+    assess_again = paper.get_by_role("button", name="Assess again 4.1.2")
+    assess_again.focus()
+    page.keyboard.press("Enter")  # the keyboard, so focus is checked where jsdom can't
+    warning = paper.get_by_role("alert")
+    expect(warning).to_have_text(
+        "Assessing 4.1.2 again sets its review aside: the findings you confirmed and the "
+        "remediation items you decided won't carry over to the new assessment. Nothing is "
+        "deleted; they stay in the audit trail."
+    )
+    keep = paper.get_by_role("button", name="Keep the review")
+    expect(keep).to_be_focused()
+    expect(paper.get_by_role("button", name="Assess 4.1.2 again anyway")).to_be_visible()
+    page.set_viewport_size({"width": 400, "height": 900})
+    assert small_targets(page) == []
+
+    page.keyboard.press("Enter")
+    expect(warning).to_have_count(0)
+    expect(assess_again).to_be_focused()
+    expect(current).to_have_text(re.compile("^(Plan fixes|Accept)$"))  # no run started
+    expect(paper.get_by_role("list", name="Agent steps")).to_have_count(0)
 
 
 def scrolls_sideways(page: Page) -> bool:

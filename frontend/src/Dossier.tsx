@@ -122,7 +122,7 @@ function Hero({ overview, onOpen, running, pass, onPass, onGoalChanged, onRoundC
         </p>
         : <p id="pass-note" className="field-note">
           {running !== null ? `Vouch is assessing ${running}. One run at a time.`
-            : 'Assesses every open control in one run. Accepted controls are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'}
+            : 'Assesses every open control in one run. Accepted controls and reviews in progress are skipped. On Sonnet 5.5, a pass over 12 controls costs about $0.30–0.50.'}
         </p>)}
     </section>
   )
@@ -347,13 +347,26 @@ function PassPanel({ overview, pass, onOpen, onPass, running }:
   const held = running !== null && <p className="field-note">Vouch is assessing {running}. One run at a time.</p>
   let body
   if (pass.kind === 'done') {
-    const skipped = pass.skipped.length > 0 && (
-      <p className="field-note">
-        {plural(pass.skipped.length, 'accepted control')} skipped: {pass.skipped.join(', ')}.
-      </p>)
+    // The controls skipped, accepted ones and reviews in progress each on a line of their own (#437).
+    const accepted = pass.skipped.filter((s) => s.reason === 'accepted').map((s) => s.control_id)
+    const inReview = pass.skipped.filter((s) => s.reason === 'in-review').map((s) => s.control_id)
+    const skipped = <>
+      {accepted.length > 0 && (
+        <p className="field-note">{plural(accepted.length, 'accepted control')} skipped: {accepted.join(', ')}.</p>
+      )}
+      {inReview.length > 0 && (
+        <p className="field-note">
+          {plural(inReview.length, 'control')} in review skipped: {inReview.join(', ')}.
+          {' '}Finish their review, or assess one again from its paper.
+        </p>
+      )}
+    </>
     body = pass.assessments.length === 0 ? (
       <>
-        <p>Every applicable control is accepted already. Nothing was assessed.</p>
+        <p>
+          {inReview.length > 0 ? 'Every applicable control is accepted or in review. Nothing was assessed.'
+            : 'Every applicable control is accepted already. Nothing was assessed.'}
+        </p>
         {skipped}
       </>
     ) : (
@@ -373,7 +386,9 @@ function PassPanel({ overview, pass, onOpen, onPass, running }:
                 <span className="pass-actions">
                   <button className="btn" onClick={() => onOpen(a.control_id, false)}>Open {a.control_id}</button>
                   {shortOf(verdict) && running === null && (
-                    <button className="btn btn-ghost" onClick={() => onOpen(a.control_id, true)}>
+                    // On a control waiting for review it opens the paper and starts nothing (#437): the card may not
+                    // know the review moved on (another tab), so the paper's Assess again decides, warning first.
+                    <button className="btn btn-ghost" onClick={() => onOpen(a.control_id, status !== 'waiting-for-review')}>
                       Assess {a.control_id} again
                     </button>
                   )}
