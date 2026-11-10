@@ -1,8 +1,10 @@
-"""The profile's Goal (#369, spec #350 story 1), on the Dossier's server (dossier_url): the lead
-changes the goal to Internal improvement from the hero, OKs the browser's confirm, sees it after
-a reload and as the newest entry of the report's audit trail, then changes it back and sees
-Audit readiness and a second entry. At 1280px and 400px, light and dark: nothing scrolls
-sideways and every control is at least 44px. Each run ends on Audit readiness, as it began."""
+"""The profile's Goal (#369, spec #350 story 1; #441, spec #448 story 5), on the Dossier's server
+(dossier_url): the lead changes the goal to Internal improvement from the hero through the in-app
+ask (#441: no browser dialog opens), sees it after a reload and as the newest entry of the
+report's audit trail, then changes it back and sees Audit readiness and a second entry. The ask
+takes focus on Cancel, and Escape or Cancel close it with focus back on Change goal, sending
+nothing. At 1280px and 400px, light and dark, with the ask open too: nothing scrolls sideways and
+every control is at least 44px. Each run ends on Audit readiness, as it began."""
 
 import pytest
 from playwright.sync_api import Dialog, Page, expect
@@ -12,30 +14,41 @@ TO_IMPROVEMENT = "Goal changed from Audit readiness to Internal improvement"
 TO_READINESS = "Goal changed from Internal improvement to Audit readiness"
 
 
+def dialogs_of(page: Page) -> list[str]:
+    """Every browser dialog that opens, dismissed and recorded: the test fails on any (#441)."""
+    opened: list[str] = []
+
+    def dismiss(dialog: Dialog) -> None:
+        opened.append(dialog.message)
+        dialog.dismiss()
+
+    page.on("dialog", dismiss)
+    return opened
+
+
 def open_dossier(page: Page, url: str) -> None:
     with page.expect_response("**/api/overview"):
         page.goto(url)
 
 
-def change_goal(page: Page, to: str) -> list[str]:
-    """Change goal, OK on the confirm, and wait for the overview read after it: what was asked."""
-    asked: list[str] = []
+def ask(page: Page, to: str) -> None:
+    """Change goal on the hero: the in-app ask opens with today's question, focus on Cancel."""
+    page.locator(".hero .goal").get_by_role("button", name="Change goal").click()
+    expect(page.locator(".hero .inline-confirm [role=alert]")).to_have_text(
+        f"Change this profile's goal to {to}? The change is recorded in the audit trail."
+    )
+    expect(page.get_by_role("button", name="Cancel")).to_be_focused()
 
-    def ok(dialog: Dialog) -> None:
-        asked.append(dialog.message)
-        dialog.accept()
 
-    page.once("dialog", ok)
+def change_goal(page: Page, to: str) -> None:
+    """Change goal, then Change goal in the ask, waiting for the overview read after it."""
+    ask(page, to)
     with (
         page.expect_response("**/api/goal") as changed,
         page.expect_response("**/api/overview"),
     ):
-        page.get_by_role("button", name="Change goal").click()
+        page.locator(".hero .inline-confirm").get_by_role("button", name="Change goal").click()
     assert changed.value.ok, changed.value.status
-    assert asked == [
-        f"Change this profile's goal to {to}? The change is recorded in the audit trail."
-    ]
-    return asked
 
 
 def newest_trail_actions(page: Page, url: str, n: int) -> list[str]:
@@ -48,11 +61,11 @@ def newest_trail_actions(page: Page, url: str, n: int) -> list[str]:
     return [rows.nth(i).locator("td[data-label=Action]").inner_text() for i in range(n)]
 
 
-def fits(page: Page, scheme: str) -> None:
+def fits(page: Page, where: str) -> None:
     assert not page.evaluate(
         "document.documentElement.scrollWidth > document.documentElement.clientWidth"
-    ), f"the Dossier scrolls sideways, {scheme}"
-    assert small_targets(page) == []
+    ), f"the Dossier scrolls sideways, {where}"
+    assert small_targets(page) == [], where
 
 
 @pytest.mark.parametrize("width", [1280, 400])
@@ -60,12 +73,26 @@ def fits(page: Page, scheme: str) -> None:
 def test_the_lead_changes_the_goal_and_back_and_the_trail_shows_both(
     page: Page, dossier_url, width, scheme
 ):
+    dialogs = dialogs_of(page)
     page.set_viewport_size({"width": width, "height": 900})
     page.emulate_media(color_scheme=scheme)
     open_dossier(page, dossier_url)
     goal = page.locator(".hero .goal")
     expect(goal).to_contain_text("Goal: Audit readiness")
     fits(page, scheme)
+
+    # Escape and Cancel close the ask, send nothing, and put focus back on Change goal.
+    sent: list[str] = []
+    page.on("request", lambda r: sent.append(r.url) if "/api/goal" in r.url else None)
+    ask(page, "Internal improvement")
+    fits(page, f"{scheme}, the ask open")
+    page.keyboard.press("Escape")
+    expect(page.locator(".inline-confirm")).to_have_count(0)
+    expect(goal.get_by_role("button", name="Change goal")).to_be_focused()
+    ask(page, "Internal improvement")
+    page.get_by_role("button", name="Cancel").click()
+    expect(goal.get_by_role("button", name="Change goal")).to_be_focused()
+    assert sent == []
 
     change_goal(page, "Internal improvement")
     expect(goal).to_contain_text("Goal: Internal improvement")
@@ -79,3 +106,4 @@ def test_the_lead_changes_the_goal_and_back_and_the_trail_shows_both(
     change_goal(page, "Audit readiness")
     expect(goal).to_contain_text("Goal: Audit readiness")
     assert newest_trail_actions(page, dossier_url, 2) == [TO_READINESS, TO_IMPROVEMENT]
+    assert dialogs == []

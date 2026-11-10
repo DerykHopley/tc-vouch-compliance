@@ -87,6 +87,10 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
    open, the next round's name field between the words and Start round. */
 .hero .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
 .hero .round .field { flex: 0 1 240px; }
+/* The in-app ask on Change goal and Close round (#441, design.md Components: Goal): in the button's place, on a row of
+   its own under the line's words, the question over its two buttons. Placed anywhere the controls are (#505). */
+.inline-confirm { flex: 1 1 100%; display: grid; gap: 8px; }
+.hero .inline-confirm .field-note { margin-top: 0; }
 /* The round comparison (#402, design.md Components: Round comparison): counts now and their change, then the changed
    controls, each a link to its working paper at least 44px tall. */
 .compare-counts, .compare-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
