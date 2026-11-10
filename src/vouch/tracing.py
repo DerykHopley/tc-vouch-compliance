@@ -37,15 +37,15 @@ from uuid import UUID
 from langchain_core.outputs import LLMResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.runnables.config import ensure_config, get_callback_manager_for_config
-from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import Status
 
 from vouch.settings import LangfuseKeys
 
 if TYPE_CHECKING:
     import requests
-    from opentelemetry.sdk.trace import TracerProvider
 
     from vouch.settings import Settings
     from vouch.spending import Usage
@@ -101,12 +101,26 @@ class TraceFacts:
         return trace | {k: v for k, v in facts.items() if v is not None}
 
 
+def own_tracer_provider() -> TracerProvider:
+    """The tracer provider a Langfuse client gets when none is given (#546): Vouch's own, never
+    the process-wide one. Left to itself, Langfuse registers its provider process-wide; FastAPI's
+    telemetry then switches on and parents each request's spans on its `traceparent`, which Cloud
+    Run flags not sampled for most requests, and the run's trace is silently dropped. It records
+    every span whatever a parent span says (ALWAYS_ON), so no request's sampling decides what
+    Vouch traces, and Langfuse's `sample_rate` (LANGFUSE_SAMPLE_RATE) has no effect: it only
+    configures the provider Langfuse makes. Langfuse sets each span's environment and release
+    itself (LangfuseSpan), so the resource Langfuse's own provider would carry adds nothing."""
+    return TracerProvider(sampler=ALWAYS_ON)
+
+
 class Tracing:
     """One Langfuse client for the process, and a fresh handler per run (`config`).
 
     `span_exporter` and `tracer_provider` are the test seams: an in-memory exporter receives
     what would be sent, redacted; with neither, the client sends to `keys.base_url`
-    (langfuse_exporter). Either way RedactingSpanExporter wraps it."""
+    (langfuse_exporter). Either way RedactingSpanExporter wraps it. With no `tracer_provider`
+    the client gets own_tracer_provider(), so the process-wide one is never set (#546), and
+    `shutdown` stops it; a provider passed in is the caller's to stop."""
 
     def __init__(
         self,
@@ -119,12 +133,13 @@ class Tracing:
 
         self.public_key = keys.public_key
         sending = span_exporter or langfuse_exporter(keys)
+        self._own_provider = None if tracer_provider else own_tracer_provider()
         self.client = Langfuse(
             public_key=keys.public_key,
             secret_key=keys.secret_key.get_secret_value(),
             base_url=keys.base_url,
             span_exporter=RedactingSpanExporter(sending),
-            tracer_provider=tracer_provider,
+            tracer_provider=tracer_provider or self._own_provider,
         )
 
     def __repr__(self) -> str:
@@ -162,12 +177,18 @@ class Tracing:
             )
 
     def shutdown(self) -> None:
-        """Send what the client holds and stop it, when the app or the eval runner ends; a
-        failure is logged, never the caller's."""
+        """Send what the client holds and stop it, when the app or the eval runner ends, then
+        Vouch's own provider, whose send thread Langfuse's shutdown leaves running; a failure
+        is logged, never the caller's."""
         try:
             self.client.shutdown()
         except Exception:
             log.exception("the Langfuse client could not be shut down")
+        if self._own_provider is not None:
+            try:
+                self._own_provider.shutdown()
+            except Exception:
+                log.exception("the tracer provider could not be shut down")
 
 
 def cost_details(response: LLMResult, model: str | None) -> dict[str, float] | None:
