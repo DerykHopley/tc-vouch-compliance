@@ -10,6 +10,7 @@ import re
 import pytest
 from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
+from hyphen_breaks import UNHYPHENATED_BREAKS
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -399,38 +400,6 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert item["width"] <= width, item
 
 
-# Each quote word on the judged table that breaks across lines without a hyphen, read once the
-# fonts have loaded and layout has settled (as CARD_PARTS). A word's range has one rect per line it
-# is on; Chromium gives a hyphen it inserts a rect of its own at the end of the line, so a word
-# broken with a hyphen has two rects on every line but its last, and one broken anywhere has one.
-UNHYPHENATED_BREAKS = (
-    "async () => {"
-    + FONTS_SETTLED
-    + r"""  const words = []
-  const breaks = []
-  for (const quote of document.querySelectorAll('table.reqs.judged .quotes-cell blockquote')) {
-    const walk = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT)
-    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
-      for (const word of node.data.matchAll(/\p{L}+/gu)) {
-        const range = document.createRange()
-        range.setStart(node, word.index)
-        range.setEnd(node, word.index + word[0].length)
-        const perLine = new Map()
-        for (const r of range.getClientRects()) {
-          const top = Math.round(r.top)
-          perLine.set(top, (perLine.get(top) ?? 0) + 1)
-        }
-        words.push(word[0])
-        const lines = [...perLine.keys()].sort((a, b) => a - b)
-        if (lines.slice(0, -1).some((top) => perLine.get(top) < 2)) breaks.push(word[0])
-      }
-    }
-  }
-  return { words: words.length, breaks }
-}"""
-)
-
-
 def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
     page: Page, paper_url, nordlicht_later
 ):
@@ -454,7 +423,7 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
     expect(quotes.first).to_be_visible()
     assert set(quotes.evaluate_all("qs => qs.map((q) => q.lang)")) == {"de"}
 
-    found = page.evaluate(UNHYPHENATED_BREAKS)
+    found = page.evaluate(UNHYPHENATED_BREAKS, "table.reqs.judged .quotes-cell blockquote")
 
     assert found["words"], f"Alpenwerk's {WIDE} shows no quote to measure"
     assert found["breaks"] == [], f"quote words broken without a hyphen: {found['breaks']}"
