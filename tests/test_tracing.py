@@ -15,6 +15,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from datetime import date
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableLambda
@@ -574,6 +575,54 @@ def test_a_reported_cost_on_an_unpriced_model_is_sent_as_its_total():
 
 def test_a_call_whose_cost_cant_be_known_sends_none_never_zero():
     assert tracing_module.cost_details(llm_result(12, 5), UNPRICED_MODEL) is None
+
+
+# --- A failed call's cost (#508) ---------------------------------------------------------------
+
+
+class FailedCall(RuntimeError):
+    """A model call that failed, its response body as OpenRouter's error carries it (`response`,
+    which langchain-core reads into the failed generation's metadata)."""
+
+    def __init__(self, body: dict) -> None:
+        super().__init__("502 from the provider")
+        self.response = httpx.Response(502, json=body)
+
+
+def failed_generations(on: Tracing, exporter, monkeypatch, error: Exception) -> list[ReadableSpan]:
+    """The generations of an assessment whose every model call fails with `error`."""
+
+    def failing(self, *args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(ScriptedChatModel, "_generate", failing)
+    response = TestClient(traced_app(on)).post(
+        "/api/assessments", json={"control_id": DEMO_CONTROL}, headers=new_user()
+    )
+    assert "event: error" in response.text
+    [spans] = traces(on, exporter).values()
+    generations = of_type(spans, "generation")
+    assert generations
+    assert all(g.attributes["langfuse.observation.level"] == "ERROR" for g in generations)  # type: ignore[index]
+    return generations
+
+
+def test_a_failed_call_whose_cost_is_unknown_carries_no_cost_never_zero(exported, monkeypatch):
+    """Langfuse's own error path sends `{"total": 0}`; a failed call may have been billed."""
+    on, exporter = exported
+
+    generations = failed_generations(on, exporter, monkeypatch, FailedCall({"error": "busy"}))
+
+    assert [(g.attributes or {}).get(COST) for g in generations] == [None] * len(generations)
+
+
+def test_a_failed_call_carries_the_cost_its_error_reports(exported, monkeypatch):
+    on, exporter = exported
+    body = {"error": "busy", "usage": {"prompt_tokens": 40, "completion_tokens": 3, "cost": 0.002}}
+
+    generations = failed_generations(on, exporter, monkeypatch, FailedCall(body))
+
+    assert [c["total"] for c in costs(generations)] == [pytest.approx(0.002)] * len(generations)
 
 
 # --- What is never sent ------------------------------------------------------------------------

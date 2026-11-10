@@ -2,8 +2,9 @@
 
 With both Langfuse keys set (vouch.settings.LangfuseKeys), each assessment run, chat turn and
 profile pass is one trace: its LangGraph steps, each model call (prompt, answer, model, tokens,
-and the cost Vouch records for it, #504: cost_details), and each tool call, tagged with the
-profile, the control, the model and the prompt version, its user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
+and the cost Vouch records for it, #504: cost_details; a failed call's too, or none, #508),
+and each tool call, tagged with the profile, the control, the model and the prompt version, its
+user the signed-in user's id. With either key unset, `start_tracing` gives None: no Langfuse
 client is made, nothing is imported from it, and no call is sent.
 
 A run is traced by its RunnableConfig: `traced` gives one holding a fresh Langfuse LangChain
@@ -43,6 +44,8 @@ from vouch.settings import LangfuseKeys
 
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace import TracerProvider
+
+    from vouch.spending import Usage
 
 log = logging.getLogger(__name__)
 
@@ -171,12 +174,31 @@ def cost_details(response: LLMResult, model: str | None) -> dict[str, float] | N
     proportion of the model's list prices; the total alone for a model PRICES doesn't list.
     None when the cost can't be known, so nothing counts as $0."""
     # Imported here: vouch.spending imports vouch.model_choice, which imports this module.
-    from vouch.model_choice import DEFAULT_MODEL
-    from vouch.spending import PRICES, UsageMeter
+    from vouch.spending import UsageMeter
 
     meter = UsageMeter(model)
     meter.on_llm_end(response)
-    usage = meter.usage()
+    return _metered_cost(meter.usage(), model)
+
+
+def error_cost_details(
+    error: BaseException, response: LLMResult | None, model: str | None
+) -> dict[str, float] | None:
+    """A failed model call's cost as `cost_details` gives a call's (#508): the cost Vouch
+    records for it (UsageMeter.on_llm_error: what its error's body carries); None when the
+    error carries none, as the call may still have been billed."""
+    from vouch.spending import UsageMeter
+
+    meter = UsageMeter(model)
+    meter.on_llm_error(error, response=response)
+    return _metered_cost(meter.usage(), model)
+
+
+def _metered_cost(usage: "Usage", model: str | None) -> dict[str, float] | None:
+    """One call's usage, as its UsageMeter recorded it, as `cost_details`."""
+    from vouch.model_choice import DEFAULT_MODEL
+    from vouch.spending import PRICES
+
     if not usage.cost_complete:
         return None
     total = usage.cost_usd
@@ -226,7 +248,31 @@ def _costing_handler() -> type[Any]:
                 log.exception("a model call's cost couldn't be added to its trace")
             return super().on_llm_end(response, run_id=run_id, **kwargs)
 
+        def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> Any:
+            # Langfuse's own error path ends the generation with `cost_details={"total": 0}`,
+            # though the call may have been billed (#508). The generation's update is made to
+            # send the cost Vouch records for the call instead: none at all when it's unknown,
+            # including when it can't be worked out.
+            cost = None
+            try:
+                cost = error_cost_details(error, kwargs.get("response"), self.vouch_model)
+            except Exception:
+                log.exception("a failed model call's cost couldn't be added to its trace")
+            generation = self._runs.get(run_id)
+            if isinstance(generation, LangfuseGeneration):
+                generation.update = _with_cost(generation.update, cost)  # type: ignore[method-assign]
+            return super().on_llm_error(error, run_id=run_id, **kwargs)
+
     return CostingCallbackHandler
+
+
+def _with_cost(update: Callable[..., Any], cost: dict[str, float] | None) -> Callable[..., Any]:
+    """A generation's `update`, its `cost_details` always `cost` (None: none sent)."""
+
+    def costed(**fields: Any) -> Any:
+        return update(**fields | {"cost_details": cost})
+
+    return costed
 
 
 def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
