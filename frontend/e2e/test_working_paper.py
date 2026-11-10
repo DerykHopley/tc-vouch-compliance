@@ -286,3 +286,27 @@ def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, p
 
     expect(paper.get_by_role("columnheader", name="Requirement", exact=True)).to_be_visible()
     expect(paper.get_by_role("button", name="Show full requirement")).to_have_count(0)
+
+
+def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
+    # #359: Alpenwerk's 1.1.1 on the German demo script cites the logging policy, approved
+    # 2023-05-10 for a yearly review, so stale; the API serves its reason in German. On the
+    # report's server (Alpenwerk on the demo fake): the paper's server spends its whole daily
+    # assessment limit on its own checks, and one more there was refused with a 429.
+    response = page.request.post(
+        f"{report_url}/api/assessments",
+        data={"control_id": "1.1.1"},
+        headers={"X-Vouch-Profile": "alpenwerk"},
+    )
+    assert response.ok, response.status
+    assert "event: result" in response.text()
+    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+
+    paper = open_paper(page, report_url, "1.1.1", assessed=True)
+
+    flag = row(paper, "S4").locator("figcaption .flag")  # the quote's, not the evidence column's
+    expect(flag).to_have_text(
+        "Prüfung überfällig: freigegeben am 2023-05-10, jährlich zu prüfen, fällig am 2024-05-10"
+    )
+    expect(flag).to_have_attribute("lang", "de")
+    expect(paper.get_by_text(re.compile(r"^Stale: "))).to_have_count(0)
