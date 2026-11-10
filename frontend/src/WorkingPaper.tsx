@@ -1,16 +1,18 @@
 import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
-  type Assessment, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
+  type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { setUnsaved } from './leaving.ts'
+import OpenQuestions from './OpenQuestions.tsx'
 import Prose from './Prose.tsx'
-import Remediation from './Remediation.tsx'
+import Remediation, { type Plan } from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
-import { type Override, rollUp, rollUpWords, withOverrides } from './review.ts'
+import type { Goal } from './report.ts'
+import { type Override, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import StepText from './StepText.tsx'
 import VerdictChip from './VerdictChip.tsx'
@@ -36,11 +38,49 @@ const RunChip = ({ run }: { run: Run }) =>
   <VerdictChip verdict={run.status === 'done' ? run.assessment.verdict : null} assessing={run.status === 'running'}
     language={answerLanguage(run)} />
 
-/** The assess button: busy while running, Retry when the service could not be reached; `held` while another runs. */
-function AssessButton({ id, run, held, onAssess }: { id: string; run: Run; held: boolean; onAssess: () => void }) {
+/**
+ * The assess button: busy while running, Retry when the service could not be reached; `held` while another runs. On a
+ * review in progress (`warnFirst`: at Plan fixes or Accept, #437) a click starts nothing: an in-app warning takes the
+ * button's place, with Assess <id> again anyway, which starts the run, and Keep the review, which closes it.
+ */
+function AssessButton({ id, run, held, onAssess, warnFirst = false }:
+  { id: string; run: Run; held: boolean; onAssess: () => void; warnFirst?: boolean }) {
+  const [warning, setWarning] = useState(false)
+  // The pressed button leaves the page as the warning opens or closes: focus moves to Keep the review, then back to
+  // Assess again, so a keyboard user isn't left on the page's body.
+  const toggled = useRef(false)
+  const keep = useRef<HTMLButtonElement>(null)
+  const assess = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!toggled.current) return
+    toggled.current = false
+    const next = warning ? keep : assess
+    next.current?.focus()
+  }, [warning])
+  const toggle = (open: boolean) => {
+    toggled.current = true
+    setWarning(open)
+  }
   const busy = run.status === 'running'
+  if (warning && warnFirst) {
+    return (
+      <>
+        <p className="field-note" role="alert">
+          Assessing {id} again sets its review aside: the findings you confirmed and the remediation items you decided
+          won't carry over to the new assessment. Nothing is deleted; they stay in the audit trail.
+        </p>
+        <div className="review-actions">
+          <button className="btn btn-primary" disabled={held} onClick={() => { setWarning(false); onAssess() }}>
+            Assess {id} again anyway
+          </button>
+          <button ref={keep} className="btn btn-ghost" onClick={() => toggle(false)}>Keep the review</button>
+        </div>
+      </>
+    )
+  }
   return (
-    <button className="btn btn-primary" onClick={onAssess} disabled={busy || held} aria-busy={busy}
+    <button ref={assess} className="btn btn-primary" onClick={warnFirst ? () => toggle(true) : onAssess}
+      disabled={busy || held} aria-busy={busy}
       aria-label={`${ACTION[run.status]} ${id}`}>
       {ACTION[run.status]}
     </button>
@@ -63,11 +103,14 @@ function ToOverview({ onOverview }: { onOverview: () => void }) {
 type PaperProps = {
   /** The overview: the company; the profile's protection level, answer language and requirements; the cards (the
    * control index). */
-  overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'>
+  overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'
+    | 'questions'> & { goal?: Goal }
   /** The open control's card. */
   card: ControlCard
   /** The control being assessed just now, if any (one run at a time, maybe of another control). */
   running: string | null
+  /** A profile pass is running (#390): Assess waits for it, as for another control's run. */
+  passing?: boolean
   run: Run
   /** The control's stored assessment is still being read: the paper shows neither verdict nor Assess yet. */
   checking?: boolean
@@ -82,6 +125,8 @@ type PaperProps = {
   onItemDecided: (threadId: string, item: RemediationItem) => void
   /** Reads the assessment again (another tab reviewed it first); false when it couldn't be. */
   onRefresh: () => Promise<boolean>
+  /** An open question was logged or answered (#414): the overview is read again, for the list and the card's flags. */
+  onQuestionsChanged: () => void
 }
 
 /**
@@ -90,9 +135,9 @@ type PaperProps = {
  * draft answer, then one row per requirement: its column, verdict, evidence kind, stale flag, reason and exact quotes.
  */
 export default function WorkingPaper(props: PaperProps) {
-  const { overview, card, running, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
-    onItemDecided } = props
-  // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until the decision; the
+  const { overview, card, running, passing = false, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
+    onItemDecided, onQuestionsChanged } = props
+  // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
   // afresh. A decision on an earlier one landing late can't touch them, as nothing but this resets them.
@@ -122,22 +167,37 @@ export default function WorkingPaper(props: PaperProps) {
   const elsewhere = running !== null && running !== card.id ? running : null
   const agentVerdicts: Record<string, Verdict> = Object.fromEntries(
     (assessed?.requirements ?? []).map((r) => [r.id, r.verdict]))
-  // A proposed control's requirements can be overridden; a reviewed one's show the overrides the lead made.
-  const marks: Overrides = review === 'waiting-for-review'
+  // The step of a proposed control's review (#372), its items as the page holds them.
+  const step = assessed ? reviewStep(assessed) : null
+  const remediation = assessed?.remediation ?? []
+  // At Confirm findings the requirements can be overridden; after, they show the overrides the lead recorded.
+  const recorded = assessed?.review?.overrides ?? assessed?.confirmed ?? []
+  const marks: Overrides = step === 'confirm-findings'
     ? { editable: true, saved: overrides, agentVerdicts,
       replaced: Object.fromEntries(overrides.map((o) => [o.requirement_id, agentVerdicts[o.requirement_id]])) }
     : { editable: false, saved: [], agentVerdicts,
-      replaced: Object.fromEntries((assessed?.review?.overrides ?? []).map((o) => [o.requirement_id, o.agent_verdict])) }
+      replaced: Object.fromEntries(recorded.map((o) => [o.requirement_id, o.agent_verdict])) }
   const save = (next: Override) => {
     setOverrides((now) => [...now.filter((o) => o.requirement_id !== next.requirement_id), next])
     setEditing(null)
   }
   const undo = (id: string) => setOverrides((now) => now.filter((o) => o.requirement_id !== id))
-  const assessingElsewhere = elsewhere !== null && <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
+  const assessingElsewhere = elsewhere !== null ? <AssessingElsewhere controlId={elsewhere} onOpen={onOpen} />
+    : passing && <p className="field-note">Vouch is running a profile pass. One run at a time.</p>
+  const held = elsewhere !== null || passing
+  // The improvement plan (#410), in the Internal improvement goal only: each item's priority and done mark; a
+  // re-assessment suggested once every approved item of the accepted control is done; Closed from its card.
+  const improving = overview.goal === 'internal-improvement'
+  const plan: Plan | undefined = improving ? { accepted: review === 'accepted' } : undefined
+  const approvedItems = remediation.filter((i) => i.status === 'approved')
+  const reassess = improving && review === 'accepted' && approvedItems.length > 0 && approvedItems.every((i) => i.done)
+  const closed = improving && review === 'accepted' && card.closed === true
+  // The open questions' reasons (#414), in both goals, while the control's newest assessment is accepted.
+  const questionReasons = review === 'accepted' ? card.reassess_reasons ?? [] : []
   return (
     <div className="wp">
       <ControlIndex controls={overview.controls} openId={card.id} running={running} run={run} onOpen={onOpen}
-        language={overview.answer_language} />
+        language={overview.answer_language} improving={improving} />
       <section className="paper wrap" aria-label="Working paper">
         <nav className="crumbs" aria-label="Breadcrumb">
           <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>
@@ -155,7 +215,7 @@ export default function WorkingPaper(props: PaperProps) {
           {!checking && (
             <div className="paper-meta">
               <span>Verdict</span><RunChip run={run} />
-              {review && <span className={`tag tag-${review}`}>{REVIEW_WORDS[review]}</span>}
+              {review && <span className={`tag tag-${review}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[review]}</span>}
             </div>
           )}
           {!checking && explained && (
@@ -196,26 +256,48 @@ export default function WorkingPaper(props: PaperProps) {
                   profile.
                 </p>
               )}
-              <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
+              {reassess && (
+                <p className="field-note">
+                  Every approved remediation item is done. Assess {card.id} again: the control is Closed once that
+                  assessment is accepted with no gaps.
+                </p>
+              )}
+              {questionReasons.includes('question-answered') && (
+                <p className="field-note">
+                  An open question was answered. Assess {card.id} again so its verdict takes the answer into account.
+                </p>
+              )}
+              {questionReasons.includes('question-overdue') && (
+                <p className="field-note">An open question is overdue. Assess {card.id} again with what is known now.</p>
+              )}
+              {/* Keyed by the assessment shown, so a warning open on one never shows on another. */}
+              <AssessButton key={assessed?.thread_id} id={card.id} run={run} held={held} onAssess={() => onAssess()}
+                warnFirst={step === 'plan-fixes' || step === 'accept'} />
               {assessingElsewhere}
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
                 language={answerLanguage(run)}
                 onEdit={setEditing} onSave={save} onUndo={undo} items={{
-                  shown: assessed?.remediation ?? [], threadId: assessed?.thread_id ?? '',
-                  decidable: review === 'accepted',
+                  shown: remediation, threadId: assessed?.thread_id ?? '',
+                  // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
+                  decidable: step === 'plan-fixes' || step === 'accept' || review === 'accepted',
                   onDecided: (item) => { if (assessed?.thread_id) onItemDecided(assessed.thread_id, item) },
+                  plan,
                 }} />
             ) : <Requirements requirements={requirements} language={overview.answer_language} />}
             {assessed?.status && assessed.thread_id && (
               <ReviewBar key={`${assessed.thread_id}:${reads}`} status={assessed.status} threadId={assessed.thread_id}
-                review={assessed.review} overrides={overrides} editing={editing} onReviewed={onReviewed}
+                review={assessed.review} beforeThreeStep={assessed.before_three_step_review} step={step}
+                overrides={overrides} editing={editing} onReviewed={onReviewed}
+                items={{ decided: remediation.filter((i) => i.status !== 'draft').length, total: remediation.length }}
                 onRefresh={onRefresh} assessAgain={<>
-                  <AssessButton id={card.id} run={run} held={elsewhere !== null} onAssess={() => onAssess()} />
+                  <AssessButton id={card.id} run={run} held={held} onAssess={() => onAssess()} />
                   {assessingElsewhere}
                 </>} />
             )}
+            <OpenQuestions key={card.id} controlId={card.id} questions={overview.questions?.[card.id] ?? []}
+              onChanged={onQuestionsChanged} />
           </>
         )}
       </section>
@@ -232,6 +314,8 @@ type IndexProps = {
   onOpen: (controlId: string) => void
   /** The profile's answer language: the verdicts' (#200). */
   language: string
+  /** The Internal improvement goal: a Closed card's tag reads Closed (#410). */
+  improving: boolean
 }
 
 /** The run with the lead's overrides in place in its assessment, and the control's verdict recalculated from them. */
@@ -252,7 +336,7 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 }
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. */
-function ControlIndex({ controls, openId, running, run, onOpen, language }: IndexProps) {
+function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   return (
     <nav className="wp-index" aria-label="Controls">
       {areas(controls).map(([area, cards]) => (
@@ -270,7 +354,8 @@ function ControlIndex({ controls, openId, running, run, onOpen, language }: Inde
                 <span className="mono">{card.id}</span>
                 <span className="wp-state">
                   <VerdictChip verdict={verdict} assessing={assessing} language={language} />
-                  {!assessing && status && <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>}
+                  {!assessing && status && <span className={`tag tag-${status}`}>
+                    {improving && status === 'accepted' && card.closed ? CLOSED_WORD : REVIEW_WORDS[status]}</span>}
                 </span>
                 <span className="wp-q" lang={language}>{card.question}</span>
               </PaperLink>
@@ -317,8 +402,8 @@ function Requirements({ requirements, language }: { requirements: PaperRequireme
 
 /**
  * The lead's overrides on the requirements: `replaced` holds the agent's verdict of each overridden one, `saved` the
- * overrides not yet recorded, `agentVerdicts` every requirement's own. `editable` while the control is proposed,
- * when each requirement that applies has "Change".
+ * overrides not yet recorded, `agentVerdicts` every requirement's own. `editable` at Confirm findings (#372), when each
+ * requirement that applies has "Change".
  */
 type Overrides = {
   editable: boolean
@@ -327,13 +412,15 @@ type Overrides = {
   agentVerdicts: Record<string, Verdict>
 }
 
-/** The assessment's remediation items, one per requirement not or partly evidenced (#43, #212): `decidable` once it
- * is accepted. */
+/** The assessment's remediation items, one per requirement not or partly evidenced (#43, #212): `decidable` once its
+ * findings are confirmed (Plan fixes, #372). */
 type RemediationItems = {
   shown: RemediationItem[]
   threadId: string
   decidable: boolean
   onDecided: (item: RemediationItem) => void
+  /** The improvement plan (#410); undefined under Audit readiness. */
+  plan?: Plan
 }
 
 type JudgedProps = {
@@ -353,7 +440,7 @@ type JudgedProps = {
 /**
  * The assessment's requirements: verdict, evidence kind and stale flag, then the reason and the exact quotes. An
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
- * overridden requirement says what the agent's verdict was; on a proposed control, "Change" opens a row to override
+ * overridden requirement says what the agent's verdict was; at Confirm findings, "Change" opens a row to override
  * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
  * to evidenced on screen hides its draft, which the review drops. On a phone each row is a stacked card, by CSS, its
  * text clamped to 2 lines with a toggle (`RequirementText`, #211).
@@ -462,7 +549,8 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   {item && items.threadId && (
                     // A new key when the item changes, so its fields start from the kept values.
                     <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
-                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language} />
+                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language}
+                      plan={items.plan} />
                   )}
                 </div></td>
               </tr>,

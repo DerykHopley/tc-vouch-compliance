@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How Vouch runs</title>
-<meta name="description" content="One assessment through Vouch end to end: FastAPI, the LangGraph graphs, the LangChain model calls, the guards, and what is written to Postgres when.">
+<meta name="description" content="One assessment through Vouch end to end, and the profile pass: FastAPI, the LangGraph graphs, the LangChain model calls, the guards, the three-step review, and what is written to Postgres when.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -142,7 +142,8 @@ svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
 <header>
   <p class="eyebrow">Vouch · runtime process flow</p>
   <h1>How Vouch runs an assessment</h1>
-  <p class="lede">One VDA ISA control, from the lead's click to a reviewed verdict and the readiness report:
+  <p class="lede">One VDA ISA control, from the lead's click through the three-step review to a reviewed verdict
+  and the report, and beside it the profile pass, which assesses every open control in one model run:
   each step, the technology it runs on, where LangGraph and LangChain come in, which guard checks what,
   and when Postgres is written.</p>
   <p class="note"><strong>Two agent layers.</strong> The chat is a ReAct agent that answers questions and starts assessments;
@@ -182,11 +183,18 @@ asked to sign off, it links the working paper. Its <code>start_assessment</code>
 the <code>answer</code> guard checks every reply and can send it back to <code>agent</code>.</p>
 <div class="scroll"><svg id="chat" role="img" aria-label="Process flow of one Ask Vouch chat turn"></svg></div>
 
+<h2>3 · The profile pass</h2>
+<p class="note">Every open control of a small compliance profile in one structured model call, with all its evidence
+in the prompt: no ReAct loop and no tools. The same guards then run on each control's part of the reply, in code,
+and each result is written onto its own thread of diagram 1's graph, waiting at its <code>review</code> interrupt for
+the same three-step review. Controls already accepted are skipped.</p>
+<div class="scroll"><svg id="pass" role="img" aria-label="Process flow of one profile pass"></svg></div>
+
 <ul class="legend" id="legend"></ul>
 
 <footer>
-  As of main <code>fafa7a1</code> (2026-11-09), read from <code>src/vouch/</code>.
-  M7 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/350">#350</a>) changes the review into three steps and adds a profile pass; this page draws today's main only.
+  As of <code>spec/350-keep-improving</code> <code>4b74e60</code> (2026-11-09), read from <code>src/vouch/</code>:
+  M7 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/350">#350</a>), with the three-step review, the profile pass, review rounds, the improvement plan, open questions and the lead's statements.
   The domain words are <a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/GLOSSARY.md">GLOSSARY.md</a>'s.
   · <a href="../evals/">Model evals</a>
 </footer>
@@ -214,7 +222,7 @@ const MAIN = {
     { span: [2, 3], card: { id: "model", type: "external", tag: "LangChain → OpenRouter", title: "The model",
       body: "ChatOpenAI (langchain-openai) on OpenRouter's API. BudgetedChatOpenAI stops a run past 12 calls, one retry each; the UsageMeter callback counts tokens and cost on every call. No key set: a scripted fake model, offline.",
       tech: "vouch.model_choice · vouch.spending" } },
-    { span: [4, 5], card: { id: "sec", type: "guard", tag: "Security", title: "Four layers, in code outside the model",
+    { span: [4, 6], card: { id: "sec", type: "guard", tag: "Security", title: "Four layers, in code outside the model",
       body: "1 input limits · 2 every tool call checked against the profile's allow-list · 3 evidence reaches the model as data, instruction-like text flagged · 4 secrets and personal data redacted from every event and log line",
       tech: "vouch.limits · vouch.allow_list · vouch.guards · vouch.redaction" } },
   ],
@@ -272,64 +280,100 @@ const MAIN = {
       { id: "check", type: "guard", tag: "Node · guard", title: "check_answer", mono: true,
         body: "No audit-result claim (“compliant”, “certified”) and the profile's language; else back to gather, once." },
       { id: "judge", type: "graph", tag: "LangGraph node", title: "judge", mono: true, model: true,
-        body: "A verdict and its quotes for each requirement. Nothing could be read: not evidenced, with no call.",
+        body: "A verdict and its quotes for each requirement. An answered open question on the control reaches it as the lead's statement (Q<id>), as data. Nothing could be read: not evidenced, with no call.",
         tech: "with_structured_output · Judgement" },
       { id: "quotes", type: "guard", tag: "Node · guard", title: "check_quotes", mono: true,
-        body: "A quote not found in the document it cites (4+ words) is dropped. Stale evidence caps a verdict at partly; so does documented-only evidence for a requirement about doing.",
+        body: "A quote not found in the document it cites (4+ words) is dropped; a quote of the lead's statement is checked word for word the same way. Stale evidence caps a verdict at partly; so does documented-only evidence for a requirement about doing, and the lead's statement.",
         tech: "vouch.citations · vouch.documents" },
       { id: "remediate", type: "graph", tag: "LangGraph node", title: "remediate", mono: true, model: true,
         body: "One remediation item for each requirement not or partly evidenced.",
         tech: "with_structured_output · RemediationPlan" },
     ] },
-    { title: "Review", sub: "interrupt · vouch.audit",
-      summary: "The graph pauses for the compliance lead; their decision resumes it and goes into the audit trail.",
+    { title: "Review", sub: "two interrupts · vouch.audit",
+      summary: "Three steps: Confirm findings and Accept each pause the graph at an interrupt; Plan fixes happens outside it, between them. Each step goes into the audit trail.",
       chips: "LangGraph interrupt · FastAPI · Postgres", cards: [
       { id: "review", type: "graph", tag: "LangGraph node", title: "review · interrupt()", mono: true,
-        body: "The run pauses; its thread waits in the checkpointer. On resume the node runs again and applies the decision." },
-      { id: "lead", type: "lead", tag: "Compliance lead", title: "Reviews on the working paper",
-        body: "Accepts or rejects, overrides a verdict with a reason, adds a note; then approves or discards each remediation item." },
-      { id: "areview", type: "api", tag: "FastAPI", title: "POST …/{id}/review", mono: true,
-        body: "vouch.audit.review resumes the thread with Command(resume=…); the decision and its audit entries go in one transaction.",
+        body: "Confirm findings. The run pauses; its thread waits in the checkpointer. On resume the overrides are applied and the remediation items recalculated; a Reject ends the review here." },
+      { id: "lead", type: "lead", tag: "Compliance lead", title: "Confirm findings",
+        body: "Confirms or overrides each requirement's verdict on the working paper, each override with a reason." },
+      { id: "afind", type: "api", tag: "FastAPI", title: "POST …/{id}/findings", mono: true,
+        body: "vouch.audit.confirm_findings resumes the thread with the findings; the step and its audit entries (each override, findings confirmed) go in one transaction.",
         writes: "checkpoint · vouch_audit_trail" },
+      { id: "plan", type: "lead", tag: "Compliance lead", title: "Plan fixes",
+        body: "Outside the graph: approves (owner role, due date) or discards each remediation item. Skipped when nothing is missing." },
       { id: "rdecide", type: "api", tag: "FastAPI", title: "POST …/remediation/{req}", mono: true,
-        body: "An accepted assessment's item approved (owner role, due date) or discarded, with its audit entry.",
+        body: "One item approved or discarded, with its audit entry.",
         tech: "vouch.remediation",
         writes: "vouch_remediation_items · vouch_audit_trail" },
+      { id: "accept", type: "graph", tag: "LangGraph node", title: "accept · interrupt()", mono: true,
+        body: "Accept, the last step (or Reject). The run pauses again until the lead decides; the review keeps the overrides confirmed with the findings." },
+      { id: "areview", type: "api", tag: "FastAPI", title: "POST …/{id}/review", mono: true,
+        body: "Resumes the thread with Command(resume=…). An Accept is refused (409) before the findings are confirmed or while an item is still a draft; the decision and its audit entry go in one transaction.",
+        writes: "checkpoint · vouch_audit_trail" },
     ] },
     { title: "Outputs", sub: "what the lead sees",
-      summary: "The streamed steps, the Dossier overview and the readiness report; the chat has its own diagram below.",
+      summary: "The streamed steps, the Dossier overview with the goal and the review round, review rounds, and the report; the chat has its own diagram below.",
       chips: "SSE · fpdf2 · no model call", cards: [
       { id: "stream", type: "browser", tag: "Browser · SSE", title: "Streamed steps",
         body: "A step event as each node finishes, each requirement once its quotes are checked, then the result with its usage. All redacted.",
         tech: "vouch.redaction · layer 4",
         writes: "vouch_usage, when the stream ends" },
       { id: "overview", type: "api", tag: "FastAPI", title: "Dossier overview",
-        body: "Readiness from each control's newest assessment; accepted verdicts only.",
-        tech: "GET /overview · vouch.dossier" },
-      { id: "report", type: "api", tag: "FastAPI", title: "Readiness report",
-        body: "One profile's standing for management or an auditor, as a page, Markdown or PDF. No model call.",
+        body: "The profile's goal (Audit readiness or Internal improvement), the open review round and the comparison with the last closed one; readiness from accepted verdicts only.",
+        tech: "GET /overview · PUT /goal · vouch.dossier",
+        writes: "vouch_profile_goals · vouch_audit_trail, on a goal change" },
+      { id: "rounds", type: "api", tag: "FastAPI", title: "Review rounds",
+        body: "The lead names and starts a round (the first opens on its own) and closes it: closing freezes each control's result, for the next round's comparison.",
+        tech: "POST /api/rounds · POST /api/rounds/close · vouch.rounds",
+        writes: "vouch_review_rounds · vouch_audit_trail" },
+      { id: "report", type: "api", tag: "FastAPI", title: "Readiness report or improvement report, by the goal",
+        body: "One profile's standing as a page, Markdown or PDF, from the same routes: for management and an auditor, or for the team. No model call.",
         tech: "/report · /report/markdown · /report/pdf (fpdf2)" },
       { id: "chatlink", type: "browser", tag: "Browser", title: "Ask Vouch chat",
         body: "Its own LangGraph agent, in diagram 2 below." },
+    ] },
+    { title: "Improve", sub: "Internal improvement goal",
+      summary: "In the Internal improvement goal: the plan's priorities and done marks, Closed, and open questions that suggest a re-assessment.",
+      chips: "FastAPI · Postgres · no model call", cards: [
+      { id: "iplan", type: "api", tag: "FastAPI", title: "The improvement plan",
+        body: "An approved item's priority (high, medium or low; by default from its verdict) and its done mark, with what was done.",
+        tech: "PUT …/remediation/{req}/priority · POST …/remediation/{req}/done · vouch.plan",
+        writes: "vouch_remediation_plan · vouch_audit_trail" },
+      { id: "closed", type: "rules", tag: "Rules", title: "Closed",
+        body: "Every approved item done, then a re-assessment accepted with no requirement left not or partly evidenced. Done marks alone never close a control." },
+      { id: "questions", type: "api", tag: "FastAPI", title: "Open questions",
+        body: "What is asked, for whom, a due date, then the answer. Answered or overdue: Vouch suggests re-assessing the control, whose judge reads the answer as the lead's statement.",
+        tech: "POST /api/controls/{id}/questions · …/{q}/answer · vouch.questions",
+        writes: "vouch_open_questions · vouch_audit_trail" },
     ] },
   ],
   lane: {
     title: "State · Postgres on Cloud SQL",
     sub: "vouch.database: one psycopg pool; vouch-db-setup creates every table at deploy. With no database, the same in process memory.",
-    summary: "LangGraph's checkpointer (every thread) and store (long-term memory), and five Vouch tables: counts, usage, the append-only audit trail, remediation items, settings.",
+    summary: "LangGraph's checkpointer (every thread) and store (long-term memory), and ten Vouch tables: the two daily counts, usage, the append-only audit trail, remediation items and the plan, goals, review rounds, open questions, settings.",
     cards: [
       { id: "s-ckpt", type: "state", tag: "LangGraph checkpointer", title: "Threads",
-        body: "Each assessment and chat thread. A checkpoint after every node; the review resumes from it.", tech: "PostgresSaver" },
+        body: "Each assessment and chat thread. A checkpoint after every node; each review step resumes from it.", tech: "PostgresSaver" },
       { id: "s-store", type: "state", tag: "LangGraph store", title: "Long-term memory",
         body: "Per lead and profile: assessments started, last review, fresh start, current chat, chat lines.", tech: "PostgresStore · vouch.memory" },
       { id: "s-counts", type: "state", tag: "Table", title: "vouch_assessment_counts", mono: true,
         body: "+1 for the lead's day when an assessment is admitted." },
+      { id: "s-pcounts", type: "state", tag: "Table", title: "vouch_profile_pass_counts", mono: true,
+        body: "+1 for the lead's day when a profile pass is admitted: its own limit, 3 a day." },
       { id: "s-usage", type: "state", tag: "Table", title: "vouch_usage", mono: true,
-        body: "Tokens and cost of each assessment and chat turn, from the UsageMeter." },
+        body: "Tokens and cost of each assessment, profile pass and chat turn, from the UsageMeter." },
       { id: "s-audit", type: "state", tag: "Table · append-only", title: "vouch_audit_trail", mono: true,
-        body: "Each review, override and remediation decision. A trigger refuses update and delete." },
+        body: "Each review step, override, item decision, priority, done mark, round, question and goal change. A trigger refuses update and delete." },
       { id: "s-rem", type: "state", tag: "Table", title: "vouch_remediation_items", mono: true,
         body: "The lead's approval or discard of each remediation item." },
+      { id: "s-plan", type: "state", tag: "Table", title: "vouch_remediation_plan", mono: true,
+        body: "An approved item's priority and done mark." },
+      { id: "s-goals", type: "state", tag: "Table", title: "vouch_profile_goals", mono: true,
+        body: "Each profile's goal." },
+      { id: "s-rounds", type: "state", tag: "Table", title: "vouch_review_rounds", mono: true,
+        body: "Each review round; a closed one with its frozen results." },
+      { id: "s-questions", type: "state", tag: "Table", title: "vouch_open_questions", mono: true,
+        body: "Each open question and its answer." },
       { id: "s-set", type: "state", tag: "Table", title: "vouch_settings", mono: true,
         body: "The developer's model choice and the daily limit." },
     ],
@@ -364,17 +408,28 @@ const MAIN = {
     { from: "judge", to: "quotes", label: "verdicts + quotes" },
     { from: "quotes", to: "remediate", label: "checked verdicts" },
     { from: "remediate", fs: "r", to: "review", ts: "l", label: "proposed\nassessment" },
-    { from: "review", to: "lead", label: "waiting for review" },
-    { from: "lead", to: "areview", label: "ReviewDecision" },
-    { ids: ["areview", "review", "lead"], route: (g) => { const a = g.areview, b = g.review, x = a.x + a.w + 13;
+    { from: "review", to: "lead", label: "waiting at\nConfirm findings" },
+    { from: "lead", to: "afind", label: "ConfirmFindings" },
+    { ids: ["afind", "review", "lead"], route: (g) => { const a = g.afind, b = g.review, x = a.x + a.w + 13;
         return [[a.x + a.w, a.cy], [x, a.cy], [x, b.cy], [b.x + b.w, b.cy]]; },
-      label: "resume", lp: (g) => [g.areview.x + g.areview.w + 13, (g.lead.y + g.lead.h + g.areview.y) / 2], dashed: true },
-    { ids: ["lead", "rdecide", "areview"], route: (g) => { const a = g.lead, b = g.rdecide, x = a.x - 13;
+      label: "resume", lp: (g) => [g.afind.x + g.afind.w + 13, (g.lead.y + g.lead.h + g.afind.y) / 2], dashed: true },
+    { from: "afind", to: "plan", label: "items to decide", cond: true },
+    { from: "plan", to: "rdecide", label: "each item" },
+    { from: "rdecide", to: "accept", label: "every item decided" },
+    // The skip edge: nothing missing, so no Plan fixes.
+    { ids: ["afind", "accept", "plan"], route: (g) => { const a = g.afind, b = g.accept, x = a.x - 13;
         return [[a.x, a.cy + 10], [x, a.cy + 10], [x, b.cy], [b.x, b.cy]]; },
-      label: "item", lp: (g) => [g.lead.x - 13, (g.areview.y + g.areview.h + g.rdecide.y) / 2] },
+      label: "nothing\nmissing:\nskipped", lp: (g) => [g.afind.x - 13, (g.plan.y + g.plan.h + g.rdecide.y) / 2], dashed: true, cond: true },
+    { from: "accept", to: "areview", label: "Accept verdict" },
+    { ids: ["areview", "accept"], route: (g) => { const a = g.areview, b = g.accept, x = a.x + a.w + 13;
+        return [[a.x + a.w, a.cy], [x, a.cy], [x, b.cy], [b.x + b.w, b.cy]]; },
+      label: "resume", lp: (g) => [g.areview.x + g.areview.w + 13, (g.accept.y + g.accept.h + g.areview.y) / 2], dashed: true },
     { from: "review", fs: "r", fo: -16, to: "stream", ts: "l", label: "steps" },
-    { from: "rdecide", fs: "r", to: "overview", ts: "l", label: "reviewed\nverdicts" },
-    { from: "overview", to: "report", label: "same readiness" },
+    { from: "areview", fs: "r", to: "overview", ts: "l", label: "reviewed\nverdicts" },
+    { from: "overview", to: "rounds", label: "the round" },
+    { from: "rounds", to: "report", label: "same readiness" },
+    { from: "overview", fs: "r", to: "iplan", ts: "l", label: "Internal\nimprovement" },
+    { from: "iplan", to: "closed", label: "done, then\nassess again" },
   ],
 };
 
@@ -397,11 +452,14 @@ const RUN = [
   { open: [3], hot: ["judge", "model"], calls: 4, cap: "judge, model call 4: a verdict for each of the 9 requirements, with the quotes it relies on." },
   { open: [3], hot: ["quotes"], calls: 4, cap: "check_quotes: each quote is looked up in the document it cites; one not found would be dropped." },
   { open: [3], hot: ["remediate", "model"], calls: 5, cap: "remediate, model call 5: items for S2 (not evidenced) and S4 (partly evidenced)." },
-  { open: [4, 5, "lane"], hot: ["review", "stream", "s-usage"], calls: 5, cap: "review: interrupt(). The stream ends with the proposed assessment; its usage is written." },
-  { open: [4], hot: ["lead"], calls: 5, cap: "The lead reviews: accepts, perhaps overriding a verdict with a reason." },
-  { open: [4, "lane"], hot: ["areview", "s-ckpt", "s-audit"], calls: 5, cap: "The decision resumes the thread; it and its audit entries are written in one transaction." },
-  { open: [4, "lane"], hot: ["rdecide", "s-rem", "s-audit"], calls: 5, cap: "The lead approves the remediation items, each with its audit entry." },
-  { open: [5], hot: ["overview", "report"], calls: 5, cap: "Readiness counts the accepted verdicts; the report is ready as a page, Markdown or PDF." },
+  { open: [4, 5, "lane"], hot: ["review", "stream", "s-usage"], calls: 5, cap: "review: interrupt(). The stream ends with the proposed assessment, waiting at Confirm findings; its usage is written." },
+  { open: [4], hot: ["lead"], calls: 5, cap: "Confirm findings: the lead overrides one requirement's verdict, with a reason, and confirms the findings." },
+  { open: [4, "lane"], hot: ["afind", "review", "s-ckpt", "s-audit"], calls: 5, cap: "POST …/findings resumes the thread: the override is applied and the remediation items recalculated; the override and the findings confirmed go into the audit trail." },
+  { open: [4], hot: ["plan"], calls: 5, cap: "Plan fixes, outside the graph: the lead approves the remediation items, each with an owner role and a due date." },
+  { open: [4, "lane"], hot: ["rdecide", "s-rem", "s-audit"], calls: 5, cap: "Each item approved, with its audit entry." },
+  { open: [4], hot: ["accept"], calls: 5, cap: "accept: interrupt(). With every item decided, the run waits for the last step." },
+  { open: [4, "lane"], hot: ["areview", "s-ckpt", "s-audit"], calls: 5, cap: "Accept verdict: POST …/review resumes the thread; the decision and its audit entry are written in one transaction." },
+  { open: [5], hot: ["overview", "report"], calls: 5, cap: "The overview counts the accepted verdict; the report is ready as a page, Markdown or PDF." },
 ];
 
 const CHAT = {
@@ -466,6 +524,68 @@ const CHAT = {
     { route: (g) => { const a = g["c-answer"], b = g["c-out"], y = g.col0.y + g.col0.h + 16;
         return [[a.cx, a.y + a.h], [a.cx, y], [b.cx, y], [b.cx, b.y + b.h]]; },
       label: "checked answer", at: 0.5 },
+  ],
+};
+
+// Diagram 3: the profile pass (vouch.profile_pass, POST /api/profile-pass), drawn whole.
+const PASS = {
+  cols: [
+    { title: "Ask", sub: "React · FastAPI", cards: [
+      { id: "p-browser", type: "browser", tag: "Browser", title: "Run a profile pass",
+        body: "On the Dossier: every open control of the lead's compliance profile in one run." },
+      { id: "p-api", type: "api", tag: "FastAPI", title: "POST /api/profile-pass", mono: true,
+        body: "One answer when the pass is done, not a stream.", tech: "vouch.api" },
+    ] },
+    { title: "Admit", sub: "before any model call", cards: [
+      { id: "p-who", type: "guard", tag: "Guard", title: "Who is asking · input limits",
+        body: "Sign-in and the input limits, as for an assessment.", tech: "vouch.auth · vouch.limits" },
+      { id: "p-one", type: "guard", tag: "Guard", title: "One run at a time",
+        body: "Another run of the lead's going: a 409.", tech: "vouch.runs" },
+      { id: "p-threshold", type: "rules", tag: "Rules", title: "Token threshold",
+        body: "Estimated over VOUCH_PROFILE_PASS_TOKENS (100,000 tokens, prompt and expected reply), or an allowed source that can't be read: a 422 offering the per-control agent, nothing counted.",
+        tech: "vouch.settings" },
+      { id: "p-daily", type: "guard", tag: "Guard", title: "Its own daily limit",
+        body: "3 passes a day, apart from the assessments'; past it a 429.",
+        tech: "vouch.spending", writes: "vouch_profile_pass_counts" },
+    ] },
+    { title: "One model call", sub: "LangChain · vouch.profile_pass", cards: [
+      { id: "p-prompt", type: "rules", tag: "Rules", title: "The prompt",
+        body: "The rules; each included control's applicable requirements; every document of every allowed source as data, with its kind and whether it is stale; each control's lead statements under it. Accepted controls skipped." },
+      { id: "p-call", type: "graph", tag: "LangChain", title: "One structured call", model: true,
+        body: "One call answers for every included control: verdicts, quotes, answers and remediation drafts. Up to 600 s, never retried on its own (the lead's Try again).",
+        tech: "with_structured_output · ProfilePassReply",
+        writes: "vouch_usage" },
+    ] },
+    { title: "Per control", sub: "guards in code", cards: [
+      { id: "p-quotes", type: "guard", tag: "Guard", title: "Quote check",
+        body: "Every citation looked up word for word; one not found is dropped and its requirement is not evidenced. A lead statement counts only for its own control.",
+        tech: "vouch.citations" },
+      { id: "p-caps", type: "guard", tag: "Guard", title: "Stale and documented-only caps",
+        body: "The same caps as check_quotes: at most partly evidenced." },
+      { id: "p-output", type: "guard", tag: "Guard", title: "Output guard",
+        body: "No audit-result claim in any answer, reason or draft, and the profile's language; else the whole reply asked for again, once." },
+    ] },
+    { title: "Waiting for review", sub: "LangGraph · Postgres", cards: [
+      { id: "p-threads", type: "graph", tag: "LangGraph", title: "One thread per control",
+        body: "Each control's result written onto a new thread of diagram 1's graph, at its review interrupt: the same three-step review.",
+        writes: "checkpoint · store" },
+      { id: "p-panel", type: "browser", tag: "Browser", title: "The result panel",
+        body: "\"12 assessments waiting for your review.\": each control with its verdict, and the accepted controls skipped." },
+    ] },
+  ],
+  arrows: [
+    { from: "p-browser", to: "p-api", label: "profile" },
+    { from: "p-api", fs: "r", to: "p-who", ts: "l", label: "request" },
+    { from: "p-who", to: "p-one" },
+    { from: "p-one", to: "p-threshold" },
+    { from: "p-threshold", to: "p-daily", label: "under the\nthreshold", cond: true },
+    { from: "p-daily", fs: "r", to: "p-prompt", ts: "l", label: "counted" },
+    { from: "p-prompt", to: "p-call", label: "one prompt" },
+    { from: "p-call", fs: "r", to: "p-quotes", ts: "l", label: "reply" },
+    { from: "p-quotes", to: "p-caps" },
+    { from: "p-caps", to: "p-output" },
+    { from: "p-output", fs: "r", to: "p-threads", ts: "l", label: "each control" },
+    { from: "p-threads", to: "p-panel", label: "assessments" },
   ],
 };
 
@@ -667,10 +787,14 @@ function draw(svg, spec, view = null, fresh = new Set()) {
     spec.lane.cards.forEach((c) => { home[c.id] = "lane"; });
     let lh;
     if (isOpen("lane")) {
-      const w = (total - 2 * PAD - (n - 1) * g) / n;
+      // At most seven stores a row, so a table's name fits its card; more go on a second row.
+      const per = Math.ceil(n / Math.ceil(n / 7)), rows = Math.ceil(n / per), rg = 30;
+      const w = (total - 2 * PAD - (per - 1) * g) / per;
       const ms = spec.lane.cards.map((c) => measure(c, w));
-      lh = Math.max(...ms.map((m) => m.h));
-      spec.lane.cards.forEach((c, k) => { ms[k].h = lh; geo[c.id] = drawCard(cards, c, TOP + PAD + k * (w + g), y + 70, w, ms[k], fresh.has("lane") ? "enter" : "").box; });
+      const rh = Math.max(...ms.map((m) => m.h));
+      lh = rows * rh + (rows - 1) * rg;
+      spec.lane.cards.forEach((c, k) => { ms[k].h = rh; const r = Math.floor(k / per), col = k % per;
+        geo[c.id] = drawCard(cards, c, TOP + PAD + col * (w + g), y + 70 + r * (rh + rg), w, ms[k], fresh.has("lane") ? "enter" : "").box; });
     } else {
       const card = { id: "sum-lane", type: "state", tag: null, title: "What is kept, and when it is written", body: spec.lane.summary, open: n + " stores · open ›" };
       const m = measure(card, total - 2 * PAD);
@@ -820,6 +944,7 @@ document.getElementById("b-all").addEventListener("click", () => { stop(); show(
 function render() {
   show(state.open);
   draw(document.getElementById("chat"), CHAT);
+  draw(document.getElementById("pass"), PASS);
 }
 legend();
 Promise.all(Object.values(F).map((f) => document.fonts.load(f))).catch(() => {}).then(render);

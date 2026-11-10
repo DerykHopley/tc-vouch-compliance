@@ -52,6 +52,42 @@ def afresh_url() -> str:
 
 
 @pytest.fixture
+def pass_url() -> str:
+    """An eighth Vouch like vouch_url, for the profile pass's checks (#390): a pass assesses all
+    12 controls, which would change the counts other checks read."""
+    return os.environ["PASS_URL"]
+
+
+@pytest.fixture
+def rounds_url() -> str:
+    """A ninth Vouch like vouch_url, for the review rounds' checks (#402): closing a round changes
+    the hero and the comparison other checks read, and accepting a control the counts."""
+    return os.environ["ROUNDS_URL"]
+
+
+@pytest.fixture
+def plan_url() -> str:
+    """A tenth Vouch like vouch_url, for the improvement plan's checks (#410): its goal is Internal
+    improvement and its control ends Closed, which other checks would read."""
+    return os.environ["PLAN_URL"]
+
+
+@pytest.fixture
+def questions_url() -> str:
+    """An eleventh Vouch like vouch_url, for the open questions' checks (#414): its control is
+    accepted, questioned and assessed again, which would change the counts and cards other checks
+    read."""
+    return os.environ["QUESTIONS_URL"]
+
+
+@pytest.fixture
+def improvement_url() -> str:
+    """A twelfth Vouch like vouch_url, for the improvement report's check (#420): its goal is
+    Internal improvement and a round is closed, which would change the report other checks read."""
+    return os.environ["IMPROVEMENT_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]

@@ -44,9 +44,19 @@ MAX_DAILY_LIMIT = 10_000
 DAILY_LIMIT_SETTING = "daily_limit"
 FAKE = "fake"
 """The model a usage names when the scripted fake ran."""
+PROFILE_PASS_DAILY_LIMIT = 3
+"""Profile passes a user may run in a UTC day (#371), apart from the assessments' limit. A
+developer may change it in the settings table, under PROFILE_PASS_LIMIT_SETTING, with no
+deploy."""
+PROFILE_PASS_LIMIT_SETTING = "profile_pass_daily_limit"
+PROFILE_PASS = "profile-pass"
+"""The control a usage record names for a profile pass (#371): one record for its one run."""
 CHAT = "chat"
 """The control a usage record names for a chat message (#44): no control was assessed, so the
 totals count its tokens and cost, but not as an assessment."""
+NOT_ASSESSMENTS = (CHAT, PROFILE_PASS)
+"""The usage records the totals count in tokens and cost but not as assessments: a chat message,
+and a profile pass (#371), whose assessments came from one run."""
 NO_SHARED_COUNTER = (
     "Assessments on OpenRouter need a database to hold each user's daily limit. "
     f"Set {DATABASE_URL_ENV}."
@@ -289,6 +299,11 @@ class SpendingStore(Protocol):
         nothing: (under it, the limit)."""
         ...
 
+    def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
+        """Count one profile pass for the user's day if they're under the passes' own limit, the
+        limit read in the same step: (counted, the limit)."""
+        ...
+
     def record(self, record: UsageRecord) -> None: ...
 
     def totals(self) -> UsageTotals: ...
@@ -304,6 +319,8 @@ class MemorySpendingStore:
         self._limit = DAILY_LIMIT
         self._day: date | None = None
         self._counts: dict[str, int] = {}
+        self._pass_day: date | None = None
+        self._pass_counts: dict[str, int] = {}
         self._records: list[UsageRecord] = []
 
     def daily_limit(self) -> int:
@@ -327,6 +344,16 @@ class MemorySpendingStore:
             count = self._counts.get(user_id, 0) if day == self._day else 0
             return count < self._limit, self._limit
 
+    def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
+        with self._lock:
+            if day != self._pass_day:  # a new day: yesterday's counts go
+                self._pass_day, self._pass_counts = day, {}
+            count = self._pass_counts.get(user_id, 0)
+            if count >= PROFILE_PASS_DAILY_LIMIT:
+                return False, PROFILE_PASS_DAILY_LIMIT
+            self._pass_counts[user_id] = count + 1
+            return True, PROFILE_PASS_DAILY_LIMIT
+
     def record(self, record: UsageRecord) -> None:
         with self._lock:
             self._records.append(record)
@@ -338,7 +365,7 @@ class MemorySpendingStore:
     def totals(self) -> UsageTotals:
         openrouter, fake = RunTotals(), RunTotals()
         for record in self.records():
-            assessment = record.control_id != CHAT
+            assessment = record.control_id not in NOT_ASSESSMENTS
             if record.usage.model == FAKE:
                 fake = fake.add(record.usage, assessment)
             else:
@@ -367,6 +394,11 @@ class DatabaseSpendingStore:
     def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.under_assessment_limit(user_id, day, DAILY_LIMIT_SETTING, DAILY_LIMIT)
 
+    def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
+        return self.db.take_profile_pass(
+            user_id, day, PROFILE_PASS_LIMIT_SETTING, PROFILE_PASS_DAILY_LIMIT
+        )
+
     def record(self, record: UsageRecord) -> None:
         usage = record.usage
         self.db.record_usage(
@@ -383,7 +415,7 @@ class DatabaseSpendingStore:
         )
 
     def totals(self) -> UsageTotals:
-        rows = self.db.usage_totals(fake_model=FAKE, not_assessments=CHAT)
+        rows = self.db.usage_totals(fake_model=FAKE, not_assessments=NOT_ASSESSMENTS)
         return UsageTotals(
             openrouter=RunTotals(**rows["openrouter"]) if "openrouter" in rows else RunTotals(),
             fake=RunTotals(**rows["fake"]) if "fake" in rows else RunTotals(),
@@ -397,6 +429,9 @@ def spending_store(db: Database | None) -> SpendingStore:
 class DailyLimitReached(Exception):
     """The user has started `limit` assessments today; the count resets at `resets_at`."""
 
+    noun = "assessment"
+    nouns = "assessments"
+
     def __init__(self, limit: int, resets_at: datetime, now: datetime) -> None:
         super().__init__(f"daily limit of {limit} reached")
         self.limit = limit
@@ -404,19 +439,28 @@ class DailyLimitReached(Exception):
         self.retry_after = max(1, math.ceil((resets_at - now).total_seconds()))
 
     def message(self) -> str:
-        noun = "assessment" if self.limit == 1 else "assessments"
+        noun = self.noun if self.limit == 1 else self.nouns
         when = f"{self.resets_at:%H:%M} UTC on {self.resets_at.day} {self.resets_at:%B %Y}"
         return f"You have reached today's limit of {self.limit} {noun}. It resets at {when}."
+
+
+class ProfilePassLimitReached(DailyLimitReached):
+    """The user has run `limit` profile passes today (#371); the count resets at `resets_at`."""
+
+    noun = "profile pass"
+    nouns = "profile passes"
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _reached(limit: int, now: datetime) -> DailyLimitReached:
+def _reached(
+    limit: int, now: datetime, kind: type[DailyLimitReached] = DailyLimitReached
+) -> DailyLimitReached:
     """The limit reached at `now`; it resets at the next UTC midnight."""
     resets_at = datetime.combine(now.date() + timedelta(days=1), time(), tzinfo=UTC)
-    return DailyLimitReached(limit, resets_at, now)
+    return kind(limit, resets_at, now)
 
 
 class SpendingGuard:
@@ -430,13 +474,30 @@ class SpendingGuard:
         """Count one assessment for the user; `paid`: it runs on OpenRouter. Raises
         NoSharedCounter (a paid model, counted only in memory), DailyLimitReached, or
         DatabaseUnavailable: then no assessment starts."""
+        self._take(self.store.take, user_id, paid, DailyLimitReached)
+
+    def start_profile_pass(self, user_id: str, paid: bool) -> None:
+        """Count one profile pass for the user against the passes' own daily limit (#371), never
+        against the assessments'; `paid`: it runs on OpenRouter. Raises NoSharedCounter,
+        ProfilePassLimitReached, or DatabaseUnavailable: then the pass doesn't run."""
+        self._take(self.store.take_profile_pass, user_id, paid, ProfilePassLimitReached)
+
+    def _take(
+        self,
+        take: Callable[[str, date], tuple[bool, int]],
+        user_id: str,
+        paid: bool,
+        reached: type[DailyLimitReached],
+    ) -> None:
+        """Count one for the user's UTC day with `take`; over its limit, `reached`. Raises
+        NoSharedCounter (a paid model, counted only in memory) before anything is taken."""
         if paid and self.store.kept_in == "memory":
             raise NoSharedCounter(NO_SHARED_COUNTER)
         now = self.clock().astimezone(UTC)
-        taken, limit = self.store.take(user_id, now.date())
+        taken, limit = take(user_id, now.date())
         if not taken:
-            log.info("a user reached the daily limit of %d assessments", limit)
-            raise _reached(limit, now)
+            log.info("a user reached the daily limit of %d %s", limit, reached.nouns)
+            raise _reached(limit, now, reached)
 
     def check(self, user_id: str, paid: bool) -> None:
         """Before a chat message (#44), whose model calls go through the spending guard too:
@@ -456,8 +517,9 @@ class SpendingGuard:
         log.info("the daily limit is now %d assessments", limit)
 
     def record(self, user_id: str, control_id: str, usage: Usage) -> None:
-        """Keep the assessment's usage, or a chat message's (`control_id` CHAT); when the
-        database can't take it, the log says so and the answer still stands."""
+        """Keep the assessment's usage, a chat message's (`control_id` CHAT), or a profile
+        pass's (PROFILE_PASS); when the database can't take it, the log says so and the answer
+        still stands."""
         try:
             self.store.record(UsageRecord(user_id, control_id, usage, self.clock()))
         except DatabaseUnavailable:

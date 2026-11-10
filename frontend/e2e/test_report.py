@@ -9,12 +9,14 @@ German demo script (demo-de.json). The page checks only read, so they run in any
 import json
 import re
 from collections import Counter
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.request import urlopen
 
 import pdf_words
 import pytest
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
+from reviewing import reviewed
 from touch_targets import small_targets
 
 LOCAL_USER = "Local user"
@@ -50,16 +52,21 @@ def accepted(
     control_id: str,
     profile: str,
     overrides: list | None = None,
+    decisions: dict | None = None,
 ) -> str:
+    """The control assessed and accepted through the three steps (#372): the items `decisions`
+    names decided so, every other one discarded. Its thread id."""
     thread_id = assessed(request, report_url, control_id, profile)
-    review = {"decision": "accept", "overrides": overrides or []}
-    post(request, f"{report_url}/api/assessments/{thread_id}/review", review, profile)
+    headers = {"X-Vouch-Profile": profile}
+    reviewed(
+        request,
+        report_url,
+        thread_id,
+        overrides=overrides or [],
+        decisions=decisions,
+        headers=headers,
+    )
     return thread_id
-
-
-def decided(request, report_url, thread_id: str, requirement_id: str, decision: str) -> None:
-    url = f"{report_url}/api/assessments/{thread_id}/remediation/{requirement_id}"
-    post(request, url, {"decision": decision}, "nordlicht")
 
 
 def open_report(page: Page, report_url: str) -> Locator:
@@ -80,10 +87,15 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     s1_not_evidenced = [
         {"requirement_id": "S1", "verdict": "not-evidenced", "reason": "No per-system list."}
     ]
-    thread = accepted(request, report_url, "4.1.2", "nordlicht", s1_not_evidenced)
-    decided(request, report_url, thread, "S1", "discard")
-    accepted(request, report_url, "1.1.1", "nordlicht")
-    decided(request, report_url, thread, "M1", "approve")
+    accepted(
+        request,
+        report_url,
+        "4.1.2",
+        "nordlicht",
+        s1_not_evidenced,
+        {"S1": {"decision": "discard"}, "M1": {"decision": "approve"}},
+    )
+    accepted(request, report_url, "1.1.1", "nordlicht")  # its items discarded
     assessed(request, report_url, "5.2.9", "nordlicht")  # proposed: still open
 
     report = open_report(page, report_url)
@@ -123,7 +135,8 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
 
     # The trail, newest first, each with who, action and evidence versions (story 6).
     # Asserted with expect, which retries: a response's event fires before the page renders (#240).
-    # 4.1.2's accept and its S1 override are one review, kept in either order.
+    # Each review in its three steps (#372): the overrides and Findings confirmed (one time, the
+    # override first kept), the items decided, then Accepted. 1.1.1's items are discarded.
     trail = report.get_by_role("table", name="Audit trail").locator("tbody tr")
 
     def entry(control: str, requirement: str, action: str) -> re.Pattern:
@@ -131,17 +144,20 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
         cells = r"\s*".join([re.escape(LOCAL_USER), re.escape(control), requirement, action])
         return re.compile(cells)
 
-    one_review = entry("4.1.2", "(S1)?", "(Overridden|Accepted)")
     expect(trail).to_have_text(
         [
-            entry("4.1.2", "M1", "Approved"),
             entry("1.1.1", "", "Accepted"),
+            entry("1.1.1", r"S\d", "Discarded"),
+            entry("1.1.1", r"S\d", "Discarded"),
+            entry("1.1.1", "", "Findings confirmed"),
+            entry("4.1.2", "", "Accepted"),
+            entry("4.1.2", "M1", "Approved"),
             entry("4.1.2", "S1", "Discarded"),
-            one_review,
-            one_review,
+            entry("4.1.2", "", "Findings confirmed"),
+            entry("4.1.2", "S1", "Overridden"),
         ]
     )
-    for kept in (trail.nth(0), trail.nth(1), trail.filter(has_text="Accepted").last):
+    for kept in (trail.nth(0), trail.nth(5), trail.filter(has_text="Accepted").last):
         expect(kept.locator("td").nth(8)).to_have_text(re.compile(r"\S+ v\S+"))
     # Every trail cell stays a table cell, so a row's rule lines up across it.
     displays = trail.locator("td").evaluate_all(
@@ -517,3 +533,70 @@ def test_a_printed_a4_report_keeps_headings_clear_of_tables_and_notes_whole(
     )
     assert noted - printed_parts == Counter()
     assert [w.text for w in found if w.right > printed.page_width - margin + 0.5] == []
+
+
+# --- The improvement report (#420, story 13 of spec #350) ---------------------------------------
+
+DONE_NOTE = "Exposure record kept in the ISMS folder."
+ASKED = "Who signs off the ISMS scope each year?"
+DUE = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()  # within the horizon
+
+
+def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_exports_them(
+    page: Page, improvement_url
+):
+    request = page.request
+    goal = request.put(
+        f"{improvement_url}/api/goal",
+        data={"goal": "internal-improvement"},
+        headers={"X-Vouch-Profile": "nordlicht"},
+    )
+    assert goal.ok, goal.text()
+    thread_id = accepted(
+        request,
+        improvement_url,
+        "4.1.2",
+        "nordlicht",
+        decisions={"M1": {"decision": "approve", "owner_role": OWNER}},
+    )
+    done = f"{improvement_url}/api/assessments/{thread_id}/remediation/M1/done"
+    post(request, done, {"note": DONE_NOTE}, "nordlicht")
+    post(request, f"{improvement_url}/api/rounds/close", {}, "nordlicht")
+    question = {"question": ASKED, "asked_of": "CEO", "due_date": DUE}
+    post(request, f"{improvement_url}/api/controls/1.1.1/questions", question, "nordlicht")
+
+    for width in (1280, 400):
+        page.set_viewport_size({"width": width, "height": 900})
+        for scheme in ("light", "dark"):
+            page.emulate_media(color_scheme=scheme)
+            report = open_report(page, improvement_url)
+            expect(report.get_by_role("heading", level=1)).to_have_text("Improvement report")
+            # M1, partly evidenced on the fake: Medium by default, Done once marked.
+            plan = report.get_by_role("region", name="Improvement plan")
+            row = plan.get_by_role("table", name="Medium").locator("tbody tr")
+            expect(row).to_have_count(1)
+            expect(row).to_contain_text("M1")
+            expect(row).to_contain_text("Done")
+            expect(row).to_contain_text(DONE_NOTE)
+            asked = report.get_by_role("table", name="Open questions").locator("tbody tr")
+            expect(asked).to_have_count(1)
+            expect(asked).to_contain_text(ASKED)
+            expect(asked).to_contain_text("Open")
+            compared = report.get_by_role("region", name="Compared with the last round")
+            expect(compared).to_contain_text("Compared with First round, closed on")
+            expect(report.locator("table.report-controls")).to_have_count(0)
+            scrolls = page.evaluate(
+                "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+            )
+            assert not scrolls, f"the improvement report scrolls sideways at {width}px in {scheme}"
+            assert small_targets(page) == []
+
+    with page.expect_download() as download_info:
+        page.get_by_role("button", name="Export Markdown").click()
+    download = download_info.value
+    name = download.suggested_filename
+    assert re.fullmatch(r"improvement-report-nordlicht-\d{4}-\d{2}-\d{2}\.md", name), name
+    text = Path(download.path()).read_text(encoding="utf-8")
+    assert text.startswith("# Improvement report\n")
+    assert f"| Done | {DONE_NOTE} |" in text
+    assert f"| 1.1.1 | {ASKED} | CEO | {DUE} | Open |" in text

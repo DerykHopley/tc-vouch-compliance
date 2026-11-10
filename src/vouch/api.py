@@ -1,6 +1,7 @@
 """The HTTP API: health, one control's assessment streamed as server-sent events up to the
-compliance lead's review, the review that resumes it, the lead's remediation decisions, the
-user's assessments, the Dossier overview, and the developer page's settings.
+compliance lead's review, a profile pass over every applicable control not yet accepted (#371),
+the review that resumes an assessment, the lead's remediation decisions, the user's assessments,
+the Dossier overview, and the developer page's settings.
 
 Run it locally with `uv run uvicorn vouch.api:app --port 8000`. With VOUCH_FRONTEND naming the
 built front end (frontend/dist), it serves that too, on one origin, as the container does.
@@ -12,20 +13,20 @@ import re
 import threading
 import time
 import unicodedata
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from importlib.metadata import version
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field, StringConstraints
 
-from vouch import audit, remediation, report, report_pdf
+from vouch import audit, goal, plan, questions, remediation, report, report_pdf, rounds
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -45,10 +46,12 @@ from vouch.chat_agent import (
     chat_prompt,
     chat_turn,
 )
-from vouch.database import Connection, Database, DatabaseUnavailable
+from vouch.citations import LeadStatement
+from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.dossier import PaperRequirement, overview, requirements_by_control
 from vouch.graph import (
     Assessment,
+    ConfirmFindings,
     InvalidReviewError,
     NotWaitingForReviewError,
     ReviewDecision,
@@ -84,6 +87,12 @@ from vouch.profile import (
     ProfileScan,
     scan_profiles,
 )
+from vouch.profile_pass import (
+    FALLBACK,
+    PROFILE_PASS_FAILED,
+    ProfilePassRefused,
+    run_profile_pass,
+)
 from vouch.redaction import (
     install_log_redaction,
     redact,
@@ -113,8 +122,10 @@ from vouch.settings import (
 from vouch.spending import (
     CHAT,
     MAX_DAILY_LIMIT,
+    PROFILE_PASS,
     DailyLimitReached,
     NoSharedCounter,
+    ProfilePassLimitReached,
     SpendingGuard,
     Usage,
     UsageMeter,
@@ -136,6 +147,10 @@ UNKNOWN_PROFILE = "There is no such compliance profile."
 OVERVIEW_FAILED = "The overview could not be loaded just now. Please try again."
 REPORT_FAILED = "The readiness report could not be loaded just now. Please try again."
 EXPORT_FAILED = "The readiness report could not be exported just now. Please try again."
+QUESTION_FAILED = "The question could not be logged just now. Please try again."
+MAX_QUESTION_ID = 2**63 - 1
+"""The highest open question id: the ceiling of vouch_open_questions' bigserial `id`. A larger
+one in the path is a 422, never sent to Postgres (whose refusal would be a 503)."""
 RUNNING_NO_FRESH_START = "An assessment is running: start afresh once it has finished."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
@@ -403,13 +418,74 @@ def remediation_items(db: AppDatabase) -> remediation.RemediationItems:
 RemediationItems = Annotated[remediation.RemediationItems, Depends(remediation_items)]
 
 
+def remediation_plan(db: AppDatabase) -> plan.RemediationPlan:
+    """Where the improvement plan's marks are kept, with their audit entries (#410): Postgres
+    with a database URL, else this process."""
+    return plan.process_plan() if db is None else plan.PostgresPlan(db)
+
+
+RemediationPlan = Annotated[plan.RemediationPlan, Depends(remediation_plan)]
+
+
+def profile_goals(db: AppDatabase) -> goal.ProfileGoals:
+    """Where each user's Goal under each profile is kept, with its audit entries (#369):
+    Postgres with a database URL, else this process."""
+    return goal.process_goals() if db is None else goal.PostgresGoals(db)
+
+
+ProfileGoals = Annotated[goal.ProfileGoals, Depends(profile_goals)]
+
+
+def review_rounds(db: AppDatabase) -> rounds.ReviewRounds:
+    """Where each user's review rounds under each profile are kept, with their audit entries
+    (#402): Postgres with a database URL, else this process."""
+    return rounds.process_rounds() if db is None else rounds.PostgresRounds(db)
+
+
+ReviewRounds = Annotated[rounds.ReviewRounds, Depends(review_rounds)]
+
+
+def open_questions(db: AppDatabase) -> questions.OpenQuestions:
+    """Where each user's open questions under each profile are kept, with their audit entries
+    (#414): Postgres with a database URL, else this process."""
+    return questions.process_questions() if db is None else questions.PostgresQuestions(db)
+
+
+OpenQuestions = Annotated[questions.OpenQuestions, Depends(open_questions)]
+
+
+def lead_statements(asked: OpenQuestions, memory: UserMemory) -> tuple[LeadStatement, ...]:
+    """The lead's statements under the profile (#422): their answered questions asked since the
+    fresh start, on any control. Questions that can't be read leave none, logged: a missing
+    statement can only lower a verdict, never raise it."""
+    try:
+        listed = asked.listed(memory.user_id, memory.profile_id)
+        return tuple(questions.lead_statements(questions.since(listed, memory.fresh_start())))
+    except DatabaseUnavailable:
+        log.warning("the open questions can't be read: assessing without the lead's statements")
+        return ()
+
+
+LeadStatements = Annotated[tuple[LeadStatement, ...], Depends(lead_statements)]
+
+
 def assessment_data(
-    assessment: Assessment, decided: dict[remediation.Key, remediation.DecidedItem] | None = None
+    assessment: Assessment,
+    decided: dict[remediation.Key, remediation.DecidedItem] | None = None,
+    marks: dict[remediation.Key, remediation.Mark] | None = None,
 ) -> dict[str, Any]:
     """The assessment as the API sends it, each remediation item with its status (#43): a draft,
-    or as the lead decided it (`decided`, none for a run just made or just reviewed)."""
+    or as the lead decided it (`decided`, none for a run just made, its findings just confirmed,
+    or just reviewed: nothing is decided before the findings are), and `review_step`, the step
+    of the review it waits at (#372; null once reviewed), and `before_three_step_review`, true
+    for one reviewed before the three-step review (#373): it still counts as reviewed, and
+    nothing stored is rewritten. Each item carries its priority and done mark in the improvement
+    plan (`marks`, #410), in both goals."""
+    review = assessment.review
     return assessment.to_dict() | {
-        "remediation": remediation.shown_items(assessment, decided or {})
+        "remediation": remediation.shown_items(assessment, decided or {}, marks),
+        "review_step": remediation.review_step(assessment, decided or {}),
+        "before_three_step_review": review is not None and not review.three_step,
     }
 
 
@@ -521,9 +597,12 @@ def assessment_run(
     tools: Annotated[frozenset[str], Depends(profile_tools)],
     saver: Checkpointer,
     memory: UserMemory,
+    statements: LeadStatements,
 ) -> AssessmentRun:
-    """What the request's assessment runs on (vouch.runs.AssessmentRun), metered afresh."""
-    return AssessmentRun(models, chosen, tools, saver, UsageMeter(chosen), memory.scope)
+    """What the request's assessment runs on (vouch.runs.AssessmentRun), metered afresh, with
+    the lead's statements (#422)."""
+    meter = UsageMeter(chosen)
+    return AssessmentRun(models, chosen, tools, saver, meter, memory.scope, statements)
 
 
 def record_off_the_event_loop(
@@ -545,11 +624,12 @@ def record_off_the_event_loop(
 
 
 def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
-    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's."""
+    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's, and
+    `"profile-pass"` the profile passes' own limit (#371)."""
     assert isinstance(error, DailyLimitReached)
     content = {
         "detail": error.message(),
-        "limit": "daily",
+        "limit": "profile-pass" if isinstance(error, ProfilePassLimitReached) else "daily",
         "resets_at": error.resets_at.isoformat(),
     }
     headers = {"Retry-After": str(error.retry_after)}
@@ -603,6 +683,88 @@ def create_assessment(
         record_off_the_event_loop(spending, user.id, control.id, run.meter.usage())
 
 
+@router.post("/profile-pass")
+def create_profile_pass(
+    profile: Profile,
+    chosen: Annotated[str | None, Depends(chosen_model)],
+    models: AppModels,
+    settings: AppSettings,
+    user: CurrentUser,
+    spending: AppSpending,
+    memory: UserMemory,
+    saver: Checkpointer,
+    running: Running,
+    statements: LeadStatements,
+) -> Any:
+    """A profile pass (vouch.profile_pass, #371): every applicable control of the user's
+    compliance profile not yet accepted, assessed in one guarded model run, each new assessment
+    waiting for review. It holds
+    the lead's one run, as an assessment does: another of theirs going is a 409.
+
+    200: each new assessment's thread id, control, status and verdict, the controls skipped, each
+    `{control_id, reason}` with reason `accepted` or `in-review` (#437), and the pass's usage,
+    redacted. With every applicable control accepted or in review, nothing is counted or called.
+    A prompt and expected reply estimated over the token threshold (VOUCH_PROFILE_PASS_TOKENS),
+    or an allowed source that can't be read, is a 422 with `"fallback": "per-control"`, nothing
+    counted. Then the pass is counted against its own daily
+    limit (a 429 with `"limit": "profile-pass"` over it; a 503 for a paid model with only memory to
+    count in, or a counter that can't be read). A model run that fails, or a reply claiming an
+    audit result twice, is a 502 with one sentence and nothing kept; the pass stays counted, as its
+    calls were made. A counted pass's usage is recorded once, under PROFILE_PASS, however it
+    ends."""
+    if not running.try_hold(memory.scope):
+        raise HTTPException(status_code=409, detail=RUNNING_ALREADY)
+    meter = UsageMeter(chosen)
+    counted = False
+
+    def count() -> None:
+        nonlocal counted
+        try:
+            spending.start_profile_pass(user.id, paid=chosen is not None)
+        except NoSharedCounter as error:
+            log.error("profile passes on OpenRouter need %s for their limit", DATABASE_URL_ENV)
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        counted = True
+
+    try:
+        model = models.for_profile_pass(chosen, callbacks=[meter])
+        result = run_profile_pass(
+            profile,
+            memory,
+            saver,
+            model,
+            max_tokens=settings.profile_pass_tokens,
+            count=count,
+            statements=statements,
+        )
+    except ProfilePassRefused as refusal:
+        return JSONResponse(status_code=422, content={"detail": str(refusal), "fallback": FALLBACK})
+    except Exception:
+        if not counted:  # refused before any call: the limit's 429, the counter's 503
+            raise
+        log.exception("a profile pass of %s failed", profile.id)
+        raise HTTPException(status_code=502, detail=PROFILE_PASS_FAILED) from None
+    finally:
+        if counted:
+            spending.record(user.id, PROFILE_PASS, meter.usage())
+        running.release(memory.scope)
+    answer = {
+        "assessments": [
+            {
+                "thread_id": a.thread_id,
+                "control_id": a.control_id,
+                "status": a.status,
+                "verdict": a.verdict,
+            }
+            for a in result.assessments
+        ],
+        "skipped": [{"control_id": s.control_id, "reason": s.reason} for s in result.skipped],
+        "usage": meter.usage().to_dict(),
+    }
+    clean, _ = redact_data(answer)
+    return clean
+
+
 @router.get("/assessments")
 def list_assessments(memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
     """The user's assessments under the compliance profile, newest first: each one's thread id,
@@ -621,7 +783,11 @@ def list_assessments(memory: UserMemory, saver: Checkpointer) -> dict[str, Any]:
 
 @router.get("/assessments/{thread_id}")
 def open_assessment(
-    thread_id: str, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+    thread_id: str,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    marks: RemediationPlan,
 ) -> dict[str, Any]:
     """One of the user's assessments, proposed or reviewed, redacted as the stream's events are.
     404 for an unknown thread, another user's included."""
@@ -630,7 +796,49 @@ def open_assessment(
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
-    clean, _ = redact_data({"assessment": assessment_data(assessment, decided)})
+    marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
+    clean, _ = redact_data({"assessment": assessment_data(assessment, decided, marked)})
+    return clean
+
+
+def _noting_work(memory: Memory) -> None:
+    """Note the lead worked now; a step of the review stands whatever happens here."""
+    try:
+        memory.note_worked()
+    except Exception:
+        log.exception("a review's time wasn't kept")
+
+
+@router.post("/assessments/{thread_id}/findings")
+def confirm_findings(
+    thread_id: str,
+    findings: Annotated[ConfirmFindings, Body()],
+    trail: AuditTrail,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """Confirm findings, the review's first step (#372): the waiting assessment's verdicts
+    confirmed, any overridden; the assessment, redacted, now waiting at Plan fixes (or Accept,
+    with no remediation item). No model runs. The step and its audit entries are written
+    together (vouch.audit): when the entries can't be, nothing is, and it's a 503.
+
+    404 for an unknown thread, another user's included; 409 for one not waiting at Confirm
+    findings (confirmed or reviewed already, or another step of its review running); 422 for an
+    override naming a requirement the assessment didn't judge, or naming one twice (the
+    findings' shape is checked before, also 422)."""
+    try:
+        confirmed = audit.confirm_findings(
+            trail, thread_id, findings, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
+        )
+    except UnknownAssessmentError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except NotWaitingForReviewError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except InvalidReviewError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    _noting_work(memory)
+    clean, _ = redact_data({"assessment": assessment_data(confirmed)})
     return clean
 
 
@@ -639,33 +847,50 @@ def review_assessment(
     thread_id: str,
     decision: Annotated[ReviewDecision, Body()],
     trail: AuditTrail,
+    items: RemediationItems,
+    marks: RemediationPlan,
     memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
 ) -> dict[str, Any]:
-    """Resume a waiting assessment with the lead's decision; the reviewed Assessment, redacted
-    as the stream's events are (its state holds the model's words as written). No model runs.
-    The decision and its audit entries are written together (vouch.audit): when the entries
-    can't be, nothing is, and it's a 503.
+    """Resume a waiting assessment with the lead's decision, Accept (the review's last step,
+    #372) or Reject (at any step); the reviewed Assessment, redacted as the stream's events are
+    (its state holds the model's words as written). No model runs. The decision and its audit
+    entry are written together (vouch.audit): when the entry can't be, nothing is, and it's a
+    503.
 
     404 for an unknown thread, another user's included; 409 for one not waiting (reviewed
-    already); 422 for an override naming a requirement the assessment didn't judge, or naming
-    one twice (the decision's shape is checked before, also 422)."""
+    already), an Accept before the findings are confirmed, or with remediation items left
+    drafts (`detail` names their requirements); 422 for a decision that doesn't validate, one
+    carrying overrides included (they go with Confirm findings)."""
+
+    # Read before the review's transaction, so it holds one connection: a draft decided
+    # meanwhile only makes fewer drafts, and the remediation route can't decide one while the
+    # review holds the thread's lock.
+    decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
+
+    def drafts(waiting: Assessment) -> list[str]:
+        return remediation.drafts_left(waiting, decided)
+
     try:
         reviewed = audit.review(
-            trail, thread_id, decision, reviewer=audit.Reviewer(user.id, name), scope=memory.scope
+            trail,
+            thread_id,
+            decision,
+            reviewer=audit.Reviewer(user.id, name),
+            scope=memory.scope,
+            drafts=drafts,
         )
     except UnknownAssessmentError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotWaitingForReviewError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    except InvalidReviewError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    try:  # the review stands whatever happens here: noting when is a convenience
-        memory.note_worked()
-    except Exception:
-        log.exception("a review's time wasn't kept")
-    clean, _ = redact_data({"assessment": assessment_data(reviewed)})
+    _noting_work(memory)
+    # Its items as they stand now (#410): read again, as a decision may have landed between the
+    # read above and the review taking the thread's lock.
+    now_decided = items.decided(memory.user_id, memory.profile_id, [thread_id])
+    marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
+    clean, _ = redact_data({"assessment": assessment_data(reviewed, now_decided, marked)})
     return clean
 
 
@@ -675,26 +900,28 @@ def decide_remediation(
     requirement_id: str,
     request: Annotated[remediation.DecisionRequest, Body()],
     items: RemediationItems,
-    memory: UserMemory,
+    marks: RemediationPlan,
     saver: Checkpointer,
+    memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
 ) -> dict[str, Any]:
-    """The lead approves or discards one of an accepted assessment's remediation items (#43),
+    """The lead approves or discards one of an assessment's remediation items (#43), once its
+    findings are confirmed (Plan fixes, #372; an accepted one's too),
     an approval maybe with another owner role or due date: the item as kept, redacted. The
     decision and its audit entry are kept together, under the user and the compliance profile;
     when the entry can't be written, neither is (a 503). The same decision again changes
     nothing and writes no entry.
 
     404 for an unknown thread (another user's or profile's too) or a requirement with no item;
-    409 for an assessment not accepted, an item decided the other way, or approved with other
+    409 for an assessment whose findings aren't confirmed, or rejected, an item decided the
+    other way, or approved with other
     values (`detail` names the kept ones); 422 for an approval due on a date past everywhere or
     beyond the horizon, or naming no owner where Vouch suggested none, with the hint in `detail`
     (the request's shape is checked before, also 422)."""
     try:
         kept = remediation.decide(
             items,
-            saver,
             thread_id,
             requirement_id,
             request,
@@ -704,12 +931,95 @@ def decide_remediation(
         )
     except (UnknownAssessmentError, remediation.UnknownItemError) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    except (remediation.NotAcceptedError, remediation.DecidedAlreadyError) as error:
+    except (remediation.NotDecidableError, remediation.DecidedAlreadyError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except (remediation.DueDateError, remediation.OwnerNeededError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    clean, _ = redact_data({"item": kept.shown()})
+    # As the assessment shows it, with its priority and done mark (#410).
+    assessment = load_assessment(thread_id, saver, scope=memory.scope)
+    marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
+    shown = remediation.shown_items(assessment, {(thread_id, requirement_id): kept}, marked)
+    item = next(i for i in shown if i["requirement_id"] == requirement_id)
+    clean, _ = redact_data({"item": item})
     return clean
+
+
+def _planned(mark: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    """A plan route's answer (#410): the item as marked, redacted; its refusals as HTTP."""
+    try:
+        item = mark()
+    except (UnknownAssessmentError, remediation.UnknownItemError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (plan.NotInImprovementGoal, plan.NotPlannable) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    clean, _ = redact_data({"item": item})
+    return clean
+
+
+@router.put("/assessments/{thread_id}/remediation/{requirement_id}/priority")
+def set_remediation_priority(
+    thread_id: str,
+    requirement_id: str,
+    request: Annotated[plan.PriorityRequest, Body()],
+    marks: RemediationPlan,
+    goals: ProfileGoals,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead sets an approved, not done remediation item's priority in the improvement plan
+    (#410), with its audit entry, together (when the entry can't be written, neither is: a 503);
+    the item as kept. The priority it has already writes nothing.
+
+    404 for an unknown thread (another user's or profile's too) or a requirement with no item;
+    409 under Audit readiness, for a draft, discarded or done item, or a rejected assessment;
+    422 for any other value or no body."""
+    current = goals.goal(memory.user_id, memory.profile_id)
+    return _planned(
+        lambda: plan.set_priority(
+            marks,
+            thread_id,
+            requirement_id,
+            request.priority,
+            goal=current,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=memory.profile_id,
+            scope=memory.scope,
+        )
+    )
+
+
+@router.post("/assessments/{thread_id}/remediation/{requirement_id}/done")
+def mark_remediation_done(
+    thread_id: str,
+    requirement_id: str,
+    request: Annotated[plan.DoneRequest, Body()],
+    marks: RemediationPlan,
+    goals: ProfileGoals,
+    memory: UserMemory,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead marks an approved remediation item of an accepted control done, with what was
+    done (#410), and its audit entry, together (when the entry can't be written, neither is: a
+    503); the item as kept. Done is final: the same note again writes nothing.
+
+    404 for an unknown thread (another user's or profile's too) or a requirement with no item;
+    409 under Audit readiness, for a draft or discarded item, an assessment not accepted, or one
+    done with another note (`detail` names it); 422 for a blank, longer or missing note."""
+    current = goals.goal(memory.user_id, memory.profile_id)
+    return _planned(
+        lambda: plan.mark_done(
+            marks,
+            thread_id,
+            requirement_id,
+            request.note,
+            goal=current,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=memory.profile_id,
+            scope=memory.scope,
+        )
+    )
 
 
 @router.get("/audit-trail")
@@ -784,18 +1094,267 @@ def _standing(
 
 @router.get("/overview")
 def dossier_overview(
-    profile: Profile, memory: UserMemory, saver: Checkpointer, items: RemediationItems
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    marks: RemediationPlan,
+    goals: ProfileGoals,
+    review: ReviewRounds,
+    asked: OpenQuestions,
 ) -> dict[str, Any]:
     """The Dossier overview for the user's compliance profile (vouch.dossier.overview): readiness
     from accepted verdicts only, the 12 control cards, the evidence quotes, the next step; and
     each control's requirements, for its working paper (#41); its ISA text in the profile's
-    edition (#199), an unreadable edition a plain 500. Redacted as the stream's events are."""
+    edition (#199), an unreadable edition a plain 500; the user's Goal under the profile
+    (#369); and their review rounds (#402): the open one, and the comparison with the last one
+    closed since the fresh start; in the Internal improvement goal, each card's improvement plan
+    flags (#410); the open questions asked since the fresh start, by control id, oldest first,
+    and the reasons they suggest a re-assessment for, in both goals (#414). Redacted as the
+    stream's events are."""
     controls, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
     approved = {key for key, item in decided.items() if item.status == "approved"}
-    clean, _ = redact_data(overview(profile, controls, latest, discarded, approved))
-    return clean | {"requirements": paper_requirements(profile, controls)}
+    current = goals.goal(memory.user_id, memory.profile_id)
+    listed = questions.since(asked.listed(memory.user_id, memory.profile_id), memory.fresh_start())
+    at = audit.now()
+    flags = plan.with_reasons(
+        _plan_flags(current, memory, saver, items, marks), questions.reasons(latest, listed, at)
+    )
+    shown = dict(overview(profile, controls, latest, discarded, approved, flags))
+    clean, _ = redact_data(shown | {"questions": questions.by_control(listed, at)})
+    return clean | {
+        "requirements": paper_requirements(profile, controls),
+        "goal": current,
+        "rounds": _rounds(review, memory, controls, latest),
+    }
+
+
+def _plan_flags(
+    current: Goal,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    marks: plan.RemediationPlan,
+) -> dict[str, plan.CardFlags]:
+    """The cards' improvement plan flags (#410): from every assessment listed since the fresh
+    start, with the user's decisions and marks on them; none read under Audit readiness."""
+    if current != plan.IMPROVEMENT:
+        return {}
+    return plan.card_flags(*_plan_reads(memory, saver, items, marks), current)
+
+
+def _plan_reads(
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    items: remediation.RemediationItems,
+    marks: plan.RemediationPlan,
+) -> tuple[
+    list[Assessment],
+    dict[remediation.Key, remediation.DecidedItem],
+    dict[remediation.Key, remediation.Mark],
+]:
+    """What the improvement plan is read from (#410): every assessment listed since the fresh
+    start, newest first, with the user's decisions and marks on them."""
+    history = memory.assessments(saver)
+    threads = [a.thread_id for a in history]
+    decided = items.decided(memory.user_id, memory.profile_id, threads)
+    marked = marks.marks(memory.user_id, memory.profile_id, threads)
+    return history, decided, marked
+
+
+def _comparison(
+    review: rounds.ReviewRounds,
+    memory: Memory,
+    controls: list[IsaControl],
+    latest: dict[str, Assessment],
+) -> report.ReportComparison | None:
+    """Now compared with the last round closed since the fresh start (None when there is none):
+    the overview's (#402) and the improvement report's (#420)."""
+    against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
+    if against is None or against.closed_at is None:
+        return None
+    return {
+        "against": {"name": against.name, "closed_at": against.closed_at.isoformat()},
+        **rounds.compare(against.results, controls, latest),
+    }
+
+
+def _rounds(
+    review: rounds.ReviewRounds,
+    memory: Memory,
+    controls: list[IsaControl],
+    latest: dict[str, Assessment],
+) -> dict[str, Any]:
+    """The overview's review rounds (#402): the open one (None when none is), and now compared
+    with the last round closed since the fresh start (None when there is none)."""
+    current = review.current(memory.user_id, memory.profile_id)
+    return {
+        "current": None if current is None else _opened(current),
+        "comparison": _comparison(review, memory, controls, latest),
+    }
+
+
+def _opened(current: rounds.Round) -> dict[str, Any]:
+    opened = current.opened_at
+    return {"name": current.name, "opened_at": None if opened is None else opened.isoformat()}
+
+
+@router.post("/rounds")
+def start_round(
+    request: Annotated[rounds.RoundRequest, Body()],
+    review: ReviewRounds,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead starts the next review round under the profile, by name (#402), with its audit
+    entry, together (when the entry can't be written, neither is: a 503). While a round is
+    open, the first one too, a 409 with nothing written; a blank or longer name a 422. It
+    starts no run, so it works while one goes on."""
+    try:
+        started = rounds.start(
+            review, request.name, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id
+        )
+    except rounds.RoundOpen as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    return {"current": _opened(started)}
+
+
+@router.post("/rounds/close")
+def close_round(
+    review: ReviewRounds,
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead closes the open review round under the profile (#402): its results frozen (each
+    control's newest assessment as it stands now) with its audit entry, together (when the
+    entry can't be written, neither is: a 503). With none open, a 409 with nothing written."""
+    controls, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    try:
+        closed = rounds.close(
+            review,
+            rounds.freeze(controls, latest),
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+        )
+    except rounds.NoRoundOpen as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    assert closed.closed_at is not None
+    return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
+
+
+def _control_of(profile: ComplianceProfile, control_id: str, failed: str) -> IsaControl:
+    """The profile's control, else a 404; an unreadable edition a plain 500 with `failed`."""
+    try:
+        return profile.isa_control(control_id)
+    except UnknownControlError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, failed) from None
+
+
+@router.post("/controls/{control_id}/questions")
+def log_question(
+    control_id: str,
+    request: Annotated[questions.QuestionRequest, Body()],
+    asked: OpenQuestions,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead logs an open question on one of the profile's controls, assessed or not (#414):
+    what, for whom, due when; kept with its audit entry, together (when the entry can't be
+    written, neither is: a 503). The question as kept, redacted.
+
+    404 for a control that isn't one of the profile's; 422 for a blank, longer or NUL-holding
+    question or `asked_of`, a missing field or no body, or a due date that isn't a date or is
+    past everywhere or beyond the horizon (the hint in `detail`)."""
+    control = _control_of(profile, control_id, QUESTION_FAILED)
+    try:
+        kept = questions.log(
+            asked,
+            control.id,
+            request,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+        )
+    except remediation.DueDateError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    clean, _ = redact_data({"question": questions.shown(kept, audit.now())})
+    return clean
+
+
+@router.post("/controls/{control_id}/questions/{question_id}/answer")
+def answer_question(
+    control_id: str,
+    question_id: Annotated[int, Path(ge=1, le=MAX_QUESTION_ID)],
+    request: Annotated[questions.AnswerRequest, Body()],
+    asked: OpenQuestions,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead records the answer to their open question on the control (#414), with its audit
+    entry, together (when the entry can't be written, neither is: a 503); the question as kept,
+    redacted. An answer is final: the same answer again writes nothing.
+
+    404 for an unknown question, another user's or profile's, or one on another control; 409
+    for a question answered already with another answer (`detail` names it); 422 for a blank,
+    longer or missing answer."""
+    try:
+        kept = questions.answer(
+            asked,
+            control_id,
+            question_id,
+            request.answer,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+        )
+    except questions.UnknownQuestionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except questions.AnsweredAlreadyError as error:  # it names the kept answer: redacted
+        raise HTTPException(status_code=409, detail=redact(str(error))[0]) from error
+    clean, _ = redact_data({"question": questions.shown(kept, audit.now())})
+    return clean
+
+
+@router.put("/goal")
+def change_goal(
+    request: Annotated[goal.GoalRequest, Body()],
+    goals: ProfileGoals,
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+) -> dict[str, Any]:
+    """The lead changes their Goal under the compliance profile (#369): another goal than the
+    one kept is kept with its audit entry, together (when the entry can't be written, neither
+    is: a 503); the goal kept already again writes nothing. Any other value is a 422."""
+    goal.change(goals, request.goal, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id)
+    return {"goal": request.goal}
+
+
+class ImprovementStores(NamedTuple):
+    """What the improvement report (#420) reads beyond the readiness report's stores: the Goal
+    that picks the shape, the plan's marks, the review rounds and the open questions."""
+
+    goals: goal.ProfileGoals
+    marks: plan.RemediationPlan
+    review: rounds.ReviewRounds
+    asked: questions.OpenQuestions
+
+
+def improvement_stores(
+    goals: ProfileGoals, marks: RemediationPlan, review: ReviewRounds, asked: OpenQuestions
+) -> ImprovementStores:
+    return ImprovementStores(goals, marks, review, asked)
+
+
+Improvement = Annotated[ImprovementStores, Depends(improvement_stores)]
 
 
 def _report(
@@ -803,17 +1362,41 @@ def _report(
     memory: Memory,
     saver: BaseCheckpointSaver,
     items: remediation.RemediationItems,
+    stores: ImprovementStores,
     read_trail: Callable[[], audit.Page],
     failed: str,
 ) -> dict[str, Any]:
-    """The readiness report for the profile, redacted (vouch.report): its standing first (an
-    unreadable ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads."""
+    """The report for the profile, redacted (vouch.report): its standing first (an unreadable
+    ISA edition is the plain 500 with `failed`), then the trail `read_trail` reads. Under the
+    user's Goal: the readiness report, or in Internal improvement the improvement report (#420),
+    its plan, comparison and questions read as the overview reads them."""
     controls, latest, accepted = _standing(profile, memory, saver, failed)
-    decided = items.decided(memory.user_id, memory.profile_id, accepted)
-    built = report.readiness_report(
-        profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
-    )
-    clean, _ = redact_data(built)
+    current = stores.goals.goal(memory.user_id, memory.profile_id)
+    built: Mapping[str, Any]
+    if current != plan.IMPROVEMENT:
+        decided = items.decided(memory.user_id, memory.profile_id, accepted)
+        built = report.readiness_report(
+            profile, controls, latest, decided=decided, trail=read_trail(), today=report.today()
+        )
+    else:
+        history, decided, marked = _plan_reads(memory, saver, items, stores.marks)
+        listed = questions.since(
+            stores.asked.listed(memory.user_id, memory.profile_id), memory.fresh_start()
+        )
+        built = report.improvement_report(
+            profile,
+            controls,
+            latest,
+            history=history,
+            decided=decided,
+            marks=marked,
+            flags=plan.card_flags(history, decided, marked, current),
+            comparison=_comparison(stores.review, memory, controls, latest),
+            questions=listed,
+            trail=read_trail(),
+            today=report.today(),
+        )
+    clean, _ = redact_data(dict(built))
     return clean
 
 
@@ -823,20 +1406,25 @@ def readiness_report(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    stores: Improvement,
     trail: AuditTrail,
 ) -> dict[str, Any]:
-    """The readiness report for the user's compliance profile (vouch.report, #234), in its
-    answer language: readiness with the overview's accepted counts (its remediation count is of
+    """The report for the user's compliance profile (vouch.report), in its answer language,
+    with the report's words; its `goal` names its shape. Under Audit readiness the readiness
+    report (#234): readiness with the overview's accepted counts (its remediation count is of
     the approved items the report lists), each control's reviewed verdict, the
     approved remediation items, the not-applicable list, the newest page of the audit trail
-    (`trail.next` reads on at GET /api/audit-trail) and the disclaimer, with the report's words.
-    No model runs. Dated the server's date in UTC; an unreadable ISA edition is a plain 500.
-    The data is redacted as every answer is; the words, the same for every report, are not."""
+    (`trail.next` reads on at GET /api/audit-trail) and the disclaimer. In Internal improvement
+    the improvement report (#420): readiness, the comparison with the last round closed since the
+    fresh start, the plan by priority, the open questions, the trail's newest page and the
+    internal self-assessment disclaimer. No model runs. Dated the server's date in UTC; an
+    unreadable ISA edition is a plain 500. The data is redacted as every answer is; the words,
+    the same for every report, are not."""
 
     def newest_page() -> audit.Page:
         return audit.read(trail, memory.user_id, memory.profile_id)
 
-    built = _report(profile, memory, saver, items, newest_page, REPORT_FAILED)
+    built = _report(profile, memory, saver, items, stores, newest_page, REPORT_FAILED)
     return built | {"words": report.words_for(profile.answer_language)}
 
 
@@ -856,21 +1444,24 @@ def _export(
     memory: Memory,
     saver: BaseCheckpointSaver,
     items: remediation.RemediationItems,
+    stores: ImprovementStores,
     trail: audit.AuditTrail,
     write: Callable[[dict[str, Any], dict[str, Any]], str | bytes],
     extension: str,
     media_type: str,
 ) -> Response:
-    """A download of the readiness report: the same redacted report and words as GET
-    /api/report, but with the whole audit trail, newest first, not a page, written by `write`
-    (report, words). An attachment named `readiness-report-<profile>-<date>.<extension>`
-    (`attachment`); an unreadable ISA edition is a plain 500 with EXPORT_FAILED."""
+    """A download of the report: the same redacted report and words as GET /api/report, but
+    with the whole audit trail, newest first, not a page, written by `write` (report, words).
+    An attachment named `readiness-report-<profile>-<date>.<extension>`, or in Internal
+    improvement `improvement-report-…` (#420) (`attachment`); an unreadable ISA edition is a
+    plain 500 with EXPORT_FAILED."""
 
     def whole_trail() -> audit.Page:
         return audit.Page(audit.read_all(trail, memory.user_id, memory.profile_id), None)
 
-    built = _report(profile, memory, saver, items, whole_trail, EXPORT_FAILED)
-    name = f"readiness-report-{profile.id}-{built['head']['date']}.{extension}"
+    built = _report(profile, memory, saver, items, stores, whole_trail, EXPORT_FAILED)
+    shape = "improvement" if built["goal"] == plan.IMPROVEMENT else "readiness"
+    name = f"{shape}-report-{profile.id}-{built['head']['date']}.{extension}"
     return Response(
         write(built, report.words_for(profile.answer_language)),
         media_type=media_type,
@@ -884,11 +1475,14 @@ def readiness_report_markdown(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    stores: Improvement,
     trail: AuditTrail,
 ) -> Response:
-    """The readiness report as one Markdown file (vouch.report.markdown, #57), as `_export`
-    makes every download."""
-    return _export(profile, memory, saver, items, trail, report.markdown, "md", "text/markdown")
+    """The report as one Markdown file (vouch.report.markdown, #57), as `_export` makes every
+    download."""
+    return _export(
+        profile, memory, saver, items, stores, trail, report.markdown, "md", "text/markdown"
+    )
 
 
 @router.get("/report/pdf")
@@ -897,11 +1491,14 @@ def readiness_report_pdf(
     memory: UserMemory,
     saver: Checkpointer,
     items: RemediationItems,
+    stores: Improvement,
     trail: AuditTrail,
 ) -> Response:
-    """The readiness report as one PDF file built on the server (vouch.report_pdf, #308), as
-    `_export` makes every download: the same data and failures as the Markdown file."""
-    return _export(profile, memory, saver, items, trail, report_pdf.pdf, "pdf", "application/pdf")
+    """The report as one PDF file built on the server (vouch.report_pdf, #308), as `_export`
+    makes every download: the same data and failures as the Markdown file."""
+    return _export(
+        profile, memory, saver, items, stores, trail, report_pdf.pdf, "pdf", "application/pdf"
+    )
 
 
 class ChatRequest(BaseModel):

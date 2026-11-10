@@ -77,6 +77,24 @@ button.prof-button:hover { border-color: var(--navy); }
 .hero p { max-width: 52ch; margin: 0; color: var(--muted); }
 .hero p b { color: var(--ink); }
 .hero .next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+/* The goal (#369, design.md Components: Goal): its own line under the company pill, Change goal beside it. */
+.hero .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 10px; color: var(--muted); }
+/* The review round (#402, design.md Components: Review round): its own line under the goal, as the goal's; with none
+   open, the next round's name field between the words and Start round. */
+.hero .round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 4px 0 0; color: var(--muted); }
+.hero .round .field { flex: 0 1 240px; }
+/* The round comparison (#402, design.md Components: Round comparison): counts now and their change, then the changed
+   controls, each a link to its working paper at least 44px tall. */
+.compare-counts, .compare-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.compare-rows { display: grid; gap: 0; }
+.compare-rows a { display: inline-flex; align-items: center; min-height: 44px; }/* The profile pass (#390, design.md Components: Profile pass): its note under the hero's buttons, then its result as a
+   sheet, one row per new assessment: the id, verdict chip and review state tag, then Open and Assess again. */
+.hero .field-note { margin-top: 8px; }
+.pass h2 { font-size: 20px; }
+.pass p { margin: 0; max-width: 72ch; }
+.pass-rows { list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; }
+.pass-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding-block: 6px; border-top: 1px solid var(--rule); }
+.pass-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-left: auto; }
 /* The invitation page (clerk mode): Clerk's sign-in under the hero */
 .signin-note { color: var(--muted); margin: 0; }
 .band { background: var(--band); color: var(--band-fg); padding: 32px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 28px; }
@@ -215,12 +233,32 @@ textarea.field { resize: vertical; font-family: inherit; }
   border-top: 2px solid var(--sign); border-radius: 0; padding: 12px; display: grid; gap: 8px; }
 .review-bar .decided { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); }
 .review-bar .note { margin: 0; border-left: 2px solid var(--rule); padding: 2px 10px; overflow-wrap: anywhere; }
+/* The review's three steps (#372): numbered in order, the current one in --ink under a 2px --ink rule, the others
+   --muted; the number is a counter, so each step's name is its text. --sign stays for sign-off (design.md, Tokens). */
+.review-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px;
+  counter-reset: review-step; font-size: 13px; color: var(--muted); }
+.review-steps li { counter-increment: review-step; padding: 2px 0; border-bottom: 2px solid transparent; }
+.review-steps li::before { content: counter(review-step) ". "; }
+.review-steps li[aria-current="step"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
 /* Remediation item (#43, design.md Components): under a not-evidenced requirement's reason, ruled off from the quotes;
    a draft's form takes the override editor's grid, Approve in the sign-off colour. */
 .remediation { display: grid; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--rule); }
 .remediation p { margin: 0; }
 .remediation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .remediation-missing { overflow-wrap: anywhere; }
+/* The improvement plan on an approved item (#410): the Priority select, then Mark done; the done note as written. */
+.item-plan { display: grid; gap: 6px; max-width: 60ch; }
+.item-plan > label { font-weight: 500; }
+.item-plan > .field { flex: none; width: 100%; max-width: 16ch; }
+.remediation .done-note { overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Open questions (#414, design.md Components: Open question): one per row, ruled apart as remediation items are; the
+   lead's question and answer as written; the forms take the override editor's grid at the sheet's width. */
+.questions .question-list { list-style: none; margin: 0; padding: 0; display: grid; width: 100%; }
+.question { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--rule); }
+.question:first-child { border-top: 0; padding-top: 0; }
+.question p { margin: 0; }
+.question-text, .question .done-note { overflow-wrap: anywhere; white-space: pre-wrap; }
+.questions .override { width: 100%; }
 
 /* Developer page (#34, pending design pass): working-paper sheets, one form row. The field's edge is --muted:
    --rule on --sheet is 1.47:1, under the 3:1 a control's edge needs (--muted: 5.45:1 light, 6.17:1 dark). */
@@ -350,6 +388,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 .report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .report-controls { min-width: 680px; }
 .report-trail { min-width: 1100px; }
+/* The improvement report's plan and questions (#420): scrolled in their container on a phone, as the controls. */
+.report-plan { min-width: 760px; }
+.report-questions { min-width: 680px; }
 .report-table thead th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
   border-bottom: 1px solid var(--ink); padding: 6px 8px; font-weight: 600; vertical-align: bottom; }
 .report-table th[scope="row"], .report-table td { border-bottom: 1px solid var(--rule); padding: 7px 8px; vertical-align: top;
@@ -366,7 +407,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 .report-line { white-space: nowrap; display: block; }
 .report-muted { color: var(--muted); margin: 0; }
 .report-group { --report-group-gap: 6px; display: grid; gap: var(--report-group-gap); }
-.report-group-head { margin: 0; font-weight: 600; }
+.report-group-head { margin: 0; font-weight: 600; font-size: inherit; }
 .report-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
 .report-list li { border-bottom: 1px solid var(--rule); padding-bottom: 10px; overflow-wrap: anywhere; }
 .report-reason { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 6px 0 0; }
@@ -421,6 +462,6 @@ textarea.field { resize: vertical; font-family: inherit; }
   .report-line { white-space: normal; }
   .report-table tr { break-inside: avoid; }
   .report-table thead { display: table-header-group; }
-  .report-doc h2, .report-quotes h3 { break-after: avoid; }
+  .report-doc h2, .report-quotes h3, .report-group-head { break-after: avoid; }
   .report-doc a[href]::after { content: " (" attr(href) ")"; overflow-wrap: anywhere; }
 }

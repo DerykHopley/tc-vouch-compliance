@@ -53,7 +53,7 @@ class ToolAllowList:
 
     @property
     def model_name(self) -> str:
-        """The wrapped model's name, which the Assessment records (vouch.graph, _model_name)."""
+        """The wrapped model's name, which the Assessment records (vouch.graph, model_name_of)."""
         return getattr(self._model, "model_name", None) or self._model._llm_type
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> Runnable:

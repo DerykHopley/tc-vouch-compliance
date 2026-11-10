@@ -552,6 +552,19 @@ def test_a_request_to_openrouter_has_a_timeout():
     assert KEY not in repr(model)
 
 
+def test_a_profile_pass_request_has_600_s_no_reply_cap_and_no_retry():
+    choice = ModelChoice(Settings(openrouter_api_key=SecretStr(KEY)), MemoryModelStore())
+
+    pass_model = choice.for_profile_pass(DEFAULT_MODEL)
+    assessment_model = choice.for_assessment(DEFAULT_MODEL)
+
+    assert pass_model.request_timeout == 600  # type: ignore[attr-defined]
+    assert pass_model.max_tokens is None  # type: ignore[attr-defined]
+    assert pass_model.max_retries == 0  # type: ignore[attr-defined]  # a timeout isn't paid twice
+    assert assessment_model.request_timeout == 120  # type: ignore[attr-defined]
+    assert assessment_model.max_retries == MAX_RETRIES  # type: ignore[attr-defined]
+
+
 # --- A compliance lead gets 403 from the developer API ------------------------------------------
 
 

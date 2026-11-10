@@ -17,6 +17,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from vouch.allow_list import GUARD, ToolAllowList
+from vouch.citations import LeadStatement
 from vouch.graph import Assessment, RequirementVerdict, assess_steps, new_thread_id
 from vouch.isa import IsaControl
 from vouch.memory import Memory, rejection_note
@@ -45,7 +46,8 @@ class AlreadyRunning(RuntimeError):
 class AssessmentRun:
     """What one assessment runs on: the model (`models` and the `chosen` id), the tools the
     compliance profile allows, the saver its thread is kept in, the meter that sees every model
-    call, and whose it is (`scope`, vouch.memory.Memory.scope)."""
+    call, whose it is (`scope`, vouch.memory.Memory.scope), and the lead's statements under the
+    profile (#422), each passed to its own control's assessment."""
 
     models: ModelChoice
     chosen: str | None
@@ -53,6 +55,7 @@ class AssessmentRun:
     saver: BaseCheckpointSaver
     meter: UsageMeter
     scope: str
+    statements: tuple[LeadStatement, ...] = ()
 
     def metered_afresh(self) -> "AssessmentRun":
         """The same run with a meter of its own, for another assessment from the same request
@@ -94,6 +97,7 @@ def assessment_events(
             note=note,
             thread_id=thread_id,
             scope=run.scope,
+            statements=[s for s in run.statements if s.control_id == control.id],
         )
         for item in steps:
             if isinstance(item, Assessment):

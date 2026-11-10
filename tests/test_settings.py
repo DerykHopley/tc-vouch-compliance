@@ -245,6 +245,17 @@ def test_started_with_a_bad_rate_setting_the_app_exits_naming_it():
     assert "VOUCH_RATE_REQUESTS" in refused_start({"VOUCH_RATE_REQUESTS": "x"})
 
 
+def test_the_profile_pass_threshold_is_100000_tokens_unless_a_setting_names_another():
+    assert load_settings({}).profile_pass_tokens == 100_000
+    assert load_settings({"VOUCH_PROFILE_PASS_TOKENS": " 12000 "}).profile_pass_tokens == 12_000
+
+
+@pytest.mark.parametrize("value", ["0", "lots", "-1", "1.5", "50k"])
+def test_a_profile_pass_threshold_that_isnt_a_whole_number_above_zero_refuses_naming_it(value):
+    with pytest.raises(SettingsError, match="VOUCH_PROFILE_PASS_TOKENS must be a whole number"):
+        load_settings({"VOUCH_PROFILE_PASS_TOKENS": value})
+
+
 def test_in_clerk_mode_the_discord_server_id_is_read_as_a_plain_setting():
     env = {"VOUCH_AUTH_MODE": "clerk"} | CLERK_KEYS
     gated = load_settings(env | {"DISCORD_SERVER_ID": " 111111111111111111 "})

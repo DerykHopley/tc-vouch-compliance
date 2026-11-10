@@ -1,26 +1,29 @@
 """The audit trail (#39): the lead's every action, append-only, written with its decision.
 
-One entry per action of the compliance lead: the review's accept or reject, each override in
-it, and each remediation item approved or discarded (vouch.remediation, #43). An entry says
+One entry per action of the compliance lead: the findings confirmed and each override with
+them (the review's first step, #372), the review's accept or reject, and each remediation item
+approved or discarded (vouch.remediation, #43), and each change of the profile's Goal
+(vouch.goal, #369, with the goal before and after), and each review round started or closed
+(vouch.rounds, #402, with the round's name). An entry says
 who, when, under which profile, on which control (and requirement), the note, the verdict
 before and after, the versions of the evidence documents it rests on, and the model and prompt
 version of the run, read from the assessment's thread, never assumed.
 
-A review is recorded or not at all (`review`). Its entries are built from the waiting
-assessment and the decision before anything is written, and the trail keeps the two together:
+Each step of a review is recorded or not at all (`confirm_findings`, `review`). Its entries are
+built from the waiting assessment and the step before anything is written, and the trail keeps the two together:
 with a database, the entries and the decision (LangGraph's checkpoint) go in one transaction on
 one connection (vouch.database's `Database.reviewing`), so a failed entry rolls the decision
 back; without one, the entries are kept in this process once the decision is written, which
 can't fail.
 
-The trail also keeps two reviews of one thread apart: the second is refused at once
+The trail also keeps two steps of one thread's review apart: the second is refused at once
 (NotWaitingForReviewError, a 409) while the first holds the thread's lock.
 
 Nothing offers an update or a delete: the table refuses both too (vouch-db-setup's trigger).
 """
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -29,10 +32,13 @@ from typing import Any, Protocol
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from vouch.database import AuditAction, Database, ReviewInProgress
+from vouch import graph
+from vouch.database import AuditAction, Database, Goal, ReviewInProgress
 from vouch.graph import (
+    NO_DRAFTS,
     WAITING,
     Assessment,
+    ConfirmFindings,
     NotWaitingForReviewError,
     RequirementVerdict,
     ReviewDecision,
@@ -82,6 +88,13 @@ class AuditEntry:
     evidence: tuple[EvidenceVersion, ...]
     model: str
     prompt_version: str
+    goal_before: Goal | None = None
+    goal_after: Goal | None = None
+    """A change of the profile's Goal (`goal`, #369): the goal before and after; None on every
+    other entry."""
+    round_name: str | None = None
+    """A review round started or closed (`round-start`, `round-close`, #402): the round's name;
+    None on every other entry."""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -116,32 +129,41 @@ def evidence_versions(requirements: list[RequirementVerdict]) -> tuple[EvidenceV
     return tuple(sorted(cited))
 
 
-def review_entries(
-    waiting: Assessment, decision: ReviewDecision, reviewer: Reviewer, at: datetime
+def _entry(waiting: Assessment, reviewer: Reviewer, at: datetime, **fields: Any) -> AuditEntry:
+    """An entry on the waiting assessment's control, by the reviewer, at `at`."""
+    return AuditEntry(
+        id=None,
+        user_id=reviewer.id,
+        reviewer_name=reviewer.name,
+        at=at,
+        profile_id=waiting.profile_id,
+        control_id=waiting.control_id,
+        thread_id=waiting.thread_id,
+        model=waiting.model,
+        prompt_version=waiting.prompt_version,
+        **fields,
+    )
+
+
+def _control_evidence(requirements: list[RequirementVerdict]) -> tuple[EvidenceVersion, ...]:
+    """The control's evidence: that of the requirements its verdict rests on (graph.roll_up's)."""
+    return evidence_versions([r for r in requirements if counts_towards_roll_up(r)])
+
+
+def confirm_entries(
+    waiting: Assessment, findings: ConfirmFindings, reviewer: Reviewer, at: datetime
 ) -> list[AuditEntry]:
-    """The entries the lead's decision on a waiting assessment makes: one per override, then
-    the decision itself (so read newest first, the decision comes before its overrides). The
-    control's evidence is that of the requirements its verdict rests on (graph.roll_up's).
-    InvalidReviewError for an override graph.resume would refuse."""
-    reviewed, overrides = apply_overrides(waiting.requirements, decision.overrides)
-
-    def entry(**fields: Any) -> AuditEntry:
-        return AuditEntry(
-            id=None,
-            user_id=reviewer.id,
-            reviewer_name=reviewer.name,
-            at=at,
-            profile_id=waiting.profile_id,
-            control_id=waiting.control_id,
-            thread_id=waiting.thread_id,
-            model=waiting.model,
-            prompt_version=waiting.prompt_version,
-            **fields,
-        )
-
+    """The entries the lead's Confirm findings makes (#372): one per override, then `confirm`
+    for the control, its verdict before Vouch's roll-up and after the roll-up with the
+    overrides (so read newest first, the confirm comes before its overrides).
+    InvalidReviewError for an override graph.confirm_findings would refuse."""
+    reviewed, overrides = apply_overrides(waiting.requirements, findings.overrides)
     by_id = {r.id: r for r in reviewed}
     entries = [
-        entry(
+        _entry(
+            waiting,
+            reviewer,
+            at,
             action="override",
             requirement_id=o.requirement_id,
             note=o.reason,
@@ -152,16 +174,41 @@ def review_entries(
         for o in overrides
     ]
     entries.append(
-        entry(
+        _entry(
+            waiting,
+            reviewer,
+            at,
+            action="confirm",
+            requirement_id=None,
+            note="",
+            verdict_before=waiting.verdict,
+            verdict_after=roll_up(reviewed),
+            evidence=_control_evidence(reviewed),
+        )
+    )
+    return entries
+
+
+def review_entries(
+    waiting: Assessment, decision: ReviewDecision, reviewer: Reviewer, at: datetime
+) -> list[AuditEntry]:
+    """The entry the lead's decision on a waiting assessment makes: `accept` or `reject` for the
+    control, with the note. The decision changes no verdict: before and after are the control's
+    verdict as it waits (the confirmed roll-up, once the findings are confirmed). Its evidence
+    is that of the requirements the verdict rests on (graph.roll_up's)."""
+    return [
+        _entry(
+            waiting,
+            reviewer,
+            at,
             action=decision.decision,
             requirement_id=None,
             note=decision.note,
             verdict_before=waiting.verdict,
-            verdict_after=roll_up(reviewed),
-            evidence=evidence_versions([r for r in reviewed if counts_towards_roll_up(r)]),
+            verdict_after=waiting.verdict,
+            evidence=_control_evidence(waiting.requirements),
         )
-    )
-    return entries
+    ]
 
 
 Record = Callable[[list[AuditEntry]], None]
@@ -200,21 +247,33 @@ class ProcessTrail:
         self._checkpointer = checkpointer
         self._entries: list[AuditEntry] = []
         self._guard = threading.Lock()
-        self._reviewing: set[str] = set()
+        self._released = threading.Condition(self._guard)
+        self._held: set[str] = set()
+
+    @contextmanager
+    def holding(self, key: str, *, wait: bool = False) -> Iterator[BaseCheckpointSaver]:
+        """The thread's lock (`key`, graph.thread_key) held for the block, and the checkpointer
+        to read and write the thread on. A step of the review is refused at once while another
+        holds it (`wait` False: NotWaitingForReviewError); a remediation decision waits for it
+        (vouch.remediation, #372)."""
+        with self._guard:
+            if key in self._held and not wait:
+                raise _busy(key)
+            self._released.wait_for(lambda: key not in self._held)
+            self._held.add(key)
+        try:
+            yield self._checkpointer()
+        finally:
+            with self._guard:
+                self._held.discard(key)
+                self._released.notify_all()
 
     @contextmanager
     def recording(self, key: str) -> Iterator[tuple[BaseCheckpointSaver, Record]]:
-        with self._guard:
-            if key in self._reviewing:
-                raise _busy(key)
-            self._reviewing.add(key)
-        try:
+        with self.holding(key) as saver:
             staged: list[AuditEntry] = []
-            yield self._checkpointer(), staged.extend
+            yield saver, staged.extend
             self.keep(staged)
-        finally:
-            with self._guard:
-                self._reviewing.discard(key)
 
     def keep(self, entries: list[AuditEntry]) -> None:
         """Append entries, each given the trail's next id: a list append, which can't fail."""
@@ -297,6 +356,36 @@ def read_all(trail: AuditTrail, user_id: str, profile_id: str) -> list[AuditEntr
         before = page.next
 
 
+def _waiting_assessment(saver: BaseCheckpointSaver, thread_id: str, scope: str) -> Assessment:
+    """The thread's assessment, waiting for review, which a step's entries are built from;
+    NotWaitingForReviewError when reviewed. Which step it waits at is graph's to check
+    (`confirm_findings`, `resume`): a step refused there writes no entry either."""
+    waiting = load_assessment(thread_id, saver, scope=scope)
+    if waiting.status != WAITING:
+        raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
+    return waiting
+
+
+def confirm_findings(
+    trail: AuditTrail,
+    thread_id: str,
+    findings: ConfirmFindings,
+    *,
+    reviewer: Reviewer,
+    scope: str = "",
+    clock: Callable[[], datetime] = now,
+) -> Assessment:
+    """The review's first step (#372): `graph.confirm_findings` on the thread with the lead's
+    findings, and its entries recorded, together, as `review` does. Raises what
+    graph.confirm_findings raises (WrongStepError for findings confirmed already;
+    NotWaitingForReviewError also while another step of the thread's review runs), and
+    DatabaseUnavailable (Postgres)."""
+    with trail.recording(thread_key(thread_id, scope)) as (saver, record):
+        waiting = _waiting_assessment(saver, thread_id, scope)
+        record(confirm_entries(waiting, findings, reviewer, clock()))
+        return graph.confirm_findings(thread_id, findings, saver, scope=scope)
+
+
 def review(
     trail: AuditTrail,
     thread_id: str,
@@ -305,15 +394,16 @@ def review(
     reviewer: Reviewer,
     scope: str = "",
     clock: Callable[[], datetime] = now,
+    drafts: Callable[[Assessment], Sequence[str]] = NO_DRAFTS,
 ) -> Assessment:
-    """`resume` the thread with the lead's decision and record its entries, together: the
-    entries are built first, and when they can't be built or written, the decision isn't
-    written either. Raises what `resume` raises (NotWaitingForReviewError also while another
-    review of the thread runs), and DatabaseUnavailable (Postgres)."""
+    """`resume` the thread with the lead's decision and record its entry, together: the entry
+    is built first, and when it can't be built or written, or `resume` refuses the step, the
+    decision isn't written either. `drafts` is `resume`'s: the requirements whose remediation
+    items are still drafts, which hold an Accept back (vouch.remediation keeps the decisions).
+    Raises what `resume` raises (NotWaitingForReviewError also while another step of the
+    thread's review runs), and DatabaseUnavailable (Postgres)."""
     with trail.recording(thread_key(thread_id, scope)) as (saver, record):
-        waiting = load_assessment(thread_id, saver, scope=scope)
-        if waiting.status != WAITING:
-            raise NotWaitingForReviewError(f"assessment {thread_id} is not waiting for review")
+        waiting = _waiting_assessment(saver, thread_id, scope)
         at = clock()
         record(review_entries(waiting, decision, reviewer, at))
         return resume(
@@ -324,4 +414,5 @@ def review(
             reviewer_id=reviewer.id,
             reviewer_name=reviewer.name,
             reviewed_at=at,
+            drafts=drafts,
         )

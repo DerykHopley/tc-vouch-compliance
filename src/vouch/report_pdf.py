@@ -7,7 +7,9 @@ Black on white, on A4, under a letterhead on every page (#352: Vouch and the com
 brass rule; the date and "Page x of y" in the footer): the title, the head as label and value
 lines, readiness, the controls table and each accepted control's quotes, the remediation items under their control,
 the not-applicable list, the audit trail table (on landscape A4 pages, for its 11 columns) and
-the disclaimer at the foot. Each table's header row repeats on every page it runs onto, its
+the disclaimer at the foot. The improvement report (#420) has its own middle: the comparison,
+the plan's priority tables and the open questions table, in place of the controls, remediation
+and not-applicable parts. Each table's header row repeats on every page it runs onto, its
 cells wrap, and fpdf2 never splits a row across pages.
 
 fpdf2 can't draw a row taller than a page, and carried text has no length limit (a lead's note,
@@ -35,6 +37,7 @@ from fpdf.enums import MethodReturnValue
 from fpdf.fonts import FontFace, TTFFont
 
 from vouch import report as rows
+from vouch.plan import IMPROVEMENT
 
 FONTS = Path(__file__).parent / "fonts"
 DISPLAY, SANS, MONO, QUOTE = "caslon", "manrope", "plexmono", "plexserif"  # the app's type
@@ -298,25 +301,10 @@ def pdf(report: Mapping[str, Any], words: Mapping[str, Any]) -> bytes:
 
 
 def _sheet(report: Mapping[str, Any], words: Mapping[str, Any], pages: int) -> _Sheet:
+    if report.get("goal") == IMPROVEMENT:
+        return _improvement_sheet(report, words, pages)
     labels, sentences = words["labels"], words["sentences"]
-    head = report["head"]
-    date = f"{labels['date']} {head['date']}"
-    sheet = _Sheet(Letterhead(head["company"], sentences["page_of"], date, pages))
-    sheet.set_title(sheet.drawable(words["title"]))
-    sheet.set_lang(head["words_language"])
-    sheet.set_creator("Vouch")
-    sheet.add_page()
-
-    sheet.paragraph(str(words["title"]).upper(), TITLE, family=DISPLAY)
-    sheet.ln(2)
-    _head(sheet, report["head"], words)
-
-    sheet.heading(labels["readiness"], SECTION)
-    sentence, counts = rows.readiness_lines(report["readiness"], words)
-    sheet.paragraph(sentence)
-    sheet.ln(1)
-    for count in counts:
-        sheet.paragraph(f"• {count}", indent=3)
+    sheet = _opened(report, words, words["title"], pages)
 
     sheet.heading(labels["controls"], SECTION)
     _controls(sheet, report["controls"], words)
@@ -342,6 +330,89 @@ def _sheet(report: Mapping[str, Any], words: Mapping[str, Any], pages: int) -> _
     if not report["not_applicable"]:
         sheet.paragraph(sentences["no_not_applicable"])
 
+    _closed(sheet, report, words)
+    return sheet
+
+
+def _opened(report: Mapping[str, Any], words: Mapping[str, Any], title: str, pages: int) -> _Sheet:
+    """A sheet under its letterhead with the report's title, head and readiness: what both
+    shapes of the report start with."""
+    labels, sentences = words["labels"], words["sentences"]
+    head = report["head"]
+    date = f"{labels['date']} {head['date']}"
+    sheet = _Sheet(Letterhead(head["company"], sentences["page_of"], date, pages))
+    sheet.set_title(sheet.drawable(title))
+    sheet.set_lang(head["words_language"])
+    sheet.set_creator("Vouch")
+    sheet.add_page()
+
+    sheet.paragraph(str(title).upper(), TITLE, family=DISPLAY)
+    sheet.ln(2)
+    _head(sheet, report["head"], words)
+
+    sheet.heading(labels["readiness"], SECTION)
+    sentence, counts = rows.readiness_lines(report["readiness"], words)
+    sheet.paragraph(sentence)
+    sheet.ln(1)
+    for count in counts:
+        sheet.paragraph(f"• {count}", indent=3)
+    return sheet
+
+
+def _improvement_sheet(report: Mapping[str, Any], words: Mapping[str, Any], pages: int) -> _Sheet:
+    """The improvement report (#420): title, head, readiness, the comparison, the plan by
+    priority, the open questions, then the trail and the disclaimer as the readiness report's."""
+    labels, sentences = words["labels"], words["sentences"]
+    sheet = _opened(report, words, words["improvement_title"], pages)
+
+    sheet.heading(labels["comparison"], SECTION)
+    comparison = report["comparison"]
+    lead, counts, closing = rows.comparison_lines(comparison, words)
+    for line in lead:
+        sheet.paragraph(line)
+    if counts:
+        sheet.ln(1)
+    for count in counts:
+        sheet.paragraph(f"• {count}", indent=3)
+    if closing is not None:
+        sheet.ln(1)
+        sheet.paragraph(closing)
+    elif comparison is not None:
+        sheet.heading(labels["changed"], SUBSECTION)
+        sheet.grid(
+            rows.changed_columns(words), rows.changed_rows(comparison, words), (30, 75, 75), ids=[0]
+        )
+
+    sheet.heading(labels["plan"], SECTION)
+    for group in report["plan"]:
+        sheet.heading(words["priorities"][group["priority"]], SUBSECTION)
+        sheet.grid(
+            rows.plan_columns(words),
+            rows.plan_rows(group, words),
+            (16, 16, 50, 28, 20, 18, 32),
+            ids=[0, 1],
+        )
+    if not report["plan"]:
+        sheet.paragraph(sentences["no_plan"])
+
+    sheet.heading(labels["open_questions"], SECTION)
+    if report["questions"]:
+        sheet.grid(
+            rows.question_columns(words),
+            rows.question_rows(report["questions"], words),
+            (16, 50, 28, 20, 22, 44),
+            ids=[0],
+        )
+    else:
+        sheet.paragraph(sentences["no_questions"])
+
+    _closed(sheet, report, words)
+    return sheet
+
+
+def _closed(sheet: _Sheet, report: Mapping[str, Any], words: Mapping[str, Any]) -> None:
+    """The audit trail and the disclaimer at the foot: how both shapes of the report end."""
+    labels, sentences = words["labels"], words["sentences"]
     entries = report["trail"]["entries"]
     if entries:
         # Its 11 columns need the width: the trail starts a landscape A4 page.
@@ -359,7 +430,6 @@ def _sheet(report: Mapping[str, Any], words: Mapping[str, Any], pages: int) -> _
     sheet.line(sheet.l_margin, sheet.y, sheet.w - sheet.r_margin, sheet.y)
     sheet.ln(2)
     sheet.paragraph(report["disclaimer"])
-    return sheet
 
 
 TRAIL_IDS = (2, 3, 8, 9, 10)  # the trail's control, requirement, evidence, model, prompt version

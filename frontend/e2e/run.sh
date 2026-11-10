@@ -13,6 +13,16 @@
 #   - a sixth, for the readiness report's checks (#234), for the same reason;
 #   - a seventh, for the fresh start's check (#285): starting Nordlicht afresh would hide the other
 #     servers' seeded progress from their checks;
+#   - an eighth, for the profile pass's checks (#390): a pass assesses all 12 controls, which would
+#     change the counts the other servers' checks read;
+#   - a ninth, for the review rounds' checks (#402): closing a round changes the hero and the
+#     comparison the other servers' checks read, and its control's accept changes the counts;
+#   - a tenth, for the improvement plan's checks (#410): its goal is Internal improvement, and its
+#     control ends Closed, which the other servers' checks would read;
+#   - an eleventh, for the open questions' checks (#414): its control is accepted, questioned and
+#     assessed again, which would change the counts and the cards the other servers' checks read;
+#   - a twelfth, for the improvement report's check (#420): its goal is Internal improvement and a
+#     round is closed, which would change the report the sixth server's checks read;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 # Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):
@@ -39,7 +49,7 @@ RATE="${VOUCH_RATE_REQUESTS:-100000}"
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
   if [ -n "${VOUCH_IMAGE:-}" ]; then
-    "$CONTAINER" rm -f "$NAME" "$NAME-dossier" "$NAME-profiles" "$NAME-paper" "$NAME-chat" "$NAME-report" "$NAME-afresh" >/dev/null 2>&1 || true
+    "$CONTAINER" rm -f "$NAME" "$NAME-dossier" "$NAME-profiles" "$NAME-paper" "$NAME-chat" "$NAME-report" "$NAME-afresh" "$NAME-pass" "$NAME-rounds" "$NAME-plan" "$NAME-questions" "$NAME-improvement" >/dev/null 2>&1 || true
   fi
   wait 2>/dev/null || true
   rm -rf "$PROFILES_DIR"
@@ -47,9 +57,9 @@ cleanup() {
 PROFILES_DIR="$(mktemp -d)"
 trap cleanup EXIT
 
-read -r VOUCH_PORT DOSSIER_PORT PROFILES_PORT PAPER_PORT CHAT_PORT REPORT_PORT AFRESH_PORT FAILING_PORT < <(python3 -c '
+read -r VOUCH_PORT DOSSIER_PORT PROFILES_PORT PAPER_PORT CHAT_PORT REPORT_PORT AFRESH_PORT PASS_PORT ROUNDS_PORT PLAN_PORT QUESTIONS_PORT IMPROVEMENT_PORT FAILING_PORT < <(python3 -c '
 import socket
-socks = [socket.socket() for _ in range(8)]
+socks = [socket.socket() for _ in range(13)]
 for s in socks: s.bind(("127.0.0.1", 0))
 print(*(s.getsockname()[1] for s in socks))')
 
@@ -79,6 +89,11 @@ start_vouch "$PAPER_PORT" paper "$NAME-paper"
 start_vouch "$CHAT_PORT" chat "$NAME-chat"
 start_vouch "$REPORT_PORT" report "$NAME-report"
 start_vouch "$AFRESH_PORT" afresh "$NAME-afresh"
+start_vouch "$PASS_PORT" pass "$NAME-pass"
+start_vouch "$ROUNDS_PORT" rounds "$NAME-rounds"
+start_vouch "$PLAN_PORT" plan "$NAME-plan"
+start_vouch "$QUESTIONS_PORT" questions "$NAME-questions"
+start_vouch "$IMPROVEMENT_PORT" improvement "$NAME-improvement"
 (cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
   uv run uvicorn vouch.api:app --port "$FAILING_PORT") >"$LOG_DIR/failing-api.log" 2>&1 &
 PIDS+=($!)
@@ -90,6 +105,11 @@ export PAPER_URL="http://localhost:$PAPER_PORT"
 export CHAT_URL="http://localhost:$CHAT_PORT"
 export REPORT_URL="http://localhost:$REPORT_PORT"
 export AFRESH_URL="http://localhost:$AFRESH_PORT"
+export PASS_URL="http://localhost:$PASS_PORT"
+export ROUNDS_URL="http://localhost:$ROUNDS_PORT"
+export PLAN_URL="http://localhost:$PLAN_PORT"
+export QUESTIONS_URL="http://localhost:$QUESTIONS_PORT"
+export IMPROVEMENT_URL="http://localhost:$IMPROVEMENT_PORT"
 export FAILING_API_URL="http://127.0.0.1:$FAILING_PORT"
 
 wait_for() {
@@ -109,6 +129,11 @@ wait_for "$PAPER_URL/api/health"
 wait_for "$CHAT_URL/api/health"
 wait_for "$REPORT_URL/api/health"
 wait_for "$AFRESH_URL/api/health"
+wait_for "$PASS_URL/api/health"
+wait_for "$ROUNDS_URL/api/health"
+wait_for "$PLAN_URL/api/health"
+wait_for "$QUESTIONS_URL/api/health"
+wait_for "$IMPROVEMENT_URL/api/health"
 wait_for "$FAILING_API_URL/api/health"
 
 # Test paths work from the repo's root too (frontend/e2e/test_x.py), not only from here (#246).

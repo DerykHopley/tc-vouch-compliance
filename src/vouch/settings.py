@@ -40,6 +40,11 @@ DATABASE_URL_ENV = "VOUCH_DATABASE_URL"
 PROFILES_DIR_ENV = "VOUCH_PROFILES_DIR"
 LOCAL_USER_NAME_ENV = "VOUCH_LOCAL_USER_NAME"
 RATE_REQUESTS_ENV = "VOUCH_RATE_REQUESTS"
+PROFILE_PASS_TOKENS_ENV = "VOUCH_PROFILE_PASS_TOKENS"
+PROFILE_PASS_TOKENS = 100_000
+"""The profile pass's token threshold (#371, #432): a pass whose prompt and expected reply are
+estimated over it is refused, and the per-control agent is the way on (docs/requirements.md,
+2026-11-09)."""
 
 CLERK_KEY_ENVS = (CLERK_SECRET_KEY_ENV, CLERK_PUBLISHABLE_KEY_ENV, CLERK_JWT_KEY_ENV)
 CLERK_ENVS = (*CLERK_KEY_ENVS, CLERK_AUTHORIZED_PARTIES_ENV)
@@ -53,7 +58,7 @@ ENV_NAMES = frozenset(
     | {FRONTEND_ENV}
     | {DATABASE_URL_ENV, PROFILES_DIR_ENV}
     | {DATABASE_URL_ENV, LOCAL_USER_NAME_ENV}
-    | {RATE_REQUESTS_ENV}
+    | {RATE_REQUESTS_ENV, PROFILE_PASS_TOKENS_ENV}
 )
 
 DEMO_DIR = Path(__file__).parent / "demo"
@@ -65,6 +70,9 @@ own, so a German profile's assessment answers in German on the fake."""
 COVERED_CONTROLS = ("1.1.1", "1.6.2", "5.1.1")
 """The controls with demo scripts of their own besides 4.1.2's (#272): the Dossier's suggested
 first step, Alpenwerk's overlay (1.6.2's O1) and Nordlicht's stale encryption standard."""
+PROFILE_PASS_SCRIPT = DEMO_DIR / "profile-pass.json"
+"""The bundled profile pass script (#371), written for Nordlicht's 12 controls: the pass's fake
+when no ASSESS_FAKE_SCRIPT is set."""
 
 
 @dataclass(frozen=True)
@@ -141,6 +149,8 @@ class Settings:
     """Local mode's one user's display name, kept on their audit entries (#154)."""
     rate_requests: int = RATE_REQUESTS
     """A user's requests a minute before 429: VOUCH_RATE_REQUESTS, else vouch.limits's 60."""
+    profile_pass_tokens: int = PROFILE_PASS_TOKENS
+    """The profile pass's token threshold: VOUCH_PROFILE_PASS_TOKENS, else 100,000 (#432)."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -174,12 +184,13 @@ def _discord_server_id(value: str | None) -> str | None:
     return value
 
 
-def _rate_requests(value: str | None) -> int:
-    """Requests a minute: a whole number above 0, else RATE_REQUESTS. Raises SettingsError."""
+def _above_zero(value: str | None, name: str, unit: str, default: int) -> int:
+    """A whole number above 0 of `unit`, else `default` when unset. Raises SettingsError naming
+    the setting `name`."""
     if value is None:
-        return RATE_REQUESTS
+        return default
     if not (value.isascii() and value.isdigit()) or int(value) < 1:
-        raise SettingsError(f"{RATE_REQUESTS_ENV} must be a whole number of requests above 0")
+        raise SettingsError(f"{name} must be a whole number of {unit} above 0")
     return int(value)
 
 
@@ -234,7 +245,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         database_url=load_database_url(env),
         profiles_dir=read_path(PROFILES_DIR_ENV) or FIXTURES_DIR,
         local_user_name=read(LOCAL_USER_NAME_ENV) or DEFAULT_USER_NAME,
-        rate_requests=_rate_requests(read(RATE_REQUESTS_ENV)),
+        rate_requests=_above_zero(
+            read(RATE_REQUESTS_ENV), RATE_REQUESTS_ENV, "requests", RATE_REQUESTS
+        ),
+        profile_pass_tokens=_above_zero(
+            read(PROFILE_PASS_TOKENS_ENV), PROFILE_PASS_TOKENS_ENV, "tokens", PROFILE_PASS_TOKENS
+        ),
     )
 
 
