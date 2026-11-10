@@ -27,11 +27,12 @@ from pydantic import SecretStr
 from pypdf import PdfReader
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
-from test_dossier import seeded
+from test_dossier import WHOLE_REASON, WITHOUT_1_1_1, seeded
 from test_memory import app_on, restart
 
 from vouch import api, audit, goal, isa, report
 from vouch.database import Database
+from vouch.dossier import overview
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import Review
 from vouch.language import audit_claim, written_in
@@ -194,6 +195,35 @@ def test_a_review_kept_without_a_name_shows_the_reviewers_id_and_with_neither_no
     assert shown["disclaimer"] == (
         "Drafted by an AI assistant, reviewed by user_42; not an audit result."
     )
+
+
+def test_a_control_not_applicable_as_a_whole_is_out_of_readiness_and_the_controls_table():
+    # #454: the overview's readiness, no row in the controls table, its requirements still
+    # listed as not applicable with the reason.
+    controls = WITHOUT_1_1_1.isa_edition().controls
+    latest = {
+        "1.1.1": seeded("1.1.1", "evidenced", "accepted"),
+        "1.6.1": seeded("1.6.1", "evidenced", "accepted"),
+    }
+
+    shown = report.readiness_report(
+        WITHOUT_1_1_1,
+        controls,
+        latest,
+        decided={},
+        trail=audit.Page([], None),
+        today=date(2026, 11, 6),
+    )
+
+    standing = overview(WITHOUT_1_1_1, controls, latest)["readiness"]
+    assert {k: shown["readiness"][k] for k in ("controls", "accepted", "open", "by_verdict")} == {
+        k: standing[k] for k in ("controls", "accepted", "open", "by_verdict")
+    }
+    assert shown["readiness"]["controls"] == len(controls) - 1
+    assert shown["readiness"]["accepted"] == 1
+    assert "1.1.1" not in [row["id"] for row in shown["controls"]]
+    listed = [n for n in shown["not_applicable"] if n["control_id"] == "1.1.1"]
+    assert listed and all(n["reason"] == WHOLE_REASON for n in listed)
 
 
 # --- Remediation: approved items only, under their control (story 4) ---------------------------

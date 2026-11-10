@@ -34,7 +34,8 @@ function seeded(cards: Partial<Record<string, Pick<ControlCard, 'status' | 'verd
     readiness: { controls: 12, accepted: 2,
       by_verdict: { evidenced: 1, 'partly-evidenced': 1, 'not-evidenced': 0, 'not-applicable': 0 }, open: 10,
       remediation_items: 3, remediation_approved: 0 },
-    by_status: { 'not-assessed': 12 - Object.keys(cards).length, 'waiting-for-review': 1, accepted: 2, rejected: 0 },
+    by_status: { 'not-assessed': 12 - Object.keys(cards).length, 'waiting-for-review': 1, accepted: 2, rejected: 0,
+      'not-applicable': 0 },
     next_step: { control_id: assessed ? '4.1.2' : '1.1.1', action: assessed ? 'review' : 'assess' },
     controls,
     quotes: assessed ? [{ control_id: '1.1.1', requirement_id: 'M1', doc_id: 'isms-policy', version: '2.0', section: 'Scope',
@@ -124,6 +125,26 @@ describe('the Dossier overview', () => {
     expect(within(card('4.1.3')).getByText('Rejected')).toBeTruthy()
     expect(within(card('5.2.9')).getByText('Not assessed').className).toBe('chip v-none')
   })
+
+  it('shows a control not applicable as a whole with the Not applicable chip, no review tag and the reason (ticket 454)',
+    () => {
+      const overview = seeded()
+      overview.controls = overview.controls.map((c) => c.id === '5.2.9'
+        ? { ...c, status: 'not-applicable', verdict: 'not-applicable', not_applicable: 'No development of our own.' }
+        : { ...c, not_applicable: null })
+      overview.readiness = { ...overview.readiness, controls: 11, open: 11 }
+      render(<Dossier state={{ status: 'ready', overview }} onRetry={() => {}} onOpen={() => {}} running={null}
+        {...NO_PASS} {...NO_GOAL} />)
+      const card = screen.getByRole('article', { name: 'Control 5.2.9' })
+      expect(cardChip('5.2.9').className).toBe('chip v-not-applicable')
+      expect(cardChip('5.2.9').textContent).toBe('Not applicable')
+      expect(card.querySelector('.card-head')!.className).toContain('edge-not-applicable')
+      expect(card.querySelector('.tag')).toBeNull()
+      expect(within(card).getByText('No development of our own.').className).toBe('field-note')
+      // The heading counts the cards, readiness the applicable ones.
+      expect(screen.getByRole('heading', { name: '12 controls' })).toBeTruthy()
+      expect(within(screen.getByRole('region', { name: 'Readiness' })).getByText('accepted of 11')).toBeTruthy()
+    })
 
   it("shows a German profile's card verdicts in German, marked lang=\"de\" (ticket 200)", () => {
     const overview = { ...seeded(ALL_VERDICTS), company: 'Alpenwerk Präzision GmbH', country: 'Austria',

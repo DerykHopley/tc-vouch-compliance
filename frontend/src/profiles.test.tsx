@@ -246,7 +246,7 @@ const overviewOf = (company: string): Overview => ({
   requirements: {}, rounds: { current: { name: 'First round', opened_at: null }, comparison: null },
   readiness: { controls: 1, accepted: 0, by_verdict: { evidenced: 0, 'partly-evidenced': 0, 'not-evidenced': 0,
     'not-applicable': 0 }, open: 1, remediation_items: 0, remediation_approved: 0 },
-  by_status: { 'not-assessed': 1, 'waiting-for-review': 0, accepted: 0, rejected: 0 },
+  by_status: { 'not-assessed': 1, 'waiting-for-review': 0, accepted: 0, rejected: 0, 'not-applicable': 0 },
   next_step: { control_id: '1.1.1', action: 'assess' },
   controls: [{ id: '1.1.1', question: 'Question?', iso_27001: 'A.5.1', status: 'not-assessed', verdict: null }],
   quotes: [],

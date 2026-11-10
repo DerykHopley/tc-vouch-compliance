@@ -2,7 +2,7 @@ import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutE
 import {
   type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
-import { type ControlCard, controlPath, isoLabel, type Overview } from './overview.ts'
+import { type ControlCard, controlPath, isoLabel, isReviewed, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
@@ -347,7 +347,7 @@ function ControlIndex({ controls, openId, running, run, onOpen, language, improv
             const done = open && run.status === 'done' ? run.assessment : null
             const assessing = open ? run.status === 'running' : card.id === running
             const verdict = done ? done.verdict : card.verdict
-            const status = done ? done.status : card.status === 'not-assessed' ? undefined : card.status
+            const status = done ? done.status : isReviewed(card.status) ? card.status : undefined
             return (
               <PaperLink key={card.id} id={card.id} onOpen={onOpen} className="wp-row"
                 aria-current={open ? 'page' : undefined}>

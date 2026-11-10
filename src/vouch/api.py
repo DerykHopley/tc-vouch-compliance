@@ -63,7 +63,12 @@ from vouch.chat_agent import (
 from vouch.citations import LeadStatement
 from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.documents import library_summaries
-from vouch.dossier import PaperRequirement, overview, requirements_by_control
+from vouch.dossier import (
+    PaperRequirement,
+    applicable_controls,
+    overview,
+    requirements_by_control,
+)
 from vouch.graph import (
     Assessment,
     ConfirmFindings,
@@ -1232,7 +1237,7 @@ def dossier_overview(
     return clean | {
         "requirements": paper_requirements(profile, controls),
         "goal": current,
-        "rounds": _rounds(review, memory, controls, latest),
+        "rounds": _rounds(review, memory, applicable_controls(profile, controls), latest),
     }
 
 
@@ -1276,7 +1281,8 @@ def _comparison(
     latest: dict[str, Assessment],
 ) -> report.ReportComparison | None:
     """Now compared with the last round closed since the fresh start (None when there is none):
-    the overview's (#402) and the improvement report's (#420)."""
+    the overview's (#402) and the improvement report's (#420). `controls`: the applicable ones
+    (vouch.dossier.applicable_controls, #454)."""
     against = review.last_closed(memory.user_id, memory.profile_id, memory.fresh_start())
     if against is None or against.closed_at is None:
         return None
@@ -1338,12 +1344,13 @@ def close_round(
 ) -> dict[str, Any]:
     """The lead closes the open review round under the profile (#402): its results frozen (each
     control's newest assessment as it stands now) with its audit entry, together (when the
-    entry can't be written, neither is: a 503). With none open, a 409 with nothing written."""
+    entry can't be written, neither is: a 503). With none open, a 409 with nothing written. A
+    control not applicable as a whole under the profile isn't frozen (#454)."""
     controls, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
     try:
         closed = rounds.close(
             review,
-            rounds.freeze(controls, latest),
+            rounds.freeze(applicable_controls(profile, controls), latest),
             reviewer=audit.Reviewer(user.id, name),
             profile_id=profile.id,
         )
@@ -1496,7 +1503,9 @@ def _report(
             decided=decided,
             marks=marked,
             flags=plan.card_flags(history, decided, marked, current),
-            comparison=_comparison(stores.review, memory, controls, latest),
+            comparison=_comparison(
+                stores.review, memory, applicable_controls(profile, controls), latest
+            ),
             questions=listed,
             trail=read_trail(),
             today=report.today(),

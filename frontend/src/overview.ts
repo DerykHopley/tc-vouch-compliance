@@ -7,8 +7,13 @@ import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
 
 /** The Dossier overview from `GET /api/overview` (#40), as `vouch.dossier.overview` sends it. */
 
-/** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected. */
-export type ReviewState = 'not-assessed' | ReviewStatus
+/** A control's review state: not assessed, proposed (waiting for the lead's review), accepted or rejected; or not
+ * applicable as a whole under the profile (#454), which nothing reviews or counts. */
+export type ReviewState = 'not-assessed' | 'not-applicable' | ReviewStatus
+
+/** Whether a card's state is a review state, with its tag: an assessment of the control is stored and counts. */
+export const isReviewed = (status: ReviewState): status is ReviewStatus =>
+  status !== 'not-assessed' && status !== 'not-applicable'
 
 /** Why a re-assessment is suggested (`vouch.plan.ReassessReason`), in this order: every fix done (#410, Internal
  * improvement only), an open question answered or overdue (#414, both goals). */
@@ -26,6 +31,8 @@ export type ControlCard = {
   reassess_suggested?: boolean
   reassess_reasons?: ReassessReason[]
   closed?: boolean
+  /** The profile's reason when the control is not applicable as a whole (#454); null on every other card. */
+  not_applicable?: string | null
 }
 
 /** Counted from accepted verdicts only; `open` is every control not accepted. */

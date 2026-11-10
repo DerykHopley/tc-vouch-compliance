@@ -29,7 +29,7 @@ from profiles_dir import SECOND, make_profiles
 from reviewing import reviewed
 from test_api import read_events, recorded_prompts
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
-from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1
+from test_dossier import GERMAN_1_6_2, GERMAN_1_6_2_M1, WITHOUT_1_1_1, seeded
 from test_memory import app_on, as_user, restart
 
 from vouch import api, chat_agent
@@ -48,12 +48,14 @@ from vouch.chat_agent import (
     chat_graph,
     chat_prompt,
     chat_turn,
+    progress_words,
     verdict_words_for,
 )
 from vouch.chat_fake import CannedChatModel
 from vouch.citations import Citation, DropReason
 from vouch.database import Database
 from vouch.documents import EvidenceKind
+from vouch.dossier import overview
 from vouch.graph import (
     Assessment,
     RequirementVerdict,
@@ -900,3 +902,17 @@ def test_assessed_controls_and_start_assessment_on_alpenwerk_write_the_german_wo
     )
     assert not ENGLISH_VERDICT.search(requirements.split(" evidence. ", 1)[1])
     assert any(word in requirements for word in GERMAN_VERDICTS)
+
+
+def test_progress_leaves_a_control_not_applicable_as_a_whole_out_of_its_counts():
+    # #454: 1.1.1 is not applicable under the profile, so 11 controls are counted.
+    controls = WITHOUT_1_1_1.isa_edition().controls
+    nothing = overview(WITHOUT_1_1_1, controls, {})
+    some = overview(WITHOUT_1_1_1, controls, {"4.1.2": seeded("4.1.2", "evidenced", "accepted")})
+
+    assert progress_words(nothing["by_status"], None, nothing["next_step"]).startswith(
+        "You have not assessed any of the 11 controls yet."
+    )
+    said = progress_words(some["by_status"], None, some["next_step"])
+    assert "Of the 11 controls, 1 is accepted, and 10 are not assessed." in said
+    assert "not applicable" not in said

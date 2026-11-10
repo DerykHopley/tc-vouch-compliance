@@ -15,6 +15,7 @@ from typing import Any
 import psycopg
 import pytest
 import test_memory
+from company_setup import MUSTERFIRMA, MUSTERFIRMA_ID
 from fastapi.testclient import TestClient
 from reviewing import accepted
 from test_audit import _audit_table_shape
@@ -25,7 +26,7 @@ from test_memory import DEMO_CONTROL, app_on, assess
 from test_report import built_report
 from test_report_pdf import text
 
-from vouch import report, report_pdf, rounds
+from vouch import api, report, report_pdf, rounds
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer
 from vouch.database import (
     AUDIT_TABLE,
@@ -700,3 +701,29 @@ def test_the_pdf_builds_with_a_round_entry_saying_it_in_the_reports_words(langua
     read = text(report_pdf.pdf(built, report.words_for(language)))
 
     assert " ".join(ROUND_ROWS[language][2].split()) in " ".join(read.split())
+
+
+def test_a_control_not_applicable_as_a_whole_is_neither_frozen_nor_compared(users, monkeypatch):
+    # #454: a company made in setup with 5.2.9 not applicable, and an accepted assessment of
+    # 5.2.9 all the same (read as the newest): the close freezes the 11 others, and the
+    # comparison counts and lists none of it.
+    alice, _ = users
+    headers = alice | {api.PROFILE_HEADER: MUSTERFIRMA_ID}
+    body = MUSTERFIRMA | {
+        "not_applicable": [{"control": "5.2.9", "requirement": None, "reason": "Not ours."}]
+    }
+    newest = {"5.2.9": seeded("5.2.9", "evidenced", "accepted", profile_id=MUSTERFIRMA_ID)}
+    monkeypatch.setattr(api, "newest_by_control", lambda *_: newest)
+    with TestClient(app_on(None)) as client:
+        made = client.post("/api/developer/profiles", json=body, headers=alice)
+        assert made.status_code == 201, made.text
+        assert close(client, headers).status_code == 200
+        assert start(client, headers, "Q1 2027").status_code == 200
+        comparison = overview_rounds(client, headers)["comparison"]
+    closed = rounds.process_rounds().last_closed(alice["X-Test-User"], MUSTERFIRMA_ID, None)
+
+    assert closed is not None
+    assert [f.control_id for f in closed.results] == [i for i in IDS if i != "5.2.9"]
+    assert comparison["accepted"] == {"now": 0, "then": 0}
+    assert comparison["by_verdict"]["evidenced"] == {"now": 0, "then": 0}
+    assert comparison["changed"] == []

@@ -17,6 +17,7 @@ import test_memory
 from fastapi.testclient import TestClient
 from reviewing import OWNER, confirm
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture)
+from test_dossier import WITHOUT_1_1_1
 from test_memory import app_on, assess
 from test_plan import T0, approved, assessment, done
 from test_report import every_word, section, table_rows, under
@@ -616,3 +617,17 @@ def test_the_improvement_downloads_are_named_improvement_report(
         assert response.text.startswith("# Verbesserungsbericht\n")
     else:
         assert text(response.content).startswith("VERBESSERUNGSBERICHT")
+
+
+def test_a_control_not_applicable_as_a_whole_is_out_of_the_readiness():
+    # #454: as the overview counts it.
+    latest = {
+        "1.1.1": assessment("t-1", {"M1": "evidenced"}, control_id="1.1.1"),
+        "1.6.1": assessment("t-2", {"M1": "evidenced"}, control_id="1.6.1"),
+    }
+
+    shown = built(latest, profile=WITHOUT_1_1_1)
+
+    assert shown["readiness"]["controls"] == len(CONTROLS) - 1
+    assert shown["readiness"]["accepted"] == 1
+    assert shown["readiness"]["open"] == len(CONTROLS) - 2

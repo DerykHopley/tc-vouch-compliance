@@ -54,6 +54,7 @@ from vouch.chat import PageContext
 from vouch.chat_citations import CITE, UNCITED, checked_reply
 from vouch.citations import Citation, CitationClaim, QuoteChecker, normalise
 from vouch.documents import EvidenceKind
+from vouch.dossier import NOT_APPLICABLE as NOT_APPLICABLE_CARD
 from vouch.dossier import CardStatus, NextAction, NextStep, overview
 from vouch.graph import (
     EVIDENCE_TOOLS,
@@ -313,8 +314,9 @@ def progress_words(
     by_status: dict[CardStatus, int], last_worked: datetime | None, next_step: NextStep | None
 ) -> str:
     """Where the lead stands, in plain sentences: when they last worked, how many controls are
-    in each review state, and the next step."""
-    total = sum(by_status.values())
+    in each review state, and the next step. A control not applicable as a whole under the
+    profile is no control to work on: left out of the total and the counts (#454)."""
+    total = sum(n for status, n in by_status.items() if status != NOT_APPLICABLE_CARD)
     if by_status["not-assessed"] == total:
         said = [f"You have not assessed any of the {total} controls yet."]
     else:
