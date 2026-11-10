@@ -120,7 +120,7 @@ from vouch.spending import (
     Usage,
     count_assessment,
 )
-from vouch.tracing import tool_span
+from vouch.tracing import tool_span, with_run_config
 
 log = logging.getLogger(__name__)
 
@@ -1139,7 +1139,7 @@ def chat_turn(
     try:
         parts = graph.stream(
             {"messages": [HumanMessage(lead)]},
-            {**(run_config or {}), **chat_config(thread_id, scope)},
+            with_run_config(chat_config(thread_id, scope), run_config),
             context=chat,
             stream_mode=["custom"],
             version="v2",

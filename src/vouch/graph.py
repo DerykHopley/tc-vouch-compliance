@@ -91,7 +91,7 @@ from vouch.search import (
     Passage,
     search_folder,
 )
-from vouch.tracing import tool_span
+from vouch.tracing import tool_span, with_run_config
 
 SUBMIT_ANSWER = "submit_answer"
 SEARCH_POLICIES = "search_policies"
@@ -1907,7 +1907,9 @@ def assess_steps(
     yield loaded
     for node, update in (
         (node, update)
-        for chunk in graph.stream(initial, {**(run_config or {}), **config}, stream_mode="updates")
+        for chunk in graph.stream(
+            initial, with_run_config(config, run_config), stream_mode="updates"
+        )
         for node, update in chunk.items()
     ):
         if node == "__interrupt__":

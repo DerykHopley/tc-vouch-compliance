@@ -40,6 +40,7 @@ from vouch import (
     report,
     report_pdf,
     rounds,
+    tracing,
 )
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
@@ -784,7 +785,7 @@ def create_assessment(
     """
     control = requested.control
     facts = TraceFacts(
-        "assessment",
+        tracing.ASSESSMENT,
         user.id,
         profile.id,
         run.chosen,
@@ -859,13 +860,15 @@ def create_profile_pass(
             raise HTTPException(status_code=503, detail=str(error)) from None
         counted = True
 
-    facts = TraceFacts("profile pass", user.id, profile.id, chosen, PROFILE_PASS_PROMPT_VERSION)
+    facts = TraceFacts(
+        tracing.PROFILE_PASS, user.id, profile.id, chosen, PROFILE_PASS_PROMPT_VERSION
+    )
     try:
         model = models.for_profile_pass(chosen, callbacks=[meter], profile=profile)
         with models.traced(facts) as run_config:
             result = run_traced(
                 run_config,
-                "profile pass",
+                tracing.PROFILE_PASS,
                 lambda: run_profile_pass(
                     profile,
                     memory,
@@ -1862,7 +1865,7 @@ def chat(
         )
         message = request.message or GREETING_REQUEST
         facts = TraceFacts(
-            "chat turn",
+            tracing.CHAT_TURN,
             user.id,
             profile.id,
             chosen,

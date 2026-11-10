@@ -22,7 +22,7 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.runnables.config import ensure_config, get_callback_manager_for_config
@@ -36,8 +36,14 @@ if TYPE_CHECKING:  # imported when tracing is on: with no keys, Langfuse is neve
 
 log = logging.getLogger(__name__)
 
-FAKE_MODEL = "fake"
-"""A trace's model tag on the scripted fake (no model id)."""
+FAKE_MODEL_TAG = "fake"
+"""A trace's model tag on the scripted fake (no model id), as vouch.spending names it."""
+TraceKind = Literal["assessment", "chat turn", "profile pass", "eval"]
+"""The kinds of run traced, each trace's name."""
+ASSESSMENT: TraceKind = "assessment"
+CHAT_TURN: TraceKind = "chat turn"
+PROFILE_PASS: TraceKind = "profile pass"
+EVAL: TraceKind = "eval"
 
 
 @dataclass(frozen=True)
@@ -47,7 +53,7 @@ class TraceFacts:
     the prompt version, and where it applies, the control, the assessment's thread and the
     chat's (`session_id`, which groups a conversation's turns)."""
 
-    name: str
+    name: TraceKind
     user_id: str
     profile_id: str
     model: str | None
@@ -58,7 +64,7 @@ class TraceFacts:
 
     def metadata(self) -> dict[str, Any]:
         """The run config's metadata: Langfuse's trace attributes, and the facts themselves."""
-        model = self.model or FAKE_MODEL
+        model = self.model or FAKE_MODEL_TAG
         tags = [f"profile:{self.profile_id}", f"model:{model}", f"prompt:{self.prompt_version}"]
         if self.control_id:
             tags.append(f"control:{self.control_id}")
@@ -124,7 +130,12 @@ class Tracing:
             log.exception("the traces could not be sent to Langfuse")
 
     def shutdown(self) -> None:
-        self.client.shutdown()
+        """Send what the client holds and stop it, when the app or the eval runner ends; a
+        failure is logged, never the caller's."""
+        try:
+            self.client.shutdown()
+        except Exception:
+            log.exception("the Langfuse client could not be shut down")
 
 
 def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
@@ -144,6 +155,12 @@ def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfi
         yield tracing.config(facts)
     finally:
         tracing.flush()
+
+
+def with_run_config(config: RunnableConfig, run_config: RunnableConfig | None) -> RunnableConfig:
+    """A graph run's own `config` (its thread, its limits) with a trace's `run_config` joined;
+    the run's own keys win."""
+    return {**(run_config or {}), **config}
 
 
 def run_traced[T](config: RunnableConfig, name: str, call: Callable[[], T]) -> T:

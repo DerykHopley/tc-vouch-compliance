@@ -97,7 +97,7 @@ from vouch.settings import (
     load_model_settings,
 )
 from vouch.spending import FAKE, Price, Usage, UsageMeter
-from vouch.tracing import TraceFacts, Tracing, start_tracing, traced
+from vouch.tracing import EVAL, TraceFacts, Tracing, start_tracing, traced
 
 EXPECTED_ANSWERS = "expected-answers.yaml"  # in the profile's fixtures folder
 FAKE_SCRIPTS_DIR = REPO_DIR / "evals" / "scripts"  # one folder per profile, a script per case
@@ -449,7 +449,7 @@ def run_eval(
         try:
             model = models.model_for(case.control_id, callbacks)
             facts = TraceFacts(
-                "eval",
+                EVAL,
                 EVAL_USER,
                 profile.id,
                 models.name,
@@ -873,11 +873,11 @@ def _judge_name(args: argparse.Namespace) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     """`python -m vouch.evals [--profile <name>] [--model <name>] [--judge <name>] [--results
-    <folder>] [--keep [<folder>]] [--trace]`: run the profile's cases, print the summary, save the raw
-    results (after every case) and the summary. `python -m vouch.evals report ...` renders the
-    report instead. Exits 1 when a case failed or was bad, 2 when the profile, its cases, the
-    model, the judge or `--trace`'s Langfuse can't be used, 3 when Ollama isn't running, 130 on Ctrl-C (the cases run
-    so far are saved). Stopping at the estimate exits 0."""
+    <folder>] [--keep [<folder>]] [--trace]`: run the profile's cases, print the summary, save
+    the raw results (after every case) and the summary. `python -m vouch.evals report ...`
+    renders the report instead. Exits 1 when a case failed or was bad, 2 when the profile, its
+    cases, the model, the judge or `--trace`'s Langfuse can't be used, 3 when Ollama isn't
+    running, 130 on Ctrl-C (the cases run so far are saved). Stopping at the estimate exits 0."""
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["report"]:
         return report_main(argv[1:])
@@ -891,14 +891,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"eval: {error}", file=sys.stderr)
         return EXIT_BAD_INPUT
     try:
-        return _run(args, tracing)
+        return run_with_tracing(args, tracing)
     finally:
         if tracing is not None:
             tracing.shutdown()  # sends what it holds
 
 
-def _run(args: argparse.Namespace, tracing: Tracing | None) -> int:
-    """main's run, once its options are read."""
+def run_with_tracing(args: argparse.Namespace, tracing: Tracing | None) -> int:
+    """main's run of the cases, its options read: each case traced with `tracing`, if any."""
     judge_name = _judge_name(args)
     if judge_name is not None:
         print(f"Judge: {judge_name}" + ("" if args.judge else " (the default for this model)"))
