@@ -813,7 +813,8 @@ class ChatTools:
 
         def traced_events() -> Generator[tuple[str, Any]]:
             """The run as a trace of its own (vouch.tracing): in its own thread it is no part
-            of the chat turn's."""
+            of the chat turn's. It doesn't wait for Langfuse: the turn's one bounded send, on
+            the same client, carries it too, so the turn is held one bound at most (#510)."""
             facts = TraceFacts(
                 ASSESSMENT,
                 self.memory.user_id,
@@ -823,7 +824,7 @@ class ChatTools:
                 control_id=control.id,
                 thread_id=thread_id,
             )
-            with run.models.traced(facts) as run_config:
+            with run.models.traced(facts, wait=False) as run_config:
                 yield from assessment_events(
                     control,
                     self.profile,

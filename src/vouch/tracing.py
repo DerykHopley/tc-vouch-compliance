@@ -20,6 +20,7 @@ address reaches a trace. A batch that can't be redacted is dropped, never sent. 
 session tokens never enter a run.
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -136,10 +137,23 @@ class Tracing:
         except Exception:
             log.exception("the traces could not be sent to Langfuse")
 
-    def flush_soon(self) -> None:
-        """`flush` in a thread of its own: a run never waits on Langfuse, and a stream closed on
-        the event loop never blocks it."""
-        threading.Thread(target=self.flush, name="langfuse-flush", daemon=True).start()
+    def flush_soon(self) -> threading.Thread:
+        """`flush` in a thread of its own, started: a stream closed on the event loop never
+        blocks it."""
+        thread = threading.Thread(target=self.flush, name="langfuse-flush", daemon=True)
+        thread.start()
+        return thread
+
+    def flush_within(self, seconds: float) -> None:
+        """`flush`, waiting at most `seconds` for it (#510): a slow or down Langfuse holds a run
+        no longer, and the send goes on in the background, logged."""
+        sending = self.flush_soon()
+        sending.join(seconds)
+        if sending.is_alive():
+            log.warning(
+                "the trace wasn't sent to Langfuse within %.1f s; it goes on in the background",
+                seconds,
+            )
 
     def shutdown(self) -> None:
         """Send what the client holds and stop it, when the app or the eval runner ends; a
@@ -221,11 +235,13 @@ def start_tracing(keys: LangfuseKeys | None) -> Tracing | None:
 
 
 @contextmanager
-def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfig]:
+def traced(
+    tracing: Tracing | None, facts: TraceFacts, *, wait: bool = True
+) -> Iterator[RunnableConfig]:
     """The run config for one traced run (empty with tracing off, or when its handler can't be
-    made: logged, and the run goes on untraced), its trace sent as the run ends, in the
-    background (`flush_soon`): on Cloud Run an instance may have little CPU between requests, so
-    it isn't left to the client's own five-second schedule."""
+    made: logged, and the run goes on untraced), its trace sent as the run ends (`send_trace`).
+    With `wait` False it's sent in the background only: a run inside another traced run's
+    request (an assessment the chat starts), whose own bounded send carries it."""
     if tracing is None:
         yield {}
         return
@@ -238,7 +254,28 @@ def traced(tracing: Tracing | None, facts: TraceFacts) -> Iterator[RunnableConfi
     try:
         yield config
     finally:
-        tracing.flush_soon()
+        if wait:
+            send_trace(tracing)
+        else:
+            tracing.flush_soon()
+
+
+TRACE_SEND_WAIT_SECONDS = 3.0
+"""The longest a run's response waits for its trace to reach Langfuse (#510)."""
+
+
+def send_trace(tracing: Tracing) -> None:
+    """Send a run's trace before its response ends, waiting at most TRACE_SEND_WAIT_SECONDS
+    (#510). On Cloud Run a request has CPU only until its response is done; a send left to the
+    background after it waits for the next request, or is lost when the instance stops. A stream
+    the client leaves is closed when it's collected, which may be on the event loop: there it is
+    sent in the background, so no other request waits (as api.record_off_the_event_loop)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:  # no loop in this thread: the threadpool, a worker, or the CLI
+        tracing.flush_within(TRACE_SEND_WAIT_SECONDS)
+        return
+    tracing.flush_soon()
 
 
 def with_run_config(config: RunnableConfig, run_config: RunnableConfig | None) -> RunnableConfig:
