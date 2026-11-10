@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { changeModel, developerSettings, type DeveloperSettings, removeCompany } from './developer.ts'
-import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
+import { changeModel, developerPrompts, developerSettings, type DeveloperSettings, removeCompany } from './developer.ts'
+import { DEVELOPER_PROMPTS, DEVELOPER_SETTINGS } from './developerFixtures.ts'
 import { setOnSignedOut, setTokenSource } from './session.ts'
 
 const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
@@ -140,5 +140,40 @@ describe('removeCompany, issue 418', () => {
     vi.stubGlobal('fetch', answer(401, { detail: 'Sign in to use Vouch.' }))
     expect(await removeCompany('x')).toEqual({ status: 'signed-out' })
     expect(signedOut).toHaveBeenCalledOnce()
+  })
+})
+
+describe('developerPrompts (ticket 496)', () => {
+  it('reads the prompts for a control, with the session token', async () => {
+    const fetch = vi.fn(answer(200, DEVELOPER_PROMPTS))
+    vi.stubGlobal('fetch', fetch)
+    setTokenSource(() => Promise.resolve('tok'))
+    expect(await developerPrompts('1.6.2')).toEqual({ status: 'read', prompts: DEVELOPER_PROMPTS })
+    expect(fetch).toHaveBeenCalledWith('/api/developer/prompts?control=1.6.2', { headers: { Authorization: 'Bearer tok' } })
+  })
+
+  it("asks for the API's first control when none is given", async () => {
+    const fetch = vi.fn((_url: string) => answer(200, DEVELOPER_PROMPTS)())
+    vi.stubGlobal('fetch', fetch)
+    await developerPrompts()
+    expect(fetch.mock.calls[0][0]).toBe('/api/developer/prompts')
+  })
+
+  it.each([
+    ['a 404', answer(404, { detail: '9.9.9 is not a control the current company applies.' })],
+    ['a 500', answer(500, { detail: 'The prompts could not be built.' })],
+    ['an answer of another shape', answer(200, DEVELOPER_SETTINGS)],
+    ['the API unreachable', () => Promise.reject(new TypeError('offline'))],
+  ])('fails on %s', async (_, reply) => {
+    vi.stubGlobal('fetch', reply)
+    expect(await developerPrompts('9.9.9')).toEqual({ status: 'failed' })
+  })
+
+  it('signs out on a 401', async () => {
+    const onSignedOut = vi.fn()
+    setOnSignedOut(onSignedOut)
+    vi.stubGlobal('fetch', answer(401, { detail: 'Sign in to use Vouch.' }))
+    expect(await developerPrompts()).toEqual({ status: 'signed-out' })
+    expect(onSignedOut).toHaveBeenCalled()
   })
 })

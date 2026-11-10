@@ -173,9 +173,34 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .companies li:last-child { border-bottom: 1px solid var(--rule); }
 .companies .company-name { font-weight: 600; min-width: 0; }
 .companies .mono, .companies time { min-width: 0; }
-/* #480: the current company is marked as the current tab is, with the brass underline; the others' buttons beside. */
+/* #480: the current company is marked as the current tab is, with the brass underline, the others' buttons beside;
+   #496: the current model in the price list, the same mark. */
 .companies .company-actions { margin-left: auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.companies .company-current { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; font-weight: 600; box-shadow: inset 0 -2px 0 var(--brass); }
+.current-mark { font-weight: 600; box-shadow: inset 0 -2px 0 var(--brass); }
+.companies .current-mark { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; }
+/* #496: the Developer page at the full width with side gutters (decision 6, Layout); its columns never wider than the
+   page, so a long control question in the select or the recent runs table never pushes it sideways. */
+.paper.developer { max-width: none; grid-template-columns: minmax(0, 1fr); }
+.developer .sheet { grid-template-columns: minmax(0, 1fr); }
+.developer select.field { max-width: 100%; text-overflow: ellipsis; }
+/* Each model's list price under the Model field (#496), the current model marked as the current company is. */
+.prices { list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; }
+.prices li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 6px 0; border-top: 1px solid var(--rule); overflow-wrap: anywhere; }
+.prices li:last-child { border-bottom: 1px solid var(--rule); }
+.prices .mono { min-width: 0; }
+.prices .current-mark { margin-left: auto; padding: 0 8px 2px; }
+/* The Prompts section (#496): one read-only panel per prompt, stacked; each message as wrapping mono text, never a
+   field, its run-only parts marked with a dashed --muted edge (words and edge, not colour alone). */
+.prompt-list { justify-self: stretch; display: grid; gap: 12px; }
+.prompt { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--rule); min-width: 0; }
+.prompt-head { margin: 0; font: 600 15px var(--f-body); display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.prompt-head .mono { font-size: 12px; font-weight: 400; color: var(--muted); }
+.prompt-message { display: grid; gap: 4px; min-width: 0; }
+.prompt-text { margin: 0; padding: 8px 10px; background: var(--paper); border-radius: 3px; font: 12px/1.55 var(--f-mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.from-run { background: var(--sheet); color: var(--ink); border: 1px dashed var(--muted); border-radius: 2px; padding: 0 2px; }
+/* Recent runs (#496): a table that scrolls inside its sheet under 700px, never the page. */
+.recent-runs { min-width: 640px; }
+.recent-runs td { white-space: nowrap; }
 .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .mono { font-family: var(--f-mono); text-transform: none; }
 .sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 16px; display: grid; gap: 8px; justify-items: start; margin: 0; }

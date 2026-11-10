@@ -1,8 +1,9 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
-import { count, dollars, plural } from './assessment.ts'
+import { costWords, count, dateTimeLabel, dollars, plural } from './assessment.ts'
 import {
-  changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, developerSettings, type DeveloperSettings,
-  makeCurrent, type MadeCompany, removeCompany, type RunTotals, type SettingChange, UNAVAILABLE,
+  changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, type DeveloperPrompts, developerPrompts,
+  developerSettings, type DeveloperSettings, makeCurrent, type MadeCompany, PROFILE_PASS, type PromptMessage,
+  type RecentRun, removeCompany, type RunTotals, type SettingChange, UNAVAILABLE,
 } from './developer.ts'
 import { fetchProfiles, type ProfileSummary } from './profiles.ts'
 
@@ -40,7 +41,7 @@ type Saving = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; set
 export default function DeveloperPage({ settings, onChange, onSetup, onRemoved, onMadeCurrent, developerNote,
   onNoteShown }: Props) {
   return (
-    <section className="paper wrap" aria-label="Developer settings">
+    <section className="paper wrap developer" aria-label="Developer settings">
       <div className="paper-head">
         <span className="lbl">Developers only</span>
         <h2>Developer settings</h2>
@@ -234,7 +235,7 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
                 <time className="field-note" dateTime={row.made.created_at}>Made {madeOn(row.made.created_at)}</time>
               )}
               <span className="company-actions">
-                {current && <span className="company-current">Current</span>}
+                {current && <span className="current-mark">Current</span>}
                 {row.listed && !current && (
                   <button type="button" className="btn" disabled={out} aria-busy={making}
                     aria-label={making ? undefined : `Make ${row.company} current`}
@@ -270,12 +271,13 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
   return (
     <>
       {settings.fake_reason && <p className="sheet notice">{FAKE_BECAUSE[settings.fake_reason]}</p>}
-      <div className="sheet">
+      <section className="sheet" aria-label="Model">
         <span className="lbl">Model</span>
         <span className="mono">{settings.model}</span>
         <SettingForm label="Model id" button="Change model" initial={settings.model} mono save={changeModel}
           saved={(s) => `The next assessment runs on ${s.model}.`} onChange={onChange} />
-      </div>
+        <Prices settings={settings} />
+      </section>
       <div className="sheet">
         <span className="lbl">Prompt version</span>
         <span className="mono">{settings.prompt_version}</span>
@@ -288,6 +290,7 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
           saved={(s) => `Each user may now start ${plural(s.daily_limit, 'assessment')} a day.`}
           onChange={onChange} />
       </div>
+      <Prompts listed={settings.listed_companies} />
       <section className="sheet" aria-label="Usage">
         <span className="lbl">Usage</span>
         <p className="mono">
@@ -305,6 +308,7 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
         )}
         <a className="link-target" href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>
       </section>
+      <RecentRuns runs={settings.recent_runs} />
       {settings.broken_profiles.length > 0 && (
         <section className="sheet notice" aria-label="Profiles left out">
           <span className="lbl">Profiles left out</span>
@@ -323,6 +327,166 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
         </p>
       )}
     </>
+  )
+}
+
+/** Each priced model (#496): its id and list price, the current model marked Current as the current company is; a
+ * current model with no list price says so. */
+function Prices({ settings }: { settings: DeveloperSettings }) {
+  const priced = settings.prices.some((p) => p.model === settings.model)
+  return (
+    <>
+      <ul className="prices" aria-label="Prices">
+        {settings.prices.map((p) => (
+          <li key={p.model}>
+            <span className="mono">{p.model}</span>
+            <span>{`${dollars(p.input_per_million)} in · ${dollars(p.output_per_million)} out per million tokens`}</span>
+            {p.model === settings.model && <span className="current-mark">Current</span>}
+          </li>
+        ))}
+      </ul>
+      {!priced && (
+        <p className="field-note">{settings.model} has no list price here: its cost is only what OpenRouter reports.</p>
+      )}
+    </>
+  )
+}
+
+const ROLE_NAMES: Record<PromptMessage['role'], string> = { system: 'System', human: 'Human' }
+/** A run-only part of a prompt (vouch.prompts.from_the_run). */
+const FROM_THE_RUN = /(\[from the run: [^\]]*\])/
+
+/** A prompt's text, each `[from the run: …]` placeholder marked. */
+const marked = (text: string) =>
+  text.split(FROM_THE_RUN).map((part, i) => i % 2 ? <mark key={i} className="from-run">{part}</mark> : part)
+
+/** What the Prompts section holds: the prompts last read (for the picker, while another control's are read), whether
+ * a read is out, and the last read's problem. */
+type PromptsState = { held: DeveloperPrompts | null; reading: boolean; problem: 'failed' | 'signed-out' | null }
+
+/**
+ * The Prompts section (#496): every prompt the agent gets, built for the current company and the control chosen, one
+ * read-only panel each. Read when the page opens, on its own request, so a failure here leaves the rest of the page;
+ * choosing another control reads its prompts, the select disabled meanwhile. A 401 has signed out already: nothing
+ * more is said.
+ */
+function Prompts({ listed }: { listed: DeveloperSettings['listed_companies'] }) {
+  const [state, setState] = useState<PromptsState>({ held: null, reading: true, problem: null })
+  // The read asked for: the control chosen (none: the API's first), and a count Try again bumps to read it again.
+  const [asked, setAsked] = useState<{ control?: string; attempt: number }>({ attempt: 0 })
+  const selectId = useId()
+
+  useEffect(() => {
+    const answer = { wanted: true } // until the page closes or reads again
+    void developerPrompts(asked.control).then((result) => {
+      if (!answer.wanted) return
+      if (result.status === 'read') setState({ held: result.prompts, reading: false, problem: null })
+      else setState((s) => ({ ...s, reading: false, problem: result.status }))
+    })
+    return () => { answer.wanted = false }
+  }, [asked])
+
+  const read = (control: string | undefined) => {
+    setState((s) => ({ ...s, reading: true, problem: null }))
+    setAsked((a) => ({ control, attempt: a.attempt + 1 }))
+  }
+  const chosen = asked.control
+
+  const { held, reading, problem } = state
+  // The control questions are the ISA edition's text in the company's answer language: marked so (agent-rules.md).
+  const language = held && listed.find((c) => c.id === held.company.id)?.answer_language
+  return (
+    <section className="sheet" aria-label="Prompts" aria-busy={reading}>
+      <span className="lbl">Prompts</span>
+      {held && (
+        <>
+          <p className="field-note">
+            Built for {held.company.name} and the control below; parts in [from the run: …] are filled in by each run.
+          </p>
+          <div className="field-row">
+            <label htmlFor={selectId}>Control</label>
+            <select id={selectId} className="field" value={chosen ?? held.control.id} disabled={reading}
+              onChange={(e) => read(e.target.value)}>
+              {held.controls.map((c) => (
+                <option key={c.id} value={c.id} lang={language || undefined}>{`${c.id} ${c.question}`}</option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
+      {reading && <p className="field-note">Building the prompts…</p>}
+      {!reading && problem === 'failed' && (
+        <>
+          <p className="notice field-note" role="alert">The prompts can't be shown just now.</p>
+          <button type="button" className="btn" onClick={() => read(chosen)}>Try again</button>
+        </>
+      )}
+      {!reading && !problem && held && (
+        <div className="prompt-list">
+          {held.prompts.map((p) => (
+            <article key={p.name} className="prompt" aria-label={p.title}>
+              <h3 className="prompt-head">{p.title} <span className="mono">{p.version}</span></h3>
+              <p className="field-note">{p.note}</p>
+              {p.messages.map((m, i) => (
+                <div key={i} className="prompt-message">
+                  <span className="lbl">{ROLE_NAMES[m.role]}</span>
+                  <pre className="prompt-text">{marked(m.text)}</pre>
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** The model a run names when the scripted fake ran (vouch.spending.FAKE). */
+const FAKE_MODEL = 'fake'
+
+/** A run's cost in the Usage line's words (costWords): reported, "(estimated)", "at least …" or "cost unknown"; the
+ * fake model's "estimated, not spent", as the Usage line's fake total says. */
+function runCost(run: RecentRun): string {
+  if (run.model === FAKE_MODEL) {
+    return `${costWords({ cost_usd: run.estimated_cost_usd, estimated: false, cost_complete: run.cost_complete })} `
+      + 'estimated, not spent'
+  }
+  return costWords({ cost_usd: run.reported_cost_usd + run.estimated_cost_usd, estimated: run.estimated,
+    cost_complete: run.cost_complete })
+}
+
+/** The last 10 assessments and profile passes (#496), for every company: one table row each, newest first. */
+function RecentRuns({ runs }: { runs: RecentRun[] }) {
+  return (
+    <section className="sheet" aria-label="Recent runs">
+      <span className="lbl">Recent runs</span>
+      {runs.length === 0 ? <p className="field-note">No assessment or profile pass has run yet.</p> : (
+        <>
+          <p className="field-note">The last 10 assessments and profile passes, for every company.</p>
+          <div className="table-wrap">
+            <table className="report-table recent-runs">
+              <thead>
+                <tr>
+                  {['When', 'What', 'Model', 'Tokens in', 'Tokens out', 'Cost'].map((h) => <th key={h} scope="col">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run, i) => (
+                  <tr key={`${run.at}:${i}`}>
+                    <td><time dateTime={run.at}>{dateTimeLabel(run.at)}</time></td>
+                    <td>{run.control_id === PROFILE_PASS ? 'Profile pass' : <span className="mono">{run.control_id}</span>}</td>
+                    <td><span className="mono">{run.model}</span></td>
+                    <td>{count(run.input_tokens)}</td>
+                    <td>{count(run.output_tokens)}</td>
+                    <td>{runCost(run)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
   )
 }
 

@@ -28,7 +28,51 @@ export type DeveloperSettings = {
   listed_companies: ProfileSummary[]
   /** The current company's id (#480): every user's company; null with none listed. */
   current_company: string | null
+  /** Each model's list price (#496), in vouch.spending.PRICES' order: for a cost OpenRouter doesn't report. */
+  prices: ModelPrice[]
+  /** The last 10 assessments and profile passes (#496), newest first, for every company; no chat message. */
+  recent_runs: RecentRun[]
 }
+
+/** A model's list price (#496), US dollars per million tokens. */
+export type ModelPrice = { model: string; input_per_million: number; output_per_million: number }
+
+/** The control a profile pass's usage names (vouch.spending.PROFILE_PASS). */
+export const PROFILE_PASS = 'profile-pass'
+
+/** One run's usage as kept (#496): when it ended (ISO 8601), the control assessed or PROFILE_PASS, and its tokens and
+ * cost. */
+export type RecentRun = Pick<Usage, 'model' | 'input_tokens' | 'output_tokens' | 'reported_cost_usd'
+  | 'estimated_cost_usd' | 'estimated' | 'cost_complete'> & { at: string; control_id: string }
+
+/** One message of a prompt, under its role. */
+export type PromptMessage = { role: 'system' | 'human'; text: string }
+
+/** One prompt the agent gets (#496), as built for the current company and a control: `sent` is false only for the
+ * overlay prompt of a control with no overlay requirement, which then has no messages. */
+export type PromptPreview = {
+  name: 'gather' | 'overlay' | 'judge' | 'remediation' | 'profile_pass' | 'chat'
+  title: string
+  version: string
+  sent: boolean
+  note: string
+  messages: PromptMessage[]
+}
+
+export type PromptControl = { id: string; question: string }
+
+/** Every prompt the agent gets (#496), built for the current company and `control`; `controls` are every applicable
+ * control, for the picker. */
+export type DeveloperPrompts = {
+  company: { id: string; name: string }
+  controls: PromptControl[]
+  control: PromptControl
+  prompts: PromptPreview[]
+}
+
+/** How reading the prompts went: read; the session ended (signed out already); or failed (any other refusal, or the
+ * API unreachable). */
+export type PromptsRead = { status: 'read'; prompts: DeveloperPrompts } | { status: 'signed-out' } | { status: 'failed' }
 
 /** A company made in company setup, as the developer page lists it: its id, its name and when it was made. */
 export type MadeCompany = { id: string; company: string; created_at: string }
@@ -165,5 +209,24 @@ export async function makeCurrent(id: string): Promise<CurrentChange> {
   if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
   if (response.status === 404) return { status: 'refused', problem: await refusedBecause(response) }
   if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
+  return { status: 'failed' }
+}
+
+/** Every prompt the agent gets (#496), built for the current company and `control` (the API's first applicable one
+ * when none is given). */
+export async function developerPrompts(control?: string): Promise<PromptsRead> {
+  const query = control === undefined ? '' : `?control=${encodeURIComponent(control)}`
+  let response: Response
+  try {
+    response = await fetch(`/api/developer/prompts${query}`, { headers: await authHeaders() })
+  } catch {
+    return { status: 'failed' }
+  }
+  if (response.ok) {
+    const body = (await response.json().catch(() => null)) as DeveloperPrompts | null
+    return Array.isArray(body?.prompts) && Array.isArray(body.controls) ? { status: 'read', prompts: body }
+      : { status: 'failed' }
+  }
+  if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
   return { status: 'failed' }
 }

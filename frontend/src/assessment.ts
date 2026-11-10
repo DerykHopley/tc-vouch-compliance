@@ -137,10 +137,24 @@ export const dollars = (n: number) =>
 type UsageShown = Pick<Usage, 'input_tokens' | 'output_tokens' | 'cost_usd' | 'estimated' | 'cost_complete'>
 
 /** An assessment's tokens and cost in words: an incomplete cost is "at least" its known part, never $0. */
-export function usageWords({ input_tokens, output_tokens, cost_usd, estimated, cost_complete }: UsageShown): string {
+export function usageWords({ input_tokens, output_tokens, ...cost }: UsageShown): string {
+  return `${count(input_tokens)} tokens in · ${count(output_tokens)} tokens out · ${costWords(cost)}`
+}
+
+/** A cost in words (the Usage line's, and the developer page's recent runs, #496): "(estimated)" when computed, "at
+ * least …" when some call's cost is unknown, "cost unknown" when none is known; never $0 for an unknown cost. */
+export function costWords({ cost_usd, estimated, cost_complete }: Pick<UsageShown, 'cost_usd' | 'estimated'
+  | 'cost_complete'>): string {
   const known = `${dollars(cost_usd)}${estimated ? ' (estimated)' : ''}`
-  const cost = cost_complete ? known : cost_usd > 0 ? `at least ${known}` : 'cost unknown'
-  return `${count(input_tokens)} tokens in · ${count(output_tokens)} tokens out · ${cost}`
+  return cost_complete ? known : cost_usd > 0 ? `at least ${known}` : 'cost unknown'
+}
+
+/** "4 Nov 2026, 08:30": a moment in the reader's time zone (a review decision, a run's end); as written when it
+ * doesn't parse. */
+export function dateTimeLabel(iso: string): string {
+  const at = new Date(iso)
+  return Number.isNaN(at.getTime()) ? iso
+    : at.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export type AssessmentEvent =

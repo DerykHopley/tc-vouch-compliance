@@ -147,7 +147,8 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
     at_phone_width(page, f"{profiles_url}/developer")
     expect(page.get_by_role("button", name="Remove Musterfirma Süd GmbH")).to_be_visible()
     expect(page.get_by_role("button", name="Make Musterfirma Süd GmbH current")).to_be_visible()
-    expect(page.locator(".company-current")).to_have_text("Current")
+    # The Companies section's mark: the price list marks the current model too (#496).
+    expect(page.locator(".companies .current-mark")).to_have_text("Current")
     assert small_targets(page) == []
 
 
