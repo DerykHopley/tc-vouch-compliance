@@ -585,13 +585,17 @@ LeadStatements = Annotated[tuple[LeadStatement, ...], Depends(lead_statements)]
 def _stale_in_answer_language(served: dict[str, Any], language: str) -> dict[str, Any]:
     """The served assessment with its stale flag in the answer language (#359): `stale_word`,
     the report's stale label (as the Documents tab's, so a page and the report flag alike), and
-    each stale citation's reason as the cap's note says it (vouch.language.stale_reason). The
-    stored assessment keeps English's reason."""
+    each stale citation's reason as the cap's note says it (vouch.language.stale_reason); and
+    `current_word`, the Documents tab's word for a document that isn't stale, which the evidence
+    column shows in its place (#484). The stored assessment keeps English's reason."""
     for requirement in served["requirements"]:
         for citation in requirement["citations"]:
             if citation["stale"]:
                 citation["stale_because"] = stale_reason(citation["stale_because"], language)
-    return served | {"stale_word": report.words_for(language)["labels"]["stale"]}
+    return served | {
+        "stale_word": report.words_for(language)["labels"]["stale"],
+        "current_word": documents_tab.document_words(language)[1]["current"],
+    }
 
 
 def assessment_data(
@@ -606,7 +610,8 @@ def assessment_data(
     for one reviewed before the three-step review (#373): it still counts as reviewed, and
     nothing stored is rewritten. Each item carries its priority and done mark in the improvement
     plan (`marks`, #410), in both goals. Its stale citations are flagged in its answer
-    language (#359): `stale_word` and each reason (`_stale_in_answer_language`)."""
+    language (#359): `stale_word`, `current_word` (#484) and each reason
+    (`_stale_in_answer_language`)."""
     review = assessment.review
     served = _stale_in_answer_language(assessment.to_dict(), assessment.answer_language)
     return served | {
