@@ -422,10 +422,10 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-table th[scope="row"], .report-table td { border-bottom: 1px solid var(--rule); padding: 7px 8px; vertical-align: top;
   text-align: left; font-weight: 400; }
 /* The free-text columns (questions, notes, answers, what's missing) hyphenate in the answer language (their `lang`), as
-   the quotes do (#511), breaking a word without a hyphen only when it can't fit otherwise (#521, #530). */
-.report-table .report-q { max-width: 52ch; hyphens: auto; overflow-wrap: break-word; }
-/* A long token in typed text that no hyphenation can break (a link, a file name) breaks anywhere instead (#530). */
-.report-q .report-token { overflow-wrap: anywhere; }
+   the quotes do (#511, #521, #530). A token no hyphenation can break (a link, a file name, a word in another language)
+   breaks anywhere, so it can't widen the table past the sheet; the 14ch floor keeps the column wide enough that a
+   word hyphenates rather than breaking bare (the owner's option A on #530). */
+.report-table .report-q { min-width: 14ch; max-width: 52ch; hyphens: auto; overflow-wrap: anywhere; }
 /* A control's quotes sit under its row, as one entry with it: no rule between them. */
 .report-controls tbody tr:has(+ .report-quote-row) > * { border-bottom-color: transparent; }
 .report-table .report-quote-row td { padding: 0 8px 12px 24px; }
@@ -509,8 +509,8 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
      narrows its column's least width, so an auto-laid table fits the page. */
   .report-table th, .report-table td { overflow-wrap: break-word; }
   .report-table .mono { overflow-wrap: anywhere; }
-  /* The free-text cells too, unhyphenated: on screen they hyphenate in the answer language (#521, #530), but a printed
-     page is wide enough for prose to wrap at spaces, and a note prints whole (#296). */
+  /* The free-text cells too, unhyphenated: on screen they hyphenate in the answer language and break a long token
+     anywhere (#530), but a printed page is wide enough for prose to wrap at spaces, and a note prints whole (#296). */
   .report-table .report-q { max-width: none; overflow-wrap: break-word; hyphens: manual; }
   .report-table:not(.report-trail) .report-q { min-width: 0; }
   .report-trail .mono { font-size: 9px; }
