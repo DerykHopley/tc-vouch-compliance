@@ -288,11 +288,13 @@ def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, p
     expect(paper.get_by_role("button", name="Show full requirement")).to_have_count(0)
 
 
-def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, paper_url):
+def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
     # #359: Alpenwerk's 1.1.1 on the German demo script cites the logging policy, approved
-    # 2023-05-10 for a yearly review, so stale; the API serves its reason in German.
+    # 2023-05-10 for a yearly review, so stale; the API serves its reason in German. On the
+    # report's server (Alpenwerk on the demo fake): the paper's server spends its whole daily
+    # assessment limit on its own checks, and one more there was refused with a 429.
     response = page.request.post(
-        f"{paper_url}/api/assessments",
+        f"{report_url}/api/assessments",
         data={"control_id": "1.1.1"},
         headers={"X-Vouch-Profile": "alpenwerk"},
     )
@@ -300,7 +302,7 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, paper_
     assert "event: result" in response.text()
     page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
 
-    paper = open_paper(page, paper_url, "1.1.1", assessed=True)
+    paper = open_paper(page, report_url, "1.1.1", assessed=True)
 
     flag = row(paper, "S4").locator("figcaption .flag")  # the quote's, not the evidence column's
     expect(flag).to_have_text(
