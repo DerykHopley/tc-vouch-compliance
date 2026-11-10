@@ -341,7 +341,7 @@ def compare(
     """Now (the listed controls' newest assessments in `latest`) against a closed round's
     `frozen` results (then), counted the same way: accepted verdicts only. A control whose
     newest assessment waits for review while an earlier one was accepted (`earlier`: each
-    control's newest accepted assessment before its newest, vouch.api's `_accepted_earlier`)
+    control's newest accepted assessment before its newest; read only while the newest waits)
     counts now under that accepted verdict and is re-assessing (#438), rather than reading as a
     regression; otherwise now is the overview's readiness. `changed` lists, in the controls'
     order (the base framework's), each listed control whose accepted verdict differs (None when

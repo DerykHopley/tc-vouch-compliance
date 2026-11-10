@@ -1389,7 +1389,9 @@ def _comparison(
     }
 
 
-def _reported(comparison: report.ReportComparison | None) -> report.ReportComparison | None:
+def _verdict_changes_only(
+    comparison: report.ReportComparison | None,
+) -> report.ReportComparison | None:
     """The comparison as the improvement report shows it: its changed controls only those whose
     accepted verdict changed, a control re-assessing under the same verdict left out (#438), as
     the report's table has no column for it."""
@@ -1611,7 +1613,7 @@ def _report(
             decided=decided,
             marks=marked,
             flags=plan.card_flags(history, decided, marked, current),
-            comparison=_reported(
+            comparison=_verdict_changes_only(
                 _comparison(stores.review, memory, saver, scope.applicable, latest)
             ),
             questions=listed,
