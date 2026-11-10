@@ -429,7 +429,11 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-quotes h3 { margin: 0; }
 /* Eleven columns in the sheet (#463): the trail set at 12px, narrower gutters and the Note's least width 16ch, as in
    print, so the German heads fit too; the day kept whole on its line (10ch of its mono), the time under it. */
-.report-trail { font-size: 12px; }
+.report-trail { font-size: 12px; font-family: "Manrope", "Manrope Fallback", var(--f-body); }
+/* #512: until Manrope loads, or if it never does, Linux sets the trail in DejaVu Sans, whose German heads are wider
+   (KONTROLLE, ANFORDERUNG): 963px of trail in the 902px sheet. Scaled to Manrope's widths, they fit; Manrope unchanged. */
+@font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans"); font-weight: 400 500; size-adjust: 85%; }
+@font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans Bold"); font-weight: 600 800; size-adjust: 85%; }
 .report-table.report-trail :is(th, td) { padding-inline: 5px; }
 .report-table.report-trail .report-q { min-width: 16ch; }
 .report-trail .report-at > .report-line { min-width: 10ch; }
