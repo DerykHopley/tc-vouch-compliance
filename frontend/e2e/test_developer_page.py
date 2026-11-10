@@ -8,9 +8,11 @@ They run on PROFILES_URL: #47 moved them off the main server while the request r
 60 a minute. Fix #138 lifted that cap for the suite, so they could move back.
 """
 
+import json
 import re
 
 import pytest
+from current_company import make_current
 from playwright.sync_api import Page, Route, expect
 from top_bar import from_user_menu
 
@@ -199,7 +201,78 @@ def test_a_model_change_keeps_the_developer_page_showing_the_new_model(page: Pag
     expect(settings.get_by_role("status")).to_contain_text(
         "The next assessment runs on openai/gpt-5.5."
     )
-    expect(
-        settings.locator(".sheet", has=page.get_by_text("Model", exact=True)).locator("span.mono")
-    ).to_have_text("openai/gpt-5.5")
+    # The model's own line: the price list under the field has mono ids too (#496).
+    expect(settings.get_by_role("region", name="Model").locator(".lbl + .mono")).to_have_text(
+        "openai/gpt-5.5"
+    )
     expect(page.get_by_text("Vouch could not")).to_have_count(0)
+
+
+# --- Story 13 (#496): the prompts, the prices and the recent runs ---------------------------------
+# On VOUCH_URL, whose profiles folder holds Alpenwerk (PROFILES_URL's holds Nordlicht, Testwerk and
+# a broken one); Alpenwerk is current for the check and Nordlicht again after (nordlicht_later).
+
+SIDEWAYS = "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+
+
+def result_of(stream: str) -> dict:
+    for block in stream.split("\n\n"):
+        if block.startswith("event: result"):
+            return json.loads(block.split("data: ", 1)[1])
+    raise AssertionError(f"no result in {stream[:300]!r}")
+
+
+def test_a_developer_reads_alpenwerks_prompts_the_model_price_and_a_fake_run_in_recent_runs(
+    page: Page, vouch_url, nordlicht_later
+):
+    nordlicht_later(vouch_url)
+    make_current(page.request, vouch_url, "alpenwerk")
+    # One fake-model assessment, on Nordlicht by name: Alpenwerk's cards stay as other checks read them.
+    ran = page.request.post(
+        f"{vouch_url}/api/assessments",
+        data={"control_id": "4.1.2"},
+        headers={"X-Vouch-Profile": "nordlicht"},
+    )
+    assert ran.ok, ran.status
+    usage = result_of(ran.text())["usage"]
+
+    with page.expect_response("**/api/overview"):
+        page.goto(vouch_url)
+    with page.expect_response(lambda r: "/api/developer/prompts" in r.url):
+        from_user_menu(page, "Developer page")
+    settings = page.get_by_role("region", name="Developer settings")
+    prompts = settings.get_by_role("region", name="Prompts")
+    expect(prompts).to_contain_text("Built for Alpenwerk Präzision GmbH")
+
+    with page.expect_response("**/api/developer/prompts?control=1.6.2"):
+        prompts.get_by_role("combobox", name="Control").select_option("1.6.2")
+
+    expect(prompts.get_by_role("article")).to_have_count(6)
+    expect(prompts.get_by_role("article", name="Gather evidence")).to_contain_text(
+        "written in German"
+    )
+    overlay = prompts.get_by_role("article", name="Country overlay")
+    expect(overlay).to_contain_text("- O1 (")
+    expect(prompts.locator("mark.from-run").first).to_be_visible()
+
+    model = settings.get_by_role("region", name="Model")
+    priced = model.get_by_role("listitem").filter(has_text="anthropic/claude-sonnet-5.5")
+    expect(priced).to_contain_text("$2.00 in · $10.00 out per million tokens")
+    expect(priced).to_contain_text("Current")
+
+    newest = settings.get_by_role("region", name="Recent runs").get_by_role("row").nth(1)
+    expect(newest.get_by_role("cell")).to_have_text(
+        [
+            re.compile(r"\S"),
+            "4.1.2",
+            "fake",
+            f"{usage['input_tokens']:,}",
+            f"{usage['output_tokens']:,}",
+            re.compile(r"^\$[\d.]+ estimated, not spent$"),
+        ]
+    )
+
+    for width in (1280, 400):
+        page.set_viewport_size({"width": width, "height": 900})
+        expect(prompts.get_by_role("article", name="Chat")).to_be_visible()
+        assert not page.evaluate(SIDEWAYS), width

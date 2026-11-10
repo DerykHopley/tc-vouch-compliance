@@ -38,7 +38,7 @@ from vouch.model_choice import (
     OpenRouter,
 )
 from vouch.settings import DEMO_SCRIPT, DEMO_SCRIPT_DE, Settings, demo_script
-from vouch.spending import MemorySpendingStore
+from vouch.spending import PRICES, MemorySpendingStore
 
 # langchain-openai probes which TCP keep-alive options the OS takes by opening (never
 # connecting) a socket when it builds ChatOpenAI; pytest-socket warns. A real connection would
@@ -274,6 +274,15 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
             },
         ],
         "current_company": "nordlicht",  # #480: nothing stored
+        "prices": [  # #496: each priced model's list price
+            {
+                "model": m,
+                "input_per_million": p.input_per_million,
+                "output_per_million": p.output_per_million,
+            }
+            for m, p in PRICES.items()
+        ],
+        "recent_runs": [],  # #496: no run yet
     }
 
 

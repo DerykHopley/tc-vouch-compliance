@@ -1,12 +1,17 @@
 import type { ComponentProps } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
-import type { DeveloperSettings } from './developer.ts'
+import type { DeveloperPrompts, DeveloperSettings, RecentRun } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
-import { DEVELOPER_SETTINGS, NO_RUNS } from './developerFixtures.ts'
+import { DEVELOPER_PROMPTS, DEVELOPER_SETTINGS, NO_RUNS } from './developerFixtures.ts'
 import { setOnSignedOut } from './session.ts'
+
+// The page reads its prompts as it opens (#496): no test reaches the network, whatever it stubs after.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+})
 
 const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
 /** Musterfirma, made in setup, as GET /api/profiles lists it. */
@@ -54,7 +59,8 @@ describe('the developer page', () => {
   it('shows the model, the prompt version and the usage link', () => {
     renderPage()
     const region = page()!
-    expect(within(region).getByText('anthropic/claude-haiku-5.5')).toBeTruthy()
+    expect(within(within(region).getByRole('region', { name: 'Model' }))
+      .getByText('anthropic/claude-haiku-5.5', { selector: '.lbl + .mono' })).toBeTruthy()
     expect(within(region).getByText('1')).toBeTruthy()
     const usage = within(region).getByRole('link', { name: /usage and costs/i })
     expect(usage.getAttribute('href')).toBe('https://openrouter.ai/activity')
@@ -200,6 +206,9 @@ describe('the companies made in setup, issue 418', () => {
     return { fetch, release: (answer: Response) => release(answer) }
   }
 
+  /** The DELETEs sent: the page's other reads (its prompts, #496) aside. */
+  const deletes = (fetch: ReturnType<typeof deleting>['fetch']) =>
+    fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')
   const sheet = () => screen.getByRole('region', { name: 'Companies' })
   const removeButton = () => within(sheet()).getByRole('button', { name: 'Remove Musterfirma Süd GmbH' })
 
@@ -223,7 +232,7 @@ describe('the companies made in setup, issue 418', () => {
     renderPage({ settings: WITH_ONE })
     await userEvent.click(removeButton())
     expect(confirm).toHaveBeenCalledWith(QUESTION)
-    expect(fetch).not.toHaveBeenCalled()
+    expect(deletes(fetch)).toEqual([])
     expect(removeButton()).toBeTruthy()
   })
 
@@ -236,7 +245,7 @@ describe('the companies made in setup, issue 418', () => {
     await userEvent.dblClick(removeButton())
     const busy = within(sheet()).getByRole('button', { name: 'Removing…' })
     expect((busy as HTMLButtonElement).disabled).toBe(true)
-    expect(fetch).toHaveBeenCalledOnce()
+    expect(deletes(fetch)).toHaveLength(1)
     release(new Response(JSON.stringify(SETTINGS), { status: 200 }))
     await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', 'Removed Musterfirma Süd GmbH.'))
     expect(onChange).toHaveBeenCalledWith(SETTINGS)
@@ -608,5 +617,173 @@ describe('the developer page in the user menu (ticket 495, M9 decision 4)', () =
     api(200)
     render(<App />)
     expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+  })
+})
+
+describe('the Prompts section, ticket 496', () => {
+  const PROMPTS: DeveloperPrompts = DEVELOPER_PROMPTS
+  const section = () => screen.getByRole('region', { name: 'Prompts' })
+  const AT_1_6_2: DeveloperPrompts = {
+    ...PROMPTS,
+    control: PROMPTS.controls[1],
+    prompts: PROMPTS.prompts.map((p) => ({ ...p, note: `${p.note} (1.6.2)` })),
+  }
+
+  /** The prompts' API: each read answered by `answer` (held until released, when it gives undefined). */
+  function promptsApi(answer: (control: string | null) => Response | undefined) {
+    const held: ((r: Response) => void)[] = []
+    const fetch = vi.fn((url: string) => {
+      if (!url.startsWith('/api/developer/prompts')) return new Promise<Response>(() => {})
+      const control = new URL(url, 'http://vouch').searchParams.get('control')
+      const given = answer(control)
+      return given ? Promise.resolve(given) : new Promise<Response>((resolve) => { held.push(resolve) })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const reads = () => fetch.mock.calls.filter(([url]) => url.startsWith('/api/developer/prompts')).map(([url]) => url)
+    return { reads, release: (r: Response) => held.shift()?.(r) }
+  }
+
+  it('shows one panel per prompt with its title, version and note, each message under its role, placeholders '
+    + "marked, and the overlay's Not sent", async () => {
+    const { reads } = promptsApi(() => Response.json(PROMPTS))
+    renderPage()
+    const gather = await within(section()).findByRole('article', { name: 'Gather evidence' })
+    expect(reads()).toEqual(['/api/developer/prompts'])
+    expect(within(section()).getByText(
+      'Built for Nordlicht Komponenten GmbH and the control below; parts in [from the run: …] are filled in by each run.',
+    )).toBeTruthy()
+    expect(within(section()).getAllByRole('article').map((a) => a.getAttribute('aria-label')))
+      .toEqual(['Gather evidence', 'Country overlay', 'Judge', 'Remediation', 'Profile pass', 'Chat'])
+    expect(within(gather).getByText('m7-lead-statements-1').className).toContain('mono')
+    expect(within(gather).getByText('Sent first on every assessment.').className).toContain('field-note')
+    expect(within(gather).getAllByText(/^(System|Human)$/).map((r) => r.textContent)).toEqual(['System', 'Human'])
+    const human = gather.querySelectorAll('pre')[1]
+    expect(human.textContent).toBe("Control 1.1.1: To what extent…\nNote: [from the run: the lead's rejection note]")
+    expect([...human.querySelectorAll('mark.from-run')].map((m) => m.textContent))
+      .toEqual(["[from the run: the lead's rejection note]"])
+    expect(within(section()).queryAllByRole('textbox')).toEqual([]) // read-only: never a field
+    const overlay = within(section()).getByRole('article', { name: 'Country overlay' })
+    expect(within(overlay).getByText('Not sent for this control: it has no overlay requirement.')).toBeTruthy()
+    expect(overlay.querySelector('pre')).toBeNull()
+    const select = within(section()).getByRole('combobox', { name: 'Control' }) as HTMLSelectElement
+    expect(select.value).toBe('1.1.1')
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      '1.1.1 To what extent are information security policies available?',
+      '1.6.2 To what extent is the organization prepared to handle crisis situations?',
+    ])
+    expect(select.options[0].lang).toBe('en') // the ISA's text, in the company's answer language
+  })
+
+  it('reads the prompts of another control once, the select disabled and Building the prompts… while it reads',
+    async () => {
+      const { reads, release } = promptsApi((control) => control === null ? Response.json(PROMPTS) : undefined)
+      renderPage()
+      const select = await within(section()).findByRole('combobox', { name: 'Control' })
+      await userEvent.selectOptions(select, '1.6.2')
+      expect(reads()).toEqual(['/api/developer/prompts', '/api/developer/prompts?control=1.6.2'])
+      expect((select as HTMLSelectElement).disabled).toBe(true)
+      expect(within(section()).getByText('Building the prompts…')).toBeTruthy()
+      expect(within(section()).queryAllByRole('article')).toEqual([])
+      release(Response.json(AT_1_6_2))
+      expect(await within(section()).findByText('Sent first on every assessment. (1.6.2)')).toBeTruthy()
+      expect((select as HTMLSelectElement).disabled).toBe(false)
+      expect((select as HTMLSelectElement).value).toBe('1.6.2')
+      expect(reads()).toHaveLength(2)
+    })
+
+  it.each([
+    ['a 500', () => new Response('{"detail": "The prompts could not be built."}', { status: 500 })],
+    ['a 404', () => new Response('{"detail": "9.9.9 is not a control the current company applies."}', { status: 404 })],
+  ])("on %s says the prompts can't be shown, with Try again that reads them again; the rest of the page stays",
+    async (_, refusal) => {
+      let failing = true
+      const { reads } = promptsApi(() => failing ? refusal() : Response.json(PROMPTS))
+      renderPage()
+      expect(await within(section()).findByText("The prompts can't be shown just now.")).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Usage' })).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Companies' })).toBeTruthy()
+      failing = false
+      await userEvent.click(within(section()).getByRole('button', { name: 'Try again' }))
+      expect(await within(section()).findByRole('article', { name: 'Chat' })).toBeTruthy()
+      expect(reads()).toHaveLength(2)
+    })
+
+  it("can't be shown when the API can't be reached", async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    renderPage()
+    expect(await within(section()).findByText("The prompts can't be shown just now.")).toBeTruthy()
+  })
+
+  it('on a 401, signs out and says nothing more', async () => {
+    const onSignedOut = vi.fn()
+    setOnSignedOut(onSignedOut)
+    promptsApi(() => new Response('{"detail": "Sign in to use Vouch."}', { status: 401 }))
+    renderPage()
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalled())
+    expect(within(section()).queryByText("The prompts can't be shown just now.")).toBeNull()
+    expect(within(section()).queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+})
+
+describe('the price per model, ticket 496', () => {
+  const model = () => screen.getByRole('region', { name: 'Model' })
+
+  it('lists each priced model with its price per million tokens, the current one marked Current', () => {
+    renderPage()
+    const rows = within(within(model()).getByRole('list', { name: 'Prices' })).getAllByRole('listitem')
+    expect(rows.map((r) => r.textContent)).toEqual([
+      'anthropic/claude-haiku-5.5$0.10 in · $0.50 out per million tokensCurrent',
+      'anthropic/claude-sonnet-5.5$2.00 in · $10.00 out per million tokens',
+    ])
+    expect(within(rows[0]).getByText('anthropic/claude-haiku-5.5').className).toContain('mono')
+    expect(within(rows[0]).getByText('Current').className).toContain('company-current')
+    expect(within(model()).queryByText(/has no list price here/)).toBeNull()
+  })
+
+  it('says a current model not in the prices has no list price here', () => {
+    renderPage({ settings: { ...SETTINGS, model: 'google/gemini-3-flash' } })
+    expect(within(model()).getByText(
+      'google/gemini-3-flash has no list price here: its cost is only what OpenRouter reports.',
+    )).toBeTruthy()
+    expect(within(model()).queryByText('Current')).toBeNull()
+  })
+})
+
+describe('the recent runs, ticket 496', () => {
+  const RUN: RecentRun = {
+    at: '2026-11-10T09:30:00+00:00', control_id: '1.6.2', model: 'anthropic/claude-sonnet-5.5', input_tokens: 12_345,
+    output_tokens: 678, reported_cost_usd: 0.0123, estimated_cost_usd: 0, estimated: false, cost_complete: true,
+  }
+  const section = () => screen.getByRole('region', { name: 'Recent runs' })
+  const cellsOf = (row: HTMLElement) => within(row).getAllByRole('cell').map((c) => c.textContent)
+  const when = (iso: string) => new Date(iso).toLocaleString('en-GB',
+    { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+  it('shows a row per run: when, what, model, tokens and cost, reported, estimated, incomplete or not spent', () => {
+    const runs: RecentRun[] = [
+      RUN,
+      { ...RUN, control_id: 'profile-pass', reported_cost_usd: 0, estimated_cost_usd: 0.25, estimated: true },
+      { ...RUN, control_id: '5.1.1', cost_complete: false },
+      { ...RUN, control_id: '4.1.2', model: 'fake', reported_cost_usd: 0, estimated_cost_usd: 0.0001, estimated: true },
+    ]
+    renderPage({ settings: { ...SETTINGS, recent_runs: runs } })
+    expect(within(section()).getByText('The last 10 assessments and profile passes, for every company.')).toBeTruthy()
+    expect(within(section()).getAllByRole('columnheader').map((h) => h.textContent))
+      .toEqual(['When', 'What', 'Model', 'Tokens in', 'Tokens out', 'Cost'])
+    const rows = within(section()).getAllByRole('row').slice(1)
+    expect(rows.map(cellsOf)).toEqual([
+      [when(RUN.at), '1.6.2', 'anthropic/claude-sonnet-5.5', '12,345', '678', '$0.0123'],
+      [when(RUN.at), 'Profile pass', 'anthropic/claude-sonnet-5.5', '12,345', '678', '$0.25 estimated'],
+      [when(RUN.at), '5.1.1', 'anthropic/claude-sonnet-5.5', '12,345', '678', '$0.0123 · incomplete'],
+      [when(RUN.at), '4.1.2', 'fake', '12,345', '678', '$0.0001 estimated, not spent'],
+    ])
+    expect(rows[0].querySelector('time')?.getAttribute('dateTime')).toBe(RUN.at)
+    expect(within(rows[0]).getByText('anthropic/claude-sonnet-5.5').className).toContain('mono')
+  })
+
+  it('says when no assessment or profile pass has run yet', () => {
+    renderPage()
+    expect(within(section()).getByText('No assessment or profile pass has run yet.')).toBeTruthy()
+    expect(within(section()).queryByRole('table')).toBeNull()
   })
 })
