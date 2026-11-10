@@ -19,12 +19,15 @@ from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from pydantic import SecretStr
 from test_memory import as_user
+from test_model_choice import CONTROL, FakeCatalogue, app_with_key
+from test_spending import UNPRICED_MODEL, CostingChat, llm_result
 
 from vouch import ScriptedChatModel, evals
 from vouch import tracing as tracing_module
 from vouch.api import create_app, current_user
 from vouch.evals import EvalModels, fake_models, load_cases, run_eval
 from vouch.graph import PROMPT_VERSION
+from vouch.model_choice import DEFAULT_MODEL
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.profile import load_named_profile, read_profile_once
 from vouch.settings import (
@@ -35,6 +38,7 @@ from vouch.settings import (
     load_langfuse_keys,
     load_settings,
 )
+from vouch.spending import CHAT, GPT_LUNA, PRICES, PROFILE_PASS
 from vouch.tracing import TraceFacts, Tracing, run_traced, traced
 
 KEYS = {"LANGFUSE_PUBLIC_KEY": "pk-lf-test-public", "LANGFUSE_SECRET_KEY": "sk-lf-test-secret"}
@@ -144,6 +148,11 @@ def exported() -> Iterator[tuple[Tracing, InMemorySpanExporter]]:
     on = Tracing(keys, span_exporter=exporter, tracer_provider=TracerProvider())
     yield on, exporter
     on.shutdown()
+
+
+@pytest.fixture
+def catalogue() -> FakeCatalogue:
+    return FakeCatalogue([DEFAULT_MODEL])
 
 
 def traces(on: Tracing, exporter: InMemorySpanExporter) -> dict[str, list[ReadableSpan]]:
@@ -276,6 +285,136 @@ def test_a_profile_pass_is_one_trace_with_its_model_call_and_each_control_s_step
     attributes = trace_attributes(spans)
     assert attributes["langfuse.trace.name"] == "profile pass"
     assert "profile:nordlicht" in attributes["langfuse.trace.tags"]
+
+
+# --- Each generation's cost and model (#504) ----------------------------------------------------
+
+COST = "langfuse.observation.cost_details"
+MODEL = "langfuse.observation.model.name"
+
+
+def costs(spans: list[ReadableSpan]) -> list[dict[str, float]]:
+    """Each generation's cost details, as Langfuse reads them: a JSON object in USD."""
+    return [json.loads(s.attributes[COST]) for s in of_type(spans, "generation")]  # type: ignore[index,arg-type]
+
+
+def kept_cost(app, user: dict[str, str], control_id: str | None = None) -> float:
+    """The cost Vouch kept for the user's runs (the in-memory spending store's records)."""
+    return sum(
+        r.usage.cost_usd
+        for r in app.state.spending.store.records()
+        if r.user_id == user["X-Test-User"] and control_id in (None, r.control_id)
+    )
+
+
+def assert_each_generation_costed(spans: list[ReadableSpan], model: str) -> float:
+    """Every generation carries the model and its cost (input, output and total, in USD);
+    gives the trace's total."""
+    generations = of_type(spans, "generation")
+    assert generations
+    found = costs(spans)
+    for cost in found:
+        assert set(cost) == {"input", "output", "total"}
+        assert cost["total"] > 0
+        assert cost["input"] + cost["output"] == pytest.approx(cost["total"])
+    assert {s.attributes.get(MODEL) for s in generations} == {model}  # type: ignore[union-attr]
+    return sum(cost["total"] for cost in found)
+
+
+def test_each_generation_of_an_assessment_carries_the_cost_vouch_records(exported):
+    on, exporter = exported
+    app = traced_app(on)
+    client, lead = TestClient(app), new_user()
+
+    client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
+
+    [spans] = traces(on, exporter).values()
+    total = assert_each_generation_costed(spans, "fake")
+    assert total == pytest.approx(kept_cost(app, lead))
+
+
+def test_each_generation_of_a_chat_turn_carries_the_cost_vouch_records(exported):
+    on, exporter = exported
+    app = traced_app(on)
+    client, lead = TestClient(app), new_user()
+
+    response = client.post(
+        "/api/chat", json={"page": "dossier", "message": "Where do I stand?"}, headers=lead
+    )
+
+    assert "event: done" in response.text
+    [spans] = traces(on, exporter).values()
+    total = assert_each_generation_costed(spans, "fake")
+    assert total == pytest.approx(kept_cost(app, lead, CHAT))
+
+
+def test_the_profile_pass_generation_carries_the_cost_vouch_records(exported):
+    on, exporter = exported
+    app = traced_app(on)
+    client, lead = TestClient(app), new_user()
+
+    response = client.post("/api/profile-pass", headers=lead)
+
+    assert response.status_code == 200, response.text
+    [spans] = traces(on, exporter).values()
+    total = assert_each_generation_costed(spans, "fake")
+    assert total == pytest.approx(kept_cost(app, lead, PROFILE_PASS))
+
+
+@pytest.mark.filterwarnings("ignore:A test tried to use socket.socket")
+def test_on_openrouter_each_generation_carries_openrouter_s_reported_cost_and_the_model(
+    exported, catalogue
+):
+    """The live case: OpenRouter's Claude ids (`anthropic/claude-haiku-5.5`,
+    `anthropic/claude-sonnet-5.5`) match no model Langfuse prices (its own are spelt
+    `claude-haiku-5-5`, `claude-sonnet-5-5`), so only the cost Vouch sends fills the Cost
+    column. OpenRouter's reported cost goes as it is, never re-estimated."""
+    on, exporter = exported
+    costing = CostingChat()
+    app = app_with_key(costing, catalogue)
+    app.state.models.tracing = on
+    app.dependency_overrides[current_user] = as_user
+    lead = new_user()
+
+    TestClient(app).post("/api/assessments", json={"control_id": CONTROL}, headers=lead)
+
+    [spans] = traces(on, exporter).values()
+    assert_each_generation_costed(spans, DEFAULT_MODEL)
+    assert [c["total"] for c in costs(spans)] == [pytest.approx(0.00025)] * len(costing.requests)
+
+
+def test_a_call_with_no_reported_cost_carries_the_estimate_split_by_the_model_s_prices():
+    price = PRICES[GPT_LUNA]
+
+    cost = tracing_module.cost_details(llm_result(1000, 200), GPT_LUNA)
+
+    assert cost == {
+        "input": pytest.approx(price.cost(1000, 0)),
+        "output": pytest.approx(price.cost(0, 200)),
+        "total": pytest.approx(price.cost(1000, 200)),
+    }
+
+
+def test_a_reported_cost_is_the_total_split_in_the_model_s_price_proportions():
+    cost = tracing_module.cost_details(llm_result(1000, 200, cost=0.004), GPT_LUNA)
+
+    assert cost is not None
+    share = PRICES[GPT_LUNA].cost(1000, 0) / PRICES[GPT_LUNA].cost(1000, 200)
+    assert cost == {
+        "input": pytest.approx(0.004 * share),
+        "output": pytest.approx(0.004 * (1 - share)),
+        "total": pytest.approx(0.004),
+    }
+
+
+def test_a_reported_cost_on_an_unpriced_model_is_sent_as_its_total():
+    cost = tracing_module.cost_details(llm_result(12, 5, cost=0.001), UNPRICED_MODEL)
+
+    assert cost == {"total": pytest.approx(0.001)}
+
+
+def test_a_call_whose_cost_cant_be_known_sends_none_never_zero():
+    assert tracing_module.cost_details(llm_result(12, 5), UNPRICED_MODEL) is None
 
 
 # --- What is never sent ------------------------------------------------------------------------

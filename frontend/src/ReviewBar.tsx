@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
-import { type Assessment, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
+import { type Assessment, dateTimeLabel, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { confirmFindings, JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, REVIEW_STEPS,
   type Review, type ReviewDecision, type ReviewStep, submitReview } from './review.ts'
 
@@ -52,11 +52,6 @@ export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onC
     </form>
   )
 }
-
-/** "4 Nov 2026, 08:30": when a decision was made, in the reader's time zone. */
-const decidedAtLabel = (at: string) =>
-  new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit',
-    minute: '2-digit' })
 
 export const NOT_READ_AGAIN = 'The assessment could not be read again just now. Please try again.'
 export const DECIDE_EACH_ITEM = 'Approve or discard each remediation item to accept the verdict.'
@@ -145,7 +140,7 @@ export default function ReviewBar(props: ReviewBarProps) {
         <p className="decided">
           <span className={`tag tag-${status}`}>{REVIEW_WORDS[status]}</span>
           {review?.reviewer_name && review.reviewed_at && (
-            <span>by {review.reviewer_name} on {decidedAtLabel(review.reviewed_at)}</span>
+            <span>by {review.reviewer_name} on {dateTimeLabel(review.reviewed_at)}</span>
           )}
           {status === 'accepted' && beforeThreeStep && <span className="field-note">before the three-step review</span>}
         </p>

@@ -238,13 +238,18 @@ def with_a_full_trail(page: Page) -> None:
 
 
 def tables_overflowing(report: Locator) -> list[str]:
-    """Each controls or trail table wider than its container, with its widths."""
+    """Each controls or trail table wider than its container, with its widths, once the fonts have
+    settled (#512: measured while a late web font was still loading, in the fallback's widths)."""
     return report.evaluate(
-        """(el, selectors) => selectors.flatMap((s) => [...el.querySelectorAll(s)].map((t) => {
+        """async (el, selectors) => {
+          await document.fonts.ready
+          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+          return selectors.flatMap((s) => [...el.querySelectorAll(s)].map((t) => {
           const box = t.parentElement
           const wide = Math.max(t.scrollWidth, box.scrollWidth)
           return wide > box.clientWidth ? `${s}: ${wide} in ${box.clientWidth}` : null
-        })).filter(Boolean)""",
+        })).filter(Boolean)
+        }""",
         list(TABLES),
     )
 
@@ -257,14 +262,21 @@ def set_goal(page: Page, url: str, profile: str, goal: str) -> None:
     assert answer.ok, answer.text()
 
 
+@pytest.mark.parametrize("fonts", ["web", "fallback"])
 @pytest.mark.parametrize("goal", ["audit-readiness", "internal-improvement"])
 def test_at_1440_and_1024_neither_table_scrolls_sideways(
-    page: Page, request, goal, nordlicht_later
+    page: Page, request, goal, fonts, nordlicht_later
 ):
     """#463: the trail was 1,231-1,250px in a 902px sheet at 1440, and the controls table carried
     empty columns. Nordlicht's report is English, Alpenwerk's German. The improvement report has a
-    server of its own, as its goal would change what the readiness checks read."""
+    server of its own, as its goal would change what the readiness checks read. #512: measured once
+    the web fonts have settled, and again without them, as on a slow network: on Ubuntu (CI) the
+    fallback is DejaVu Sans, whose German headers were 963px of trail in the 902px sheet."""
     url = request.getfixturevalue("report_url" if goal == "audit-readiness" else "improvement_url")
+    if fonts == "fallback":
+        page.route(
+            re.compile(r"^https://fonts\.(googleapis|gstatic)\.com/"), lambda route: route.abort()
+        )
     if goal != "audit-readiness":  # each profile's default
         for profile in ("nordlicht", "alpenwerk"):
             set_goal(page, url, profile, goal)

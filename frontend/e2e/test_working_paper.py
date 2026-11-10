@@ -58,7 +58,7 @@ def test_an_assessed_controls_rows_show_verdict_kind_stale_flag_and_quotes(page:
 
     expect(paper.get_by_text("Protection level: normal")).to_be_visible()
     expect(paper.get_by_text("Answer language: English")).to_be_visible()
-    rows = paper.get_by_role("table", name="Requirements").locator("tbody tr")
+    rows = paper.get_by_role("table", name="Requirements").locator("tbody th[scope=row]")
     expect(rows).to_have_count(5)
     for requirement_id in ("M1", "M2", "S1", "S2", "S3"):
         shown = row(paper, requirement_id)
@@ -210,7 +210,8 @@ CARD_PARTS = """async () => {
     return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left, width: r.width }
   }
   const cards = {}
-  for (const tr of document.querySelectorAll('table[aria-label="Requirements"] tbody tr:not(.override-row)')) {
+  for (const th of document.querySelectorAll('table[aria-label="Requirements"] tbody th[scope=row]')) {
+    const tr = th.closest('tr') // a requirement's row: not its override or remediation item's (#464)
     cards[tr.querySelector('th[scope=row] .mono').textContent] = {
       card: rect(tr), head: rect(tr.querySelector('th[scope=row]')),
       verdict: rect(tr.querySelector('.verdict-cell .chip')), text: rect(tr.querySelector('.rq-text')),
@@ -235,7 +236,7 @@ def test_on_a_phone_each_requirement_is_a_card_in_order(page: Page, paper_url, s
     paper = open_paper(page, paper_url, ASSESSED, assessed=True)
 
     assert not scrolls_sideways(page)
-    expect(paper.locator("tbody tr")).to_have_count(5)
+    expect(paper.locator("tbody th[scope=row]")).to_have_count(5)  # not the items' rows (#464)
     for requirement_id, card in settled_cards(page).items():
         head, verdict, text = card["head"], card["verdict"], card["text"]
         evidence, reason = card["evidence"], card["reason"]
@@ -287,6 +288,77 @@ def test_on_a_desktop_the_requirements_stay_a_table_with_no_toggle(page: Page, p
 
     expect(paper.get_by_role("columnheader", name="Requirement", exact=True)).to_be_visible()
     expect(paper.get_by_role("button", name="Show full requirement")).to_have_count(0)
+
+
+WIDE = "5.2.4"  # #464's audit: Alpenwerk's long German words ("Informationssicherheit")
+REQUIREMENT_MIN = 200
+"""The Requirement column's floor at 1024 and 1440 (#464), in px: it was 100-143px."""
+
+# The judged table, read in one go once the fonts have loaded and layout has settled (as
+# CARD_PARTS): its width against its wrapper's, the narrowest Requirement cell, each text's
+# hyphenation and language, and where each remediation item sits against its requirement's row.
+TABLE_LAYOUT = """async () => {
+  await document.fonts.ready
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const table = document.querySelector('table.reqs.judged')
+  const rect = (el) => el.getBoundingClientRect()
+  return {
+    scroll: table.scrollWidth, room: table.parentElement.clientWidth, table: rect(table).width,
+    requirement: Math.min(...[...table.querySelectorAll('td.rq')].map((td) => rect(td).width)),
+    texts: [...table.querySelectorAll('.rq-text')].map((t) => ({ hyphens: getComputedStyle(t).hyphens, lang: t.lang })),
+    items: [...table.querySelectorAll('section.remediation')].map((item) => {
+      const own = item.closest('tr')
+      const id = item.getAttribute('aria-label').replace('Remediation item ', '')
+      const requirement = [...table.querySelectorAll('tbody tr')]
+        .find((tr) => tr.querySelector('th[scope=row] .mono')?.textContent === id)
+      return { id, ownRow: own !== requirement, inQuotes: !!item.closest('.quotes-cell'),
+        next: requirement.nextElementSibling === own, below: rect(own).top >= rect(requirement).bottom - 1,
+        width: rect(own).width }
+    }),
+  }
+}"""
+
+
+@pytest.mark.parametrize("width", [1440, 1024, 390])
+def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row(
+    page: Page, paper_url, width, nordlicht_later
+):
+    """#464: the working paper uses the full width (#448 decision 6). At 1440 and 1024 the judged
+    table doesn't scroll sideways on Nordlicht or Alpenwerk, and the Requirement column keeps at
+    least REQUIREMENT_MIN; the requirement text hyphenates in its own language; each remediation
+    item is its own row under its requirement, spanning the table on a desktop and inside the
+    card's width on a phone (#211)."""
+    page.set_viewport_size({"width": width, "height": 900})
+    nordlicht_later(paper_url)
+    for profile, language in (("nordlicht", "en"), ("alpenwerk", "de")):
+        response = page.request.post(
+            f"{paper_url}/api/assessments",
+            data={"control_id": WIDE},
+            headers={"X-Vouch-Profile": profile},
+        )
+        assert response.ok, response.status
+        assert "event: result" in response.text()
+        make_current(page.request, paper_url, profile)  # #480: the paper opens under it
+        paper = open_paper(page, paper_url, WIDE, assessed=True)
+        name = "German" if language == "de" else "English"
+        expect(paper.get_by_text(f"Answer language: {name}")).to_be_visible()
+        layout = page.evaluate(TABLE_LAYOUT)
+
+        assert not scrolls_sideways(page), f"{profile} at {width}px"
+        assert layout["scroll"] <= layout["room"], f"{profile} at {width}px: {layout}"
+        if width > 1000:
+            assert layout["requirement"] >= REQUIREMENT_MIN, f"{profile} at {width}px: {layout}"
+        assert layout["texts"] and all(
+            t == {"hyphens": "auto", "lang": language} for t in layout["texts"]
+        ), layout["texts"]
+        assert layout["items"], f"{profile}'s {WIDE} has no remediation item to place"
+        for item in layout["items"]:
+            assert item["ownRow"] and not item["inQuotes"], item
+            assert item["next"] and item["below"], item
+            if width > 700:
+                assert abs(item["width"] - layout["table"]) <= 1, item  # spans the table
+            else:
+                assert item["width"] <= width, item
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(

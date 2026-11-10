@@ -117,10 +117,10 @@ def test_story_2_override_confirm_plan_fixes_and_accept_counts_on_the_overview(
     expect(bar.get_by_role("button", name="Accept verdict")).to_be_disabled()
     expect(bar).to_contain_text("0 of 2 remediation items decided.")
     with page.expect_response(re.compile(r"/remediation/M1$")):
-        row(paper, "M1").get_by_role("button", name="Approve M1").click()
+        paper.get_by_role("button", name="Approve M1").click()
     expect(bar).to_contain_text("1 of 2 remediation items decided.")
     with page.expect_response(re.compile(r"/remediation/S1$")):
-        row(paper, "S1").get_by_role("button", name="Discard S1").click()
+        paper.get_by_role("button", name="Discard S1").click()
 
     # Accept.
     expect(current_step(bar)).to_have_text("Accept")

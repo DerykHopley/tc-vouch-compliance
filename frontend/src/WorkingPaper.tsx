@@ -431,9 +431,10 @@ type JudgedProps = {
  * The assessment's requirements: verdict, evidence kind and stale flag, then the reason and the exact quotes. An
  * overlay requirement's source comes from the profile's list (`listed`), as the assessment doesn't carry it. An
  * overridden requirement says what the agent's verdict was; at Confirm findings, "Change" opens a row to override
- * it. A requirement not or partly evidenced shows its remediation item under its reason (#43, #212); one overridden
- * to evidenced on screen hides its draft, which the review drops. On a phone each row is a stacked card, by CSS, its
- * text clamped to 2 lines with a toggle (`RequirementText`, #211).
+ * it. A requirement not or partly evidenced shows its remediation item on a row of its own under it, spanning the
+ * table (#43, #212, #464; under the override row while that is open); one overridden to evidenced on screen hides its
+ * draft, which the review drops. On a phone each row is a stacked card, by CSS, its text clamped to 2 lines with a
+ * toggle (`RequirementText`, #211), and its item closes the card.
  */
 /** A requirement's text cell. On a phone (#211) the text is clamped to 2 lines, and "Show full requirement" /
  * "Show less" toggles it (`aria-expanded`), offered only when the clamp hides some of it (measured again as the width
@@ -463,6 +464,9 @@ function RequirementText({ text, language }: { text: string; language?: string }
     </td>
   )
 }
+
+/** The judged table's columns: the override and remediation item rows span them all (#464). */
+const JUDGED_COLUMNS = 5
 
 /** The statement note in English, for an API that serves none (#439); `vouch.language` holds it in each language. */
 const STATEMENT_NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is "
@@ -496,9 +500,9 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
             const applies = r.verdict !== 'not-applicable'
             const replaced = overrides.replaced[r.id]
             const toFix = r.verdict === 'not-evidenced' || r.verdict === 'partly-evidenced'
-            const item = toFix ? items.shown.find((i) => i.requirement_id === r.id) : undefined
+            const item = toFix && items.threadId ? items.shown.find((i) => i.requirement_id === r.id) : undefined
             return [
-              <tr key={r.id}>
+              <tr key={r.id} className={item ? 'has-item' : undefined}>
                 <RequirementId id={r.id} column={r.column} source={source(r.id)} />
                 <RequirementText text={r.text} language={language} />
                 <td className="verdict-col">
@@ -555,20 +559,24 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   {r.verdict === 'partly-evidenced' && r.citations.some((c) => c.lead_statement) && (
                     <p className="why" lang={language}>{statementNote}</p> // what the cap note's statement asks (#439)
                   )}
-                  {item && items.threadId && (
-                    // A new key when the item changes, so its fields start from the kept values.
-                    <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
-                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language}
-                      plan={items.plan} />
-                  )}
                 </div></td>
               </tr>,
               overrides.editable && editing === r.id && (
                 <tr key={`${r.id}-override`} className="override-row">
-                  <td colSpan={5}>
+                  <td colSpan={JUDGED_COLUMNS}>
                     <OverrideEditor requirementId={r.id} agentVerdict={overrides.agentVerdicts[r.id] ?? r.verdict}
                       saved={overrides.saved.find((o) => o.requirement_id === r.id)} onCancel={() => onEdit(null)}
                       onSave={onSave} />
+                  </td>
+                </tr>
+              ),
+              item && (
+                <tr key={`${r.id}-item`} className="remediation-row">
+                  <td colSpan={JUDGED_COLUMNS}>
+                    {/* A new key when the item changes, so its fields start from the kept values. */}
+                    <Remediation key={`${item.status}:${item.owner_role}:${item.due_date}`} item={item}
+                      threadId={items.threadId} decidable={items.decidable} onDecided={items.onDecided} language={language}
+                      plan={items.plan} />
                   </td>
                 </tr>
               ),

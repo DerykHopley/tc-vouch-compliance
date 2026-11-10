@@ -147,7 +147,8 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
     at_phone_width(page, f"{profiles_url}/developer")
     expect(page.get_by_role("button", name="Remove Musterfirma Süd GmbH")).to_be_visible()
     expect(page.get_by_role("button", name="Make Musterfirma Süd GmbH current")).to_be_visible()
-    expect(page.locator(".company-current")).to_have_text("Current")
+    # The Companies section's mark: the price list marks the current model too (#496).
+    expect(page.locator(".companies .current-mark")).to_have_text("Current")
     assert small_targets(page) == []
 
 
@@ -212,7 +213,8 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
 
     confirmed_with_an_item(page.request, paper_url)  # Plan fixes: S1's item to approve or discard
     paper = open_paper(page, paper_url)
-    expect(row(paper, ITEM).get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
+    # The item is a row of its own under its requirement (#464), so it's found on the paper.
+    expect(paper.get_by_role("button", name=f"Discard {ITEM}")).to_be_visible()
     assert small_targets(page) == []
 
     # #437: Assess again on a review in progress warns first, with two pills in its place.

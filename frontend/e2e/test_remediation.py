@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from current_company import reopened_under
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 from reviewing import confirmed
-from test_review import CONTROL, assessed, open_paper, row
+from test_review import CONTROL, assessed, open_paper
 from top_bar import back_to_overview
 
 OWNER = "IT security officer"
@@ -47,7 +47,7 @@ def assessed_on(request: APIRequestContext, url: str, headers: dict | None) -> s
 
 
 def item(paper: Locator) -> Locator:
-    return row(paper, ITEM).get_by_role("region", name=f"Remediation item {ITEM}")
+    return paper.get_by_role("region", name=f"Remediation item {ITEM}")  # its own row (#464)
 
 
 def stored_items(request: APIRequestContext, url: str, thread_id: str) -> list[dict]:
