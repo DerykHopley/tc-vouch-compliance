@@ -372,6 +372,77 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert item["width"] <= width, item
 
 
+INDEX_ROWS = """async () => {
+  await document.fonts.ready
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const rect = (el) => el && el.getBoundingClientRect()
+  return [...document.querySelectorAll('.wp-index .wp-row')].map((row) => {
+    const q = row.querySelector('.wp-q')
+    return {
+      id: row.querySelector('.mono').textContent, row: rect(row).height, idBox: rect(row.querySelector('.mono')),
+      state: rect(row.querySelector('.wp-state')), chip: rect(row.querySelector('.chip')),
+      tag: rect(row.querySelector('.tag')), q: rect(q), line: parseFloat(getComputedStyle(q).lineHeight),
+    }
+  })
+}"""
+
+ROW_MAX = 72
+"""An index row's height at 1440 (#466), in px, when its id, chip and tag share one line: that
+line, two lines of question and the row's padding. A row whose chip and tag don't fit beside its
+id in the 250px index (a long verdict word with a review tag) takes one more line for them."""
+
+
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_at_1440_each_index_row_is_its_id_and_state_then_at_most_two_lines_of_question(
+    page: Page, paper_url, profile
+):
+    """#466: each row is one line of id, chip and tag, then the question clamped to two lines."""
+    response = page.request.post(
+        f"{paper_url}/api/assessments",
+        data={"control_id": ASSESSED},  # a chip and a review tag: the row's widest state
+        headers={"X-Vouch-Profile": profile},
+    )
+    assert response.ok, response.status
+    page.set_viewport_size({"width": 1440, "height": 900})
+    as_company(page, profile)
+    open_paper(page, paper_url, ASSESSED, assessed=True)
+
+    rows = page.evaluate(INDEX_ROWS)
+
+    assert len(rows) == 12, rows
+    assert any(r["q"]["height"] > 1.5 * r["line"] for r in rows), "no question uses a second line"
+    for r in rows:
+        assert r["q"]["height"] <= 2 * r["line"] + 1, r  # two lines of question at most
+        assert r["chip"]["top"] < r["idBox"]["bottom"], r  # the chip on the id's line
+        assert r["q"]["top"] >= r["state"]["bottom"] - 1, r  # the question under them
+        fits = r["tag"] is None or r["chip"]["width"] + r["tag"]["width"] + 6 <= r["state"]["width"]
+        if fits:
+            assert r["row"] <= ROW_MAX, r
+            if r["tag"]:
+                assert r["tag"]["top"] < r["idBox"]["bottom"], r  # the tag on the id's line too
+
+
+def test_at_1440_the_index_stays_in_view_when_the_paper_scrolls_to_its_foot(page: Page, paper_url):
+    """#466: the index's list is sticky beside the paper, below the top bar, and scrolls on its
+    own; it ends above the room main keeps for Ask Vouch, so the paper's foot doesn't push it up."""
+    assessed(page.request, paper_url, ASSESSED)  # a long paper
+    page.set_viewport_size({"width": 1440, "height": 900})
+    open_paper(page, paper_url, ASSESSED, assessed=True)
+    index = page.get_by_role("navigation", name="Controls").locator(".wp-index-list")
+    top_bar = box(page.locator(".top"))
+
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    page.wait_for_function("scrollY > 0")
+
+    shown = box(index)
+    assert abs(shown["y"] - (top_bar["y"] + top_bar["height"])) <= 1, (shown, top_bar)
+    assert shown["y"] + shown["height"] <= 900 + 1, shown
+    last = index.get_by_role("link").filter(has_text="5.2.9")  # the index scrolls on its own
+    last.scroll_into_view_if_needed()
+    assert box(last)["y"] + box(last)["height"] <= 900 + 1, box(last)
+    assert box(index)["y"] == shown["y"], "bringing the last row into view moved the index"
+
+
 def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
     # #359: Alpenwerk's 1.1.1 on the German demo script cites the logging policy, approved
     # 2023-05-10 for a yearly review, so stale; the API serves its reason in German. On the

@@ -406,6 +406,19 @@ describe('the control index', () => {
     expect(within(index).getByRole('link', { name: /^2\.1\.3/ }).textContent).toContain('Not assessed')
   })
 
+  it("shows each row's question without the shared opening, in the answer language (issue 466)", () => {
+    const german = 'Inwieweit werden Informationen während der Übertragung geschützt?'
+    const controls = CONTROLS.map((c) => (c.id === '5.1.2' ? { ...c, question: german } : c))
+    render(<WorkingPaper overview={{ ...OVERVIEW, answer_language: 'de', goal: 'audit-readiness', controls }}
+      card={{ ...controls.find((c) => c.id === '5.1.2')!, question: german }} running={null}
+      run={{ status: 'idle', steps: [] }} checking={false} onAssess={() => {}} onOpen={() => {}} onOverview={() => {}}
+      onReviewed={() => {}} onRefresh={() => Promise.resolve(true)} onItemDecided={() => {}} onQuestionsChanged={() => {}} />)
+    const index = screen.getByRole('navigation', { name: 'Controls' })
+    const question = within(index).getByRole('link', { name: /^5\.1\.2/ }).querySelector('.wp-q')
+    expect(question?.textContent).toBe('Werden Informationen während der Übertragung geschützt?')
+    expect(question?.getAttribute('lang')).toBe('de')
+  })
+
   it("shows the open control's own run: assessing, then its verdict and state", () => {
     show({ run: { status: 'running', steps: [] } })
     const index = screen.getByRole('navigation', { name: 'Controls' })

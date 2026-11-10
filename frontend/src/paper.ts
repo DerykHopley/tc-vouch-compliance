@@ -58,6 +58,18 @@ export function areas<C extends { id: string }>(controls: C[]): [string, C[]][] 
   return [...grouped]
 }
 
+/** The opening every ISA control question shares, in each edition's language: "To what extent", "Inwieweit". */
+const SHARED_OPENING = /^(to what extent|inwieweit)\s+/i
+
+/**
+ * A control's question as its index row shows it (#466): without the opening every question shares, so the rows
+ * tell the controls apart, and starting with a capital, as a question of its own. Any other question is kept as is.
+ */
+export function indexLabel(question: string): string {
+  const rest = question.replace(SHARED_OPENING, '')
+  return rest === question ? question : rest.charAt(0).toLocaleUpperCase() + rest.slice(1)
+}
+
 /** The answer language's English name ("German"), or its code when there is none. */
 export function languageName(code: string): string {
   try {

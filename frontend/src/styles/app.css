@@ -212,6 +212,16 @@ button.prof-button:hover { border-color: var(--navy); }
 .wp-row[aria-current="page"] { background: var(--paper); border-left-color: var(--navy); }
 .wp-state { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .wp-q { grid-column: 2; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Beside the paper (#466): the index's list stays in view below the top bar and scrolls on its own, while the index's
+   column runs the paper's full height. It ends above main's 88px clearance for Ask Vouch (below: change them
+   together), so at the paper's foot it isn't pushed up out of view. Each row is its id and state, then the question
+   (without its shared opening, paper.ts indexLabel) across the row, clamped to two lines. The phone and stacked
+   layout (1000px or less) is unchanged. */
+@media (min-width: 1001px) {
+  .wp-index { padding: 0; }
+  .wp-index-list { position: sticky; top: var(--top-bar, 0px); max-height: calc(100vh - var(--top-bar, 0px) - 88px); overflow-y: auto; padding: 12px 0; }
+  .wp-q { grid-column: 1 / -1; line-height: 1.4; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+}
 /* The requirement rows: a wide table scrolls inside its own container, never the page (design.md, Layout) */
 .table-wrap { overflow-x: auto; width: 100%; }
 .reqs { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--sheet); }
@@ -297,7 +307,7 @@ textarea.field { resize: vertical; font-family: inherit; }
 .fab kbd { font: 500 11px var(--f-mono); opacity: .65; }
 /* The page leaves room for the floating Ask Vouch button at every width (#198 at phone width, #462 at all): its foot
    scrolls clear of it, and a field brought into view (scrolled to, tapped, tabbed to) stops above it. 88px: the
-   button's 45px, its 20px inset, a gap. */
+   button's 45px, its 20px inset, a gap. The working paper's index list ends above it (.wp-index-list, #466). */
 main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .bubble { width: min(390px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 16px 48px var(--shadow); display: flex; flex-direction: column; animation: rise .18s ease-out; }

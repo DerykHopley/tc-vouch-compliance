@@ -3,7 +3,7 @@ import {
   type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
 import { type ControlCard, controlPath, isoLabel, isReviewState, type Overview } from './overview.ts'
-import { areas, COLUMN_WORDS, evidenceOf, languageName, type PaperRequirement } from './paper.ts'
+import { areas, COLUMN_WORDS, evidenceOf, indexLabel, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { setUnsaved } from './leaving.ts'
@@ -342,34 +342,37 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
   )
 }
 
-/** The control index, by area: each control with its verdict and review state; the open one marked. */
+/** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
+ * view beside the paper as the paper scrolls (#466). */
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   return (
     <nav className="wp-index" aria-label="Controls">
-      {areas(controls).map(([area, cards]) => (
-        <div key={area}>
-          <h3>{area}</h3>
-          {cards.map((card) => {
-            const open = card.id === openId
-            const done = open && run.status === 'done' ? run.assessment : null
-            const assessing = open ? run.status === 'running' : card.id === running
-            const verdict = done ? done.verdict : card.verdict
-            const status = done ? done.status : isReviewState(card.status) ? card.status : undefined
-            return (
-              <PaperLink key={card.id} id={card.id} onOpen={onOpen} className="wp-row"
-                aria-current={open ? 'page' : undefined}>
-                <span className="mono">{card.id}</span>
-                <span className="wp-state">
-                  <VerdictChip verdict={verdict} assessing={assessing} language={language} />
-                  {!assessing && status && <span className={`tag tag-${status}`}>
-                    {improving && status === 'accepted' && card.closed ? CLOSED_WORD : REVIEW_WORDS[status]}</span>}
-                </span>
-                <span className="wp-q" lang={language}>{card.question}</span>
-              </PaperLink>
-            )
-          })}
-        </div>
-      ))}
+      <div className="wp-index-list">
+        {areas(controls).map(([area, cards]) => (
+          <div key={area}>
+            <h3>{area}</h3>
+            {cards.map((card) => {
+              const open = card.id === openId
+              const done = open && run.status === 'done' ? run.assessment : null
+              const assessing = open ? run.status === 'running' : card.id === running
+              const verdict = done ? done.verdict : card.verdict
+              const status = done ? done.status : isReviewState(card.status) ? card.status : undefined
+              return (
+                <PaperLink key={card.id} id={card.id} onOpen={onOpen} className="wp-row"
+                  aria-current={open ? 'page' : undefined}>
+                  <span className="mono">{card.id}</span>
+                  <span className="wp-state">
+                    <VerdictChip verdict={verdict} assessing={assessing} language={language} />
+                    {!assessing && status && <span className={`tag tag-${status}`}>
+                      {improving && status === 'accepted' && card.closed ? CLOSED_WORD : REVIEW_WORDS[status]}</span>}
+                  </span>
+                  <span className="wp-q" lang={language}>{indexLabel(card.question)}</span>
+                </PaperLink>
+              )
+            })}
+          </div>
+        ))}
+      </div>
     </nav>
   )
 }
