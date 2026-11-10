@@ -383,8 +383,8 @@ Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:40 + 0:30 = 6 minute
 2. Point at the mix: 2.1.3, 5.1.2 and 5.2.5 **Evidenced**, most others **Partly evidenced**, and
    1.6.1 and 5.2.4 **Not evidenced**. 5.2.4 ("To what extent are event logs recorded and
    analysed?") has nothing: its logging documents were left out.
-3. Point at 5.2.9's card under "The controls": it reads "Not assessed". It is not applicable, so
-   the pass left it out and it has no draft.
+3. Point at 5.2.9's card under "The controls": it reads **Not applicable**, with the reason you
+   gave in step 5. The pass left it out, it has no draft, and readiness counts 11 controls.
 
 > The new company starts where Nordlicht did in Part 2: one pass drafted every applicable
 > control, from the chosen documents only, with the same guards. A draft never cites a document
