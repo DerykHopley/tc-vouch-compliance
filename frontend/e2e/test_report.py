@@ -16,7 +16,7 @@ from urllib.request import urlopen
 import pdf_words
 import pytest
 from fonts import FONTS_SETTLED, without_web_fonts
-from hyphen_breaks import UNHYPHENATED_BREAKS
+from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from test_working_paper import as_company
@@ -25,6 +25,9 @@ from touch_targets import small_targets
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
 NORDLICHT_REASON = "Nordlicht allows no remote access to its company network"
+GERMAN_REASON = (  # an Alpenwerk override reason, with long compounds for the trail's Note (#530)
+    "Die Protokollierungsrichtlinie regelt die Informationssicherheitsverantwortlichkeiten nicht."
+)
 DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -231,37 +234,74 @@ def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
     report = open_report(page, report_url)
 
     expect(report).to_have_attribute("lang", "de")
-    questions = report.locator("table.report-controls td.report-q")
-    expect(questions.first).to_be_visible()
-    marks = questions.evaluate_all(
-        "cells => cells.map((c) => ({ lang: c.lang, hyphens: getComputedStyle(c).hyphens }))"
-    )
-    assert marks and all(m == {"lang": "de", "hyphens": "auto"} for m in marks), marks
-    found = page.evaluate(UNHYPHENATED_BREAKS, "table.report-controls td.report-q")
-    assert found["words"], "Alpenwerk's report shows no question to measure"
-    assert found["breaks"] == [], f"question words broken without a hyphen: {found['breaks']}"
+    expect(report.locator("table.report-controls td.report-q").first).to_be_visible()
+    assert_hyphenated_in_german(page, {"question": "table.report-controls td.report-q"})
+
+
+@pytest.mark.parametrize("width", [701, 1024])
+def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
+    page: Page, report_url, width
+):
+    """#530: the trail's Note column is narrow at 701 and 1024, and Alpenwerk's override reasons
+    split mid-word with no hyphen ("Protokollierungsrichtlinie"). A note is typed in the answer
+    language, so it is marked in it and hyphenates, as the controls' questions do since #521."""
+    override = [{"requirement_id": "S1", "verdict": "not-evidenced", "reason": GERMAN_REASON}]
+    accepted(page.request, report_url, "4.1.2", "alpenwerk", override)
+    page.set_viewport_size({"width": width, "height": 900})
+    as_company(page, "alpenwerk")
+
+    report = open_report(page, report_url)
+
+    notes = "table.report-trail td.report-q"
+    expect(report.locator(notes).filter(has_text=GERMAN_REASON).first).to_be_visible()
+    assert_hyphenated_in_german(page, {"note": notes})
 
 
 # --- The controls and trail tables fit (#463) ---------------------------------------------------
 
 TABLES = ("table.report-controls", "table.report-trail")
+REMEDIATION = "section[aria-labelledby='report-remediation'] table"
+# Free texts holding a token no hyphenation can break (#530's verify), each of which widened its
+# column past the sheet while the cells broke words only at hyphens or spaces: a link, a signed
+# link (a browser may break a link after a slash, not in its id and signature), a file name under
+# 31 characters, and a German compound in Nordlicht's English report.
+UNBREAKABLE = {
+    "link": "Siehe https://intranet.alpenwerk.example/isms/richtlinien/"
+    "Protokollierungsrichtlinie_Version3_freigegeben.pdf für Details.",
+    "signed link": "Kein Nachweis unter https://intranet.alpenwerk.example/isms/dokument?"
+    "id=8f14e45fceea167a5a36dedd4bea2543&sig=c9a1b2d3e4f506178f14e45fceea167a5a36dedd hinterlegt.",
+    "file name": "Siehe Zugriffsmatrix_Q3_2026_v2.xlsx dazu.",
+    "compound": "The Informationssicherheitsmanagementsystem was signed off.",
+}
 
 
 def with_a_full_trail(page: Page) -> None:
     """The report as served, with the recorded Nordlicht trail and a long entry added, so the trail
-    has every column filled (long notes, evidence ids, model names) whatever this server holds."""
+    has every column filled (long notes, evidence ids, model names) whatever this server holds; and
+    each UNBREAKABLE text as a trail note, a remediation item's Missing, a plan item's Missing and
+    note, and a question's answer (#530)."""
     recorded = json.loads(NORDLICHT_REPORT.read_text())["trail"]["entries"]
 
     def patched(route: Route) -> None:
         served = route.fetch().json()
-        served["trail"] = {"entries": [*recorded, long_entry()], "next": None}
+        served["trail"] = {
+            "entries": [*recorded, long_entry(), *unbreakable_entries()],
+            "next": None,
+        }
+        if "questions" in served:
+            served["questions"] = [*served["questions"], *unbreakable_questions()]
+            plan = served["plan"] or [{"priority": "low", "items": []}]
+            plan[-1]["items"] += unbreakable_plan_items()
+            served["plan"] = plan
+        else:
+            served["remediation"] = [*served["remediation"], unbreakable_remediation()]
         route.fulfill(json=served)
 
     page.route("**/api/report", patched)
 
 
-def tables_overflowing(report: Locator) -> list[str]:
-    """Each controls or trail table wider than its container, with its widths, once the fonts have
+def tables_overflowing(report: Locator, tables: tuple[str, ...] = TABLES) -> list[str]:
+    """Each of the tables wider than its container, with its widths, once the fonts have
     settled (#512: measured while a late web font was still loading, in the fallback's widths)."""
     return report.evaluate(
         "async (el, selectors) => {"
@@ -273,7 +313,7 @@ def tables_overflowing(report: Locator) -> list[str]:
           return wide > box.clientWidth ? `${s}: ${wide} in ${box.clientWidth}` : null
         })).filter(Boolean)
         }""",
-        list(TABLES),
+        list(tables),
     )
 
 
@@ -307,9 +347,21 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
             page.set_viewport_size({"width": width, "height": 900})
             report = open_report(page, url)
             expect(report.locator("table.report-trail tbody tr").first).to_be_visible()
+            for text in UNBREAKABLE.values():
+                expect(report.locator("table.report-trail")).to_contain_text(text)
             if goal == "audit-readiness":
                 expect(report.locator("table.report-controls")).to_be_visible()
-            assert tables_overflowing(report) == [], (profile, width)
+                expect(report.locator(REMEDIATION).last).to_contain_text(UNBREAKABLE["file name"])
+                shown = (*TABLES, REMEDIATION)
+            else:
+                expect(report.locator("table.report-questions")).to_contain_text(
+                    UNBREAKABLE["compound"]
+                )
+                expect(report.locator("table.report-plan").last).to_contain_text(
+                    UNBREAKABLE["signed link"]
+                )
+                shown = (*TABLES, "table.report-questions", "table.report-plan")
+            assert tables_overflowing(report, shown) == [], (profile, width)
             if goal == "audit-readiness" and profile == "alpenwerk":
                 # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
                 days = report.locator("table.report-controls td.report-day").evaluate_all(
@@ -324,7 +376,7 @@ def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
     page: Page, report_url, nordlicht_report
 ):
     page.set_viewport_size({"width": 390, "height": 900})
-    nordlicht_report["trail"]["entries"].append(long_entry())
+    nordlicht_report["trail"]["entries"] += [long_entry(), *unbreakable_entries()]
     page.route("**/api/report", lambda route: route.fulfill(json=nordlicht_report))
     for scheme in ("light", "dark"):
         page.emulate_media(color_scheme=scheme)
@@ -377,6 +429,65 @@ def long_entry() -> dict:
         "model": "scripted-fake-model-with-a-long-name",
         "prompt_version": "assess-2026-11-01",
     }
+
+
+def unbreakable_entries() -> list[dict]:
+    """A trail entry for each UNBREAKABLE text, as its typed note (#530's verify)."""
+    return [
+        {**long_entry(), "id": 2 + i, "action": "override", "note": text}
+        for i, text in enumerate(UNBREAKABLE.values())
+    ]
+
+
+def unbreakable_remediation() -> dict:
+    """A remediation group with an item for each UNBREAKABLE text, as its drafted Missing."""
+    return {
+        "control_id": "1.6.2",
+        "question": "To what extent are changes managed?",
+        "items": [
+            {
+                "requirement_id": f"S{i + 1}",
+                "missing": text,
+                "owner_role": "IT-Leiter",
+                "due_date": "2026-12-31",
+            }
+            for i, text in enumerate(UNBREAKABLE.values())
+        ],
+    }
+
+
+def unbreakable_plan_items() -> list[dict]:
+    """A done plan item for each UNBREAKABLE text, as its drafted Missing and its typed note."""
+    return [
+        {
+            "control_id": "1.6.2",
+            "requirement_id": f"S{i + 1}",
+            "missing": text,
+            "owner_role": "IT-Leiter",
+            "due_date": "2026-12-31",
+            "status": "done",
+            "note": text,
+        }
+        for i, text in enumerate(UNBREAKABLE.values())
+    ]
+
+
+def unbreakable_questions() -> list[dict]:
+    """An answered open question for each UNBREAKABLE text, as its typed answer."""
+    return [
+        {
+            "id": 99 + i,
+            "control_id": "1.1.1",
+            "question": "Wo liegt die Protokollierungsrichtlinie?",
+            "asked_of": "IT-Leiter",
+            "due_date": "2026-12-01",
+            "asked_at": "2026-11-06T14:05:00+00:00",
+            "answer": text,
+            "answered_at": "2026-11-07T09:00:00+00:00",
+            "overdue": False,
+        }
+        for i, text in enumerate(UNBREAKABLE.values())
+    ]
 
 
 # --- Export (#57, story 9; #308, story 4 of spec #321) ---------------------------------------
@@ -692,6 +803,18 @@ def test_a_printed_a4_report_keeps_headings_clear_of_tables_and_notes_whole(
 DONE_NOTE = "Exposure record kept in the ISMS folder."
 ASKED = "Who signs off the ISMS scope each year?"
 DUE = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()  # within the horizon
+# Alpenwerk's done note, question and answer, with long compounds for the free-text columns (#530).
+GERMAN_DONE_NOTE = "Risikobewertungsprotokoll im Informationssicherheitsordner abgelegt."
+GERMAN_QUESTION = (
+    "Wer genehmigt den Geltungsbereich des Informationssicherheitsmanagementsystems und die "
+    "Zugriffsberechtigungsüberprüfungen?"
+)
+GERMAN_ANSWER = "Die Geschäftsführung, in der jährlichen Managementbewertung."
+# The plan's free-text columns (Missing, Note) and the open questions' (Question, Answer).
+IMPROVEMENT_COLUMNS = {
+    "plan": "table.report-plan tbody td.report-q",
+    "questions": "table.report-questions tbody td.report-q",
+}
 
 
 def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_exports_them(
@@ -747,3 +870,37 @@ def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_export
     assert text.startswith("# Improvement report\n")
     assert f"| Done | {DONE_NOTE} |" in text
     assert f"| 1.1.1 | {ASKED} | CEO | {DUE} | Open |" in text
+
+
+def test_at_701px_alpenwerks_plan_and_questions_break_words_only_with_a_hyphen(
+    page: Page, improvement_url
+):
+    """#530: at 701px the plan's Missing and Note and the open questions' Question and Answer are
+    narrow, and Alpenwerk's German split mid-word with no hyphen ("Risikobewertungsprotokoll").
+    They are marked in the answer language and hyphenate in it, as the controls' questions do
+    since #521: typed text too, as an Alpenwerk team writes in German."""
+    request = page.request
+    set_goal(page, improvement_url, "alpenwerk", "internal-improvement")
+    thread_id = accepted(
+        request,
+        improvement_url,
+        "4.1.2",
+        "alpenwerk",
+        decisions={"M1": {"decision": "approve", "owner_role": "IT-Leiter"}},
+    )
+    done = f"{improvement_url}/api/assessments/{thread_id}/remediation/M1/done"
+    post(request, done, {"note": GERMAN_DONE_NOTE}, "alpenwerk")
+    asked = {"question": GERMAN_QUESTION, "asked_of": "Geschäftsführung", "due_date": DUE}
+    logged = post(request, f"{improvement_url}/api/controls/1.1.1/questions", asked, "alpenwerk")
+    question_id = json.loads(logged)["question"]["id"]
+    answer = f"{improvement_url}/api/controls/1.1.1/questions/{question_id}/answer"
+    post(request, answer, {"answer": GERMAN_ANSWER}, "alpenwerk")
+    page.set_viewport_size({"width": 701, "height": 900})
+    as_company(page, "alpenwerk")
+
+    report = open_report(page, improvement_url)
+
+    expect(report).to_have_attribute("lang", "de")
+    expect(report.locator("table.report-plan").filter(has_text=GERMAN_DONE_NOTE)).to_be_visible()
+    expect(report.locator("table.report-questions")).to_contain_text(GERMAN_ANSWER)
+    assert_hyphenated_in_german(page, IMPROVEMENT_COLUMNS)
