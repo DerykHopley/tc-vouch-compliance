@@ -73,6 +73,11 @@ first step, Alpenwerk's overlay (1.6.2's O1) and Nordlicht's stale encryption st
 PROFILE_PASS_SCRIPT = DEMO_DIR / "profile-pass.json"
 """The bundled profile pass script (#371), written for Nordlicht's 12 controls: the pass's fake
 when no ASSESS_FAKE_SCRIPT is set."""
+LIBRARY_PASS_SCRIPT = DEMO_DIR / "profile-pass-library.json"
+"""The bundled profile pass script for a company made in setup (#446), over the sample library's
+12 controls, its verdicts and citations those of fixtures/sample-library/expected-answers.yaml:
+the pass's fake, limited to the company's chosen documents (vouch.fake_model.chosen_documents_only),
+for a profile whose evidence is all sample-library folders, when no ASSESS_FAKE_SCRIPT is set."""
 
 
 @dataclass(frozen=True)

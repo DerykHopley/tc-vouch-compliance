@@ -28,7 +28,7 @@ import logging
 import re
 import time
 from collections.abc import Callable, Iterator
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import httpx
 from langchain_core.callbacks import BaseCallbackHandler
@@ -38,8 +38,20 @@ from pydantic import PrivateAttr, SecretStr
 
 from vouch.chat import CHAT_PROMPT_VERSION
 from vouch.database import Database
+from vouch.documents import document_files
 from vouch.graph import PROMPT_VERSION
-from vouch.settings import PROFILE_PASS_SCRIPT, Settings, demo_script, fake_model
+from vouch.paths import SAMPLE_LIBRARY_DIR
+from vouch.profile import ComplianceProfile
+from vouch.settings import (
+    LIBRARY_PASS_SCRIPT,
+    PROFILE_PASS_SCRIPT,
+    Settings,
+    demo_script,
+    fake_model,
+)
+
+if TYPE_CHECKING:
+    from vouch.fake_model import ScriptedChatModel
 
 log = logging.getLogger(__name__)
 
@@ -348,15 +360,23 @@ class ModelChoice:
         return self.openrouter.chat_model(chosen, callbacks)
 
     def for_profile_pass(
-        self, chosen: str | None, callbacks: list[BaseCallbackHandler] | None = None
+        self,
+        chosen: str | None,
+        callbacks: list[BaseCallbackHandler] | None = None,
+        profile: ComplianceProfile | None = None,
     ) -> BaseChatModel:
         """A fresh model for one profile pass (#371), on `chosen` (from `chosen()`), within
         CALL_BUDGET calls, PROFILE_PASS_TIMEOUT_SECONDS a request and no retry
-        (PROFILE_PASS_MAX_RETRIES); on the fake,
-        ASSESS_FAKE_SCRIPT when set, else the bundled pass script (PROFILE_PASS_SCRIPT, written
-        for Nordlicht). `callbacks` see every call (the usage meter)."""
+        (PROFILE_PASS_MAX_RETRIES); on the fake, ASSESS_FAKE_SCRIPT when set, else for a
+        `profile` whose evidence is all sample-library folders (a company made in setup) the
+        library script limited to its chosen documents (LIBRARY_PASS_SCRIPT, #446), else the
+        bundled pass script (PROFILE_PASS_SCRIPT, written for Nordlicht). `callbacks` see every
+        call (the usage meter)."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
-            fake = fake_model(self._settings, PROFILE_PASS_SCRIPT)
+            if self._settings.fake_script is None and profile and _from_library(profile):
+                fake = _library_pass(profile)
+            else:
+                fake = fake_model(self._settings, PROFILE_PASS_SCRIPT)
             fake.callbacks = callbacks
             return fake
         return self.openrouter.chat_model(
@@ -386,6 +406,34 @@ class ModelChoice:
     def close(self) -> None:
         if self.openrouter is not None:
             self.openrouter.close()
+
+
+def _from_library(profile: ComplianceProfile) -> bool:
+    """Whether every evidence source of the profile is a folder of the sample library, as every
+    company made in setup's is (vouch.company_profiles)."""
+    library = SAMPLE_LIBRARY_DIR.resolve()
+    sources = profile.evidence_sources.values()
+    return bool(sources) and all(s.folder.resolve().parent == library for s in sources)
+
+
+def _library_pass(profile: ComplianceProfile) -> "ScriptedChatModel":
+    """The fake playing the library pass script, limited to the documents the profile may use
+    (vouch.fake_model.chosen_documents_only), as the pass reads them. A bad script raises
+    ScriptError."""
+    from vouch.fake_model import ScriptedChatModel, chosen_documents_only
+    from vouch.profile_pass import ProfilePassReply
+
+    fake = ScriptedChatModel.from_file(LIBRARY_PASS_SCRIPT)
+    usable: set[str] = set()
+    for source in profile.evidence_sources.values():
+        try:
+            usable |= {p.stem for p in document_files(source.folder) if source.uses(p.stem)}
+        except OSError:  # the pass refuses a source it can't read before any call
+            continue
+    replies = fake.script.replies_for(ProfilePassReply)
+    limited = [chosen_documents_only(r, usable) for r in replies]  # type: ignore[arg-type]
+    fake.script = fake.script.model_copy(update={"profile_pass": limited})
+    return fake
 
 
 def model_store(db: Database | None) -> ModelStore:

@@ -2,6 +2,7 @@
 
 import json
 import math
+from collections.abc import Collection
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -13,12 +14,31 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Discriminator, Field, Tag, ValidationError, model_validator
 
-from vouch.graph import SUBMIT_ANSWER, Judgement, RemediationPlan, SubmitAnswer
-from vouch.profile_pass import ProfilePassReply
+from vouch.graph import (
+    SHOWN_VERDICTS,
+    SUBMIT_ANSWER,
+    Judgement,
+    RemediationItemReply,
+    RemediationPlan,
+    RequirementJudgement,
+    SubmitAnswer,
+)
+from vouch.profile_pass import ControlAssessmentReply, ProfilePassReply
 
 FAKE_CHARS_PER_TOKEN = 4
 """The fake's own token count, four characters a token: its usage figures are estimates by design,
 kept apart from the profile pass's measured rates (#432) so spending tests don't move."""
+
+
+NONE_CHOSEN = "None of the chosen documents shows this."
+"""The reason for a requirement whose scripted citations were all of documents not chosen."""
+NONE_CHOSEN_ITEM = RemediationItemReply(
+    requirement_id="",
+    missing="A document that shows this; none of the chosen documents does.",
+    owner_role="Information security officer",
+    due_in_days=60,
+)
+"""The remediation item such a requirement gets, if the script drafted it none."""
 
 
 class ScriptExhaustedError(RuntimeError):
@@ -225,3 +245,27 @@ class ScriptedReply(BaseChatModel):
         content = self.source.next_reply(self.reply_schema, messages).model_dump_json()
         reply = AIMessage(content, usage_metadata=_usage(messages, content))
         return _result(reply, self.source.served_model)
+
+
+def chosen_documents_only(reply: ProfilePassReply, chosen: Collection[str]) -> ProfilePassReply:
+    """The pass reply limited to the `chosen` documents (ids), before the fake plays it (#446): a
+    citation of another document left out; a requirement evidenced or partly evidenced with no
+    citation left turned not evidenced (NONE_CHOSEN), with a remediation item (NONE_CHOSEN_ITEM)
+    if it had none. One with citations left keeps its verdict: the agent's own rules then apply
+    to it as to any reply. `reply` is left as it was."""
+
+    def limited(control: ControlAssessmentReply) -> ControlAssessmentReply:
+        requirements: list[RequirementJudgement] = []
+        items = list(control.remediation)
+        drafted = {i.requirement_id for i in items}
+        for r in control.requirements:
+            kept = [c for c in r.citations if c.doc_id in chosen]
+            if r.citations and not kept and r.verdict in SHOWN_VERDICTS:
+                r = r.model_copy(update={"verdict": "not-evidenced", "reason": NONE_CHOSEN})
+                if r.requirement_id not in drafted:
+                    item = NONE_CHOSEN_ITEM.model_copy(update={"requirement_id": r.requirement_id})
+                    items.append(item)
+            requirements.append(r.model_copy(update={"citations": kept}))
+        return control.model_copy(update={"requirements": requirements, "remediation": items})
+
+    return ProfilePassReply(controls=[limited(c) for c in reply.controls])
