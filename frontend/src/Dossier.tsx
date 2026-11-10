@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useId, useRef, useState } from 'react'
 import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, isoLabel, isReviewState, type NextStep, type Overview,
+import { changeGoal, closeRound, type ControlCard, controlPath, dateWords, GOAL_WORDS, goalWording, isoLabel, isReviewState, type NextStep, type Overview,
   type OverviewState, type Readiness, type ReassessReason, ROUND_NAME_LENGTH, type RoundChange, type RoundComparison, SEGMENTS, startRound }
   from './overview.ts'
 import type { PassState } from './profilePass.ts'
@@ -112,12 +112,13 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
   // starting another.
   const passing = pass.kind === 'running'
   const assess = next !== null && next.action !== 'review' && running === null && !passing
+  const wording = goalWording(overview.goal, overview.answer_language)
   return (
     <section className="hero">
       <span className="pill">{overview.company} · {overview.country}</span>
       <GoalRow overview={overview} onChanged={onGoalChanged} arriving={arriving} notSet={goalNotSet} />
       <RoundRow overview={overview} onChanged={onRoundChanged} />
-      <h1 ref={heading} tabIndex={-1}>Prepared for audit. One piece of evidence at a time.</h1>
+      <h1 ref={heading} tabIndex={-1} lang={wording.lang}>{wording.headline}</h1>
       <p><b>{headline}</b> {detail}</p>
       {(next || readiness.open > 0) && (
         <div className="next">

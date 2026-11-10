@@ -130,6 +130,20 @@ describe('Dossier landing', () => {
     expect(await screen.findAllByRole('article', { name: /^Control / })).toHaveLength(12)
     expect(screen.queryByRole('alert')).toBeNull()
   })
+
+  it("names the profile's goal in the top bar, in its language, and keeps it on the Report (ticket 440)", async () => {
+    vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
+      ? Promise.resolve(Response.json({ ...OVERVIEW, goal: 'internal-improvement', answer_language: 'de' }))
+      : new Promise(() => {}))
+    render(<App />)
+    const top = screen.getByRole('banner')
+    const brand = within(top).getByText('Vouch').nextElementSibling!
+    await waitFor(() => expect(brand.textContent).toBe('Sicherheitsverbesserung'))
+    expect(brand.getAttribute('lang')).toBe('de')
+    await userEvent.click(within(top).getByRole('link', { name: 'Report' }))
+    expect(window.location.pathname).toBe('/report')
+    expect(brand.textContent).toBe('Sicherheitsverbesserung')
+  })
 })
 
 describe('the working paper', () => {

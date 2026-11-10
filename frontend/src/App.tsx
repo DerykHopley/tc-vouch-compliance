@@ -244,9 +244,11 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
   }, [paperId, readStored, paperReloads])
   // The lead's decisions made in this page (#42), by thread: newer than the run's result or the stored read.
   const [reviewed, setReviewed] = useState<Record<string, Assessment>>({})
+  // The overview once read: its goal and language name the top bar's label (#440).
+  const readOverview = overview.state.status === 'ready' ? overview.state.overview : undefined
   // In the Internal improvement goal a review or a plan mark can change a card's flags (#410: re-assessment
   // suggested, Closed), which the server works out: the overview is read again, kept as it is when that read fails.
-  const improving = overview.state.status === 'ready' && overview.state.overview.goal === 'internal-improvement'
+  const improving = readOverview?.goal === 'internal-improvement'
   const noteReviewed = (assessment: Assessment) => {
     if (assessment.thread_id) setReviewed((now) => ({ ...now, [assessment.thread_id!]: assessment }))
     noteAssessed(assessment)
@@ -284,7 +286,7 @@ export default function App({ onSignOut, profileSwitcher, userName, company, onS
 
   return (
     <>
-      <TopBar>
+      <TopBar goal={readOverview?.goal} language={readOverview?.answer_language}>
         <button className="btn btn-ghost bar-toggle" aria-expanded={barOpen} aria-controls="top-bar-menu"
           onClick={() => setBarOpen((now) => !now)}>Menu</button>
         <div id="top-bar-menu" className={barOpen ? 'bar-menu open' : 'bar-menu'}>
