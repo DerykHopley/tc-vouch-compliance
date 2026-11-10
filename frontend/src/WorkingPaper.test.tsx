@@ -290,6 +290,39 @@ describe("a lead's statement cited, issue 439", () => {
     expect(within(quotes('S1')).getByText(NOTE)).toBeTruthy()
   })
 
+  const evidence = (id: string) => row(id).querySelector('.evidence-col')! as HTMLElement
+
+  it('labels the evidence column with the served statement word, not "documented", issue 498', () => {
+    const assessment = { ...ASSESSED, answer_language: 'en', statement_word: "Lead's statement",
+      requirements: citedBy("Lead's statement") }
+    show({ run: { status: 'done', steps: [], assessment } })
+    expect(evidence('S1').querySelector('.kind')).toBeNull()
+    expect(within(evidence('S1')).queryByText('documented')).toBeNull()
+    expect(within(evidence('S1')).queryByText('No evidence')).toBeNull()
+    expect(within(evidence('S1')).queryByText('Current')).toBeNull() // a statement is no document to be current
+    const word = within(evidence('S1')).getByText("Lead's statement")
+    expect(word.className).toBe('why')
+    expect(word.getAttribute('lang')).toBe('en')
+    // A document's evidence reads as before.
+    expect(within(evidence('M1')).getByText('implemented').className).toBe('kind kind-implemented')
+    expect(within(evidence('M1')).getByText('Current')).toBeTruthy()
+  })
+
+  it('labels it in German on a German profile, the served word marked German, issue 498', () => {
+    const assessment = { ...ASSESSED, answer_language: 'de', statement_word: 'Aussage der Compliance-Leitung',
+      requirements: citedBy('Aussage der Compliance-Leitung') }
+    show({ run: { status: 'done', steps: [], assessment }, language: 'de' })
+    expect(within(evidence('S1')).queryByText('documented')).toBeNull()
+    expect(within(evidence('S1')).getByText('Aussage der Compliance-Leitung').getAttribute('lang')).toBe('de')
+    expect(within(evidence('S1')).queryByText("Lead's statement")).toBeNull()
+  })
+
+  it("labels it in English's words from an API that serves none, issue 498", () => {
+    show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, requirements: citedBy("Lead's statement") } } })
+    expect(within(evidence('S1')).getByText("Lead's statement")).toBeTruthy()
+    expect(within(evidence('S1')).queryByText('documented')).toBeNull()
+  })
+
   it('says nothing on a requirement judged evidenced, as nothing caps it', () => {
     const evidenced = citedBy("Lead's statement").map((r) => r.id === 'S1' ? { ...r, verdict: 'evidenced' as const } : r)
     show({ run: { status: 'done', steps: [], assessment: { ...ASSESSED, requirements: evidenced } } })

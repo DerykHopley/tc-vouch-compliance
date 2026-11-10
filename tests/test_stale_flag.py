@@ -94,3 +94,10 @@ def test_the_statement_note_is_served_in_the_answer_language():
         "Eine Aussage der Compliance-Leitung kann eine Anforderung nicht vollständig nachweisen: "
         "Um sie zu schließen, ist ein Dokument oder eine Aufzeichnung nötig, die sie belegt."
     )
+
+
+def test_the_statement_word_is_served_in_the_answer_language():
+    # #498: the evidence column names a requirement a lead's statement shows by the statement's
+    # label, as its citation's section does, not "documented".
+    assert assessment_data(assessed("en"))["statement_word"] == "Lead's statement"
+    assert assessment_data(assessed("de"))["statement_word"] == "Aussage der Compliance-Leitung"
