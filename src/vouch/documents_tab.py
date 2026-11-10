@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
 
-from vouch.documents import DocumentSummary, by_title, document_files, document_summary
+from vouch.documents import DocumentSummary, by_title, document_summary
 from vouch.dossier import cited_assessments
 from vouch.graph import Assessment
 from vouch.isa import IsaControl
@@ -129,18 +129,14 @@ def profile_documents(
     today: date,
 ) -> list[ProfileDocument]:
     """Each document the profile uses: its sources in the profile's order, each source's
-    documents of its folder (document_files) that the source `uses`, by title as the library is
+    documents it may use (EvidenceSource.usable_documents), by title as the library is
     listed; each a DocumentSummary judged on `today`, with `stale` and `cited_by`. A citation
     has no source, so a cited id matches every listed document with that id. An unreadable
     folder or document raises (OSError, or ValueError for one that isn't UTF-8 text)."""
     cited_by = _cited_by(controls, latest)
     found: list[ProfileDocument] = []
     for name, source in profile.evidence_sources.items():
-        summaries = [
-            document_summary(path, name, today)
-            for path in document_files(source.folder)
-            if source.uses(path.stem)
-        ]
+        summaries = [document_summary(path, name, today) for path in source.usable_documents()]
         for summary in by_title(summaries):
             found.append(
                 ProfileDocument(
