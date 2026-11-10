@@ -141,6 +141,20 @@ def test_at_startup_one_line_says_whether_tracing_is_on_and_why_not(env, level, 
     assert "sk-lf-test-secret" not in caplog.text
 
 
+def run_python(script: str) -> subprocess.CompletedProcess[str]:
+    """`script` run by this Python in a process of its own, with no Vouch settings in its
+    environment (as conftest clears them), its output captured."""
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
 def test_the_served_app_s_info_lines_reach_the_log_under_uvicorn_once():
     """Under uvicorn's logging the root logger has no handler, and Python's last resort writes
     WARNING and up only: an INFO line from vouch would never reach Cloud Run's log. Once a root
@@ -154,15 +168,7 @@ def test_the_served_app_s_info_lines_reach_the_log_under_uvicorn_once():
         "logging.basicConfig(stream=sys.stdout, format='root: %(message)s')\n"
         "logging.getLogger('vouch.auth').info('after a root handler')\n"
     )
-    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}  # as conftest: no settings
-    done = subprocess.run(
-        [sys.executable, "-c", script],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    done = run_python(script)
 
     assert done.returncode == 0, done.stderr
     assert "tracing off: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set" in done.stderr
@@ -637,9 +643,10 @@ def test_a_run_under_an_unsampled_parent_span_is_still_traced(as_served):
     """Whatever puts a request's unsampled span around a run (FastAPI's own telemetry, another
     instrumentation), Vouch's trace doesn't follow its sampling."""
     on, exporter = as_served
+    _, trace_id, span_id, _ = UNSAMPLED.split("-")
     parent = SpanContext(
-        trace_id=0x0AF7651916CD43DD8448EB211C80319C,
-        span_id=0xB7AD6B7169203331,
+        trace_id=int(trace_id, 16),
+        span_id=int(span_id, 16),
         is_remote=True,
         trace_flags=TraceFlags(TraceFlags.DEFAULT),
     )
@@ -655,28 +662,40 @@ def test_a_run_under_an_unsampled_parent_span_is_still_traced(as_served):
     assert [s.name for s in exporter.get_finished_spans()] == ["assessment"]
 
 
+def test_shutting_tracing_down_stops_its_own_provider_s_send_thread():
+    """Langfuse's shutdown leaves the provider's batch thread running: Vouch's own provider is
+    shut down with it, so none outlives its client."""
+
+    def send_threads() -> set[threading.Thread]:
+        return {t for t in threading.enumerate() if t.name == "OtelBatchSpanRecordProcessor"}
+
+    before = send_threads()
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), LOCAL)
+    on = Tracing(keys, span_exporter=InMemorySpanExporter())
+    started = send_threads() - before
+    assert len(started) == 1
+
+    on.shutdown()
+
+    assert not any(t.is_alive() for t in started)
+
+
 def test_starting_tracing_leaves_the_process_wide_tracer_provider_as_it_was():
-    """In a process of its own, so whatever ran before can't have set the provider already."""
-    script = (
-        "from pydantic import SecretStr\n"
+    """In a process of its own, so whatever ran before can't have set the provider already; its
+    spans kept in memory, as pytest-socket doesn't reach a subprocess."""
+    done = run_python(
         "from opentelemetry import trace\n"
+        "from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter\n"
+        "from pydantic import SecretStr\n"
+        "from vouch import tracing\n"
         "from vouch.settings import LangfuseKeys\n"
-        "from vouch.tracing import start_tracing\n"
+        "tracing.langfuse_exporter = lambda keys: InMemorySpanExporter()\n"
         "before = trace.get_tracer_provider()\n"
-        "on = start_tracing(LangfuseKeys('pk-lf-test-own', SecretStr('sk-lf-test'), "
+        "on = tracing.start_tracing(LangfuseKeys('pk-lf-test-own', SecretStr('sk-lf-test'), "
         "'http://localhost:3300'))\n"
         "after = trace.get_tracer_provider()\n"
-        "on.client.shutdown()\n"
+        "on.shutdown()\n"
         "print(type(before).__name__, type(after).__name__, before is after)\n"
-    )
-    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}  # as conftest: no settings
-    done = subprocess.run(
-        [sys.executable, "-c", script],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
     )
 
     assert done.returncode == 0, done.stderr
