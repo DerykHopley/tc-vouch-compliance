@@ -2,11 +2,11 @@
 
 Vouch is an audit-readiness agent for ISMS and TISAX. For each control it searches the company's
 policies and records, judges each requirement as Evidenced, Partly evidenced or Not evidenced
-(Not applicable when the company's profile excludes it), and drafts an answer for the auditor
-that quotes its sources word for word. The compliance lead reviews every verdict in three steps:
-**Confirm findings** (each requirement's verdict confirmed or overridden), **Plan fixes** (each
-remediation item approved or discarded) and **Accept**. Only accepted verdicts count towards
-readiness.
+(Not applicable when the company's compliance profile excludes it), and drafts an answer for the
+auditor that quotes its sources word for word. The compliance lead reviews every verdict in
+three steps: **Confirm findings** (each requirement's verdict confirmed or overridden), **Plan
+fixes** (each remediation item approved or discarded) and **Accept**. Only accepted verdicts
+count towards readiness.
 
 Each compliance profile has a goal: **Audit readiness**, preparing for an external audit, or
 **Internal improvement**, improving the company's own security with no audit planned, through
@@ -14,13 +14,30 @@ review rounds, an improvement plan by priority, open questions and an improvemen
 goals and the review steps are a demo/prototype process: a real SaaS product might do it
 differently.
 
-For a small profile, Vouch can also run a **profile pass**: one model run over every applicable
-control with all the profile's evidence in front of it, each result waiting for the lead's review.
-The same guards hold as for the per-control agent (the quote check, the staleness rule, the output
-guard). It runs only while its prompt and expected reply fit under a token threshold (100,000
+For a small compliance profile, Vouch can also run a **profile pass**: one model run over every
+applicable control with all the company's evidence in front of it, each result waiting for the
+lead's review. The same guards hold as for the per-control agent (the quote check, the staleness
+rule, the output guard). It runs only while its prompt and expected reply fit under a token threshold (100,000
 tokens by default; above it, Vouch offers the per-control agent) and has its own daily limit of 3
 passes, apart from the assessments'. On Sonnet 5.5, a pass over 12 controls costs about
 $0.30–0.50.
+
+## One current company
+
+Vouch works for one **current company** at a time, the same for every user. It starts as
+Nordlicht Komponenten GmbH, a German supplier; Alpenwerk Präzision GmbH, an Austrian company
+working in German, is bundled too. A developer makes another company current on the
+**Developer page** (in the user menu), and can set up a new company there or remove one made in
+setup. The top bar names the current company, with the tabs **Overview**, **Report** and
+**Company**.
+
+The **Company page** holds the company's details and settings: its country, answer language,
+protection level and overlays, its Goal, its review rounds, its scope, the controls that are not
+applicable and its evidence documents. Only the Goal can be changed there; the review rounds are
+closed and started there as on the Overview.
+
+One current company for everyone is a demo/prototype process: a real product would give each
+lead their own companies ([#163](https://github.com/DerykHopley/tc-vouch-compliance/issues/163)).
 
 ## Who it's for
 
@@ -46,7 +63,7 @@ scripts/dev.sh --api-port 8010 --web-port 5180   # when 8000 or 5173 is taken
 ```
 
 It runs on the scripted fake model: offline, free, with no keys and no sign-in. The fake covers
-four controls, **1.1.1**, **1.6.2**, **4.1.2** and **5.1.1**, under both bundled profiles; any
+four controls, **1.1.1**, **1.6.2**, **4.1.2** and **5.1.1**, under both bundled companies; any
 other control plays 4.1.2's script. The full setup, and what to
 do when something fails, is in [`docs/setup.md`](docs/setup.md); the four common tasks, step by
 step, are in [`docs/features.md`](docs/features.md).
@@ -78,7 +95,7 @@ The optional tasks done; the full table, with the code and the app page for each
 - [`docs/setup.md`](docs/setup.md): local setup, the CLI, the evals, the API, sign-in, the
   container, the checks, keys, Cloud Run in short, and common failures.
 - [`docs/features.md`](docs/features.md): assess a control, review it, ask a question, read the
-  report.
+  report, and switch the current company.
 - [`docs/demo.md`](docs/demo.md): the demo in three parts: Part 1, Audit readiness (on the live
   app, with the local run as a fallback), Part 2, Keep improving (the Internal improvement goal
   and the profile pass, on the local app), and Part 3, Company setup (a developer sets up a new
@@ -89,8 +106,8 @@ The optional tasks done; the full table, with the code and the app page for each
 - [`docs/eval-report.md`](docs/eval-report.md): the full eval report.
 - [How Vouch runs](https://derykhopley.github.io/tc-vouch-compliance/flow/) ([`docs/flow/index.html`](docs/flow/index.html)):
   the runtime process flow, from the lead's click through FastAPI, the LangGraph graphs and the
-  model calls to what is written to Postgres, the three-step review, the chat and the profile
-  pass.
+  model calls to what is written to Postgres, the three-step review, the chat and the
+  profile pass.
 - [`DEPLOY.md`](DEPLOY.md): deploying to Cloud Run.
 - [`GLOSSARY.md`](GLOSSARY.md): the domain words. [`docs/requirements.md`](docs/requirements.md):
   requirements and dated decisions.

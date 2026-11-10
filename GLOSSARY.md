@@ -71,7 +71,7 @@ The compliance profile over the whole sample library that the eval scores; it is
 _Avoid_: Sample company, test profile
 
 **Documents tab**:
-The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every profile has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505).
+The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505).
 _Avoid_: Document library, uploads, files
 
 **Remove company**:
