@@ -337,7 +337,7 @@ function Controls({ report: { controls, words } }: { report: AuditReadinessRepor
       return verdict && <VerdictChip verdict={verdict} label={words.verdicts[verdict]} />
     } },
     { label: labels.reviewer, cell: (c) => reviewedVerdict(c) && c.reviewer },
-    { label: labels.reviewed_at, cell: (c) => reviewedVerdict(c) && c.reviewed_at && dayOf(c.reviewed_at), className: 'mono' },
+    { label: labels.reviewed_at, cell: (c) => reviewedVerdict(c) && c.reviewed_at && dayOf(c.reviewed_at), className: 'mono report-day' },
   ], controls)
   return (
     <section className="report-part" aria-labelledby="report-controls">

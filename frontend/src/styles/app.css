@@ -422,6 +422,7 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report-table.report-trail :is(th, td) { padding-inline: 5px; }
 .report-table.report-trail .report-q { min-width: 16ch; }
 .report-trail .report-at > .report-line { min-width: 10ch; }
+.report-controls .report-day { white-space: nowrap; overflow-wrap: normal; } /* a review day never breaks mid-date (#463) */
 /* A value on a line of its own: the trail's time, and each evidence version stacked under the last. */
 .report-line { display: block; }
 .report-muted { color: var(--muted); margin: 0; }

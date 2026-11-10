@@ -273,6 +273,14 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
             if goal == "audit-readiness":
                 expect(report.locator("table.report-controls")).to_be_visible()
             assert tables_overflowing(report) == [], (profile, width)
+            if goal == "audit-readiness" and profile == "alpenwerk":
+                # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
+                days = report.locator("table.report-controls td.report-day").evaluate_all(
+                    "cells => cells.filter(c => c.textContent.trim())"
+                    ".map(c => { const r = document.createRange(); r.selectNodeContents(c);"
+                    " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
+                )
+                assert days and all(lines == 1 for lines in days), (profile, width, days)
 
 
 def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
