@@ -14,6 +14,7 @@ from test_company_setup import (
     open_setup,
     press,
     to_step_3,
+    to_step_4,
     to_step_5,
     to_step_6,
     to_step_7,
@@ -135,7 +136,7 @@ def test_the_developer_page_s_remove_buttons_are_at_least_44px(page: Page, profi
 
 
 @pytest.mark.parametrize(
-    "step", ["company", "levels", "levels failed", "not applicable", "evidence", "finish"]
+    "step", ["company", "levels", "levels failed", "goal", "not applicable", "evidence", "finish"]
 )
 def test_every_company_setup_control_is_at_least_44px_at_phone_width(
     page: Page, profiles_url, step
@@ -156,6 +157,8 @@ def test_every_company_setup_control_is_at_least_44px_at_phone_width(
         with page.expect_response(lambda r: LEVELS in r.url):
             press(page, "Next")
         expect(page.get_by_role("button", name="Try again")).to_be_visible()
+    if step == "goal":  # #447
+        to_step_4(page)
     if step == "not applicable":
         to_step_5(page)
         control(page, "1.6.1").check()

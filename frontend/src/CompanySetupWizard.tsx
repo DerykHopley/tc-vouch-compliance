@@ -1,14 +1,16 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ProtectionLevel } from './assessment.ts'
 import DocumentTable from './DocumentTable.tsx'
+import { GOAL_LINES, GOAL_WORDS } from './overview.ts'
 import type { ProfileSummary } from './profiles.ts'
+import type { Goal } from './report.ts'
 import {
   type AnswerLanguage, type ChosenEvidence, type CompanyCreated, COUNTRIES, createCompany, type FrameworkControl,
   frameworkControls, LANGUAGES, type LibraryDocument, type LibrarySource, MAX_COMPANY_LENGTH, type NotApplicable,
   notApplicableProblems, PROTECTION_LEVELS, protectionLevels, type ProtectionScope, readyToCite, sampleLibrary, scopeWords,
 } from './setup.ts'
 
-/** Every step of company setup, by name; those NOT_BUILT are a later slice of #351. */
+/** Every step of company setup, by name. */
 const STEPS = ['Company', 'Language', 'Protection level', 'Goal', 'Not applicable', 'Evidence', 'Finish']
 const COMPANY = 1
 const LANGUAGE = 2
@@ -17,8 +19,9 @@ const GOAL = 4
 const NOT_APPLICABLE = 5
 const EVIDENCE = 6
 const FINISH = 7
-const NOT_BUILT = [GOAL] // skipped by Next and Back until slice 5 of #351 builds it
-const later = (n: number) => NOT_BUILT.includes(n)
+
+/** Step 4's Goals in the order shown, Internal improvement first (chosen at the start) (#447). */
+const GOALS: Goal[] = ['internal-improvement', 'audit-readiness']
 
 /** A press of its own (detail 1) within this long of the last move is that move's press landing again (two quick
  * clicks, a double-tap) on the new step's Next, Back or Create company: it is ignored, so each press moves one step and
@@ -31,6 +34,7 @@ type Answers = {
   country: string
   language: AnswerLanguage
   level: ProtectionLevel | null
+  goal: Goal
   notApplicable: NotApplicable[]
   evidence: ChosenEvidence
 }
@@ -85,19 +89,21 @@ function secondPress(e: MouseEvent) {
 const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number'])
 
 /** `developerPath`: the developer page's address, for the breadcrumb's link; `onDeveloper` opens it. `onCreated`: the
- * company was created, as GET /api/profiles lists it; the app then opens under it. */
-type Props = { developerPath: string; onDeveloper: () => void; onCreated?: (profile: ProfileSummary) => void }
+ * company was created, as GET /api/profiles lists it, with the Goal chosen on step 4; the app then opens under it, sets
+ * that Goal and runs a profile pass (#447). The Goal isn't part of the create: it is kept per user and profile. */
+type Props = { developerPath: string; onDeveloper: () => void; onCreated?: (profile: ProfileSummary, goal: Goal) => void }
 
 /**
  * Company setup (#403, M8 #351): a developer walks the steps that make a company, going back and forward without
  * losing an answer. The answers live here only: leaving or reloading starts afresh. Steps 1 to 3 (company and
- * country, answer language, protection level with what each brings into scope), step 5 (#407, controls marked not
- * applicable, each with a reason), step 6 (#408, the evidence chosen from the sample library) and step 7 (#409, a
- * summary and Create company, which sends them) are built; step 4 is skipped until it is built.
+ * country, answer language, protection level with what each brings into scope), step 4 (#447, the Goal), step 5
+ * (#407, controls marked not applicable, each with a reason), step 6 (#408, the evidence chosen from the sample
+ * library) and step 7 (#409, a summary and Create company, which sends them).
  */
 export default function CompanySetupWizard({ developerPath, onDeveloper, onCreated }: Props) {
   const [step, setStep] = useState(COMPANY)
-  const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, notApplicable: [],
+  const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, goal: 'internal-improvement',
+    notApplicable: [],
     evidence: { policies: [], records: [] } })
   const [shown, setShown] = useState<Shown>(NOTHING_SHOWN)
   const { problems, failure } = shown
@@ -139,8 +145,6 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
   const go = (to: number) => {
     if (settling()) return
     lastMove.current = performance.now()
-    const by = Math.sign(to - step)
-    while (NOT_BUILT.includes(to)) to += by
     moved.current = true
     setStep(to)
     setShown(NOTHING_SHOWN)
@@ -190,7 +194,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
       protection_level: answers.level, not_applicable: answers.notApplicable, evidence: answers.evidence,
     })
     if (created.status === 'created') {
-      onCreated?.(created.profile)
+      onCreated?.(created.profile, answers.goal)
       return
     }
     setCreating(false)
@@ -240,9 +244,8 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
       </div>
       <ol className="setup-steps" aria-label="Setup steps">
         {STEPS.map((name, i) => (
-          <li key={name} className={later(i + 1) ? 'later' : undefined} aria-current={i + 1 === step ? 'step' : undefined}>
+          <li key={name} aria-current={i + 1 === step ? 'step' : undefined}>
             <span className="setup-step-n">{i + 1}</span>{name}
-            {later(i + 1) && <span className="sr-only"> (not yet available)</span>}
           </li>
         ))}
       </ol>
@@ -255,6 +258,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
           <LevelStep answers={answers} answer={answer} scope={scope} onRetry={readScope} problem={problems.includes('level')}
             problemId={noticeId} />
         )}
+        {step === GOAL && <GoalStep answers={answers} answer={answer} />}
         {step === NOT_APPLICABLE && (
           <NotApplicableStep marked={answers.notApplicable} mark={mark} controls={controls} onRetry={readControls}
             problems={problems} problemId={noticeId} />
@@ -386,6 +390,26 @@ function LevelStep({ answers, answer, scope, onRetry, problem, problemId }: Step
   )
 }
 
+/** Step 4 (#447): the Goal, in steps 2 and 3's pattern. One is always chosen, so Next never refuses it. */
+function GoalStep({ answers, answer }: StepProps) {
+  const noteId = useId()
+  return (
+    <fieldset className="setup-choices" aria-describedby={noteId}>
+      <legend>Goal</legend>
+      {GOALS.map((goal) => (
+        <label key={goal} className="setup-choice setup-option">
+          <input type="radio" name="goal" value={goal} checked={answers.goal === goal} onChange={() => answer({ goal })} />
+          <span className="setup-option-text">
+            <span className="setup-option-name">{GOAL_WORDS[goal]}</span>
+            <span className="field-note">{GOAL_LINES[goal]}</span>
+          </span>
+        </label>
+      ))}
+      <p id={noteId} className="field-note">You can change the Goal later on the overview.</p>
+    </fieldset>
+  )
+}
+
 function NotApplicableStep({ marked, mark, controls, onRetry, problems, problemId }: {
   marked: NotApplicable[]
   mark: (control: string, reason: string | null) => void
@@ -488,6 +512,7 @@ function FinishStep({ answers, controls, library }: { answers: Answers; controls
         <dt>Country</dt><dd>{answers.country}</dd>
         <dt>Answer language</dt><dd>{LANGUAGES.find((l) => l.code === answers.language)?.name}</dd>
         <dt>Protection level</dt><dd>{answers.level && PROTECTION_LEVELS[answers.level].name}</dd>
+        <dt>Goal</dt><dd>{GOAL_WORDS[answers.goal]}</dd>
         <dt>Not applicable</dt>
         <dd>
           {marked.length === 0 ? 'None' : (
@@ -503,7 +528,8 @@ function FinishStep({ answers, controls, library }: { answers: Answers; controls
         return chosen.length > 0 && <DocumentTable key={source} caption={caption} documents={chosen} />
       })}
       <p className="field-note">
-        Creating the company adds it to the profile switcher. Its first assessment comes in a later step.
+        Creating the company adds it to the profile switcher. Then Vouch sets its Goal and runs a profile pass: every
+        applicable control drafted, waiting for your review.
       </p>
     </>
   )

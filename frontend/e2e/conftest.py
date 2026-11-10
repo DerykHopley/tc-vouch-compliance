@@ -95,6 +95,21 @@ def setup_url() -> str:
 
 
 @pytest.fixture
+def first_pass_url() -> str:
+    """A fourteenth Vouch like setup_url, for the profile pass a create starts (#447): every create
+    on setup_url runs one, and the passes' daily limit (3 a user) would refuse story 5's."""
+    return os.environ["FIRST_PASS_URL"]
+
+
+@pytest.fixture
+def removal_url() -> str:
+    """A fifteenth Vouch like setup_url, for removing a company made in setup (#418): its three
+    creates each run a profile pass (#447), and with setup_url's two they would pass the passes'
+    daily limit (3 a user)."""
+    return os.environ["REMOVAL_URL"]
+
+
+@pytest.fixture
 def failing_api_url() -> str:
     """An API on a broken fake script: every assessment ends in one `error` event."""
     return os.environ["FAILING_API_URL"]
