@@ -96,6 +96,8 @@ export type Assessment = {
   /** Under the quotes of a requirement a lead's statement caps, in the answer language (#439): it takes a document or
    * record to close it. */
   statement_note?: string
+  /** The evidence column's word for a lead's statement, in the answer language (#498): its citation's label. */
+  statement_word?: string
   status?: ReviewStatus
   requirements?: RequirementVerdict[]
   /** The thread to review it by (#38, #39). */

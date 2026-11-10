@@ -25,10 +25,15 @@ export const COLUMN_WORDS: Record<Column, string> = {
   overlay: 'Country overlay',
 }
 
-/** The kinds of evidence a requirement's quotes are (implemented first), and whether any of them is stale. */
-export function evidenceOf({ citations }: Pick<RequirementVerdict, 'citations'>): { kinds: EvidenceKind[]; stale: boolean } {
-  const kinds = (['implemented', 'documented'] as const).filter((k) => citations.some((c) => c.kind === k))
-  return { kinds, stale: citations.some((c) => c.stale) }
+/**
+ * The kinds of evidence a requirement's document quotes are (implemented first), whether any quote is stale, and
+ * whether a lead's statement shows it (#498): a statement has no kind, as its quote shows none (#439).
+ */
+export function evidenceOf({ citations }: Pick<RequirementVerdict, 'citations'>):
+  { kinds: EvidenceKind[]; stale: boolean; statement: boolean } {
+  const documents = citations.filter((c) => !c.lead_statement)
+  const kinds = (['implemented', 'documented'] as const).filter((k) => documents.some((c) => c.kind === k))
+  return { kinds, stale: citations.some((c) => c.stale), statement: documents.length < citations.length }
 }
 
 /**
