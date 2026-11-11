@@ -22,6 +22,7 @@ dependencies = [
 [project.scripts]
 assess = "vouch.cli:main"
 vouch-db-setup = "vouch.database:main"
+vouch-seed-demo-round = "vouch.demo_round:main"
 
 [dependency-groups]
 dev = [

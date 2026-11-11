@@ -347,6 +347,40 @@ it were empty, and what writes to it answers 503, the log saying to run `vouch-d
 **When the trial ends** the instance stops unless the billing account is upgraded, as Cloud Run
 does; health then says `unavailable` (docs/requirements.md, 2026-11-04).
 
+## The demo round (#579)
+
+`vouch-seed-demo-round` plays a compliance lead's work under Nordlicht through the app's own
+code, on the fake model (no key is read, so no paid call), so Company › Rounds opens on a closed
+round, "Q2 2026", and an improvement since: a profile pass accepted as judged, "Q2 2026" closed and
+"Q3 2026" started, two not-evidenced controls and one partly-evidenced control assessed again and
+accepted as evidenced, one remediation item done and one open question answered. Every step is a
+real request with its audit entries (named "Demo lead", or `--name`, on the database target; a preview uses its own local user's name), at the time it runs.
+
+Rounds are kept per user, so it seeds one user. **Find your user id** in the Clerk dashboard:
+Users, your user, the id starting `user_` (*unverified*: from Clerk's docs, not checked in this
+dashboard). Then, with the Cloud SQL proxy running as for `vouch-db-setup` above:
+
+```bash
+uv run vouch-seed-demo-round --user user_XXXXXXXX   # .envrc gives VOUCH_DATABASE_URL
+```
+
+- **Once.** With "Q2 2026" there since the fresh start it stops, writing nothing (exit 1).
+- **On a fresh start only.** With assessments under Nordlicht since the fresh start (your own
+  work) it stops, writing nothing: Start afresh in the app first, then seed.
+- **The profile pass counts** against the day's profile passes (3): over it, it stops at once with the 429, writing nothing more.
+- **Stopped partway** (a refused request, a limit, Ctrl-C), it leaves part of the work written:
+  Start afresh in the app, then seed again. The goal it switches for marking the item done is
+  put back either way.
+- Without `VOUCH_DATABASE_URL` or `--api` it refuses and says what it needs (exit 2).
+
+**On a preview** (`scripts/dev.sh`, in memory), give its API port instead: only a loopback
+address is taken, and the preview's one local user is seeded.
+
+```bash
+scripts/dev.sh --api-port 8010 --web-port 5180 --detach demo
+env -u VOUCH_DATABASE_URL uv run vouch-seed-demo-round --api http://127.0.0.1:8010
+```
+
 ## Redeploy, roll back, remove
 
 - **Redeploy after a change:** `scripts/deploy-wizard.sh`. It skips what exists, builds the next

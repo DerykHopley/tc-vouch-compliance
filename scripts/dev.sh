@@ -7,6 +7,9 @@
 #   scripts/dev.sh --api-port 8010 --web-port 5180 --detach m7   # an owner preview (#309)
 #   scripts/dev.sh --stop m7                                      # stops it, freeing its ports
 #
+# To seed Nordlicht's demo round "Q2 2026" on a running preview (#579):
+#   env -u VOUCH_DATABASE_URL uv run vouch-seed-demo-round --api http://127.0.0.1:<api port>
+#
 # --detach <name> runs it as its own systemd user unit, vouch-preview-<name>, so it outlives the
 # shell and the agent session that started it (an agent's process group and scope are stopped
 # when its turn ends). It returns once both servers answer, printing the log file and how to stop
