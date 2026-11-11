@@ -336,3 +336,19 @@ def test_a_named_round_when_there_are_none_says_no_round_is_closed() -> None:
     from vouch.chat_agent import NO_ROUND_CLOSED, unknown_round
 
     assert unknown_round("Q2", []) == NO_ROUND_CLOSED
+
+
+def test_round_n_and_review_round_n_name_round_n() -> None:
+    from datetime import UTC, datetime
+
+    from vouch.chat_agent import chosen_round
+    from vouch.rounds import ListedRound
+
+    closed = datetime(2026, 6, 30, tzinfo=UTC)
+    listed = [
+        ListedRound(
+            number=1, name="First round", opened_at=None, closed_at=closed, before_fresh_start=False
+        )
+    ]
+    for asked in ("round 1", "Review round 1"):
+        assert chosen_round(listed, asked) == listed[0]

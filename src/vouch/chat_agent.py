@@ -23,6 +23,7 @@ message, the replies, the tools' words.
 
 import logging
 import queue
+import re
 import threading
 from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -505,6 +506,7 @@ def chosen_round(listed: Sequence[ListedRound], asked: str | None) -> ListedRoun
         number = default_choice(listed)
         return NO_ROUND_CLOSED if number is None else listed[number - 1]
     words = " ".join(asked.split()).casefold()
+    words = re.sub(r"^(review )?round (?=\d+$)", "", words)
     found = [r for r in listed if str(r.number) == words or r.name.casefold() == words]
     if not found:
         found = [r for r in listed if words in r.name.casefold()]
