@@ -9,6 +9,7 @@ import re
 
 import pytest
 from current_company import make_current
+from dossier_cards import card as overview_card
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
@@ -18,9 +19,15 @@ ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a 
 UNASSESSED = "5.1.2"  # assessed by one check only; Nordlicht marks its S3 not applicable
 
 
-def assessed(request: APIRequestContext, paper_url: str, control_id: str) -> None:
-    """Assesses a control on the server's fake model, up to the review."""
-    response = request.post(f"{paper_url}/api/assessments", data={"control_id": control_id})
+def assessed(
+    request: APIRequestContext, paper_url: str, control_id: str, profile: str | None = None
+) -> None:
+    """Assesses a control on the server's fake model, up to the review: under the profile when
+    one is named, else under the current company."""
+    headers = {"X-Vouch-Profile": profile} if profile else {}
+    response = request.post(
+        f"{paper_url}/api/assessments", data={"control_id": control_id}, headers=headers
+    )
     assert response.ok, response.status
     assert "event: result" in response.text()
 
@@ -359,7 +366,50 @@ TABLE_LAYOUT = (
 )
 
 
-@pytest.mark.parametrize("width", [1440, 1024, 390])
+# Each verdict chip a selector finds, once the fonts have settled (as CARD_PARTS): its white-space,
+# its text's line boxes, and its dot. A pseudo-element has no box to read, so a probe takes the
+# dot's place for the measure: a span with the `::before`'s size, margins and alignment, the
+# `::before` itself switched off meanwhile.
+CHIPS = (
+    "async (selector) => {"
+    + FONTS_SETTLED
+    + """  const off = document.createElement('style')
+  off.textContent = '.dot-probing::before { display: none !important }'
+  document.head.append(off)
+  const chips = [...document.querySelectorAll(selector)].map((chip) => {
+    const dot = getComputedStyle(chip, '::before')
+    const probe = document.createElement('span')
+    for (const p of ['display', 'width', 'height', 'margin-top', 'margin-right', 'margin-bottom',
+      'margin-left', 'align-self', 'flex-shrink', 'vertical-align']) probe.style.setProperty(p, dot.getPropertyValue(p))
+    chip.classList.add('dot-probing')
+    chip.prepend(probe)
+    const range = document.createRange()
+    range.selectNodeContents(chip.lastChild)
+    const rects = [...range.getClientRects()].map((r) => ({ top: r.top, bottom: r.bottom }))
+    const box = probe.getBoundingClientRect()
+    probe.remove()
+    chip.classList.remove('dot-probing')
+    return { text: chip.textContent, whiteSpace: getComputedStyle(chip).whiteSpace,
+      lines: new Set(rects.map((r) => Math.round(r.top))).size, first: rects[0],
+      dot: { top: box.top, bottom: box.bottom } }
+  })
+  off.remove()
+  return chips
+}"""
+)
+WRAP_WIDTH = 701
+"""The width at which the German verdict widened the judged table by about 16px (#550)."""
+
+
+def assert_dot_on_first_line(chips: list[dict]) -> None:
+    """Each chip's dot sits within its text's first line box, wrapped or not (#550)."""
+    assert chips, "no verdict chip to measure"
+    for chip in chips:
+        first, dot = chip["first"], chip["dot"]
+        assert dot["top"] >= first["top"] - 1 and dot["bottom"] <= first["bottom"] + 1, chip
+
+
+@pytest.mark.parametrize("width", [1440, 1024, WRAP_WIDTH, 390])
 def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row(
     page: Page, paper_url, width, nordlicht_later
 ):
@@ -367,7 +417,9 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
     table doesn't scroll sideways on Nordlicht or Alpenwerk, and the Requirement column keeps at
     least REQUIREMENT_MIN; the requirement text hyphenates in its own language; each remediation
     item is its own row under its requirement, spanning the table on a desktop and inside the
-    card's width on a phone (#211)."""
+    card's width on a phone (#211). #550: at 701 the German verdict ("Teilweise nachgewiesen")
+    widened the table by about 16px; there a chip may wrap at its space, its dot on its first line,
+    while the Overview's card chip stays on one line."""
     page.set_viewport_size({"width": width, "height": 900})
     nordlicht_later(paper_url)
     for profile, language in (("nordlicht", "en"), ("alpenwerk", "de")):
@@ -399,6 +451,21 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert abs(item["width"] - layout["table"]) <= 1, item  # spans the table
             else:
                 assert item["width"] <= width, item
+        chips = page.evaluate(CHIPS, "table.reqs.judged .verdict-col .chip")
+        if width > 1000:  # a desktop's chips stay on one line (#550)
+            assert chips and all(c["lines"] == 1 for c in chips), f"{profile} at {width}px: {chips}"
+        if width == WRAP_WIDTH and profile == "alpenwerk":
+            assert_dot_on_first_line(chips)
+
+    if width == WRAP_WIDTH:  # outside the table a chip stays on one line
+        assessed(page.request, paper_url, ASSESSED, "alpenwerk")
+        with page.expect_response("**/api/overview"):
+            page.goto(f"{paper_url}/")
+        expect(overview_card(page, ASSESSED).locator(".chip")).to_have_text(
+            "Teilweise nachgewiesen"
+        )
+        (chip,) = page.evaluate(CHIPS, f"article[aria-label='Control {ASSESSED}'] .chip")
+        assert chip["whiteSpace"] == "nowrap" and chip["lines"] == 1, chip
 
 
 INDEX_ROWS = (

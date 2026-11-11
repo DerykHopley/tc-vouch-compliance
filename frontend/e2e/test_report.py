@@ -328,7 +328,9 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
     empty columns. Nordlicht's report is English, Alpenwerk's German. The improvement report has a
     server of its own, as its goal would change what the readiness checks read. #512: measured once
     the web fonts have settled, and again without them, as on a slow network: on Ubuntu (CI) the
-    fallback is DejaVu Sans, whose German headers were 963px of trail in the 902px sheet."""
+    fallback is DejaVu Sans, whose German headers were 963px of trail in the 902px sheet. #550: at
+    701 the German verdict ("Teilweise nachgewiesen") made the controls table 619px in 603px; there
+    the controls table is checked, as #463 owns the other tables' widths."""
     url = request.getfixturevalue("report_url" if goal == "audit-readiness" else "improvement_url")
     if fonts == "fallback":
         without_web_fonts(page)
@@ -340,7 +342,7 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
     nordlicht_later(url)
     for profile in ("nordlicht", "alpenwerk"):
         make_current(page.request, url, profile)  # #480: the report opens under the current company
-        for width in (1440, 1024):
+        for width in (1440, 1024, 701) if goal == "audit-readiness" else (1440, 1024):
             page.set_viewport_size({"width": width, "height": 900})
             report = open_report(page, url)
             expect(report.locator("table.report-trail tbody tr").first).to_be_visible()
@@ -349,7 +351,7 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
             if goal == "audit-readiness":
                 expect(report.locator("table.report-controls")).to_be_visible()
                 expect(report.locator(REMEDIATION).last).to_contain_text(UNBREAKABLE["file name"])
-                shown = (*TABLES, REMEDIATION)
+                shown = (*TABLES, REMEDIATION) if width > 701 else ("table.report-controls",)
             else:
                 expect(report.locator("table.report-questions")).to_contain_text(
                     UNBREAKABLE["compound"]
@@ -359,6 +361,12 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
                 )
                 shown = (*TABLES, "table.report-questions", "table.report-plan")
             assert tables_overflowing(report, shown) == [], (profile, width)
+            if goal == "audit-readiness" and profile == "alpenwerk" and width > 1000:
+                # a desktop's chips never wrap (#550): the German verdict is the widest
+                spaces = report.locator("table.report-controls .chip").evaluate_all(
+                    "chips => chips.map((c) => getComputedStyle(c).whiteSpace)"
+                )
+                assert spaces and set(spaces) == {"nowrap"}, (profile, width, spaces)
             if goal == "audit-readiness" and profile == "alpenwerk":
                 # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
                 days = report.locator("table.report-controls td.report-day").evaluate_all(
