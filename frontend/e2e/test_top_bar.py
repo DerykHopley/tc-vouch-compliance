@@ -100,7 +100,11 @@ def test_the_user_menu_opens_by_click_or_keyboard_closes_with_esc_and_flips_the_
     expect(menu.get_by_role("menuitem")).to_have_text(
         [theme, "Developer page", "Set up a company", FRESH_START]
     )
-    expect(menu.get_by_role("separator")).to_have_count(2)
+    expect(menu.get_by_role("separator")).to_have_count(3)  # the last before the build (#580)
+    # "Vouch dev" on uvicorn; the commit on CI's image, built with it baked in
+    expect(menu.locator(":scope > :last-child")).to_have_text(
+        re.compile(r"^Vouch (dev|[0-9a-f]{7,})$")
+    )
     page.keyboard.press("Escape")
     expect(menu).to_have_count(0)
 

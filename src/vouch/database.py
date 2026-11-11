@@ -114,6 +114,16 @@ CREATE_USAGE = (
     "estimated boolean NOT NULL, cost_complete boolean NOT NULL, at timestamptz NOT NULL)"
 )
 
+RESET_DEMO_SETTING = "vouch.reset_demo"
+"""The transaction-local setting (`SET LOCAL vouch.reset_demo = 'on'`) under which the guarded
+tables (the audit trail, remediation decisions, added documents) let a row be deleted. In the
+app only Reset demo's own transaction sets it (#605, `Database.reset_company`), but any client
+with database access could set it too: the guard can't tell who did. Truncates and updates stay
+refused. A real deployment would drop this exception."""
+_RESET_DELETE = (
+    f"IF TG_OP = 'DELETE' AND current_setting('{RESET_DEMO_SETTING}', true) = 'on' "
+    "THEN RETURN OLD; END IF; "
+)
 AUDIT_TABLE = "vouch_audit_trail"
 """Every reviewed verdict and override (vouch.audit), append-only, in its decision's transaction."""
 AuditAction = Literal[
@@ -132,13 +142,15 @@ AuditAction = Literal[
     "answer",
     "document-add",
     "document-withdraw",
+    "demo-reset",
 ]
 """What an audit entry records the compliance lead doing (vouch.audit's Action): `goal` is a
 change of the profile's Goal (#369); `round-start` and `round-close` a review round started or
 closed (#402); `priority` and `done` a remediation item's priority changed or marked done, in the
 improvement plan (#410); `question` and `answer` an open question logged on a control and its
 answer recorded (#414); `document-add` and `document-withdraw` an evidence document (or a new
-version of one) added to the profile, or withdrawn (#584)."""
+version of one) added to the profile, or withdrawn (#584); `demo-reset` a developer's Reset demo
+of the profile (#605), every user's progress and history under it deleted just before."""
 Goal = Literal["audit-readiness", "internal-improvement"]
 """What a compliance profile is used for (#369, vouch.goal): kept per user and profile."""
 Priority = Literal["high", "medium", "low"]
@@ -178,7 +190,7 @@ CREATE_AUDIT_INDEX = (
 )
 CREATE_AUDIT_GUARD = (
     "CREATE OR REPLACE FUNCTION vouch_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS "
-    "$$ BEGIN RAISE EXCEPTION 'the audit trail is append-only'; END $$"
+    f"$$ BEGIN {_RESET_DELETE}RAISE EXCEPTION 'the audit trail is append-only'; END $$"
 )
 CREATE_AUDIT_TRIGGERS = (
     (
@@ -260,7 +272,7 @@ CREATE_REMEDIATION = (
 )
 CREATE_REMEDIATION_GUARD = (
     "CREATE OR REPLACE FUNCTION vouch_remediation_final() RETURNS trigger LANGUAGE plpgsql AS "
-    "$$ BEGIN RAISE EXCEPTION 'a remediation decision is final'; END $$"
+    f"$$ BEGIN {_RESET_DELETE}RAISE EXCEPTION 'a remediation decision is final'; END $$"
 )
 CREATE_REMEDIATION_TRIGGERS = (
     (
@@ -395,7 +407,7 @@ CREATE_ADDED_DOCUMENTS = (
 _KEPT_COLUMNS = tuple(c for c in ADDED_DOCUMENT_COLUMNS if c != "withdrawn_at")
 CREATE_ADDED_DOCUMENTS_GUARD = (
     "CREATE OR REPLACE FUNCTION vouch_added_documents_kept() RETURNS trigger LANGUAGE plpgsql "
-    "AS $$ BEGIN "
+    f"AS $$ BEGIN {_RESET_DELETE}"
     "IF TG_OP = 'UPDATE' AND OLD.withdrawn_at IS NULL AND NEW.withdrawn_at IS NOT NULL "
     f"AND ({', '.join(f'NEW.{c}' for c in _KEPT_COLUMNS)}) IS NOT DISTINCT FROM "
     f"({', '.join(f'OLD.{c}' for c in _KEPT_COLUMNS)}) THEN RETURN NEW; END IF; "
@@ -1160,6 +1172,56 @@ class Database:
             _insert_audit(conn, [entry])
         return True
 
+    def reset_company(
+        self,
+        profile_id: str,
+        store_label: str,
+        entry: Mapping[str, Any],
+        first_round: tuple[str, str, datetime] | None = None,
+    ) -> None:
+        """Reset demo's wipe (#605), in one transaction: every user's progress and history
+        under `profile_id` deleted (LangGraph's stored memory, under `store_label`, vouch.memory's
+        label of the profile; every user's checkpointed threads; the audit trail, remediation
+        decisions and the plan, the Goal, review rounds, open questions, added documents with
+        their versions), then `entry`, the reset's own audit entry (a mapping of AUDIT_COLUMNS),
+        and with `first_round` (user id, name, opened at) that user's first round, open, in
+        place of the unnamed "First round". The guarded tables let the delete through only
+        under RESET_DEMO_SETTING, set for this transaction alone. Raises DatabaseUnavailable."""
+        where_profile = "split_part(prefix, '.', 1) = 'vouch' AND split_part(prefix, '.', 3) = %s"
+        tables = "the company's progress"
+        with (
+            self.connection() as conn,
+            self._failed(tables),
+            self._needs_setup(tables),
+            conn.transaction(),
+        ):
+            conn.execute(f"SET LOCAL {RESET_DEMO_SETTING} = 'on'")
+            # A thread's key is vouch.memory's scope, the JSON list [user id, profile id], then
+            # the thread id: any user's under the profile, by its key's start.
+            scope_end = re.escape(", " + json.dumps(profile_id) + "]")
+            any_users = r'^\["(?:[^"\\]|\\.)*"' + scope_end
+            for table in CHECKPOINT_TABLES:
+                conn.execute(f"DELETE FROM {table} WHERE thread_id ~ %s", (any_users,))
+            conn.execute(f"DELETE FROM store WHERE {where_profile}", (store_label,))
+            for table in (
+                AUDIT_TABLE,
+                PLAN_TABLE,
+                REMEDIATION_TABLE,
+                GOALS_TABLE,
+                ROUNDS_TABLE,
+                QUESTIONS_TABLE,
+                ADDED_DOCUMENTS_TABLE,
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE profile_id = %s", (profile_id,))
+            _insert_audit(conn, [entry])
+            if first_round is not None:
+                user_id, name, opened_at = first_round
+                conn.execute(
+                    f"INSERT INTO {ROUNDS_TABLE} (user_id, profile_id, name, opened_at) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (user_id, profile_id, name, opened_at),
+                )
+
     def close_round(
         self,
         user_id: str,
@@ -1589,6 +1651,10 @@ class PlanWrites:
             row,
         )
         _insert_audit(self.conn, entries)
+
+
+CHECKPOINT_TABLES = ("checkpoint_writes", "checkpoint_blobs", "checkpoints")
+"""LangGraph's checkpointer's tables, as its installed version names them."""
 
 
 def _insert_audit(conn: Connection, entries: list[Mapping[str, Any]]) -> None:

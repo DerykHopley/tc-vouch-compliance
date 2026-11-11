@@ -257,6 +257,7 @@ class ProcessTrail:
     ) -> None:
         self._checkpointer = checkpointer
         self._entries: list[AuditEntry] = []
+        self._last_id = 0
         self._guard = threading.Lock()
         self._released = threading.Condition(self._guard)
         self._held: set[str] = set()
@@ -289,10 +290,16 @@ class ProcessTrail:
     def keep(self, entries: list[AuditEntry]) -> None:
         """Append entries, each given the trail's next id: a list append, which can't fail."""
         with self._guard:
-            first = len(self._entries) + 1
+            first = self._last_id + 1
             self._entries.extend(
                 AuditEntry(**(asdict(e) | {"id": first + n})) for n, e in enumerate(entries)
             )
+            self._last_id += len(entries)
+
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's entries under the profile gone."""
+        with self._guard:
+            self._entries = [e for e in self._entries if e.profile_id != profile_id]
 
     def entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None

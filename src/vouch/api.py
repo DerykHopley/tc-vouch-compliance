@@ -35,6 +35,8 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch import (
     audit,
     company_profiles,
+    demo_reset,
+    demo_round,
     documents_tab,
     goal,
     plan,
@@ -767,7 +769,15 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     if settings.clerk is not None:
         gate = "discord-server" if settings.clerk.discord_server_id else "clerk"
     auth = {"mode": settings.auth_mode, "publishable_key": publishable_key, "gate": gate}
-    answer: dict[str, Any] = {"status": "ok", "version": version("vouch"), "auth": auth}
+    # Which build is running, for the user menu's last line (#580): the short commit and the
+    # revision's name, nothing else. The package version alone doesn't change between deploys.
+    build = {"commit": settings.build.commit, "revision": settings.build.revision}
+    answer: dict[str, Any] = {
+        "status": "ok",
+        "version": version("vouch"),
+        "auth": auth,
+        "build": build,
+    }
     if db is not None:
         answer["database"] = db.health()
     return answer
@@ -2339,6 +2349,9 @@ def chat(
         record_off_the_event_loop(spending, user.id, CHAT, usage)
 
 
+DEMO_NOT_SEEDED = (
+    "The company was reset, but the demo round could not be played. Reset it again to retry."
+)
 DEVELOPERS = [Depends(require_developer)]
 """The developer page's API: a compliance lead gets a 403 (the role itself is never sent)."""
 
@@ -2404,7 +2417,9 @@ def _company_settings(
     return {
         "broken_profiles": [asdict(b) for b in scan.broken],
         "companies": made,
-        "listed_companies": [listed_profile(p) for p in scan.loaded],
+        "listed_companies": [
+            listed_profile(p) | {"demo": p.id == demo_reset.DEMO_COMPANY} for p in scan.loaded
+        ],
         "current_company": current_of(scan, stored_current_company(current)),
     }
 
@@ -2608,6 +2623,35 @@ def remove_company_profile(
     except Exception:  # removed already: never answer as if nothing was (#418 review)
         log.exception("the developer settings can't be read after removing %s", profile_id)
         return {"settings_unavailable": True}
+
+
+@router.post("/developer/profiles/{profile_id}/reset-demo", dependencies=DEVELOPERS)
+def reset_demo(
+    profile_id: str,
+    request: Request,
+    user: CurrentUser,
+    settings: AppSettings,
+    companies: CompanyProfiles,
+    db: AppDatabase,
+) -> dict[str, Any]:
+    """Reset demo (#605, vouch.demo_reset): every user's progress and history under a listed
+    company deleted, the reset's audit entry written; on Nordlicht the demo round then seeded
+    for the developer, on the fake model, counting against no limit. An unlisted company is a
+    404, nothing changed; the database down a 503. `seeded`: the demo round was played; a seed
+    that stops partway leaves the company wiped, with `note` saying so."""
+    if profile_id not in {p.id for p in _profile_scan(settings, companies.all()).loaded}:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    name = reviewer_name(request, user, settings)
+    demo_reset.wipe(db, profile_id, audit.Reviewer(user.id, name), audit.now())
+    log.info("company %s reset to its demo state by %s", profile_id, user.id)
+    if profile_id != demo_reset.DEMO_COMPANY:
+        return {"reset": profile_id, "seeded": False}
+    try:
+        demo_reset.seed_demo(request.app, user.id, name)
+    except demo_round.SeedError as error:
+        log.error("the demo round could not be seeded after the reset: %s", error)
+        return {"reset": profile_id, "seeded": False, "note": DEMO_NOT_SEEDED}
+    return {"reset": profile_id, "seeded": True}
 
 
 def _forget_profile(profile_id: str) -> None:

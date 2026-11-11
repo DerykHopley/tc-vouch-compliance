@@ -39,6 +39,11 @@ COPY --from=backend /app/src ./src
 COPY fixtures ./fixtures
 COPY --from=frontend /frontend/dist ./frontend/dist
 ENV PATH="/app/.venv/bin:$PATH" VOUCH_FRONTEND=/app/frontend/dist PORT=8080 VOUCH_AUTH_MODE=clerk
+# The commit this image is built from, for the user menu's last line (#580): the deploy wizard and
+# CI pass `--build-arg VOUCH_COMMIT=$(git rev-parse --short HEAD)`. Last, so a new commit rebuilds
+# only this layer and the ones after it.
+ARG VOUCH_COMMIT=dev
+ENV VOUCH_COMMIT=$VOUCH_COMMIT
 USER nobody
 EXPOSE 8080
 # Cloud Run's contract: listen on 0.0.0.0 at $PORT. exec, so uvicorn gets the stop signal.
