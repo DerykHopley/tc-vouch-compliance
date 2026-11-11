@@ -39,6 +39,13 @@ def compared(client: TestClient, user: dict[str, str]) -> tuple[list[str], dict[
     return names, shown.json()["changes"]
 
 
+def assert_empty(client: TestClient, user: dict[str, str]) -> None:
+    """No round closed since the fresh start, and nothing assessed."""
+    rounds = client.get("/api/rounds", headers=user).json()["rounds"]
+    assert not [r for r in rounds if r["closed_at"] and not r["before_fresh_start"]]
+    assert client.get("/api/assessments", headers=user).json()["assessments"] == []
+
+
 def test_start_afresh_on_nordlicht_restores_the_demo_round(database_url, users):
     lead, _ = users
     with TestClient(app_on(database_url)) as client:
@@ -56,12 +63,9 @@ def test_start_afresh_on_another_company_leaves_it_empty(database_url, users):
     alpenwerk = {PROFILE_HEADER: ALPENWERK}
     with TestClient(app_on(database_url)) as client:
         answer = reset(client, lead, **alpenwerk)
-        rounds = client.get("/api/rounds", headers=lead | alpenwerk).json()["rounds"]
-        assessed = client.get("/api/assessments", headers=lead | alpenwerk).json()
+        assert_empty(client, lead | alpenwerk)
 
     assert "demo" not in answer
-    assert not [r for r in rounds if r["closed_at"] and not r["before_fresh_start"]]
-    assert assessed["assessments"] == []
 
 
 def test_a_second_reset_gives_the_same_demo_state(database_url, users):
@@ -84,10 +88,7 @@ def test_with_the_profile_passes_used_up_the_reset_clears_and_says_why(database_
         for _ in range(3):  # each restore takes one of the day's three profile passes
             assert reset(client, lead)["demo"]["restored"]
         answer = reset(client, lead)
-        rounds = client.get("/api/rounds", headers=lead).json()["rounds"]
-        assessed = client.get("/api/assessments", headers=lead).json()
+        assert_empty(client, lead)
 
     assert answer["demo"]["restored"] is False
     assert "profile passes" in answer["demo"]["reason"]
-    assert not [r for r in rounds if r["closed_at"] and not r["before_fresh_start"]]
-    assert assessed["assessments"] == []
