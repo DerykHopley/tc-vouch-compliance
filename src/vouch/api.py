@@ -1651,8 +1651,8 @@ def round_comparison(
 ) -> dict[str, Any]:
     """The round comparison (#571): now against the closed round numbered `number`, control by
     control, with readiness then and now, the evidence changed (#575) and the remediation items
-    done and open questions answered since it closed. An unknown number is a 404; the open round, or one closed before
-    the fresh start, a 409."""
+    done and open questions answered since it closed. An unknown number is a 404; the open
+    round, or one closed before the fresh start, a 409."""
     listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
     if not 1 <= number <= len(listed):
         raise HTTPException(status_code=404, detail="No review round has that number.")

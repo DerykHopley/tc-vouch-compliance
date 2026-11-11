@@ -515,7 +515,7 @@ class EvidenceChange(TypedDict):
     kind: AddedKind
     change: EvidenceChangeKind
     from_version: int | None
-    """The newest version kept when the round closed; None when added or withdrawn."""
+    """The newest version kept when the round closed, for a new version; None otherwise."""
     to_version: int
     at: datetime
     """When it last changed."""
@@ -613,8 +613,8 @@ def round_comparison(
     latest: Mapping[str, Assessment],
     earlier: Mapping[str, Assessment] | None = None,
     *,
-    added: Iterable[AddedDocument] = (),
-    closed_at: datetime | None = None,
+    added: Iterable[AddedDocument],
+    closed_at: datetime,
 ) -> RoundComparison:
     """Now against a closed round's `frozen` results, each control of `controls` (the base
     framework's order) that is applicable now (`applicable`) or was frozen then: better, worse,
@@ -624,7 +624,7 @@ def round_comparison(
     under its earlier accepted verdict (`earlier`, as `compare` reads it, #438). Readiness now
     is the overview's, of the controls in scope now; readiness then is the round's as it closed,
     every frozen accepted control (those out of scope now too). The evidence changed since
-    `closed_at` (None: none read) is read from `added`, the company's added documents (#575)."""
+    `closed_at` is read from `added`, the company's added documents (#575)."""
     controls = list(controls)
     applicable = list(applicable)
     now_ids = {c.id for c in applicable}
@@ -650,7 +650,7 @@ def round_comparison(
             },
         },
         "controls": rows,
-        "evidence": [] if closed_at is None else evidence_since(added, closed_at),
+        "evidence": evidence_since(added, closed_at),
     }
 
 

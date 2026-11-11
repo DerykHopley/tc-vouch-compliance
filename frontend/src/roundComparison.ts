@@ -50,16 +50,21 @@ export type EvidenceChange = {
   title: string
   kind: 'policy' | 'record'
   change: 'added' | 'new-version' | 'withdrawn'
-  /** The version kept when the round closed: only for a new version. */
+  /** The newest version kept when the round closed, for a new version; null otherwise. */
   from_version: number | null
   to_version: number
   at: string
 }
 
+/** What happened to each, as its line says. */
+const EVIDENCE_WORDS: Record<EvidenceChange['change'], string> = {
+  added: 'added', 'new-version': 'new version', withdrawn: 'withdrawn',
+}
+
 /** What happened to it, as its line says ("new version, 1 → 2"). */
 export function evidenceWords(e: EvidenceChange): string {
-  if (e.change === 'new-version') return `new version, ${e.from_version} → ${e.to_version}`
-  return e.change
+  const words = EVIDENCE_WORDS[e.change]
+  return e.change === 'new-version' ? `${words}, ${e.from_version} → ${e.to_version}` : words
 }
 
 export const KIND_WORDS: Record<EvidenceChange['kind'], string> = { policy: 'Policy', record: 'Record' }

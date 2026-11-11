@@ -17,7 +17,7 @@ from test_chat_agent import chat_tools, reply
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
 from test_dossier import seeded
 from test_memory import DEMO_CONTROL, app_on, assess
-from test_rounds import CONTROLS, IDS, frozen_as
+from test_rounds import AT, CONTROLS, IDS, frozen_as
 
 from vouch import rounds
 from vouch.chat import PageContext
@@ -66,7 +66,9 @@ def reader(listed: list[ListedRound], seen: list[int] | None = None) -> RoundsRe
         if seen is not None:
             seen.append(chosen.number)
         assert chosen.closed_at is not None
-        comparison = rounds.round_comparison(chosen.results, _controls(), _controls(), {})
+        comparison = rounds.round_comparison(
+            chosen.results, _controls(), _controls(), {}, added=[], closed_at=AT
+        )
         later = chosen.closed_at + HOUR
         done = [rounds.Done(control_id=IDS[0], requirement_id=f"{IDS[0]}-M1", at=later)]
         answered = [rounds.Answered(control_id=IDS[0], question_id=7, at=later)]
@@ -181,7 +183,7 @@ def test_its_words_carry_counts_readiness_changes_scope_and_whats_done_since():
     }
     applicable = [c for c in controls if c.id != IDS[3]]
     then = tuple(f for f in chosen.results if f.control_id != IDS[4])  # IDS[4] new since
-    comparison = rounds.round_comparison(then, controls, applicable, now)
+    comparison = rounds.round_comparison(then, controls, applicable, now, added=[], closed_at=AT)
     done = [rounds.Done(control_id=IDS[0], requirement_id=f"{IDS[0]}-M1", at=CLOSED + HOUR)]
     answered = [rounds.Answered(control_id=IDS[2], question_id=3, at=CLOSED + HOUR)]
 
@@ -206,7 +208,9 @@ def test_its_words_carry_counts_readiness_changes_scope_and_whats_done_since():
 
 def test_with_nothing_changed_its_words_say_so():
     chosen = listed_rounds()[1]
-    comparison = rounds.round_comparison(chosen.results, _controls(), _controls(), {})
+    comparison = rounds.round_comparison(
+        chosen.results, _controls(), _controls(), {}, added=[], closed_at=AT
+    )
     comparison["controls"] = [{**c, "change": "unchanged"} for c in comparison["controls"]]
 
     said = compare_rounds_words(chosen, comparison, [], [], "en")
@@ -219,7 +223,9 @@ def test_with_nothing_changed_its_words_say_so():
 
 def test_a_proposed_control_says_it_waits_for_review():
     chosen = listed_rounds()[1]
-    comparison = rounds.round_comparison(chosen.results, _controls(), _controls(), {})
+    comparison = rounds.round_comparison(
+        chosen.results, _controls(), _controls(), {}, added=[], closed_at=AT
+    )
     row = next(c for c in comparison["controls"] if c["control_id"] == IDS[1])
     row["proposed"] = True
 
@@ -230,7 +236,9 @@ def test_a_proposed_control_says_it_waits_for_review():
 
 def test_its_verdicts_are_in_the_profiles_language():
     chosen = listed_rounds()[1]
-    comparison = rounds.round_comparison(chosen.results, _controls(), _controls(), {})
+    comparison = rounds.round_comparison(
+        chosen.results, _controls(), _controls(), {}, added=[], closed_at=AT
+    )
 
     said = compare_rounds_words(chosen, comparison, [], [], "de")
 

@@ -118,7 +118,7 @@ def test_each_control_is_better_worse_new_or_unchanged_by_its_accepted_verdict()
         e: seeded(e, "not-evidenced", "accepted"),
     }
 
-    shown = round_comparison(frozen, CONTROLS, CONTROLS, latest)
+    shown = round_comparison(frozen, CONTROLS, CONTROLS, latest, added=[], closed_at=AT)
 
     changes = changes_of(shown)
     assert changes[a] == ("better", "partly-evidenced", "evidenced", False)
@@ -139,7 +139,7 @@ def test_scope_changes_are_new_since_and_out_of_scope_since_left_out_of_the_coun
     }
     now_applicable = [x for x in CONTROLS if x.id != a]  # a out of scope now, b in scope now
 
-    shown = round_comparison(frozen, CONTROLS, now_applicable, latest)
+    shown = round_comparison(frozen, CONTROLS, now_applicable, latest, added=[], closed_at=AT)
 
     changes = changes_of(shown)
     assert changes[a] == ("out-of-scope-since", "evidenced", None, False)
@@ -152,7 +152,7 @@ def test_scope_changes_are_new_since_and_out_of_scope_since_left_out_of_the_coun
 
 
 def test_controls_come_in_the_base_frameworks_order_each_with_its_chapter():
-    shown = round_comparison(frozen_as({}), CONTROLS, CONTROLS, {})
+    shown = round_comparison(frozen_as({}), CONTROLS, CONTROLS, {}, added=[], closed_at=AT)
 
     assert [c["control_id"] for c in shown["controls"]] == IDS
     assert [c["chapter"] for c in shown["controls"]] == [i.split(".")[0] for i in IDS]
@@ -167,7 +167,7 @@ def test_a_control_waiting_for_review_is_proposed_and_counted_under_its_earlier_
     }
     earlier = {a: seeded(a, "partly-evidenced", "accepted")}
 
-    shown = round_comparison(frozen, CONTROLS, CONTROLS, latest, earlier)
+    shown = round_comparison(frozen, CONTROLS, CONTROLS, latest, earlier, added=[], closed_at=AT)
 
     changes = changes_of(shown)
     assert changes[a] == ("unchanged", "partly-evidenced", "partly-evidenced", True)
