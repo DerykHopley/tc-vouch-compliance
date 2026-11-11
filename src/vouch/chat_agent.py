@@ -907,7 +907,7 @@ class ChatTools:
                 continue
             allowed += 1
             documents = allowed_documents(self.profile, tool.source)
-            result = tool.run({"query": query}, folder, documents)
+            result = tool.run({"query": query}, folder, documents, ())
             if isinstance(result, list):
                 passages = with_facts(result, tool.source, folder, self.today)
                 found += passages

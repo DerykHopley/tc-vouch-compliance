@@ -16,10 +16,12 @@ vouch-db-setup made the table, the Postgres store lists none and an add or withd
 DatabaseUnavailable (a 503).
 
 The search tools, the quote check and the profile pass read the documents from the
-AddedIndex (`added_index()`): the newest version of each document not withdrawn, per profile.
-There is no search index to rebuild (search reads text on each call), so the index is these
-documents in this process's memory: the app loads it when it starts, and a store given the
-index refreshes the profile's entry on each add and withdraw.
+AddedIndex (`added_index()`). There is no search index to rebuild (search reads text on each
+call), so the index is every version in this process's memory: the app loads it when it starts,
+a store given the index refreshes the profile's entry on each add and withdraw, and before each
+use a cheap watermark from the database tells it whether another instance changed a profile.
+Searches find the newest version of each document not withdrawn; the quote check reads the
+version its assessment's search returned (`added_read` in its state).
 """
 
 import datetime
@@ -61,10 +63,10 @@ SUFFIXES = (".md", ".txt")
 TITLE_LENGTH = 120
 ID_LENGTH = 60
 
-TOO_LARGE = "This file is over 200 KB, the most an added document may be."
+TOO_LARGE = f"This file is over {MAX_BYTES // 1024} KB, the most an added document may be."
 TOO_MANY = (
-    "This company already has 50 added documents, the most it may have. "
-    "Add a new version of one instead."
+    f"This company already has {MAX_DOCUMENTS} documents added and not withdrawn, the most it "
+    "may have. Withdraw one, or add a new version of one instead."
 )
 NOT_TEXT = "This file isn't valid UTF-8 text. Save it as UTF-8 and add it again."
 WRONG_TYPE = "Only Markdown (.md) and plain-text (.txt) files can be added."
@@ -180,6 +182,7 @@ def new_id(title: str, taken: Collection[str]) -> str:
 
 
 def next_version(
+    *,
     profile_id: str,
     kept: Sequence[AddedDocument],
     new: NewDocument,
@@ -189,8 +192,9 @@ def next_version(
     at: datetime.datetime,
 ) -> AddedDocument:
     """The version the add keeps, from the profile's documents already kept: the next of the
-    document with the same title (ignoring case), else version 1 of a new one. DocumentRefused
-    for any limit it breaks, before anything is written."""
+    document with the same title (ignoring case), else version 1 of a new one. Only documents
+    not withdrawn count toward MAX_DOCUMENTS. DocumentRefused for any limit it breaks, before
+    anything is written."""
     title = checked_fields(new)
     text = checked_text(new)
     same = [d for d in kept if d.title.casefold() == title.casefold()]
@@ -200,21 +204,21 @@ def next_version(
         doc_id, version = same[0].doc_id, max(d.version for d in same) + 1
     else:
         ids = {d.doc_id for d in kept}
-        if len(ids) >= MAX_DOCUMENTS:
+        if len({d.doc_id for d in kept if d.withdrawn_at is None}) >= MAX_DOCUMENTS:
             raise DocumentRefused(TOO_MANY)
         doc_id, version = new_id(title, {*builtin_ids, *ids}), 1
     return AddedDocument(
-        profile_id,
-        doc_id,
-        version,
-        title,
-        new.kind,
-        new.approval_date,
-        new.review_cycle,
-        text,
-        added_by,
-        added_by_name,
-        at,
+        profile_id=profile_id,
+        doc_id=doc_id,
+        version=version,
+        title=title,
+        kind=new.kind,
+        approval_date=new.approval_date,
+        review_cycle=new.review_cycle,
+        text=text,
+        added_by=added_by,
+        added_by_name=added_by_name,
+        added_at=at,
     )
 
 
@@ -229,18 +233,42 @@ def newest(documents: Iterable[AddedDocument]) -> list[AddedDocument]:
     return [by_id[k] for k in sorted(by_id)]
 
 
+Watermark = tuple[int, int, datetime.datetime | None]
+"""A profile's added documents in brief: how many versions are kept, how many of them are
+withdrawn, and the latest time one was added or withdrawn. Any add or withdraw changes it (the
+counts do, even when the times tie)."""
+
+
+def watermark_of(documents: Iterable[AddedDocument]) -> Watermark:
+    """The watermark of these versions, as vouch.database's `added_watermark` reads it."""
+    kept = list(documents)
+    times = [max(d.added_at, d.withdrawn_at or d.added_at) for d in kept]
+    withdrawn = sum(d.withdrawn_at is not None for d in kept)
+    return len(kept), withdrawn, max(times, default=None)
+
+
 class AddedIndex:
-    """The added documents search and the quote check read: per profile, the newest version of
-    each document not withdrawn. Loaded from a store when the app starts (`load`); a store given
-    it refreshes a profile's entry on each add and withdraw (`put`)."""
+    """The added documents search and the quote check read, per profile: every version kept,
+    so a quote is checked against the version its assessment read (`read`), and searches find
+    the newest of each document not withdrawn (`searchable`).
+
+    Loaded from a store when the app starts (`load`, which binds it to that store); a store
+    given it puts a profile's versions on each add and withdraw (`put`). Before each use, a
+    bound store with a watermark (Postgres's) is asked for the profile's, and the profile is
+    read again when it differs from the one held: so another instance's add or withdraw is seen
+    on the next use, and a load that failed at start is made good. The process store has none:
+    its puts are all there is."""
 
     def __init__(self) -> None:
         self._by_profile: dict[str, tuple[AddedDocument, ...]] = {}
+        self._store: AddedDocuments | None = None
         self._guard = threading.Lock()
 
     def load(self, store: "AddedDocuments") -> None:
-        """Every profile's documents, read from the store at once. DatabaseUnavailable leaves the
-        index as it was (logged): a database that can't answer at start mustn't stop the app."""
+        """Bind the index to the store and read every profile's documents from it at once.
+        DatabaseUnavailable leaves the index as it was (logged): a database that can't answer
+        at start mustn't stop the app, and each profile is read again on its next use."""
+        self._store = store
         try:
             kept = store.everything()
         except DatabaseUnavailable as error:
@@ -250,22 +278,47 @@ class AddedIndex:
         for d in kept:
             by_profile.setdefault(d.profile_id, []).append(d)
         with self._guard:
-            self._by_profile = {p: tuple(newest(docs)) for p, docs in by_profile.items()}
+            self._by_profile = {p: tuple(docs) for p, docs in by_profile.items()}
 
     def put(self, profile_id: str, documents: Iterable[AddedDocument]) -> None:
-        """The profile's documents as kept now (every version; the newest are taken)."""
+        """The profile's documents as kept now, every version."""
         with self._guard:
-            self._by_profile[profile_id] = tuple(newest(documents))
+            self._by_profile[profile_id] = tuple(documents)
 
     def searchable(self, profile_id: str, source: str | None = None) -> list[AddedDocument]:
-        """The profile's documents a search may find (only `source`'s, when given)."""
-        with self._guard:
-            found = self._by_profile.get(profile_id, ())
+        """The profile's documents a search may find (only `source`'s, when given): the newest
+        version of each not withdrawn."""
+        found = newest(self._current(profile_id))
         return [d for d in found if source is None or d.source == source]
 
+    def read(self, profile_id: str, doc_id: str, version: int) -> AddedDocument | None:
+        """That version of the document, unless the document is withdrawn (or unknown)."""
+        versions = [d for d in self._current(profile_id) if d.doc_id == doc_id]
+        if any(d.withdrawn_at is not None for d in versions):
+            return None
+        return next((d for d in versions if d.version == version), None)
+
     def clear(self) -> None:
+        """Forget every profile's documents and the store bound (tests start from nothing)."""
         with self._guard:
             self._by_profile = {}
+            self._store = None
+
+    def _current(self, profile_id: str) -> tuple[AddedDocument, ...]:
+        with self._guard:
+            held, store = self._by_profile.get(profile_id, ()), self._store
+        if store is None:
+            return held
+        try:
+            mark = store.watermark(profile_id)
+            if mark is None or mark == watermark_of(held):
+                return held
+            fresh = tuple(store.listed(profile_id))
+        except DatabaseUnavailable as error:
+            log.error("added documents of %s not read again: %s", profile_id, error)
+            return held
+        self.put(profile_id, fresh)
+        return fresh
 
 
 @cache
@@ -283,6 +336,11 @@ class AddedDocuments(Protocol):
 
     def everything(self) -> list[AddedDocument]:
         """Every version of every profile's documents (the index loads them at start)."""
+        ...
+
+    def watermark(self, profile_id: str) -> Watermark | None:
+        """The profile's watermark as kept now; None when the index's own puts are all there is
+        (the process store)."""
         ...
 
     def add(
@@ -308,6 +366,12 @@ def _ordered(documents: Iterable[AddedDocument]) -> list[AddedDocument]:
     return sorted(documents, key=lambda d: (d.doc_id, d.version))
 
 
+def _refresh(index: AddedIndex | None, profile_id: str, kept: Iterable[AddedDocument]) -> None:
+    """Put the profile's versions as the write left them into the index, when there is one."""
+    if index is not None:
+        index.put(profile_id, _ordered(kept))
+
+
 class ProcessAddedDocuments:
     """Added documents without a database: in this process, so a restart forgets them."""
 
@@ -324,6 +388,9 @@ class ProcessAddedDocuments:
         with self._guard:
             return _ordered(d for docs in self._kept.values() for d in docs)
 
+    def watermark(self, profile_id: str) -> Watermark | None:
+        return None
+
     def add(
         self,
         profile_id: str,
@@ -335,9 +402,17 @@ class ProcessAddedDocuments:
     ) -> AddedDocument:
         with self._guard:
             kept = self._kept.setdefault(profile_id, [])
-            added = next_version(profile_id, kept, new, builtin_ids, added_by, added_by_name, at)
+            added = next_version(
+                profile_id=profile_id,
+                kept=kept,
+                new=new,
+                builtin_ids=builtin_ids,
+                added_by=added_by,
+                added_by_name=added_by_name,
+                at=at,
+            )
             kept.append(added)
-        self._refresh(profile_id)
+            _refresh(self._index, profile_id, kept)  # under the guard: puts land in order
         return added
 
     def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
@@ -346,16 +421,14 @@ class ProcessAddedDocuments:
             for i, d in enumerate(kept):
                 if d.doc_id == doc_id and d.withdrawn_at is None:
                     kept[i] = replace(d, withdrawn_at=at)
-        self._refresh(profile_id)
-        return [d for d in self.listed(profile_id) if d.doc_id == doc_id]
-
-    def _refresh(self, profile_id: str) -> None:
-        if self._index is not None:
-            self._index.put(profile_id, self.listed(profile_id))
+            _refresh(self._index, profile_id, kept)
+            return _ordered(d for d in kept if d.doc_id == doc_id)
 
 
 class PostgresAddedDocuments:
-    """Added documents in Postgres (vouch.database's added-documents table)."""
+    """Added documents in Postgres (vouch.database's added-documents table). The index is
+    refreshed from the rows each write read in its own transaction, so a committed write is
+    never followed by a failing read."""
 
     def __init__(self, db: Database, index: AddedIndex | None = None) -> None:
         self.db = db
@@ -367,6 +440,9 @@ class PostgresAddedDocuments:
     def everything(self) -> list[AddedDocument]:
         return [_document(r) for r in self.db.added_documents(None)]
 
+    def watermark(self, profile_id: str) -> Watermark | None:
+        return self.db.added_watermark(profile_id)
+
     def add(
         self,
         profile_id: str,
@@ -377,22 +453,25 @@ class PostgresAddedDocuments:
         at: datetime.datetime,
     ) -> AddedDocument:
         def made(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-            kept = [_document(r) for r in rows]
-            added = next_version(profile_id, kept, new, builtin_ids, added_by, added_by_name, at)
+            added = next_version(
+                profile_id=profile_id,
+                kept=[_document(r) for r in rows],
+                new=new,
+                builtin_ids=builtin_ids,
+                added_by=added_by,
+                added_by_name=added_by_name,
+                at=at,
+            )
             return _row(added)
 
-        added = _document(self.db.add_document(profile_id, made))
-        self._refresh(profile_id)
-        return added
+        added, rows = self.db.add_document(profile_id, made)
+        _refresh(self._index, profile_id, map(_document, rows))
+        return _document(added)
 
     def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
-        rows = self.db.withdraw_document(profile_id, doc_id, at)
-        self._refresh(profile_id)
-        return [_document(r) for r in rows]
-
-    def _refresh(self, profile_id: str) -> None:
-        if self._index is not None:
-            self._index.put(profile_id, self.listed(profile_id))
+        rows = [_document(r) for r in self.db.withdraw_document(profile_id, doc_id, at)]
+        _refresh(self._index, profile_id, rows)
+        return [d for d in rows if d.doc_id == doc_id]
 
 
 def _row(document: AddedDocument) -> dict[str, Any]:

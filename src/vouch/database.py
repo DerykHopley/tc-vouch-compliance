@@ -392,7 +392,7 @@ CREATE_ADDED_DOCUMENTS = (
     "added_by_name text NOT NULL, added_at timestamptz NOT NULL, withdrawn_at timestamptz, "
     "PRIMARY KEY (profile_id, doc_id, version))"
 )
-_KEPT_COLUMNS = ADDED_DOCUMENT_COLUMNS[:-1]
+_KEPT_COLUMNS = tuple(c for c in ADDED_DOCUMENT_COLUMNS if c != "withdrawn_at")
 CREATE_ADDED_DOCUMENTS_GUARD = (
     "CREATE OR REPLACE FUNCTION vouch_added_documents_kept() RETURNS trigger LANGUAGE plpgsql "
     "AS $$ BEGIN "
@@ -415,7 +415,8 @@ CREATE_ADDED_DOCUMENTS_TRIGGERS = (
 """The table refuses a delete, a truncate, and any update but setting the withdrawn mark once,
 whoever asks: an earlier version stays as it was cited."""
 ADD_DOCUMENT_LOCK = "SELECT pg_advisory_xact_lock(%s)"
-"""Two adds to one profile take turns, so the limit and the next version are read as written."""
+"""Two writes to one profile (adds, withdraws) take turns, so the limit and the next version are
+read as written, and no add slips a live version in beside a withdraw."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -1288,8 +1289,8 @@ class Database:
 
     def added_documents(self, profile_id: str | None) -> list[dict[str, Any]]:
         """Every version of the profile's added documents (every profile's, for None), by
-        profile, id and version: mappings of ADDED_DOCUMENT_COLUMNS. None before vouch-db-setup
-        made the table (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
+        profile, id and version: mappings of ADDED_DOCUMENT_COLUMNS. An empty list before
+        vouch-db-setup made the table (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
         with self.connection() as conn:
             try:
                 return conn.execute(
@@ -1302,12 +1303,30 @@ class Database:
                 log.error("no %s table: run vouch-db-setup on this database", ADDED_DOCUMENTS_TABLE)
                 return []
 
+    def added_watermark(self, profile_id: str) -> tuple[int, int, datetime | None]:
+        """How many versions of the profile's added documents are kept, how many are withdrawn,
+        and the latest time one was added or withdrawn: (0, 0, None) for none, also before vouch-db-setup made the table.
+        One aggregate on the table, which an instance asks before using what it holds. Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT count(*) AS n, count(withdrawn_at) AS w, "
+                    "max(greatest(added_at, withdrawn_at)) AS at "
+                    f"FROM {ADDED_DOCUMENTS_TABLE} WHERE profile_id = %s",
+                    (profile_id,),
+                ).fetchone()
+            except psycopg.errors.UndefinedTable:
+                return 0, 0, None
+        return (0, 0, None) if row is None else (int(row["n"]), int(row["w"]), row["at"])
+
     def add_document(
         self, profile_id: str, made: Callable[[list[dict[str, Any]]], Mapping[str, Any]]
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Keep the version `made` gives from the profile's versions already kept (a mapping of
-        ADDED_DOCUMENT_COLUMNS), in one transaction holding the profile's add lock, so two adds
-        take turns. An exception from `made` writes nothing and is raised as itself. Raises
+        ADDED_DOCUMENT_COLUMNS), in one transaction holding the profile's lock, so two writes
+        take turns: the version kept, and every version of the profile as it then stands. An
+        exception from `made` writes nothing and is raised as itself. Raises
         DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
         columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
         with (
@@ -1329,14 +1348,15 @@ class Database:
                 f"RETURNING {columns}",
                 row,
             ).fetchone()
-        if added is None:  # an INSERT … RETURNING returns its row
-            raise DatabaseUnavailable(f"a document in {ADDED_DOCUMENTS_TABLE} was not kept")
-        return added
+            if added is None:  # an INSERT … RETURNING returns its row
+                raise DatabaseUnavailable(f"a document in {ADDED_DOCUMENTS_TABLE} was not kept")
+        return added, [*kept, added]
 
     def withdraw_document(self, profile_id: str, doc_id: str, at: datetime) -> list[dict[str, Any]]:
-        """Mark every version of the document not yet withdrawn withdrawn at `at`: its versions
-        as kept now, by version (none: no such document). Raises DatabaseUnavailable for any
-        database failure, also before vouch-db-setup ran."""
+        """Mark every version of the document not yet withdrawn withdrawn at `at`, holding the
+        profile's lock as an add does (so an add can't slip a live version in beside it): every
+        version of the profile as it then stands, by id and version. Raises DatabaseUnavailable
+        for any database failure, also before vouch-db-setup ran."""
         columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
         with (
             self.connection() as conn,
@@ -1344,6 +1364,7 @@ class Database:
             self._needs_setup(ADDED_DOCUMENTS_TABLE),
             conn.transaction(),
         ):
+            conn.execute(ADD_DOCUMENT_LOCK, (lock_id(f"added-documents:{profile_id}"),))
             conn.execute(
                 f"UPDATE {ADDED_DOCUMENTS_TABLE} SET withdrawn_at = %s WHERE profile_id = %s "
                 "AND doc_id = %s AND withdrawn_at IS NULL",
@@ -1351,8 +1372,8 @@ class Database:
             )
             return conn.execute(
                 f"SELECT {columns} FROM {ADDED_DOCUMENTS_TABLE} WHERE profile_id = %s "
-                "AND doc_id = %s ORDER BY version",
-                (profile_id, doc_id),
+                "ORDER BY doc_id, version",
+                (profile_id,),
             ).fetchall()
 
     def audit_entries(
