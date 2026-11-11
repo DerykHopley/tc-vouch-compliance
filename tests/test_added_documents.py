@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 
 import psycopg
 import pytest
@@ -23,9 +24,11 @@ from test_profile_pass import Lead, fake, prompt_text
 from vouch import ScriptedChatModel, assess, database, load_named_profile
 from vouch.added_documents import (
     MAX_DOCUMENTS,
+    MAX_VERSIONS,
     NOT_TEXT,
     TOO_LARGE,
     TOO_MANY,
+    TOO_MANY_VERSIONS,
     WITHDRAWN_TITLE,
     WRONG_TYPE,
     AddedDocument,
@@ -36,6 +39,7 @@ from vouch.added_documents import (
     ProcessAddedDocuments,
     added_index,
     builtin_ids,
+    next_version,
     process_added_documents,
     watermark_of,
 )
@@ -171,8 +175,37 @@ def test_a_withdrawn_document_doesnt_count_toward_the_limit(store):
         add(store, new(V2, title="Policy 3"))
 
 
+def next_of(kept: list[AddedDocument], document: NewDocument) -> AddedDocument:
+    """The version an add of `document` keeps, given `kept`."""
+    return next_version(
+        profile_id=PROFILE,
+        kept=kept,
+        new=document,
+        builtin_ids=BUILT_IN,
+        added_by="user_lead",
+        added_by_name="Dana Lead",
+        at=AT,
+    )
+
+
+def versions_kept(n: int) -> list[AddedDocument]:
+    """Versions 1 to n of the badge policy, as kept."""
+    first = next_of([], new(V1))
+    return [replace(first, version=v) for v in range(1, n + 1)]
+
+
+def test_a_document_takes_versions_up_to_the_cap_and_one_more_is_refused():
+    assert next_of(versions_kept(MAX_VERSIONS - 1), new(V2)).version == MAX_VERSIONS
+
+    with pytest.raises(DocumentRefused, match=re.escape(TOO_MANY_VERSIONS)):
+        next_of(versions_kept(MAX_VERSIONS), new(V2))
+    # the cap is per document: another title is still a new document
+    assert next_of(versions_kept(MAX_VERSIONS), new(title="Another policy")).version == 1
+
+
 def test_the_limit_sentences_name_the_limits():
     assert "200 KB" in TOO_LARGE and f"{MAX_DOCUMENTS} documents" in TOO_MANY
+    assert f"{MAX_VERSIONS} versions" in TOO_MANY_VERSIONS
     assert "withdrawn" in TOO_MANY  # a withdrawn one doesn't count, and the sentence says so
 
 
@@ -561,3 +594,33 @@ def test_a_withdraw_waits_for_an_add_holding_the_profiles_lock(db):
 
     assert waited  # it waited for the lock an add holds
     assert done.is_set()
+
+
+@needs_postgres
+def test_two_adds_of_the_last_version_at_once_keep_one_and_refuse_the_other(db):
+    db.setup()
+    store = PostgresAddedDocuments(db, AddedIndex())
+    for _ in range(MAX_VERSIONS - 1):
+        add(store, new(V1))
+    outcomes: list[int | str] = []
+
+    def adding() -> None:
+        try:
+            outcomes.append(add(store, new(V2)).version)
+        except DocumentRefused as refused:
+            outcomes.append(str(refused))
+
+    with psycopg.connect(db.url.get_secret_value(), autocommit=True) as holder:
+        holder.execute(  # both adds wait for the profile's lock, so they meet at the cap
+            "SELECT pg_advisory_lock(%s)", (database.lock_id(f"added-documents:{PROFILE}"),)
+        )
+        workers = [threading.Thread(target=adding) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        time.sleep(0.5)
+        holder.execute("SELECT pg_advisory_unlock_all()")
+    for worker in workers:
+        worker.join(5)
+
+    assert sorted(outcomes, key=str) == sorted([MAX_VERSIONS, TOO_MANY_VERSIONS], key=str)
+    assert [d.version for d in store.listed(PROFILE)] == list(range(1, MAX_VERSIONS + 1))
