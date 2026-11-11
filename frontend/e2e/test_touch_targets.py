@@ -276,3 +276,20 @@ def test_the_app_s_own_error_page_s_try_again_is_at_least_44px(page: Page, profi
         "Vouch could not show this page. Please try again."
     )
     assert small_targets(page) == []
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_round_comparison_s_links_and_folds_are_at_least_44px(page: Page, rounds_url, scheme):
+    # #573: the round comparison with every chapter's unchanged controls unfolded, under Alpenwerk
+    # as above (#525).
+    page.emulate_media(color_scheme=scheme)
+    with current_company(page.request, rounds_url, "alpenwerk"):
+        closed = page.request.post(f"{rounds_url}/api/rounds/close")
+        assert closed.status in (200, 409), closed.status  # 409: none was open
+        number = page.request.get(f"{rounds_url}/api/rounds").json()["default"]
+        at_phone_width(page, f"{rounds_url}/company/rounds/{number}")
+        folds = page.locator(".compare-chapter summary")
+        expect(folds.first).to_be_visible()
+        for fold in folds.all():
+            fold.click()
+        assert small_targets(page) == []

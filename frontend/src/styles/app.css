@@ -219,6 +219,18 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .rounds-link { color: var(--navy); }
 .rounds-name { font-weight: 600; }
 .rounds-times, .rounds-note { color: var(--muted); font-size: 14px; }
+/* The round comparison view (#573, design.md Components: Round comparison view): the Company page's full width and head,
+   a summary sheet, then a sheet per chapter: its changed controls as a report-table, the unchanged ones folded under a
+   44px "<n> unchanged" disclosure. Under 700px each control is a stacked card, as the report's rows (below). */
+.compare-view { padding-block: 24px 110px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); justify-items: stretch; }
+.compare-view > .crumb, .compare-view .company-head > .pill { justify-self: start; }
+.compare-chapter h2 { font-size: 18px; }
+.compare-chapter, .compare-chapter details { justify-items: stretch; width: 100%; min-width: 0; }
+.compare-chapter summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--navy); font-weight: 600; }
+.compare-controls th[scope="row"] a, .compare-back { display: inline-flex; align-items: center; min-height: 44px; }
+.compare-controls th[scope="row"] { font-weight: 400; overflow-wrap: anywhere; }
+.compare-since { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.compare-proposed { margin-left: 8px; }
 @media (min-width: 700px) {
   .company-grid { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
   .company-documents { grid-column: 1; grid-row: 1; }
@@ -543,17 +555,17 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
      data-label) and its value. The header row stays for screen readers (the table keeps its roles), so the shown name
      has empty alt text and isn't read twice; a browser without alt text in `content` keeps the first declaration. An
      empty cell is not shown. A free-text cell drops its 14ch floor here (min-width: 0), so it never widens a card. */
-  .report-controls, .report-trail, .report-remediation, :is(.report-controls, .report-trail, .report-remediation) tbody {
+  .report-controls, .report-trail, .report-remediation, .compare-controls, :is(.report-controls, .report-trail, .report-remediation, .compare-controls) tbody {
     display: block; }
-  :is(.report-controls, .report-trail, .report-remediation) thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  :is(.report-controls, .report-trail, .report-remediation, .compare-controls) thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
     clip-path: inset(50%); }
-  :is(.report-controls, .report-trail, .report-remediation) tbody tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  :is(.report-controls, .report-trail, .report-remediation, .compare-controls) tbody tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--rule); }
   .report-controls tbody tr:has(+ .report-quote-row) { border-bottom: 0; padding-bottom: 4px; }
-  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > * { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
+  .report-table:is(.report-controls, .report-trail, .report-remediation, .compare-controls) tbody tr > * { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
     gap: 0 12px; justify-items: start; padding: 2px 0; border-bottom: 0; max-width: none; min-width: 0; }
-  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > :empty { display: none; }
-  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > * > * { grid-column: 2; }
-  .report-table:is(.report-controls, .report-trail, .report-remediation) tbody tr > [data-label]::before { content: attr(data-label);
+  .report-table:is(.report-controls, .report-trail, .report-remediation, .compare-controls) tbody tr > :empty { display: none; }
+  .report-table:is(.report-controls, .report-trail, .report-remediation, .compare-controls) tbody tr > * > * { grid-column: 2; }
+  .report-table:is(.report-controls, .report-trail, .report-remediation, .compare-controls) tbody tr > [data-label]::before { content: attr(data-label);
     content: attr(data-label) / ""; grid-column: 1; font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
     padding-top: 2px; overflow-wrap: anywhere; }
   .report-table.report-controls .report-quote-row td { display: block; padding: 0 0 12px 16px; }

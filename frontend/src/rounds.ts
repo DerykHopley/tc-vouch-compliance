@@ -20,6 +20,9 @@ export type RoundList = { rounds: ListedRound[]; default: number | null }
 /** The page's own sentence when the rounds can't be read. */
 export const ROUNDS_FAILED = 'The review rounds could not be loaded.'
 
+/** The Company page's address (#495), where the Rounds section is. */
+export const COMPANY_PATH = '/company'
+
 /** A round's comparison's address (the view is #573's). */
 export const roundPath = (number: number) => `/company/rounds/${number}`
 

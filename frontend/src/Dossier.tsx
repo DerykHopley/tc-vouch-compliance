@@ -1,9 +1,10 @@
-import { type MouseEvent, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { CLOSED_WORD, plural, REVIEW_WORDS, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { GoalControl, RoundControl } from './GoalControls.tsx'
-import { type ControlCard, controlPath, dateWords, goalWording, isoLabel, isReviewState, type NextStep, type Overview,
+import { type ControlCard, controlPath, dateWords, goalWording, isoLabel, isReviewState, type NextStep, openInPlace, type Overview,
   type OverviewState, type Readiness, type ReassessReason, type RoundComparison, SEGMENTS } from './overview.ts'
 import type { PassState } from './profilePass.ts'
+import { acceptedWord } from './roundComparison.ts'
 import type { Goal } from './report.ts'
 import VerdictChip from './VerdictChip.tsx'
 
@@ -153,8 +154,6 @@ function Hero({ overview, onOpen, running, focus, pass, onPass, onGoalChanged, o
 const change = (now: number, then: number) =>
   now === then ? '(no change)' : `(${now > then ? '+' : '-'}${Math.abs(now - then)})`
 
-/** An accepted verdict, or none, as the comparison names it. */
-const acceptedWord = (verdict: Verdict | null) => verdict === null ? 'Not accepted' : VERDICT_WORDS[verdict]
 
 /**
  * Now against the last closed review round (`docs/design.md`, Components: Round comparison, #402): accepted verdicts
@@ -347,14 +346,6 @@ function Band({ readiness: r }: { readiness: Readiness }) {
       </div>
     </section>
   )
-}
-
-/** A click on a link stretched over a card (#231, #311): a plain primary click opens the working paper in place; a
- * Ctrl/Cmd/Shift/Alt or non-primary click is the browser's (a new tab or window). */
-function openInPlace(e: MouseEvent, open: () => void) {
-  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
-  e.preventDefault()
-  open()
 }
 
 /** A card's line for each reason a re-assessment is suggested (#410, #414). */
