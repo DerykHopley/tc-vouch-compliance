@@ -399,6 +399,11 @@ CHIPS = (
 )
 WRAP_WIDTH = 701
 """The width at which the German verdict widened the judged table by about 16px (#550)."""
+ONE_LINE_FROM = 800
+"""From this width a verdict chip never wraps (#550's verify): with every chip on one line the
+tables fit from 718px in the web fonts, and from 770px with DejaVu Sans (CI's fallback)."""
+SWEEP = (720, ONE_LINE_FROM, 900, 1000)
+"""The widths between 701 and 1001 the fit checks also measure, resized in place."""
 
 
 def assert_dot_on_first_line(chips: list[dict]) -> None:
@@ -456,6 +461,17 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
             assert chips and all(c["lines"] == 1 for c in chips), f"{profile} at {width}px: {chips}"
         if width == WRAP_WIDTH and profile == "alpenwerk":
             assert_dot_on_first_line(chips)
+        if width == WRAP_WIDTH:  # #550's verify: a chip wraps only where the table needs it
+            for swept in SWEEP:
+                page.set_viewport_size({"width": swept, "height": 900})
+                fit = page.evaluate(TABLE_LAYOUT)
+                assert fit["scroll"] <= fit["room"], f"{profile} at {swept}px: {fit}"
+                chips = page.evaluate(CHIPS, "table.reqs.judged .verdict-col .chip")
+                if swept >= ONE_LINE_FROM:
+                    assert all(c["lines"] == 1 for c in chips), f"{profile} at {swept}px: {chips}"
+                else:
+                    assert_dot_on_first_line(chips)
+            page.set_viewport_size({"width": width, "height": 900})
 
     if width == WRAP_WIDTH:  # outside the table a chip stays on one line
         assessed(page.request, paper_url, ASSESSED, "alpenwerk")

@@ -23,6 +23,16 @@ from reviewing import reviewed
 from touch_targets import small_targets
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, UNBREAKABLE, with_long_quotes
 
+ONE_LINE_FROM = 800
+"""From this width a verdict chip never wraps (#550's verify), as test_working_paper's."""
+SWEEP = (1000, 900, ONE_LINE_FROM, 720)
+"""The widths between 701 and 1001 the controls table's fit check also measures (#550)."""
+LINES = (
+    "els => els.map(e => { const r = document.createRange(); r.selectNodeContents(e);"
+    " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
+)
+"""Each element's number of text lines."""
+
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
 NORDLICHT_REASON = "Nordlicht allows no remote access to its company network"
@@ -329,8 +339,9 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
     server of its own, as its goal would change what the readiness checks read. #512: measured once
     the web fonts have settled, and again without them, as on a slow network: on Ubuntu (CI) the
     fallback is DejaVu Sans, whose German headers were 963px of trail in the 902px sheet. #550: at
-    701 the German verdict ("Teilweise nachgewiesen") made the controls table 619px in 603px; there
-    the controls table is checked, as #463 owns the other tables' widths."""
+    701 the German verdict ("Teilweise nachgewiesen") made the controls table 619px in 603px; from
+    701 to 1000 the controls table is checked, as #463 owns the other tables' widths. Its verdict
+    chips may wrap there only below ONE_LINE_FROM, where the table needs it (#550's verify)."""
     url = request.getfixturevalue("report_url" if goal == "audit-readiness" else "improvement_url")
     if fonts == "fallback":
         without_web_fonts(page)
@@ -342,7 +353,7 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
     nordlicht_later(url)
     for profile in ("nordlicht", "alpenwerk"):
         make_current(page.request, url, profile)  # #480: the report opens under the current company
-        for width in (1440, 1024, 701) if goal == "audit-readiness" else (1440, 1024):
+        for width in (1440, 1024, *SWEEP, 701) if goal == "audit-readiness" else (1440, 1024):
             page.set_viewport_size({"width": width, "height": 900})
             report = open_report(page, url)
             expect(report.locator("table.report-trail tbody tr").first).to_be_visible()
@@ -351,7 +362,7 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
             if goal == "audit-readiness":
                 expect(report.locator("table.report-controls")).to_be_visible()
                 expect(report.locator(REMEDIATION).last).to_contain_text(UNBREAKABLE["file name"])
-                shown = (*TABLES, REMEDIATION) if width > 701 else ("table.report-controls",)
+                shown = (*TABLES, REMEDIATION) if width > 1000 else ("table.report-controls",)
             else:
                 expect(report.locator("table.report-questions")).to_contain_text(
                     UNBREAKABLE["compound"]
@@ -361,18 +372,14 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
                 )
                 shown = (*TABLES, "table.report-questions", "table.report-plan")
             assert tables_overflowing(report, shown) == [], (profile, width)
-            if goal == "audit-readiness" and profile == "alpenwerk" and width > 1000:
-                # a desktop's chips never wrap (#550): the German verdict is the widest
-                spaces = report.locator("table.report-controls .chip").evaluate_all(
-                    "chips => chips.map((c) => getComputedStyle(c).whiteSpace)"
-                )
-                assert spaces and set(spaces) == {"nowrap"}, (profile, width, spaces)
+            if goal == "audit-readiness" and profile == "alpenwerk" and width >= ONE_LINE_FROM:
+                # a chip wraps only where the table needs it (#550): the German verdict is the widest
+                chips = report.locator("table.report-controls .chip").evaluate_all(LINES)
+                assert chips and set(chips) == {1}, (profile, width, chips)
             if goal == "audit-readiness" and profile == "alpenwerk":
                 # #463's verify: the German review day broke mid-date ("2026-11-" / "10")
                 days = report.locator("table.report-controls td.report-day").evaluate_all(
-                    "cells => cells.filter(c => c.textContent.trim())"
-                    ".map(c => { const r = document.createRange(); r.selectNodeContents(c);"
-                    " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
+                    f"cells => ({LINES})(cells.filter(c => c.textContent.trim()))"
                 )
                 assert days and all(lines == 1 for lines in days), (profile, width, days)
 
