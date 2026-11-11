@@ -3,7 +3,7 @@ import { type TableWords, wordFor } from './documents.ts'
 import type { LibraryDocument } from './setup.ts'
 
 /** A document as the table shows it: the sample library's, or a profile's from any source (patch too). */
-export type ShownDocument = Omit<LibraryDocument, 'source'> & { source: string }
+export type ShownDocument = Omit<LibraryDocument, 'source'> & { source: string; withdrawn?: boolean }
 
 type Props<D extends ShownDocument> = {
   caption: string
@@ -30,7 +30,7 @@ const ENGLISH: TableWords = {
   stale: 'Stale',
   stale_reasons: { no_approval_date: 'no approval date', no_review_cycle: 'no review cycle',
     unknown_cycle: 'unknown review cycle' },
-  current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
+  current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none', withdrawn: 'Withdrawn',
 }
 
 /** Whether `selected` holds this document of this source. */
@@ -98,9 +98,9 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
               <td>{d.approval_date ?? w.no_date}</td>
               <td>{d.review_cycle === null ? w.no_cycle : wordFor(w.cycles, d.review_cycle) ?? d.review_cycle}</td>
               <td>
-                {d.stale
-                  ? <span className="flag">{staleWord(d)}</span>
-                  : <span className="doc-current">{w.current}</span>}
+                {d.withdrawn ? <span className="doc-withdrawn">{w.withdrawn}</span>
+                  : d.stale ? <span className="flag">{staleWord(d)}</span>
+                    : <span className="doc-current">{w.current}</span>}
               </td>
               {extraColumns.map((c) => <td key={c.heading}>{c.cell(d)}</td>)}
             </tr>

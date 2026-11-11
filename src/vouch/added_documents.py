@@ -59,6 +59,7 @@ EVIDENCE_KIND_OF: dict[AddedKind, EvidenceKind] = {"policy": DOCUMENTED, "record
 
 MAX_BYTES = 200 * 1024
 MAX_DOCUMENTS = 50
+MAX_VERSIONS = 20
 SUFFIXES = (".md", ".txt")
 TITLE_LENGTH = 120
 ID_LENGTH = 60
@@ -67,6 +68,10 @@ TOO_LARGE = f"This file is over {MAX_BYTES // 1024} KB, the most an added docume
 TOO_MANY = (
     f"This company already has {MAX_DOCUMENTS} documents added and not withdrawn, the most it "
     "may have. Withdraw one, or add a new version of one instead."
+)
+TOO_MANY_VERSIONS = (
+    f"This document already has {MAX_VERSIONS} versions, the most an added document may have. "
+    "Add this file under another title instead."
 )
 NOT_TEXT = "This file isn't valid UTF-8 text. Save it as UTF-8 and add it again."
 EMPTY = "This file is empty."
@@ -201,15 +206,18 @@ def next_version(
     at: datetime.datetime,
 ) -> AddedDocument:
     """The version the add keeps, from the profile's documents already kept: the next of the
-    document with the same title (ignoring case), else version 1 of a new one. Only documents
-    not withdrawn count toward MAX_DOCUMENTS. DocumentRefused for any limit it breaks, before
-    anything is written."""
+    document with the same title (ignoring case), at most MAX_VERSIONS of it, else version 1 of
+    a new one. Only documents not withdrawn count toward MAX_DOCUMENTS. DocumentRefused for any
+    limit it breaks, before anything is written; the stores call it holding the profile's lock,
+    so two adds at once can't both pass a limit."""
     title = checked_fields(new)
     text = checked_text(new)
     same = [d for d in kept if d.title.casefold() == title.casefold()]
     if same:
         if any(d.withdrawn_at is not None for d in same):
             raise DocumentRefused(WITHDRAWN_TITLE)
+        if len(same) >= MAX_VERSIONS:
+            raise DocumentRefused(TOO_MANY_VERSIONS)
         doc_id, version = same[0].doc_id, max(d.version for d in same) + 1
     else:
         ids = {d.doc_id for d in kept}
@@ -231,11 +239,12 @@ def next_version(
     )
 
 
-def newest(documents: Iterable[AddedDocument]) -> list[AddedDocument]:
-    """The newest version of each document not withdrawn, by id."""
+def newest(documents: Iterable[AddedDocument], *, withdrawn: bool = False) -> list[AddedDocument]:
+    """The newest version of each document not withdrawn, by id; with `withdrawn`, of the
+    withdrawn ones too (#586: the Documents panel lists them)."""
     by_id: dict[str, AddedDocument] = {}
     for d in documents:
-        if d.withdrawn_at is None and (
+        if (withdrawn or d.withdrawn_at is None) and (
             d.doc_id not in by_id or d.version > by_id[d.doc_id].version
         ):
             by_id[d.doc_id] = d
@@ -299,6 +308,11 @@ class AddedIndex:
         version of each not withdrawn."""
         found = newest(self._current(profile_id))
         return [d for d in found if source is None or d.source == source]
+
+    def shown(self, profile_id: str) -> list[AddedDocument]:
+        """The profile's documents as the Documents panel lists them (#586): the newest version
+        of each, a withdrawn one too (its `withdrawn_at` set)."""
+        return newest(self._current(profile_id), withdrawn=True)
 
     def read(self, profile_id: str, doc_id: str, version: int) -> AddedDocument | None:
         """That version of the document, unless the document is withdrawn (or unknown)."""
@@ -367,9 +381,12 @@ class AddedDocuments(Protocol):
         DocumentRefused, writing nothing, for a limit."""
         ...
 
-    def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
+    def withdraw(
+        self, profile_id: str, doc_id: str, at: datetime.datetime, entry: Entry | None = None
+    ) -> list[AddedDocument]:
         """Mark every version of the document withdrawn at `at` (one already withdrawn keeps
-        its time): its versions as kept now, none when there is no such document."""
+        its time), with `entry`'s audit entry of its newest version when this marked any
+        (#586), together: its versions as kept now, none when there is no such document."""
         ...
 
 
@@ -436,14 +453,21 @@ class ProcessAddedDocuments:
                 self._keep(entry(added))
         return added
 
-    def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
+    def withdraw(
+        self, profile_id: str, doc_id: str, at: datetime.datetime, entry: Entry | None = None
+    ) -> list[AddedDocument]:
         with self._guard:
             kept = self._kept.get(profile_id, [])
+            marked = False
             for i, d in enumerate(kept):
                 if d.doc_id == doc_id and d.withdrawn_at is None:
                     kept[i] = replace(d, withdrawn_at=at)
+                    marked = True
             _refresh(self._index, profile_id, kept)
-            return _ordered(d for d in kept if d.doc_id == doc_id)
+            versions = _ordered(d for d in kept if d.doc_id == doc_id)
+            if marked and entry is not None and self._keep is not None:
+                self._keep(entry(versions[-1]))
+            return versions
 
 
 class PostgresAddedDocuments:
@@ -491,8 +515,11 @@ class PostgresAddedDocuments:
         _refresh(self._index, profile_id, map(_document, rows))
         return _document(added)
 
-    def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
-        rows = [_document(r) for r in self.db.withdraw_document(profile_id, doc_id, at)]
+    def withdraw(
+        self, profile_id: str, doc_id: str, at: datetime.datetime, entry: Entry | None = None
+    ) -> list[AddedDocument]:
+        audit = None if entry is None else (lambda row: entry(_document(row)))
+        rows = [_document(r) for r in self.db.withdraw_document(profile_id, doc_id, at, audit)]
         _refresh(self._index, profile_id, rows)
         return [d for d in rows if d.doc_id == doc_id]
 

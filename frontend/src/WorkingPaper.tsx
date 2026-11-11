@@ -75,7 +75,7 @@ type PaperProps = {
   /** The overview: the company; the profile's protection level, answer language and requirements; the cards (the
    * control index). */
   overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'
-    | 'questions'> & { goal?: Goal }
+    | 'questions' | 'new_evidence'> & { goal?: Goal }
   /** The open control's card. */
   card: ControlCard
   /** The control being assessed just now, if any (one run at a time, maybe of another control). */
@@ -176,6 +176,8 @@ export default function WorkingPaper(props: PaperProps) {
   const closed = improving && review === 'accepted' && card.closed === true
   // The open questions' reasons (#414), in both goals, while the control's newest assessment is accepted.
   const questionReasons = review === 'accepted' ? card.reassess_reasons ?? [] : []
+  // A newer version of a document the newest assessment cites (#586): whatever its review state.
+  const newEvidence = card.reassess_reasons?.includes('new-evidence') ? overview.new_evidence?.[card.id] ?? [] : []
   // Not applicable as a whole under the profile (#454): its chip and the profile's reason, and no assessment to start.
   const excluded = card.status === 'not-applicable'
   return (
@@ -261,6 +263,12 @@ export default function WorkingPaper(props: PaperProps) {
               )}
               {questionReasons.includes('question-overdue') && (
                 <p className="field-note">An open question is overdue. Assess {card.id} again with what is known now.</p>
+              )}
+              {newEvidence.length > 0 && (
+                <p className="field-note">
+                  A new version of {newEvidence.join(' and ')} was added. Assess {card.id} again so its verdict takes it
+                  into account.
+                </p>
               )}
               {/* Keyed by the assessment shown, so a warning open on one never shows on another. */}
               <AssessButton key={assessed?.thread_id} id={card.id} run={run} held={held} onAssess={() => onAssess()}

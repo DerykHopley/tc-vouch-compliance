@@ -212,6 +212,10 @@ INSTRUCTION_WARNING = (
 """The warning before a document with instruction-like text is added (#585, Q9)."""
 INSTRUCTION_NOTE = "Instruction-like text found"
 """The note of a `document-add` entry whose document was added after that warning."""
+BUILT_IN_NOT_WITHDRAWN = "A built-in document can't be withdrawn."
+"""`POST /api/documents/{id}/withdraw`'s 400 for a built-in document's id (#586)."""
+NO_ADDED_DOCUMENT = "This company has no added document with that id."
+"""`POST /api/documents/{id}/withdraw`'s 404 (#586)."""
 NOT_BASE64 = "The file could not be read. Choose it again."
 DOCUMENT_MESSAGE_BYTES = 2 * MAX_BYTES
 """`POST /api/documents`'s body limit: the file in base64 (a third larger) and the form's
@@ -1426,8 +1430,9 @@ def dossier_overview(
     (#369); and their review rounds (#402): the open one, and the comparison with the last one
     closed since the fresh start; in the Internal improvement goal, each card's improvement plan
     flags (#410); the open questions asked since the fresh start, by control id, oldest first,
-    and the reasons they suggest a re-assessment for, in both goals (#414). Redacted as the
-    stream's events are."""
+    and the reasons they suggest a re-assessment for, in both goals (#414); and the titles of the
+    added documents a newer version of which each control's newest assessment doesn't cite yet
+    (`new_evidence`, #586, its `new-evidence` reason). Redacted as the stream's events are."""
     scope, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
@@ -1435,11 +1440,16 @@ def dossier_overview(
     current = goals.goal(memory.user_id, memory.profile_id)
     listed = questions.since(asked.listed(memory.user_id, memory.profile_id), memory.fresh_start())
     at = audit.now()
-    flags = plan.with_reasons(
-        _plan_flags(current, memory, saver, items, marks), questions.reasons(latest, listed, at)
-    )
+    newer = plan.newer_evidence(latest, added_index().searchable(profile.id))
+    more: dict[str, list[plan.ReassessReason]] = questions.reasons(latest, listed, at)
+    for control_id in newer:
+        more.setdefault(control_id, []).append("new-evidence")
+    flags = plan.with_reasons(_plan_flags(current, memory, saver, items, marks), more)
     shown = dict(overview(profile, scope, latest, discarded, approved, flags))
-    clean, _ = redact_data(shown | {"questions": questions.by_control(listed, at)})
+    new_evidence = {i: [d.title for d in docs] for i, docs in newer.items()}
+    clean, _ = redact_data(
+        shown | {"questions": questions.by_control(listed, at), "new_evidence": new_evidence}
+    )
     return clean | {
         "requirements": paper_requirements(profile, scope.controls),
         "goal": current,
@@ -1893,7 +1903,7 @@ def profile_documents_tab(
     none, #454), and the tab's words in the profile's language. Redacted as the overview is;
     an unreadable ISA edition, folder or document a plain 500 naming no path."""
     scope, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
-    added = added_index().searchable(profile.id)
+    added = added_index().shown(profile.id)
     try:
         listed = documents_tab.profile_documents(
             profile, scope.applicable, latest, report.today(), added
@@ -1982,6 +1992,29 @@ def add_document(
     except DocumentRefused as refusal:
         raise HTTPException(status_code=400, detail=str(refusal)) from None
     return {"document": _added_data(added)}
+
+
+@router.post("/documents/{doc_id}/withdraw")
+def withdraw_document(
+    doc_id: Annotated[str, StringConstraints(max_length=255)],
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+    store: AddedDocumentsStore,
+) -> dict[str, Any]:
+    """The lead withdraws an added document of the current company (#586, Q11): every version
+    marked withdrawn with one `document-withdraw` entry, together, so it is no longer searched
+    or cited; its versions are kept. A 200 with the document; one withdrawn already is answered
+    the same, nothing more written. A built-in document's id is a 400, an unknown one a 404.
+    Nothing is re-assessed. The database down is a 503."""
+    if doc_id in builtin_ids(profile):
+        raise HTTPException(status_code=400, detail=BUILT_IN_NOT_WITHDRAWN)
+    versions = audit.withdraw_document(
+        store, doc_id, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id
+    )
+    if not versions:
+        raise HTTPException(status_code=404, detail=NO_ADDED_DOCUMENT)
+    return {"document": _added_data(versions[-1]) | {"withdrawn": True}}
 
 
 @router.get("/company")

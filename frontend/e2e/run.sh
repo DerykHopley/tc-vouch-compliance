@@ -31,7 +31,8 @@
 #   - a fifteenth, for removing a company made in setup (#418): its three creates each run a pass
 #     (#447), which with the thirteenth's three would pass the daily limit (3);
 #   - a sixteenth, for adding documents (#585): an added document is kept for its company and found
-#     by every search on that server, which would change what the other servers' checks read;
+#     by every search on that server, which would change what the other servers' checks read; its fake
+#     script (tests/scripts/added-evidence.json, #586) also cites an added document, badge-register;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 # Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):
@@ -87,15 +88,19 @@ if [ -z "${VOUCH_IMAGE:-}" ]; then
   (cd "$ROOT/frontend" && npm run build) >"$LOG_DIR/build.log" 2>&1 \
     || { echo "The front-end build failed:" >&2; tail -n 30 "$LOG_DIR/build.log" >&2; exit 1; }
 fi
-start_vouch() { # port, log name, container name, then a profiles folder if not the fixtures
+start_vouch() { # port, log name, container name, then a profiles folder if not the fixtures (or ""), then a
+  # fake script if not the bundled demo scripts
   if [ -n "${VOUCH_IMAGE:-}" ]; then
-    local profiles=()
+    local profiles=() script=()
     if [ -n "${4:-}" ]; then profiles=(-v "$4:/profiles:ro,Z" -e VOUCH_PROFILES_DIR=/profiles); fi
+    if [ -n "${5:-}" ]; then script=(-v "$5:/script.json:ro,Z" -e ASSESS_FAKE_SCRIPT=/script.json); fi
     CONTAINERS+=("$3")
     "$CONTAINER" run --rm --name "$3" -p "127.0.0.1:$1:8080" -e VOUCH_AUTH_MODE=local -e VOUCH_RATE_REQUESTS="$RATE" \
-      "${profiles[@]}" "$VOUCH_IMAGE" >"$LOG_DIR/$2.log" 2>&1 &
+      "${profiles[@]}" "${script[@]}" "$VOUCH_IMAGE" >"$LOG_DIR/$2.log" 2>&1 &
   else
-    (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" VOUCH_FRONTEND="$ROOT/frontend/dist" \
+    local script=()
+    if [ -n "${5:-}" ]; then script=(ASSESS_FAKE_SCRIPT="$5"); fi
+    (cd "$ROOT" && env -u ASSESS_FAKE_SCRIPT -u OPENROUTER_API_KEY "${script[@]}" VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" VOUCH_FRONTEND="$ROOT/frontend/dist" \
       VOUCH_PROFILES_DIR="${4:-}" uv run uvicorn vouch.api:app --port "$1") >"$LOG_DIR/$2.log" 2>&1 &
   fi
   PIDS+=($!)
@@ -106,8 +111,11 @@ chmod -R a+rX "$PROFILES_DIR" # the container runs as nobody
 for i in "${!SERVERS[@]}"; do
   server=${SERVERS[$i]%%:*}
   folder=()
+  script=()
   if [ "$server" = profiles ]; then folder=("$PROFILES_DIR/profiles"); fi
-  start_vouch "${PORTS[$i]}" "$server" "$NAME-$server" "${folder[@]+"${folder[@]}"}"
+  # #586: the documents' server cites an added document (badge-register), so its new version shows.
+  if [ "$server" = documents ]; then folder=(""); script=("$ROOT/tests/scripts/added-evidence.json"); fi
+  start_vouch "${PORTS[$i]}" "$server" "$NAME-$server" "${folder[@]+"${folder[@]}"}" "${script[@]+"${script[@]}"}"
   export "${SERVERS[$i]#*:}=http://localhost:${PORTS[$i]}"
 done
 (cd "$ROOT" && env -u OPENROUTER_API_KEY -u VOUCH_FRONTEND VOUCH_AUTH_MODE=local VOUCH_RATE_REQUESTS="$RATE" ASSESS_FAKE_SCRIPT="$ROOT/tests/scripts/broken.json" \
