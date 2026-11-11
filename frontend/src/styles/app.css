@@ -688,6 +688,7 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
    in two columns from 700px, stacked under it; the version and invented-data notes, any alert, then its buttons. */
 .documents-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .doc-origin { display: grid; justify-items: start; gap: 2px; }
+/* Cancels .btn-ghost's 10px inline padding, so the pill's text lines up with "Added" above it. */
 .doc-origin .btn { margin-left: -10px; }
 .doc-form { display: grid; gap: 10px; padding: 12px 0; border-block: 1px solid var(--rule); min-width: 0; }
 .doc-form h3 { margin: 0; font-size: 16px; }

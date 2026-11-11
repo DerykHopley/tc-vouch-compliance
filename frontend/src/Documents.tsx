@@ -3,17 +3,17 @@ import AddDocument from './AddDocument.tsx'
 import DocumentTable from './DocumentTable.tsx'
 import { type DocumentsState, type ProfileDocument, type ProfileDocuments, wordFor } from './documents.ts'
 
+type Props = { state: DocumentsState; tryAgain: () => void; onAdded: () => void }
+
 /** The Documents tab (#424), the Company page's Documents panel since #505: each evidence document the profile uses,
  * one table per source, with the controls citing it and its origin. A lead adds a document there, or a new version of
  * an added one (#585, AddDocument); built-in documents are labelled "Built in" and offer nothing. Its words are the
  * served ones, and the sheet carries their language (`words_language`); the panel around it (loading, the notice, Try
  * again, Add document and its form) stays English, as the report's does. Read each time the page opens, alongside the
  * company (documents.ts' `useDocuments`, which the page calls), and again after an add (`onAdded`); its states stay
- * inside the panel, so the rest of the page stays up. */
-
-type Props = { state: DocumentsState; tryAgain: () => void; onAdded: () => void }
-
-/** The Documents panel's content for `state`: the loading line, the notice with Try again, or the sheet. */
+ * inside the panel, so the rest of the page stays up.
+ *
+ * The panel's content for `state`: the loading line, the notice with Try again, or the sheet. */
 export default function Documents({ state, tryAgain, onAdded }: Props) {
   if (state.status === 'loading') {
     return <p className="lbl" role="status">Loading the documents…</p>

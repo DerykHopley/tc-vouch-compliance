@@ -100,6 +100,11 @@ describe('the Add document form (ticket 585)', () => {
     expect(title.value).toBe('Visitor badge policy')
   })
 
+  it('prefills a new version from the added document whose title differs only in case or spaces', () => {
+    shown({ title: ' visitor BADGE policy' })
+    expect((screen.getByLabelText('Approval date') as HTMLInputElement).value).toBe('2026-10-01')
+  })
+
   it('sends the file in base64 with the fields; busy and disabled while sending; then reports it added', async () => {
     let answer: (r: Response) => void = () => {}
     const fetch = serve(() => new Promise<Response>((resolve) => { answer = resolve }))

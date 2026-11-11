@@ -1,6 +1,6 @@
 import { type FormEvent, useId, useRef, useState } from 'react'
 import { ADD_FAILED, addDocument, type AddedKind, CYCLES, type DocumentFields, prefill, type ProfileDocument,
-  versionFor } from './documents.ts'
+  sameTitle, versionFor } from './documents.ts'
 
 export { ADD_FAILED }
 
@@ -29,7 +29,7 @@ function today(): string {
 
 /** The newest version's fields of the added document with this title, for Add new version's prefill. */
 function fieldsOf(documents: readonly ProfileDocument[], title: string | undefined): DocumentFields {
-  const newest = title === undefined ? undefined : documents.find((d) => d.origin === 'added' && d.title === title)
+  const newest = title === undefined ? undefined : documents.find((d) => d.origin === 'added' && sameTitle(d.title, title))
   return {
     title: title ?? '',
     kind: newest?.kind === 'implemented' ? 'record' : 'policy',
@@ -126,7 +126,7 @@ export default function AddDocument({ documents, title, onAdded, onCancel }: Pro
         ) : (
           <>
             <button className="btn btn-primary" type="submit" disabled={sending} aria-busy={sending || undefined}>
-              {heading === 'Add document' ? 'Add document' : 'Add version'}
+              {title === undefined ? 'Add document' : 'Add version'}
             </button>
             <button className="btn btn-ghost" type="button" disabled={sending} onClick={onCancel}>Cancel</button>
           </>

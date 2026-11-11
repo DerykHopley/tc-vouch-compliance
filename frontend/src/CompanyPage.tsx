@@ -49,8 +49,8 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
       ? { status: 'ready', company: got.company } : { status: 'failed', message: got.message }))
     return () => { answer.wanted = false }
   }, [attempt])
-  // Read alongside the company, so the panel is ready with the page; a company Try again leaves them as read.
-  // and again after a lead adds one in the panel (#585).
+  // The documents: read alongside the company, so the panel is ready with the page, and again after a lead adds one
+  // in the panel (#585); a company Try again leaves them as read.
   const [added, setAdded] = useState(0)
   const documents = useDocuments(documentsReloads + added)
   // The rounds too (#572), read again after a round is closed or started in the Review rounds panel.

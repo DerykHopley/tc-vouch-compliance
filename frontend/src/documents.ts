@@ -119,11 +119,15 @@ export function prefill(text: string): Partial<DocumentFields> {
   return found
 }
 
+/** Whether two titles name the same document, as the server matches them: ignoring case and spaces at their ends. */
+export function sameTitle(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
 /** The version Vouch will give a document added with this title: the next of the added document with that title
  * (ignoring case and spaces at its ends, as the server does), else 1. */
 export function versionFor(documents: readonly ProfileDocument[], title: string): number {
-  const wanted = title.trim().toLowerCase()
-  const same = documents.find((d) => d.origin === 'added' && d.title.toLowerCase() === wanted)
+  const same = documents.find((d) => d.origin === 'added' && sameTitle(d.title, title))
   return same ? Number(same.version) + 1 : 1
 }
 

@@ -49,6 +49,7 @@ from vouch.added_documents import (
     MAX_BYTES,
     AddedDocument,
     AddedDocuments,
+    AddedKind,
     DocumentRefused,
     NewDocument,
     added_documents_store,
@@ -1928,7 +1929,7 @@ class DocumentRequest(BaseModel):
             filename=self.filename,
             content=raw,
             title=self.title,
-            kind=cast(Any, self.kind),
+            kind=cast(AddedKind, self.kind),  # any other: the store refuses it with NO_KIND
             approval_date=self.approval_date,
             review_cycle=self.review_cycle,
         )
