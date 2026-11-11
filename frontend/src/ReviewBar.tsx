@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { type Assessment, dateTimeLabel, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { confirmFindings, JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, REVIEW_STEPS,
-  type Review, type ReviewDecision, type ReviewStep, submitReview } from './review.ts'
+import { confirmFindings, JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, REVIEW_STEP_WORDS,
+  REVIEW_STEPS, type Review, type ReviewDecision, type ReviewStep, submitReview } from './review.ts'
+import { useHeightVar } from './useHeightVar.ts'
 
 /** The lead's review on the working paper (#42, in three steps since #372): the override editor and the review bar at
  * the paper's foot. */
@@ -95,10 +96,11 @@ type ReviewBarProps = {
 
 /** The three steps, in order, the current one marked (`aria-current="step"`); Plan fixes skipped when nothing is. */
 function Steps({ step, items }: { step: ReviewStep; items: ReviewBarProps['items'] }) {
-  const at = REVIEW_STEPS.findIndex(([s]) => s === step)
+  const at = REVIEW_STEPS.indexOf(step)
   return (
     <ol className="review-steps" aria-label="Review steps">
-      {REVIEW_STEPS.map(([s, words], i) => {
+      {REVIEW_STEPS.map((s, i) => {
+        const words = REVIEW_STEP_WORDS[s]
         const skipped = s === 'plan-fixes' && step === 'accept' && items.total === 0
         return (
           <li key={s} aria-current={i === at ? 'step' : undefined} className={i < at ? 'done' : undefined}>
@@ -110,6 +112,88 @@ function Steps({ step, items }: { step: ReviewStep; items: ReviewBarProps['items
   )
 }
 
+/** How far above the window's foot the docked buttons sit: the Ask Vouch button's clearance (app.css, `main`). */
+const CLEARANCE = 88
+/** The room kept between a focused field and the docked buttons. */
+const GAP = 8
+
+/**
+ * The review's buttons in reach (#467, `docs/design.md`, Components: Review bar): while the review is in progress and
+ * the buttons' place in the bar (`slot`) is below the window's foot (above the Ask Vouch button's clearance), the
+ * buttons (`dock`) are `stuck` there, over the bar's width (`place`), and the slot keeps their room; once the slot
+ * comes into view they are back in it. The steps, the note and the explanations stay in the bar's place. The slot's
+ * height is kept in `--review-actions` (app.css: a field brought into view stops above the docked buttons), and a field
+ * focused under them, or under them as they change, is scrolled clear of them: Firefox doesn't scroll a field it
+ * already counts as in view.
+ */
+function useDock(reviewing: boolean) {
+  const bar = useRef<HTMLElement>(null)
+  const slot = useRef<HTMLDivElement>(null)
+  const dock = useRef<HTMLDivElement>(null)
+  const [stuck, setStuck] = useState(false)
+  const [place, setPlace] = useState<{ left: number; width: number } | null>(null)
+  useHeightVar(slot, '--review-actions', reviewing)
+
+  useEffect(() => {
+    const el = slot.current
+    if (!reviewing || !el || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(([entry]) => {
+      const foot = entry.rootBounds?.bottom ?? window.innerHeight - CLEARANCE
+      setStuck(entry.boundingClientRect.bottom > foot + 1)
+    }, { rootMargin: `0px 0px -${CLEARANCE}px 0px`, threshold: [0, 1] })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      setStuck(false)
+    }
+  }, [reviewing])
+
+  useLayoutEffect(() => {
+    const el = bar.current
+    if (!stuck || !el) return
+    const measure = () => {
+      const { left, width } = el.getBoundingClientRect()
+      setPlace({ left, width })
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [stuck])
+
+  useEffect(() => {
+    const el = dock.current
+    if (!reviewing || !el) return
+    const pending = { frame: 0 } // one check a frame, however many focus or resize events come
+    const clear = () => {
+      cancelAnimationFrame(pending.frame)
+      pending.frame = requestAnimationFrame(() => {
+        const field = document.activeElement
+        if (!el.classList.contains('stuck') || !(field instanceof HTMLElement) || el.contains(field)) return
+        const f = field.getBoundingClientRect()
+        const top = el.getBoundingClientRect().top
+        if (f.height + GAP < top && f.bottom + GAP > top && f.top < window.innerHeight) {
+          window.scrollBy(0, f.bottom + GAP - top)
+        }
+      })
+    }
+    document.addEventListener('focusin', clear)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(clear)
+    observer?.observe(el)
+    return () => {
+      cancelAnimationFrame(pending.frame)
+      document.removeEventListener('focusin', clear)
+      observer?.disconnect()
+    }
+  }, [reviewing])
+
+  return { bar, slot, dock, stuck, place }
+}
+
 /**
  * The review bar at the paper's foot (`docs/design.md`, Components: Review bar). On a proposed control it names the
  * review's three steps and marks the current one (#372). Confirm findings: the overrides made on the rows, recorded
@@ -119,9 +203,7 @@ function Steps({ step, items }: { step: ReviewStep; items: ReviewBarProps['items
  * retry; a 409 shows the review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
  * a rejected one Assess again; an accepted one reviewed before the three steps is marked "before the three-step review"
  * (#373). Shown afresh (a new key) whenever its assessment is read again, so a message about an
- * older read never lingers. While the review is in progress, the bar sticks to the window's foot above the Ask Vouch
- * button's clearance as the paper scrolls (#467), and its height is kept in `--review-bar` on the page (app.css), so a
- * field on the paper brought into view by focus stops above the bar, not under it.
+ * older read never lingers. While the review is in progress its buttons stay in reach (#467, `useDock`).
  */
 export default function ReviewBar(props: ReviewBarProps) {
   const { status, threadId, review, beforeThreeStep, step, overrides, editing, items, onReviewed, onRefresh,
@@ -133,20 +215,7 @@ export default function ReviewBar(props: ReviewBarProps) {
   const noteId = useId()
   const whyId = useId()
   const reviewing = status === 'waiting-for-review' && step !== null
-  const bar = useRef<HTMLElement>(null)
-  useLayoutEffect(() => {
-    const el = bar.current
-    if (!reviewing || !el) return
-    const root = document.documentElement
-    const measure = () => root.style.setProperty('--review-bar', `${el.getBoundingClientRect().height}px`)
-    measure()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(el)
-    return () => {
-      observer?.disconnect()
-      root.style.removeProperty('--review-bar')
-    }
-  }, [reviewing])
+  const { bar, slot, dock, stuck, place } = useDock(reviewing)
 
   const act = async (action: Action) => {
     setSending(action)
@@ -180,7 +249,7 @@ export default function ReviewBar(props: ReviewBarProps) {
   const held = sending !== null || editing !== null
   const planning = step === 'plan-fixes'
   return (
-    <section ref={bar} className="review-bar reviewing" aria-label="Review">
+    <section ref={bar} className="review-bar" aria-label="Review">
       <Steps step={step} items={items} />
       <label className="lbl" htmlFor={noteId}>Your note (kept in the audit trail)</label>
       <textarea id={noteId} className="field" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
@@ -191,28 +260,34 @@ export default function ReviewBar(props: ReviewBarProps) {
       {items.total > 0 && step !== 'confirm-findings' && (
         <p className="field-note">{items.decided} of {plural(items.total, 'remediation item')} decided.</p>
       )}
-      <div className="review-actions">
-        {step === 'confirm-findings' ? (
-          <button className="btn btn-primary" disabled={held} aria-busy={sending === 'confirm'}
-            onClick={() => void act('confirm')}>Confirm findings</button>
-        ) : (
-          <button className="btn btn-sign" disabled={held || planning} aria-busy={sending === 'accept'}
-            aria-describedby={planning ? whyId : undefined} onClick={() => void act('accept')}>Accept verdict</button>
-        )}
-        <button className="btn" disabled={held} aria-busy={sending === 'reject'}
-          onClick={() => void act('reject')}>Reject verdict</button>
-        {planning && <p id={whyId} className="field-note">{DECIDE_EACH_ITEM}</p>}
-        {editing !== null && <p className="field-note">Save or cancel the override of {editing} first.</p>}
-      </div>
-      {refused && (
-        <div className="review-actions">
-          <p className="field-note notice" role="alert">{refused.message}</p>
-          {refused.refusal === 'conflict' && <button className="btn" onClick={() => void refresh()}>Refresh</button>}
-          {refused.refusal === 'failed' && (
-            <button className="btn" onClick={() => void act(refused.action)}>Retry</button>
+      <div ref={slot} className={stuck ? 'review-slot holding' : 'review-slot'}>
+        <div ref={dock} className={stuck ? 'review-dock stuck' : 'review-dock'}
+          style={stuck && place ? { left: place.left, width: place.width } : undefined}>
+          <div className="review-actions">
+            {step === 'confirm-findings' ? (
+              <button className="btn btn-primary" disabled={held} aria-busy={sending === 'confirm'}
+                onClick={() => void act('confirm')}>Confirm findings</button>
+            ) : (
+              <button className="btn btn-sign" disabled={held || planning} aria-busy={sending === 'accept'}
+                aria-describedby={planning ? whyId : undefined} onClick={() => void act('accept')}>Accept verdict</button>
+            )}
+            <button className="btn" disabled={held} aria-busy={sending === 'reject'}
+              onClick={() => void act('reject')}>Reject verdict</button>
+          </div>
+          {/* What a press answers stays with the buttons, where it was pressed. */}
+          {refused && (
+            <div className="review-actions">
+              <p className="field-note notice" role="alert">{refused.message}</p>
+              {refused.refusal === 'conflict' && <button className="btn" onClick={() => void refresh()}>Refresh</button>}
+              {refused.refusal === 'failed' && (
+                <button className="btn" onClick={() => void act(refused.action)}>Retry</button>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
+      {planning && <p id={whyId} className="field-note">{DECIDE_EACH_ITEM}</p>}
+      {editing !== null && <p className="field-note">Save or cancel the override of {editing} first.</p>}
       {notReadAgain && <p className="field-note notice" role="status">{NOT_READ_AGAIN}</p>}
     </section>
   )

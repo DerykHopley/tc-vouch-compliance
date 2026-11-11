@@ -639,18 +639,29 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(
 
 # Where the review bar sits against the viewport, the top bar, the Ask Vouch button and the last
 # requirement row, scrolled to `at` of the page (0 the top, 0.5 the middle, 1 the bottom; #467).
+# `bar` is the part of the bar that floats over the page (the nearest fixed or sticky box holding
+# its primary button), or the whole bar when nothing of it floats; `strip` is whether what shows
+# 10px under a floating bar is the bar's own (the page's content doesn't slide under it there).
 REVIEW_BAR_AT = (
     "async (at) => {"
     + FONTS_SETTLED
     + """
   window.scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * at)
   await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const rect = (sel) => document.querySelector(sel).getBoundingClientRect().toJSON()
+  const region = document.querySelector('section.review-bar')
+  const button = region.querySelector(':is(.btn-primary, .btn-sign)')
+  let part = button
+  while (part !== region && !['fixed', 'sticky'].includes(getComputedStyle(part).position)) part = part.parentElement
+  const box = (el) => el.getBoundingClientRect().toJSON()
+  const bar = box(part)
+  const under = bar.bottom + 10 < innerHeight ? document.elementFromPoint(bar.left + 4, bar.bottom + 10) : null
   const rows = [...document.querySelectorAll('table.reqs.judged tbody tr')]
   return {
-    viewport: innerHeight, top: rect('header.top').bottom, bar: rect('.review-bar'),
-    button: rect('.review-bar :is(.btn-primary, .btn-sign)'), fab: rect('.fab'),
-    last: rows[rows.length - 1].getBoundingClientRect().toJSON(),
+    viewport: innerHeight, top: box(document.querySelector('header.top')).bottom, bar, button: box(button),
+    fab: box(document.querySelector('.fab')), last: box(rows[rows.length - 1]),
+    floating: part !== region || getComputedStyle(region).position === 'sticky',
+    strip: under === null ? null : region.contains(under),
+    sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
   }
 }"""
 )
@@ -666,16 +677,9 @@ def meets(a: dict, b: dict) -> bool:
     )
 
 
-@pytest.mark.parametrize("size", [(1440, 900), (390, 844)], ids=lambda size: str(size[0]))
-def test_the_review_bars_buttons_stay_in_view_and_cover_neither_the_last_row_nor_ask_vouch(
-    page: Page, paper_url, size, nordlicht_later
-):
-    """#467: on a proposed 5.2.4 (Alpenwerk's, a long paper), the review bar's primary button is
-    in the viewport, below the top bar, scrolled to the top, the middle and the bottom; the bar
-    never meets the Ask Vouch button; at the bottom the last requirement row ends above the bar;
-    and the last row's Change, brought into view by focus, stops above the bar, not under it."""
+def proposed_wide_paper(page: Page, paper_url: str, size: tuple[int, int]) -> Locator:
+    """Alpenwerk's 5.2.4 (a long paper) assessed afresh, at Confirm findings, opened at `size`."""
     page.set_viewport_size({"width": size[0], "height": size[1]})
-    nordlicht_later(paper_url)
     response = page.request.post(
         f"{paper_url}/api/assessments",
         data={"control_id": WIDE},
@@ -686,6 +690,22 @@ def test_the_review_bars_buttons_stay_in_view_and_cover_neither_the_last_row_nor
     make_current(page.request, paper_url, "alpenwerk")
     paper = open_paper(page, paper_url, WIDE, assessed=True)
     expect(paper.get_by_role("button", name="Confirm findings")).to_be_visible()
+    return paper
+
+
+BAR_SIZES = [(1440, 900), (1024, 768), (701, 900), (390, 844), (360, 740)]
+
+
+@pytest.mark.parametrize("size", BAR_SIZES, ids=lambda size: str(size[0]))
+def test_the_review_bars_buttons_stay_in_view_and_cover_neither_the_last_row_nor_ask_vouch(
+    page: Page, paper_url, size, nordlicht_later
+):
+    """#467: on a proposed 5.2.4, scrolled to the top, the middle and the bottom, the review
+    bar's primary button is in the viewport below the top bar; the bar never meets the Ask Vouch
+    button; nothing scrolls sideways; under a floating bar the page's content doesn't show (the
+    strip down to Ask Vouch is the bar's); at the bottom the last requirement row ends above it."""
+    nordlicht_later(paper_url)
+    proposed_wide_paper(page, paper_url, size)
 
     for at in (0, 0.5, 1):
         seen = page.evaluate(REVIEW_BAR_AT, at)
@@ -693,15 +713,75 @@ def test_the_review_bars_buttons_stay_in_view_and_cover_neither_the_last_row_nor
         assert seen["button"]["top"] >= seen["top"] - 1, where
         assert seen["button"]["bottom"] <= seen["viewport"] + 1, where
         assert not meets(seen["bar"], seen["fab"]), where
+        assert not seen["sideways"], where
+        if seen["floating"] and seen["strip"] is not None:
+            assert seen["strip"], where
         if at == 1:
             assert seen["last"]["bottom"] <= seen["bar"]["top"] + 1, where
 
-    # As fab_clearance's check: scrollIntoView keeps clear of the page's scroll padding and the
-    # field's scroll margin, as tabbing to a field just below the fold does.
+
+# The focused field, when the review bar covers any of its foot or its focus ring (the points just
+# inside its bottom edge and 3px under it), or it ends off screen: where. Null when it is clear,
+# is in the bar itself, or is taller than the window (a scrolling table, which can't be in view
+# whole). After two frames, so a scroll the page makes on focus is done.
+COVERED = """async () => {
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const el = document.activeElement
+  const region = document.querySelector('section.review-bar')
+  if (!el || el === document.body || region.contains(el)) return null
+  const r = el.getBoundingClientRect()
+  if (r.height > innerHeight / 2) return null
+  const hits = []
+  for (const y of [r.bottom - 1, r.bottom + 3]) {
+    for (const x of [r.left + 2, (r.left + r.right) / 2, r.right - 2]) {
+      if (y >= innerHeight) { hits.push(`off screen at y=${Math.round(y)}`); continue }
+      const at = document.elementFromPoint(x, y)
+      if (at && region.contains(at)) hits.push(`under the bar at ${Math.round(x)},${Math.round(y)}`)
+    }
+  }
+  const name = (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 40)
+  return hits.length ? { name, rect: r.toJSON(), hits } : null
+}"""
+
+
+@pytest.mark.parametrize("size", BAR_SIZES, ids=lambda size: str(size[0]))
+def test_a_field_tabbed_to_or_opened_with_change_is_never_under_the_review_bar(
+    page: Page, paper_url, size, nordlicht_later
+):
+    """#467: on a proposed 5.2.4, Tab from the breadcrumb through the paper to the review bar:
+    each field focused on the way ends clear of the bar, its focus ring included; each Change
+    pressed with Enter opens its override with the Verdict field clear of the bar, and Tab to its
+    Reason too (the bar may change as the override opens). Cancel closes it, and tabbing goes on
+    from that Change."""
+    nordlicht_later(paper_url)
+    paper = proposed_wide_paper(page, paper_url, size)
     page.evaluate("window.scrollTo(0, 0)")
-    change = paper.get_by_role("button", name=re.compile(r"^Change ")).last
-    change.evaluate(
-        "el => { el.scrollIntoView({ block: 'nearest' }); el.focus({ preventScroll: true }) }"
-    )
-    focused, bar = box(change), box(paper.get_by_role("region", name="Review"))
-    assert focused["y"] + focused["height"] <= bar["y"] + 1, (focused, bar)
+    paper.get_by_role("navigation", name="Breadcrumb").get_by_role("link").first.focus()
+    region = paper.get_by_role("region", name="Review")
+    covered: list = []
+    changes = 0
+    for _ in range(200):
+        page.keyboard.press("Tab")
+        if region.evaluate("(bar) => bar.contains(document.activeElement)"):
+            break
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+        name = page.evaluate("document.activeElement.getAttribute('aria-label') || ''")
+        if not name.startswith("Change "):
+            continue
+        changes += 1
+        editor = paper.get_by_role("form", name=f"Override {name.removeprefix('Change ')}")
+        page.keyboard.press("Enter")
+        expect(editor.get_by_label("Verdict")).to_be_focused()
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+        page.keyboard.press("Tab")
+        expect(editor.get_by_label("Reason (required)")).to_be_focused()
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+        editor.get_by_role("button", name="Cancel").click()
+        paper.get_by_role("button", name=name, exact=True).focus()
+    else:
+        raise AssertionError("Tab never reached the review bar")
+    assert changes > 0
+    assert covered == [], f"{size[0]}px: {covered}"
