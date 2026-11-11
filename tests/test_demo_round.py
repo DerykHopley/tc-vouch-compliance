@@ -264,3 +264,21 @@ def test_the_command_starts_in_a_shell_with_clerk_keys_and_no_auth_mode():
 
     assert done.returncode == 2, done.stderr
     assert "needs one target" in done.stderr
+
+
+def test_an_unreachable_api_says_so_without_a_traceback(capsys):
+    from contextlib import contextmanager
+
+    import httpx
+
+    from vouch.demo_round import _run
+
+    @contextmanager
+    def unreachable():
+        raise httpx.ConnectError("Connection refused")
+        yield
+
+    assert _run(unreachable) == 1
+    said = capsys.readouterr().err
+    assert "could not reach" in said
+    assert "Traceback" not in said

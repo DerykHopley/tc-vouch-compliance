@@ -364,6 +364,9 @@ def _run(make: Callable[[], AbstractContextManager[Client, None]]) -> int:
     except SeedError as error:
         say(f"vouch-seed-demo-round: {error}")
         return 1
+    except httpx.HTTPError as error:
+        say(f"vouch-seed-demo-round: could not reach the app ({error}). Is the preview running?")
+        return 1
     say(f'Seeded: Company › Rounds now compares with "{ROUND_NAME}".')
     return 0
 

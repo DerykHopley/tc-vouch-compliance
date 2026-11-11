@@ -330,7 +330,7 @@ code, on the fake model (no key is read, so no paid call), so Company › Rounds
 round, "Q2 2026", and an improvement since: a profile pass accepted as judged, "Q2 2026" closed and
 "Q3 2026" started, two not-evidenced controls and one partly-evidenced control assessed again and
 accepted as evidenced, one remediation item done and one open question answered. Every step is a
-real request with its audit entries (named "Demo lead", or `--name`), at the time it runs.
+real request with its audit entries (named "Demo lead", or `--name`, on the database target; a preview uses its own local user's name), at the time it runs.
 
 Rounds are kept per user, so it seeds one user. **Find your user id** in the Clerk dashboard:
 Users, your user, the id starting `user_` (*unverified*: from Clerk's docs, not checked in this
