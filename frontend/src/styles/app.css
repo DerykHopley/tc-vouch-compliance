@@ -714,7 +714,13 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .documents-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .doc-origin { display: grid; justify-items: start; gap: 2px; }
 /* Cancels .btn-ghost's 10px inline padding, so the pill's text lines up with "Added" above it. */
-.doc-origin .btn { margin-left: -10px; }
+.doc-origin > .btn, .doc-withdraw > .btn { margin-left: -10px; }
+/* Withdraw (#586): its in-app ask in the row's Origin cell, kept to a readable measure; a withdrawn row's status in
+   --muted, as "Current" is. */
+.doc-withdraw { display: grid; justify-items: start; gap: 4px; }
+.doc-withdraw .inline-confirm { min-width: 24ch; max-width: 36ch; padding-block: 4px; }
+.doc-withdraw .field-note { margin: 0; max-width: 36ch; }
+.doc-table .doc-withdrawn { color: var(--muted); }
 .doc-form { display: grid; gap: 10px; padding: 12px 0; border-block: 1px solid var(--rule); min-width: 0; }
 .doc-form h3 { margin: 0; font-size: 16px; }
 .doc-form-fields { display: grid; gap: 10px 16px; grid-template-columns: minmax(0, 1fr); }

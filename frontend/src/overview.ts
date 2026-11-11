@@ -17,7 +17,7 @@ export const isReviewState = (status: ReviewState): status is ReviewStatus =>
 
 /** Why a re-assessment is suggested (`vouch.plan.ReassessReason`), in this order: every fix done (#410, Internal
  * improvement only), an open question answered or overdue (#414, both goals). */
-export type ReassessReason = 'fixes-done' | 'question-answered' | 'question-overdue'
+export type ReassessReason = 'fixes-done' | 'question-answered' | 'question-overdue' | 'new-evidence'
 
 /** `closed` is the improvement plan's (#410): false under Audit readiness. `reassess_suggested` is true exactly when
  * `reassess_reasons` isn't empty (#414). A Closed control is still accepted, and no reason changes the status or a
@@ -80,6 +80,9 @@ export type Overview = {
   /** The open questions asked since the fresh start, by control id, oldest first (#414); a control with none isn't
    * named. Optional, as the cards' flags are, so a page built before them still reads. */
   questions?: Record<string, OpenQuestion[]>
+  /** The titles of the added documents a newer version of which each control's newest assessment doesn't cite yet
+   * (#586, its `new-evidence` reason), by control id; a control with none isn't named. */
+  new_evidence?: Record<string, string[]>
 }
 
 /** The open review round: `opened_at` null for the first one, open since the start. */
