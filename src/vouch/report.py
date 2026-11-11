@@ -46,7 +46,7 @@ from vouch.dossier import (
 )
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
-from vouch.language import placeholder, trail_note
+from vouch.language import NOTE_WORDS, placeholder, trail_note
 from vouch.plan import IMPROVEMENT, CardFlags
 from vouch.profile import ComplianceProfile, ProtectionLevel
 from vouch.questions import OpenQuestion
@@ -254,7 +254,7 @@ WORDS: dict[str, dict[str, Any]] = {
             "internal-improvement": "Interner Verbesserung",
         },
         "protection_levels": {"normal": "Normal", "high": "Hoch", "very high": "Sehr hoch"},
-        "priorities": {"high": "Hoch", "medium": "Mittel", "low": "Niedrig"},
+        "priorities": NOTE_WORDS["de"].priorities,  # as a priority change's note says them
         "item_statuses": {"open": "Offen", "done": "Erledigt", "closed": "Geschlossen"},
         "question_statuses": {"answered": "Beantwortet", "overdue": "Überfällig", "open": "Offen"},
         "languages": {"en": "Englisch", "de": "Deutsch"},
@@ -600,7 +600,7 @@ def _remediation(
                     {
                         "requirement_id": kept.requirement_id,
                         "missing": placeholder(kept.missing, language),
-                        "owner_role": kept.owner_role,
+                        "owner_role": placeholder(kept.owner_role, language),
                         "due_date": kept.due_date.isoformat(),
                     }
                 )
@@ -715,7 +715,7 @@ def _plan(
                 "control_id": assessment.control_id,
                 "requirement_id": kept.requirement_id,
                 "missing": placeholder(kept.missing, language),
-                "owner_role": kept.owner_role,
+                "owner_role": placeholder(kept.owner_role, language),
                 "due_date": kept.due_date.isoformat(),
                 "status": state,
                 "note": (mark.done_note or "") if mark is not None and done else "",

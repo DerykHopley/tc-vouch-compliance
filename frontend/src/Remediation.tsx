@@ -97,7 +97,8 @@ export default function Remediation({ item, threadId, decidable, onDecided, lang
         </form>
       ) : (
         <>
-          <p className="why">Owner: {item.owner_role} · Due {item.due_date}</p>
+          {/* Where Vouch suggested no owner, none is named, as the owner field starts empty: the sentinel is English (#535). */}
+          <p className="why">{item.owner_role === NO_OWNER ? '' : `Owner: ${item.owner_role} · `}Due {item.due_date}</p>
           {item.status === 'draft' && <p className="why">Approve or discard it once the findings are confirmed.</p>}
           {done && <p className="why done-note">Done on {dateWords(done.at)}: {done.note}</p>}
           {plan && item.status === 'approved' && !done && (

@@ -32,6 +32,7 @@ from pydantic import BaseModel, StringConstraints
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, now, process_trail
 from vouch.database import AuditAction, Database, Goal, PlanWrites, Priority, RemediationWrites
 from vouch.graph import NO_NUL_PATTERN, Assessment, load_assessment, state_serializer, thread_key
+from vouch.language import priority_note
 from vouch.remediation import (
     NO_ITEM,
     DecidedItem,
@@ -262,7 +263,8 @@ def _shown(item: _Item, mark: Mark | None) -> dict[str, Any]:
     priority = (mark.priority if mark else None) or default_priority(
         item.assessment, item.key.requirement_id
     )
-    return item_data(item.decided, item.decided.status, priority, mark)
+    language = item.assessment.answer_language  # as shown_items says it (#535)
+    return item_data(item.decided, item.decided.status, priority, mark, language=language)
 
 
 def set_priority(
@@ -298,7 +300,7 @@ def set_priority(
         if priority == before:
             return _shown(item, item.mark)
         mark = Mark(priority=priority, done_at=None, done_note=None)
-        note = f"Priority: {priority} (was {before})."
+        note = priority_note(priority, before)
         entry = _entry(item.assessment, requirement_id, "priority", note, reviewer, clock())
         marking.write(item.key, item.assessment.control_id, mark, entry)
         return _shown(item, mark)

@@ -16,9 +16,14 @@ it (#140). "Not only compliant" and "nicht nur konform" are claims, not negation
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date
+from typing import TYPE_CHECKING
 
 from vouch.citations import LEAD_STATEMENT, occurs
 from vouch.documents import CYCLE_MONTHS, NO_REVIEW_DATE
+
+if TYPE_CHECKING:
+    from vouch.audit import Action  # vouch.audit imports vouch.graph, which imports this module
 
 
 @dataclass(frozen=True)
@@ -226,10 +231,10 @@ def cap_note(
 
 @dataclass(frozen=True)
 class NoteWords:
-    """The words Vouch stores in English on remediation items and trail notes, in one answer
+    """The words Vouch keeps in English on remediation items and trail notes, in one answer
     language (#535): its placeholders, by their English (vouch.graph's NOT_DRAFTED and NO_OWNER),
-    and the shapes of the notes an approval or discard, a question and a priority change store,
-    with the priorities as the report names them."""
+    the shapes of the notes an approval or discard, a question and a priority change store, and
+    the priorities as the report names them (vouch.report's words point here)."""
 
     placeholders: dict[str, str]
     decided: str  # {missing}, {owner} and {due}
@@ -239,6 +244,15 @@ class NoteWords:
 
 
 NOTE_WORDS = {
+    # As Vouch stores them: the writers (vouch.remediation, vouch.questions, vouch.plan) write
+    # these shapes and trail_note reads them back, so each shape is defined once.
+    "en": NoteWords(
+        placeholders={"not drafted": "not drafted", "no owner suggested": "no owner suggested"},
+        decided="{missing} Owner: {owner}. Due {due}.",
+        question="{question} (for {asked_of}, due {due})",
+        priority="Priority: {priority} (was {before}).",
+        priorities={"high": "high", "medium": "medium", "low": "low"},
+    ),
     "de": NoteWords(
         placeholders={
             "not drafted": "nicht entworfen",
@@ -251,18 +265,76 @@ NOTE_WORDS = {
         priorities={"high": "Hoch", "medium": "Mittel", "low": "Niedrig"},
     ),
 }
-"""The stored English words per answer language; English, and any language not here, as stored."""
+"""The words per answer language; any language not here says them as English stores them."""
+
+STORED = NOTE_WORDS["en"]
+"""The shapes and words Vouch stores, whatever the answer language."""
+
+
+def decided_note(missing: str, owner: str, due: date) -> str:
+    """The note an approval or discard of a remediation item stores (vouch.remediation)."""
+    return STORED.decided.format(missing=missing, owner=owner, due=due.isoformat())
+
+
+def question_note(question: str, asked_of: str, due: date) -> str:
+    """The note logging an open question stores (vouch.questions)."""
+    return STORED.question.format(question=question, asked_of=asked_of, due=due.isoformat())
+
+
+def priority_note(priority: str, before: str) -> str:
+    """The note a priority change stores (vouch.plan), the priorities by their keys."""
+    return STORED.priority.format(priority=priority, before=before)
+
+
+def _shapes(template: str, *tries: dict[str, str]) -> tuple[re.Pattern[str], ...]:
+    """The stored `template` as patterns, one per `tries` (a pattern for each field), tried in
+    order: its literal text escaped, each {field} a named group."""
+    parts = re.split(r"\{(\w+)\}", template)  # literal, field, literal, ...
+
+    def pattern(fields: dict[str, str]) -> re.Pattern[str]:
+        return re.compile(
+            "".join(
+                re.escape(part) if n % 2 == 0 else f"(?P<{part}>{fields[part]})"
+                for n, part in enumerate(parts)
+            ),
+            re.DOTALL,
+        )
+
+    return tuple(pattern(fields) for fields in tries)
+
 
 _DATE = r"\d{4}-\d{2}-\d{2}"
-# As vouch.remediation, vouch.questions and vouch.plan store them; a greedy first group keeps an
-# " Owner: " or " (for " inside the lead's text and takes the shape's own, the last.
-_DECIDED_NOTE = re.compile(
-    rf"(?P<missing>.*) Owner: (?P<owner>.*)\. Due (?P<due>{_DATE})\.", re.DOTALL
+# Where a note splits: the lead types the text after the split (an owner role such as "Asset
+# Owner: Plant 2", an asked-of such as "Leitung (for Werk 2)"), and the text before it ends a
+# sentence (Vouch's drafted missing text, a question) or is a placeholder. So the split is the
+# first after a sentence's end, which keeps a drafted text with " Owner: " mid-sentence whole
+# too; a text with no such end splits at the first.
+_SENTENCE = r".*?[.!?…][\"'“”»)]?"
+_FIRST = r".*?"
+_PLACEHOLDER = "|".join(re.escape(p) for p in STORED.placeholders)
+_DECIDED_NOTES = _shapes(
+    STORED.decided,
+    {"missing": f"(?:{_PLACEHOLDER}|{_SENTENCE})", "owner": ".*", "due": _DATE},
+    {"missing": _FIRST, "owner": ".*", "due": _DATE},
 )
-_QUESTION_NOTE = re.compile(
-    rf"(?P<question>.*) \(for (?P<asked_of>.*), due (?P<due>{_DATE})\)", re.DOTALL
+_QUESTION_NOTES = _shapes(
+    STORED.question,
+    {"question": _SENTENCE, "asked_of": ".*", "due": _DATE},
+    {"question": _FIRST, "asked_of": ".*", "due": _DATE},
 )
-_PRIORITY_NOTE = re.compile(r"Priority: (?P<priority>\w+) \(was (?P<before>\w+)\)\.")
+_PRIORITY_NOTES = _shapes(
+    STORED.priority, {field: "|".join(STORED.priorities) for field in ("priority", "before")}
+)
+
+
+def _found(note: str, shapes: tuple[re.Pattern[str], ...]) -> re.Match[str] | None:
+    return next((m for shape in shapes if (m := shape.fullmatch(note))), None)
+
+
+def says_no_owner(owner: str) -> bool:
+    """Whether an owner role is "no owner suggested" in any answer language's words: an approval
+    refuses each, as it refuses the English (#535)."""
+    return owner in {words.placeholders["no owner suggested"] for words in NOTE_WORDS.values()}
 
 
 def placeholder(text: str, code: str) -> str:
@@ -273,28 +345,26 @@ def placeholder(text: str, code: str) -> str:
     return words.placeholders.get(text, text) if words else text
 
 
-def trail_note(note: str, action: str, code: str) -> str:
+def trail_note(note: str, action: "Action", code: str) -> str:
     """An audit entry's stored note in the answer language `code` (#535): the note Vouch writes
-    for its `action` (an approval or discard, a question, a priority change) said in its words,
-    the placeholders in it too. A lead's own note, one in no shape of its action, or a language
-    with no words, stays as written."""
+    for its `action` (an approval or discard, a question, a priority change), read back by its
+    stored shape and said in the language's, the placeholders in it too. A lead's own note, one
+    in no shape of its action, or a language with no words, stays as written."""
     words = NOTE_WORDS.get(code)
     if words is None:
         return note
-    if action in ("approve", "discard") and (found := _DECIDED_NOTE.fullmatch(note)):
+    if action in ("approve", "discard") and (found := _found(note, _DECIDED_NOTES)):
         return words.decided.format(
             missing=placeholder(found["missing"], code),
             owner=placeholder(found["owner"], code),
             due=found["due"],
         )
-    if action == "question" and (found := _QUESTION_NOTE.fullmatch(note)):
+    if action == "question" and (found := _found(note, _QUESTION_NOTES)):
         return words.question.format(**found.groupdict())
-    if action == "priority" and (found := _PRIORITY_NOTE.fullmatch(note)):
-        priority, before = found["priority"], found["before"]
-        if priority in words.priorities and before in words.priorities:
-            return words.priority.format(
-                priority=words.priorities[priority], before=words.priorities[before]
-            )
+    if action == "priority" and (found := _found(note, _PRIORITY_NOTES)):
+        return words.priority.format(
+            priority=words.priorities[found["priority"]], before=words.priorities[found["before"]]
+        )
     return note
 
 

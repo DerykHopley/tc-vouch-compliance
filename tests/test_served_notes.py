@@ -2,7 +2,8 @@
 (#535): "not drafted", "no owner suggested", and the notes of an approval or discard, a question
 and a priority change. Stored items and audit entries stay English; the API says them again when
 it serves them, as vouch.language.stale_reason does for a stale document's reason (#359). English,
-and a language without German's words, read as stored."""
+and a language without German's words, read as stored. Each note's shape is vouch.language's
+NOTE_WORDS: the writers write it from there, and trail_note reads it back from there."""
 
 from dataclasses import replace
 from datetime import date, timedelta
@@ -12,22 +13,38 @@ import pytest
 import reviewing
 import test_memory
 from fastapi.testclient import TestClient
+from langgraph.store.memory import InMemoryStore
+from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture)
 from test_memory import app_on
 from test_plan import T0, assessment
 from test_report import assessed, entry, pdf_text, report_of, under
 
 from vouch import api, audit, graph, report, report_pdf
-from vouch.audit import AuditEntry, Page
-from vouch.language import placeholder, trail_note
+from vouch.audit import Action, AuditEntry, Page
+from vouch.graph import build_graph, thread_config
+from vouch.language import (
+    NOTE_WORDS,
+    decided_note,
+    placeholder,
+    priority_note,
+    question_note,
+    trail_note,
+)
+from vouch.memory import Memory, process_checkpointer
 from vouch.plan import card_flags
 from vouch.profile import load_named_profile
-from vouch.remediation import DecidedItem, Key
+from vouch.remediation import DecidedItem, Key, shown_items
 
 database_url = test_memory.database_url
 postgres = test_memory.postgres
 users = test_memory.users
 
 # --- The words, unit by unit -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("code", sorted(NOTE_WORDS))
+def test_each_languages_placeholders_are_vouchs_two(code):
+    assert set(NOTE_WORDS[code].placeholders) == {graph.NOT_DRAFTED, graph.NO_OWNER}
 
 
 def test_the_placeholders_are_said_in_german_and_as_stored_in_english():
@@ -39,6 +56,10 @@ def test_the_placeholders_are_said_in_german_and_as_stored_in_english():
 
 def test_a_drafted_missing_text_stays_as_written():
     assert placeholder("Ein Register der Schlüssel.", "de") == "Ein Register der Schlüssel."
+
+
+def test_the_reports_priority_words_are_the_notes():
+    assert report.words_for("de")["priorities"] is NOTE_WORDS["de"].priorities
 
 
 @pytest.mark.parametrize("action", ["approve", "discard"])
@@ -60,11 +81,20 @@ def test_a_not_drafted_items_discard_says_both_placeholders_in_german():
     )
 
 
-def test_a_missing_text_holding_owner_keeps_it_and_only_the_last_is_the_shapes():
-    note = "A list with an Owner: column. Owner: CISO. Due 2027-01-09."
+@pytest.mark.parametrize(
+    ("missing", "owner"),
+    [
+        ("Ein Register der Schlüssel.", "Asset Owner: Plant 2"),  # the lead's owner holds it
+        ("not drafted", "Asset Owner: Plant 2"),
+        ("A list with an Owner: column.", "CISO"),  # Vouch's missing text holds it
+    ],
+)
+def test_an_owner_in_the_missing_text_or_the_owner_role_stays_in_its_own_part(missing, owner):
+    note = decided_note(missing, owner, date(2027, 1, 9))
 
     assert trail_note(note, "approve", "de") == (
-        "A list with an Owner: column. Verantwortliche Rolle: CISO. Fällig am 2027-01-09."
+        f"{placeholder(missing, 'de')} Verantwortliche Rolle: {placeholder(owner, 'de')}. "
+        "Fällig am 2027-01-09."
     )
 
 
@@ -77,6 +107,14 @@ def test_a_questions_note_reads_in_german():
     assert trail_note(note, "question", "en") == note
 
 
+def test_an_asked_of_holding_for_stays_in_its_own_part():
+    note = question_note("Wer prüft das?", "Leitung (for Werk 2)", date(2026, 12, 1))
+
+    assert trail_note(note, "question", "de") == (
+        "Wer prüft das? (für Leitung (for Werk 2), fällig am 2026-12-01)"
+    )
+
+
 def test_a_priority_changes_note_reads_in_german_with_the_reports_priority_words():
     note = "Priority: low (was medium)."
 
@@ -84,12 +122,37 @@ def test_a_priority_changes_note_reads_in_german_with_the_reports_priority_words
     assert trail_note(note, "priority", "en") == note
 
 
-def test_the_priority_words_are_the_reports():
-    words = report.words_for("de")["priorities"]
-    for english, german in words.items():
-        assert trail_note(f"Priority: {english} (was {english}).", "priority", "de") == (
-            f"Priorität: {german} (vorher {german})."
-        )
+DUE = date(2027, 2, 8)
+
+
+@pytest.mark.parametrize(
+    ("action", "written", "german"),
+    [
+        (
+            "approve",
+            decided_note("Ein Register.", "IT-Leiter", DUE),
+            "Ein Register. Verantwortliche Rolle: IT-Leiter. Fällig am 2027-02-08.",
+        ),
+        (
+            "discard",
+            decided_note(graph.NOT_DRAFTED, graph.NO_OWNER, DUE),
+            (
+                "nicht entworfen Verantwortliche Rolle: keine verantwortliche Rolle vorgeschlagen. "
+                "Fällig am 2027-02-08."
+            ),
+        ),
+        (
+            "question",
+            question_note("Gibt es eine Liste?", "IT-Leiter", DUE),
+            "Gibt es eine Liste? (für IT-Leiter, fällig am 2027-02-08)",
+        ),
+        ("priority", priority_note("high", "low"), "Priorität: Hoch (vorher Niedrig)."),
+    ],
+)
+def test_each_note_vouch_writes_reads_back_in_each_language(action, written, german):
+    """A round trip: a reworded shape that trail_note can't read would fall back to English."""
+    assert trail_note(written, action, "de") == german
+    assert trail_note(written, action, "en") == written
 
 
 @pytest.mark.parametrize(
@@ -108,7 +171,7 @@ def test_the_priority_words_are_the_reports():
         ("Wer prüft das?", "question"),
     ],
 )
-def test_a_note_in_no_shape_of_its_action_stays_as_written(note, action):
+def test_a_note_in_no_shape_of_its_action_stays_as_written(note: str, action: Action):
     assert trail_note(note, action, "de") == note
 
 
@@ -206,6 +269,25 @@ def test_a_not_drafted_item_reads_in_german_in_a_german_improvement_reports_plan
     assert notes(shown) == [GERMAN_NOTE]
     assert plan_missing(improvement_of(NORDLICHT)) == ["not drafted"]
     assert notes(improvement_of(NORDLICHT)) == [NOT_DRAFTED_NOTE]
+
+
+def test_an_owner_cell_holding_the_no_owner_sentinel_reads_in_german():
+    """An approval refuses it, but where the sentinel reaches a German report it is German."""
+    latest = {"4.1.2": assessment("t1", {"M1": "not-evidenced"})}
+    decided = {k: replace(v, owner_role=graph.NO_OWNER) for k, v in not_drafted_approved().items()}
+    for profile, owner in [
+        (ALPENWERK, "keine verantwortliche Rolle vorgeschlagen"),
+        (NORDLICHT, graph.NO_OWNER),
+    ]:
+        shown = report.readiness_report(
+            profile,
+            profile.isa_edition().controls,
+            latest,
+            decided=decided,
+            trail=Page([], None),
+            today=TODAY,
+        )
+        assert [i["owner_role"] for g in shown["remediation"] for i in g["items"]] == [owner]
 
 
 @pytest.mark.parametrize("built", [readiness_of, improvement_of])
@@ -311,3 +393,77 @@ def test_alpenwerks_priority_change_serves_its_item_and_note_in_german(users):
     assert changed.status_code == 200, changed.text
     assert changed.json()["item"]["missing"] == "nicht entworfen"
     assert trail[0]["note"] == "Priorität: Niedrig (vorher Hoch)."
+
+
+def stored_as_english(user: dict[str, str], thread_id: str) -> None:
+    """The Alpenwerk thread's state saying English, as an assessment kept before its answer
+    language was stored reads when its profile can't be read (vouch.graph._profile_language)."""
+    scope = Memory(InMemoryStore(), user["X-Test-User"], "alpenwerk").scope
+    built = build_graph(None, checkpointer=process_checkpointer())
+    built.update_state(thread_config(thread_id, scope), {"answer_language": "en"})
+
+
+def test_an_item_reads_in_its_assessments_language_on_every_route(users):
+    """One source: the working paper, the decision's answer and a plan route's answer agree, so
+    the item never flips language after a priority change."""
+    alice = under(users[0], "alpenwerk")
+    due = (date.today() + timedelta(days=30)).isoformat()
+    approve = {"decision": "approve", "owner_role": "IT-Leiter", "due_date": due}
+    with TestClient(app_on(None)) as client:
+        client.put("/api/goal", json={"goal": "internal-improvement"}, headers=alice)
+        thread_id = assessed(client, alice)["thread_id"]
+        reviewing.accepted(
+            client,
+            thread_id,
+            overrides=[S1_NOT_EVIDENCED],
+            decisions={"S1": approve},
+            headers=alice,
+        )
+        stored_as_english(alice, thread_id)
+        kept = reviewing.decide(client, thread_id, "S1", approve, alice)  # the same again
+        changed = client.put(
+            f"/api/assessments/{thread_id}/remediation/S1/priority",
+            json={"priority": "low"},
+            headers=alice,
+        )
+        shown = served_s1(client, alice, thread_id)
+
+    assert changed.status_code == 200, changed.text
+    assert [kept["missing"], changed.json()["item"]["missing"], shown["missing"]] == [
+        graph.NOT_DRAFTED
+    ] * 3
+
+
+def test_the_german_no_owner_phrase_is_refused_as_an_owner_like_the_english_one(users):
+    alice = under(users[0], "alpenwerk")
+    due = (date.today() + timedelta(days=30)).isoformat()
+    with TestClient(app_on(None)) as client:
+        thread_id = assessed(client, alice)["thread_id"]
+        assert reviewing.confirm(client, thread_id, [S1_NOT_EVIDENCED], alice).status_code == 200
+        refused = [
+            client.post(
+                f"/api/assessments/{thread_id}/remediation/S1",
+                json={"decision": "approve", "owner_role": owner, "due_date": due},
+                headers=alice,
+            )
+            for owner in (graph.NO_OWNER, "keine verantwortliche Rolle vorgeschlagen")
+        ]
+        still = served_s1(client, alice, thread_id)
+
+    assert [r.status_code for r in refused] == [422, 422]
+    assert refused[1].json()["detail"] == refused[0].json()["detail"]
+    assert still["status"] == "draft"
+
+
+def test_a_drafts_item_keeps_the_no_owner_sentinel_and_says_not_drafted_in_its_language():
+    german = replace(
+        assessment("t1", {"M1": "not-evidenced"}),
+        remediation=[graph.RemediationItem.not_drafted("M1", date(2026, 11, 9))],
+        answer_language="de",
+    )
+
+    (item,) = shown_items(german, {})
+    (as_english,) = shown_items(replace(german, answer_language="en"), {})
+
+    assert (item["missing"], item["owner_role"]) == ("nicht entworfen", graph.NO_OWNER)
+    assert (as_english["missing"], as_english["owner_role"]) == (graph.NOT_DRAFTED, graph.NO_OWNER)
