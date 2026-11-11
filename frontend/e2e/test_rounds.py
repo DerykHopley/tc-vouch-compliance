@@ -12,7 +12,10 @@ open with the name field) and the comparison fit: nothing scrolls sideways and e
 at least 44px. The layout check runs from whatever state the server is in."""
 
 import json
+import os
 import re
+import subprocess
+from pathlib import Path
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
@@ -256,3 +259,35 @@ def test_the_lead_opens_a_control_from_the_round_comparison_and_comes_back_to_th
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         ), "the round comparison scrolls sideways at 400px"
         assert small_targets(page) == []
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_the_lead_opens_company_rounds_on_the_seeded_demo_round(page: Page, rounds_url):
+    """#579, the user story: Nordlicht started afresh, then the demo round seeded through this
+    server's API (`vouch-seed-demo-round --api`, as for a preview); Company › Rounds marks
+    "Q2 2026" compared by default, and its comparison opens on three controls better and none
+    worse. Last in this file: the seed works Nordlicht's rounds and counts."""
+    assert page.request.post(f"{rounds_url}/api/progress/fresh-start").ok
+    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "VOUCH_DATABASE_URL")}
+    seeded = subprocess.run(
+        ["uv", "run", "--project", str(ROOT), "vouch-seed-demo-round", "--api", rounds_url],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    page.set_viewport_size({"width": 1280, "height": 900})
+    with page.expect_response(re.compile(r".*/api/rounds$")):
+        page.goto(f"{rounds_url}/company")
+    section = page.get_by_role("region", name="Rounds", exact=True)
+    marked = section.get_by_role("listitem").filter(has_text="Compared by default")
+    expect(marked).to_contain_text("Q2 2026")
+    with page.expect_response(re.compile(r".*/api/rounds/\d+/comparison$")):
+        marked.get_by_role("link").click()
+    changes = page.get_by_role("region", name="Summary").get_by_role("list", name="Changes")
+    expect(changes).to_contain_text("Better 3")
+    expect(changes).to_contain_text("Worse 0")
