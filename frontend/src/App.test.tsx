@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import type { CompanyFacts } from './company.ts'
 import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
 /** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
@@ -422,6 +423,106 @@ describe('the working paper', () => {
 
         expect(confirm).not.toHaveBeenCalled()
         expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+      })
+
+      describe('an open override editor with input in it counts as unsaved (issue 356)', () => {
+        const editorOfM1 = () => screen.getByRole('form', { name: 'Override M1' })
+        const reasonOfM1 = () => within(editorOfM1()).getByLabelText<HTMLTextAreaElement>('Reason (required)')
+        const unload = () => {
+          const event = new Event('beforeunload', { cancelable: true })
+          window.dispatchEvent(event)
+          return event.defaultPrevented
+        }
+        async function typeReasonOfM1() {
+          await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+          await userEvent.type(reasonOfM1(), 'The rollout record shows it.')
+        }
+
+        it('a typed reason, not Saved: the index asks; Stay keeps the typed reason', async () => {
+          await openPaper()
+          await typeReasonOfM1()
+          const confirm = asking(false)
+
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).toHaveBeenCalledWith(ONE)
+          expect(window.location.pathname).toBe('/controls/4.1.2')
+          expect(reasonOfM1().value).toBe('The rollout record shows it.')
+        })
+
+        it('a typed reason, not Saved: Leave opens the other control', async () => {
+          await openPaper()
+          await typeReasonOfM1()
+          const confirm = asking(true)
+
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).toHaveBeenCalledWith(ONE)
+          expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+          expect(window.location.pathname).toBe('/controls/4.1.3')
+        })
+
+        it('a changed verdict alone asks too', async () => {
+          await openPaper()
+          await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+          await userEvent.selectOptions(within(editorOfM1()).getByLabelText('Verdict'), 'not-evidenced')
+          const confirm = asking(false)
+
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).toHaveBeenCalledWith(ONE)
+        })
+
+        it('an editor opened and left unchanged asks nothing, and holds back no reload', async () => {
+          await openPaper()
+          await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+          const confirm = asking(false)
+
+          expect(unload()).toBe(false)
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).not.toHaveBeenCalled()
+          expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+        })
+
+        it("reopening a cancelled editor, left untouched, asks nothing: its typing isn't kept", async () => {
+          await openPaper()
+          await typeReasonOfM1()
+          await userEvent.click(within(editorOfM1()).getByRole('button', { name: 'Cancel' }))
+          await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+          const confirm = asking(false)
+
+          expect(reasonOfM1().value).toBe('')
+          expect(unload()).toBe(false)
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).not.toHaveBeenCalled()
+          expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+        })
+
+        it('a reload or closing the tab is held back while typed; not once cancelled', async () => {
+          await openPaper()
+          await typeReasonOfM1()
+          expect(unload()).toBe(true)
+
+          await userEvent.click(within(editorOfM1()).getByRole('button', { name: 'Cancel' }))
+
+          expect(unload()).toBe(false)
+        })
+
+        it('once Saved, the override counts once, as a saved one (issue 182)', async () => {
+          await openPaper()
+          await typeReasonOfM1()
+          await userEvent.selectOptions(within(editorOfM1()).getByLabelText('Verdict'), 'evidenced')
+          await userEvent.click(within(editorOfM1()).getByRole('button', { name: 'Save' }))
+          await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+          await userEvent.type(reasonOfM1(), ' Again.')
+          const confirm = asking(false)
+
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).toHaveBeenCalledWith(ONE)
+        })
       })
 
       it('asks nothing after Confirm findings records the overrides', async () => {
@@ -1293,7 +1394,9 @@ describe('Ask Vouch', () => {
     expect(within(log).getByText('Assess 1.1.1')).toBeTruthy() // the chip's message, as the lead's
     expect(within(log).queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
     await press('Close the chat')
+    await pastDoubleClick() // a click within a double-click's time of Close presses nothing (#333)
     await open()
+    expect(bubble()).toBeTruthy()
     expect(greetings).toHaveLength(1)
   })
 
@@ -1532,6 +1635,7 @@ describe('Ask Vouch', () => {
       expect(asked[1].thread_id).toBe('t9')
 
       await press('Close the chat')
+      await pastDoubleClick() // a click within a double-click's time of Close presses nothing (#333)
       await open()
       await waitFor(() => expect(greetings).toHaveLength(2))
     })
