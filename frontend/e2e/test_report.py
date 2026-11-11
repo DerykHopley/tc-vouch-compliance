@@ -21,6 +21,7 @@ from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from touch_targets import small_targets
+from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, UNBREAKABLE, with_long_quotes
 
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
@@ -266,18 +267,6 @@ def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
 
 TABLES = ("table.report-controls", "table.report-trail")
 REMEDIATION = "section[aria-labelledby='report-remediation'] table"
-# Free texts holding a token no hyphenation can break (#530's verify), each of which widened its
-# column past the sheet while the cells broke words only at hyphens or spaces: a link, a signed
-# link (a browser may break a link after a slash, not in its id and signature), a file name under
-# 31 characters, and a German compound in Nordlicht's English report.
-UNBREAKABLE = {
-    "link": "Siehe https://intranet.alpenwerk.example/isms/richtlinien/"
-    "Protokollierungsrichtlinie_Version3_freigegeben.pdf für Details.",
-    "signed link": "Kein Nachweis unter https://intranet.alpenwerk.example/isms/dokument?"
-    "id=8f14e45fceea167a5a36dedd4bea2543&sig=c9a1b2d3e4f506178f14e45fceea167a5a36dedd hinterlegt.",
-    "file name": "Siehe Zugriffsmatrix_Q3_2026_v2.xlsx dazu.",
-    "compound": "The Informationssicherheitsmanagementsystem was signed off.",
-}
 
 
 def with_a_full_trail(page: Page) -> None:
@@ -378,6 +367,40 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
                     " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
                 )
                 assert days and all(lines == 1 for lines in days), (profile, width, days)
+
+
+def long_report_quotes(served: dict) -> None:
+    """An accepted control's quotes hold LONG_QUOTES, one each, copying its first quote."""
+    control = next(c for c in served["controls"] if c["status"] == "accepted" and c["quotes"])
+    first = control["quotes"][0]
+    control["quotes"] = [{**first, "quote": quote} for quote in LONG_QUOTES]
+
+
+@pytest.mark.parametrize("width", [701, 390])
+def test_a_quote_holding_a_long_link_or_path_does_not_widen_the_controls_table(
+    page: Page, report_url, nordlicht_later, width
+):
+    """#538: a quote broke only at hyphens or spaces (#511), and the quote row spans the controls
+    table, so a link, a signed link or a path widened the table to its own width (653 in 603 at
+    701, 645 in 324 at 390). A token too long for the line breaks anywhere, as #530's columns do:
+    each such quote's least width fits the table's box. Measured on the quote in one page load, so
+    it holds whatever the Verdict column does (#550)."""
+    page.set_viewport_size({"width": width, "height": 900})
+    nordlicht_later(report_url)
+    for profile in ("nordlicht", "alpenwerk"):
+        accepted(page.request, report_url, "4.1.2", profile)
+        page.unroute("**/api/report")  # the last company's route gives way to this one's
+        make_current(page.request, report_url, profile)  # #480: the report opens under it
+        with_long_quotes(page, "**/api/report", profile, long_report_quotes)
+
+        report = open_report(page, report_url)
+        quotes = report.locator("table.report-controls blockquote")
+        for quote in LONG_QUOTES:
+            expect(quotes.filter(has_text=quote)).to_have_count(1)
+        measured = page.evaluate(LONG_QUOTES_LEAST, {"box": ".table-wrap", "hide": False})
+
+        assert len(measured) == len(LONG_QUOTES), measured
+        assert all(q["wide"] <= q["room"] for q in measured), (profile, width, measured)
 
 
 def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
