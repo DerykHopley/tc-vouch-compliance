@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
 import type { CompanyFacts } from './company.ts'
 import { DEVELOPER_SETTINGS } from './developerFixtures.ts'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
 import { type Overview, OVERVIEW_FAILED } from './overview.ts'
 
 /** The window's width and theme as media queries see them; `resizeTo` changes the width, telling each listener. */
@@ -1393,7 +1394,9 @@ describe('Ask Vouch', () => {
     expect(within(log).getByText('Assess 1.1.1')).toBeTruthy() // the chip's message, as the lead's
     expect(within(log).queryByRole('button', { name: 'Assess 1.1.1' })).toBeNull()
     await press('Close the chat')
+    await pastDoubleClick() // a click within a double-click's time of Close presses nothing (#333)
     await open()
+    expect(bubble()).toBeTruthy()
     expect(greetings).toHaveLength(1)
   })
 
@@ -1632,6 +1635,7 @@ describe('Ask Vouch', () => {
       expect(asked[1].thread_id).toBe('t9')
 
       await press('Close the chat')
+      await pastDoubleClick() // a click within a double-click's time of Close presses nothing (#333)
       await open()
       await waitFor(() => expect(greetings).toHaveLength(2))
     })
