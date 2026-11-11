@@ -130,6 +130,7 @@ describe('the round comparison view (ticket 573)', () => {
     expect(row('5.2.1').textContent).toContain('5.2.1') // no card: its id alone
     expect(row('4.1.2').textContent).toContain('Done since: M2 Access rights are reviewed.')
     expect(row('1.3.1').textContent).toContain('Answered since: Who signs the policy?')
+    expect(row('1.3.1').querySelector('.compare-since [lang="en"]')?.textContent).toBe('Who signs the policy?')
     expect(row('1.1.1').textContent).not.toContain('since:')
   })
 

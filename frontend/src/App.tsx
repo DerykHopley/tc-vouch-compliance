@@ -20,7 +20,8 @@ import UserMenu from './UserMenu.tsx'
 import type { Theme } from './user.ts'
 import { type Run, useAssessment } from './useAssessment.ts'
 import RoundComparisonView from './RoundComparison.tsx'
-import { roundPath } from './rounds.ts'
+import { forgetScrolls } from './roundComparison.ts'
+import { COMPANY_PATH, roundPath } from './rounds.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
 
@@ -37,7 +38,6 @@ type View = { name: 'dossier' } | { name: 'report' } | { name: 'company' } | { n
 export const DEVELOPER_PATH = '/developer'
 export const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
-const COMPANY_PATH = '/company'
 const DOCUMENTS_PATH = '/documents' // the documents' own page before #495: it leads to the Company tab
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
 const ROUND_PATH = /^\/company\/rounds\/([1-9]\d{0,8})$/
@@ -146,8 +146,14 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     return viewAt(pathname)
   })
   const [focusHeading, setFocusHeading] = useState(arrival !== null) // ends with the first move to another view
-  // The round comparison a working paper was opened from (#573): its breadcrumb leads back there, until another view.
-  const [paperFrom, setPaperFrom] = useState<{ number: number; name: string } | null>(null)
+  // The round comparison a working paper was opened from (#573): that control's breadcrumb leads back there, until
+  // another view; another control's paper, reached by a link from it, has the Overview's.
+  const [paperFrom, setPaperFrom] = useState<{ number: number; name: string; controlId: string } | null>(null)
+  /** Off to a view other than a paper or a comparison: no breadcrumb back, and no comparison's old scroll (#573). */
+  const leaveRounds = () => {
+    setPaperFrom(null)
+    forgetScrolls()
+  }
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
@@ -161,7 +167,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
       }
       setFocusHeading(false)
       const next = viewAt(window.location.pathname)
-      if (next.name !== 'paper' && next.name !== 'round') setPaperFrom(null)
+      if (next.name !== 'paper' && next.name !== 'round') leaveRounds()
       setView(next)
     }
     // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
@@ -181,6 +187,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     const path = pathOf(next)
     if (path !== shownPath.current && !mayLeave()) return false // the view shown again asks nothing
     if (next.name !== 'paper') setPaperFrom(null)
+    if (next.name !== 'paper' && next.name !== 'round') forgetScrolls()
     if (window.location.pathname !== path) window.history.pushState(null, '', path)
     setFocusHeading(false)
     setView(next)
@@ -355,7 +362,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
           <RoundComparisonView key={view.number} number={view.number}
             names={overview.state.status === 'ready' ? overview.state.overview : undefined}
             onRounds={() => showView({ name: 'company' })} onOpen={(controlId, name) => {
-              if (showView({ name: 'paper', controlId })) setPaperFrom({ number: view.number, name })
+              if (showView({ name: 'paper', controlId })) setPaperFrom({ number: view.number, name, controlId })
             }} />
         )
         : shown === 'developer' && developer ? (
@@ -380,7 +387,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
               run={paperRun ?? idle} checking={paperRun === null}
               passing={passing} onAssess={() => { if (!passing) void start(control.id) }} onOpen={(id) => open(id, false)}
               onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh}
-              back={paperFrom ? { label: `Compared with ${paperFrom.name}`, href: roundPath(paperFrom.number),
+              back={paperFrom?.controlId === control.id ? { label: `Compared with ${paperFrom.name}`, href: roundPath(paperFrom.number),
                 onBack: () => showView({ name: 'round', number: paperFrom.number }) } : undefined}
               onItemDecided={noteItem} onQuestionsChanged={() => void refreshOverview()} />
           </main>

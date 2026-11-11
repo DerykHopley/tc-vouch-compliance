@@ -1,10 +1,11 @@
-import { type MouseEvent, type ReactNode, useLayoutEffect, useState } from 'react'
-import { type Verdict, VERDICT_WORDS } from './assessment.ts'
-import { controlPath, dateWords, type Overview, SEGMENTS } from './overview.ts'
+import { type ReactNode, useLayoutEffect, useState } from 'react'
+import { VERDICT_WORDS } from './assessment.ts'
+import { controlPath, dateWords, openInPlace, type Overview, SEGMENTS } from './overview.ts'
 import { areas } from './paper.ts'
 import {
-  CHANGE_WORDS, changesFirst, type ControlChange, keepPlace, placeOf, type RoundComparison, useComparison,
+  acceptedWord, CHANGE_WORDS, changesFirst, type ControlChange, keepPlace, placeOf, type RoundComparison, useComparison,
 } from './roundComparison.ts'
+import { COMPANY_PATH } from './rounds.ts'
 
 /** What the view names controls, requirements and questions by: the overview's, when read. */
 export type ControlNames = Pick<Overview, 'answer_language'> & {
@@ -23,17 +24,6 @@ type Props = {
   onRounds: () => void
 }
 
-const ROUNDS_PATH = '/company'
-
-/** A plain primary click is the app's; a Ctrl/Cmd/Shift/Alt or non-primary click is the browser's, as a Control card. */
-function inPlace(e: MouseEvent, go: () => void) {
-  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
-  e.preventDefault()
-  go()
-}
-
-const acceptedWord = (verdict: Verdict | null) => verdict === null ? 'Not accepted' : VERDICT_WORDS[verdict]
-
 /**
  * The round comparison (#573; `docs/design.md`, Components: Round comparison view) at `/company/rounds/<number>`: now
  * against one closed review round, a summary on top, then the controls by chapter, changes first and the unchanged ones
@@ -43,7 +33,7 @@ const acceptedWord = (verdict: Verdict | null) => verdict === null ? 'Not accept
 export default function RoundComparisonView({ number, names, onOpen, onRounds }: Props) {
   const { state, tryAgain } = useComparison(number)
   const back = (
-    <a className="btn btn-ghost crumb" href={ROUNDS_PATH} onClick={(e) => inPlace(e, onRounds)}>← Rounds</a>
+    <a className="btn btn-ghost crumb" href={COMPANY_PATH} onClick={(e) => openInPlace(e, onRounds)}>← Rounds</a>
   )
   if (state.status === 'loading') {
     return <main className="compare-view wrap">{back}<p className="lbl" role="status">Loading the round comparison…</p></main>
@@ -56,7 +46,7 @@ export default function RoundComparisonView({ number, names, onOpen, onRounds }:
           <p role="alert" className="answer">{state.message}</p>
           {state.status === 'failed'
             ? <button className="btn" onClick={tryAgain}>Try again</button>
-            : <a className="compare-back" href={ROUNDS_PATH} onClick={(e) => inPlace(e, onRounds)}>Back to the rounds</a>}
+            : <a className="compare-back" href={COMPANY_PATH} onClick={(e) => openInPlace(e, onRounds)}>Back to the rounds</a>}
         </section>
       </main>
     )
@@ -160,7 +150,7 @@ function Rows({ rows, comparison, names, onOpen }: { rows: ControlChange[]; comp
             <tr key={c.control_id}>
               <th scope="row" data-label="Control">
                 {card
-                  ? <a href={controlPath(c.control_id)} onClick={(e) => inPlace(e, () => onOpen(c.control_id))}>{label}</a>
+                  ? <a href={controlPath(c.control_id)} onClick={(e) => openInPlace(e, () => onOpen(c.control_id))}>{label}</a>
                   : label}
               </th>
               <td data-label="Then → now"><span>{acceptedWord(c.before)} → {acceptedWord(c.after)}</span></td>
@@ -179,7 +169,7 @@ function Rows({ rows, comparison, names, onOpen }: { rows: ControlChange[]; comp
                     })}
                     {answered.map((a) => {
                       const text = names?.questions?.[a.control_id]?.find((q) => q.id === a.question_id)?.question
-                      return <li key={`a-${a.question_id}`}>Answered since: {text ?? `question ${a.question_id}`}</li>
+                      return <li key={`a-${a.question_id}`}>Answered since: {text ? <span lang={language}>{text}</span> : `question ${a.question_id}`}</li>
                     })}
                   </ul>
                 )}

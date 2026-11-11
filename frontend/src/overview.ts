@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { type MouseEvent, useCallback, useRef, useState } from 'react'
 import type { Assessment, Citation, ProtectionLevel, ReviewStatus, Verdict } from './assessment.ts'
 import type { OpenQuestion } from './questions.ts'
 import type { PaperRequirement } from './paper.ts'
@@ -115,6 +115,14 @@ export const dateWords = (at: string) =>
 
 /** A control's working paper's address. */
 export const controlPath = (id: string) => `/controls/${encodeURIComponent(id)}`
+
+/** A click on a link to a working paper (#231, #311), on a card or a round comparison's row (#573): a plain primary
+ * click opens it in place; a Ctrl/Cmd/Shift/Alt or non-primary click is the browser's (a new tab or window). */
+export function openInPlace(e: MouseEvent, open: () => void) {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+  e.preventDefault()
+  open()
+}
 
 export const OVERVIEW_FAILED = 'The overview could not be loaded just now. Please try again.'
 

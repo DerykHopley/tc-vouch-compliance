@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Verdict } from './assessment.ts'
+import { type Verdict, VERDICT_WORDS } from './assessment.ts'
 import type { NowAndThen } from './overview.ts'
 import type { ListedRound } from './rounds.ts'
 import { authHeaders, SESSION_ENDED, sessionEnded } from './session.ts'
@@ -106,3 +106,11 @@ export const placeOf = (number: number): Place => places.get(number) ?? { unfold
 export function keepPlace(number: number, change: Partial<Place>) {
   places.set(number, { ...placeOf(number), ...change })
 }
+
+/** Leaving for a view other than a working paper or a comparison: no comparison comes back to its old scroll. */
+export function forgetScrolls() {
+  for (const [number, place] of places) places.set(number, { ...place, scrollY: null })
+}
+
+/** An accepted verdict, or none, as a comparison names it (the Dossier's and the round comparison view's). */
+export const acceptedWord = (verdict: Verdict | null) => verdict === null ? 'Not accepted' : VERDICT_WORDS[verdict]

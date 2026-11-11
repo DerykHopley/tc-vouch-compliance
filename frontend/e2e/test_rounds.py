@@ -16,6 +16,7 @@ import re
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
+from current_company import current_company
 from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
 from touch_targets import small_targets
@@ -217,38 +218,41 @@ def test_the_lead_opens_a_control_from_the_round_comparison_and_comes_back_to_th
     """#573, the user story: the round comparison's summary and chapters; a control opened from
     it, and the breadcrumb back to it, with the folds and the scroll as they were. Then at 400px
     each control is a card, nothing scrolls sideways and every control is at least 44px."""
-    number, control_id = compared_after_a_change(page.request, rounds_url, "Comparison check")
-    page.set_viewport_size({"width": 1280, "height": 600})
-    with page.expect_response(f"**/api/rounds/{number}/comparison"):
-        page.goto(f"{rounds_url}/company/rounds/{number}")
-    tab = page.get_by_role("navigation", name="Main").get_by_role("link", name="Company")
-    expect(tab).to_have_attribute("aria-current", "page")
-    summary = page.get_by_role("region", name="Summary")
-    expect(summary.get_by_role("list", name="Changes")).to_contain_text("New 1")
-    folds = page.locator(".compare-chapter details")
-    expect(folds.first).to_be_visible()
-    folds.first.locator("summary").click()
-    expect(folds.first).to_have_attribute("open", "")
-    row = page.get_by_role("row", name=re.compile(rf"^{re.escape(control_id)} "))
-    link = row.get_by_role("link")
-    link.scroll_into_view_if_needed()
-    scrolled = page.evaluate("window.scrollY")
-    assert scrolled > 0, "the check needs the comparison scrolled"
-    link.click()
-    expect(page).to_have_url(f"{rounds_url}/controls/{control_id}")
+    # Under Alpenwerk (#525): closing a round here leaves Nordlicht's first round open for the
+    # first check above, whichever order the checks run in.
+    with current_company(page.request, rounds_url, "alpenwerk"):
+        number, control_id = compared_after_a_change(page.request, rounds_url, "Comparison check")
+        page.set_viewport_size({"width": 1280, "height": 600})
+        with page.expect_response(f"**/api/rounds/{number}/comparison"):
+            page.goto(f"{rounds_url}/company/rounds/{number}")
+        tab = page.get_by_role("navigation", name="Main").get_by_role("link", name="Company")
+        expect(tab).to_have_attribute("aria-current", "page")
+        summary = page.get_by_role("region", name="Summary")
+        expect(summary.get_by_role("list", name="Changes")).to_contain_text("New 1")
+        folds = page.locator(".compare-chapter details")
+        expect(folds.first).to_be_visible()
+        folds.first.locator("summary").click()
+        expect(folds.first).to_have_attribute("open", "")
+        row = page.get_by_role("row", name=re.compile(rf"^{re.escape(control_id)} "))
+        link = row.get_by_role("link")
+        link.scroll_into_view_if_needed()
+        scrolled = page.evaluate("window.scrollY")
+        assert scrolled > 0, "the check needs the comparison scrolled"
+        link.click()
+        expect(page).to_have_url(f"{rounds_url}/controls/{control_id}")
 
-    crumbs = page.get_by_role("navigation", name="Breadcrumb")
-    with page.expect_response(f"**/api/rounds/{number}/comparison"):
-        crumbs.get_by_role("link", name=re.compile("^Compared with ")).click()
-    expect(page).to_have_url(f"{rounds_url}/company/rounds/{number}")
-    expect(folds.first).to_have_attribute("open", "")
-    expect(folds.nth(1)).not_to_have_attribute("open", "")
-    page.wait_for_function(f"Math.abs(window.scrollY - {scrolled}) < 2")
+        crumbs = page.get_by_role("navigation", name="Breadcrumb")
+        with page.expect_response(f"**/api/rounds/{number}/comparison"):
+            crumbs.get_by_role("link", name=re.compile("^Compared with ")).click()
+        expect(page).to_have_url(f"{rounds_url}/company/rounds/{number}")
+        expect(folds.first).to_have_attribute("open", "")
+        expect(folds.nth(1)).not_to_have_attribute("open", "")
+        page.wait_for_function(f"Math.abs(window.scrollY - {scrolled}) < 2")
 
-    page.set_viewport_size({"width": 400, "height": 900})
-    card = page.locator(".compare-controls tbody tr").first
-    assert card.evaluate("r => getComputedStyle(r).display") == "block"
-    assert page.evaluate(
-        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
-    ), "the round comparison scrolls sideways at 400px"
-    assert small_targets(page) == []
+        page.set_viewport_size({"width": 400, "height": 900})
+        card = page.locator(".compare-controls tbody tr").first
+        assert card.evaluate("r => getComputedStyle(r).display") == "block"
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        ), "the round comparison scrolls sideways at 400px"
+        assert small_targets(page) == []
