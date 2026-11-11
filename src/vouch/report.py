@@ -46,6 +46,7 @@ from vouch.dossier import (
 )
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
+from vouch.language import placeholder, trail_note
 from vouch.plan import IMPROVEMENT, CardFlags
 from vouch.profile import ComplianceProfile, ProtectionLevel
 from vouch.questions import OpenQuestion
@@ -504,7 +505,7 @@ def readiness_report(
     latest = scope.counted(latest)
     shown = [_control(control, latest.get(control.id)) for control in applicable]
     reviewers = [row["reviewer"] for row in shown if row["reviewer"] is not None]
-    remediation = _remediation(applicable, latest, decided)
+    remediation = _remediation(applicable, latest, decided, profile.answer_language)
     approved = sum(len(group["items"]) for group in remediation)
     return {
         "goal": "audit-readiness",
@@ -515,9 +516,19 @@ def readiness_report(
         "controls": shown,
         "remediation": remediation,
         "not_applicable": _not_applicable(profile, scope.controls),
-        "trail": {"entries": [e.to_dict() for e in trail.entries], "next": trail.next},
+        "trail": {
+            "entries": trail_entries(trail.entries, profile.answer_language),
+            "next": trail.next,
+        },
         "disclaimer": disclaimer(reviewers, profile.answer_language),
     }
+
+
+def trail_entries(entries: Iterable[audit.AuditEntry], language: str) -> list[dict[str, Any]]:
+    """Audit entries as the API serves them, each note Vouch wrote in the answer `language`
+    (vouch.language.trail_note, #535): the report's trail and GET /api/audit-trail say them
+    alike. The stored entries stay as written."""
+    return [e.to_dict() | {"note": trail_note(e.note, e.action, language)} for e in entries]
 
 
 def _accepted(assessment: Assessment | None) -> TypeGuard[Assessment]:
@@ -571,9 +582,11 @@ def _remediation(
     controls: list[IsaControl],
     latest: Mapping[str, Assessment],
     decided: Mapping[Key, DecidedItem],
+    language: str,
 ) -> list[ControlItems]:
     """The approved items of each accepted control's newest assessment, in its items' order,
-    under their control; a control with none is left out."""
+    under their control; a control with none is left out. A placeholder in the answer
+    `language` (vouch.language.placeholder, #535)."""
     grouped: list[ControlItems] = []
     for control in controls:
         assessment = latest.get(control.id)
@@ -586,7 +599,7 @@ def _remediation(
                 items.append(
                     {
                         "requirement_id": kept.requirement_id,
-                        "missing": kept.missing,
+                        "missing": placeholder(kept.missing, language),
                         "owner_role": kept.owner_role,
                         "due_date": kept.due_date.isoformat(),
                     }
@@ -642,7 +655,7 @@ def improvement_report(
     scope = applicability(profile, controls)
     applicable = scope.applicable
     latest = scope.counted(latest)
-    plan = _plan(applicable, history, decided, marks, flags)
+    plan = _plan(applicable, history, decided, marks, flags, profile.answer_language)
     listed = sum(len(group["items"]) for group in plan)
     reviewers = [
         row["reviewer"]
@@ -658,7 +671,10 @@ def improvement_report(
         "comparison": comparison,
         "plan": plan,
         "questions": _questions(applicable, asked, today),
-        "trail": {"entries": [e.to_dict() for e in trail.entries], "next": trail.next},
+        "trail": {
+            "entries": trail_entries(trail.entries, profile.answer_language),
+            "next": trail.next,
+        },
         "disclaimer": disclaimer(reviewers, profile.answer_language, improvement=True),
     }
 
@@ -669,11 +685,12 @@ def _plan(
     decided: Mapping[Key, DecidedItem],
     marks: Mapping[Key, Mark],
     flags: Mapping[str, CardFlags],
+    language: str,
 ) -> list[PlanGroup]:
     """For each control, the approved items of its newest accepted assessment that has any (so a
     Closed control keeps the items that closed it), by priority (the lead's, else the default),
     then in the base framework's control order and the assessment's item order. A priority with
-    no item is left out."""
+    no item is left out. A placeholder in the answer `language` (#535)."""
     order = {control.id: n for n, control in enumerate(controls)}
     planned: dict[str, list[tuple[Priority, PlanItem]]] = {}
     for assessment in history:  # newest first: the first with an approved item is the plan
@@ -697,7 +714,7 @@ def _plan(
             item: PlanItem = {
                 "control_id": assessment.control_id,
                 "requirement_id": kept.requirement_id,
-                "missing": kept.missing,
+                "missing": placeholder(kept.missing, language),
                 "owner_role": kept.owner_role,
                 "due_date": kept.due_date.isoformat(),
                 "status": state,

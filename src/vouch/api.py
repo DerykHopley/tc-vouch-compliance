@@ -94,7 +94,7 @@ from vouch.isa import (
     UnknownControlError,
     load_base_framework,
 )
-from vouch.language import lead_statement_label, stale_reason, statement_note
+from vouch.language import lead_statement_label, placeholder, stale_reason, statement_note
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
     Memory,
@@ -677,6 +677,13 @@ def _evidence_in_answer_language(served: dict[str, Any], language: str) -> dict[
     }
 
 
+def _item_in_answer_language(item: dict[str, Any], language: str) -> dict[str, Any]:
+    """A remediation item as served, its "not drafted" in the answer language (#535): the
+    working paper shows it. Its owner role stays the NO_OWNER sentinel the frontend compares
+    with, and the stored item stays English."""
+    return item | {"missing": placeholder(item["missing"], language)}
+
+
 def assessment_data(
     assessment: Assessment,
     decided: dict[remediation.Key, remediation.DecidedItem] | None = None,
@@ -694,7 +701,10 @@ def assessment_data(
     review = assessment.review
     served = _evidence_in_answer_language(assessment.to_dict(), assessment.answer_language)
     return served | {
-        "remediation": remediation.shown_items(assessment, decided or {}, marks),
+        "remediation": [
+            _item_in_answer_language(item, assessment.answer_language)
+            for item in remediation.shown_items(assessment, decided or {}, marks)
+        ],
         "review_step": remediation.review_step(assessment, decided or {}),
         "before_three_step_review": review is not None and not review.three_step,
     }
@@ -1188,19 +1198,20 @@ def decide_remediation(
     marked = marks.marks(memory.user_id, memory.profile_id, [thread_id])
     shown = remediation.shown_items(assessment, {(thread_id, requirement_id): kept}, marked)
     item = next(i for i in shown if i["requirement_id"] == requirement_id)
-    clean, _ = redact_data({"item": item})
+    clean, _ = redact_data({"item": _item_in_answer_language(item, assessment.answer_language)})
     return clean
 
 
-def _planned(mark: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-    """A plan route's answer (#410): the item as marked, redacted; its refusals as HTTP."""
+def _planned(mark: Callable[[], dict[str, Any]], language: str) -> dict[str, Any]:
+    """A plan route's answer (#410): the item as marked, in the answer `language` (#535),
+    redacted; its refusals as HTTP."""
     try:
         item = mark()
     except (UnknownAssessmentError, remediation.UnknownItemError) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (plan.NotInImprovementGoal, plan.NotPlannable) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    clean, _ = redact_data({"item": item})
+    clean, _ = redact_data({"item": _item_in_answer_language(item, language)})
     return clean
 
 
@@ -1214,6 +1225,7 @@ def set_remediation_priority(
     memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
+    profile: Profile,
 ) -> dict[str, Any]:
     """The lead sets an approved, not done remediation item's priority in the improvement plan
     (#410), with its audit entry, together (when the entry can't be written, neither is: a 503);
@@ -1233,7 +1245,8 @@ def set_remediation_priority(
             reviewer=audit.Reviewer(user.id, name),
             profile_id=memory.profile_id,
             scope=memory.scope,
-        )
+        ),
+        profile.answer_language,
     )
 
 
@@ -1247,6 +1260,7 @@ def mark_remediation_done(
     memory: UserMemory,
     user: CurrentUser,
     name: ReviewerName,
+    profile: Profile,
 ) -> dict[str, Any]:
     """The lead marks an approved remediation item of an accepted control done, with what was
     done (#410), and its audit entry, together (when the entry can't be written, neither is: a
@@ -1266,7 +1280,8 @@ def mark_remediation_done(
             reviewer=audit.Reviewer(user.id, name),
             profile_id=memory.profile_id,
             scope=memory.scope,
-        )
+        ),
+        profile.answer_language,
     )
 
 
@@ -1283,7 +1298,8 @@ def read_audit_trail(
     `before` for the page after (null: no more). The trail is append-only: no route changes or
     removes an entry."""
     page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
-    clean, _ = redact_data({"entries": [entry.to_dict() for entry in page.entries]})
+    # Each note Vouch wrote in the answer language, as the report's trail says it (#535).
+    clean, _ = redact_data({"entries": report.trail_entries(page.entries, profile.answer_language)})
     return clean | {"next": page.next}
 
 

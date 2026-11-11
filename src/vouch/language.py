@@ -224,6 +224,80 @@ def cap_note(
     return f"{words.capped} {'; '.join(why)}." if why else None
 
 
+@dataclass(frozen=True)
+class NoteWords:
+    """The words Vouch stores in English on remediation items and trail notes, in one answer
+    language (#535): its placeholders, by their English (vouch.graph's NOT_DRAFTED and NO_OWNER),
+    and the shapes of the notes an approval or discard, a question and a priority change store,
+    with the priorities as the report names them."""
+
+    placeholders: dict[str, str]
+    decided: str  # {missing}, {owner} and {due}
+    question: str  # {question}, {asked_of} and {due}
+    priority: str  # {priority} and {before}
+    priorities: dict[str, str]
+
+
+NOTE_WORDS = {
+    "de": NoteWords(
+        placeholders={
+            "not drafted": "nicht entworfen",
+            "no owner suggested": "keine verantwortliche Rolle vorgeschlagen",
+        },
+        # The report's labels "Verantwortliche Rolle", "Fällig am" and "Für", "Priorität".
+        decided="{missing} Verantwortliche Rolle: {owner}. Fällig am {due}.",
+        question="{question} (für {asked_of}, fällig am {due})",
+        priority="Priorität: {priority} (vorher {before}).",
+        priorities={"high": "Hoch", "medium": "Mittel", "low": "Niedrig"},
+    ),
+}
+"""The stored English words per answer language; English, and any language not here, as stored."""
+
+_DATE = r"\d{4}-\d{2}-\d{2}"
+# As vouch.remediation, vouch.questions and vouch.plan store them; a greedy first group keeps an
+# " Owner: " or " (for " inside the lead's text and takes the shape's own, the last.
+_DECIDED_NOTE = re.compile(
+    rf"(?P<missing>.*) Owner: (?P<owner>.*)\. Due (?P<due>{_DATE})\.", re.DOTALL
+)
+_QUESTION_NOTE = re.compile(
+    rf"(?P<question>.*) \(for (?P<asked_of>.*), due (?P<due>{_DATE})\)", re.DOTALL
+)
+_PRIORITY_NOTE = re.compile(r"Priority: (?P<priority>\w+) \(was (?P<before>\w+)\)\.")
+
+
+def placeholder(text: str, code: str) -> str:
+    """A remediation item's stored text in the answer language `code`: "not drafted" and "no
+    owner suggested" said in its words (#535); any other text, or a language with none, as it
+    is."""
+    words = NOTE_WORDS.get(code)
+    return words.placeholders.get(text, text) if words else text
+
+
+def trail_note(note: str, action: str, code: str) -> str:
+    """An audit entry's stored note in the answer language `code` (#535): the note Vouch writes
+    for its `action` (an approval or discard, a question, a priority change) said in its words,
+    the placeholders in it too. A lead's own note, one in no shape of its action, or a language
+    with no words, stays as written."""
+    words = NOTE_WORDS.get(code)
+    if words is None:
+        return note
+    if action in ("approve", "discard") and (found := _DECIDED_NOTE.fullmatch(note)):
+        return words.decided.format(
+            missing=placeholder(found["missing"], code),
+            owner=placeholder(found["owner"], code),
+            due=found["due"],
+        )
+    if action == "question" and (found := _QUESTION_NOTE.fullmatch(note)):
+        return words.question.format(**found.groupdict())
+    if action == "priority" and (found := _PRIORITY_NOTE.fullmatch(note)):
+        priority, before = found["priority"], found["before"]
+        if priority in words.priorities and before in words.priorities:
+            return words.priority.format(
+                priority=words.priorities[priority], before=words.priorities[before]
+            )
+    return note
+
+
 def statement_note(code: str) -> str:
     """What a lead statement's cap asks for, in the answer language `code` (English's for any
     other): the working paper says it under the quotes of a requirement a statement caps (#439),
