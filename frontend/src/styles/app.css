@@ -219,7 +219,6 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .rounds-link { color: var(--navy); }
 .rounds-name { font-weight: 600; }
 .rounds-times, .rounds-note { color: var(--muted); font-size: 14px; }
-.rounds-link .rounds-times { color: inherit; }
 @media (min-width: 700px) {
   .company-grid { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
   .company-documents { grid-column: 1; grid-row: 1; }
