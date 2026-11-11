@@ -5,6 +5,7 @@ kept over a reload, and the index stacked or beside the paper by width.
 On its own server (paper_url): local mode has one user and 60 requests a minute, and the main
 server's checks already spend most of that."""
 
+import json
 import re
 
 import pytest
@@ -12,6 +13,7 @@ from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from reviewing import confirmed
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, with_long_quotes
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -635,3 +637,279 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(
     current = row(paper, "M1").locator(".evidence-col .why")
     expect(current).to_have_text("Aktuell")
     expect(current).to_have_attribute("lang", "de")
+
+
+# Where the review bar sits against the viewport, the top bar, the Ask Vouch button and the last
+# requirement row, scrolled to `at` of the page (0 the top, 0.5 the middle, 1 the bottom; #467).
+# `bar` is the part of the bar that floats over the page (the nearest fixed or sticky box holding
+# its primary button), or the whole bar when nothing of it floats; `strip` is whether what shows
+# 10px under a floating bar is the bar's own (the page's content doesn't slide under it there).
+REVIEW_BAR_AT = (
+    "async (at) => {"
+    + FONTS_SETTLED
+    + """
+  window.scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * at)
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const region = document.querySelector('section.review-bar')
+  const button = region.querySelector(':is(.btn-primary, .btn-sign)')
+  let part = button
+  while (part !== region && !['fixed', 'sticky'].includes(getComputedStyle(part).position)) part = part.parentElement
+  const box = (el) => el.getBoundingClientRect().toJSON()
+  const bar = box(part)
+  const under = bar.bottom + 10 < innerHeight ? document.elementFromPoint(bar.left + 4, bar.bottom + 10) : null
+  const rows = [...document.querySelectorAll('table.reqs.judged tbody tr')]
+  return {
+    viewport: innerHeight, top: box(document.querySelector('header.top')).bottom, bar, button: box(button),
+    fab: box(document.querySelector('.fab')), last: box(rows[rows.length - 1]),
+    floating: part !== region || getComputedStyle(region).position === 'sticky',
+    strip: under === null ? null : region.contains(under),
+    sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  }
+}"""
+)
+
+
+def meets(a: dict, b: dict) -> bool:
+    """Whether two boxes overlap, with 1px of slack for sub-pixel rounding."""
+    return (
+        a["left"] < b["right"] - 1
+        and a["right"] > b["left"] + 1
+        and a["top"] < b["bottom"] - 1
+        and a["bottom"] > b["top"] + 1
+    )
+
+
+def proposed_wide_paper(
+    page: Page, paper_url: str, size: tuple[int, int], *, confirm: bool = False
+) -> tuple[Locator, str]:
+    """Alpenwerk's 5.2.4 (a long paper) assessed afresh, opened at `size`: at Confirm findings,
+    or with `confirm` at Plan fixes (its drafts not yet decided); the paper and its thread id."""
+    page.set_viewport_size({"width": size[0], "height": size[1]})
+    response = page.request.post(
+        f"{paper_url}/api/assessments",
+        data={"control_id": WIDE},
+        headers={"X-Vouch-Profile": "alpenwerk"},
+    )
+    assert response.ok, response.status
+    data = re.search(r"event: result\r?\ndata: (.*)", response.text())
+    assert data, response.text()
+    thread_id = json.loads(data.group(1))["assessment"]["thread_id"]
+    make_current(page.request, paper_url, "alpenwerk")
+    if confirm:
+        confirmed(page.request, paper_url, thread_id)
+    paper = open_paper(page, paper_url, WIDE, assessed=True)
+    button = "Accept verdict" if confirm else "Confirm findings"
+    expect(paper.get_by_role("button", name=button)).to_be_visible()
+    return paper, thread_id
+
+
+BAR_SIZES = [(1440, 900), (1024, 768), (701, 900), (390, 844), (360, 740)]
+
+
+@pytest.mark.parametrize("size", BAR_SIZES, ids=lambda size: str(size[0]))
+def test_the_review_bars_buttons_stay_in_view_and_cover_neither_the_last_row_nor_ask_vouch(
+    page: Page, paper_url, size, nordlicht_later
+):
+    """#467: on a proposed 5.2.4, scrolled to the top, the middle and the bottom, the review
+    bar's primary button is in the viewport below the top bar; the bar never meets the Ask Vouch
+    button; nothing scrolls sideways; under a floating bar the page's content doesn't show (the
+    strip down to Ask Vouch is the bar's); at the bottom the last requirement row ends above it."""
+    nordlicht_later(paper_url)
+    proposed_wide_paper(page, paper_url, size)
+
+    for at in (0, 0.5, 1):
+        seen = page.evaluate(REVIEW_BAR_AT, at)
+        where = f"{size[0]}px, scrolled to {at}: {seen}"
+        assert seen["button"]["top"] >= seen["top"] - 1, where
+        assert seen["button"]["bottom"] <= seen["viewport"] + 1, where
+        assert not meets(seen["bar"], seen["fab"]), where
+        assert not seen["sideways"], where
+        if seen["floating"] and seen["strip"] is not None:
+            assert seen["strip"], where
+        if at == 1:
+            assert seen["last"]["bottom"] <= seen["bar"]["top"] + 1, where
+
+
+# The focused field, when the review bar covers any of its foot or its focus ring (the points just
+# inside its bottom edge and 3px under it), or it ends off screen: where. Null when it is clear,
+# is in the bar itself, or is taller than the window (a scrolling table, which can't be in view
+# whole). After two frames, so a scroll the page makes on focus is done.
+COVERED = """async () => {
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const el = document.activeElement
+  const region = document.querySelector('section.review-bar')
+  if (!el || el === document.body || region.contains(el)) return null
+  const r = el.getBoundingClientRect()
+  if (r.height > innerHeight / 2) return null
+  const hits = []
+  for (const y of [r.bottom - 1, r.bottom + 3]) {
+    for (const x of [r.left + 2, (r.left + r.right) / 2, r.right - 2]) {
+      if (y >= innerHeight) { hits.push(`off screen at y=${Math.round(y)}`); continue }
+      const at = document.elementFromPoint(x, y)
+      if (at && region.contains(at)) hits.push(`under the bar at ${Math.round(x)},${Math.round(y)}`)
+    }
+  }
+  const name = (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 40)
+  return hits.length ? { name, rect: r.toJSON(), hits } : null
+}"""
+
+
+@pytest.mark.parametrize("size", BAR_SIZES, ids=lambda size: str(size[0]))
+def test_a_field_tabbed_to_or_opened_with_change_is_never_under_the_review_bar(
+    page: Page, paper_url, size, nordlicht_later
+):
+    """#467: on a proposed 5.2.4, Tab from the breadcrumb through the paper to the review bar:
+    each field focused on the way ends clear of the bar, its focus ring included; each Change
+    pressed with Enter opens its override with the Verdict field clear of the bar, and Tab to its
+    Reason too (the bar may change as the override opens). Cancel closes it, and tabbing goes on
+    from that Change."""
+    nordlicht_later(paper_url)
+    paper, _ = proposed_wide_paper(page, paper_url, size)
+    page.evaluate("window.scrollTo(0, 0)")
+    paper.get_by_role("navigation", name="Breadcrumb").get_by_role("link").first.focus()
+    region = paper.get_by_role("region", name="Review")
+    covered: list = []
+    changes = 0
+    for _ in range(200):
+        page.keyboard.press("Tab")
+        if region.evaluate("(bar) => bar.contains(document.activeElement)"):
+            break
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+        name = page.evaluate("document.activeElement.getAttribute('aria-label') || ''")
+        if not name.startswith("Change "):
+            continue
+        changes += 1
+        editor = paper.get_by_role("form", name=f"Override {name.removeprefix('Change ')}")
+        page.keyboard.press("Enter")
+        expect(editor.get_by_label("Verdict")).to_be_focused()
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+        page.keyboard.press("Tab")
+        expect(editor.get_by_label("Reason (required)")).to_be_focused()
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+        editor.get_by_role("button", name="Cancel").click()
+        paper.get_by_role("button", name=name, exact=True).focus()
+    else:
+        raise AssertionError("Tab never reached the review bar")
+    assert changes > 0
+    assert covered == [], f"{size[0]}px: {covered}"
+
+
+# The docked buttons, their place in the bar (the slot) and the bar, as boxes; whether docked.
+DOCK = """() => {
+  const box = (sel) => document.querySelector(sel).getBoundingClientRect().toJSON()
+  const dock = document.querySelector('.review-dock')
+  const style = getComputedStyle(dock)
+  const content = dock.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+    - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
+  return { docked: style.position === 'fixed', dock: box('.review-dock'), content,
+    slot: dock.parentElement.getBoundingClientRect().toJSON(),
+    bar: box('section.review-bar'), top: box('header.top').bottom,
+    page: document.documentElement.clientWidth }
+}"""
+
+
+def test_a_409_in_the_docked_buttons_keeps_their_room_and_focus_clear(
+    page: Page, paper_url, nordlicht_later
+):
+    """#467: pressing the docked Confirm findings after another tab confirmed them shows "moved
+    on" with Refresh in the docked row; the bar keeps that grown row's room in its place, and a
+    field tabbed to after it still ends clear of the docked buttons."""
+    nordlicht_later(paper_url)
+    paper, thread_id = proposed_wide_paper(page, paper_url, (390, 844))
+    confirmed(page.request, paper_url, thread_id)  # another tab, first
+    page.evaluate("window.scrollTo(0, 0)")
+    assert page.evaluate(DOCK)["docked"]
+    bar = paper.get_by_role("region", name="Review")
+    with page.expect_response(re.compile(r"/findings$")) as answer:
+        bar.get_by_role("button", name="Confirm findings").click()
+    assert answer.value.status == 409
+    expect(bar.get_by_role("button", name="Refresh")).to_be_visible()
+    page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+    )
+    seen = page.evaluate(DOCK)
+    assert seen["docked"], seen
+    assert abs(seen["slot"]["height"] - seen["content"]) <= 1, seen
+
+    page.evaluate("window.scrollTo(0, 0)")
+    paper.get_by_role("navigation", name="Breadcrumb").get_by_role("link").first.focus()
+    covered = []
+    for _ in range(200):
+        page.keyboard.press("Tab")
+        if bar.evaluate("(bar) => bar.contains(document.activeElement)"):
+            break
+        if (hit := page.evaluate(COVERED)) is not None:
+            covered.append(hit)
+    assert covered == [], covered
+
+
+def test_the_docked_buttons_stay_docked_while_a_remediation_decision_lands(
+    page: Page, paper_url, nordlicht_later
+):
+    """#467: at Plan fixes, discarding an item from the rows reads the paper again (the bar is
+    shown afresh); the docked buttons stay docked in every frame drawn, never blinking back into
+    the bar's place."""
+    nordlicht_later(paper_url)
+    paper, _ = proposed_wide_paper(page, paper_url, (390, 844), confirm=True)
+    page.evaluate("window.scrollTo(0, 0)")
+    assert page.evaluate(DOCK)["docked"]
+    discard = paper.get_by_role("button", name=re.compile(r"^Discard ")).first
+    discard.scroll_into_view_if_needed()
+    page.evaluate("""() => {
+      window.__docked = []
+      const tick = () => {
+        const dock = document.querySelector('.review-dock')
+        window.__docked.push(!!dock && getComputedStyle(dock).position === 'fixed')
+        if (window.__docked.length < 90) requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    }""")
+    with page.expect_response(re.compile(r"/remediation/[^/]+$")) as answer:
+        discard.click()
+    assert answer.value.ok, answer.value.status
+    page.wait_for_function("window.__docked.length >= 90")
+    frames = page.evaluate("window.__docked")
+    assert all(frames), frames
+
+
+def test_printed_the_docked_buttons_fit_the_bar(page: Page, paper_url, nordlicht_later):
+    """#467: printed while docked, the buttons are back in the bar's place, inside its padding, and
+    the bar keeps to the page: the width they were docked at doesn't carry over to paper."""
+    nordlicht_later(paper_url)
+    proposed_wide_paper(page, paper_url, (1440, 900))
+    page.evaluate("window.scrollTo(0, 0)")
+    assert page.evaluate(DOCK)["docked"]
+    page.emulate_media(media="print")
+    seen = page.evaluate(DOCK)
+    assert not seen["docked"], seen
+    assert seen["bar"]["right"] <= seen["page"] + 1, seen  # the bar isn't widened past the page
+    assert seen["dock"]["left"] >= seen["bar"]["left"] + 12 - 1, seen  # inside the bar's padding
+    assert seen["dock"]["right"] <= seen["bar"]["right"] - 12 + 1, seen
+
+
+def test_a_field_taller_than_the_room_keeps_its_top_below_the_top_bar(
+    page: Page, paper_url, nordlicht_later
+):
+    """#467: at 360x740, a Reason field the lead has drawn taller than the room between the top
+    bar and the docked buttons, tabbed to, keeps its top below the top bar: clearing the docked
+    buttons never scrolls a field's top under the top bar."""
+    nordlicht_later(paper_url)
+    paper, _ = proposed_wide_paper(page, paper_url, (360, 740))
+    page.evaluate("window.scrollTo(0, 0)")
+    change = paper.get_by_role("button", name=re.compile(r"^Change ")).last
+    change.focus()
+    page.keyboard.press("Enter")
+    reason = paper.get_by_label("Reason (required)")
+    seen = page.evaluate(DOCK)
+    room = seen["dock"]["top"] - seen["top"]
+    reason.evaluate("(el, height) => { el.style.height = `${height}px` }", room + 30)
+    page.keyboard.press("Tab")
+    expect(reason).to_be_focused()
+    page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+    )
+    top_bar = page.evaluate("document.querySelector('header.top').getBoundingClientRect().bottom")
+    assert box(reason)["y"] >= top_bar - 1, (box(reason), top_bar)

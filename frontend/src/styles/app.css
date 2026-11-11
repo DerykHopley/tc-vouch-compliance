@@ -174,7 +174,7 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .paper { padding-block: 24px 110px; display: grid; gap: 16px; }
 .paper-head { display: grid; gap: 6px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
 .paper-head h2 { font-size: clamp(22px, 3vw, 30px); overflow-wrap: anywhere; }
-.paper-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.paper-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--muted); } /* wraps on a phone (#467) */
 /* The companies made in company setup, on the developer page (#418): one row each, name, id and day, Remove at its end;
    the row wraps at phone width, and a long name or id breaks rather than scroll the page sideways. */
 .companies { list-style: none; margin: 0; padding: 0; justify-self: stretch; display: grid; }
@@ -330,8 +330,7 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); hyphens: auto; overflow-wrap: anywhere; }
 .cite figcaption { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 12px; }
 /* The review (#42): "Change" under a requirement's verdict opens the override row (a verdict and a required reason).
-   The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). Unlike the prototype
-   it doesn't stick to the window's foot, where the Ask Vouch button floats over it. */
+   The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). */
 .verdict-cell { display: grid; gap: 4px; justify-items: start; }
 .verdict-cell .btn-ghost { margin-left: -10px; }
 .override-row td { background: var(--paper); }
@@ -344,6 +343,26 @@ textarea.field { resize: vertical; font-family: inherit; }
   border-top: 2px solid var(--sign); border-radius: 0; padding: 12px; display: grid; gap: 8px; }
 .review-bar .decided { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); }
 .review-bar .note { margin: 0; border-left: 2px solid var(--rule); padding: 2px 10px; overflow-wrap: anywhere; }
+/* A review in progress keeps its buttons in reach (#467, ReviewBar's useDock): while their place in the bar
+   (`.review-slot`) is below the window's foot, the buttons (`.review-dock`) are docked there, above the Ask Vouch
+   button's 88px clearance (below), so they never cover it, ruled as the bar is; the strip under them, down to the
+   window's foot, is the page's background, so the paper doesn't slide under them. The slot keeps their room. The steps,
+   the note and the explanations stay in the bar's place, and once the slot is in view the buttons are back in it. A
+   field on the paper brought into view (tabbed or scrolled to) stops above the docked buttons: their row's height
+   inside its padding (`--review-actions`, which ReviewBar measures), the row's padding and rules (27px), and a gap;
+   the row's own buttons keep the page's clearance. Docked, the row takes the bar's place across (`--dock-left`,
+   `--dock-width`, which ReviewBar measures; print leaves them out). The head names the step too. */
+.review-dock { display: grid; gap: 8px; }
+.review-dock.stuck { position: fixed; bottom: calc(88px + env(safe-area-inset-bottom, 0px)); z-index: 2;
+  left: var(--dock-left, 16px); width: var(--dock-width, auto);
+  box-sizing: border-box; background: var(--sheet); border: 1px solid var(--rule); border-top: 2px solid var(--sign);
+  padding: 12px; }
+.review-dock.stuck::after { content: ""; position: absolute; left: -1px; right: -1px; top: calc(100% + 1px);
+  height: calc(88px + env(safe-area-inset-bottom, 0px)); background: var(--paper); }
+.review-slot.holding { min-height: var(--review-actions, 44px); }
+.paper:has(.review-dock.stuck) :is(a[href], button, input, select, textarea, [tabindex]):not(.review-dock *) {
+  scroll-margin-bottom: calc(var(--review-actions, 0px) + 35px); }
+.review-step-now { color: var(--ink); font-weight: 600; }
 /* The review's three steps (#372): numbered in order, the current one in --ink under a 2px --ink rule, the others
    --muted; the number is a counter, so each step's name is its text. --sign stays for sign-off (design.md, Tokens). */
 .review-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px;
@@ -586,6 +605,8 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 @media print {
   .top, .fab, .bubble, .report-actions, .report-older { display: none !important; }
   :root[data-chat="pinned"] body { padding-right: 0; }
+  .review-dock.stuck { position: static; left: auto; width: auto; border: 0; padding: 0; } /* in its place (#467) */
+  .review-dock.stuck::after { display: none; }
   body { background: var(--sheet); }
   .report { max-width: none; padding: 0; display: block; }
   .report.wrap { padding-inline: 0; }

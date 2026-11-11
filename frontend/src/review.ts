@@ -37,10 +37,13 @@ export type Review = ReviewDecision & {
 /** The step of the review a proposed assessment waits at (`vouch.remediation.ReviewStep`). */
 export type ReviewStep = 'confirm-findings' | 'plan-fixes' | 'accept'
 
-/** The three steps, in order, with their names on screen (`GLOSSARY.md`). */
-export const REVIEW_STEPS: [ReviewStep, string][] = [
-  ['confirm-findings', 'Confirm findings'], ['plan-fixes', 'Plan fixes'], ['accept', 'Accept'],
-]
+/** Each step's name on screen (`GLOSSARY.md`): in the review bar's steps and the paper's head (#467). */
+export const REVIEW_STEP_WORDS: Record<ReviewStep, string> = {
+  'confirm-findings': 'Confirm findings', 'plan-fixes': 'Plan fixes', accept: 'Accept',
+}
+
+/** The three steps, in order. */
+export const REVIEW_STEPS: ReviewStep[] = ['confirm-findings', 'plan-fixes', 'accept']
 
 /**
  * The step a proposed assessment's review is at: Confirm findings until the server says they are confirmed; then Plan

@@ -679,6 +679,21 @@ describe('the review in three steps (issue 372)', () => {
     expect(current()).toEqual(['Confirm findings'])
   })
 
+  describe("the current step named in the paper's head (issue 467)", () => {
+    const head = () => document.querySelector('.paper-head') as HTMLElement
+    it.each([
+      ['Confirm findings', PROPOSED], ['Plan fixes', PLANNING], ['Accept', READY],
+    ] as const)('names %s in the head', (name, assessment) => {
+      review({ assessment })
+      expect(within(head()).getByText(`Review step: ${name}`)).toBeTruthy()
+    })
+
+    it('names no step once the control is reviewed', () => {
+      review({ assessment: { ...READY, status: 'accepted', review_step: null } })
+      expect(within(head()).queryByText(/Review step/)).toBeNull()
+    })
+  })
+
   it('marks Accept current and shows Plan fixes as skipped for a control with no remediation item', () => {
     review({ assessment: READY })
     expect(current()).toEqual(['Accept'])
