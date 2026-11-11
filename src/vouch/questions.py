@@ -34,6 +34,7 @@ from vouch.audit import AuditEntry, ProcessTrail, Reviewer, now, process_trail
 from vouch.citations import LeadStatement
 from vouch.database import AuditAction, Database
 from vouch.graph import NO_NUL_PATTERN, Assessment
+from vouch.language import question_note
 from vouch.plan import REASSESS_REASONS, ReassessReason, accepted_at
 from vouch.remediation import MAX_OWNER_ROLE, check_due
 
@@ -372,7 +373,7 @@ def log(
         due_date=request.due_date,
         asked_at=at,
     )
-    note = f"{request.question} (for {request.asked_of}, due {request.due_date.isoformat()})"
+    note = question_note(request.question, request.asked_of, request.due_date)
     entry = _entry(reviewer, profile_id, control_id, "question", note, at)
     return store.log(reviewer.id, profile_id, question, entry)
 
