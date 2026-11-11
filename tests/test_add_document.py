@@ -22,9 +22,11 @@ from vouch.added_documents import (
     EMPTY,
     MAX_BYTES,
     MAX_DOCUMENTS,
+    MAX_VERSIONS,
     NOT_TEXT,
     TOO_LARGE,
     TOO_MANY,
+    TOO_MANY_VERSIONS,
     WRONG_TYPE,
     AddedDocument,
     added_index,
@@ -141,6 +143,21 @@ def test_the_51st_document_is_refused_with_its_sentence(users):
     assert response.status_code == 400
     assert response.json() == {"detail": TOO_MANY}
     assert len(kept()) == MAX_DOCUMENTS
+
+
+def test_a_version_past_the_cap_is_refused_with_its_sentence_and_nothing_is_kept(users):
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        for n in range(MAX_VERSIONS):
+            made = client.post(PATH, json=body(f"# Badges, v{n + 1}\n"), headers=alice)
+            assert made.status_code == 201, made.text
+        response = client.post(PATH, json=body("# Badges, one too many\n"), headers=alice)
+        entries = trail(client, alice)
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": TOO_MANY_VERSIONS}
+    assert [d.version for d in kept()] == list(range(1, MAX_VERSIONS + 1))
+    assert len(entries) == MAX_VERSIONS
 
 
 def test_a_file_of_200_kb_fits_through_the_message_limit(users):
