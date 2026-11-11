@@ -372,8 +372,8 @@ limit and uses no profile pass; assessments already used today aren't given back
 
 **The delete exception.** The audit trail, remediation decisions and added documents refuse every
 delete in Postgres. Reset demo's own transaction sets `vouch.reset_demo = 'on'` (`SET LOCAL`), and
-only under it do those tables let a row be deleted; every other delete, any update and any truncate
-stay refused. `vouch-db-setup` applies the changed guards (`CREATE OR REPLACE`, safe to rerun on a
+only under it do those tables let a row be deleted; updates and truncates stay refused. The guard
+can't tell who set it, so any client with database access could switch the exception on. `vouch-db-setup` applies the changed guards (`CREATE OR REPLACE`, safe to rerun on a
 database holding data). **A real deployment would drop this exception**, so its audit trail stays
 append-only whoever asks.
 

@@ -116,9 +116,10 @@ CREATE_USAGE = (
 
 RESET_DEMO_SETTING = "vouch.reset_demo"
 """The transaction-local setting (`SET LOCAL vouch.reset_demo = 'on'`) under which the guarded
-tables (the audit trail, remediation decisions, added documents) let a row be deleted: only
-Reset demo's own transaction sets it (#605, `Database.reset_company`). Every other delete, and
-any truncate or update, stays refused. A real deployment would drop this exception."""
+tables (the audit trail, remediation decisions, added documents) let a row be deleted. In the
+app only Reset demo's own transaction sets it (#605, `Database.reset_company`), but any client
+with database access could set it too: the guard can't tell who did. Truncates and updates stay
+refused. A real deployment would drop this exception."""
 _RESET_DELETE = (
     f"IF TG_OP = 'DELETE' AND current_setting('{RESET_DEMO_SETTING}', true) = 'on' "
     "THEN RETURN OLD; END IF; "
