@@ -18,10 +18,11 @@ now against the last round closed since the fresh start (a fresh start leaves th
 they are, but a round closed before it is not compared with). It is never called progress.
 
 The round comparison (#571, `round_comparison`; GLOSSARY: Round comparison) is of any closed
-round the lead chooses from the listing (`listed`, `number_rounds`: each round numbered by
-its position from 1 in the order opened, as no id is kept on them), control by control: better, worse, new or
-unchanged, and the scope changes since, with readiness then and now, and the remediation items
-done and open questions answered since it closed (`done_since`, `answered_since`).
+round the lead chooses from the listing (`listed`, `number_rounds`: each round numbered by its
+position from 1 in the order opened, as no id is kept on them), control by control: better,
+worse, new or unchanged, and the scope changes since, with readiness then and now, and the
+remediation items done and open questions answered since it closed (`done_since`,
+`answered_since`).
 """
 
 import threading
