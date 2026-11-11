@@ -352,3 +352,40 @@ def test_round_n_and_review_round_n_name_round_n() -> None:
     ]
     for asked in ("round 1", "Review round 1"):
         assert chosen_round(listed, asked) == listed[0]
+
+
+@pytest.mark.parametrize(
+    ("asked", "args"),
+    [
+        ("Whats changed between the first and this round?", {"round": "first"}),
+        ("What changed between the first round and now?", {"round": "first"}),
+        ("How has this round improved on the first round?", {"round": "first"}),
+        ("What is better in this round?", {}),
+        ("Was hat sich seit der ersten Runde verändert?", {"round": "first"}),
+        ("What improved since Q2 2026?", {"round": "Q2 2026"}),
+        ("Which controls got worse since the last round?", {}),
+    ],
+)
+def test_the_fake_sends_questions_about_rounds_to_the_comparison(asked, args):
+    made = CannedChatModel(tools=[COMPARE_ROUNDS])._tool_call(HumanMessage(asked), [])
+
+    assert made is not None
+    assert (made["name"], made["args"]) == (COMPARE_ROUNDS, args)
+
+
+def test_first_names_the_first_closed_round_unless_a_round_has_that_name() -> None:
+    from vouch.chat_agent import chosen_round
+    from vouch.rounds import ListedRound
+
+    at = datetime(2026, 6, 30, tzinfo=UTC)
+    old = ListedRound(
+        number=1, name="Kick-off", opened_at=None, closed_at=at, before_fresh_start=True
+    )
+    first = ListedRound(
+        number=2, name="Q2 2026", opened_at=at, closed_at=at, before_fresh_start=False
+    )
+    now = ListedRound(
+        number=3, name="Q3 2026", opened_at=at, closed_at=None, before_fresh_start=False
+    )
+    for asked in ("first", "the first round", "First round", "erste Runde"):
+        assert chosen_round([old, first, now], asked) == first

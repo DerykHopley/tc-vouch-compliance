@@ -498,6 +498,11 @@ NO_ROUND_CLOSED = (
 )
 
 
+FIRST = re.compile(r"^(?:the )?(?:first|erste[nmr]?)(?: (?:review )?(?:round|runde))?$")
+"""The lead's "the first round": the first round closed since the fresh start, unless a round
+has that name."""
+
+
 def chosen_round(listed: Sequence[ListedRound], asked: str | None) -> ListedRound | str:
     """The round `asked` names: its number, its name (any case), or the one round whose name
     holds the words; None: the default choice. Else the sentence saying why there is none to
@@ -508,6 +513,8 @@ def chosen_round(listed: Sequence[ListedRound], asked: str | None) -> ListedRoun
     words = " ".join(asked.split()).casefold()
     words = re.sub(r"^(review )?round (?=\d+$)", "", words)
     found = [r for r in listed if str(r.number) == words or r.name.casefold() == words]
+    if not found and FIRST.match(words):
+        found = [r for r in listed if r.closed_at is not None and not r.before_fresh_start][:1]
     if not found:
         found = [r for r in listed if words in r.name.casefold()]
     if len(found) != 1:

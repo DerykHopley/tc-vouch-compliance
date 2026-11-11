@@ -69,6 +69,13 @@ EVIDENCE = re.compile(r"\bevidence (?:of|for|about|on) (.+?)[?.!]*$", re.IGNOREC
 SINCE_ROUND = re.compile(
     r"\b(?:improved|better|worse|changed)\b.*?\bsince\s+(?:the\s+)?(.+?)[?.!]*$", re.IGNORECASE
 )
+ABOUT_ROUND = re.compile(r"\b(?:round|runde)\b", re.IGNORECASE)
+ROUND_CHANGE = re.compile(
+    r"\b(?:chang\w*|improv\w*|better|worse|since|between|ver(?:ä|ae)ndert|ge(?:ä|ae)ndert|besser"
+    r"|schlechter|seit|zwischen)\b",
+    re.IGNORECASE,
+)
+FIRST_ROUND = re.compile(r"\b(?:first|erste[nmr]?)\b", re.IGNORECASE)
 LAST_ROUND = re.compile(r"^(?:last|previous) (?:review )?round$", re.IGNORECASE)
 ACROSS_CONTROLS = re.compile(r"\bwhich (?:controls|musts|requirements)\b", re.IGNORECASE)
 PAGE_CONTROL = re.compile(rf"VDA ISA control {_ID}:")
@@ -552,11 +559,16 @@ class CannedChatModel(BaseChatModel):
             return call(EXPLAIN_CONTROL, control_id=asked.group(2), sign_off=sign_off)
         if asked := ASSESS.search(text):
             return call(START_ASSESSMENT, control_id=asked.group(1).rstrip(".?!,;:"))
+        about_rounds = ABOUT_ROUND.search(text) and ROUND_CHANGE.search(text)
+        if about_rounds and FIRST_ROUND.search(text):
+            return call(COMPARE_ROUNDS, round="first")
         if asked := SINCE_ROUND.search(text):
             named = asked.group(1).strip()
             if LAST_ROUND.match(named):
                 return call(COMPARE_ROUNDS)
             return call(COMPARE_ROUNDS, round=named)
+        if about_rounds:
+            return call(COMPARE_ROUNDS)
         if ACROSS_CONTROLS.search(text):
             return call(ASSESSED_CONTROLS)
         if text == GREETING_REQUEST or WHERE.search(text):
