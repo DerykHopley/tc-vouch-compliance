@@ -601,6 +601,14 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url, no
     expect(page.get_by_role("region", name="Profile pass")).to_be_visible()
     assert current_of(page, setup_url) == profile["id"]  # every user's company now (#480)
 
+    # The create replaced the wizard's history entry (#476): Back goes to where the developer was
+    # before setup (the Dossier, opened first), not to an empty wizard that could make a second.
+    page.go_back()
+    expect(page).to_have_url(f"{setup_url}/")
+    expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+    expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+    expect(bar_company(page)).to_have_text("Musterfirma Nord GmbH")
+
     overview = page.request.get(
         f"{setup_url}/api/overview", headers={"X-Vouch-Profile": profile["id"]}
     )

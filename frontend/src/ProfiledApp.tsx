@@ -69,7 +69,8 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   // A developer made a company in company setup (#409): it is made current, then, once the list is read again, the app
   // opens afresh under it on the Dossier, focus on its heading, with the Goal chosen in setup for its first pass (#447).
   // Not made current: the developer page opens under the current company, saying so; the company is made all the same.
-  // A list that can't be read again gains it, so its name is known still.
+  // A list that can't be read again gains it, so its name is known still. Either way the address replaces the setup's
+  // history entry (#476): Back goes to where the developer was before setup, not to an empty wizard.
   const created = (profile: ProfileSummary, goal: Goal) => {
     const signOuts = signOutCount()
     void makeCurrent(profile.id).then((change) => {
@@ -78,11 +79,11 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
         setListing({ status: 'read', profiles: withProfile(found ?? held, profile) })
         if (change.status === 'made') {
           setArrival({ goal })
-          toPath('/')
+          toPath('/', 'replace')
           reopen(profile.id)
           return
         }
-        toPath(DEVELOPER_PATH)
+        toPath(DEVELOPER_PATH, 'replace')
         reopen(found ? found.current : shown,
           `${profile.company} was made but could not be made current. Use Make current to try again.`)
       })
@@ -120,7 +121,9 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
     developerNote={developerNote ?? undefined} onNoteShown={forgetNote} arrival={arrival} onArrivalUsed={arrivalUsed} />
 }
 
-/** Puts `path` in the address bar, as a new history entry, unless it is there already. */
-function toPath(path: string) {
-  if (window.location.pathname !== path) window.history.pushState(null, '', path)
+/** Puts `path` in the address bar, unless it is there already: as a new history entry, or in place of the one shown. */
+function toPath(path: string, entry: 'push' | 'replace' = 'push') {
+  if (window.location.pathname === path) return
+  if (entry === 'replace') window.history.replaceState(null, '', path)
+  else window.history.pushState(null, '', path)
 }
