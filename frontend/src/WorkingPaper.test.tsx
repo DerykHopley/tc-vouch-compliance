@@ -993,6 +993,12 @@ describe("a not-evidenced requirement's remediation item (#43)", () => {
     expect(within(item()).queryByRole('button')).toBeNull()
   })
 
+  it('shows no owner for an item Vouch suggested none for, as its owner field starts empty', () => {
+    review({ assessment: { ...ACCEPTED, remediation: [{ ...DRAFT, status: 'discarded', owner_role: NO_OWNER }] } })
+    expect(within(item()).getByText('Due 2027-02-01')).toBeTruthy()
+    expect(within(item()).queryByText(/no owner suggested/)).toBeNull()
+  })
+
   it('shows a discarded item as discarded', () => {
     review({ assessment: { ...ACCEPTED, remediation: [{ ...DRAFT, status: 'discarded' }] } })
     expect(within(item()).getByText('Discarded')).toBeTruthy()
