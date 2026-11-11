@@ -12,12 +12,13 @@ import sys
 import uuid
 from typing import Any
 
+import httpx
 import pytest
 import test_memory
 from fastapi.testclient import TestClient
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture)
 
-from vouch import api, demo_round
+from vouch import demo_round
 from vouch.demo_round import ROUND_NAME, AlreadySeeded, NotFresh, seed, seeding_app
 
 database_url = test_memory.database_url
@@ -65,8 +66,8 @@ def test_the_seed_closes_q2_2026_and_the_comparison_opens_on_a_clear_improvement
     assert set(better) == set(seeded.improved)
     assert compared["changes"]["worse"] == 0
     assert compared["changes"]["new"] == 0
-    assert [d["control_id"] for d in compared["remediation_done"]] == [seeded.done_on]
-    assert [q["control_id"] for q in compared["questions_answered"]] == [seeded.answered_on]
+    assert [d["control_id"] for d in compared["remediation_done"]] == [seeded.followed_up]
+    assert [q["control_id"] for q in compared["questions_answered"]] == [seeded.followed_up]
     assert (
         compared["readiness"]["by_verdict"]["evidenced"]["now"]
         == compared["readiness"]["by_verdict"]["evidenced"]["then"] + 3
@@ -118,7 +119,70 @@ def test_the_seeding_app_runs_on_the_fake_model_even_with_a_key_in_the_environme
     assert settings.model is None
     assert settings.fake_script is None
     assert settings.langfuse is None
-    assert demo_round.PROFILE_HEADER == api.PROFILE_HEADER
+
+
+class FailingDone:
+    """A client whose remediation-done call fails, as an interrupted run's would."""
+
+    def __init__(self, client: TestClient, error: type[BaseException] | None = None) -> None:
+        self.client = client
+        self.error = error
+
+    def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        if url.endswith("/done"):
+            if self.error is not None:
+                raise self.error()
+            return httpx.Response(500, text="broken")
+        return self.client.request(method, url, **kwargs)
+
+
+@pytest.mark.parametrize("error", [None, KeyboardInterrupt])
+def test_the_goal_is_put_back_when_marking_done_fails(user, error):
+    with client_for(None, user) as client:
+        with pytest.raises(demo_round.SeedError if error is None else error):
+            seed(FailingDone(client, error))
+        goal = client.get("/api/overview").json()["goal"]
+
+    assert goal == "audit-readiness"
+
+
+class Answers:
+    """A client answering each request with the next of `responses`."""
+
+    def __init__(self, *responses: httpx.Response) -> None:
+        self.responses = list(responses)
+
+    def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        return self.responses.pop(0)
+
+
+def test_a_request_rate_429_is_waited_out(monkeypatch):
+    waits: list[float] = []
+    monkeypatch.setattr(demo_round.time, "sleep", waits.append)
+    rate = httpx.Response(429, headers={"Retry-After": "2"}, json={"detail": "Too many"})
+
+    answered = demo_round._call(Answers(rate, httpx.Response(200, json={})), "GET", "/api/x")
+
+    assert answered.status_code == 200
+    assert waits == [2.0]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(429, headers={"Retry-After": "30000"}, json={"limit": "profile-pass"}),
+        httpx.Response(429, headers={"Retry-After": "30000"}, json={"limit": "daily"}),
+        httpx.Response(429, headers={"Retry-After": "7200"}, json={"detail": "Too many"}),
+    ],
+)
+def test_a_limit_429_stops_at_once_without_waiting(monkeypatch, response):
+    waits: list[float] = []
+    monkeypatch.setattr(demo_round.time, "sleep", waits.append)
+
+    with pytest.raises(demo_round.SeedError, match="limit"):
+        demo_round._call(Answers(response), "POST", "/api/profile-pass")
+
+    assert waits == []
 
 
 # --- The command -------------------------------------------------------------------------------

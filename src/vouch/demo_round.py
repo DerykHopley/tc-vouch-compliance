@@ -36,7 +36,8 @@ import json
 import os
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import ModuleType
@@ -55,17 +56,18 @@ from vouch.settings import DATABASE_URL_ENV, Settings, User, load_database_url
 ROUND_NAME = "Q2 2026"
 NEXT_ROUND = "Q3 2026"
 OWNER_ROLE = "IT security officer"
-FIXED = "Evidence added since Q2 2026: the document now covers this requirement."
-DONE_NOTE = "Done since Q2 2026: the change was made and recorded."
+FIXED = f"Evidence added since {ROUND_NAME}: the document now covers this requirement."
+DONE_NOTE = f"Done since {ROUND_NAME}: the change was made and recorded."
 QUESTION = "Who signs off the updated document, and by when?"
 ASKED_OF = "Managing director"
 ANSWER = "The managing director signs it off at the next management review."
-PROFILE_HEADER = "X-Vouch-Profile"
-"""vouch.api's PROFILE_HEADER: the profile a request is for."""
 APP_SETTINGS = ("VOUCH_", "CLERK_", "OPENROUTER_", "LANGFUSE_", "ASSESS_", "DISCORD_")
 """The prefixes of the settings vouch.api's own app reads from the environment on import."""
 MAX_WAITS = 10
 """Requests refused for the rate (429) the seed waits out before it gives up."""
+MAX_WAIT_SECONDS = 60
+"""A 429 asking a longer wait than this is a limit (the day's, or the profile passes'), not the
+request rate: the seed stops on it rather than hang for hours."""
 
 
 class SeedError(RuntimeError):
@@ -80,10 +82,22 @@ class NotFresh(SeedError):
     """The user has assessments since the fresh start: nothing written."""
 
 
+class Answer(Protocol):
+    """What the seed reads of a response: httpx's, or httpx2's (FastAPI's TestClient)."""
+
+    @property
+    def status_code(self) -> int: ...
+    @property
+    def text(self) -> str: ...
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+    def json(self) -> Any: ...
+
+
 class Client(Protocol):
     """What the seed asks of a client: httpx's, or FastAPI's TestClient (an httpx one)."""
 
-    def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response: ...
+    def request(self, method: str, url: str, *, json: Any = ..., headers: Any = ...) -> Answer: ...
 
 
 @dataclass(frozen=True)
@@ -92,8 +106,8 @@ class Seeded:
     the answered question are."""
 
     improved: tuple[str, ...]
-    done_on: str
-    answered_on: str
+    followed_up: str
+    """The control whose remediation item is done and whose question is answered."""
 
 
 def _api() -> ModuleType:
@@ -126,17 +140,32 @@ def seeding_app(database_url: SecretStr | str | None, user_id: str, name: str) -
     return app
 
 
-def _call(client: Client, method: str, path: str, body: Any = None) -> httpx.Response:
+def _call(client: Client, method: str, path: str, body: Any = None) -> Answer:
     """One request under Nordlicht, waiting out the rate limit; a refusal is a SeedError."""
-    headers = {PROFILE_HEADER: DEFAULT_PROFILE}
+    headers = {_api().PROFILE_HEADER: DEFAULT_PROFILE}
     for _ in range(MAX_WAITS + 1):
         response = client.request(method, path, json=body, headers=headers)
         if response.status_code != 429:
             break
-        time.sleep(float(response.headers.get("Retry-After", "1")))
+        wait = float(response.headers.get("Retry-After", "1"))
+        if _limit_named(response) or wait > MAX_WAIT_SECONDS:
+            raise SeedError(
+                f"{method} {path} is over a limit (answered 429, try again in {wait / 3600:.1f} "
+                f"hours): {response.text[:300]}"
+            )
+        time.sleep(wait)
     if response.status_code >= 400:
         raise SeedError(f"{method} {path} answered {response.status_code}: {response.text[:300]}")
     return response
+
+
+def _limit_named(response: Answer) -> bool:
+    """The 429 names a limit (`"limit": "daily"` or `"profile-pass"`), not the request rate."""
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and "limit" in body
 
 
 def _json(client: Client, method: str, path: str, body: Any = None) -> Any:
@@ -196,7 +225,7 @@ def _check_fresh(client: Client) -> None:
         )
 
 
-def seed(client: Client, say: Any = None) -> Seeded:
+def seed(client: Client, say: Callable[[str], None] | None = None) -> Seeded:
     """Play the lead's work (the module's steps) through `client`. Raises AlreadySeeded or
     NotFresh before writing anything, and SeedError for a request the app refuses."""
     say = say or (lambda _: None)
@@ -246,16 +275,18 @@ def seed(client: Client, say: Any = None) -> Seeded:
     ]
     if not approved:
         raise SeedError(f"{kept_weak['control_id']} has no approved remediation item to mark done.")
-    goal = _json(client, "GET", "/api/overview").get("goal", "audit-readiness")
+    goal = _json(client, "GET", "/api/overview")["goal"]
     _call(client, "PUT", "/api/goal", {"goal": "internal-improvement"})
-    _call(
-        client,
-        "POST",
-        f"/api/assessments/{kept_weak['thread_id']}/remediation/{approved[0]['requirement_id']}/done",
-        {"note": DONE_NOTE},
-    )
-    if goal != "internal-improvement":
-        _call(client, "PUT", "/api/goal", {"goal": goal})
+    try:
+        _call(
+            client,
+            "POST",
+            f"/api/assessments/{kept_weak['thread_id']}/remediation/{approved[0]['requirement_id']}/done",
+            {"note": DONE_NOTE},
+        )
+    finally:
+        if goal != "internal-improvement":
+            _call(client, "PUT", "/api/goal", {"goal": goal})
     _call(
         client,
         "POST",
@@ -263,9 +294,7 @@ def seed(client: Client, say: Any = None) -> Seeded:
         {"answer": ANSWER},
     )
     say(f"Marked an item on {kept_weak['control_id']} done and answered its question.")
-    return Seeded(
-        tuple(a["control_id"] for a in improved), kept_weak["control_id"], kept_weak["control_id"]
-    )
+    return Seeded(tuple(a["control_id"] for a in improved), kept_weak["control_id"])
 
 
 # --- The command -------------------------------------------------------------------------------
@@ -325,7 +354,7 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
     return _run(lambda: TestClient(seeding_app(url, args.user, args.name)))
 
 
-def _run(make: Any) -> int:
+def _run(make: Callable[[], AbstractContextManager[Client, None]]) -> int:
     def say(line: str) -> None:
         print(line, file=sys.stderr)
 

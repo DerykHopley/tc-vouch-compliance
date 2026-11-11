@@ -343,7 +343,10 @@ uv run vouch-seed-demo-round --user user_XXXXXXXX   # .envrc gives VOUCH_DATABAS
 - **Once.** With "Q2 2026" there since the fresh start it stops, writing nothing (exit 1).
 - **On a fresh start only.** With assessments under Nordlicht since the fresh start (your own
   work) it stops, writing nothing: Start afresh in the app first, then seed.
-- **The profile pass counts** against the day's profile passes (3): over it, it stops with the 429.
+- **The profile pass counts** against the day's profile passes (3): over it, it stops at once with the 429, writing nothing more.
+- **Stopped partway** (a refused request, a limit, Ctrl-C), it leaves part of the work written:
+  Start afresh in the app, then seed again. The goal it switches for marking the item done is
+  put back either way.
 - Without `VOUCH_DATABASE_URL` or `--api` it refuses and says what it needs (exit 2).
 
 **On a preview** (`scripts/dev.sh`, in memory), give its API port instead: only a loopback

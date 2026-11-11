@@ -24,6 +24,8 @@ from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
 from touch_targets import small_targets
 
+ROOT = Path(__file__).resolve().parents[2]
+
 CLOSE_FIRST = (
     'Close the review round "First round"? Its results are frozen, and the overview compares '
     "later work with them. The close is recorded in the audit trail."
@@ -287,9 +289,6 @@ def test_the_lead_asks_the_chat_what_improved_since_the_last_round(page: Page, r
     expect(link).to_be_visible()
     link.click()
     expect(page).to_have_url(f"{rounds_url}/controls/{control_id}")
-
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_the_lead_opens_company_rounds_on_the_seeded_demo_round(page: Page, rounds_url):
