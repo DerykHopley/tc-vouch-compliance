@@ -31,3 +31,36 @@ describe("the top bar's label in each goal (ticket 440)", () => {
     expect(label().getAttribute('lang')).toBe('de')
   })
 })
+
+const NORDLICHT = { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' }
+
+describe('the top bar names the current company (ticket 495, option A "Letterhead")', () => {
+  it('reads Vouch, the Goal word, the rule, the company and its tag, in order, the name neither a button nor a link', () => {
+    render(<TopBar goal="audit-readiness" language="en" company={NORDLICHT} />)
+    const bar = screen.getByRole('banner')
+    const rule = bar.querySelector('.top-rule')
+    expect(rule?.getAttribute('aria-hidden')).toBe('true')
+    const name = screen.getByText('Nordlicht Komponenten GmbH')
+    const tag = screen.getByText('DE · EN')
+    const order = [screen.getByText('Vouch'), screen.getByText('Audit preparation'), rule!, name, tag]
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(name.closest('button, a')).toBeNull()
+    expect(tag.closest('button, a')).toBeNull()
+    expect(screen.queryAllByRole('button')).toEqual([])
+    expect(screen.queryAllByRole('link')).toEqual([])
+  })
+
+  it('shows neither the rule nor a name without a company', () => {
+    render(<TopBar goal="audit-readiness" language="en" />)
+    const bar = screen.getByRole('banner')
+    expect(bar.querySelector('.top-rule')).toBeNull()
+    expect(bar.querySelector('.top-company')).toBeNull()
+  })
+
+  it("tags a country with no ISO code by its name, from the overview's fields alone", () => {
+    render(<TopBar company={{ company: 'Testwerk GmbH', country: 'Somewhere', answer_language: 'de' }} />)
+    expect(screen.getByText('Somewhere · DE')).toBeTruthy()
+  })
+})

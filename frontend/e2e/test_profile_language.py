@@ -11,11 +11,11 @@ which the output check refuses for a German profile (#51)."""
 import json
 import re
 
+from current_company import reopened_under
 from playwright.sync_api import Page, Route, expect
 from test_german_answers import ALPENWERK_ASSESSMENT, CONTROL, seeded_stream
-from top_bar import switch_profile
+from top_bar import bar_company, bar_tag, company_tab
 
-ALPENWERK = "Alpenwerk Präzision GmbH · Austria · German"
 PROPER_NAMES = ["Alpenwerk Präzision GmbH"]
 """Names, the same in every language: allowed without `lang`."""
 GERMAN_REPLY = "Für 4.1.2 fehlt die Risikobewertung der Anmeldeverfahren."
@@ -55,16 +55,17 @@ def german_reply(route: Route) -> None:
 
 
 def on_alpenwerk(page: Page, url: str) -> None:
+    """The app opened with Alpenwerk current (#480)."""
     page.set_viewport_size({"width": 1400, "height": 900})
     with page.expect_response("**/api/overview"):
         page.goto(url)
-    with page.expect_response("**/api/overview"):
-        switch_profile(page, ALPENWERK)
+    reopened_under(page, url, "alpenwerk")
 
 
-def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url):
+def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url, nordlicht_later):
     page.route("**/api/assessments", seeded_stream)
     page.route("**/api/chat", german_reply)
+    nordlicht_later(vouch_url)
     on_alpenwerk(page, vouch_url)
 
     # The overview: the controls' German questions.
@@ -96,10 +97,33 @@ def test_on_alpenwerk_every_german_text_carries_lang_de(page: Page, vouch_url):
     expect(report.get_by_role("heading", level=1)).to_have_text("Bereitschaftsbericht")
     assert_marked(page, "Was fehlt?")
 
-    # The Documents tab: its words follow the profile's language (#424); the tab name stays English.
+    # The Company tab's documents: their words follow the profile's language (#424); the tab name
+    # stays English.
     with page.expect_response("**/api/documents"):
-        page.get_by_role("link", name="Documents").click()
+        company_tab(page).click()
     documents = page.locator("article.documents-doc")
     expect(documents).to_have_attribute("lang", "de")
-    expect(documents.get_by_role("heading", level=1)).to_have_text("Dokumente")
+    expect(documents.get_by_role("heading", level=2)).to_have_text("Dokumente")
     assert_marked(page, "Was fehlt?")
+
+
+def test_on_alpenwerk_every_page_s_top_bar_names_it(page: Page, vouch_url, nordlicht_later):
+    """#495: the top bar names the current company on every page, including Report opened
+    directly, which reads no overview: the name comes from the profile list."""
+    nordlicht_later(vouch_url)
+    on_alpenwerk(page, vouch_url)
+
+    def names_alpenwerk() -> None:
+        expect(bar_company(page)).to_have_text("Alpenwerk Präzision GmbH")
+        expect(bar_tag(page)).to_have_text("AT · DE")
+
+    names_alpenwerk()  # the Overview
+    for path, answer in [
+        ("/report", "**/api/report"),
+        ("/company", "**/api/documents"),
+        ("/developer", "**/api/developer/settings"),
+        (f"/controls/{CONTROL}", "**/api/overview"),
+    ]:
+        with page.expect_response(answer):
+            page.goto(f"{vouch_url}{path}")
+        names_alpenwerk()

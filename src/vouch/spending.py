@@ -57,6 +57,11 @@ totals count its tokens and cost, but not as an assessment."""
 NOT_ASSESSMENTS = (CHAT, PROFILE_PASS)
 """The usage records the totals count in tokens and cost but not as assessments: a chat message,
 and a profile pass (#371), whose assessments came from one run."""
+RECENT_RUNS = 10
+"""The usage records the developer page lists as its recent runs (#496)."""
+NOT_RUNS = (CHAT,)
+"""The usage records the recent runs leave out: chat messages; an assessment or a profile pass is
+a run."""
 NO_SHARED_COUNTER = (
     "Assessments on OpenRouter need a database to hold each user's daily limit. "
     f"Set {DATABASE_URL_ENV}."
@@ -137,6 +142,13 @@ class UsageRecord:
     control_id: str
     usage: Usage
     at: datetime
+
+    def to_run(self) -> dict[str, Any]:
+        """The record as the developer page's recent runs list it (#496): when it ended, what ran,
+        and its usage; no user id."""
+        usage = self.usage.to_dict()
+        del usage["cost_usd"]
+        return {"at": self.at.isoformat(), "control_id": self.control_id} | usage
 
 
 @dataclass(frozen=True)
@@ -308,6 +320,11 @@ class SpendingStore(Protocol):
 
     def totals(self) -> UsageTotals: ...
 
+    def recent(self, limit: int) -> list[UsageRecord]:
+        """The last `limit` usage records that are runs (an assessment or a profile pass, not a
+        chat message, NOT_RUNS), newest first by when each ended."""
+        ...
+
 
 class MemorySpendingStore:
     """No database: kept until the server restarts, for the fake model only."""
@@ -372,6 +389,12 @@ class MemorySpendingStore:
                 openrouter = openrouter.add(record.usage, assessment)
         return UsageTotals(openrouter, fake)
 
+    def recent(self, limit: int) -> list[UsageRecord]:
+        # Newest kept first, then sorted (a stable sort): runs ending at the same moment list the
+        # last kept first, as the database's `ORDER BY at DESC, id DESC` does.
+        runs = [r for r in reversed(self.records()) if r.control_id not in NOT_RUNS]
+        return sorted(runs, key=lambda r: r.at, reverse=True)[:limit]
+
 
 class DatabaseSpendingStore:
     """In the database's tables, shared by every instance and restart (vouch.database)."""
@@ -420,6 +443,25 @@ class DatabaseSpendingStore:
             openrouter=RunTotals(**rows["openrouter"]) if "openrouter" in rows else RunTotals(),
             fake=RunTotals(**rows["fake"]) if "fake" in rows else RunTotals(),
         )
+
+    def recent(self, limit: int) -> list[UsageRecord]:
+        return [
+            UsageRecord(
+                row["user_id"],
+                row["control_id"],
+                Usage(
+                    row["model"],
+                    row["input_tokens"],
+                    row["output_tokens"],
+                    row["reported_cost_usd"],
+                    row["estimated_cost_usd"],
+                    row["estimated"],
+                    row["cost_complete"],
+                ),
+                row["at"],
+            )
+            for row in self.db.recent_usage(limit, leave_out=NOT_RUNS)
+        ]
 
 
 def spending_store(db: Database | None) -> SpendingStore:
@@ -526,8 +568,14 @@ class SpendingGuard:
             log.warning("the usage of an assessment of %s could not be kept", control_id)
 
     def settings(self) -> dict[str, Any]:
-        """What the developer page shows. Raises DatabaseUnavailable."""
-        return {"daily_limit": self.store.daily_limit(), "usage": self.store.totals().to_dict()}
+        """What the developer page shows: the daily limit, the usage totalled, each priced
+        model's list price and the recent runs (#496). Raises DatabaseUnavailable."""
+        return {
+            "daily_limit": self.store.daily_limit(),
+            "usage": self.store.totals().to_dict(),
+            "prices": [{"model": model} | asdict(price) for model, price in PRICES.items()],
+            "recent_runs": [r.to_run() for r in self.store.recent(RECENT_RUNS)],
+        }
 
 
 def count_assessment(spending: SpendingGuard, user_id: str, paid: bool) -> None:

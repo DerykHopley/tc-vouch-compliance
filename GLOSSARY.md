@@ -42,6 +42,18 @@ _Avoid_: Regional rules, local law
 The stack of layers (base framework, overlays, language) that defines what one company must show and how answers are written.
 _Avoid_: Config, settings, project
 
+**Company**:
+The organisation Vouch works for, with one compliance profile. The UI says "company" where a lead would; "compliance profile" stays for its layers.
+_Avoid_: Profile (alone), tenant, client
+
+**Current company**:
+The one company every user sees, developers included. A developer sets it on the Developer page. It starts as Nordlicht, and falls back to Nordlicht when the current company is removed. A demo/prototype choice: a real product gives each lead their own companies (#163).
+_Avoid_: Selected profile, active profile
+
+**Company page**:
+The page, reached by the top bar's **Company** tab, with the current company's details and settings. Only the Goal can be changed there.
+_Avoid_: Settings page, profile page
+
 **Goal**:
 What a compliance profile is used for: **Audit readiness** (preparing for an external audit; the flow before M7) or **Internal improvement** (improving the company's own security with no audit planned). The lead can change it; each change is an audit trail entry.
 _Avoid_: Purpose, mode, use case
@@ -59,11 +71,11 @@ The compliance profile over the whole sample library that the eval scores; it is
 _Avoid_: Sample company, test profile
 
 **Documents tab**:
-The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every profile has one, for every user.
+The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505).
 _Avoid_: Document library, uploads, files
 
 **Remove company**:
-A developer hiding a company made in company setup everywhere: it leaves the profile switcher and can't be opened again, but its audit trail is kept and its id is never used again. File-defined profiles can't be removed.
+A developer hiding a company made in company setup everywhere: it leaves every list and can't be opened again, but its audit trail is kept and its id is never used again. When it was the current company, everyone falls back to Nordlicht. File-defined profiles can't be removed.
 _Avoid_: Delete company, archive
 
 ### Assessment
@@ -85,7 +97,7 @@ Whether a signed-in user may use Vouch: a member of the course's Discord server,
 _Avoid_: Permission, entitlement, allow-list (that is the tools')
 
 **Developer page**:
-The page, and its API, where a developer sees and changes the model assessments run on and the daily limit, and sees the prompt version and every assessment's usage totalled. Only a user with the developer role reaches it; a compliance lead never sees it.
+The page, and its API, where a developer sees and changes the model assessments run on and the daily limit, and sees the prompt version and every assessment's usage totalled. It is also where a developer makes a company current, sets one up and removes one. It is reached from the user menu; only a user with the developer role reaches it, and a compliance lead never sees it.
 _Avoid_: Admin page, settings page
 
 **Prompt version**:

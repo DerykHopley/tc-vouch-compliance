@@ -730,6 +730,18 @@ class Database:
             ).fetchall()
         return {row.pop("kind"): row for row in rows}
 
+    def recent_usage(self, limit: int, leave_out: tuple[str, ...]) -> list[dict[str, Any]]:
+        """The last `limit` usage rows, newest first by `at`, leaving out those whose control is
+        one of `leave_out` (chat messages): the developer page's recent runs (#496). Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(USAGE_TABLE):
+            return conn.execute(
+                "SELECT user_id, control_id, model, input_tokens, output_tokens, "
+                "reported_cost_usd, estimated_cost_usd, estimated, cost_complete, at "
+                f"FROM {USAGE_TABLE} WHERE control_id <> ALL(%s) ORDER BY at DESC, id DESC LIMIT %s",
+                (list(leave_out), limit),
+            ).fetchall()
+
     @contextmanager
     def _failed(self, table: str) -> Iterator[None]:
         """Any other database error writing to `table` (a value it refuses, say):

@@ -62,12 +62,15 @@ from vouch.chat_agent import (
     chat_turn,
 )
 from vouch.citations import LeadStatement
+from vouch.company_page import company_facts
+from vouch.current_company import CurrentCompanyStore, current_company_store, current_of
 from vouch.database import Connection, Database, DatabaseUnavailable, Goal
 from vouch.documents import library_summaries
 from vouch.dossier import (
     Applicability,
     PaperRequirement,
     applicability,
+    applicable_controls,
     not_applicable_refusal,
     overview,
     requirements_by_control,
@@ -127,6 +130,7 @@ from vouch.profile_pass import (
     ProfilePassRefused,
     run_profile_pass,
 )
+from vouch.prompts import prompt_previews
 from vouch.redaction import (
     configure_logging,
     redact,
@@ -175,8 +179,12 @@ CLERK_UNAVAILABLE = "Vouch cannot check your sign-in just now. Please try again 
 DEVELOPERS_ONLY = "This is available to developers only."
 PROTECTION_LEVELS_FAILED = "What each protection level brings into scope could not be read."
 CONTROLS_FAILED = "The framework's controls could not be read."
+PROMPTS_FAILED = "The prompts could not be built."
+NOT_A_PROMPT_CONTROL = "{control} is not a control the current company applies."
+NO_PROMPT_CONTROL = "The current company applies no control."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
 DOCUMENTS_FAILED = "The documents could not be read."
+COMPANY_FAILED = "The company could not be loaded."
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
 # in the order step 6 lists them.
 LIBRARY_SOURCES = ("policies", "records")
@@ -217,8 +225,8 @@ class RequestedAssessment:
 
 
 PROFILE_HEADER = "X-Vouch-Profile"
-"""Names the compliance profile a request is for (#47): the top bar's profile switcher sets it on
-every call. Without it, the default profile."""
+"""Names the compliance profile a request is for (#47): the app sets it on every call to the
+current company it opened under (#480). Without it, the current company."""
 
 
 def app_settings(request: Request) -> Settings:
@@ -395,6 +403,25 @@ def app_company_profiles(db: AppDatabase) -> company_profiles.CompanyProfiles:
 CompanyProfiles = Annotated[company_profiles.CompanyProfiles, Depends(app_company_profiles)]
 
 
+def app_current_company(request: Request) -> CurrentCompanyStore:
+    """Where the current company is kept (vouch.current_company, #480)."""
+    return request.app.state.current_company
+
+
+AppCurrentCompany = Annotated[CurrentCompanyStore, Depends(app_current_company)]
+
+
+def stored_current_company(store: CurrentCompanyStore) -> str | None:
+    """The current company's stored id; None when nothing is stored, or when it can't be read
+    (logged): then the default profile is current, as the file profiles are listed when the
+    stored companies can't be read."""
+    try:
+        return store.get()
+    except DatabaseUnavailable:
+        log.warning("the current company can't be read: the default profile is current")
+        return None
+
+
 def file_profiles(settings: Settings) -> ProfileScan:
     """Every profile in the profiles folder, each read once, except the sample library's
     reference profile, which is no company (#370)."""
@@ -410,7 +437,7 @@ SHADOWED = "its id is now a file profile's"
 
 
 def user_profiles(settings: Settings, user: User, companies: CompanyProfiles) -> ProfileScan:
-    """The compliance profiles a user is shown (#47), the profile switcher's and the developer
+    """The compliance profiles a user is shown (#47), GET /api/profiles' and the developer
     page's: for now, for every user, the profiles folder's (file_profiles), then the companies
     made in the app, oldest first (#385), each read once. A broken one is left out (and listed
     for the developer page), never a failure; so is a stored one whose id a file profile has
@@ -452,23 +479,64 @@ def compliance_profile(
     settings: AppSettings,
     user: CurrentUser,
     companies: CompanyProfiles,
+    current: AppCurrentCompany,
     chosen: Annotated[str | None, Header(alias=PROFILE_HEADER)] = None,
 ) -> ComplianceProfile:
-    """The profile the request names, else the default: a file profile first, so a request
-    under one never reads the database, else a company made in the app (the file-first rule
-    user_profiles lists by). Settled before the stream starts: one there is none of is a 404; a
-    broken one a plain 500; a stored company's that can't be read a 503."""
-    name = chosen or DEFAULT_PROFILE
-    found = file_profiles(settings).find(name)
-    if found is None and company_profiles.is_profile_name(name):
-        row = companies.one(name)
-        found = None if row is None else company_profiles.read_stored_once(row)
+    """The profile the request names, else the current company (#480, _current_profile): a file
+    profile first, so a request under one never reads the companies made in the app, else a
+    company made in the app (the file-first rule user_profiles lists by). Settled before the
+    stream starts: one there is none of is a 404; a broken one a plain 500; a stored company's
+    that can't be read a 503."""
+    if chosen is None:
+        return _current_profile(settings, companies, current)
+    name = chosen
+    found = _find_profile(settings, companies, name)
     if found is None:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
     if isinstance(found, BrokenProfile):
         log.error("the compliance profile %s can't be used: %s", name, found.problem)
         raise HTTPException(status_code=500, detail=ASSESSMENT_FAILED)
     return found
+
+
+def _find_profile(
+    settings: Settings, companies: company_profiles.CompanyProfiles, name: str
+) -> ComplianceProfile | BrokenProfile | None:
+    """The profile `name`: a file profile first, else a live company made in the app."""
+    found = file_profiles(settings).find(name)
+    if found is None and company_profiles.is_profile_name(name):
+        row = companies.one(name)
+        found = None if row is None else company_profiles.read_stored_once(row)
+    return found
+
+
+def _current_profile(
+    settings: Settings, companies: company_profiles.CompanyProfiles, current: CurrentCompanyStore
+) -> ComplianceProfile:
+    """The current company's profile, by current_of's one rule, as GET /api/profiles lists it:
+    the stored company while it is usable, else Nordlicht, else the first listed. A stored
+    company made in the app that can't be read (the database down) falls back the same way,
+    logged, as the list leaves it out then. The fallback is found among the file profiles first,
+    so a request under one reads no company made in the app; the companies are read only when
+    no file profile is listed."""
+    stored = stored_current_company(current)
+    if stored is not None:
+        try:
+            found = _find_profile(settings, companies, stored)
+        except DatabaseUnavailable:
+            log.warning(
+                "the current company can't be read (%s, made in the app): falling back", stored
+            )
+            found = None
+        if isinstance(found, ComplianceProfile):
+            return found
+    files = file_profiles(settings)  # first in every list, so the fallback is one of them if any
+    scan = files if files.loaded else _profile_scan(settings, _stored_companies(companies))
+    name = current_of(scan, None)
+    profile = None if name is None else scan.find(name)
+    if not isinstance(profile, ComplianceProfile):
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    return profile
 
 
 Profile = Annotated[ComplianceProfile, Depends(compliance_profile)]
@@ -1221,20 +1289,28 @@ def read_audit_trail(
 
 @router.get("/profiles")
 def list_profiles(
-    settings: AppSettings, user: CurrentUser, companies: CompanyProfiles
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
+    current: AppCurrentCompany,
 ) -> dict[str, Any]:
-    """The compliance profiles the user may switch between (#47): each one's id, company,
-    country and answer language. A profile that can't be loaded is left out (the developer page
-    names it). `default` is the profile a request without X-Vouch-Profile is under; null when
-    that one is left out."""
+    """The compliance profiles listed for the user (#47): each one's id, company, country and
+    answer language. A profile that can't be loaded is left out (the developer page names it).
+    `default` is the default profile (Nordlicht); null when that one is left out. `current` is
+    the current company (#480), the one the app opens under and a request without
+    X-Vouch-Profile is under; null with none listed."""
     scan = user_profiles(settings, user, companies)
     listed = [listed_profile(p) for p in scan.loaded]
     default = scan.find(DEFAULT_PROFILE)
-    return {"profiles": listed, "default": default.id if default in scan.loaded else None}
+    return {
+        "profiles": listed,
+        "default": default.id if default in scan.loaded else None,
+        "current": current_of(scan, stored_current_company(current)),
+    }
 
 
 def listed_profile(profile: ComplianceProfile) -> dict[str, str]:
-    """A profile as the profile switcher lists it."""
+    """A profile as GET /api/profiles lists it."""
     return {
         "id": profile.id,
         "company": profile.company,
@@ -1687,6 +1763,20 @@ def profile_documents_tab(
     return clean | {"words": words, "words_language": language}
 
 
+@router.get("/company")
+def company_page(profile: Profile) -> dict[str, Any]:
+    """The Company page's facts (#505, vouch.company_page), for every signed-in user, under the
+    current company: its profile's facts, overlays, protection level's scope, not-applicable
+    entries and where it is defined. Read-only; redacted as the overview is. The base framework
+    unreadable, a plain 500 naming no file."""
+    try:
+        facts = company_facts(profile)
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, COMPANY_FAILED) from None
+    clean, _ = redact_data(facts)
+    return clean
+
+
 def attachment(name: str) -> str:
     """A Content-Disposition for a download named `name`: `filename` an ASCII slug of it
     (letters, digits, `-` and `.` kept, lower case) for any browser, `filename*` the name as
@@ -1996,13 +2086,17 @@ def _developer_page(
     spending: SpendingGuard,
     settings: Settings,
     companies: CompanyProfiles,
+    current: CurrentCompanyStore,
     model: str | None = None,
+    *,
+    rows: list[company_profiles.StoredProfile] | None = None,
 ) -> dict[str, Any]:
     """The whole developer page, the same for its read and for each change's answer (#455: the
     changes once left out the broken profiles, and the page rendering their answer failed),
-    the companies made in setup included (#418)."""
+    the companies made in setup (#418) and the current company (#480) included. `rows`: the
+    companies made in setup when the caller has just read them, so they aren't read twice."""
     page = models.settings(model) | spending.settings()
-    return page | _company_settings(settings, companies)
+    return page | _company_settings(settings, companies, current, rows=rows)
 
 
 @router.get("/developer/settings", dependencies=DEVELOPERS)
@@ -2012,22 +2106,37 @@ def developer_settings(
     settings: AppSettings,
     user: CurrentUser,
     companies: CompanyProfiles,
+    current: AppCurrentCompany,
 ) -> dict[str, Any]:
     """The model, where assessments run (and why on the fake), the prompt version, the daily
-    limit, every assessment's usage totalled, the compliance profiles left out of the profile
-    switcher because they can't be loaded (#47), each with its problem, and the companies made
-    in setup (#418)."""
-    return _developer_page(models, spending, settings, companies)
+    limit, every assessment's usage totalled, the compliance profiles left out of the list
+    because they can't be loaded (#47), each with its problem, the companies made in setup
+    (#418), and the listed and current companies (#480)."""
+    return _developer_page(models, spending, settings, companies, current)
 
 
-def _company_settings(settings: Settings, companies: CompanyProfiles) -> dict[str, Any]:
-    """The developer page's profiles: `broken_profiles`, and `companies`, each live company made
-    in setup, oldest first, broken and shadowed ones included, so any can be removed (#418);
-    None when they can't be read (logged)."""
-    rows = _stored_companies(companies)
-    broken = _profile_scan(settings, rows).broken
+def _company_settings(
+    settings: Settings,
+    companies: CompanyProfiles,
+    current: CurrentCompanyStore,
+    *,
+    rows: list[company_profiles.StoredProfile] | None = None,
+) -> dict[str, Any]:
+    """The developer page's companies: `broken_profiles`; `companies`, each live company made in
+    setup, oldest first, broken and shadowed ones included, so any can be removed (#418), None
+    when they can't be read (logged); `listed_companies`, every company listed for users as
+    GET /api/profiles lists them, and `current_company`, the current one's id (#480). `rows`:
+    the companies made in setup as just read, else they are read here."""
+    if rows is None:
+        rows = _stored_companies(companies)
+    scan = _profile_scan(settings, rows)
     made = None if rows is None else [_made_company(row) for row in rows]
-    return {"broken_profiles": [asdict(b) for b in broken], "companies": made}
+    return {
+        "broken_profiles": [asdict(b) for b in scan.broken],
+        "companies": made,
+        "listed_companies": [listed_profile(p) for p in scan.loaded],
+        "current_company": current_of(scan, stored_current_company(current)),
+    }
 
 
 def _made_company(row: company_profiles.StoredProfile) -> dict[str, str]:
@@ -2047,11 +2156,12 @@ def change_daily_limit(
     spending: AppSpending,
     settings: AppSettings,
     companies: CompanyProfiles,
+    current: AppCurrentCompany,
 ) -> dict[str, Any]:
     """Each user may start `daily_limit` assessments a day, from the next one on. The answer is
     the whole developer page, as `developer_settings` reads it (#455)."""
     spending.set_daily_limit(request.daily_limit)
-    return _developer_page(models, spending, settings, companies)
+    return _developer_page(models, spending, settings, companies, current)
 
 
 @router.put("/developer/model", dependencies=DEVELOPERS)
@@ -2061,6 +2171,7 @@ def change_model(
     spending: AppSpending,
     settings: AppSettings,
     companies: CompanyProfiles,
+    current: AppCurrentCompany,
 ) -> dict[str, Any]:
     """The next assessment runs on `model`, once OpenRouter's model list has it. The answer is
     the whole developer page, as `developer_settings` reads it (#455)."""
@@ -2073,7 +2184,33 @@ def change_model(
         raise HTTPException(status_code=422, detail=detail) from None
     except CatalogueUnavailable:
         raise HTTPException(status_code=503, detail=CATALOGUE_UNAVAILABLE) from None
-    return _developer_page(models, spending, settings, companies, model)
+    return _developer_page(models, spending, settings, companies, current, model)
+
+
+class CurrentCompanyRequest(BaseModel):
+    company: Annotated[str, StringConstraints(max_length=200)]
+
+
+@router.put("/developer/current-company", dependencies=DEVELOPERS)
+def change_current_company(
+    request: CurrentCompanyRequest,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    user: CurrentUser,
+    companies: CompanyProfiles,
+    current: AppCurrentCompany,
+) -> dict[str, Any]:
+    """Make `company` the current company (#480), every user's from their next page open. Only a
+    listed company: an unknown, removed or broken one's id is a 404, nothing changed. The
+    companies made in setup or the setting can't be read or written: a 503, nothing changed.
+    The answer is the whole developer page, as `developer_settings` reads it (#455)."""
+    rows = companies.all()  # unreadable: a 503, never a wrong 404
+    if request.company not in {p.id for p in _profile_scan(settings, rows).loaded}:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    current.set(request.company)
+    log.info("the current company is now %s, made so by %s", request.company, user.id)
+    return _developer_page(models, spending, settings, companies, current, rows=rows)
 
 
 @router.get("/developer/protection-levels", dependencies=DEVELOPERS)
@@ -2098,6 +2235,38 @@ def framework_controls() -> dict[str, Any]:
         log.exception("the base framework could not be read")
         raise HTTPException(status_code=500, detail=CONTROLS_FAILED) from None
     return {"controls": [{"id": c.id, "question": c.question} for c in controls]}
+
+
+@router.get("/developer/prompts", dependencies=DEVELOPERS)
+def developer_prompts(
+    settings: AppSettings,
+    companies: CompanyProfiles,
+    current: AppCurrentCompany,
+    control: str | None = None,
+) -> dict[str, Any]:
+    """Every prompt the agent gets (#496), built for the current company, always (the request's
+    profile header isn't read), and `control`, one of its applicable controls (default: the
+    first): `company`, `controls` (every applicable one, for the picker), `control` and the six
+    `prompts` (vouch.prompts). A control not applicable to the company, or unknown, is a 404
+    naming it, nothing built; the base framework unreadable, a plain 500 naming no file."""
+    control = control or None  # `?control=` asks for none: the first applies
+    profile = _current_profile(settings, companies, current)
+    try:
+        controls = applicable_controls(profile, profile.isa_edition().controls)
+    except BaseFrameworkError:
+        raise _unreadable_edition(profile, PROMPTS_FAILED) from None
+    chosen = next((c for c in controls if c.id == control), None) if control else None
+    if control is not None and chosen is None:
+        raise HTTPException(status_code=404, detail=NOT_A_PROMPT_CONTROL.format(control=control))
+    chosen = chosen or (controls[0] if controls else None)
+    if chosen is None:  # every control not applicable: company setup refuses such a company
+        raise HTTPException(status_code=404, detail=NO_PROMPT_CONTROL)
+    return {
+        "company": {"id": profile.id, "name": profile.company},
+        "controls": [{"id": c.id, "question": c.question} for c in controls],
+        "control": {"id": chosen.id, "question": chosen.question},
+        "prompts": [p.to_dict() for p in prompt_previews(profile, chosen)],
+    }
 
 
 @router.get("/developer/sample-library", dependencies=DEVELOPERS)
@@ -2148,6 +2317,7 @@ def remove_company_profile(
     settings: AppSettings,
     user: CurrentUser,
     companies: CompanyProfiles,
+    current: AppCurrentCompany,
 ) -> dict[str, Any]:
     """Remove a company made in setup (#418): it leaves every list and can't be opened, its row
     kept so its id is never used again, its audit trail, threads, remediation items and Goal
@@ -2164,7 +2334,7 @@ def remove_company_profile(
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
     _forget_profile(profile_id)
     try:
-        return _developer_page(models, spending, settings, companies)
+        return _developer_page(models, spending, settings, companies, current)
     except Exception:  # removed already: never answer as if nothing was (#418 review)
         log.exception("the developer settings can't be read after removing %s", profile_id)
         return {"settings_unavailable": True}
@@ -2256,6 +2426,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth = auth
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
+    app.state.current_company = current_company_store(app.state.database)
     app.state.spending = SpendingGuard(spending_store(app.state.database))
     app.state.running = RunningAssessments()
     frontend = settings.frontend

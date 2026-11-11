@@ -1,21 +1,20 @@
-"""The Documents tab (#424, story 4 of M8 #351): each evidence document of the profile shown, with
+"""The documents (#424, story 4 of M8 #351), under the Company tab since #495: each evidence document of the profile shown, with
 its version, approval date, review cycle, stale flag and the controls citing it, for a file profile
 (Nordlicht, after 4.1.2 is assessed) and for a company made through setup (only its chosen
 documents). Local mode, the scripted fake model."""
 
-import re
-
 from playwright.sync_api import Page, expect
 from test_company_setup import create_company, open_setup, to_step_7
 from test_profiles import assessed as assessed_in
+from top_bar import bar_company, company_tab
 
 DOCUMENTS = "**/api/documents"
 
 
 def open_documents(page: Page) -> None:
-    """The Documents tab from the top bar, once its documents have been read."""
+    """The Company tab from the top bar, once its documents have been read."""
     with page.expect_response(DOCUMENTS) as answer:
-        page.get_by_role("navigation", name="Main").get_by_role("link", name="Documents").click()
+        company_tab(page).click()
     assert answer.value.ok, answer.value.status
     expect(page.locator("article.documents-doc")).to_be_visible()
 
@@ -32,7 +31,7 @@ def test_nordlicht_lists_its_documents_with_the_controls_citing_them(page: Page,
 
     open_documents(page)
 
-    expect(page).to_have_url(f"{vouch_url}/documents")
+    expect(page).to_have_url(f"{vouch_url}/company")
     sheet = page.get_by_role("article", name="Documents")
     expect(sheet).to_have_attribute("lang", "en")
     standard = row(page, "Authentication standard")
@@ -48,7 +47,7 @@ def test_at_400px_only_the_tables_scroll_sideways(page: Page, vouch_url):
     """design.md, Layout: wide tables scroll in their own container, never the page."""
     page.set_viewport_size({"width": 400, "height": 900})
     with page.expect_response(DOCUMENTS):
-        page.goto(f"{vouch_url}/documents")
+        page.goto(f"{vouch_url}/company")
     table = page.get_by_role("table", name="Policies")
     expect(table).to_be_visible()
 
@@ -59,14 +58,15 @@ def test_at_400px_only_the_tables_scroll_sideways(page: Page, vouch_url):
     assert table.locator("xpath=..").evaluate("w => w.scrollWidth > w.clientWidth")
 
 
-def test_a_company_made_through_setup_lists_only_its_chosen_document(page: Page, setup_url):
+def test_a_company_made_through_setup_lists_only_its_chosen_document(
+    page: Page, setup_url, nordlicht_later
+):
+    nordlicht_later(setup_url)  # the create makes it current (#480)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
     to_step_7(page, "Belegfirma GmbH")  # German, the Backup policy chosen
     create_company(page)
-    expect(
-        page.get_by_role("button", name=re.compile(r"^Profile: Belegfirma GmbH"))
-    ).to_be_visible()
+    expect(bar_company(page)).to_have_text("Belegfirma GmbH")
 
     open_documents(page)
 

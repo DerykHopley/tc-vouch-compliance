@@ -5,7 +5,7 @@ reaches it.
 
 On the profiles server, as the developer page's checks are (local mode: its one user is a
 developer), except the checks that create a company: they run on servers of their own, as the
-company stays in that process and would join the other checks' switchers. Story 5's runs on
+company stays in that process and is made current there (#480). Story 5's runs on
 first_pass_url, as every create now runs a profile pass and setup_url's creates would spend the
 passes' daily limit (3).
 """
@@ -15,6 +15,7 @@ import re
 import pytest
 from playwright.sync_api import Page, Response, expect
 from test_developer_page import as_compliance_lead
+from top_bar import bar_company, from_user_menu
 from touch_targets import small_targets
 
 LEVELS = "/api/developer/protection-levels"
@@ -35,8 +36,9 @@ def press(page: Page, button: str) -> None:
 
 
 def open_setup(page: Page, profiles_url: str) -> None:
-    page.goto(f"{profiles_url}/developer")
-    page.get_by_role("button", name="Set up a company").click()
+    with page.expect_response("**/api/developer/settings"):
+        page.goto(profiles_url)
+    from_user_menu(page, "Set up a company")  # the user menu's, since #495
 
 
 def to_step_3(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
@@ -100,14 +102,21 @@ def reason(page: Page, control_id: str):
     return page.get_by_role("textbox", name=f"Why {control_id} doesn't apply")
 
 
-def test_a_developer_opens_company_setup_from_the_developer_page(page: Page, profiles_url):
+def test_a_developer_opens_company_setup_from_the_user_menu(page: Page, profiles_url):
     open_setup(page, profiles_url)
 
     expect(page).to_have_url(re.compile(r"/developer/setup$"))
     expect(page.get_by_role("heading", name="Company setup")).to_be_visible()
     expect(page.get_by_text("Step 1 of 7")).to_be_visible()
-    developer = page.get_by_role("navigation", name="Main").get_by_role("link", name="Developer")
-    expect(developer).to_have_attribute("aria-current", "page")
+    # no tab is the setup's own: the developer's pages are in the user menu (#495)
+    expect(page.locator("nav[aria-label=Main] [aria-current=page]")).to_have_count(0)
+
+
+def test_a_developer_opens_company_setup_from_the_developer_page(page: Page, profiles_url):
+    page.goto(f"{profiles_url}/developer")
+    page.get_by_role("button", name="Set up a company").click()
+    expect(page).to_have_url(re.compile(r"/developer/setup$"))
+    expect(page.get_by_text("Step 1 of 7")).to_be_visible()
 
 
 def test_a_compliance_lead_at_the_setup_address_gets_the_dossier(page: Page, profiles_url):
@@ -526,11 +535,19 @@ def to_step_7(page: Page, company: str = "Musterfirma Nord GmbH") -> None:
     expect(page.get_by_role("heading", name="Finish")).to_be_focused()
 
 
-def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
+def current_of(page: Page, url: str) -> str:
+    """The server's current company (#480), as GET /api/profiles says."""
+    listed = page.request.get(f"{url}/api/profiles")
+    assert listed.ok, listed.status
+    return listed.json()["current"]
+
+
+def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url, nordlicht_later):
     """Stories 1 to 4 end to end: every answer summed up on step 7 (the name and a reason typed
-    with spaces around them, shown and sent trimmed), Create company, then the new company on the
-    Dossier, focus on its heading, in the top bar and the switcher, its marked controls' reasons
-    kept in its profile."""
+    with spaces around them, shown and sent trimmed), Create company, then the new company made
+    current (#480) and on the Dossier, focus on its heading, its marked controls' reasons kept in
+    its profile."""
+    nordlicht_later(setup_url)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
     to_step_5(page, "  Musterfirma Nord GmbH ")
@@ -577,18 +594,12 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
 
     expect(page).to_have_url(f"{setup_url}/")
     expect(page.get_by_role("heading", level=1)).to_be_focused()
-    banner = page.get_by_role("banner")
-    expect(
-        banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
-    ).to_be_visible()
+    expect(bar_company(page)).to_have_text("Musterfirma Nord GmbH")
     expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
     # Its Goal is set and its profile pass has run (#447): story 5's check follows the pass through.
     expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
     expect(page.get_by_role("region", name="Profile pass")).to_be_visible()
-    banner.get_by_role("button", name=re.compile(r"^Profile: ")).click()
-    expect(
-        banner.get_by_role("menuitemradio", name=re.compile(r"^Musterfirma Nord GmbH"))
-    ).to_be_checked()
+    assert current_of(page, setup_url) == profile["id"]  # every user's company now (#480)
 
     overview = page.request.get(
         f"{setup_url}/api/overview", headers={"X-Vouch-Profile": profile["id"]}
@@ -603,10 +614,10 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url):
         assert {r["not_applicable"] for r in requirements[control_id]} == {typed}
     assert all(r["not_applicable"] is None for r in requirements["1.1.1"])
 
-    page.reload()
-    expect(
-        banner.get_by_role("button", name=re.compile(r"^Profile: Musterfirma Nord GmbH"))
-    ).to_be_visible()
+    with page.expect_response(lambda r: r.url.endswith("/api/overview")) as reread:
+        page.reload()
+    assert reread.value.request.header_value("X-Vouch-Profile") == profile["id"]
+    expect(bar_company(page)).to_have_text("Musterfirma Nord GmbH")
 
 
 def test_a_double_click_on_step_6s_next_lands_on_step_7_and_creates_nothing(
@@ -663,11 +674,14 @@ def test_a_double_click_on_a_next_that_moves_leaves_focus_on_the_new_heading(
     expect(page.get_by_role("heading", name="Finish")).to_be_focused()
 
 
-def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(page: Page, setup_url):
+def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(
+    page: Page, setup_url, nordlicht_later
+):
     """#454: 5.2.9 marked not applicable on step 5. Its card has the Not applicable chip, no review
     tag and the reason; readiness counts the 11 others; opening it reads no stored assessment
     (each read counts to the rate limit), while opening an assessed control does. Its working
     paper has the chip and the reason, and no Assess button (#454 review)."""
+    nordlicht_later(setup_url)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, setup_url)
     to_step_5(page, "Ausnahmefirma GmbH")
@@ -678,9 +692,7 @@ def test_a_control_marked_not_applicable_in_setup_reads_so_on_the_dossier(page: 
     document(page, "Backup policy").check()
     press(page, "Next")
     create_company(page)
-    expect(
-        page.get_by_role("button", name=re.compile(r"^Profile: Ausnahmefirma GmbH"))
-    ).to_be_visible()
+    expect(bar_company(page)).to_have_text("Ausnahmefirma GmbH")
 
     card = page.get_by_role("article", name="Control 5.2.9")
     expect(card.locator(".chip")).to_have_class("chip v-not-applicable")
@@ -775,12 +787,13 @@ CHOSEN = {
 
 
 def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted(
-    page: Page, first_pass_url
+    page: Page, first_pass_url, nordlicht_later
 ):
     """Story 5 end to end (#447): setup with Internal improvement left chosen on step 4 and a few
     library documents, Create company, then the new company's Overview with its Goal set and its
     profile pass's result: every card waiting for review, and an opened working paper citing only
     chosen documents."""
+    nordlicht_later(first_pass_url)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, first_pass_url)
     to_step_4(page, "Erstpass GmbH")
@@ -810,11 +823,8 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
     assert goal.value.request.headers["x-vouch-profile"] == profile
 
     expect(page).to_have_url(f"{first_pass_url}/")
-    expect(
-        page.get_by_role("banner").get_by_role(
-            "button", name=re.compile(r"^Profile: Erstpass GmbH")
-        )
-    ).to_be_visible()
+    expect(bar_company(page)).to_have_text("Erstpass GmbH")
+    assert current_of(page, first_pass_url) == profile  # every user's company now (#480)
     expect(page.get_by_text("Goal: Internal improvement")).to_be_visible()
     panel = page.get_by_role("region", name="Profile pass")
     expect(panel).to_contain_text("12 assessments waiting for your review.")

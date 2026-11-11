@@ -742,13 +742,16 @@ def _passage_key(passage: Passage) -> tuple[str, str, str]:
     return passage["doc_id"], passage["heading"], passage["text"]
 
 
-def _prompt(
+def gather_prompt(
     control: IsaControl,
     control_requirements: ControlRequirements,
     profile: ComplianceProfile,
     note: str = "",
     statements: list[EvidencePassage] | None = None,
 ) -> list[AnyMessage]:
+    """The gather step's prompt: the system rules and the control with its requirements, the
+    lead's `statements` and a rejection `note` when there are some (the developer page shows it,
+    vouch.prompts)."""
     offered = [t["function"]["name"] for t in _offered_tools(profile)]
     search = (
         f"Use {' and '.join(offered)} to find evidence."
@@ -773,7 +776,8 @@ def _prompt(
     ]
 
 
-def _overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage:
+def overlay_prompt(overlay_requirements: Iterable[Requirement]) -> HumanMessage:
+    """Asks the gathering for evidence for each country-overlay requirement too."""
     listed = "\n".join(f"- {r.id} ({r.source}): {r.text}" for r in overlay_requirements)
     return HumanMessage(
         "These requirements come from a country overlay, national rules added to this "
@@ -786,7 +790,9 @@ def _statements_of(state: AssessState, profile: ComplianceProfile) -> list[Evide
     return statement_passages(state.get("lead_statements", []), profile.answer_language)
 
 
-def _judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMessage]:
+def judge_prompt(state: AssessState, profile: ComplianceProfile) -> list[AnyMessage]:
+    """The judge's prompt: the requirements, the evidence found, the lead's statements, the draft
+    answer and any rejection note, from the run's state."""
     control = state["control"]
     pending = [
         f"{label} could not be read, so its evidence is pending" for label in state["pending"]
@@ -835,9 +841,10 @@ def to_remediate(
     return [r for r in requirements if r.verdict in TO_FIX and r.id not in pending]
 
 
-def _remediation_prompt(
+def remediation_prompt(
     control: IsaControl, requirements: list[RequirementVerdict], profile: ComplianceProfile
 ) -> list[AnyMessage]:
+    """The remediation step's prompt: one item asked for each requirement listed."""
     to_fix = "\n".join(
         f"- {r.id} ({r.column}, {verdict_words(r.verdict)}): {r.text}\n  Why: {r.reason}"
         for r in requirements
@@ -1092,7 +1099,9 @@ def build_graph(
         control = state["control"]
         control_requirements = profile.requirements_for(control)
         statements = _statements_of(state, profile)
-        prompt = _prompt(control, control_requirements, profile, state.get("note", ""), statements)
+        prompt = gather_prompt(
+            control, control_requirements, profile, state.get("note", ""), statements
+        )
         return {
             "control_requirements": control_requirements,
             "overlay_requirements": overlay_requirements_of(control_requirements),
@@ -1106,7 +1115,7 @@ def build_graph(
         return {
             # Unchanged; given again only so this step's describe() can name them.
             "overlay_requirements": overlay_requirements,
-            "messages": [_overlay_prompt(overlay_requirements)],
+            "messages": [overlay_prompt(overlay_requirements)],
         }
 
     def after_overlays(state: AssessState) -> str:
@@ -1282,7 +1291,7 @@ def build_graph(
 
         judged, usage, rejected = ask_until_clean(
             judge_model,
-            _judge_prompt(state, profile),
+            judge_prompt(state, profile),
             read,
             what="a judgement's reason",
             refusal=lambda word: (
@@ -1352,7 +1361,7 @@ def build_graph(
 
         (drafts, not_drafted), usage, rejected = ask_until_clean(
             remediation_model,
-            _remediation_prompt(state["control"], to_fix, profile),
+            remediation_prompt(state["control"], to_fix, profile),
             read,
             what="a remediation draft",
             refusal=lambda word: (

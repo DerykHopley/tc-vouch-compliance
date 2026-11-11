@@ -108,44 +108,61 @@ class CallBudgetSpent(RuntimeError):
     """The assessment asked for more model calls than CALL_BUDGET."""
 
 
-class ModelStore(Protocol):
-    """Where the developer's model choice is kept. Both methods may raise DatabaseUnavailable."""
+class SettingStore(Protocol):
+    """Where one developer setting is kept (the model choice, the current company #480). Both
+    methods may raise DatabaseUnavailable."""
 
     kept_in: KeptIn
 
     def get(self) -> str | None: ...
 
-    def set(self, model: str) -> None: ...
+    def set(self, value: str) -> None: ...
 
 
-class MemoryModelStore:
-    """No database: the choice lasts until the server restarts."""
+ModelStore = SettingStore
+"""Where the developer's model choice is kept."""
+
+
+class MemorySettingStore:
+    """No database: the setting lasts until the server restarts."""
 
     kept_in: KeptIn = "memory"
 
     def __init__(self) -> None:
-        self._model: str | None = None
+        self._value: str | None = None
 
     def get(self) -> str | None:
-        return self._model
+        return self._value
 
-    def set(self, model: str) -> None:
-        self._model = model
+    def set(self, value: str) -> None:
+        self._value = value
 
 
-class DatabaseModelStore:
-    """The choice in the database's settings table, shared by every instance and restart."""
+MemoryModelStore = MemorySettingStore
+
+
+class DatabaseSettingStore:
+    """The setting `name` in the database's settings table, shared by every instance and
+    restart."""
 
     kept_in: KeptIn = "database"
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, name: str) -> None:
         self.db = db
+        self.name = name
 
     def get(self) -> str | None:
-        return self.db.setting(MODEL_SETTING)
+        return self.db.setting(self.name)
 
-    def set(self, model: str) -> None:
-        self.db.set_setting(MODEL_SETTING, model)
+    def set(self, value: str) -> None:
+        self.db.set_setting(self.name, value)
+
+
+class DatabaseModelStore(DatabaseSettingStore):
+    """The model choice in the settings table."""
+
+    def __init__(self, db: Database) -> None:
+        super().__init__(db, MODEL_SETTING)
 
 
 def _budgeted_chat_openai() -> type[BaseChatModel]:
@@ -170,8 +187,20 @@ def _budgeted_chat_openai() -> type[BaseChatModel]:
             return super()._generate(*args, **kwargs)
 
         def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
+            # OpenRouter names the model in each chunk that carries a `finish_reason`, and its
+            # usage chunk repeats the last one's; langchain-core's chunk merge (merge_dicts)
+            # adds strings up, so the merged answer would name `openai/gpt-6-lunaopenai/...`
+            # (#551). Only the first chunk naming the model keeps it.
             self._spend()
-            yield from super()._stream(*args, **kwargs)
+            named = False
+            for chunk in super()._stream(*args, **kwargs):
+                info = chunk.generation_info or {}
+                if "model_name" in info:
+                    if named:
+                        rest = {k: v for k, v in info.items() if k != "model_name"}
+                        chunk.generation_info = rest or None
+                    named = True
+                yield chunk
 
     return BudgetedChatOpenAI
 

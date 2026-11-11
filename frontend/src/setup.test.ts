@@ -24,7 +24,7 @@ describe('the countries company setup offers', () => {
     const regions = new Intl.DisplayNames(['en'], { type: 'region' })
     for (const { code, name } of COUNTRIES) {
       expect(regions.of(code)).toBe(name)
-      expect(profileTag({ id: 'x', company: 'X', country: name, answer_language: 'en' })).toBe(`${code} · EN`)
+      expect(profileTag({ country: name, answer_language: 'en' })).toBe(`${code} · EN`)
     }
   })
 })
@@ -218,7 +218,7 @@ describe('creating a company, issue 409', () => {
 })
 
 describe('newlyListed', () => {
-  const before = { profiles: [NORDLICHT, CREATED], default: 'nordlicht' }
+  const before = { profiles: [NORDLICHT, CREATED], default: 'nordlicht', current: 'nordlicht' }
   const twin = { ...CREATED, id: 'musterfirma-gmbh-2' }
 
   it('is the profile of that name whose id was not listed before', () => {

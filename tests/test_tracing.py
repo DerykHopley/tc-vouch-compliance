@@ -23,9 +23,11 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
+import httpx2
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableLambda
 from opentelemetry import context as otel_context
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -42,7 +44,7 @@ from vouch import tracing as tracing_module
 from vouch.api import create_app, current_user
 from vouch.evals import EvalModels, fake_models, load_cases, run_eval
 from vouch.graph import PROMPT_VERSION
-from vouch.model_choice import DEFAULT_MODEL
+from vouch.model_choice import DEFAULT_MODEL, OpenRouter
 from vouch.paths import FIXTURES_DIR, REPO_DIR
 from vouch.profile import load_named_profile, read_profile_once
 from vouch.settings import (
@@ -54,8 +56,8 @@ from vouch.settings import (
     load_langfuse_keys,
     load_settings,
 )
-from vouch.spending import CHAT, GPT_LUNA, PRICES, PROFILE_PASS
-from vouch.tracing import TraceFacts, Tracing, run_traced, traced
+from vouch.spending import CHAT, GPT_LUNA, PRICES, PROFILE_PASS, UsageMeter
+from vouch.tracing import CHAT_TURN, TraceFacts, Tracing, run_traced, traced
 
 KEYS = {"LANGFUSE_PUBLIC_KEY": "pk-lf-test-public", "LANGFUSE_SECRET_KEY": "sk-lf-test-secret"}
 LOCAL = "http://localhost:3300"
@@ -830,6 +832,50 @@ def test_a_reported_cost_on_an_unpriced_model_is_sent_as_its_total():
 
 def test_a_call_whose_cost_cant_be_known_sends_none_never_zero():
     assert tracing_module.cost_details(llm_result(12, 5), UNPRICED_MODEL) is None
+
+
+def streamed_answer(request: httpx2.Request) -> httpx2.Response:
+    """OpenRouter streaming a chat answer, as its streaming docs show: every chunk names the
+    model, and the usage chunk repeats the last one's `finish_reason`."""
+
+    def chunk(delta: dict, finish: str | None, **extra) -> str:
+        choice = {"index": 0, "delta": delta, "finish_reason": finish}
+        body = {"id": "gen-1", "object": "chat.completion.chunk", "created": 1, "model": GPT_LUNA}
+        return "data: " + json.dumps(body | {"choices": [choice]} | extra) + "\n\n"
+
+    usage = {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200}
+    stream = (
+        chunk({"role": "assistant", "content": "Laptops use full-disk encryption."}, None)
+        + chunk({"content": ""}, "stop")
+        + chunk({"role": "assistant", "content": ""}, "stop", usage=usage)
+        + "data: [DONE]\n\n"
+    )
+    return httpx2.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+
+@pytest.mark.filterwarnings("ignore:A test tried to use socket.socket")
+def test_a_streamed_call_s_generation_names_the_served_model_once_with_its_recorded_cost(exported):
+    """The chat streams its answer (#551): LangChain merges the chunks, adding up the strings
+    two of them carry, so the served model read `openai/gpt-6-lunaopenai/gpt-6-luna`."""
+    on, exporter = exported
+    meter = UsageMeter(GPT_LUNA)
+    openrouter = OpenRouter(
+        SecretStr("sk-test"),
+        chat_client=httpx2.Client(transport=httpx2.MockTransport(streamed_answer)),
+    )
+    model = openrouter.chat_model(GPT_LUNA, [meter])
+    facts = TraceFacts(CHAT_TURN, "user_1", "demo", GPT_LUNA, PROMPT_VERSION)
+
+    chunks = list(model.stream([HumanMessage("Are laptops encrypted?")], on.config(facts)))
+
+    assert "".join(str(c.content) for c in chunks) == "Laptops use full-disk encryption."
+    [spans] = traces(on, exporter).values()
+    [generation] = of_type(spans, "generation")
+    assert generation.attributes[MODEL] == GPT_LUNA  # type: ignore[index]
+    assert meter.usage().served_models == {GPT_LUNA: 1}
+    [cost] = costs(spans)
+    assert cost["total"] == pytest.approx(meter.usage().cost_usd)
+    assert cost["total"] == pytest.approx(PRICES[GPT_LUNA].cost(1000, 200))
 
 
 # --- A failed call's cost (#508) ---------------------------------------------------------------

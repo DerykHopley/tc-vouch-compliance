@@ -35,6 +35,7 @@ vi.mock('@clerk/react', () => ({
 const ONE_PROFILE = {
   profiles: [{ id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' }],
   default: 'nordlicht',
+  current: 'nordlicht', // #480: the app opens under the current company
 }
 
 /** GET /api/access answers `status` with `body`, and GET /api/profiles one profile (#47: the app
@@ -131,7 +132,7 @@ describe('signed in', () => {
     await userEvent.click(user)
     expect(screen.getByText('Signed in as Anna Berg')).toBeTruthy()
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent))
-      .toEqual(['Start Nordlicht Komponenten GmbH afresh…', 'Dark theme', 'Sign out']) // the fresh start, #285
+      .toEqual(['Dark theme', 'Sign out', 'Start Nordlicht Komponenten GmbH afresh…']) // the reset last, #285, #495
     await userEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }))
     expect(clerk.signOut).toHaveBeenCalledOnce()
   })

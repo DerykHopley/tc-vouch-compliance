@@ -72,6 +72,7 @@ def test_the_users_profiles_are_listed_with_company_country_and_language(profile
             },
         ],
         "default": "nordlicht",
+        "current": "nordlicht",  # #480: nothing stored
     }
 
 

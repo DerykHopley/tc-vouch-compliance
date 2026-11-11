@@ -57,8 +57,8 @@ two layouts. `page.evaluate(LONG_QUOTES_LEAST, {"box": ..., "hide": ...})`."""
 def with_long_quotes(
     page: Page, url: str | re.Pattern[str], profile: str, edit: Callable[[dict], None]
 ) -> None:
-    """The response to `url` as served under `profile` (as_company's header: this route answers
-    before its), after `edit` has changed it in place to hold LONG_QUOTES."""
+    """The response to `url` as served under `profile` (made current: this route sends its header
+    too), after `edit` has changed it in place to hold LONG_QUOTES."""
 
     def patched(route: Route) -> None:
         headers = {**route.request.headers, "x-vouch-profile": profile}
