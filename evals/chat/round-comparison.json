@@ -1,0 +1,7 @@
+{
+  "about": "A chat eval case (#581), kept as a scripted fixture: the offline eval (vouch.evals) scores assessments, not chat. A chat eval would run each case here through the chat agent on a model and score the tool it called and the controls its answer cites. tests/test_chat_rounds.py checks the case against the tool on the fake, offline.",
+  "question": "What improved since Q2 2026?",
+  "rounds": "First round closed; Q2 2026 closed with 1.1.1 accepted partly evidenced and 1.6.1 accepted evidenced; Q3 2026 open; nothing accepted now.",
+  "expects_tool": {"name": "compare_rounds", "args": {"round": "Q2 2026"}},
+  "expects_cited_controls": ["1.1.1", "1.6.1"]
+}
