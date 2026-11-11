@@ -97,6 +97,7 @@ The optional tasks done; the full table, with the code and the app page for each
 | Medium | Multi-model support | [Medium](docs/course-tasks.md#medium) |
 | Medium | A security guard; developer settings apart from the user experience | [Medium](docs/course-tasks.md#medium) |
 | Hard | Agentic RAG in the LangGraph app | [Hard](docs/course-tasks.md#hard) |
+| Hard | An LLM observability tool (Langfuse) | [Hard](docs/course-tasks.md#hard) |
 | Hard | An AI evaluation report with DeepEval | [Hard](docs/course-tasks.md#hard) |
 
 ## Docs
