@@ -14,16 +14,27 @@ type EditorProps = {
   saved?: Override
   onSave: (override: Override) => void
   onCancel: () => void
+  /** Whether the lead has changed the verdict or the reason from what the editor opened with (#356); false again
+   * when the editor closes. */
+  onChanged: (requirementId: string, changed: boolean) => void
 }
 
 /**
  * Overrides one requirement's verdict: a verdict other than the agent's, and a reason. Save stays disabled, saying
  * why, until both are given.
  */
-export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onCancel }: EditorProps) {
-  const [verdict, setVerdict] = useState<JudgedVerdict>(
-    saved?.verdict ?? JUDGED_VERDICTS.find((v) => v !== agentVerdict) ?? 'evidenced')
-  const [reason, setReason] = useState(saved?.reason ?? '')
+export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onCancel, onChanged }: EditorProps) {
+  const [opened] = useState(() => ({
+    verdict: saved?.verdict ?? JUDGED_VERDICTS.find((v) => v !== agentVerdict) ?? 'evidenced',
+    reason: saved?.reason ?? '',
+  }))
+  const [verdict, setVerdict] = useState<JudgedVerdict>(opened.verdict)
+  const [reason, setReason] = useState(opened.reason)
+  const changed = verdict !== opened.verdict || reason !== opened.reason
+  useEffect(() => {
+    onChanged(requirementId, changed)
+    return () => onChanged(requirementId, false) // Save, Cancel or the paper going: nothing typed is left open
+  }, [requirementId, changed, onChanged])
   const id = useId()
   // The form takes focus on its first field when it opens (#226).
   const first = useRef<HTMLSelectElement>(null)
