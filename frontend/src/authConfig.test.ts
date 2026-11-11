@@ -8,7 +8,10 @@ const health = (body: unknown, status = 200) =>
     return Promise.resolve(new Response(JSON.stringify(body), { status }))
   })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  setBuild(undefined)
+})
 
 describe('authConfig', () => {
   it('is clerk, with the publishable key, when health says so', async () => {
@@ -48,6 +51,5 @@ describe('authConfig', () => {
     health({ status: 'ok', auth: { mode: 'local' }, build: { commit: '1a2b3c4', revision: 'vouch-00029' } })
     await authConfig()
     expect(buildLine()).toBe('Vouch 1a2b3c4 · vouch-00029')
-    setBuild(undefined)
   })
 })

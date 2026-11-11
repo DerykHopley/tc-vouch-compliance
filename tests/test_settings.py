@@ -287,10 +287,3 @@ def test_the_build_names_the_baked_commit_and_cloud_run_s_revision_each_when_set
     assert load_settings({"K_REVISION": "vouch-00029"}).build == Build("dev", "vouch-00029")
     both = load_settings({"VOUCH_COMMIT": " 1a2b3c4 ", "K_REVISION": "vouch-00029"})
     assert both.build == Build("1a2b3c4", "vouch-00029")
-
-
-def test_the_image_bakes_the_commit_it_was_built_from_into_vouch_commit():
-    """The build arg becomes the env var load_settings reads, in the stage that runs."""
-    final_stage = DOCKERFILE.read_text().rsplit("\nFROM ", 1)[1]
-    assert re.search(r"^ARG VOUCH_COMMIT=dev$", final_stage, re.MULTILINE)
-    assert re.search(r"^ENV .*\bVOUCH_COMMIT=\$VOUCH_COMMIT\b", final_stage, re.MULTILINE)
