@@ -10,7 +10,7 @@ import re
 import pytest
 from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
-from hyphen_breaks import UNHYPHENATED_BREAKS
+from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -400,6 +400,137 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert item["width"] <= width, item
 
 
+INDEX_ROWS = (
+    """async () => {"""
+    + FONTS_SETTLED
+    + """
+  const rect = (el) => el && el.getBoundingClientRect()
+  return [...document.querySelectorAll('.wp-index .wp-row')].map((row) => {
+    const q = row.querySelector('.wp-q')
+    const state = row.querySelector('.wp-state')
+    return {
+      id: row.querySelector('.mono').textContent, row: rect(row).height, idBox: rect(row.querySelector('.mono')),
+      state: rect(state), gap: parseFloat(getComputedStyle(state).columnGap),
+      chip: rect(row.querySelector('.chip')), tag: rect(row.querySelector('.tag')), q: rect(q),
+      line: parseFloat(getComputedStyle(q).lineHeight),
+    }
+  })
+}"""
+)
+
+ROW_MAX = 72
+"""An index row's height at 1440 (#466), in px, when its id, chip and any tag share one line: that
+line, two lines of question and the row's padding."""
+ROW_WRAPPED_MAX = 96
+"""The same when the review tag doesn't fit beside the id and chip in the 250px index (beside
+"Partly evidenced", or any German verdict word) and wraps to a line of its own below them: the
+owner's answer A on #466 (2026-11-10)."""
+
+
+LINE_SHARED = 3
+"""How far apart, in px, the vertical centres of two things on one line may be (#466)."""
+
+
+def centre(rect: dict) -> float:
+    """A DOMRect's vertical centre, as INDEX_ROWS reads them."""
+    return rect["top"] + rect["height"] / 2
+
+
+@pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
+def test_at_1440_each_index_row_is_its_id_and_chip_then_at_most_two_lines_of_question(
+    page: Page, paper_url, profile, nordlicht_later
+):
+    """#466 (answer A): the id and chip share a line; the review tag sits on it when it fits and
+    wraps below it otherwise; then the question, clamped to two lines."""
+    response = page.request.post(
+        f"{paper_url}/api/assessments",
+        data={"control_id": ASSESSED},  # a chip and a review tag: the row's widest state
+        headers={"X-Vouch-Profile": profile},
+    )
+    assert response.ok, response.status
+    page.set_viewport_size({"width": 1440, "height": 900})
+    nordlicht_later(paper_url)
+    make_current(page.request, paper_url, profile)  # #480: the paper opens under it
+    open_paper(page, paper_url, ASSESSED, assessed=True)
+
+    rows = page.evaluate(INDEX_ROWS)
+
+    assert len(rows) == 12, rows
+    assert any(r["q"]["height"] > 1.5 * r["line"] for r in rows), "no question uses a second line"
+    assert any(r["tag"] for r in rows), "no row has a review tag to place"
+    for r in rows:
+        id_line = r["idBox"]
+        # The id and chip share a line: their vertical centres within LINE_SHARED, also when the
+        # tag wraps below them (centred across both lines, the id sat half a line low).
+        assert abs(centre(id_line) - centre(r["chip"])) <= LINE_SHARED, r
+        assert r["q"]["height"] <= 2 * r["line"] + 1, r  # two lines of question at most
+        assert r["q"]["top"] >= r["state"]["bottom"] - 1, r  # the question under the state
+        if r["tag"] is None:
+            assert r["row"] <= ROW_MAX, r
+            continue
+        fits = r["chip"]["width"] + r["gap"] + r["tag"]["width"] <= r["state"]["width"] + 0.5
+        if fits:  # on the id and chip's line
+            assert r["tag"]["top"] < id_line["bottom"], r
+            assert r["row"] <= ROW_MAX, r
+        else:  # on a line of its own, below them
+            assert r["tag"]["top"] >= r["chip"]["bottom"] - 1, r
+            assert r["row"] <= ROW_WRAPPED_MAX, r
+
+
+def test_at_1440_the_index_stays_in_view_when_the_paper_scrolls_to_its_foot(page: Page, paper_url):
+    """#466: the index's list is sticky beside the paper, below the top bar, and scrolls on its
+    own; it ends above the room main keeps for Ask Vouch, so the paper's foot doesn't push it up."""
+    assessed(page.request, paper_url, ASSESSED)  # a long paper
+    page.set_viewport_size({"width": 1440, "height": 900})
+    open_paper(page, paper_url, ASSESSED, assessed=True)
+    index = page.get_by_role("navigation", name="Controls").locator(".wp-index-list")
+    top_bar = box(page.locator(".top"))
+
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    page.wait_for_function("scrollY > 0")
+
+    shown = box(index)
+    assert abs(shown["y"] - (top_bar["y"] + top_bar["height"])) <= 1, (shown, top_bar)
+    assert shown["y"] + shown["height"] <= 900 + 1, shown
+    last = index.get_by_role("link").filter(has_text="5.2.9")  # the index scrolls on its own
+    last.scroll_into_view_if_needed()
+    assert box(last)["y"] + box(last)["height"] <= 900 + 1, box(last)
+    moved = abs(box(index)["y"] - shown["y"])  # the top bar's height is fractional (62.67px)
+    assert moved <= 1, "bringing the last row into view moved the index"
+
+
+FOCUSED_IN_LIST = (
+    """async () => {"""
+    + FONTS_SETTLED
+    + """
+  const row = document.activeElement
+  const list = document.querySelector('.wp-index-list')
+  if (!row || !list.contains(row)) return null
+  const r = row.getBoundingClientRect(), l = list.getBoundingClientRect()
+  return { id: row.querySelector('.mono').textContent, top: r.top, bottom: r.bottom,
+    listTop: l.top, listBottom: l.bottom }
+}"""
+)
+
+
+def test_at_1440_a_focused_index_row_is_scrolled_into_the_lists_view(page: Page, paper_url):
+    """#466: the index's list scrolls on its own, so a row Tab reaches lies inside it, its focus
+    ring whole. Firefox left 5.1.2 sticking out of the list's foot (#466's verifier)."""
+    page.set_viewport_size({"width": 1440, "height": 900})
+    open_paper(page, paper_url, "1.1.1", assessed=False)
+    links = page.get_by_role("navigation", name="Controls").get_by_role("link")
+    links.first.focus()
+    seen = []
+    for _ in range(links.count()):
+        focused = page.evaluate(FOCUSED_IN_LIST)
+        assert focused, f"focus left the index after {seen}"
+        seen.append(focused["id"])
+        assert focused["top"] >= focused["listTop"] - 1, focused
+        assert focused["bottom"] <= focused["listBottom"] + 1, focused
+        page.keyboard.press("Tab")
+    assert seen[-1] == "5.2.9", seen
+
+
 def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
     page: Page, paper_url, nordlicht_later
 ):
@@ -418,15 +549,11 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
     make_current(page.request, paper_url, "alpenwerk")  # #480: the paper opens under it
     paper = open_paper(page, paper_url, WIDE, assessed=True)
     expect(paper.get_by_text("Answer language: German")).to_be_visible()
+    quotes = "table.reqs.judged .quotes-cell blockquote"
+    expect(paper.locator(quotes).first).to_be_visible()
+
     # Chromium's English rules also find breaks in these words, so the quote must say it's German.
-    quotes = paper.locator(".cite blockquote")
-    expect(quotes.first).to_be_visible()
-    assert set(quotes.evaluate_all("qs => qs.map((q) => q.lang)")) == {"de"}
-
-    found = page.evaluate(UNHYPHENATED_BREAKS, "table.reqs.judged .quotes-cell blockquote")
-
-    assert found["words"], f"Alpenwerk's {WIDE} shows no quote to measure"
-    assert found["breaks"] == [], f"quote words broken without a hyphen: {found['breaks']}"
+    assert_hyphenated_in_german(page, {"quotes": quotes})
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(

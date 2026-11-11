@@ -311,6 +311,22 @@ describe('The controls and trail tables (ticket 463)', () => {
       }
     }
   })
+
+  it("name each remediation cell's column on the cell, and keep the header row for screen readers (ticket 534)", async () => {
+    serve(REPORT)
+    render(<Report />)
+    const report = await shown()
+
+    const section = within(report).getByRole('heading', { name: 'Remediation items' }).closest('section')!
+    const table = within(section).getByRole('table')
+    const heads = [...table.querySelectorAll('thead th')]
+    expect(heads.map((th) => [th.textContent, th.getAttribute('scope')])).toEqual(
+      ['Requirement', 'Missing', 'Owner role', 'Due date'].map((name) => [name, 'col']))
+    const [row] = table.querySelectorAll<HTMLElement>('tbody tr')
+    expect([...row.querySelectorAll('th, td')].map((cell) => cell.getAttribute('data-label')))
+      .toEqual(heads.map((th) => th.textContent))
+    expect(within(row).getByRole('rowheader').textContent).toBe('M1')
+  })
 })
 
 const NOW_AND_THEN = { now: 0, then: 0 }

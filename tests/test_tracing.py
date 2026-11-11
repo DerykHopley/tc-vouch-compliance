@@ -17,17 +17,21 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableLambda
+from opentelemetry import context as otel_context
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, set_span_in_context
 from pydantic import SecretStr
 from test_memory import as_user
 from test_model_choice import CONTROL, FakeCatalogue, app_with_key
@@ -56,6 +60,7 @@ from vouch.tracing import TraceFacts, Tracing, run_traced, traced
 KEYS = {"LANGFUSE_PUBLIC_KEY": "pk-lf-test-public", "LANGFUSE_SECRET_KEY": "sk-lf-test-secret"}
 LOCAL = "http://localhost:3300"
 DEMO_CONTROL = "4.1.2"
+local_only = pytest.mark.allow_hosts(["127.0.0.1"])
 
 
 # --- The settings -------------------------------------------------------------------------------
@@ -136,6 +141,20 @@ def test_at_startup_one_line_says_whether_tracing_is_on_and_why_not(env, level, 
     assert "sk-lf-test-secret" not in caplog.text
 
 
+def run_python(script: str) -> subprocess.CompletedProcess[str]:
+    """`script` run by this Python in a process of its own, with no Vouch settings in its
+    environment (as conftest clears them), its output captured."""
+    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
 def test_the_served_app_s_info_lines_reach_the_log_under_uvicorn_once():
     """Under uvicorn's logging the root logger has no handler, and Python's last resort writes
     WARNING and up only: an INFO line from vouch would never reach Cloud Run's log. Once a root
@@ -149,15 +168,7 @@ def test_the_served_app_s_info_lines_reach_the_log_under_uvicorn_once():
         "logging.basicConfig(stream=sys.stdout, format='root: %(message)s')\n"
         "logging.getLogger('vouch.auth').info('after a root handler')\n"
     )
-    env = {k: v for k, v in os.environ.items() if k not in ENV_NAMES}  # as conftest: no settings
-    done = subprocess.run(
-        [sys.executable, "-c", script],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    done = run_python(script)
 
     assert done.returncode == 0, done.stderr
     assert "tracing off: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set" in done.stderr
@@ -435,6 +446,54 @@ def sent_by_the_end(on: Tracing, exporter: InMemorySpanExporter, response) -> No
     assert len(exporter.get_finished_spans()) == at_the_end
 
 
+@contextmanager
+def served(app) -> Iterator[str]:
+    """`app` served by uvicorn on a free local port, its base URL: unlike TestClient, which runs
+    the whole response before handing it over, a real client can leave the stream part way."""
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
+    running = threading.Thread(target=server.run, daemon=True)
+    running.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started:
+            assert running.is_alive() and time.monotonic() < deadline, "uvicorn didn't start"
+            time.sleep(0.01)
+        yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        running.join(10)
+        assert not running.is_alive(), "the test server didn't stop"
+
+
+def at_result[T](url: str, headers: dict[str, str], seen: Callable[[], T]) -> T:
+    """Start an assessment and read its stream only until `result`, then close it, as the
+    browser's postEvents does; `seen()` as `result` arrived."""
+    with (
+        httpx.Client(base_url=url, timeout=30) as client,
+        client.stream(
+            "POST", "/api/assessments", json={"control_id": DEMO_CONTROL}, headers=headers
+        ) as response,
+    ):
+        for line in response.iter_lines():
+            if line == "event: result":
+                return seen()
+    raise AssertionError("the stream ended with no result")
+
+
+@local_only
+def test_an_assessment_s_trace_is_sent_before_its_result_to_a_client_that_leaves_there(slow):
+    """The live symptom (#541): the browser stops reading at `result`, so a trace sent after it
+    is sent once the response is over, when Cloud Run gives the instance no CPU."""
+    on, exporter = slow
+
+    with served(traced_app(on)) as url:
+        spans = at_result(url, new_user(), exporter.get_finished_spans)
+
+    assert len(of_type(list(spans), "generation")) == 4  # the whole run, before its result
+    on.flush()
+    assert len(exporter.get_finished_spans()) == len(spans)  # and nothing after
+
+
 def test_an_assessment_s_trace_is_sent_before_its_stream_ends(slow):
     on, exporter = slow
     client, lead = TestClient(traced_app(on)), new_user()
@@ -472,19 +531,22 @@ def test_a_profile_pass_s_trace_is_sent_before_its_answer(slow):
     sent_by_the_end(on, exporter, response)
 
 
-def test_a_langfuse_that_never_answers_holds_the_response_at_most_the_bound(
+@local_only
+def test_a_langfuse_that_never_answers_holds_the_result_at_most_the_bound(
     down, monkeypatch, caplog
 ):
     on, _ = down
     monkeypatch.setattr(tracing_module, "TRACE_SEND_WAIT_SECONDS", 0.5)
-    client, lead = TestClient(traced_app(on)), new_user()
 
-    started = time.monotonic()
-    with caplog.at_level(logging.WARNING, logger="vouch.tracing"):
-        response = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
-    took = time.monotonic() - started
+    with (
+        served(traced_app(on)) as url,
+        caplog.at_level(logging.WARNING, logger="vouch.tracing"),
+    ):
+        started = time.monotonic()
+        warned = at_result(url, new_user(), lambda: "wasn't sent to Langfuse within" in caplog.text)
+        took = time.monotonic() - started
 
-    assert "event: result" in response.text
+    assert warned  # the bound ran out before the result was sent
     assert took < 0.5 + 2.5  # the bound, and the fake run's own time
     assert "wasn't sent to Langfuse within 0.5 s" in caplog.text
 
@@ -522,6 +584,122 @@ def test_a_stream_closed_on_the_event_loop_never_waits_for_langfuse(down):
         return time.monotonic() - started
 
     assert asyncio.run(run_and_close()) < 0.5
+
+
+# --- Whatever the request's traceparent (#546) ---------------------------------------------------
+# Cloud Run puts a `traceparent` on every request, mostly flagged not sampled (`-00`). Tracing
+# here is made as start_tracing makes it, with no tracer provider passed in.
+
+UNSAMPLED = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-00"
+SAMPLED = "00-0af7651916cd43dd8448eb211c80319d-b7ad6b7169203332-01"
+TRACEPARENTS = pytest.mark.parametrize(
+    "traceparent", [UNSAMPLED, SAMPLED], ids=["unsampled", "sampled"]
+)
+
+
+@pytest.fixture
+def as_served() -> Iterator[tuple[Tracing, InMemorySpanExporter]]:
+    """Tracing as start_tracing makes it (no tracer provider), its spans kept in memory."""
+    exporter = InMemorySpanExporter()
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), LOCAL)
+    on = Tracing(keys, span_exporter=exporter)
+    yield on, exporter
+    on.shutdown()
+
+
+@TRACEPARENTS
+def test_an_assessment_is_traced_whatever_the_request_s_traceparent(as_served, traceparent):
+    on, exporter = as_served
+    client = TestClient(traced_app(on))
+
+    response = client.post(
+        "/api/assessments",
+        json={"control_id": DEMO_CONTROL},
+        headers=new_user() | {"traceparent": traceparent},
+    )
+
+    assert "event: result" in response.text
+    [spans] = traces(on, exporter).values()
+    assert "judge" in {s.name for s in spans}
+
+
+@TRACEPARENTS
+def test_a_chat_turn_is_traced_whatever_the_request_s_traceparent(as_served, traceparent):
+    on, exporter = as_served
+    client = TestClient(traced_app(on))
+
+    response = client.post(
+        "/api/chat",
+        json={"page": "dossier", "message": "Where do I stand?"},
+        headers=new_user() | {"traceparent": traceparent},
+    )
+
+    assert "event: done" in response.text
+    [spans] = traces(on, exporter).values()
+    assert {"agent", "answer"} <= {s.name for s in spans}
+
+
+def test_a_run_under_an_unsampled_parent_span_is_still_traced(as_served):
+    """Whatever puts a request's unsampled span around a run (FastAPI's own telemetry, another
+    instrumentation), Vouch's trace doesn't follow its sampling."""
+    on, exporter = as_served
+    _, trace_id, span_id, _ = UNSAMPLED.split("-")
+    parent = SpanContext(
+        trace_id=int(trace_id, 16),
+        span_id=int(span_id, 16),
+        is_remote=True,
+        trace_flags=TraceFlags(TraceFlags.DEFAULT),
+    )
+    facts = TraceFacts("assessment", "u", "nordlicht", None, PROMPT_VERSION)
+
+    token = otel_context.attach(set_span_in_context(NonRecordingSpan(parent)))
+    try:
+        with traced(on, facts) as config:
+            run_traced(config, "assessment", lambda: 42)
+    finally:
+        otel_context.detach(token)
+
+    assert [s.name for s in exporter.get_finished_spans()] == ["assessment"]
+
+
+def test_shutting_tracing_down_stops_its_own_provider_s_send_thread():
+    """Langfuse's shutdown leaves the provider's batch thread running: Vouch's own provider is
+    shut down with it, so none outlives its client."""
+
+    def send_threads() -> set[threading.Thread]:
+        return {t for t in threading.enumerate() if t.name == "OtelBatchSpanRecordProcessor"}
+
+    before = send_threads()
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), LOCAL)
+    on = Tracing(keys, span_exporter=InMemorySpanExporter())
+    started = send_threads() - before
+    assert len(started) == 1
+
+    on.shutdown()
+
+    assert not any(t.is_alive() for t in started)
+
+
+def test_starting_tracing_leaves_the_process_wide_tracer_provider_as_it_was():
+    """In a process of its own, so whatever ran before can't have set the provider already; its
+    spans kept in memory, as pytest-socket doesn't reach a subprocess."""
+    done = run_python(
+        "from opentelemetry import trace\n"
+        "from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter\n"
+        "from pydantic import SecretStr\n"
+        "from vouch import tracing\n"
+        "from vouch.settings import LangfuseKeys\n"
+        "tracing.langfuse_exporter = lambda keys: InMemorySpanExporter()\n"
+        "before = trace.get_tracer_provider()\n"
+        "on = tracing.start_tracing(LangfuseKeys('pk-lf-test-own', SecretStr('sk-lf-test'), "
+        "'http://localhost:3300'))\n"
+        "after = trace.get_tracer_provider()\n"
+        "on.shutdown()\n"
+        "print(type(before).__name__, type(after).__name__, before is after)\n"
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["ProxyTracerProvider", "ProxyTracerProvider", "True"]
 
 
 # --- Each generation's cost and model (#504) ----------------------------------------------------
@@ -875,9 +1053,6 @@ def otlp() -> Iterator[OtlpEndpoint]:
     endpoint.server.server_close()
 
 
-local_only = pytest.mark.allow_hosts(["127.0.0.1"])
-
-
 def finished_spans(count: int) -> list[ReadableSpan]:
     tracer = TracerProvider().get_tracer("t")
     spans = []
@@ -1082,6 +1257,29 @@ def test_five_assessments_in_one_process_each_reach_langfuse_before_their_respon
     sent = [r for r in tracing_lines(caplog) if "to Langfuse" in r.getMessage()]
     assert len(sent) == len(otlp.sends) >= 5
     assert all(r.levelno == logging.INFO for r in sent)
+
+
+@local_only
+def test_an_assessment_s_send_is_logged_before_its_result_to_a_client_that_leaves_there(
+    otlp, caplog
+):
+    """#536's send line, sent over HTTP to a local endpoint, logged before the result (#541)."""
+    keys = LangfuseKeys(f"pk-lf-test-{uuid.uuid4().hex}", SecretStr("sk-lf-test-secret"), otlp.url)
+    on = Tracing(keys, tracer_provider=TracerProvider())
+
+    def sent() -> tuple[list[str], int]:
+        lines = [r.getMessage() for r in tracing_lines(caplog) if "to Langfuse" in r.getMessage()]
+        return lines, len(otlp.spans())
+
+    try:
+        with served(traced_app(on)) as url, caplog.at_level(logging.INFO, logger="vouch.tracing"):
+            lines, spans = at_result(url, new_user(), sent)
+    finally:
+        on.shutdown()
+
+    assert spans > 0
+    assert len(lines) == len(otlp.sends) >= 1
+    assert all(line.startswith("sent ") for line in lines), lines
 
 
 # --- The eval runner ---------------------------------------------------------------------------
