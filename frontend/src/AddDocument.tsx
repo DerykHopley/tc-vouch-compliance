@@ -59,7 +59,8 @@ export default function AddDocument({ documents, title, onAdded, onCancel }: Pro
     if (!picked) return
     const found = prefill(await picked.text().catch(() => ''))
     if (mine !== chosen.current) return
-    setFields((f) => ({ ...f, ...found, title: title ?? found.title ?? f.title }))
+    // Each file starts from the defaults (a new version: its stored values), so an earlier file's leave nothing.
+    setFields((f) => ({ ...fieldsOf(documents, title), ...found, title: title ?? found.title ?? f.title }))
   }
 
   const send = async (addAnyway: boolean) => {

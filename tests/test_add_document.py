@@ -19,6 +19,7 @@ from test_memory import app_on, restart
 
 from vouch import api
 from vouch.added_documents import (
+    EMPTY,
     MAX_BYTES,
     MAX_DOCUMENTS,
     NOT_TEXT,
@@ -111,6 +112,8 @@ def test_a_second_add_with_the_same_title_keeps_version_2(users):
         ({"filename": "badges.pdf"}, WRONG_TYPE),
         ({"content": b"x" * (MAX_BYTES + 1), "filename": "big.txt"}, TOO_LARGE),
         ({"content": b"\xff\xfe not utf-8"}, NOT_TEXT),
+        ({"content": b""}, EMPTY),
+        ({"content": b" \n\t\n"}, EMPTY),
     ],
 )
 def test_a_file_breaking_a_limit_is_refused_with_its_sentence_and_nothing_is_kept(

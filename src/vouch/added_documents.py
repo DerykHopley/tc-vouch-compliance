@@ -69,6 +69,7 @@ TOO_MANY = (
     "may have. Withdraw one, or add a new version of one instead."
 )
 NOT_TEXT = "This file isn't valid UTF-8 text. Save it as UTF-8 and add it again."
+EMPTY = "This file is empty."
 WRONG_TYPE = "Only Markdown (.md) and plain-text (.txt) files can be added."
 NO_TITLE = f"Give the document a title of 1 to {TITLE_LENGTH} characters."
 NO_CYCLE = f"Give the review cycle as one of: {', '.join(CYCLE_MONTHS)}."
@@ -157,9 +158,12 @@ def checked_text(new: NewDocument) -> str:
     if len(new.content) > MAX_BYTES:
         raise DocumentRefused(TOO_LARGE)
     try:
-        return new.content.decode("utf-8")
+        text = new.content.decode("utf-8")
     except UnicodeDecodeError:
         raise DocumentRefused(NOT_TEXT) from None
+    if not text.strip():  # nothing to search or quote (#585)
+        raise DocumentRefused(EMPTY)
+    return text
 
 
 def checked_fields(new: NewDocument) -> str:

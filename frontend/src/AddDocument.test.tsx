@@ -100,6 +100,32 @@ describe('the Add document form (ticket 585)', () => {
     expect(title.value).toBe('Visitor badge policy')
   })
 
+  it('a second file without front matter resets kind, date and cycle to their defaults', async () => {
+    shown()
+    const date = screen.getByLabelText('Approval date') as HTMLInputElement
+    const today = date.value
+    await choose(FRONT)
+    await waitFor(() => expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('record'))
+
+    await choose('# No front matter\n', 'plain.md')
+
+    await waitFor(() => expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('policy'))
+    expect(date.value).toBe(today)
+    expect((screen.getByLabelText('Review cycle') as HTMLSelectElement).value).toBe('yearly')
+  })
+
+  it("for a new version, a file without front matter keeps the stored document's values", async () => {
+    shown({ title: 'Visitor badge policy' })
+    await choose(FRONT)
+    await waitFor(() => expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('record'))
+
+    await choose('# No front matter\n', 'plain.md')
+
+    await waitFor(() => expect((screen.getByLabelText('Approval date') as HTMLInputElement).value).toBe('2026-10-01'))
+    expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('policy')
+    expect((screen.getByLabelText('Review cycle') as HTMLSelectElement).value).toBe('yearly')
+  })
+
   it('prefills a new version from the added document whose title differs only in case or spaces', () => {
     shown({ title: ' visitor BADGE policy' })
     expect((screen.getByLabelText('Approval date') as HTMLInputElement).value).toBe('2026-10-01')
