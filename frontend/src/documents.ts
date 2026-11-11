@@ -11,7 +11,9 @@ export type Origin = 'built-in' | 'added'
 
 /** A document of the profile, from any of its sources (patch too), with the controls whose newest assessment cites
  * it, in control order, and its origin. */
-export type ProfileDocument = ShownDocument & { cited_by: string[]; origin: Origin }
+export type ProfileDocument = ShownDocument & { cited_by: string[]; origin: Origin
+  /** An added document the lead withdrew (#586): listed, no longer searched or cited. */
+  withdrawn?: boolean }
 
 /** The tab's own words (vouch.documents_tab.DOCUMENT_WORDS), in `words_language`. */
 export type DocumentWords = {
@@ -34,6 +36,8 @@ export type DocumentWords = {
   no_documents: string
   /** Each origin's word: "Built in", "Added". */
   origins: Record<Origin, string>
+  /** A withdrawn document's status (#586). */
+  withdrawn: string
 }
 
 export type ProfileDocuments = {
@@ -59,7 +63,7 @@ export async function fetchDocuments(): Promise<{ ok: true; documents: ProfileDo
 
 /** The words a document table takes (DocumentTable's `words`): its headings and cell words. */
 export type TableWords = Pick<DocumentWords, 'columns' | 'kinds' | 'cycles' | 'stale' | 'stale_reasons' | 'current'
-  | 'no_version' | 'no_date' | 'no_cycle'>
+  | 'no_version' | 'no_date' | 'no_cycle' | 'withdrawn'>
 
 /** The word for `key` in a table of words, or undefined: its own keys only, never an Object.prototype member (a review
  * cycle or source named `constructor` is shown as written). */
@@ -165,5 +169,22 @@ export async function addDocument(file: File, fields: DocumentFields, addAnyway:
     return { status: 'failed', message: ADD_FAILED }
   } catch {
     return { status: 'failed', message: ADD_FAILED }
+  }
+}
+
+/** The page's own sentence when a withdraw fails for any reason (#586). */
+export const WITHDRAW_FAILED = 'The document could not be withdrawn just now. Please try again.'
+
+/** Withdraw an added document of the current company (`POST /api/documents/{id}/withdraw`, #586): true once it is
+ * withdrawn, else the sentence to show. */
+export async function withdrawDocument(id: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(`/api/documents/${encodeURIComponent(id)}/withdraw`, {
+      method: 'POST', headers: await authHeaders(),
+    })
+    if (response.ok) return { ok: true }
+    return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : WITHDRAW_FAILED }
+  } catch {
+    return { ok: false, message: WITHDRAW_FAILED }
   }
 }

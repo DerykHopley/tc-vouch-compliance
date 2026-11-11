@@ -30,7 +30,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from functools import cache
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -436,10 +436,16 @@ def review(
         )
 
 
-def document_entry(reviewer: Reviewer, added: AddedDocument, note: str, at: datetime) -> AuditEntry:
-    """The audit entry of a document added (#585): who, when and under which profile, the
-    document's id and version as its evidence, and the note; no control, thread, verdict,
-    model or prompt."""
+def document_entry(
+    reviewer: Reviewer,
+    added: AddedDocument,
+    note: str,
+    at: datetime,
+    action: Literal["document-add", "document-withdraw"] = "document-add",
+) -> AuditEntry:
+    """The audit entry of a document added (#585) or withdrawn (#586, its newest version):
+    who, when and under which profile, the document's id and version as its evidence, and the
+    note; no control, thread, verdict, model or prompt."""
     return AuditEntry(
         id=None,
         user_id=reviewer.id,
@@ -448,7 +454,7 @@ def document_entry(reviewer: Reviewer, added: AddedDocument, note: str, at: date
         profile_id=added.profile_id,
         control_id="",
         thread_id="",
-        action="document-add",
+        action=action,
         requirement_id=None,
         note=note,
         verdict_before=None,
@@ -479,3 +485,24 @@ def add_document(
         return {k: v for k, v in row.items() if k != "id"}
 
     return store.add(profile_id, new, builtin_ids, reviewer.id, reviewer.name, at, entry)
+
+
+def withdraw_document(
+    store: AddedDocuments,
+    doc_id: str,
+    *,
+    reviewer: Reviewer,
+    profile_id: str,
+    clock: Callable[[], datetime] = now,
+) -> list[AddedDocument]:
+    """The lead withdraws an added document of the profile (#586): every version marked
+    withdrawn at `clock()`, with one `document-withdraw` entry naming its newest version,
+    together; none written when it was withdrawn already. Its versions as kept now, none for an
+    unknown id. Raises DatabaseUnavailable (Postgres)."""
+    at = clock()
+
+    def entry(newest: AddedDocument) -> dict[str, Any]:
+        row = asdict(document_entry(reviewer, newest, "", at, "document-withdraw"))
+        return {k: v for k, v in row.items() if k != "id"}
+
+    return store.withdraw(profile_id, doc_id, at, entry)

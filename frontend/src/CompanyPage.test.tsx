@@ -46,7 +46,7 @@ const DOCUMENTS = {
   kinds: { documented: 'Documented', implemented: 'Implemented' }, cycles: { yearly: 'Yearly' }, stale: 'Stale',
   stale_reasons: {}, current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
   not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.',
-  origins: { 'built-in': 'Built in', added: 'Added' } },
+  origins: { 'built-in': 'Built in', added: 'Added' }, withdrawn: 'Withdrawn' },
   words_language: 'en',
 }
 

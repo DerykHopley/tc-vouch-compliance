@@ -29,6 +29,7 @@ from typing import Annotated, Any, Literal, NamedTuple, Protocol, get_args
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, StringConstraints
 
+from vouch.added_documents import AddedDocument
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, evidence_versions, now, process_trail
 from vouch.database import AuditAction, Database, Goal, PlanWrites, Priority, RemediationWrites
 from vouch.graph import NO_NUL_PATTERN, Assessment, load_assessment, state_serializer, thread_key
@@ -345,10 +346,11 @@ def mark_done(
         return _shown(item, mark)
 
 
-ReassessReason = Literal["fixes-done", "question-answered", "question-overdue"]
+ReassessReason = Literal["fixes-done", "question-answered", "question-overdue", "new-evidence"]
 """Why a re-assessment of a control is suggested: its fixes are all done (#410, Internal
-improvement only), or an open question on it was answered or is overdue (#414, vouch.questions,
-in both goals). Listed in this order."""
+improvement only), an open question on it was answered or is overdue (#414, vouch.questions,
+in both goals), or its newest assessment cites an earlier version of an added document
+(#586, newer_evidence, in both goals). Listed in this order."""
 REASSESS_REASONS: tuple[ReassessReason, ...] = get_args(ReassessReason)
 
 
@@ -461,3 +463,29 @@ def with_reasons(
         if ordered or kept.closed:
             merged[control_id] = CardFlags(bool(ordered), kept.closed, ordered)
     return merged
+
+
+def newer_evidence(
+    latest: Mapping[str, Assessment], added: Iterable[AddedDocument]
+) -> dict[str, list[AddedDocument]]:
+    """The added documents (#586, Q10) each control's newest assessment (`latest`, by control)
+    cites an earlier version of: `added` is the newest version of each document not withdrawn
+    (vouch.added_documents' `searchable`), so a withdrawn one raises nothing. A rejected
+    assessment counts for nothing, as in the overview's quotes; one waiting for review counts.
+    Each document once, by id; only controls with one are named. The `new-evidence` reason."""
+    by_id = {d.doc_id: d for d in added}
+    found: dict[str, list[AddedDocument]] = {}
+    for control_id, assessment in latest.items():
+        if assessment.status == "rejected":
+            continue
+        older = {
+            c.doc_id
+            for r in assessment.requirements
+            for c in r.citations
+            if (d := by_id.get(c.doc_id)) is not None
+            and c.version.isdigit()
+            and int(c.version) < d.version
+        }
+        if older:
+            found[control_id] = [by_id[i] for i in sorted(older)]
+    return found

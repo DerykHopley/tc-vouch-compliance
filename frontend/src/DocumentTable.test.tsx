@@ -75,7 +75,7 @@ describe('the document table, with words and an extra column (the Documents tab,
     stale: 'Prüfung überfällig',
     stale_reasons: { no_approval_date: 'kein Freigabedatum', no_review_cycle: 'kein Prüfzyklus',
       unknown_cycle: 'unbekannter Prüfzyklus' },
-    current: 'Aktuell', no_version: 'keine Version', no_date: 'kein Datum', no_cycle: 'keine',
+    current: 'Aktuell', no_version: 'keine Version', no_date: 'kein Datum', no_cycle: 'keine', withdrawn: 'Zurückgezogen',
   }
   const extra = { heading: 'Zitiert von', cell: (d: LibraryDocument) => `cell ${d.id}` }
 

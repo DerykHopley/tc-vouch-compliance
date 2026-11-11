@@ -348,11 +348,12 @@ function Band({ readiness: r }: { readiness: Readiness }) {
   )
 }
 
-/** A card's line for each reason a re-assessment is suggested (#410, #414). */
+/** A card's line for each reason a re-assessment is suggested (#410, #414, #586). */
 const REASON_WORDS: Record<ReassessReason, string> = {
   'fixes-done': 'Fixes done: assess again',
   'question-answered': 'Question answered: assess again',
   'question-overdue': 'Question overdue: assess again',
+  'new-evidence': 'New evidence: assess again',
 }
 
 /** A control's card; `language`, the profile's answer language, is its verdict's (#200). */

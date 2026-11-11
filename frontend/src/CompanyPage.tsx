@@ -124,7 +124,7 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
           <Panel title="Not applicable"><NotApplicable company={company} /></Panel>
         </div>
         <section className="company-documents" aria-label="Documents">
-          <Documents state={documents.state} tryAgain={documents.tryAgain} onAdded={() => setAdded((n) => n + 1)} />
+          <Documents state={documents.state} tryAgain={documents.tryAgain} onChanged={() => setAdded((n) => n + 1)} />
         </section>
       </div>
     </main>

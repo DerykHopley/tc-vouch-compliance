@@ -865,6 +865,14 @@ describe("the open questions' reasons on the Dossier (ticket 414)", () => {
     showReasons('audit-readiness', { '1.1.1': [...all] })
     expect(notes('1.1.1')).toEqual(['Question answered: assess again', 'Question overdue: assess again'])
   })
+
+  it('says "New evidence: assess again" for a newer version of a cited document (ticket 586), in both goals', () => {
+    showReasons('audit-readiness', { '1.1.1': ['new-evidence'] })
+    expect(notes('1.1.1')).toEqual(['New evidence: assess again'])
+    cleanup()
+    showReasons('internal-improvement', { '1.1.1': ['question-answered', 'new-evidence'] })
+    expect(notes('1.1.1')).toEqual(['Question answered: assess again', 'New evidence: assess again'])
+  })
 })
 
 describe("the hero's headline in each goal (ticket 440)", () => {
