@@ -1,4 +1,4 @@
-import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type AnchorHTMLAttributes, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
   type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
@@ -123,8 +123,16 @@ export default function WorkingPaper(props: PaperProps) {
     setEditing(null)
     setReads((n) => n + 1)
   }
-  // Leaving asks first while overrides are saved and not recorded (#182); none once the paper is gone.
-  useEffect(() => setUnsaved(overrides.length), [overrides.length])
+  // The requirement whose open editor holds input (a changed verdict or a typed reason) not yet Saved (#356).
+  const [changedEditor, setChangedEditor] = useState<string | null>(null)
+  const onChanged = useCallback((requirementId: string, changed: boolean) =>
+    setChangedEditor((now) => changed ? requirementId : now === requirementId ? null : now), [])
+  // Leaving asks first while overrides are saved and not recorded (#182), or typed in the open editor and not yet
+  // Saved (#356), an override opened again counted once; none once the paper is gone.
+  const editorUnsaved = editing !== null && changedEditor === editing
+    && !overrides.some((o) => o.requirement_id === editing)
+  const unsaved = overrides.length + (editorUnsaved ? 1 : 0)
+  useEffect(() => setUnsaved(unsaved), [unsaved])
   useEffect(() => () => setUnsaved(0), [])
   const run = overridden(props.run, overrides)
   // Before an assessment the paper lists the profile's requirements; after one, the assessment's own.
@@ -256,7 +264,7 @@ export default function WorkingPaper(props: PaperProps) {
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
                 language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
                 statementNote={assessed?.statement_note} statementWord={assessed?.statement_word}
-                onEdit={setEditing} onSave={save} onUndo={undo} items={{
+                onEdit={setEditing} onChanged={onChanged} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
                   // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
                   decidable: step === 'plan-fixes' || step === 'accept' || review === 'accepted',
@@ -417,6 +425,8 @@ type JudgedProps = {
   /** The requirement whose override is open. */
   editing: string | null
   onEdit: (requirementId: string | null) => void
+  /** Whether the requirement's open editor holds input not yet Saved (#356). */
+  onChanged: (requirementId: string, changed: boolean) => void
   onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
   items: RemediationItems
@@ -491,7 +501,7 @@ const JUDGED_COLUMNS = 5
 const STATEMENT_NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is "
   + 'needed to close it.'
 
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave, onUndo, items, language,
+function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onChanged, onSave, onUndo, items, language,
   staleWord = 'Stale', currentWord = 'Current', statementNote = STATEMENT_NOTE,
   statementWord = "Lead's statement" }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
@@ -585,7 +595,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onSave
                   <td colSpan={JUDGED_COLUMNS}>
                     <OverrideEditor requirementId={r.id} agentVerdict={overrides.agentVerdicts[r.id] ?? r.verdict}
                       saved={overrides.saved.find((o) => o.requirement_id === r.id)} onCancel={() => onEdit(null)}
-                      onSave={onSave} />
+                      onSave={onSave} onChanged={onChanged} />
                   </td>
                 </tr>
               ),

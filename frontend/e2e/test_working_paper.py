@@ -12,6 +12,7 @@ from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, with_long_quotes
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
 UNASSESSED = "5.1.2"  # assessed by one check only; Nordlicht marks its S3 not applicable
@@ -554,6 +555,50 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
 
     # Chromium's English rules also find breaks in these words, so the quote must say it's German.
     assert_hyphenated_in_german(page, {"quotes": quotes})
+
+
+STORED = re.compile(r"/api/assessments/[^/]+$")
+
+
+def long_stored_quotes(served: dict) -> None:
+    """The stored assessment's first quotes hold LONG_QUOTES, one each."""
+    citations = [c for r in served["assessment"]["requirements"] for c in r["citations"]]
+    assert len(citations) >= len(LONG_QUOTES), citations
+    for citation, quote in zip(citations, LONG_QUOTES, strict=False):
+        citation["quote"] = quote
+
+
+@pytest.mark.parametrize("width", [701, 1024, 390])
+def test_a_quote_holding_a_long_link_or_path_does_not_widen_the_quotes_column(
+    page: Page, paper_url, nordlicht_later, width
+):
+    """#538: a quote broke only at hyphens or spaces (#511), and the quotes column sizes to its
+    content's least width, so a link, a signed link or a path widened the judged table (1144 in 669
+    at 701). A token too long for the line breaks anywhere, as #530's report columns do: each such
+    quote's least width fits the quotes column as it is without them. Measured on the quote in one
+    page load, so it holds whatever the Verdict column does (#550)."""
+    page.set_viewport_size({"width": width, "height": 900})
+    nordlicht_later(paper_url)
+    for profile in ("nordlicht", "alpenwerk"):
+        response = page.request.post(
+            f"{paper_url}/api/assessments",
+            data={"control_id": ASSESSED},
+            headers={"X-Vouch-Profile": profile},
+        )
+        assert response.ok, response.status
+        assert "event: result" in response.text()
+        page.unroute(STORED)  # the last company's route gives way to this one's
+        make_current(page.request, paper_url, profile)  # #480: the paper opens under it
+        with_long_quotes(page, STORED, profile, long_stored_quotes)
+
+        paper = open_paper(page, paper_url, ASSESSED, assessed=True)
+        quotes = paper.locator("table.reqs.judged blockquote")
+        for quote in LONG_QUOTES:
+            expect(quotes.filter(has_text=quote)).to_have_count(1)
+        measured = page.evaluate(LONG_QUOTES_LEAST, {"box": ".quotes-cell", "hide": True})
+
+        assert len(measured) == len(LONG_QUOTES), measured
+        assert all(q["wide"] <= q["room"] for q in measured), (profile, width, measured)
 
 
 def test_on_a_german_profile_a_stale_citations_flag_is_german(
