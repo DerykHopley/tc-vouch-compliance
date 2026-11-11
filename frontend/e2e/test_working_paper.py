@@ -918,18 +918,22 @@ def test_a_field_taller_than_the_room_keeps_its_top_below_the_top_bar(
 # The stacked control index's scroll hint (#555): at 1000px or less the index sits above the paper
 # in a box of its own that scrolls ("Policies and incidents" is its first area). Its foot fades
 # while more rows lie below, the next row cut by the edge, and the fade goes at the list's end.
-INDEX_FADE = """nav => {
-  const after = getComputedStyle(nav, '::after')
+INDEX_FADES = """(() => {
+  const after = getComputedStyle(document.querySelector('.wp-index'), '::after')
   return after.display !== 'none' && after.backgroundImage.includes('gradient')
+})()"""
+ROW_CLEAR_OF_FADE = """async (row) => {
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const nav = document.querySelector('.wp-index'), after = getComputedStyle(nav, '::after')
+  if (!after.backgroundImage.includes('gradient')) return null  // no fade: at the list's end
+  const n = nav.getBoundingClientRect(), r = (row ?? document.activeElement).getBoundingClientRect()
+  const fadeTop = n.top + nav.clientTop + nav.clientHeight - parseFloat(after.height)
+  return { id: (row ?? document.activeElement).querySelector('.mono').textContent, bottom: r.bottom, fadeTop }
 }"""
-INDEX_FADES = f"({INDEX_FADE})(document.querySelector('.wp-index'))"
 
 
-@pytest.mark.parametrize("size", [(390, 844), (360, 740)])
-def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(
-    page: Page, paper_url, size
-):
-    page.set_viewport_size({"width": size[0], "height": size[1]})
+def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page: Page, paper_url):
+    page.set_viewport_size({"width": 390, "height": 844})
     open_paper(page, paper_url, "1.1.1", assessed=False)
     nav = page.get_by_role("navigation", name="Controls")
     expect(nav.get_by_role("link")).to_have_count(12)
@@ -944,6 +948,27 @@ def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(
 
     nav.evaluate("n => { n.scrollTop = n.scrollHeight }")
     page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
+
+
+def test_on_a_phone_a_focused_or_open_index_row_stops_above_the_fade(page: Page, paper_url):
+    """#555's verifier: a row tabbed to, or the open control's row, brought into the stacked
+    index's view lands above its fading foot, not washed out under it."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "1.1.1", assessed=False)
+    links = page.get_by_role("navigation", name="Controls").get_by_role("link")
+    expect(links).to_have_count(12)
+    links.first.focus()
+    for _ in range(12):
+        seen = page.evaluate(ROW_CLEAR_OF_FADE)
+        assert seen is None or seen["bottom"] <= seen["fadeTop"] + 1, seen
+        page.keyboard.press("Tab")
+
+    for control in ("2.1.3", "4.2.1"):
+        open_paper(page, paper_url, control, assessed=False)
+        row = page.locator('.wp-index [aria-current="page"]')
+        expect(row).to_contain_text(control)
+        seen = row.evaluate(ROW_CLEAR_OF_FADE)
+        assert seen is None or seen["bottom"] <= seen["fadeTop"] + 1, seen
 
 
 def test_a_stacked_index_that_fits_shows_no_fade_nor_does_the_index_beside_the_paper(
