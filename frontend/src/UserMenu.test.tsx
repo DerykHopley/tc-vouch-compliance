@@ -26,8 +26,7 @@ describe('UserMenu (issue 222)', () => {
 
 describe('starting afresh (issue 285)', () => {
   const COMPANY = 'Nordlicht Komponenten GmbH'
-  const QUESTION = `Start ${COMPANY} afresh? Your progress here is replaced by the demo state: Q2 2026 closed and Q3 2026 open.`
-    + ' The audit trail keeps every entry.'
+  const QUESTION = `Start ${COMPANY} afresh? Your progress here starts from nothing; the audit trail keeps every entry.`
 
   /** The menu with the fresh start, opened; `answer` is the fresh start's response. */
   async function opened(answer: () => Promise<Response>, { company }: { company?: string } = { company: COMPANY }) {
@@ -65,51 +64,6 @@ describe('starting afresh (issue 285)', () => {
     await userEvent.click(screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` }))
     await waitFor(() => expect(started).toHaveBeenCalledOnce())
     expect(fetch).toHaveBeenCalledWith('/api/progress/fresh-start', expect.objectContaining({ method: 'POST' }))
-  })
-
-  it('asks with the demo state only on Nordlicht (issue 605); another company starts from nothing', async () => {
-    const confirm = vi.fn(() => false)
-    vi.stubGlobal('confirm', confirm)
-    await opened(() => Promise.resolve(Response.json({})), { company: 'Alpenwerk Präzision GmbH' })
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Start Alpenwerk Präzision GmbH afresh…' }))
-    expect(confirm).toHaveBeenCalledWith(
-      'Start Alpenwerk Präzision GmbH afresh? Your progress here starts from nothing; the audit trail keeps every entry.')
-  })
-
-  it("says the demo state is restored and how many of today's profile passes are left (issue 605)", async () => {
-    vi.stubGlobal('confirm', () => true)
-    const alert = vi.fn()
-    vi.stubGlobal('alert', alert)
-    const { started } = await opened(() => Promise.resolve(Response.json(
-      { fresh_start: '2026-11-07T10:00:00+00:00', demo: { restored: true, passes_left: 2, passes: 3 } })))
-    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` }))
-    await waitFor(() => expect(started).toHaveBeenCalledOnce())
-    expect(alert).toHaveBeenCalledWith("Demo state restored. 2 of today's 3 profile passes left.")
-  })
-
-  it('says only that the demo state could not be restored when the API gives no reason', async () => {
-    vi.stubGlobal('confirm', () => true)
-    const alert = vi.fn()
-    vi.stubGlobal('alert', alert)
-    const { started } = await opened(() => Promise.resolve(Response.json(
-      { fresh_start: '2026-11-07T10:00:00+00:00', demo: { restored: false } })))
-    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` }))
-    await waitFor(() => expect(started).toHaveBeenCalledOnce())
-    expect(alert).toHaveBeenCalledWith('Started afresh, but the demo state could not be restored.')
-  })
-
-  it('asks to restore the demo state, and says why when it could not be (issue 605)', async () => {
-    vi.stubGlobal('confirm', () => true)
-    const alert = vi.fn()
-    vi.stubGlobal('alert', alert)
-    const why = "You have reached today's limit of 3 profile passes. It resets at 01:00."
-    const { fetch, started } = await opened(() => Promise.resolve(Response.json(
-      { fresh_start: '2026-11-07T10:00:00+00:00', demo: { restored: false, reason: why } })))
-    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` }))
-    await waitFor(() => expect(started).toHaveBeenCalledOnce())
-    expect(alert).toHaveBeenCalledWith(`Started afresh, but the demo state could not be restored: ${why}`)
-    const [, init] = fetch.mock.calls[0]
-    expect(JSON.parse(String(init?.body))).toEqual({ restore_demo: true })
   })
 
   it.each([

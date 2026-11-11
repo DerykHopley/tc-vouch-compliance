@@ -35,7 +35,6 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch import (
     audit,
     company_profiles,
-    demo_round,
     documents_tab,
     goal,
     plan,
@@ -240,7 +239,6 @@ MAX_QUESTION_ID = 2**63 - 1
 """The highest open question id: the ceiling of vouch_open_questions' bigserial `id`. A larger
 one in the path is a 422, never sent to Postgres (whose refusal would be a 503)."""
 RUNNING_NO_FRESH_START = "An assessment is running: start afresh once it has finished."
-DEMO_NOT_RESTORED = "Vouch could not play the demo round just now."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -2222,71 +2220,21 @@ def new_conversation(memory: UserMemory) -> dict[str, Any]:
     return {"thread_id": None}
 
 
-class FreshStartRequest(BaseModel):
-    """A fresh start's options: `restore_demo`, as the user menu asks, seeds Nordlicht's demo
-    round afterwards (#605)."""
-
-    restore_demo: bool = False
-
-
 @router.post("/progress/fresh-start")
-def fresh_start(
-    memory: UserMemory,
-    running: Running,
-    request: Request,
-    user: CurrentUser,
-    settings: AppSettings,
-    options: Annotated[FreshStartRequest | None, Body()] = None,
-) -> dict[str, Any]:
+def fresh_start(memory: UserMemory, running: Running) -> dict[str, Any]:
     """Start the lead's progress under the profile afresh (#285, vouch.memory's
     `Memory.start_afresh`): only what they start from now on is listed and counted, and the chat
     opens a new conversation. Nothing is deleted, and the audit trail keeps every entry. No model
     runs and nothing counts against the daily limit. While one of the lead's assessments runs
     under the profile, a 409 with nothing written; the lead's scope is held meanwhile, so none
     starts mid-way. A store that can't be written is a 503 (DatabaseUnavailable)."""
-    demo = bool(options and options.restore_demo and memory.profile_id == DEFAULT_PROFILE)
     if not running.try_hold(memory.scope):
         raise HTTPException(status_code=409, detail=RUNNING_NO_FRESH_START)
-    client = None
-    refused: demo_round.SeedError | None = None
-    closed: str | None = None
     try:
-        if demo:  # its limit checked and the open round closed before the fresh start
-            client = demo_round.restoring_client(
-                request.app, user.id, reviewer_name(request, user, settings)
-            )
-            try:
-                closed = demo_round.prepare(client, request.app, user.id)
-            except demo_round.SeedError as error:
-                client, refused = None, error
         at = memory.start_afresh()
     finally:
         running.release(memory.scope)
-    answer: dict[str, Any] = {"fresh_start": at.isoformat()}
-    if refused is not None:
-        answer["demo"] = _not_restored(memory, refused, closed)
-    elif client is not None:
-        try:
-            demo_round.seed(client)
-            left, limit = request.app.state.spending.profile_passes_left(user.id)
-            answer["demo"] = {"restored": True, "passes_left": left, "passes": limit}
-        except demo_round.SeedError as error:
-            answer["demo"] = _not_restored(memory, error, closed)
-    return answer
-
-
-def _not_restored(
-    memory: Memory, error: demo_round.SeedError, closed: str | None
-) -> dict[str, Any]:
-    """The demo state not restored (#605): stopped partway, the lead's progress starts afresh
-    again, so nothing half-seeded is listed; the answer says why, and names the round the
-    restore closed before it stopped (`closed`), as that close stays."""
-    log.warning("the demo round could not be restored: %s", error)
-    memory.start_afresh()
-    reason = str(error) if isinstance(error, demo_round.OverLimit) else DEMO_NOT_RESTORED
-    if closed is not None:
-        reason += f' The open round, "{closed}", was closed first.'
-    return {"restored": False, "reason": reason}
+    return {"fresh_start": at.isoformat()}
 
 
 @router.post(

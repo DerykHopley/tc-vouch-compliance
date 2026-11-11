@@ -21,36 +21,19 @@ type Props = {
 
 const RUNNING = 'An assessment is running: start afresh once it has finished.'
 const FAILED = 'Vouch could not start afresh just now. Try again.'
-/** The company whose fresh start restores the demo state (#605): the API's DEFAULT_PROFILE, by its name. */
-const DEMO_COMPANY = 'Nordlicht Komponenten GmbH'
-const NOT_RESTORED = 'Started afresh, but the demo state could not be restored'
-
 
 /** "Start <company> afresh", or "Start afresh" without a profile list: the menu item's words and the confirm's. */
 const startWords = (company: string | undefined) => company ? `Start ${company} afresh` : 'Start afresh'
 
-/** The confirm's question: on Nordlicht, that the demo state comes back (#605); elsewhere, that progress starts from
- * nothing. */
-const freshStartQuestion = (company: string | undefined) => company === DEMO_COMPANY
-  ? `${startWords(company)}? Your progress here is replaced by the demo state: Q2 2026 closed and Q3 2026 open. The audit trail keeps every entry.`
-  : `${startWords(company)}? Your progress here starts from nothing; the audit trail keeps every entry.`
-
 /** Asks with the browser's own confirm, then starts the profile's progress afresh (#285); a refusal says why in an
  * alert, and the page stays as it was. A 401 has signed out already: no alert. */
 async function confirmFreshStart(company: string | undefined, onStarted: () => void) {
-  if (!window.confirm(freshStartQuestion(company))) return
+  const question = `${startWords(company)}? Your progress here starts from nothing; the audit trail keeps every entry.`
+  if (!window.confirm(question)) return
   const result = await startAfresh()
-  if (result.kind === 'started') onStarted()
-  else if (result.kind === 'demo-restored') {
-    onStarted()
-    window.alert(`Demo state restored. ${result.passesLeft} of today's ${result.passes} profile passes left.`)
-  }
-  else if (result.kind === 'demo-not-restored') {
-    onStarted()
-    window.alert(result.reason ? `${NOT_RESTORED}: ${result.reason}` : `${NOT_RESTORED}.`)
-  }
-  else if (result.kind === 'running') window.alert(RUNNING)
-  else if (result.kind === 'failed') window.alert(FAILED)
+  if (result === 'started') onStarted()
+  else if (result === 'running') window.alert(RUNNING)
+  else if (result === 'failed') window.alert(FAILED)
 }
 
 /** The user menu behind the user's initials (#222), in the Letterhead order (#495, option A): "Signed in as <name>" and

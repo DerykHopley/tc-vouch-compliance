@@ -39,35 +39,19 @@ export function withoutProfile(held: Profiles | null, id: string): Profiles | nu
 }
 
 /** How a fresh start went: started, refused while an assessment runs (the 409), the session ended (a 401: signed out
- * already, so nothing more to say), or failed any other way. Started on Nordlicht (#605): the demo state
- * restored, with today's profile passes left, or not, with the API's reason. */
-export type FreshStart =
-  | { kind: 'started' }
-  | { kind: 'demo-restored', passesLeft: number, passes: number }
-  | { kind: 'demo-not-restored', reason?: string }
-  | { kind: 'running' }
-  | { kind: 'signed-out' }
-  | { kind: 'failed' }
+ * already, so nothing more to say), or failed any other way. */
+export type FreshStart = 'started' | 'running' | 'signed-out' | 'failed'
 
 /** Starts the lead's progress under the chosen profile afresh (#285): from now on, only what they start is listed. Nothing
- * is deleted, and the audit trail keeps every entry. On Nordlicht the API then restores the demo state (#605). */
+ * is deleted, and the audit trail keeps every entry. */
 export async function startAfresh(): Promise<FreshStart> {
   try {
-    const response = await fetch('/api/progress/fresh-start', {
-      method: 'POST', headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restore_demo: true }),
-    })
-    if (response.ok) {
-      type Demo = { restored: boolean, reason?: string, passes_left?: number, passes?: number }
-      const demo = ((await response.json().catch(() => ({}))) as { demo?: Demo }).demo
-      if (!demo) return { kind: 'started' }
-      if (!demo.restored) return { kind: 'demo-not-restored', reason: demo.reason || undefined }
-      return { kind: 'demo-restored', passesLeft: demo.passes_left ?? 0, passes: demo.passes ?? 0 }
-    }
-    if (sessionEnded(response)) return { kind: 'signed-out' } // a 401 signs out, as every API call's does
-    return { kind: response.status === 409 ? 'running' : 'failed' }
+    const response = await fetch('/api/progress/fresh-start', { method: 'POST', headers: await authHeaders() })
+    if (response.ok) return 'started'
+    if (sessionEnded(response)) return 'signed-out' // a 401 signs out, as every API call's does
+    return response.status === 409 ? 'running' : 'failed'
   } catch {
-    return { kind: 'failed' }
+    return 'failed'
   }
 }
 

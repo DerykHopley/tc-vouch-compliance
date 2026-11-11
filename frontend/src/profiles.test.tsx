@@ -131,20 +131,20 @@ describe('fetchProfiles', () => {
 describe('startAfresh, issue 285', () => {
   it('says how the fresh start went: started, running (409), or failed', async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ fresh_start: '2026-11-07T10:00:00+00:00' })))
-    expect(await startAfresh()).toEqual({ kind: 'started' })
+    expect(await startAfresh()).toBe('started')
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 409 })))
-    expect(await startAfresh()).toEqual({ kind: 'running' })
+    expect(await startAfresh()).toBe('running')
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 503 })))
-    expect(await startAfresh()).toEqual({ kind: 'failed' })
+    expect(await startAfresh()).toBe('failed')
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
-    expect(await startAfresh()).toEqual({ kind: 'failed' })
+    expect(await startAfresh()).toBe('failed')
   })
 
   it('signs out on a 401 and says so, not that it failed', async () => {
     const signOut = vi.fn()
     setOnSignedOut(signOut)
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 401 })))
-    expect(await startAfresh()).toEqual({ kind: 'signed-out' })
+    expect(await startAfresh()).toBe('signed-out')
     expect(signOut).toHaveBeenCalledOnce()
   })
 })

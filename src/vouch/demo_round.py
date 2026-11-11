@@ -52,7 +52,6 @@ from vouch.auth import USER_ID
 from vouch.limits import RATE_REQUESTS
 from vouch.profile import DEFAULT_PROFILE
 from vouch.settings import DATABASE_URL_ENV, Settings, User, load_database_url
-from vouch.spending import SpendingGuard
 
 ROUND_NAME = "Q2 2026"
 NEXT_ROUND = "Q3 2026"
@@ -81,11 +80,6 @@ class AlreadySeeded(SeedError):
 
 class NotFresh(SeedError):
     """The user has assessments since the fresh start: nothing written."""
-
-
-class OverLimit(SeedError):
-    """A request was over one of the user's limits (the day's assessments, or its profile
-    passes): the message is the app's own sentence."""
 
 
 class Answer(Protocol):
@@ -154,9 +148,7 @@ def _call(client: Client, method: str, path: str, body: Any = None) -> Answer:
         if response.status_code != 429:
             break
         wait = float(response.headers.get("Retry-After", "1"))
-        if _limit_named(response):
-            raise OverLimit(response.json().get("detail") or response.text[:300])
-        if wait > MAX_WAIT_SECONDS:
+        if _limit_named(response) or wait > MAX_WAIT_SECONDS:
             raise SeedError(
                 f"{method} {path} is over a limit (answered 429, try again in {wait / 3600:.1f} "
                 f"hours): {response.text[:300]}"
@@ -303,56 +295,6 @@ def seed(client: Client, say: Callable[[str], None] | None = None) -> Seeded:
     )
     say(f"Marked an item on {kept_weak['control_id']} done and answered its question.")
     return Seeded(tuple(a["control_id"] for a in improved), kept_weak["control_id"])
-
-
-RESTORED_STATE = ("database", "running", "current_company", "added_documents")
-"""What the restoring app shares with the app it runs in: its stores, so the seed's work lands
-where the lead reads it. Its spending guard is PassesOnly, on the same store."""
-
-
-class PassesOnly(SpendingGuard):
-    """The restore's spending guard (#605): its profile pass counts against the lead's passes,
-    but its assessments, on the fake model, not against their daily limit."""
-
-    def start(self, user_id: str, paid: bool) -> None:
-        if paid:  # never: the seeding app has no key
-            super().start(user_id, paid)
-
-
-def restoring_client(app: FastAPI, user_id: str, name: str) -> Client:
-    """A client for restoring the demo state for one user inside `app`, the app serving them
-    (#605, Start afresh on Nordlicht): a seeding app of its own (as that user, on the bundled
-    fake model, named `name` on the audit entries) that shares `app`'s stores and limits
-    (RESTORED_STATE)."""
-    from fastapi.testclient import TestClient
-
-    seeding = seeding_app(None, user_id, name)
-    for key in RESTORED_STATE:
-        setattr(seeding.state, key, getattr(app.state, key))
-    guard: SpendingGuard = app.state.spending
-    seeding.state.spending = PassesOnly(guard.store, guard.clock)
-    # Never entered: its lifespan would close `app`'s stores. A server error is a 500, so a
-    # SeedError, never an exception out of the seed.
-    return TestClient(seeding, raise_server_exceptions=False)
-
-
-def prepare(client: Client, app: FastAPI, user_id: str) -> str | None:
-    """Before the fresh start that restores the demo state (#605): the seed's profile pass
-    checked against the lead's limit (OverLimit, nothing written), then the open round closed,
-    so it closes before the fresh start and isn't listed since: every restore then lists the
-    same rounds, "Q2 2026" closed and "Q3 2026" open. `seed` follows the fresh start. Returns
-    the name of the round closed, or None."""
-    from vouch.spending import DailyLimitReached
-
-    try:
-        app.state.spending.check_profile_pass(user_id)
-    except DailyLimitReached as error:
-        raise OverLimit(error.message()) from None
-    current = _json(client, "GET", "/api/overview")["rounds"]["current"]
-    if current is None:
-        return None
-    _call(client, "POST", "/api/rounds/close")
-    return str(current["name"])
 
 
 # --- The command -------------------------------------------------------------------------------
