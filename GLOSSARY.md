@@ -168,6 +168,10 @@ _Avoid_: Resolved, fixed, complete
 A period the lead names and opens (such as "Q4 2026"; the first opens on its own) and later closes, which freezes its results. The overview compares the current round with the last closed one. Used in both goals.
 _Avoid_: Snapshot, cycle, sprint, audit period
 
+**Round comparison**:
+Where the lead stands now set against one closed review round they choose (the last closed one by default), control by control: verdict changes, readiness then and now, remediation items done and open questions answered since. Used in both goals. It is never called progress.
+_Avoid_: Timeline, diff, progress, history
+
 **Open question**:
 A question the lead logs on a control for someone else to answer: what is asked, who it is for, a due date, and the answer. Once answered or overdue, Vouch suggests re-assessing the control.
 _Avoid_: Task, query, follow-up, ticket
