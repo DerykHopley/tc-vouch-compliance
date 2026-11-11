@@ -8,6 +8,7 @@ server's checks already spend most of that."""
 import re
 
 import pytest
+from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
@@ -357,21 +358,9 @@ TABLE_LAYOUT = (
 )
 
 
-def as_company(page: Page, profile: str) -> None:
-    """Every API call the page makes goes under `profile`, by the API's own header: not by the
-    'vouch.profile' key, which M9 (#448, #480) removes. Lower case, as the request's own headers
-    are: a second spelling would send the header twice."""
-    page.route(
-        "**/api/**",
-        lambda route: route.continue_(
-            headers={**route.request.headers, "x-vouch-profile": profile}
-        ),
-    )
-
-
 @pytest.mark.parametrize("width", [1440, 1024, 390])
 def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row(
-    page: Page, paper_url, width
+    page: Page, paper_url, width, nordlicht_later
 ):
     """#464: the working paper uses the full width (#448 decision 6). At 1440 and 1024 the judged
     table doesn't scroll sideways on Nordlicht or Alpenwerk, and the Requirement column keeps at
@@ -379,6 +368,7 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
     item is its own row under its requirement, spanning the table on a desktop and inside the
     card's width on a phone (#211)."""
     page.set_viewport_size({"width": width, "height": 900})
+    nordlicht_later(paper_url)
     for profile, language in (("nordlicht", "en"), ("alpenwerk", "de")):
         response = page.request.post(
             f"{paper_url}/api/assessments",
@@ -387,8 +377,7 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
         )
         assert response.ok, response.status
         assert "event: result" in response.text()
-        page.unroute("**/api/**")  # the last company's route gives way to this one's
-        as_company(page, profile)
+        make_current(page.request, paper_url, profile)  # #480: the paper opens under it
         paper = open_paper(page, paper_url, WIDE, assessed=True)
         name = "German" if language == "de" else "English"
         expect(paper.get_by_text(f"Answer language: {name}")).to_be_visible()
@@ -449,7 +438,7 @@ def centre(rect: dict) -> float:
 
 @pytest.mark.parametrize("profile", ["nordlicht", "alpenwerk"])
 def test_at_1440_each_index_row_is_its_id_and_chip_then_at_most_two_lines_of_question(
-    page: Page, paper_url, profile
+    page: Page, paper_url, profile, nordlicht_later
 ):
     """#466 (answer A): the id and chip share a line; the review tag sits on it when it fits and
     wraps below it otherwise; then the question, clamped to two lines."""
@@ -460,7 +449,8 @@ def test_at_1440_each_index_row_is_its_id_and_chip_then_at_most_two_lines_of_que
     )
     assert response.ok, response.status
     page.set_viewport_size({"width": 1440, "height": 900})
-    as_company(page, profile)
+    nordlicht_later(paper_url)
+    make_current(page.request, paper_url, profile)  # #480: the paper opens under it
     open_paper(page, paper_url, ASSESSED, assessed=True)
 
     rows = page.evaluate(INDEX_ROWS)
@@ -541,7 +531,9 @@ def test_at_1440_a_focused_index_row_is_scrolled_into_the_lists_view(page: Page,
     assert seen[-1] == "5.2.9", seen
 
 
-def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page, paper_url):
+def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(
+    page: Page, paper_url, nordlicht_later
+):
     """#511: just above the phone layout the quotes column is narrow (#464), and Alpenwerk's
     quotes ("Administratorkonten") broke mid-word with no hyphen. They hyphenate in the answer
     language (German, as Alpenwerk's documents are), or don't break."""
@@ -553,7 +545,8 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page
     assert response.ok, response.status
     assert "event: result" in response.text()
     page.set_viewport_size({"width": 701, "height": 900})
-    as_company(page, "alpenwerk")
+    nordlicht_later(paper_url)
+    make_current(page.request, paper_url, "alpenwerk")  # #480: the paper opens under it
     paper = open_paper(page, paper_url, WIDE, assessed=True)
     expect(paper.get_by_text("Answer language: German")).to_be_visible()
     quotes = "table.reqs.judged .quotes-cell blockquote"
@@ -563,7 +556,9 @@ def test_at_701px_a_german_quotes_long_words_break_only_with_a_hyphen(page: Page
     assert_hyphenated_in_german(page, {"quotes": quotes})
 
 
-def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report_url):
+def test_on_a_german_profile_a_stale_citations_flag_is_german(
+    page: Page, report_url, nordlicht_later
+):
     # #359: Alpenwerk's 1.1.1 on the German demo script cites the logging policy, approved
     # 2023-05-10 for a yearly review, so stale; the API serves its reason in German. On the
     # report's server (Alpenwerk on the demo fake): the paper's server spends its whole daily
@@ -575,7 +570,10 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(page: Page, report
     )
     assert response.ok, response.status
     assert "event: result" in response.text()
-    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    nordlicht_later(report_url)
+    make_current(
+        page.request, report_url, "alpenwerk"
+    )  # #480: Alpenwerk opens as the current company
 
     paper = open_paper(page, report_url, "1.1.1", assessed=True)
 

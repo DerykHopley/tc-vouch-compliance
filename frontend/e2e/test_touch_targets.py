@@ -27,7 +27,7 @@ from test_remediation import ITEM, confirmed_with_an_item
 from test_review import assessed, open_paper, row
 from touch_targets import small_targets
 
-PAGES = ["/", "/controls/4.1.2", "/developer", "/documents"]
+PAGES = ["/", "/controls/4.1.2", "/developer", "/company"]
 
 
 def at_phone_width(page: Page, url: str) -> None:
@@ -116,22 +116,39 @@ def test_the_developer_page_at_375px_with_the_daily_limit_field_in_view(page: Pa
     assert small_targets(page) == []
 
 
-def test_the_developer_page_s_remove_buttons_are_at_least_44px(page: Page, profiles_url):
-    """#418: a company made in setup listed with its Remove button; the settings answered with
-    one added, so no company is made on the profiles server."""
+def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
+    page: Page, profiles_url
+):
+    """#418, #480: a company made in setup listed with Make current and Remove, the others with
+    Make current, the current one marked; the settings answered with one added, so no company is
+    made on the profiles server."""
     made = {
         "id": "musterfirma-sud-gmbh",
         "company": "Musterfirma Süd GmbH",
         "created_at": "2026-11-09T10:15:00+00:00",
     }
+    listed = {
+        "id": "musterfirma-sud-gmbh",
+        "company": "Musterfirma Süd GmbH",
+        "country": "Germany",
+        "answer_language": "en",
+    }
 
     def with_a_company(route) -> None:
         answer = route.fetch()
-        route.fulfill(response=answer, json=answer.json() | {"companies": [made]})
+        read = answer.json()
+        route.fulfill(
+            response=answer,
+            json=read
+            | {"companies": [made], "listed_companies": [*read["listed_companies"], listed]},
+        )
 
     page.route("**/api/developer/settings", with_a_company)
     at_phone_width(page, f"{profiles_url}/developer")
     expect(page.get_by_role("button", name="Remove Musterfirma Süd GmbH")).to_be_visible()
+    expect(page.get_by_role("button", name="Make Musterfirma Süd GmbH current")).to_be_visible()
+    # The Companies section's mark: the price list marks the current model too (#496).
+    expect(page.locator(".companies .current-mark")).to_have_text("Current")
     assert small_targets(page) == []
 
 
@@ -207,14 +224,15 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
 
 
 def test_the_top_bar_menu_and_its_menus_are_at_least_44px(page: Page, profiles_url):
-    # #222: on a phone the tabs, the profile dropdown and the user menu sit behind one Menu button.
+    # #222: on a phone the tabs and the user menu sit behind one Menu button (no profile
+    # dropdown since #480).
     page.set_viewport_size({"width": 400, "height": 900})
     with page.expect_response("**/api/overview"):
         page.goto(profiles_url)
     bar = page.get_by_role("banner")
     bar.get_by_role("button", name="Menu", exact=True).click()
-    bar.get_by_role("button", name=re.compile(r"^Profile: ")).click()
-    expect(bar.get_by_role("menuitemradio").first).to_be_visible()
+    bar.get_by_role("button", name="Your menu").click()
+    expect(bar.get_by_role("menuitem").first).to_be_visible()
     assert small_targets(page) == []
 
 

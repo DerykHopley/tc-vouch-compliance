@@ -12,10 +12,11 @@ import json
 import re
 from datetime import date, timedelta
 
+from current_company import reopened_under
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 from reviewing import confirmed
 from test_review import CONTROL, assessed, open_paper
-from top_bar import back_to_overview, switch_profile
+from top_bar import back_to_overview
 
 OWNER = "IT security officer"
 ITEM = "S1"
@@ -167,7 +168,10 @@ def test_the_draft_fits_at_400px_in_light_and_dark(page: Page, paper_url):
         assert not scrolls_sideways(page), f"the draft scrolls sideways at 400px in {scheme}"
 
 
-def test_one_profiles_approved_items_do_not_show_under_another(page: Page, profiles_url):
+def test_one_profiles_approved_items_do_not_show_under_another(
+    page: Page, profiles_url, nordlicht_later
+):
+    nordlicht_later(profiles_url)
     nordlicht = {"X-Vouch-Profile": "nordlicht"}
     thread_id = confirmed_with_an_item(page.request, profiles_url, nordlicht)
     approved = page.request.post(
@@ -187,8 +191,7 @@ def test_one_profiles_approved_items_do_not_show_under_another(page: Page, profi
         page.goto(profiles_url)
     expect(remediation_tile(page)).to_have_text("1")
 
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        switch_profile(page, "Testwerk Prüfstand GmbH · Austria · English")
+    reopened_under(page, profiles_url, "testwerk")
     expect(remediation_tile(page)).to_have_text("0")
     elsewhere = page.request.get(
         f"{profiles_url}/api/assessments/{thread_id}", headers={"X-Vouch-Profile": "testwerk"}

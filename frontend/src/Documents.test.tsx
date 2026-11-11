@@ -2,7 +2,8 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Documents from './Documents.tsx'
-import { DOCUMENTS_FAILED, type DocumentWords, type ProfileDocument, type ProfileDocuments } from './documents.ts'
+import { DOCUMENTS_FAILED, type DocumentWords, type ProfileDocument, type ProfileDocuments, useDocuments }
+  from './documents.ts'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
 
 afterEach(() => {
@@ -38,6 +39,12 @@ const RECORD: ProfileDocument = {
 }
 const NORDLICHT: ProfileDocuments = { documents: [AUTHENTICATION, BACKUP, RECORD], words: ENGLISH, words_language: 'en' }
 
+/** The panel as the Company page shows it: read with useDocuments, then shown. */
+function Shown() {
+  const { state, tryAgain } = useDocuments()
+  return <Documents state={state} tryAgain={tryAgain} />
+}
+
 const json = (body: unknown, status = 200) => Promise.resolve(Response.json(body, { status }))
 
 function serve(answer: () => Promise<Response>) {
@@ -46,15 +53,15 @@ function serve(answer: () => Promise<Response>) {
   return fetch
 }
 
-describe('the Documents page', () => {
+describe('the Documents panel of the Company page (ticket 505: its title an h2)', () => {
   it('says it is loading, then shows the sheet in the words language: one table per source, with Cited by', async () => {
     serve(() => json(NORDLICHT))
-    render(<Documents />)
+    render(<Shown />)
     expect(screen.getByRole('status').textContent).toBe('Loading the documents…')
 
     const sheet = await screen.findByRole('article', { name: 'Documents' })
     expect(sheet.getAttribute('lang')).toBe('en')
-    expect(within(sheet).getByRole('heading', { level: 1 }).textContent).toBe('Documents')
+    expect(within(sheet).getByRole('heading', { level: 2 }).textContent).toBe('Documents')
     const tables = within(sheet).getAllByRole('table')
     expect(tables.map((t) => t.querySelector('caption')?.textContent)).toEqual(['Policies', 'Records'])
     const [policies] = tables
@@ -69,7 +76,7 @@ describe('the Documents page', () => {
 
   it("names a source it has no word for as written, even one named like an object's own member", async () => {
     serve(() => json({ ...NORDLICHT, documents: [{ ...RECORD, source: 'constructor' }, { ...BACKUP, source: 'toString' }] }))
-    render(<Documents />)
+    render(<Shown />)
 
     const sheet = await screen.findByRole('article', { name: 'Documents' })
     expect(within(sheet).getAllByRole('table').map((t) => t.querySelector('caption')?.textContent))
@@ -78,7 +85,7 @@ describe('the Documents page', () => {
 
   it('with no documents, shows the no_documents sentence and no table', async () => {
     serve(() => json({ ...NORDLICHT, documents: [] }))
-    render(<Documents />)
+    render(<Shown />)
 
     const sheet = await screen.findByRole('article', { name: 'Documents' })
     expect(within(sheet).getByText(ENGLISH.no_documents)).toBeTruthy()
@@ -91,7 +98,7 @@ describe('the Documents page', () => {
   ])('on %s shows the notice and Try again, none of the sheet, and Try again reads once more', async (_, failing) => {
     let reads = 0
     const fetch = serve(() => ++reads === 1 ? failing() : json(NORDLICHT))
-    render(<Documents />)
+    render(<Shown />)
 
     expect((await screen.findByRole('alert')).textContent).toBe(DOCUMENTS_FAILED)
     expect(screen.queryByRole('article')).toBeNull()

@@ -73,7 +73,7 @@ function failureWords(created: Exclude<CompanyCreated, { status: 'created' | 'si
   }
   if (created.status === 'unavailable') return 'The database is unavailable just now. Nothing was saved; try again in a moment.'
   if (created.status === 'unknown')
-    return 'The company may not have been created. Check the profile switcher before trying again.'
+    return 'The company may not have been created. Check the Companies section of the Developer page before trying again.'
   return 'The company could not be created. Nothing was saved.'
 }
 
@@ -554,8 +554,8 @@ function FinishStep({ answers, controls, library }: { answers: Answers; controls
         return chosen.length > 0 && <DocumentTable key={source} caption={caption} documents={chosen} />
       })}
       <p className="field-note">
-        Creating the company adds it to the profile switcher. Then Vouch sets its Goal and runs a profile pass: every
-        applicable control drafted, waiting for your review.
+        Creating the company adds it to the Companies list and makes it the current company, for every user. Then
+        Vouch sets its Goal and runs a profile pass: every applicable control drafted, waiting for your review.
       </p>
     </>
   )

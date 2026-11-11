@@ -155,7 +155,9 @@ def _skip_reason(newest: Assessment | None) -> SkipReason | None:
 
 
 @dataclass(frozen=True)
-class _Included:
+class IncludedControl:
+    """A control the pass assesses, as its prompt lists it."""
+
     control: IsaControl
     requirements: ControlRequirements
     statements: list[LeadStatement] = field(default_factory=list)  # the lead's on it (#422)
@@ -197,9 +199,10 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
     return found
 
 
-def _prompt(
-    profile: ComplianceProfile, included: list[_Included], documents: list[EvidencePassage]
+def profile_pass_prompt(
+    profile: ComplianceProfile, included: list[IncludedControl], documents: list[EvidencePassage]
 ) -> list[AnyMessage]:
+    """The profile pass's one prompt: every included control and every document, whole."""
     language = language_name(profile.answer_language)
     controls = "\n\n".join(
         f"Control {i.control.id}: {i.control.question}\n"
@@ -263,7 +266,7 @@ class _Assessed:
 
 
 def _assessed(
-    included: _Included,
+    included: IncludedControl,
     reply: ControlAssessmentReply | None,
     checker: QuoteChecker,
     profile: ComplianceProfile,
@@ -406,7 +409,7 @@ def run_profile_pass(
     today = today or date.today()
     statements = list(statements)
     newest = newest_by_control(memory, saver)
-    included: list[_Included] = []
+    included: list[IncludedControl] = []
     skipped: list[SkippedControl] = []
     for control in applicable_controls(profile, profile.isa_edition().controls):
         requirements = profile.requirements_for(control)
@@ -416,11 +419,11 @@ def run_profile_pass(
         else:
             mine = [s for s in statements if s.control_id == control.id]
             passages = statement_passages(mine, profile.answer_language)
-            included.append(_Included(control, requirements, mine, passages))
+            included.append(IncludedControl(control, requirements, mine, passages))
     if not included:
         return ProfilePassResult([], skipped)
     documents = _documents(profile, today)
-    prompt = _prompt(profile, included, documents)
+    prompt = profile_pass_prompt(profile, included, documents)
     tokens_in = estimate_tokens(prompt, profile.answer_language)
     tokens_out = estimate_output_tokens(
         sum(len(i.requirements.applicable) for i in included), profile.answer_language

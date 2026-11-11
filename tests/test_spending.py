@@ -913,3 +913,102 @@ def test_in_the_database_the_pass_count_is_its_own_and_reads_its_own_limit(empty
     assert store.take_profile_pass("alice", today) == (True, 4)  # changed without a deploy
     assert store.take("alice", today) == (True, DAILY_LIMIT)  # the assessments' count untouched
     assert database.PROFILE_PASS_COUNTS_TABLE in tables(empty_database)
+
+
+# --- The developer page's prices and recent runs (#496, story 13) --------------------------------
+
+
+def twelve_records() -> list[UsageRecord]:
+    """Twelve usage records an hour apart, oldest first: ten assessments, a chat message (the
+    third newest) and a profile pass (the newest), on the fake and on OpenRouter."""
+    fake = Usage("fake", 7, 3, 0.0, 0.0001, estimated=True, cost_complete=True)
+    real = Usage(DEFAULT_MODEL, 10, 2, 0.5, 0.0, estimated=False, cost_complete=False)
+    controls = [f"1.{n}" for n in range(9)] + [CHAT, CONTROL, PROFILE_PASS]
+    return [
+        UsageRecord("alice", c, real if n % 2 else fake, NOV_4_AFTERNOON + timedelta(hours=n))
+        for n, c in enumerate(controls)
+    ]
+
+
+EXPECTED_RECENT = [PROFILE_PASS, CONTROL, "1.8", "1.7", "1.6", "1.5", "1.4", "1.3", "1.2", "1.1"]
+
+
+def test_the_developer_page_lists_every_priced_model_on_the_read_and_on_a_model_change(catalogue):
+    client = TestClient(app_with_key(FakeChat(), catalogue))
+
+    read = client.get("/api/developer/settings").json()
+    changed = client.put("/api/developer/model", json={"model": OTHER_MODEL}).json()
+
+    expected = [
+        {
+            "model": m,
+            "input_per_million": p.input_per_million,
+            "output_per_million": p.output_per_million,
+        }
+        for m, p in PRICES.items()
+    ]
+    assert read["prices"] == expected
+    assert changed["prices"] == expected
+    assert changed["recent_runs"] == read["recent_runs"] == []
+
+
+def test_the_developer_page_lists_the_last_10_runs_newest_first_leaving_out_chat():
+    app, _ = app_at(NOV_4_AFTERNOON)
+    for record in reversed(twelve_records()):  # kept out of order: sorted by when they ended
+        app.state.spending.store.record(record)
+
+    runs = TestClient(app).get("/api/developer/settings").json()["recent_runs"]
+
+    assert [r["control_id"] for r in runs] == EXPECTED_RECENT
+    assert runs[0] == {
+        "at": (NOV_4_AFTERNOON + timedelta(hours=11)).isoformat(),
+        "control_id": PROFILE_PASS,
+        "model": DEFAULT_MODEL,
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "reported_cost_usd": 0.5,
+        "estimated_cost_usd": 0.0,
+        "estimated": False,
+        "cost_complete": False,
+    }
+    assert (runs[1]["model"], runs[1]["estimated"]) == ("fake", True)
+
+
+def tied_records() -> list[UsageRecord]:
+    """Three runs ending at the same moment, kept in this order."""
+    usage = Usage("fake", 7, 3, 0.0, 0.0001, estimated=True, cost_complete=True)
+    return [UsageRecord("alice", c, usage, NOV_4_AFTERNOON) for c in ("1.1", "1.2", "1.3")]
+
+
+def test_runs_ending_at_the_same_moment_list_the_last_kept_first():
+    store = MemorySpendingStore()
+    for record in tied_records():
+        store.record(record)
+
+    assert [r.control_id for r in store.recent(10)] == ["1.3", "1.2", "1.1"]
+
+
+@needs_postgres
+def test_in_the_database_runs_ending_at_the_same_moment_list_the_last_kept_first(empty_database):  # noqa: F811
+    empty_database.setup()
+    store = DatabaseSpendingStore(empty_database)
+    for record in tied_records():
+        store.record(record)
+
+    assert [r.control_id for r in store.recent(10)] == ["1.3", "1.2", "1.1"]
+
+
+@needs_postgres
+def test_in_the_database_the_recent_runs_are_read_from_the_usage_table(empty_database):  # noqa: F811
+    empty_database.setup()
+    before = tables(empty_database)
+    store = DatabaseSpendingStore(empty_database)
+    for record in reversed(twelve_records()):
+        store.record(record)
+
+    recent = store.recent(10)
+
+    assert [r.control_id for r in recent] == EXPECTED_RECENT
+    assert recent[0].at == NOV_4_AFTERNOON + timedelta(hours=11)
+    assert recent[0].usage == twelve_records()[-1].usage
+    assert tables(empty_database) == before

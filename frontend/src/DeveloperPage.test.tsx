@@ -1,14 +1,28 @@
 import type { ComponentProps } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.tsx'
-import type { DeveloperSettings } from './developer.ts'
+import type { DeveloperPrompts, DeveloperSettings, RecentRun } from './developer.ts'
 import DeveloperPage from './DeveloperPage.tsx'
-import { DEVELOPER_SETTINGS, NO_RUNS } from './developerFixtures.ts'
+import { DEVELOPER_PROMPTS, DEVELOPER_SETTINGS, NO_RUNS } from './developerFixtures.ts'
 import { setOnSignedOut } from './session.ts'
 
+// The page reads its prompts as it opens (#496): no test reaches the network, whatever it stubs after.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+})
+
 const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
+/** Musterfirma, made in setup, as GET /api/profiles lists it. */
+const LISTED_MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', country: 'Germany',
+  answer_language: 'en' }
+
+/** The Companies section's row naming `company`. */
+function rowOf(company: string): HTMLElement {
+  const sheet = screen.getByRole('region', { name: 'Companies' })
+  return within(sheet).getAllByRole('listitem').find((li) => within(li).queryByText(company, { selector: '.company-name' }))!
+}
 
 /** The developer page with SETTINGS and no-op handlers, but for those given. */
 function renderPage(props: Partial<ComponentProps<typeof DeveloperPage>> = {}) {
@@ -45,7 +59,8 @@ describe('the developer page', () => {
   it('shows the model, the prompt version and the usage link', () => {
     renderPage()
     const region = page()!
-    expect(within(region).getByText('anthropic/claude-haiku-5.5')).toBeTruthy()
+    expect(within(within(region).getByRole('region', { name: 'Model' }))
+      .getByText('anthropic/claude-haiku-5.5', { selector: '.lbl + .mono' })).toBeTruthy()
     expect(within(region).getByText('1')).toBeTruthy()
     const usage = within(region).getByRole('link', { name: /usage and costs/i })
     expect(usage.getAttribute('href')).toBe('https://openrouter.ai/activity')
@@ -104,7 +119,7 @@ describe('the developer page', () => {
   it('says when no key makes assessments run on the fake model, and when the choice lasts only until a restart', () => {
     renderPage({ settings: { ...SETTINGS, runs_on: 'fake', fake_reason: 'no_key', kept_in: 'memory' } })
     expect(screen.getByText('No OpenRouter key is set: assessments run on the fake model.')).toBeTruthy()
-    expect(screen.getByText(/until the server restarts/i)).toBeTruthy()
+    expect(screen.getByText(/until the server restarts/i).textContent).toContain('the current company') // #480
   })
 
   it('names each compliance profile left out because it could not be loaded, with its problem (#47)', () => {
@@ -114,6 +129,9 @@ describe('the developer page', () => {
     const broken_profiles = [{ id: 'broken', problem: 'not valid YAML (ParserError)' }]
     renderPage({ settings: { ...SETTINGS, broken_profiles } })
     const note = screen.getByRole('region', { name: 'Profiles left out' })
+    expect(within(note).getByText(
+      'These compliance profiles could not be loaded, so the Companies list leaves them out and none can be made current:',
+    )).toBeTruthy()
     expect(within(note).getByText('broken')).toBeTruthy()
     expect(within(note).getByText('not valid YAML (ParserError)')).toBeTruthy()
   })
@@ -133,10 +151,10 @@ describe('the developer page', () => {
     expect(screen.queryByRole('button', { name: 'Set up a company' })).toBeNull()
   })
 
-  it('opens company setup from its sheet', async () => {
+  it('opens company setup from the Companies section', async () => {
     const onSetup = vi.fn()
     renderPage({ onSetup })
-    const sheet = screen.getByRole('region', { name: 'Company setup' })
+    const sheet = screen.getByRole('region', { name: 'Companies' })
     await userEvent.click(within(sheet).getByRole('button', { name: 'Set up a company' }))
     expect(onSetup).toHaveBeenCalledOnce()
   })
@@ -171,9 +189,10 @@ describe('the developer page', () => {
 
 describe('the companies made in setup, issue 418', () => {
   const MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', created_at: '2026-11-09T10:15:00+00:00' }
-  const WITH_ONE: DeveloperSettings = { ...SETTINGS, companies: [MUSTERFIRMA] }
-  const QUESTION = 'Remove Musterfirma Süd GmbH? It leaves the profile switcher for everyone and can\'t be opened again. '
-    + 'Its audit trail is kept.'
+  const WITH_ONE: DeveloperSettings = { ...SETTINGS, companies: [MUSTERFIRMA],
+    listed_companies: [...SETTINGS.listed_companies, LISTED_MUSTERFIRMA] }
+  const QUESTION = 'Remove Musterfirma Süd GmbH? It leaves the Companies list for everyone and can\'t be opened or '
+    + 'made current again. Its audit trail is kept.'
 
   /** The API answering the DELETE with `status` and `body`, or held until the returned function answers it. */
   function deleting(status?: number, body: unknown = WITH_ONE) {
@@ -187,24 +206,24 @@ describe('the companies made in setup, issue 418', () => {
     return { fetch, release: (answer: Response) => release(answer) }
   }
 
-  const sheet = () => screen.getByRole('region', { name: 'Company setup' })
+  /** The DELETEs sent: the page's other reads (its prompts, #496) aside. */
+  const deletes = (fetch: ReturnType<typeof deleting>['fetch']) =>
+    fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')
+  const sheet = () => screen.getByRole('region', { name: 'Companies' })
   const removeButton = () => within(sheet()).getByRole('button', { name: 'Remove Musterfirma Süd GmbH' })
 
-  it('lists each company with its id and the date it was made, under Set up a company', () => {
+  it('lists each company made in setup with its id and the date it was made', () => {
     renderPage({ settings: WITH_ONE })
-    const item = within(sheet()).getByRole('listitem')
-    expect(within(item).getByText('Musterfirma Süd GmbH')).toBeTruthy()
+    const item = rowOf('Musterfirma Süd GmbH')
     expect(within(item).getByText('musterfirma-sud-gmbh').className).toContain('mono')
     expect(item.querySelector('time')?.getAttribute('dateTime')).toBe('2026-11-09T10:15:00+00:00')
     expect(removeButton().className).toContain('btn')
   })
 
-  it('says when none was made, and when they cannot be read', () => {
-    renderPage()
-    expect(within(sheet()).getByText('No companies made in setup yet.')).toBeTruthy()
-    cleanup()
+  it('says when they cannot be read, and still lists the file companies', () => {
     renderPage({ settings: { ...SETTINGS, companies: null } })
     expect(within(sheet()).getByText("The companies made in setup can't be read just now.")).toBeTruthy()
+    expect(within(sheet()).getAllByRole('listitem')).toHaveLength(2)
   })
 
   it('asks first, and Cancel sends nothing and keeps the company listed', async () => {
@@ -213,7 +232,7 @@ describe('the companies made in setup, issue 418', () => {
     renderPage({ settings: WITH_ONE })
     await userEvent.click(removeButton())
     expect(confirm).toHaveBeenCalledWith(QUESTION)
-    expect(fetch).not.toHaveBeenCalled()
+    expect(deletes(fetch)).toEqual([])
     expect(removeButton()).toBeTruthy()
   })
 
@@ -226,9 +245,9 @@ describe('the companies made in setup, issue 418', () => {
     await userEvent.dblClick(removeButton())
     const busy = within(sheet()).getByRole('button', { name: 'Removing…' })
     expect((busy as HTMLButtonElement).disabled).toBe(true)
-    expect(fetch).toHaveBeenCalledOnce()
+    expect(deletes(fetch)).toHaveLength(1)
     release(new Response(JSON.stringify(SETTINGS), { status: 200 }))
-    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh'))
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', 'Removed Musterfirma Süd GmbH.'))
     expect(onChange).toHaveBeenCalledWith(SETTINGS)
     expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
   })
@@ -262,7 +281,7 @@ describe('the companies made in setup, issue 418', () => {
     renderPage({ settings: WITH_ONE, onChange, onRemoved })
     await userEvent.click(removeButton())
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(SETTINGS))
-    expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh')
+    expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', 'Musterfirma Süd GmbH was already removed.')
     expect(within(sheet()).getByRole('status').textContent).toBe('Musterfirma Süd GmbH was already removed.')
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -275,7 +294,7 @@ describe('the companies made in setup, issue 418', () => {
     const onChange = vi.fn()
     renderPage({ settings: WITH_ONE, onChange })
     await userEvent.click(removeButton())
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [] }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [], listed_companies: SETTINGS.listed_companies }))
   })
 
   it("on a 200 whose settings couldn't be read after, says removed and drops it from the list held", async () => {
@@ -285,17 +304,17 @@ describe('the companies made in setup, issue 418', () => {
     const onRemoved = vi.fn()
     renderPage({ settings: WITH_ONE, onChange, onRemoved })
     await userEvent.click(removeButton())
-    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh'))
-    expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [] })
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', 'Removed Musterfirma Süd GmbH.'))
+    expect(onChange).toHaveBeenCalledWith({ ...WITH_ONE, companies: [], listed_companies: SETTINGS.listed_companies })
     expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('opened afresh after removing the company shown, says what was removed, once', () => {
-    const onRemovedShown = vi.fn()
-    renderPage({ removedCompany: 'Musterfirma Süd GmbH', onRemovedShown })
+  it('opened afresh with a note for it, says it, once', () => {
+    const onNoteShown = vi.fn()
+    renderPage({ developerNote: 'Removed Musterfirma Süd GmbH.', onNoteShown })
     expect(within(sheet()).getByRole('status').textContent).toBe('Removed Musterfirma Süd GmbH.')
-    expect(onRemovedShown).toHaveBeenCalledOnce()
+    expect(onNoteShown).toHaveBeenCalledOnce()
   })
 
   it('on a 401, signs out with no alert', async () => {
@@ -308,24 +327,253 @@ describe('the companies made in setup, issue 418', () => {
     await waitFor(() => expect(signedOut).toHaveBeenCalledOnce())
     expect(screen.queryByRole('alert')).toBeNull()
   })
+
+  it('removing the current company says the company now current, the one the API answers (issue 480, decision 8)',
+    async () => {
+      const current = { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' }
+      deleting(200, { ...SETTINGS }) // Nordlicht current again
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const onRemoved = vi.fn()
+      renderPage({ settings: current, onRemoved })
+      await userEvent.click(removeButton())
+      const note = 'Removed Musterfirma Süd GmbH. Nordlicht Komponenten GmbH is now the current company.'
+      await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', note))
+      expect(within(sheet()).getByRole('status').textContent).toBe(note)
+    })
+
+  /** The API answering the DELETE with `removal`, the settings read again with `again` (null: a 500), and the profile
+   * list with `current` the current company (null: a 500). */
+  function serving(removal: Response, again: DeveloperSettings | null, current: string | null) {
+    const listed = [...SETTINGS.listed_companies, { id: 'alpenwerk-2', company: 'Alpenwerk Zwei GmbH',
+      country: 'Austria', answer_language: 'de' }]
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return Promise.resolve(removal)
+      if (url === '/api/developer/settings')
+        return Promise.resolve(again ? Response.json(again) : new Response(null, { status: 500 }))
+      if (url === '/api/profiles') return Promise.resolve(current
+        ? Response.json({ profiles: listed, default: 'nordlicht', current }) : new Response(null, { status: 500 }))
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  it("removing the current company, the settings unreadable after, names the API's current company (issue 480)",
+    async () => {
+      const current = { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' }
+      // The API's answer, not a rule copied here: whatever company it says is current.
+      serving(Response.json({ settings_unavailable: true }), null, 'alpenwerk-2')
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      renderPage({ settings: current })
+      await userEvent.click(removeButton())
+      expect((await within(sheet()).findByRole('status')).textContent)
+        .toBe('Removed Musterfirma Süd GmbH. Alpenwerk Zwei GmbH is now the current company.')
+    })
+
+  it("removing the current company, nothing readable after, says only that it was removed", async () => {
+    serving(Response.json({ settings_unavailable: true }), null, null)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage({ settings: { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' } })
+    await userEvent.click(removeButton())
+    expect((await within(sheet()).findByRole('status')).textContent).toBe('Removed Musterfirma Süd GmbH.')
+  })
+
+  it('removed elsewhere already (404) while current: the note names the company now current (decision 8)',
+    async () => {
+      serving(Response.json({ detail: 'There is no such compliance profile.' }, { status: 404 }), SETTINGS, 'nordlicht')
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const onRemoved = vi.fn()
+      renderPage({ settings: { ...WITH_ONE, current_company: 'musterfirma-sud-gmbh' }, onRemoved })
+      await userEvent.click(removeButton())
+      const note = 'Musterfirma Süd GmbH was already removed. Nordlicht Komponenten GmbH is now the current company.'
+      await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('musterfirma-sud-gmbh', note))
+      expect(within(sheet()).getByRole('status').textContent).toBe(note)
+    })
+
+  it('a removal after the current company changed elsewhere names the company now current', async () => {
+    // Held: Nordlicht current; meanwhile another developer made Alpenwerk current.
+    deleting(200, { ...SETTINGS, current_company: 'alpenwerk' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(removeButton())
+    expect((await within(sheet()).findByRole('status')).textContent)
+      .toBe('Removed Musterfirma Süd GmbH. Alpenwerk Präzision GmbH is now the current company.')
+  })
 })
 
-describe('the Developer link', () => {
-  it('shows for a developer and opens the page at /developer', async () => {
+describe('the Companies section, issue 480', () => {
+  const MADE = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', created_at: '2026-11-09T10:15:00+00:00' }
+  const WITH_ONE: DeveloperSettings = { ...SETTINGS, companies: [MADE],
+    listed_companies: [...SETTINGS.listed_companies, LISTED_MUSTERFIRMA] }
+  const sheet = () => screen.getByRole('region', { name: 'Companies' })
+  const buttonsOf = (company: string) => within(rowOf(company)).queryAllByRole('button').map((b) => b.textContent)
+  const makeButton = (company: string) => within(sheet()).getByRole('button', { name: `Make ${company} current` })
+
+  /** The API answering the PUT with `status` and `body` (held until the returned function answers, when none), and
+   * the settings read again with `again`. */
+  function putting(status?: number, body: unknown = WITH_ONE, again: DeveloperSettings = WITH_ONE) {
+    let release: (answer: Response) => void = () => {}
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/developer/settings') return Promise.resolve(Response.json(again))
+      if (url !== '/api/developer/current-company' || init?.method !== 'PUT') return new Promise<Response>(() => {})
+      if (status === undefined) return new Promise<Response>((resolve) => { release = resolve })
+      return Promise.resolve(new Response(JSON.stringify(body), { status }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    return { fetch, release: (answer: Response) => release(answer) }
+  }
+  const puts = (fetch: ReturnType<typeof putting>['fetch']) =>
+    fetch.mock.calls.filter(([url]) => url === '/api/developer/current-company')
+
+  it('lists every listed company, the current one marked Current with no button, the others Make current, and Remove '
+    + 'only on those made in setup, under Set up a company', () => {
+    renderPage({ settings: WITH_ONE })
+    const label = within(sheet()).getByText('Companies', { selector: '.lbl' })
+    const setUp = within(sheet()).getByRole('button', { name: 'Set up a company' })
+    const list = within(sheet()).getByRole('list')
+    expect(label.compareDocumentPosition(setUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(setUp.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(list).getAllByRole('listitem').map((li) => li.querySelector('.company-name')?.textContent))
+      .toEqual(['Alpenwerk Präzision GmbH', 'Nordlicht Komponenten GmbH', 'Musterfirma Süd GmbH'])
+    expect(within(rowOf('Alpenwerk Präzision GmbH')).getByText('alpenwerk').className).toContain('mono')
+    expect(buttonsOf('Alpenwerk Präzision GmbH')).toEqual(['Make current'])
+    expect(buttonsOf('Nordlicht Komponenten GmbH')).toEqual([])
+    expect(within(rowOf('Nordlicht Komponenten GmbH')).getByText('Current')).toBeTruthy()
+    expect(buttonsOf('Musterfirma Süd GmbH')).toEqual(['Make current', 'Remove'])
+    expect(rowOf('Alpenwerk Präzision GmbH').querySelector('time')).toBeNull()
+  })
+
+  it.each([
+    ['broken', { id: 'musterfirma-sud-gmbh', problem: 'chosen document retired-policy is not in the library' }],
+    ['shadowed', { id: 'nordlicht', problem: "its id is now a file profile's" }],
+  ])('a company made in setup that is %s is listed with Remove only', (_, left) => {
+    const made = { ...MADE, id: left.id }
+    renderPage({ settings: { ...SETTINGS, companies: [made], broken_profiles: [left] } })
+    const rows = within(sheet()).getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
+    const last = rows[2]
+    expect(within(last).getByText('Musterfirma Süd GmbH')).toBeTruthy()
+    expect(within(last).getAllByRole('button').map((b) => b.textContent)).toEqual(['Remove'])
+    expect(within(last).queryByText('Current')).toBeNull()
+  })
+
+  it('Make current pressed twice quickly sends one request, then opens the app afresh under it with the note',
+    async () => {
+      const made = { ...WITH_ONE, current_company: 'alpenwerk' }
+      const { fetch, release } = putting()
+      const onChange = vi.fn()
+      const onMadeCurrent = vi.fn()
+      renderPage({ settings: WITH_ONE, onChange, onMadeCurrent })
+      await userEvent.dblClick(makeButton('Alpenwerk Präzision GmbH'))
+      const busy = within(sheet()).getByRole('button', { name: 'Making current…' })
+      expect((busy as HTMLButtonElement).disabled).toBe(true)
+      expect((within(sheet()).getByRole('button', { name: 'Remove Musterfirma Süd GmbH' }) as HTMLButtonElement).disabled)
+        .toBe(true)
+      expect(puts(fetch)).toHaveLength(1)
+      expect(JSON.parse(String(puts(fetch)[0][1]?.body))).toEqual({ company: 'alpenwerk' })
+      release(Response.json(made))
+      const note = 'Alpenwerk Präzision GmbH is now the current company.'
+      await waitFor(() => expect(onMadeCurrent).toHaveBeenCalledWith('alpenwerk', note))
+      expect(onChange).toHaveBeenCalledWith(made)
+      expect(within(sheet()).getByRole('status').textContent).toBe(note)
+      expect(puts(fetch)).toHaveLength(1)
+    })
+
+  it("refused (404): reads the settings again and says the API's reason", async () => {
+    const again = { ...SETTINGS } // Musterfirma removed meanwhile
+    putting(404, { detail: 'There is no such compliance profile.' }, again)
+    const onChange = vi.fn()
+    const onMadeCurrent = vi.fn()
+    renderPage({ settings: WITH_ONE, onChange, onMadeCurrent })
+    await userEvent.click(makeButton('Musterfirma Süd GmbH'))
+    expect((await within(sheet()).findByRole('alert')).textContent)
+      .toBe('Vouch could not make this company current: There is no such compliance profile.')
+    expect(onChange).toHaveBeenCalledWith(again)
+    expect(onMadeCurrent).not.toHaveBeenCalled()
+  })
+
+  it("a 200 whose answer can't be read is still a change: reads the settings again, never 'Nothing changed'",
+    async () => {
+      const again = { ...WITH_ONE, current_company: 'alpenwerk' }
+      const { fetch } = putting(undefined, WITH_ONE, again)
+      const answered = fetch.getMockImplementation()!
+      fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/developer/current-company'
+        ? Promise.resolve(new Response('<html>proxy page</html>', { status: 200 })) : answered(url, init))
+      const onChange = vi.fn()
+      const onMadeCurrent = vi.fn()
+      renderPage({ settings: WITH_ONE, onChange, onMadeCurrent })
+      await userEvent.click(makeButton('Alpenwerk Präzision GmbH'))
+      const note = 'Alpenwerk Präzision GmbH is now the current company.'
+      await waitFor(() => expect(onMadeCurrent).toHaveBeenCalledWith('alpenwerk', note))
+      expect(onChange).toHaveBeenCalledWith(again)
+      expect(within(sheet()).getByRole('status').textContent).toBe(note)
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
+  it('with the database down, says nothing changed, and Make current can be pressed again', async () => {
+    putting(503, { detail: 'The database is unavailable just now.', unavailable: 'database' })
+    const onMadeCurrent = vi.fn()
+    renderPage({ settings: WITH_ONE, onMadeCurrent })
+    await userEvent.click(makeButton('Alpenwerk Präzision GmbH'))
+    expect((await within(sheet()).findByRole('alert')).textContent)
+      .toBe('The database is unavailable just now. Nothing changed; try again in a moment.')
+    expect((makeButton('Alpenwerk Präzision GmbH') as HTMLButtonElement).disabled).toBe(false)
+    expect(onMadeCurrent).not.toHaveBeenCalled()
+  })
+
+  it('on a 401, signs out with no alert', async () => {
+    putting(401, { detail: 'Sign in to use Vouch.' })
+    const signedOut = vi.fn()
+    setOnSignedOut(signedOut)
+    renderPage({ settings: WITH_ONE })
+    await userEvent.click(makeButton('Alpenwerk Präzision GmbH'))
+    await waitFor(() => expect(signedOut).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+/** The Main tabs' names. */
+const tabNames = () =>
+  within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link').map((l) => l.textContent)
+
+/** Opens the user menu (local mode) and gives its items' words. */
+async function menuItems() {
+  await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+  return screen.getAllByRole('menuitem').map((item) => item.textContent)
+}
+
+describe('the developer page in the user menu (ticket 495, M9 decision 4)', () => {
+  it('shows for a developer, beside no Developer or Documents tab, and opens the page at /developer', async () => {
     api(200)
     render(<App />)
-    const link = await screen.findByRole('link', { name: 'Developer' })
-    await userEvent.click(link)
+    await userEvent.click(await screen.findByRole('button', { name: 'Your menu' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Developer page' }))
     expect(window.location.pathname).toBe('/developer')
     expect(screen.getByRole('region', { name: 'Developer settings' })).toBeTruthy()
-    expect(link.getAttribute('aria-current')).toBe('page')
+    expect(tabNames()).toEqual(['Overview', 'Report', 'Company'])
+    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
+    for (const name of tabNames()) {
+      const tab = within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: name! })
+      expect(tab.getAttribute('aria-current')).toBeNull()
+    }
+  })
+
+  it('opens company setup at /developer/setup from Set up a company', async () => {
+    api(200)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Your menu' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Set up a company' }))
+    expect(window.location.pathname).toBe('/developer/setup')
+    expect(screen.getByRole('region', { name: 'Company setup' })).toBeTruthy()
   })
 
   it('is not there for a compliance lead (the API answers 403)', async () => {
     const fetch = api(403)
     render(<App />)
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/developer/settings', expect.anything()))
-    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(await menuItems()).toEqual(['Dark theme'])
+    expect(tabNames()).toEqual(['Overview', 'Report', 'Company'])
   })
 
   it("keeps a compliance lead at /developer on the Dossier, never the page", async () => {
@@ -341,7 +589,6 @@ describe('the Developer link', () => {
     window.history.replaceState(null, '', '/developer')
     api(503, undefined, { detail: 'The database is unavailable just now. Please try again shortly.', unavailable: 'database' })
     render(<App />)
-    expect(await screen.findByRole('link', { name: 'Developer' })).toBeTruthy()
     const region = await screen.findByRole('region', { name: 'Developer settings' })
     expect(within(region).getByRole('alert').textContent).toMatch(/unavailable just now/)
   })
@@ -352,8 +599,8 @@ describe('the Developer link', () => {
     render(<App />)
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/developer/settings', expect.anything()))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.queryByRole('link', { name: 'Developer' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Developer settings' })).toBeNull()
+    expect(await menuItems()).toEqual(['Dark theme'])
   })
 
   it("shows the unavailable notice, not company setup, at /developer/setup on the database's 503", async () => {
@@ -370,5 +617,179 @@ describe('the Developer link', () => {
     api(200)
     render(<App />)
     expect(await screen.findByRole('region', { name: 'Developer settings' })).toBeTruthy()
+  })
+})
+
+describe('the Prompts section, ticket 496', () => {
+  const PROMPTS: DeveloperPrompts = DEVELOPER_PROMPTS
+  const section = () => screen.getByRole('region', { name: 'Prompts' })
+  const AT_1_6_2: DeveloperPrompts = {
+    ...PROMPTS,
+    control: PROMPTS.controls[1],
+    prompts: PROMPTS.prompts.map((p) => ({ ...p, note: `${p.note} (1.6.2)` })),
+  }
+
+  /** The prompts' API: each read answered by `answer` (held until released, when it gives undefined). */
+  function promptsApi(answer: (control: string | null) => Response | undefined) {
+    const held: ((r: Response) => void)[] = []
+    const fetch = vi.fn((url: string) => {
+      if (!url.startsWith('/api/developer/prompts')) return new Promise<Response>(() => {})
+      const control = new URL(url, 'http://vouch').searchParams.get('control')
+      const given = answer(control)
+      return given ? Promise.resolve(given) : new Promise<Response>((resolve) => { held.push(resolve) })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const reads = () => fetch.mock.calls.filter(([url]) => url.startsWith('/api/developer/prompts')).map(([url]) => url)
+    return { reads, release: (r: Response) => held.shift()?.(r) }
+  }
+
+  it('shows one panel per prompt with its title, version and note, each message under its role, placeholders '
+    + "marked, and the overlay's Not sent", async () => {
+    const { reads } = promptsApi(() => Response.json(PROMPTS))
+    renderPage()
+    const gather = await within(section()).findByRole('article', { name: 'Gather evidence' })
+    expect(reads()).toEqual(['/api/developer/prompts'])
+    expect(within(section()).getByText(
+      'Built for Nordlicht Komponenten GmbH and the control below; parts in [from the run: …] are filled in by each run.',
+    )).toBeTruthy()
+    expect(within(section()).getAllByRole('article').map((a) => a.getAttribute('aria-label')))
+      .toEqual(['Gather evidence', 'Country overlay', 'Judge', 'Remediation', 'Profile pass', 'Chat'])
+    expect(within(gather).getByText('m7-lead-statements-1').className).toContain('mono')
+    expect(within(gather).getByText('Sent first on every assessment.').className).toContain('field-note')
+    expect(within(gather).getAllByText(/^(System|Human)$/).map((r) => r.textContent)).toEqual(['System', 'Human'])
+    const human = gather.querySelectorAll('pre')[1]
+    expect(human.textContent).toBe("Control 1.1.1: To what extent…\nNote: [from the run: the lead's rejection note]")
+    expect([...human.querySelectorAll('mark.from-run')].map((m) => m.textContent))
+      .toEqual(["[from the run: the lead's rejection note]"])
+    expect(within(section()).queryAllByRole('textbox')).toEqual([]) // read-only: never a field
+    const overlay = within(section()).getByRole('article', { name: 'Country overlay' })
+    expect(within(overlay).getByText('Not sent for this control: it has no overlay requirement.')).toBeTruthy()
+    expect(overlay.querySelector('pre')).toBeNull()
+    const select = within(section()).getByRole('combobox', { name: 'Control' }) as HTMLSelectElement
+    expect(select.value).toBe('1.1.1')
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      '1.1.1 To what extent are information security policies available?',
+      '1.6.2 To what extent is the organization prepared to handle crisis situations?',
+    ])
+    expect(select.options[0].lang).toBe('en') // the ISA's text, in the company's answer language
+  })
+
+  it('reads the prompts of another control once, the select disabled and Building the prompts… while it reads',
+    async () => {
+      const { reads, release } = promptsApi((control) => control === null ? Response.json(PROMPTS) : undefined)
+      renderPage()
+      const select = await within(section()).findByRole('combobox', { name: 'Control' })
+      await userEvent.selectOptions(select, '1.6.2')
+      expect(reads()).toEqual(['/api/developer/prompts', '/api/developer/prompts?control=1.6.2'])
+      expect((select as HTMLSelectElement).disabled).toBe(true)
+      expect(within(section()).getByText('Building the prompts…')).toBeTruthy()
+      expect(within(section()).queryAllByRole('article')).toEqual([])
+      release(Response.json(AT_1_6_2))
+      expect(await within(section()).findByText('Sent first on every assessment. (1.6.2)')).toBeTruthy()
+      expect((select as HTMLSelectElement).disabled).toBe(false)
+      expect((select as HTMLSelectElement).value).toBe('1.6.2')
+      expect(reads()).toHaveLength(2)
+    })
+
+  it.each([
+    ['a 500', () => new Response('{"detail": "The prompts could not be built."}', { status: 500 })],
+    ['a 404', () => new Response('{"detail": "9.9.9 is not a control the current company applies."}', { status: 404 })],
+  ])("on %s says the prompts can't be shown, with Try again that reads them again; the rest of the page stays",
+    async (_, refusal) => {
+      let failing = true
+      const { reads } = promptsApi(() => failing ? refusal() : Response.json(PROMPTS))
+      renderPage()
+      expect(await within(section()).findByText("The prompts can't be shown just now.")).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Usage' })).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Companies' })).toBeTruthy()
+      failing = false
+      await userEvent.click(within(section()).getByRole('button', { name: 'Try again' }))
+      expect(await within(section()).findByRole('article', { name: 'Chat' })).toBeTruthy()
+      expect(reads()).toHaveLength(2)
+    })
+
+  it("can't be shown when the API can't be reached", async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    renderPage()
+    expect(await within(section()).findByText("The prompts can't be shown just now.")).toBeTruthy()
+  })
+
+  it('on a 401, signs out and says nothing more', async () => {
+    const onSignedOut = vi.fn()
+    setOnSignedOut(onSignedOut)
+    promptsApi(() => new Response('{"detail": "Sign in to use Vouch."}', { status: 401 }))
+    renderPage()
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalled())
+    expect(within(section()).queryByText("The prompts can't be shown just now.")).toBeNull()
+    expect(within(section()).queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+})
+
+describe('the price per model, ticket 496', () => {
+  const model = () => screen.getByRole('region', { name: 'Model' })
+
+  it('lists each priced model with its price per million tokens, the current one marked Current', () => {
+    renderPage()
+    const rows = within(within(model()).getByRole('list', { name: 'Prices' })).getAllByRole('listitem')
+    expect(rows.map((r) => r.textContent)).toEqual([
+      'anthropic/claude-haiku-5.5$0.10 in · $0.50 out per million tokensCurrent',
+      'anthropic/claude-sonnet-5.5$2.00 in · $10.00 out per million tokens',
+    ])
+    expect(within(rows[0]).getByText('anthropic/claude-haiku-5.5').className).toContain('mono')
+    expect(within(rows[0]).getByText('Current').className).toContain('current-mark')
+    expect(within(model()).queryByText(/has no list price here/)).toBeNull()
+  })
+
+  it('says a current model not in the prices has no list price here', () => {
+    renderPage({ settings: { ...SETTINGS, model: 'google/gemini-3-flash' } })
+    expect(within(model()).getByText(
+      'google/gemini-3-flash has no list price here: its cost is only what OpenRouter reports.',
+    )).toBeTruthy()
+    expect(within(model()).queryByText('Current')).toBeNull()
+  })
+})
+
+describe('the recent runs, ticket 496', () => {
+  const RUN: RecentRun = {
+    at: '2026-11-10T09:30:00+00:00', control_id: '1.6.2', model: 'anthropic/claude-sonnet-5.5', input_tokens: 12_345,
+    output_tokens: 678, reported_cost_usd: 0.0123, estimated_cost_usd: 0, estimated: false, cost_complete: true,
+  }
+  const section = () => screen.getByRole('region', { name: 'Recent runs' })
+  const cellsOf = (row: HTMLElement) => within(row).getAllByRole('cell').map((c) => c.textContent)
+  const when = (iso: string) => new Date(iso).toLocaleString('en-GB',
+    { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+  it('shows a row per run: when, what, model, tokens and cost, in the Usage line\'s words', () => {
+    const FAKE_RUN = { ...RUN, model: 'fake', reported_cost_usd: 0, estimated_cost_usd: 0.0001, estimated: true }
+    const runs: RecentRun[] = [
+      RUN,
+      { ...RUN, control_id: 'profile-pass', reported_cost_usd: 0, estimated_cost_usd: 0.25, estimated: true },
+      { ...RUN, control_id: '5.1.1', cost_complete: false },
+      { ...RUN, control_id: '5.1.2', reported_cost_usd: 0, cost_complete: false },
+      { ...FAKE_RUN, control_id: '4.1.2' },
+      { ...FAKE_RUN, control_id: '4.1.3', cost_complete: false },
+    ]
+    renderPage({ settings: { ...SETTINGS, recent_runs: runs } })
+    expect(within(section()).getByText('The last 10 assessments and profile passes, for every company.')).toBeTruthy()
+    expect(within(section()).getAllByRole('columnheader').map((h) => h.textContent))
+      .toEqual(['When', 'What', 'Model', 'Tokens in', 'Tokens out', 'Cost'])
+    const rows = within(section()).getAllByRole('row').slice(1)
+    const sonnet = 'anthropic/claude-sonnet-5.5'
+    expect(rows.map(cellsOf)).toEqual([
+      [when(RUN.at), '1.6.2', sonnet, '12,345', '678', '$0.0123'],
+      [when(RUN.at), 'Profile pass', sonnet, '12,345', '678', '$0.25 (estimated)'],
+      [when(RUN.at), '5.1.1', sonnet, '12,345', '678', 'at least $0.0123'],
+      [when(RUN.at), '5.1.2', sonnet, '12,345', '678', 'cost unknown'],
+      [when(RUN.at), '4.1.2', 'fake', '12,345', '678', '$0.0001 estimated, not spent'],
+      [when(RUN.at), '4.1.3', 'fake', '12,345', '678', 'at least $0.0001 estimated, not spent'],
+    ])
+    expect(rows[0].querySelector('time')?.getAttribute('dateTime')).toBe(RUN.at)
+    expect(within(rows[0]).getByText(sonnet).className).toContain('mono')
+  })
+
+  it('says when no assessment or profile pass has run yet', () => {
+    renderPage()
+    expect(within(section()).getByText('No assessment or profile pass has run yet.')).toBeTruthy()
+    expect(within(section()).queryByRole('table')).toBeNull()
   })
 })

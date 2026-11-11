@@ -15,11 +15,11 @@ from urllib.request import urlopen
 
 import pdf_words
 import pytest
+from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
-from test_working_paper import as_company
 from touch_targets import small_targets
 
 LOCAL_USER = "Local user"
@@ -184,10 +184,13 @@ def test_nordlichts_report_shows_its_reviewed_standing(page: Page, report_url):
     expect(report.locator(".report-lead")).to_have_text("2 of 12 controls accepted")
 
 
-def test_alpenwerks_report_is_german_and_the_page_around_it_english(page: Page, report_url):
+def test_alpenwerks_report_is_german_and_the_page_around_it_english(
+    page: Page, report_url, nordlicht_later
+):
     accepted(page.request, report_url, "4.1.2", "alpenwerk")
-    # The remembered profile (#201) opens Alpenwerk.
-    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    # Alpenwerk made current (#480) opens it; Nordlicht current again after.
+    nordlicht_later(report_url)
+    make_current(page.request, report_url, "alpenwerk")
 
     report = open_report(page, report_url)
 
@@ -222,14 +225,15 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
 
 
 def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
-    page: Page, report_url
+    page: Page, report_url, nordlicht_later
 ):
     """#521: just above the phone layout the controls table's Question column is narrow, and
     Alpenwerk's questions broke mid-word with no hyphen ("Information" / "ssicherheit"). They are
     marked in the answer language and hyphenate in it, as the quotes do since #511."""
     accepted(page.request, report_url, "4.1.2", "alpenwerk")  # the reviewed columns narrow it
     page.set_viewport_size({"width": 701, "height": 900})
-    as_company(page, "alpenwerk")
+    nordlicht_later(report_url)
+    make_current(page.request, report_url, "alpenwerk")  # #480: the report opens under it
 
     report = open_report(page, report_url)
 
@@ -240,7 +244,7 @@ def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
 
 @pytest.mark.parametrize("width", [701, 1024])
 def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
-    page: Page, report_url, width
+    page: Page, report_url, width, nordlicht_later
 ):
     """#530: the trail's Note column is narrow at 701 and 1024, and Alpenwerk's override reasons
     split mid-word with no hyphen ("Protokollierungsrichtlinie"). A note is typed in the answer
@@ -248,7 +252,8 @@ def test_alpenwerks_trail_note_column_breaks_words_only_with_a_hyphen(
     override = [{"requirement_id": "S1", "verdict": "not-evidenced", "reason": GERMAN_REASON}]
     accepted(page.request, report_url, "4.1.2", "alpenwerk", override)
     page.set_viewport_size({"width": width, "height": 900})
-    as_company(page, "alpenwerk")
+    nordlicht_later(report_url)
+    make_current(page.request, report_url, "alpenwerk")  # #480: the report opens under it
 
     report = open_report(page, report_url)
 
@@ -327,7 +332,9 @@ def set_goal(page: Page, url: str, profile: str, goal: str) -> None:
 
 @pytest.mark.parametrize("fonts", ["web", "fallback"])
 @pytest.mark.parametrize("goal", ["audit-readiness", "internal-improvement"])
-def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, goal, fonts):
+def test_at_1440_and_1024_neither_table_scrolls_sideways(
+    page: Page, request, goal, fonts, nordlicht_later
+):
     """#463: the trail was 1,231-1,250px in a 902px sheet at 1440, and the controls table carried
     empty columns. Nordlicht's report is English, Alpenwerk's German. The improvement report has a
     server of its own, as its goal would change what the readiness checks read. #512: measured once
@@ -341,8 +348,9 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
             set_goal(page, url, profile, goal)
     accepted(page.request, url, "4.1.2", "alpenwerk")  # a German reviewed row: chip, reviewer, day
     with_a_full_trail(page)
+    nordlicht_later(url)
     for profile in ("nordlicht", "alpenwerk"):
-        page.add_init_script(f"window.localStorage.setItem('vouch.profile', '{profile}')")
+        make_current(page.request, url, profile)  # #480: the report opens under the current company
         for width in (1440, 1024):
             page.set_viewport_size({"width": width, "height": 900})
             report = open_report(page, url)
@@ -424,7 +432,7 @@ REMEDIATION_LABELS = {
 
 
 def with_a_german_remediation_item(page: Page) -> None:
-    """Alpenwerk's report as served (as_company's header: this route answers before its), with one
+    """Alpenwerk's report as served (made current: this route also sends Alpenwerk's header), with one
     more remediation group: an item whose Missing is GERMAN_REASON and one whose owner role is
     GERMAN_OWNER, long compounds that must break in a phone's card: they hyphenate in German or
     the check sees it."""
@@ -444,7 +452,9 @@ def with_a_german_remediation_item(page: Page) -> None:
 
 
 @pytest.mark.parametrize("width", [390, 360, 1024])
-def test_each_remediation_item_reads_as_a_stacked_card_on_a_phone(page: Page, report_url, width):
+def test_each_remediation_item_reads_as_a_stacked_card_on_a_phone(
+    page: Page, report_url, width, nordlicht_later
+):
     """#534: since #530 the remediation table was 332-440px in a 294-324px box under 700px, its
     Owner role and Due date off-screen with no cue that the box scrolls. Under 700px each item is a
     card, as the controls and trail rows are (#463): each cell a line of its column's name and its
@@ -453,10 +463,10 @@ def test_each_remediation_item_reads_as_a_stacked_card_on_a_phone(page: Page, re
     for profile in ("nordlicht", "alpenwerk"):
         accepted(page.request, report_url, "4.1.2", profile, decisions=approve)
     page.set_viewport_size({"width": width, "height": 900})
+    nordlicht_later(report_url)
     for profile, labels in REMEDIATION_LABELS.items():
-        page.unroute("**/api/**")
         page.unroute("**/api/report")
-        as_company(page, profile)
+        make_current(page.request, report_url, profile)  # #480: the report opens under it
         if profile == "alpenwerk":
             with_a_german_remediation_item(page)
         report = open_report(page, report_url)
@@ -592,9 +602,12 @@ def test_export_markdown_downloads_one_markdown_file_under_the_servers_name(page
     expect(page.get_by_role("button", name="Export Markdown")).to_be_enabled()
 
 
-def test_export_pdf_downloads_alpenwerks_report_as_one_pdf_file(page: Page, report_url):
+def test_export_pdf_downloads_alpenwerks_report_as_one_pdf_file(
+    page: Page, report_url, nordlicht_later
+):
     accepted(page.request, report_url, "4.1.2", "alpenwerk")
-    page.add_init_script("window.localStorage.setItem('vouch.profile', 'alpenwerk')")
+    nordlicht_later(report_url)
+    make_current(page.request, report_url, "alpenwerk")  # #480
     downloads = []
     page.on("download", lambda download: downloads.append(download))
     report = open_report(page, report_url)
@@ -953,7 +966,7 @@ def test_story_13_the_improvement_report_shows_the_plan_and_questions_and_export
 
 
 def test_at_701px_alpenwerks_plan_and_questions_break_words_only_with_a_hyphen(
-    page: Page, improvement_url
+    page: Page, improvement_url, nordlicht_later
 ):
     """#530: at 701px the plan's Missing and Note and the open questions' Question and Answer are
     narrow, and Alpenwerk's German split mid-word with no hyphen ("Risikobewertungsprotokoll").
@@ -976,7 +989,8 @@ def test_at_701px_alpenwerks_plan_and_questions_break_words_only_with_a_hyphen(
     answer = f"{improvement_url}/api/controls/1.1.1/questions/{question_id}/answer"
     post(request, answer, {"answer": GERMAN_ANSWER}, "alpenwerk")
     page.set_viewport_size({"width": 701, "height": 900})
-    as_company(page, "alpenwerk")
+    nordlicht_later(improvement_url)
+    make_current(page.request, improvement_url, "alpenwerk")  # #480: the report opens under it
 
     report = open_report(page, improvement_url)
 

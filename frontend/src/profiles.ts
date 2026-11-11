@@ -1,13 +1,14 @@
 import { authHeaders, sessionEnded } from './session.ts'
 
-/** The compliance profiles from `GET /api/profiles` (#47): those the user may switch between. */
+/** The compliance profiles from `GET /api/profiles` (#47): the companies listed for users. */
 
 export type ProfileSummary = { id: string; company: string; country: string; answer_language: string }
 
-/** `default`: the profile a call naming none is under; null when it can't be loaded and was left out. */
-export type Profiles = { profiles: ProfileSummary[]; default: string | null }
+/** `default`: the default profile (Nordlicht); null when it can't be loaded and was left out. `current`: the current
+ * company (#480), the one the app opens under and a call naming none is under; null with none listed. */
+export type Profiles = { profiles: ProfileSummary[]; default: string | null; current: string | null }
 
-/** The profiles, or null when they can't be read: then there's no switcher, and every call is under the default. */
+/** The profiles, or null when they can't be read: then every call names none, and is under the current company. */
 export async function fetchProfiles(): Promise<Profiles | null> {
   try {
     const response = await fetch('/api/profiles', { headers: await authHeaders() })
@@ -20,19 +21,20 @@ export async function fetchProfiles(): Promise<Profiles | null> {
 }
 
 /** `held` with `profile` added at its end, unless it is listed already; with nothing held, that profile alone. A
- * company made in company setup (#409) is named by the switcher even when the list can't be read again. */
+ * company made in company setup (#409) is named even when the list can't be read again. */
 export function withProfile(held: Profiles | null, profile: ProfileSummary): Profiles {
-  const list = held ?? { profiles: [], default: null }
+  const list = held ?? { profiles: [], default: null, current: null }
   return list.profiles.some((p) => p.id === profile.id) ? list : { ...list, profiles: [...list.profiles, profile] }
 }
 
-/** `held` less the profile `id`, and with no default when it was that one (so the first listed opens); none when
- * nothing is held. A company removed on the developer page (#418) leaves the switcher even when the list can't be read
+/** `held` less the profile `id`, and with no default or current when it was that one (so the first listed opens);
+ * none when nothing is held. A company removed on the developer page (#418) leaves the list even when it can't be read
  * again. */
 export function withoutProfile(held: Profiles | null, id: string): Profiles | null {
   return held && {
     profiles: held.profiles.filter((p) => p.id !== id),
     default: held.default === id ? null : held.default,
+    current: held.current === id ? null : held.current,
   }
 }
 
@@ -52,19 +54,6 @@ export async function startAfresh(): Promise<FreshStart> {
     return 'failed'
   }
 }
-
-/** The profile to open with: the remembered one while the list holds it, else the default (or the first listed), and
- * whether it fell back from a remembered one (#201). Without a list, none: calls name no profile. */
-export function startingProfile(
-  found: Profiles | null, remembered: string | null,
-): { id: string | null; fellBack: boolean } {
-  if (!found) return { id: null, fellBack: false }
-  if (remembered && found.profiles.some((p) => p.id === remembered)) return { id: remembered, fellBack: false }
-  return { id: found.default ?? found.profiles[0]?.id ?? null, fellBack: Boolean(remembered) }
-}
-
-// The interface is English (docs/design.md, Language), so the answer language is named in English.
-const languages = new Intl.DisplayNames(['en'], { type: 'language' })
 
 const regions = new Intl.DisplayNames(['en'], { type: 'region' })
 
@@ -94,11 +83,7 @@ function countryCode(country: string): string | null {
   return codes.get(country) ?? null
 }
 
-/** The profile button's tag (#222): its country's code and its answer language's, "DE · EN"; the country's name where
- * it has no code. */
-export const profileTag = (p: ProfileSummary) =>
+/** A company's tag in the top bar (#222, #495): its country's code and its answer language's, "DE · EN"; the
+ * country's name where it has no code. A profile's summary fits it, and so does the overview's company. */
+export const profileTag = (p: Pick<ProfileSummary, 'country' | 'answer_language'>) =>
   `${countryCode(p.country) ?? p.country} · ${p.answer_language.toUpperCase()}`
-
-/** How the top bar names a profile: company, country and answer language. */
-export const profileLabel = (p: ProfileSummary) =>
-  `${p.company} · ${p.country} · ${languages.of(p.answer_language) ?? p.answer_language}`

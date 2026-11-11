@@ -4,10 +4,10 @@ it has no sign-in, so a reload stands in for signing out and in (the conversatio
 not the browser's, so both read it the same way)."""
 
 import re
+import uuid
 
+from current_company import reopened_under
 from playwright.sync_api import Page, expect
-from test_profiles import NORDLICHT, TESTWERK
-from top_bar import switch_profile
 
 CHAT = "aside[aria-label='Chat with Vouch']"
 
@@ -46,24 +46,24 @@ def test_a_reload_shows_the_question_and_its_answer_again(page: Page, chat_url):
     expect(log.locator(".msg").last).to_have_text(answer)
 
 
-def test_each_profile_keeps_its_own_conversation(page: Page, profiles_url):
+def test_each_profile_keeps_its_own_conversation(page: Page, profiles_url, nordlicht_later):
+    nordlicht_later(profiles_url)
     log = opened_chat(page, profiles_url)
     asked(page, "Is there evidence of encryption?")
     expect(log).to_contain_text("Is there evidence of encryption?")
 
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        switch_profile(page, TESTWERK)
+    reopened_under(page, profiles_url, "testwerk")  # #480: another current company
     with page.expect_response("**/api/chat/current"):
         page.get_by_role("button", name="Ask Vouch").click()
     expect(log).not_to_contain_text("Is there evidence of encryption?")
-    asked(page, "Where do I stand?")
+    testwerk_only = f"What is open for Testwerk? (run {uuid.uuid4().hex[:8]})"  # this run's own
+    asked(page, testwerk_only)
 
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        switch_profile(page, NORDLICHT)
+    reopened_under(page, profiles_url, "nordlicht")
     with page.expect_response("**/api/chat/current"):
         page.get_by_role("button", name="Ask Vouch").click()
     expect(log).to_contain_text("Is there evidence of encryption?")
-    expect(log).not_to_contain_text("Where do I stand?")
+    expect(log).not_to_contain_text(testwerk_only)
 
 
 def test_new_conversation_empties_the_chat_and_a_reload_keeps_it_new(page: Page, chat_url):

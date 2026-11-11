@@ -1,21 +1,23 @@
-"""The top bar's profile switcher (#47): with two profiles, switching shows each one's own
-progress; with one, its name and no menu; a broken profile is left out.
+"""The current company (#480, M9 decision 1): every user sees the one a developer made current on
+the Developer page; no top bar shows a profile switcher, and the browser keeps no choice of its
+own. Each company still shows its own progress and chat (#47, #251).
 
-They run on PROFILES_URL, whose profiles folder holds Nordlicht, a second test profile and a
-broken one; the one-profile check on DOSSIER_URL (the fixtures' one profile). Every server runs
-with the suite's raised request rate (Fix #138)."""
+They run on PROFILES_URL, whose profiles folder holds Nordlicht, a second test profile (Testwerk)
+and a broken one; the bundled companies' check on DOSSIER_URL. A check that makes another company
+current puts Nordlicht back after (current_company.py). Every server runs with the suite's raised
+request rate (Fix #138)."""
 
 import json
 import re
 import uuid
 
 import pytest
-from playwright.sync_api import APIRequestContext, Page, expect
+from current_company import current_company, nordlicht_after
+from playwright.sync_api import APIRequestContext, Browser, Page, expect
 from reviewing import reviewed
-from top_bar import open_profile_menu, profile_button, switch_profile
+from top_bar import bar_company, bar_tag
 
-NORDLICHT = "Nordlicht Komponenten GmbH · Germany · English"
-TESTWERK = "Testwerk Prüfstand GmbH · Austria · English"
+TESTWERK = "Testwerk Prüfstand GmbH"
 
 
 def assessed(request: APIRequestContext, url: str, profile: str, control_id: str) -> str:
@@ -49,34 +51,95 @@ def accepted_tile(page: Page):
     return band.locator(".tile").filter(has=page.get_by_text("accepted of 12", exact=True))
 
 
-def test_switching_shows_each_profiles_own_progress(page: Page, profiles_url):
-    # Seeded on the server's fake model: Nordlicht has 4.1.2 accepted; Testwerk has 1.1.1 proposed.
-    seeded = assessed(page.request, profiles_url, "nordlicht", "4.1.2")
-    accepted(page.request, profiles_url, "nordlicht", seeded)
-    assessed(page.request, profiles_url, "testwerk", "1.1.1")
+def companies(page: Page):
+    return page.get_by_role("region", name="Companies")
 
-    opened(page, profiles_url)
-    # The broken profile is left out.
-    expect(open_profile_menu(page)).to_have_text([NORDLICHT, TESTWERK])
-    page.keyboard.press("Escape")
-    expect(page.locator(".pill").first).to_have_text("Nordlicht Komponenten GmbH · Germany")
+
+def seeded(request: APIRequestContext, url: str) -> None:
+    """Seeded on the server's fake model: Nordlicht has 4.1.2 accepted; Testwerk 1.1.1 proposed."""
+    thread_id = assessed(request, url, "nordlicht", "4.1.2")
+    accepted(request, url, "nordlicht", thread_id)
+    assessed(request, url, "testwerk", "1.1.1")
+
+
+def shows_nordlicht(page: Page) -> None:
+    expect(bar_company(page)).to_have_text("Nordlicht Komponenten GmbH")  # the top bar's (#495)
+    expect(bar_tag(page)).to_have_text("DE · EN")
     expect(accepted_tile(page).locator("b")).to_have_text("1")
     expect(card(page, "4.1.2")).to_contain_text("Accepted")
     expect(card(page, "1.1.1")).to_contain_text("Not assessed")
 
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
-        switch_profile(page, TESTWERK)
-    assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
 
-    expect(page.locator(".pill").first).to_have_text("Testwerk Prüfstand GmbH · Austria")
+def shows_testwerk(page: Page) -> None:
+    expect(bar_company(page)).to_have_text("Testwerk Prüfstand GmbH")
+    expect(bar_tag(page)).to_contain_text("AT · ")
     expect(accepted_tile(page).locator("b")).to_have_text("0")
     expect(card(page, "4.1.2")).to_contain_text("Not assessed")
     expect(card(page, "1.1.1")).to_contain_text("Proposed")
 
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        switch_profile(page, NORDLICHT)
-    expect(accepted_tile(page).locator("b")).to_have_text("1")
-    expect(card(page, "1.1.1")).to_contain_text("Not assessed")
+
+@pytest.mark.parametrize("width", [1280, 400])
+@pytest.mark.parametrize("role", ["developer", "lead"])
+def test_no_top_bar_shows_a_profile_switcher_and_nothing_is_kept_in_the_browser(
+    page: Page, profiles_url, width, role
+):
+    """Two companies listed, at desktop and phone width, for a developer and a compliance lead
+    (the developer API refused, as test_developer_page's lead): no switcher, and nothing under
+    the old `vouch.profile` key."""
+    if role == "lead":
+        page.route("**/api/developer/**", lambda route: route.fulfill(status=403, json={}))
+    page.set_viewport_size({"width": width, "height": 900})
+    opened(page, profiles_url)
+
+    banner = page.get_by_role("banner")
+    if width < 700:
+        banner.get_by_role("button", name="Menu", exact=True).click()
+    expect(banner.get_by_role("button", name=re.compile(r"^Profile"))).to_have_count(0)
+    expect(banner.get_by_role("menuitemradio")).to_have_count(0)
+    expect(banner.locator(".prof, .prof-button")).to_have_count(0)
+    assert page.evaluate("window.localStorage.getItem('vouch.profile')") is None
+    assert not page.evaluate(
+        "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+    )
+
+
+def test_story_2_a_company_made_current_on_the_developer_page_is_every_users(
+    page: Page, browser: Browser, profiles_url
+):
+    """Story 2's end-to-end check: a developer makes Testwerk current; their app is reopened under
+    it on the Developer page, saying so, and a second browser that then opens the app shows
+    Testwerk's progress. Nordlicht is put back after."""
+    seeded(page.request, profiles_url)
+    opened(page, profiles_url)
+    shows_nordlicht(page)
+
+    with nordlicht_after(page.request, profiles_url):
+        with page.expect_response("**/api/developer/settings"):
+            page.goto(f"{profiles_url}/developer")
+        with page.expect_response("**/api/developer/current-company"):
+            companies(page).get_by_role("button", name=f"Make {TESTWERK} current").click()
+        note = companies(page).get_by_role("status")
+        expect(note).to_have_text(f"{TESTWERK} is now the current company.")
+        expect(note).to_be_focused()
+        expect(page).to_have_url(f"{profiles_url}/developer")
+        row = companies(page).get_by_role("listitem").filter(has_text=TESTWERK)
+        expect(row.get_by_text("Current", exact=True)).to_be_visible()
+        expect(row.get_by_role("button")).to_have_count(0)
+
+        other = browser.new_context()
+        try:
+            second = other.new_page()
+            with second.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
+                second.goto(profiles_url)
+            assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
+            shows_testwerk(second)
+        finally:
+            other.close()
+
+        # The developer's own app is under Testwerk too.
+        with page.expect_response(lambda r: r.url.endswith("/api/overview")):
+            page.get_by_role("navigation", name="Main").get_by_role("link", name="Overview").click()
+        shows_testwerk(page)
 
 
 def sent(page: Page, message: str):
@@ -87,13 +150,12 @@ def sent(page: Page, message: str):
     return answer.value.request
 
 
-def test_switching_shows_the_new_profiles_own_chat_and_the_next_message_is_under_it(
+def test_another_current_company_shows_its_own_chat_and_the_next_message_is_under_it(
     page: Page, profiles_url
 ):
-    """Since #251 each profile keeps its own conversation: after a switch the chat shows the
-    new profile's, never the old one's. The question is this run's own (an earlier test on this
-    server may have asked "Where do I stand?" under Testwerk), and each opening waits for the
-    kept conversation to be read before looking (#317: a check before it raced the restore)."""
+    """Since #251 each company keeps its own conversation: under another current company the
+    chat shows that one's, never the old one's. The question is this run's own, and each opening
+    waits for the kept conversation to be read before looking (#317)."""
     question = f"Where do I stand? (run {uuid.uuid4().hex[:8]})"
     opened(page, profiles_url)
     with page.expect_response("**/api/chat/current"):
@@ -103,80 +165,55 @@ def test_switching_shows_the_new_profiles_own_chat_and_the_next_message_is_under
     expect(log).to_contain_text(question)
     assert first.header_value("X-Vouch-Profile") == "nordlicht"
 
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        switch_profile(page, TESTWERK)
-    with page.expect_response("**/api/chat/current"):
-        page.get_by_role("button", name="Ask Vouch").click()
-    expect(log).not_to_contain_text(question)
-    second = sent(page, "What is missing?")
-    assert second.header_value("X-Vouch-Profile") == "testwerk"
+    with current_company(page.request, profiles_url, "testwerk"):
+        opened(page, profiles_url)
+        with page.expect_response("**/api/chat/current"):
+            page.get_by_role("button", name="Ask Vouch").click()
+        expect(log).not_to_contain_text(question)
+        second = sent(page, "What is missing?")
+        assert second.header_value("X-Vouch-Profile") == "testwerk"
 
 
-def test_a_reload_or_a_pasted_link_keeps_the_chosen_profile(page: Page, profiles_url):
-    """#201: the browser remembers the switch, so a working paper opened afresh is the same company's."""
-    opened(page, profiles_url)
-    with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-        switch_profile(page, TESTWERK)
+def test_the_bundled_companies_are_both_in_the_companies_section(page: Page, dossier_url):
+    """The fixtures hold Nordlicht and Alpenwerk (#49): the Developer page lists both, Nordlicht
+    current."""
+    with page.expect_response("**/api/developer/settings"):
+        page.goto(f"{dossier_url}/developer")
 
-    for arrive in (lambda: page.goto(f"{profiles_url}/controls/1.1.1"), page.reload):
-        with page.expect_response(lambda r: r.url.endswith("/api/overview")) as answer:
-            arrive()
-        assert answer.value.request.header_value("X-Vouch-Profile") == "testwerk"
-        expect(profile_button(page)).to_have_accessible_name(f"Profile: {TESTWERK}")
-        expect(page.get_by_role("banner").get_by_role("status")).to_have_count(0)
-
-
-def test_the_switcher_fits_a_phone_in_dark(page: Page, profiles_url):
-    page.set_viewport_size({"width": 400, "height": 900})
-    page.emulate_media(color_scheme="dark")
-    opened(page, profiles_url)
-
-    # On a phone the profile sits behind the top bar's Menu button (#222).
-    page.get_by_role("banner").get_by_role("button", name="Menu", exact=True).click()
-    expect(profile_button(page)).to_be_visible()
-    assert not page.evaluate(
-        "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+    rows = companies(page).get_by_role("listitem")
+    expect(rows.locator(".company-name")).to_have_text(
+        ["Alpenwerk Präzision GmbH", "Nordlicht Komponenten GmbH"]
     )
-
-
-def test_the_bundled_profiles_are_both_in_the_menu(page: Page, dossier_url):
-    """The fixtures hold Nordlicht and Alpenwerk (#49), so the menu lists both; one profile's
-    name without a menu is checked below the UI (profiles.test.tsx)."""
-    opened(page, dossier_url)
-
-    expect(open_profile_menu(page)).to_have_text(
-        ["Alpenwerk Präzision GmbH · Austria · German", NORDLICHT]
-    )
+    expect(rows.nth(1).get_by_text("Current", exact=True)).to_be_visible()
+    expect(
+        rows.nth(0).get_by_role("button", name="Make Alpenwerk Präzision GmbH current")
+    ).to_be_visible()
 
 
 @pytest.mark.parametrize(
-    ("profile", "label", "company"),
-    [
-        ("nordlicht", NORDLICHT, "Nordlicht Komponenten GmbH"),
-        ("testwerk", TESTWERK, "Testwerk Prüfstand GmbH"),
-    ],
+    ("profile", "company"),
+    [("nordlicht", "Nordlicht Komponenten GmbH"), ("testwerk", TESTWERK)],
 )
 def test_a_cross_control_answer_links_each_named_control_to_its_paper_in_that_profile(
-    page: Page, profiles_url, profile, label, company
+    page: Page, profiles_url, profile, company
 ):
     """#217: the chat's answer across controls links each control it names to its working paper,
-    opened in the profile the chat answered for."""
+    opened under the company the chat answered for."""
     assessed(page.request, profiles_url, profile, "1.1.1")
-    opened(page, profiles_url)
-    if profile != "nordlicht":
-        with page.expect_response(lambda r: r.url.endswith("/api/overview")):
-            switch_profile(page, label)
-    page.get_by_role("button", name="Ask Vouch").click()
-    asked = sent(page, "Which controls have documented evidence only?")
-    assert asked.header_value("X-Vouch-Profile") == profile
-    log = page.locator("aside[aria-label='Chat with Vouch']").get_by_role("log")
-    link = log.get_by_role("link", name="Working paper 1.1.1")
-    expect(link).to_be_visible()
+    with current_company(page.request, profiles_url, profile):
+        opened(page, profiles_url)
+        page.get_by_role("button", name="Ask Vouch").click()
+        asked = sent(page, "Which controls have documented evidence only?")
+        assert asked.header_value("X-Vouch-Profile") == profile
+        log = page.locator("aside[aria-label='Chat with Vouch']").get_by_role("log")
+        link = log.get_by_role("link", name="Working paper 1.1.1")
+        expect(link).to_be_visible()
 
-    # The paper opens in the app, reading the control's stored assessment under the chat's profile.
-    with page.expect_response(re.compile(r"/api/assessments/[^/]+$")) as read:
-        link.click()
-    expect(page).to_have_url(re.compile(r"/controls/1\.1\.1$"))
-    assert read.value.request.header_value("X-Vouch-Profile") == profile
-    paper = page.get_by_role("region", name="Working paper")
-    expect(paper.get_by_text(f"Working paper · {company}")).to_be_visible()
+        # The paper opens in the app, reading the control's stored assessment under the chat's
+        # company.
+        with page.expect_response(re.compile(r"/api/assessments/[^/]+$")) as read:
+            link.click()
+        expect(page).to_have_url(re.compile(r"/controls/1\.1\.1$"))
+        assert read.value.request.header_value("X-Vouch-Profile") == profile
+        paper = page.get_by_role("region", name="Working paper")
+        expect(paper.get_by_text(f"Working paper · {company}")).to_be_visible()
