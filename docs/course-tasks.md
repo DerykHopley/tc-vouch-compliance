@@ -12,7 +12,7 @@ Which of the course's optional tasks Vouch does, and where to find each one. The
 
 | Task | Status | Where |
 |---|---|---|
-| Ask an LLM to critique the solution (usability, security, prompt engineering) | Not done | No critique is written up for the project. |
+| Ask an LLM to critique the solution (usability, security, prompt engineering) | Done | Claude Opus 5.5, on the Claude subscription (no paid run), read the code and docs on main: [`critique.md`](critique.md), 22 points with where each was seen, how serious it is and a fix; 12 are filed as issues for triage. |
 | Give the agent a personality | Done | Formal, like an experienced auditor: the chat's system prompt in [`vouch.chat_agent`](../src/vouch/chat_agent.py) and the assessment's in [`vouch.graph`](../src/vouch/graph.py). App: the chat on `/`. |
 | Let the user choose from a list of LLMs | Not done | On purpose: users get no model picker ([decision of 2026-11-03, "model"](requirements.md#decisions)). A developer chooses the model instead (multi-model support, below). |
 | Expose model settings (temperature, max tokens) as sliders or fields | Not done | Not planned: the developer page sets the model and the daily limit only. |
