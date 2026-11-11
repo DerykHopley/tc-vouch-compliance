@@ -216,6 +216,11 @@ class ProcessQuestions:
         self._ids = itertools.count(1)
         self._guard = threading.Lock()
 
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's questions under the profile gone."""
+        with self._guard:
+            self._questions = {k: v for k, v in self._questions.items() if k[1] != profile_id}
+
     def listed(self, user_id: str, profile_id: str) -> list[OpenQuestion]:
         with self._guard:
             return list(self._questions.get((user_id, profile_id), []))

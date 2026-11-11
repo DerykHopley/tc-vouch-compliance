@@ -16,7 +16,7 @@ beforeEach(() => {
 const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
 /** Musterfirma, made in setup, as GET /api/profiles lists it. */
 const LISTED_MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', country: 'Germany',
-  answer_language: 'en' }
+  answer_language: 'en', demo: false }
 
 /** The Companies section's row naming `company`. */
 function rowOf(company: string): HTMLElement {
@@ -436,10 +436,10 @@ describe('the Companies section, issue 480', () => {
     expect(within(list).getAllByRole('listitem').map((li) => li.querySelector('.company-name')?.textContent))
       .toEqual(['Alpenwerk Präzision GmbH', 'Nordlicht Komponenten GmbH', 'Musterfirma Süd GmbH'])
     expect(within(rowOf('Alpenwerk Präzision GmbH')).getByText('alpenwerk').className).toContain('mono')
-    expect(buttonsOf('Alpenwerk Präzision GmbH')).toEqual(['Make current'])
-    expect(buttonsOf('Nordlicht Komponenten GmbH')).toEqual([])
+    expect(buttonsOf('Alpenwerk Präzision GmbH')).toEqual(['Make current', 'Reset demo'])
+    expect(buttonsOf('Nordlicht Komponenten GmbH')).toEqual(['Reset demo']) // the current one too (#605)
     expect(within(rowOf('Nordlicht Komponenten GmbH')).getByText('Current')).toBeTruthy()
-    expect(buttonsOf('Musterfirma Süd GmbH')).toEqual(['Make current', 'Remove'])
+    expect(buttonsOf('Musterfirma Süd GmbH')).toEqual(['Make current', 'Reset demo', 'Remove'])
     expect(rowOf('Alpenwerk Präzision GmbH').querySelector('time')).toBeNull()
   })
 
@@ -791,5 +791,90 @@ describe('the recent runs, ticket 496', () => {
     renderPage()
     expect(within(section()).getByText('No assessment or profile pass has run yet.')).toBeTruthy()
     expect(within(section()).queryByRole('table')).toBeNull()
+  })
+})
+
+describe('Reset demo, issue 605', () => {
+  const NORDLICHT_QUESTION = 'Reset the demo of Nordlicht Komponenten GmbH? Every user\'s progress and history under it '
+    + 'is deleted: assessments, rounds, the audit trail, open questions, remediation and added documents. Then the demo '
+    + 'round is played: Q2 2026 closed, Q3 2026 open. This can\'t be undone.'
+  const ALPENWERK_QUESTION = 'Reset the demo of Alpenwerk Präzision GmbH? Every user\'s progress and history under it '
+    + 'is deleted: assessments, rounds, the audit trail, open questions, remediation and added documents. It starts '
+    + 'empty. This can\'t be undone.'
+  const sheet = () => screen.getByRole('region', { name: 'Companies' })
+  const button = (company: string) => within(sheet()).getByRole('button', { name: `Reset the demo of ${company}` })
+
+  /** The API answering the reset's POST with `status` and `body`, or held until released. */
+  function resetting(status?: number, body: unknown = { reset: 'nordlicht', seeded: true }) {
+    let release: (answer: Response) => void = () => {}
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST' || !url.endsWith('/reset-demo')) return new Promise<Response>(() => {})
+      if (status === undefined) return new Promise<Response>((resolve) => { release = resolve })
+      return Promise.resolve(new Response(JSON.stringify(body), { status }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    return { fetch, release: (answer: Response) => release(answer) }
+  }
+  const posts = (fetch: ReturnType<typeof resetting>['fetch']) =>
+    fetch.mock.calls.filter(([url]) => String(url).endsWith('/reset-demo'))
+
+  it('asks first, naming the company, and Cancel sends nothing', async () => {
+    const { fetch } = resetting(200)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage()
+    await userEvent.click(button('Nordlicht Komponenten GmbH'))
+    expect(confirm).toHaveBeenCalledWith(NORDLICHT_QUESTION)
+    await userEvent.click(button('Alpenwerk Präzision GmbH'))
+    expect(confirm).toHaveBeenLastCalledWith(ALPENWERK_QUESTION)
+    expect(posts(fetch)).toEqual([])
+  })
+
+  it("builds the confirm from the API's demo mark, not the company's id", async () => {
+    resetting(200)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const marked = { ...SETTINGS, listed_companies: SETTINGS.listed_companies.map((c) => ({ ...c, demo: !c.demo })) }
+    renderPage({ settings: marked })
+    await userEvent.click(button('Alpenwerk Präzision GmbH'))
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Then the demo round is played'))
+    await userEvent.click(button('Nordlicht Komponenten GmbH'))
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('It starts empty.'))
+  })
+
+  it('resets once on a double press, saying Resetting… while out, then says the demo state is back', async () => {
+    const { fetch, release } = resetting()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+    await userEvent.dblClick(button('Nordlicht Komponenten GmbH'))
+    const busy = within(sheet()).getByRole('button', { name: 'Resetting…' })
+    expect((busy as HTMLButtonElement).disabled).toBe(true)
+    expect(posts(fetch)).toHaveLength(1)
+    expect(posts(fetch)[0][0]).toBe('/api/developer/profiles/nordlicht/reset-demo')
+    release(new Response(JSON.stringify({ reset: 'nordlicht', seeded: true }), { status: 200 }))
+    await waitFor(() => expect(within(sheet()).getByRole('status').textContent).toBe(
+      'Reset Nordlicht Komponenten GmbH to its demo state: Q2 2026 closed, Q3 2026 open.'))
+  })
+
+  it.each([
+    [{ reset: 'alpenwerk', seeded: false }, 'Alpenwerk Präzision GmbH', 'Reset Alpenwerk Präzision GmbH: it has no progress or history.'],
+    [{ reset: 'nordlicht', seeded: false, note: 'The company was reset, but the demo round could not be played. Reset it again to retry.' },
+      'Nordlicht Komponenten GmbH',
+      'Reset Nordlicht Komponenten GmbH. The company was reset, but the demo round could not be played. Reset it again to retry.'],
+  ])('says what the reset left: %o', async (body, company, note) => {
+    resetting(200, body)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+    await userEvent.click(button(company))
+    await waitFor(() => expect(within(sheet()).getByRole('status').textContent).toBe(note))
+  })
+
+  it.each([
+    [503, { detail: 'down', unavailable: 'database' }, 'The database is unavailable just now. Nothing was reset; try again in a moment.'],
+    [500, {}, 'The company could not be reset. Try again.'],
+  ])('on a %i, says why under the list', async (status, body, message) => {
+    resetting(status, body)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+    await userEvent.click(button('Nordlicht Komponenten GmbH'))
+    await waitFor(() => expect(within(sheet()).getByRole('alert').textContent).toBe(message))
   })
 })

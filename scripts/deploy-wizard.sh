@@ -353,7 +353,13 @@ fi
 if [[ $REGISTRY_READ == yes ]]; then say "The image from the Dockerfile, as $TAG (the registry's highest: ${LAST:-none})."
 else say "The image from the Dockerfile, as $TAG (the registry wasn't read: gcloud can't reach it here)."; fi
 [[ $DRY == no && -n "$(saved TAG)" ]] && forget TAG  # the tag lived in wizard.env before #135
-run "Build the image (a few minutes the first time)" docker build -t "$IMAGE:$TAG" .
+# The commit the image is built from, baked in for the user menu's last line (#580). A dry run
+# without git shows "dev".
+if COMMIT=$(git rev-parse --short HEAD 2>/dev/null); then :
+elif [[ $DRY == yes ]]; then COMMIT=dev
+else stop "Couldn't read this checkout's commit (git rev-parse --short HEAD). Nothing was built: run this from the repository."
+fi
+run "Build the image (a few minutes the first time)" docker build --build-arg "VOUCH_COMMIT=$COMMIT" -t "$IMAGE:$TAG" .
 PUSHED=no
 if [[ $RAN == no ]]; then say "Not built, so not pushed."
 else run "Push it" docker push "$IMAGE:$TAG"; PUSHED=$RAN; fi

@@ -456,7 +456,7 @@ describe('a company made in company setup, issue 409', () => {
 
 describe('a company removed on the developer page, issues 418 and 480', () => {
   const MADE = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', created_at: '2026-11-09T10:15:00+00:00' }
-  const WITH_MADE = { ...SETTINGS, companies: [MADE], listed_companies: [...SETTINGS.listed_companies, MUSTERFIRMA] }
+  const WITH_MADE = { ...SETTINGS, companies: [MADE], listed_companies: [...SETTINGS.listed_companies, { ...MUSTERFIRMA, demo: false }] }
 
   /** The API, for a developer on the developer page with Musterfirma made in setup and `current` the current company:
    * the DELETE answers the settings without it (Nordlicht current), and the list read again answers `relisted` (null:

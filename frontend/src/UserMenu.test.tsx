@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { setBuild } from './build.ts'
 import UserMenu from './UserMenu.tsx'
 
 afterEach(() => {
@@ -97,6 +98,7 @@ describe('starting afresh (issue 285)', () => {
 })
 
 describe('the user menu in the Letterhead order (ticket 495)', () => {
+  const DEV = 'Vouch dev' // the running build, last (issue 580)
   const COMPANY = 'Nordlicht Komponenten GmbH'
   const developerTools = { onPage: () => {}, onSetup: () => {} }
   /** The open menu's contents in order: each item's words, the note's, and '—' for a separator. */
@@ -108,7 +110,7 @@ describe('the user menu in the Letterhead order (ticket 495)', () => {
       developerTools={developerTools} />)
     await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
     expect(contents()).toEqual(['Dark theme', '—', 'Developer page', 'Set up a company', '—',
-      `Start ${COMPANY} afresh…`])
+      `Start ${COMPANY} afresh…`, '—', DEV])
   })
 
   it('in clerk mode: "Signed in as", the theme, the developer items, Sign out, then the reset', async () => {
@@ -116,17 +118,17 @@ describe('the user menu in the Letterhead order (ticket 495)', () => {
       onStartedAfresh={() => {}} developerTools={developerTools} />)
     await userEvent.click(screen.getByRole('button', { name: 'Anna Berg: your menu' }))
     expect(contents()).toEqual(['Signed in as Anna Berg', 'Light theme', '—', 'Developer page', 'Set up a company',
-      '—', 'Sign out', '—', `Start ${COMPANY} afresh…`])
+      '—', 'Sign out', '—', `Start ${COMPANY} afresh…`, '—', DEV])
   })
 
   it("for a lead, no developer items and no empty group's separator", async () => {
     render(<UserMenu theme="light" onTheme={() => {}} company={COMPANY} onStartedAfresh={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
-    expect(contents()).toEqual(['Dark theme', '—', `Start ${COMPANY} afresh…`])
+    expect(contents()).toEqual(['Dark theme', '—', `Start ${COMPANY} afresh…`, '—', DEV])
     cleanup()
     render(<UserMenu theme="light" onTheme={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
-    expect(contents()).toEqual(['Dark theme'])
+    expect(contents()).toEqual(['Dark theme', '—', DEV])
   })
 
   it('opens the developer page and company setup, closing the menu', async () => {
@@ -167,6 +169,41 @@ describe('the user menu in the Letterhead order (ticket 495)', () => {
     expect(document.activeElement).toBe(reset)
     expect(document.activeElement?.textContent).toBe(`Start ${COMPANY} afresh…`)
     expect(contents()).toEqual(['Signed in as Anna Berg', 'Dark theme', '—', 'Developer page', 'Set up a company',
-      '—', 'Sign out', '—', `Start ${COMPANY} afresh…`])
+      '—', 'Sign out', '—', `Start ${COMPANY} afresh…`, '—', DEV])
+  })
+})
+
+describe("the running build, the menu's muted last line (issue 580)", () => {
+  afterEach(() => setBuild(undefined))
+
+  /** The open menu's last element. */
+  async function lastLine() {
+    render(<UserMenu theme="light" onTheme={() => {}} onStartedAfresh={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Your menu' }))
+    const last = screen.getByRole('menu').lastElementChild!
+    expect(last.previousElementSibling?.getAttribute('role')).toBe('separator')
+    expect(last.className).toBe('menu-note') // muted, as "Signed in as" is
+    return last.textContent
+  }
+
+  it('names the commit and the Cloud Run revision the API serves', async () => {
+    setBuild({ commit: '1a2b3c4', revision: 'vouch-00029' })
+    expect(await lastLine()).toBe('Vouch 1a2b3c4 · vouch-00029')
+  })
+
+  it('names the commit alone with no revision', async () => {
+    setBuild({ commit: '1a2b3c4', revision: null })
+    expect(await lastLine()).toBe('Vouch 1a2b3c4')
+  })
+
+  it('reads "Vouch dev" locally, and when the API serves no build it can read', async () => {
+    setBuild({ commit: 'dev', revision: null })
+    expect(await lastLine()).toBe('Vouch dev')
+    cleanup()
+    setBuild(undefined)
+    expect(await lastLine()).toBe('Vouch dev')
+    cleanup()
+    setBuild({ commit: 42, revision: ['x'] })
+    expect(await lastLine()).toBe('Vouch dev')
   })
 })
