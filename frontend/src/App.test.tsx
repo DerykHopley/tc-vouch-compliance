@@ -484,6 +484,21 @@ describe('the working paper', () => {
           expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
         })
 
+        it("reopening a cancelled editor, left untouched, asks nothing: its typing isn't kept", async () => {
+          await openPaper()
+          await typeReasonOfM1()
+          await userEvent.click(within(editorOfM1()).getByRole('button', { name: 'Cancel' }))
+          await userEvent.click(within(m1()).getByRole('button', { name: 'Change M1' }))
+          const confirm = asking(false)
+
+          expect(reasonOfM1().value).toBe('')
+          expect(unload()).toBe(false)
+          await userEvent.click(indexLink('4.1.3'))
+
+          expect(confirm).not.toHaveBeenCalled()
+          expect(await screen.findByRole('heading', { name: /4\.1\.3 Question 4\.1\.3\?/ })).toBeTruthy()
+        })
+
         it('a reload or closing the tab is held back while typed; not once cancelled', async () => {
           await openPaper()
           await typeReasonOfM1()

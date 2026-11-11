@@ -1,4 +1,4 @@
-import { type AnchorHTMLAttributes, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type AnchorHTMLAttributes, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
   type Assessment, CLOSED_WORD, plural, REVIEW_WORDS, type RequirementVerdict, usageWords, type Verdict, VERDICT_WORDS, verdictLang,
 } from './assessment.ts'
@@ -124,11 +124,14 @@ export default function WorkingPaper(props: PaperProps) {
     setReads((n) => n + 1)
   }
   // The requirement whose open editor holds input (a changed verdict or a typed reason) not yet Saved (#356).
-  const [changedIn, setChangedIn] = useState<string | null>(null)
+  const [changedEditor, setChangedEditor] = useState<string | null>(null)
+  const onChanged = useCallback((requirementId: string, changed: boolean) =>
+    setChangedEditor((now) => changed ? requirementId : now === requirementId ? null : now), [])
   // Leaving asks first while overrides are saved and not recorded (#182), or typed in the open editor and not yet
   // Saved (#356), an override opened again counted once; none once the paper is gone.
-  const typed = editing !== null && changedIn === editing && !overrides.some((o) => o.requirement_id === editing)
-  const unsaved = overrides.length + (typed ? 1 : 0)
+  const editorUnsaved = editing !== null && changedEditor === editing
+    && !overrides.some((o) => o.requirement_id === editing)
+  const unsaved = overrides.length + (editorUnsaved ? 1 : 0)
   useEffect(() => setUnsaved(unsaved), [unsaved])
   useEffect(() => () => setUnsaved(0), [])
   const run = overridden(props.run, overrides)
@@ -261,7 +264,7 @@ export default function WorkingPaper(props: PaperProps) {
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
                 language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
                 statementNote={assessed?.statement_note} statementWord={assessed?.statement_word}
-                onEdit={setEditing} onChanged={setChangedIn} onSave={save} onUndo={undo} items={{
+                onEdit={setEditing} onChanged={onChanged} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
                   // Plan fixes, once the findings are confirmed; an accept from before #372 may still have drafts.
                   decidable: step === 'plan-fixes' || step === 'accept' || review === 'accepted',
@@ -422,8 +425,8 @@ type JudgedProps = {
   /** The requirement whose override is open. */
   editing: string | null
   onEdit: (requirementId: string | null) => void
-  /** The requirement whose open editor holds input not yet Saved, or null (#356). */
-  onChanged: (requirementId: string | null) => void
+  /** Whether the requirement's open editor holds input not yet Saved (#356). */
+  onChanged: (requirementId: string, changed: boolean) => void
   onSave: (override: Override) => void
   onUndo: (requirementId: string) => void
   items: RemediationItems
@@ -592,7 +595,7 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onChan
                   <td colSpan={JUDGED_COLUMNS}>
                     <OverrideEditor requirementId={r.id} agentVerdict={overrides.agentVerdicts[r.id] ?? r.verdict}
                       saved={overrides.saved.find((o) => o.requirement_id === r.id)} onCancel={() => onEdit(null)}
-                      onSave={onSave} onChanged={(changed) => onChanged(changed ? r.id : null)} />
+                      onSave={onSave} onChanged={onChanged} />
                   </td>
                 </tr>
               ),

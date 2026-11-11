@@ -14,8 +14,9 @@ type EditorProps = {
   saved?: Override
   onSave: (override: Override) => void
   onCancel: () => void
-  /** Whether the lead has changed the verdict or the reason from what the editor opened with (#356). */
-  onChanged?: (changed: boolean) => void
+  /** Whether the lead has changed the verdict or the reason from what the editor opened with (#356); false again
+   * when the editor closes. */
+  onChanged: (requirementId: string, changed: boolean) => void
 }
 
 /**
@@ -30,7 +31,10 @@ export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onC
   const [verdict, setVerdict] = useState<JudgedVerdict>(opened.verdict)
   const [reason, setReason] = useState(opened.reason)
   const changed = verdict !== opened.verdict || reason !== opened.reason
-  useEffect(() => onChanged?.(changed), [changed, onChanged])
+  useEffect(() => {
+    onChanged(requirementId, changed)
+    return () => onChanged(requirementId, false) // Save, Cancel or the paper going: nothing typed is left open
+  }, [requirementId, changed, onChanged])
   const id = useId()
   // The form takes focus on its first field when it opens (#226).
   const first = useRef<HTMLSelectElement>(null)
