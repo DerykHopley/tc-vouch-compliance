@@ -39,15 +39,22 @@ export function withoutProfile(held: Profiles | null, id: string): Profiles | nu
 }
 
 /** How a fresh start went: started, refused while an assessment runs (the 409), the session ended (a 401: signed out
- * already, so nothing more to say), or failed any other way. */
-export type FreshStart = 'started' | 'running' | 'signed-out' | 'failed'
+ * already, so nothing more to say), or failed any other way. Started, but with Nordlicht's demo state not restored
+ * (#605), the API's reason. */
+export type FreshStart = 'started' | 'running' | 'signed-out' | 'failed' | { demoNotRestored: string }
 
 /** Starts the lead's progress under the chosen profile afresh (#285): from now on, only what they start is listed. Nothing
- * is deleted, and the audit trail keeps every entry. */
+ * is deleted, and the audit trail keeps every entry. On Nordlicht the API then restores the demo state (#605). */
 export async function startAfresh(): Promise<FreshStart> {
   try {
-    const response = await fetch('/api/progress/fresh-start', { method: 'POST', headers: await authHeaders() })
-    if (response.ok) return 'started'
+    const response = await fetch('/api/progress/fresh-start', {
+      method: 'POST', headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restore_demo: true }),
+    })
+    if (response.ok) {
+      const demo = ((await response.json().catch(() => ({}))) as { demo?: { restored: boolean, reason?: string } }).demo
+      return demo && !demo.restored ? { demoNotRestored: demo.reason ?? '' } : 'started'
+    }
     if (sessionEnded(response)) return 'signed-out' // a 401 signs out, as every API call's does
     return response.status === 409 ? 'running' : 'failed'
   } catch {

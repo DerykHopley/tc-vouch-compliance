@@ -332,6 +332,14 @@ round, "Q2 2026", and an improvement since: a profile pass accepted as judged, "
 accepted as evidenced, one remediation item done and one open question answered. Every step is a
 real request with its audit entries (named "Demo lead", or `--name`, on the database target; a preview uses its own local user's name), at the time it runs.
 
+**Start afresh restores it (#605).** Start afresh on Nordlicht, from the user menu, runs the same
+steps in the app, for the lead who asked, so the demo state comes back without a terminal: it
+uses 1 of the day's profile passes, on the fake model. With the passes used up it still starts
+afresh and says the demo state couldn't be restored, and why. Other companies start afresh empty.
+Each reset first closes the round open at the time (an empty one), so after a second reset the
+round list starts with that empty round. The command below is still useful to seed a user without
+signing in as them, or a preview from a script.
+
 Rounds are kept per user, so it seeds one user. **Find your user id** in the Clerk dashboard:
 Users, your user, the id starting `user_` (*unverified*: from Clerk's docs, not checked in this
 dashboard). Then, with the Cloud SQL proxy running as for `vouch-db-setup` above:

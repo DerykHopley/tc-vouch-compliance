@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch import (
     audit,
     company_profiles,
+    demo_round,
     documents_tab,
     goal,
     plan,
@@ -239,6 +240,7 @@ MAX_QUESTION_ID = 2**63 - 1
 """The highest open question id: the ceiling of vouch_open_questions' bigserial `id`. A larger
 one in the path is a 422, never sent to Postgres (whose refusal would be a 503)."""
 RUNNING_NO_FRESH_START = "An assessment is running: start afresh once it has finished."
+DEMO_NOT_RESTORED = "Vouch could not play the demo round just now."
 NO_KEY = (
     "No OpenRouter key is set, so assessments run on the fake model and a model id cannot be "
     "checked. Set OPENROUTER_API_KEY to choose a model."
@@ -2220,8 +2222,22 @@ def new_conversation(memory: UserMemory) -> dict[str, Any]:
     return {"thread_id": None}
 
 
+class FreshStartRequest(BaseModel):
+    """A fresh start's options: `restore_demo`, as the user menu asks, seeds Nordlicht's demo
+    round afterwards (#605)."""
+
+    restore_demo: bool = False
+
+
 @router.post("/progress/fresh-start")
-def fresh_start(memory: UserMemory, running: Running) -> dict[str, Any]:
+def fresh_start(
+    memory: UserMemory,
+    running: Running,
+    request: Request,
+    user: CurrentUser,
+    settings: AppSettings,
+    options: Annotated[FreshStartRequest | None, Body()] = None,
+) -> dict[str, Any]:
     """Start the lead's progress under the profile afresh (#285, vouch.memory's
     `Memory.start_afresh`): only what they start from now on is listed and counted, and the chat
     opens a new conversation. Nothing is deleted, and the audit trail keeps every entry. No model
@@ -2234,7 +2250,26 @@ def fresh_start(memory: UserMemory, running: Running) -> dict[str, Any]:
         at = memory.start_afresh()
     finally:
         running.release(memory.scope)
-    return {"fresh_start": at.isoformat()}
+    answer: dict[str, Any] = {"fresh_start": at.isoformat()}
+    if options and options.restore_demo and memory.profile_id == DEFAULT_PROFILE:
+        answer["demo"] = _restore_demo(memory, request, user, settings)
+    return answer
+
+
+def _restore_demo(
+    memory: Memory, request: Request, user: User, settings: Settings
+) -> dict[str, Any]:
+    """Nordlicht's demo round seeded after a fresh start (#605, vouch.demo_round's `restore`), on
+    the fake model. Stopped partway (a limit, a refusal), the lead's progress starts afresh
+    again, so the reset still leaves nothing half-seeded, and the answer says why."""
+    try:
+        demo_round.restore(request.app, user.id, reviewer_name(request, user, settings))
+    except demo_round.SeedError as error:
+        log.warning("the demo round could not be restored: %s", error)
+        memory.start_afresh()
+        reason = str(error) if isinstance(error, demo_round.OverLimit) else DEMO_NOT_RESTORED
+        return {"restored": False, "reason": reason}
+    return {"restored": True}
 
 
 @router.post(

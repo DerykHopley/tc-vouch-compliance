@@ -32,6 +32,10 @@ async function confirmFreshStart(company: string | undefined, onStarted: () => v
   if (!window.confirm(question)) return
   const result = await startAfresh()
   if (result === 'started') onStarted()
+  else if (typeof result === 'object') {
+    onStarted()
+    window.alert(`Started afresh, but the demo state could not be restored: ${result.demoNotRestored}`)
+  }
   else if (result === 'running') window.alert(RUNNING)
   else if (result === 'failed') window.alert(FAILED)
 }

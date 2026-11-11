@@ -82,6 +82,11 @@ class NotFresh(SeedError):
     """The user has assessments since the fresh start: nothing written."""
 
 
+class OverLimit(SeedError):
+    """A request was over one of the user's limits (the day's assessments, or its profile
+    passes): the message is the app's own sentence."""
+
+
 class Answer(Protocol):
     """What the seed reads of a response: httpx's, or httpx2's (FastAPI's TestClient)."""
 
@@ -148,7 +153,9 @@ def _call(client: Client, method: str, path: str, body: Any = None) -> Answer:
         if response.status_code != 429:
             break
         wait = float(response.headers.get("Retry-After", "1"))
-        if _limit_named(response) or wait > MAX_WAIT_SECONDS:
+        if _limit_named(response):
+            raise OverLimit(response.json().get("detail") or response.text[:300])
+        if wait > MAX_WAIT_SECONDS:
             raise SeedError(
                 f"{method} {path} is over a limit (answered 429, try again in {wait / 3600:.1f} "
                 f"hours): {response.text[:300]}"
@@ -295,6 +302,24 @@ def seed(client: Client, say: Callable[[str], None] | None = None) -> Seeded:
     )
     say(f"Marked an item on {kept_weak['control_id']} done and answered its question.")
     return Seeded(tuple(a["control_id"] for a in improved), kept_weak["control_id"])
+
+
+RESTORED_STATE = ("database", "spending", "running", "current_company", "added_documents")
+"""What the restoring app shares with the app it runs in: its stores and its limits, so the
+seed's work lands where the lead reads it and counts against the lead's own limits."""
+
+
+def restore(app: FastAPI, user_id: str, name: str) -> Seeded:
+    """The seed played for one user inside `app`, the app serving them (#605, Start afresh on
+    Nordlicht): through a seeding app of its own (as that user, on the bundled fake model, named
+    `name` on the audit entries) that shares `app`'s stores and limits (RESTORED_STATE). Raises
+    what `seed` raises."""
+    from fastapi.testclient import TestClient
+
+    seeding = seeding_app(None, user_id, name)
+    for key in RESTORED_STATE:
+        setattr(seeding.state, key, getattr(app.state, key))
+    return seed(TestClient(seeding))  # never entered: its lifespan would close `app`'s stores
 
 
 # --- The command -------------------------------------------------------------------------------

@@ -66,6 +66,20 @@ describe('starting afresh (issue 285)', () => {
     expect(fetch).toHaveBeenCalledWith('/api/progress/fresh-start', expect.objectContaining({ method: 'POST' }))
   })
 
+  it('asks to restore the demo state, and says why when it could not be (issue 605)', async () => {
+    vi.stubGlobal('confirm', () => true)
+    const alert = vi.fn()
+    vi.stubGlobal('alert', alert)
+    const why = "You have reached today's limit of 3 profile passes. It resets at 01:00."
+    const { fetch, started } = await opened(() => Promise.resolve(Response.json(
+      { fresh_start: '2026-11-07T10:00:00+00:00', demo: { restored: false, reason: why } })))
+    await userEvent.click(screen.getByRole('menuitem', { name: `Start ${COMPANY} afresh…` }))
+    await waitFor(() => expect(started).toHaveBeenCalledOnce())
+    expect(alert).toHaveBeenCalledWith(`Started afresh, but the demo state could not be restored: ${why}`)
+    const [, init] = fetch.mock.calls[0]
+    expect(JSON.parse(String(init?.body))).toEqual({ restore_demo: true })
+  })
+
   it.each([
     ['a running assessment (409)', () => Promise.resolve(new Response(null, { status: 409 })),
       'An assessment is running: start afresh once it has finished.'],
