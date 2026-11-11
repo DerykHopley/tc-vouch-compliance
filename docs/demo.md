@@ -3,14 +3,14 @@
 This is the presenter's script: what to show, in what order, and what to say. It has three parts,
 which run alone or one after the other:
 
-- **[Part 1, Audit readiness](#part-1-audit-readiness)** (7 minutes 15 seconds): a company
+- **[Part 1, Audit readiness](#part-1-audit-readiness)** (6 minutes 50 seconds): a company
   preparing its TISAX audit, on the live app.
-- **[Part 2, Keep improving](#part-2-keep-improving)** (6 minutes 40 seconds): the same company
+- **[Part 2, Keep improving](#part-2-keep-improving)** (6 minutes 10 seconds): the same company
   improving its own security with no audit planned, on the local app.
 - **[Part 3, Company setup](#part-3-company-setup)** (6 minutes 10 seconds): a developer sets up
   a new company, which opens with every applicable control drafted, on the local app.
 
-All three take 20 minutes 5 seconds. Vouch works for one **current company** at a time, the same
+All three take 19 minutes 10 seconds. Vouch works for one **current company** at a time, the same
 for every user, and a developer makes a company current on the Developer page. The current
 company, the goals, the three-step review and company setup shown here are a demo/prototype
 process: a real SaaS product might do it differently, for example giving each lead their own
@@ -32,6 +32,10 @@ ISA controls have evidence, what is missing, and who checked. Vouch reads the co
 and records, drafts a verdict for each requirement with the exact quotes behind it, and drafts
 what to fix. Vouch drafts; the lead decides.
 
+The lead has been at it for a while already: a review round, "Q2 2026", is closed, and the next,
+"Q3 2026", is open, with every control reviewed once. Starting Nordlicht afresh puts it back in
+exactly this demo state each time, so every rehearsal starts from the same place.
+
 After the audit, the same lead keeps going: no audit is planned, but the company wants its own
 security to improve, round by round, with a plan its team can follow.
 
@@ -52,10 +56,13 @@ security to improve, round by round, with a plan its team can follow.
   Then in the user menu choose **Start Alpenwerk Präzision GmbH afresh…** and OK the question.
   Back on the Developer page, select **Make current** in Nordlicht Komponenten GmbH's row.
 - Start Nordlicht afresh before each run: in the user menu, choose **Start Nordlicht Komponenten
-  GmbH afresh…** and OK the question. Every control is "Not
-  assessed" again and the chat opens a new conversation, so each run starts from the same place.
-  Nothing is deleted: the report's audit trail still lists every earlier rehearsal's entries. Wait
-  until no assessment is running, or Vouch asks you to.
+  GmbH afresh…** and OK the question. Nordlicht is back in its demo state: "Q2 2026" closed,
+  "Review round: Q3 2026" open, every control "Accepted", and the chat opens a new conversation,
+  so each run starts from the same place. Nothing is deleted: the report's audit trail still lists
+  every earlier rehearsal's entries. Wait until no assessment is running, or Vouch asks you to.
+- Restoring the demo state runs on the scripted fake model, so it costs nothing, but it uses one
+  of the day's 3 profile passes. When they are used up, the fresh start still clears Nordlicht and
+  says the demo state couldn't be restored: rehearse Part 1 at most three times a day.
 - The Overview must read "Goal: Audit readiness". A fresh start keeps the goal: if Part 2 left it
   on Internal improvement, select **Change goal**, then the **Change goal** that appears with the
   question in its place.
@@ -66,22 +73,22 @@ security to improve, round by round, with a plan its team can follow.
 
 ### The steps
 
-Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:15 + 1:30 = 7 minutes 15 seconds.
+Budgets: 0:30 + 1:30 + 1:15 + 0:50 + 1:15 + 1:30 = 6 minutes 50 seconds.
 
-#### 1. The overview (0:45)
+#### 1. The overview (0:30)
 
-1. Open **Overview** (the Dossier). Point at "Where you stand": its figures count only verdicts
-   you accepted.
-2. Point at "The controls": Nordlicht's 12 controls, each with its status ("Not
-   assessed", "Proposed" or "Accepted").
+1. Open **Overview** (the Dossier): "Review round: Q3 2026", and "12 of 12 controls accepted".
+   Point at "Where you stand": its figures (8 evidenced, 4 partly evidenced, 0 not evidenced)
+   count only verdicts you accepted.
+2. Point at "The controls": Nordlicht's 12 controls, each "Accepted", with its verdict.
 
-> This is where Nordlicht stands today. Only verdicts the compliance lead has accepted count here,
-> and the figures describe evidence coverage, not an audit result.
+> This is where Nordlicht stands today, one review round in. Only verdicts the compliance lead
+> has accepted count here, and the figures describe evidence coverage, not an audit result.
 
-#### 2. Assess 5.1.1 (1:30)
+#### 2. Assess 5.1.1 again (1:30)
 
-1. Open **5.1.1** ("To what extent is the use of cryptographic procedures managed?") and select
-   **Assess**.
+1. Open **5.1.1** ("To what extent is the use of cryptographic procedures managed?"): last round's
+   verdict, **Evidenced**, "Accepted". With the audit close, look again: select **Assess again**.
 2. Point at the steps as they appear under "How Vouch reached this": the control loaded, the
    policies searched, the quotes checked, the remediation items drafted.
 3. Point at the verdict: **Not evidenced**, because its one must requirement is only partly
@@ -95,8 +102,9 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:15 + 1:30 = 7 minutes 15 seconds.
    a due date.
 
 > Vouch found the encryption standard, and what it says is sound, but it is past its yearly
-> review, so Vouch won't call it fully evidenced. Every quote is checked word for word against the
-> document. And notice the wording: Vouch talks about evidence, never about an audit result.
+> review, so Vouch won't call it fully evidenced, whatever was accepted last round. Every quote is
+> checked word for word against the document. And notice the wording: Vouch talks about evidence,
+> never about an audit result.
 
 #### 3. Review in three steps (1:15)
 
@@ -113,7 +121,7 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:15 + 1:30 = 7 minutes 15 seconds.
 > decides. Accepting comes last, so the accepted verdict covers the plan too. My override and its
 > reason go into the audit trail, with my name and the time, next to the model's original verdict.
 
-#### 4. Ask a question in the chat (1:00)
+#### 4. Ask a question in the chat (0:50)
 
 1. Open the chat: **Ask Vouch** at the bottom right, or Ctrl K.
 2. Ask one question about 5.1.1, for example "What's missing for 5.1.1?" or "Is there evidence of
@@ -162,7 +170,8 @@ Budgets: 0:45 + 1:30 + 1:15 + 1:00 + 1:15 + 1:30 = 7 minutes 15 seconds.
 Start the app on your own machine as [setup](setup.md#run-the-app) says (`scripts/dev.sh`, then
 open the URL it prints). It runs on the scripted fake model, offline and free, with no sign-in:
 you are the local user (the user menu shows **LU**), a developer, so the user menu offers
-**Developer page** and Make current works as on the live app. The fake covers 1.1.1, 1.6.2, 4.1.2
+**Developer page** and Make current works as on the live app. Start Nordlicht afresh in the user
+menu first, as on the live app, so it opens in its demo state. The fake covers 1.1.1, 1.6.2, 4.1.2
 and 5.1.1, so the steps run as on the live app, with one difference:
 
 - **Step 4:** the fake recognises only some phrasings
@@ -177,9 +186,9 @@ Export Markdown the `.md`.
 ## Part 2, Keep improving
 
 Nordlicht switches its goal to Internal improvement: no audit is planned, and the lead works
-through review rounds with an improvement plan for the team. Part 2 runs on the **local app with
-the scripted fake model** only. The profile pass on the live app runs the real model and costs
-money (on Sonnet 5.5, about $0.30–0.50 a pass over 12 controls), so the demo shows it locally.
+through review rounds with an improvement plan for the team. Part 2 starts from Nordlicht's demo
+state ("Q2 2026" closed, "Q3 2026" open) and runs on the **local app with the scripted fake
+model** only, so its verdicts are the same in every run and nothing costs money.
 
 ### Before you present
 
@@ -187,119 +196,114 @@ money (on Sonnet 5.5, about $0.30–0.50 a pass over 12 controls), so the demo s
   ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user
   menu shows **LU**), and **Nordlicht Komponenten GmbH** is the current company, named in the top
   bar. On the local app everything lives in the running process, the current company and the
-  profile pass's daily limit of 3 included, so a restart starts every count and every control
-  from nothing, on Nordlicht.
-- A rehearsal that runs more than 3 profile passes in one run of the app is refused until you
-  restart it.
-- The Overview reads "Goal: Audit readiness" and "Review round: First round, open since the
-  start", and every control is "Not assessed".
+  day's 3 profile passes included, so a restart starts every count from nothing.
+- Then start Nordlicht afresh: in the user menu, choose **Start Nordlicht Komponenten GmbH
+  afresh…** and OK the question. Nordlicht is back in its demo state, on the scripted fake model:
+  a lead's earlier work, with "Q2 2026" closed and "Q3 2026" open. It uses one of the day's 3
+  profile passes; when they are used up, it says the demo state couldn't be restored: restart the
+  local app and start afresh again.
+- Check the demo state is there: the Overview reads "Goal: Audit readiness", "Review round: Q3
+  2026, open since" today, "12 of 12 controls accepted", and a section "Compared with Q2 2026".
 
 ### The steps
 
-Budgets: 0:30 + 1:00 + 1:00 + 0:30 + 0:50 + 1:20 + 0:30 + 1:00 = 6 minutes 40 seconds.
+Budgets: 0:50 + 0:50 + 1:20 + 1:40 + 1:00 + 0:30 = 6 minutes 10 seconds.
 
-#### 1. Goal (0:30)
+#### 1. Goal (0:50)
 
 1. On the Overview (the Dossier), select **Change goal**. The question takes the button's place,
    "Change this profile's goal to Internal improvement? The change is recorded in the audit
    trail.", with **Change goal** and **Cancel** under it: select **Change goal**.
-2. Point at "Goal: Internal improvement" and the round line, "Review round: First round, open
-   since the start".
+2. Point at "Goal: Internal improvement" and the round line, "Review round: Q3 2026, open since"
+   today: one round, "Q2 2026", is closed already.
+3. Point at "The controls": every control "Accepted", 4.1.2's card with "Fixes done: assess again"
+   and "Question answered: assess again".
 
 > No audit this year, but the company wants to get better. The goal says what the company uses
 > Vouch for; the change itself is in the audit trail. The assessments stay the same: what changes
-> is the plan and the report.
+> is the plan and the report. The lead has been at this for a round already: every control is
+> reviewed, and 4.1.2 has news since.
 
-#### 2. Profile pass (1:00)
+#### 2. Open question (0:50)
 
-1. Select **Run a profile pass** ("Assesses every open control in one run. Accepted controls and
-   reviews in progress are skipped. On Sonnet 5.5, a pass over 12 controls costs about
-   $0.30–0.50.").
-2. Point at the result panel, "Profile pass": "12 assessments waiting for your review.", each
-   control with its verdict and "Proposed". The cards under "The controls" read "Proposed" too.
-
-> One model run assessed every open control, with all of Nordlicht's evidence in front of it. The
-> same guards as the per-control agent hold: every quote checked word for word, stale evidence
-> capped, the output guard on every answer. Vouch uses the pass only while its prompt and expected
-> reply fit under a token threshold, and it has its own daily limit; above the threshold, Vouch
-> offers the per-control agent instead.
-
-#### 3. Three-step review of 4.1.2 (1:00)
-
-1. Open **4.1.2** from the panel or its card: **Partly evidenced**, "Proposed", from the pass.
-2. **Confirm findings:** select **Confirm findings** at the foot.
-3. **Plan fixes:** point at M1's remediation item, "Priority: Medium", the default for partly
-   evidenced. Select **Approve**.
-4. **Accept:** select **Accept verdict**. The verdict reads "Accepted".
-
-> The same three steps as before the audit: findings, fixes, then the conclusion. In this goal
-> each approved item gets a priority, here Medium because M1 is partly evidenced; the lead can
-> change it.
-
-#### 4. Review round (0:30)
-
-1. Back on the Overview, select **Close round**. The question takes the button's place, "Close
-   the review round "First round"? Its results are frozen, …", with **Close round** and
-   **Cancel** under it: select **Close round**. The round line reads "No review round open."
-2. Type "Q4 2026" as the name of the next round and select **Start round**: "Review round: Q4
-   2026, open since" today.
-
-> Closing a round freezes its results, so the next one has a set point to compare with. The
-> lead chooses when; it is not an arbitrary date.
-
-#### 5. Open question (0:50)
-
-1. Open **4.1.2** again. Under "Open questions", select **Log a question**: type the question
-   (for example "Does the exposure record cover the supplier portal?"), who it is for ("IT
-   lead") and a due date, then select **Log question**. It reads "For IT lead · Due" the date.
-2. Select **Record answer**, type the answer ("Yes, since this week.") and select **Save
-   answer**: "Answered on" today.
-3. Point at the sentence near the top: "An open question was answered. Assess 4.1.2 again so its
+1. Open **4.2.1** ("To what extent are access rights assigned and managed?"): **Partly
+   evidenced**, because rights in customers' systems aren't reviewed.
+2. Under "Open questions", select **Log a question**: type the question ("Are rights in
+   customers' systems reviewed too?"), who it is for ("Key account lead") and a due date, then
+   select **Log question**. It reads "For Key account lead · Due" the date.
+3. Select **Record answer**, type the answer ("Yes: each key account lead reviews them every half
+   year.") and select **Save answer**: "Answered on" today.
+4. Point at the sentence near the top: "An open question was answered. Assess 4.2.1 again so its
    verdict takes the answer into account." (The card on the Overview says "Question answered:
    assess again".)
 
 > Some facts live only in people's heads. An answered question can be cited as the lead's
 > statement, but never above partly evidenced: a statement doesn't stand in for a document or a
-> record. The fake model here doesn't cite one; on the real model the judge may.
+> record.
 
-#### 6. Fix and Closed (1:20)
+#### 3. Fix and Closed (1:20)
 
-1. On M1's remediation item, select **Mark done**, type what was done ("The exposure record now
-   covers every system.") under "What was done", and select **Mark done**. The item reads
-   "Done", and the paper says "Every approved remediation item is done. Assess 4.1.2 again: the
-   control is Closed once that assessment is accepted with no gaps."
+1. Open **4.1.2**: **Partly evidenced**, "Accepted". M1's remediation item reads "Done", with
+   "Priority: Medium" and its note, and its open question is answered. The paper says "Every
+   approved remediation item is done. Assess 4.1.2 again: the control is Closed once that
+   assessment is accepted with no gaps."
 2. Select **Assess again** (the per-control agent). Its steps appear under "How Vouch reached
    this", and M1 is again **Partly evidenced**: the fake model finds the same thing it found
    before.
-3. In M1's row, select **Change**, pick **Evidenced**, type the reason "the exposure record now
-   covers every system", and select **Save**. Select **Confirm findings**: the foot reads "Plan
-   fixes: skipped, nothing to fix". Select **Accept verdict**.
-4. The verdict reads **Evidenced**, "Closed".
+3. **Confirm findings:** in M1's row, select **Change**, pick **Evidenced**, type the reason "the
+   exposure record now covers every system", and select **Save**. Select **Confirm findings**.
+4. **Plan fixes:** the foot reads "Plan fixes: skipped, nothing to fix".
+5. **Accept:** select **Accept verdict**. The verdict reads **Evidenced**, "Closed".
 
-> The scripted model can't see the new record, so I override M1 with my reason, and that override
-> is in the audit trail. Closed needs an accepted re-assessment with nothing left not or partly
-> evidenced; "we did the fix" alone never closes a control.
+> The same three steps as before an audit: findings, fixes, then the conclusion. The scripted
+> model can't see the new record, so I override M1 with my reason, and that override is in the
+> audit trail. Closed needs an accepted re-assessment with nothing left not or partly evidenced;
+> "we did the fix" alone never closes a control.
 
-#### 7. Comparison (0:30)
+#### 4. Round comparison with Q2 2026 (1:40)
 
-1. Back on the Overview, point at "Compared with First round": "Accepted: 1 now, 1 when First
-   round closed.", the verdict counts with their change, and under "Changed controls" 4.1.2,
-   "Partly evidenced → Evidenced". 4.1.2's card reads "Closed".
+1. **Overview** (0:20): back on the Overview, point at "Compared with Q2 2026": "Accepted: 12 now,
+   12 when Q2 2026 closed.", the verdict counts with their change, and under "Changed controls"
+   four controls, 4.1.2 among them, "Partly evidenced → Evidenced". 4.1.2's card reads "Closed".
+2. **Company › Rounds** (0:40): select **Company** in the top bar. Under "Rounds", point at the
+   list: "Q3 2026" open, "Q2 2026" marked "Compared by default", and "First round". Select **Q2
+   2026**: its comparison page (`/company/rounds/2`), "Compared with Q2 2026", with "Better 4",
+   "Worse 0", readiness then and now, and the controls by topic. Under "Access", point at 4.1.2,
+   "Better", with "Done since" (its M1 item) and "Answered since" (its question), and open the
+   unchanged controls to show 4.2.1's "Answered since".
+3. **Ask Vouch** (0:40): open the chat (**Ask Vouch**, or Ctrl K) and ask "What improved since Q2
+   2026?". Point at the parts of the answer: it names the round it compared with, the controls
+   better, worse and unchanged, readiness then and now, the changed controls, the remediation items
+   done and the questions answered since, and links their working papers.
 
-> This is progress over time: what changed since the round we closed, control by control.
+> This is the round comparison: where we stand now against the round we closed, control by
+> control, with what the team did since. The chat reads the same comparison: ask it in plain words,
+> and it answers from the frozen round, not from memory.
 
-#### 8. Improvement report (1:00)
+#### 5. Improvement report (1:00)
 
 1. Select **Report** in the top bar: the "Improvement report".
-2. Point at "Compared with the last round" (4.1.2 under "Changed controls"), the "Improvement
-   plan" by priority (Medium: 4.1.2 M1, "Closed", with the note), "Open questions" (4.1.2's,
-   "Answered") and the disclaimer at the foot: "Internal self-assessment, drafted by an AI
-   assistant, reviewed by Local user."
+2. Point at "Compared with the last round" (Q2 2026, with the changed controls), the "Improvement
+   plan" by priority (under Medium, 4.1.2 M1, "Closed", with its note), "Open questions" (4.1.2's
+   and 4.2.1's, both "Answered") and the disclaimer at the foot: "Internal self-assessment,
+   drafted by an AI assistant, reviewed by Local user."
 3. Select **Export PDF**: `improvement-report-nordlicht-<date>.pdf` downloads.
 
 > The same report page, written for the team instead of an auditor: where we stand against the
 > last round, the plan in priority order with each item's status, and the questions still open.
 > It is an internal self-assessment, and it says so.
+
+#### 6. Review round (0:30)
+
+1. Back on the Overview, select **Close round**. The question takes the button's place, "Close
+   the review round "Q3 2026"? Its results are frozen, …", with **Close round** and **Cancel**
+   under it: select **Close round**. The round line reads "No review round open."
+2. Type "Q1 2027" as the name of the next round (the field "Name of the next round") and select
+   **Start round**: "Review round: Q1 2027, open since" today. The Overview now compares with Q3
+   2026: "Nothing has changed since Q3 2026 closed."
+
+> Closing a round freezes its results, so the next one has a set point to compare with. The
+> lead chooses when; it is not an arbitrary date.
 
 ## Part 3, Company setup
 
@@ -320,7 +324,8 @@ The company and its answers below are invented for the demo; any name works.
   menu shows **LU**), a developer: the user menu offers **Developer page** and **Set up a
   company**. The top bar names **Nordlicht Komponenten GmbH**, the current company.
 - Creating a company runs one profile pass, which counts towards the local app's daily limit of
-  3 passes (Part 2 runs one too). After three rehearsals in one run of the app, restart it.
+  3 passes (Part 2's fresh start on Nordlicht uses one too). When a pass is refused, restart the
+  app.
 
 ### The steps
 
@@ -384,8 +389,8 @@ Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:50 + 0:30 = 6 minute
    implemented, 1 stale)." Select **Next**.
 
 > The sample library ships with Vouch: invented policies and records with a few deliberate gaps.
-> There's no upload in this prototype. I leave out the two logging documents, so we can see that
-> Vouch cites only what I chose.
+> Documents of the company's own are added later, on the Company page. I leave out the two logging
+> documents, so we can see that Vouch cites only what I chose.
 
 #### 6. Finish (0:30)
 
@@ -410,7 +415,7 @@ Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:50 + 0:30 = 6 minute
 3. Point at 5.2.9's card under "The controls": it reads **Not applicable**, with the reason you
    gave in step 4. The pass left it out, it has no draft, and readiness counts 11 controls.
 
-> The new company starts where Nordlicht did in Part 2: one pass drafted every applicable
+> The new company starts the way Nordlicht's first round did: one pass drafted every applicable
 > control, from the chosen documents only, with the same guards. A draft never cites a document
 > that wasn't chosen, so leaving out the logging documents shows straight away as a gap. 1.6.1 is
 > one of the library's planted gaps: there's no procedure for reporting a security event.
@@ -423,12 +428,20 @@ Budgets: 0:20 + 1:00 + 0:20 + 0:40 + 1:00 + 0:30 + 1:00 + 0:50 + 0:30 = 6 minute
    Goal."
 2. Point at "Not applicable": "5.2.9, the whole control", with the reason given in setup.
 3. Under "Documents", the "Policies" and "Records" tables: the 15 chosen documents only, each with
-   its kind, version, approval date, review cycle, status and "Cited by".
+   its kind, version, approval date, review cycle, status, "Cited by" and "Origin" ("Built in").
 4. Point at the backup policy, "Stale", cited by 1.1.1, and at "Sign-in and account settings,
    checked October 2026", cited by 4.1.2, 4.1.3 and 4.2.1.
+5. Point at **Add document**, next to the "Documents" heading: a lead adds the company's own
+   documents here.
 
 > Every company has this page, Nordlicht and Alpenwerk too: what setup decided, and the evidence
-> documents, read-only, with the controls that cite each. Upload would later live here.
+> documents, with the controls that cite each. The built-in ones can't be changed; documents of
+> the company's own come in through Add document.
+
+To show Add document itself, use the sample files in
+[`docs/demo-files/`](demo-files/README.md): its README says what each one shows (a first
+version, a second version that triggers the warning about instruction-like text, and two that
+are refused). It isn't in the timed steps.
 
 #### 9. Remove company (0:30)
 
