@@ -52,7 +52,7 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
   }, [open])
   if (open) {
     const confirm = (e: ReactMouseEvent<HTMLButtonElement>) => {
-      if (e.detail > 0) swallowNextPointerClick()
+      swallowNextPointerClick(e)
       setOpen(false)
       onConfirm()
     }

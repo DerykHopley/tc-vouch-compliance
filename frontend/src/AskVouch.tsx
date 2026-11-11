@@ -1,5 +1,5 @@
 import {
-  type FormEvent, Fragment, type KeyboardEvent as KeyEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState,
+  type FormEvent, Fragment, type KeyboardEvent as KeyEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState,
 } from 'react'
 import { REVIEW_WORDS, type ReviewStatus, type Step, type Verdict, verdictLang, verdictWord } from './assessment.ts'
 import {
@@ -390,6 +390,12 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     )
   }
   const { className, size, pin } = STATES[state]
+  /** Close: a double click's second click presses nothing under it (#527's guard), and focus, which its press may have
+   * moved, goes back to Ask Vouch (#333). */
+  const close = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    swallowNextPointerClick(e, () => fabRef.current?.focus())
+    setState('closed')
+  }
   return (
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
       {state === 'pinned' && pinnable && (
@@ -412,12 +418,8 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
         {/* "New" on screen, so the 390px bubble's header keeps to one line; its name says what it starts. */}
         <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}
           aria-label="New conversation" title="New conversation">New</button>
-        {/* An icon button (design.md, Components): the glyph is hidden; the name and tooltip say the action (#72).
-            A double click's second click presses nothing under it, and focus stays on Ask Vouch (#333, #527's guard). */}
-        <button className="btn btn-ghost btn-icon" onClick={(e) => {
-          if (e.detail > 0) swallowNextPointerClick(() => fabRef.current?.focus())
-          setState('closed')
-        }}
+        {/* An icon button (design.md, Components): the glyph is hidden; the name and tooltip say the action (#72). */}
+        <button className="btn btn-ghost btn-icon" onClick={close}
           aria-label="Close the chat" title="Close the chat">
           <span aria-hidden="true">×</span>
         </button>

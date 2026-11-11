@@ -181,7 +181,12 @@ def test_a_double_click_on_close_closes_the_chat_once_and_presses_nothing_behind
             page.touchscreen.tap(x, y)
             page.touchscreen.tap(x, y)
         expect(sheet).to_have_count(0)
-        menu = page.get_by_role("banner").locator(".bar-toggle")
+        menu = page.get_by_role("banner").get_by_role(
+            "button",
+            name="Menu",
+            exact=True,
+            include_hidden=True,  # hidden at 1400px
+        )
         expect(menu).to_have_attribute("aria-expanded", "false")
         expect(menu).not_to_be_focused()
         expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
