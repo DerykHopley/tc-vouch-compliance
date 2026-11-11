@@ -330,3 +330,9 @@ def test_a_round_that_is_neither_text_nor_a_number_is_refused_naming_what_it_nee
     assert said.startswith(f"Refused a call to {COMPARE_ROUNDS}: its arguments are invalid.")
     assert "number or name" in said
     assert written[0][0] == "step"
+
+
+def test_a_named_round_when_there_are_none_says_no_round_is_closed() -> None:
+    from vouch.chat_agent import NO_ROUND_CLOSED, unknown_round
+
+    assert unknown_round("Q2", []) == NO_ROUND_CLOSED

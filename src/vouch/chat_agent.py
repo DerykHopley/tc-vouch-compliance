@@ -245,7 +245,7 @@ COMPARE_ROUNDS_TOOL = {
     "function": {
         "name": COMPARE_ROUNDS,
         "description": (
-            "Now compared with a closed review round (#581): how many controls are better, "
+            "Now compared with a closed review round: how many controls are better, "
             "worse, new or unchanged by accepted verdict, readiness then and now, each changed "
             "control with its verdicts then and now, the scope changes, and the remediation "
             "items done and open questions answered since the round closed."
@@ -517,6 +517,9 @@ def chosen_round(listed: Sequence[ListedRound], asked: str | None) -> ListedRoun
 
 
 def unknown_round(asked: str, listed: Sequence[ListedRound]) -> str:
+    """The sentence for a round the lead names that isn't there, naming the rounds there are."""
+    if not listed:
+        return NO_ROUND_CLOSED
     named = [f"{r.number} “{r.name}”" for r in listed]
     rounds = ", ".join(named[:-1]) + f" and {named[-1]}" if len(named) > 1 else "".join(named)
     return f"There is no review round “{asked.strip()}”. The rounds are {rounds}."
@@ -711,7 +714,7 @@ class ChatTools:
     spending: SpendingGuard
     running: RunningAssessments
     record: Callable[[str, Usage], None]
-    rounds: "RoundsReader | None" = None
+    rounds: RoundsReader | None = None
     """The lead's review rounds and the round comparison, for `compare_rounds`; None: none."""
     returned: list[str] = field(default_factory=list)
     """Text this turn gave the model to quote, as it saw it (redacted, normalised): the
@@ -787,7 +790,8 @@ class ChatTools:
         if isinstance(chosen, str):
             write(("step", {"node": COMPARE_ROUNDS, "text": chosen}))
             return chosen
-        assert self.rounds is not None
+        if self.rounds is None:
+            return NO_ROUND_CLOSED
         comparison, done, answered = self.rounds.compared(chosen)
         said = f"Compared now with review round {chosen.number}, “{chosen.name}”."
         write(("step", {"node": COMPARE_ROUNDS, "text": said}))
