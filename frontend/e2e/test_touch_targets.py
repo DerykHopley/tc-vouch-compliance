@@ -21,6 +21,7 @@ from test_company_setup import (
     to_step_6,
     to_step_7,
 )
+from test_documents import NEW_EVIDENCE, added_by_api, cited_then_versioned
 from test_guided_chat import assess_in_the_chat
 from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
@@ -315,3 +316,17 @@ def test_the_round_comparison_s_links_and_folds_are_at_least_44px(page: Page, ro
         for fold in folds.all():
             fold.click()
         assert small_targets(page) == []
+
+
+def test_the_new_evidence_tag_and_withdraw_s_ask_are_at_least_44px(page: Page, documents_url):
+    # #586: a control tagged "New evidence: assess again", then an added document's Withdraw ask.
+    cited_then_versioned(page, documents_url)
+    at_phone_width(page, documents_url)
+    expect(page.get_by_text(NEW_EVIDENCE)).to_be_visible()
+    assert small_targets(page) == []
+
+    added_by_api(page, documents_url, "Touch withdraw note", "# Touch\n\nWithdraw me.\n")
+    at_phone_width(page, f"{documents_url}/company")
+    page.get_by_role("button", name="Withdraw Touch withdraw note").click()
+    expect(page.get_by_role("button", name="Withdraw", exact=True)).to_be_visible()
+    assert small_targets(page) == []

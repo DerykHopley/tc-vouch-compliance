@@ -1358,11 +1358,18 @@ class Database:
                 _insert_audit(conn, [entry(added)])
         return added, [*kept, added]
 
-    def withdraw_document(self, profile_id: str, doc_id: str, at: datetime) -> list[dict[str, Any]]:
+    def withdraw_document(
+        self,
+        profile_id: str,
+        doc_id: str,
+        at: datetime,
+        entry: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         """Mark every version of the document not yet withdrawn withdrawn at `at`, holding the
-        profile's lock as an add does (so an add can't slip a live version in beside it): every
-        version of the profile as it then stands, by id and version. Raises DatabaseUnavailable
-        for any database failure, also before vouch-db-setup ran."""
+        profile's lock as an add does (so an add can't slip a live version in beside it), with
+        `entry`'s audit entry of its newest version when this marked any (#586), in the same
+        transaction: every version of the profile as it then stands, by id and version. Raises
+        DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
         columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
         with (
             self.connection() as conn,
@@ -1371,16 +1378,20 @@ class Database:
             conn.transaction(),
         ):
             conn.execute(ADD_DOCUMENT_LOCK, (lock_id(f"added-documents:{profile_id}"),))
-            conn.execute(
+            marked = conn.execute(
                 f"UPDATE {ADDED_DOCUMENTS_TABLE} SET withdrawn_at = %s WHERE profile_id = %s "
                 "AND doc_id = %s AND withdrawn_at IS NULL",
                 (at, profile_id, doc_id),
-            )
-            return conn.execute(
+            ).rowcount
+            rows = conn.execute(
                 f"SELECT {columns} FROM {ADDED_DOCUMENTS_TABLE} WHERE profile_id = %s "
                 "ORDER BY doc_id, version",
                 (profile_id,),
             ).fetchall()
+            if marked and entry is not None:
+                newest = [r for r in rows if r["doc_id"] == doc_id][-1]
+                _insert_audit(conn, [entry(newest)])
+            return rows
 
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None

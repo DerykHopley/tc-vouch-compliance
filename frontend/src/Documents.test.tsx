@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Documents from './Documents.tsx'
-import { DOCUMENTS_FAILED, type DocumentWords, type ProfileDocument, type ProfileDocuments, useDocuments }
+import { DOCUMENTS_FAILED, type DocumentWords, WITHDRAW_FAILED, type ProfileDocument, type ProfileDocuments, useDocuments }
   from './documents.ts'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
 
@@ -164,5 +164,76 @@ describe('adding documents on the Documents panel (ticket 585)', () => {
 
     await waitFor(() => expect(onAdded).toHaveBeenCalledOnce())
     expect(screen.queryByRole('form')).toBeNull()
+  })
+})
+
+describe('withdrawing an added document (ticket 586)', () => {
+  const ASK = 'Withdraw "Visitor badge policy"? It is no longer searched or cited. Its versions are kept, so the '
+    + 'audit trail stays true.'
+  const WITHDRAWN: ProfileDocument = { ...ADDED, withdrawn: true }
+  const WORDS = { ...ENGLISH, withdrawn: 'Withdrawn' }
+
+  /** The panel on a server answering the documents read with `documents`, and the withdraw with `answer`. */
+  function withdrawing(answer: () => Promise<Response>, documents: ProfileDocument[] = [AUTHENTICATION, ADDED]) {
+    const fetch = vi.fn((url: string) => url.endsWith('/withdraw') ? answer()
+      : json({ ...NORDLICHT, words: WORDS, documents }))
+    vi.stubGlobal('fetch', fetch)
+    const onAdded = vi.fn()
+    function Page() {
+      const { state, tryAgain } = useDocuments()
+      return <Documents state={state} tryAgain={tryAgain} onAdded={onAdded} />
+    }
+    render(<Page />)
+    return { fetch, onAdded }
+  }
+  const press = async (name: string) => userEvent.click(await screen.findByRole('button', { name }))
+  const confirm = () => userEvent.click(within(screen.getByRole('alert').parentElement!)
+    .getByRole('button', { name: 'Withdraw' }))
+
+  it('lists a withdrawn document with the Withdrawn status and no actions; a built-in one has no Withdraw', async () => {
+    withdrawing(() => json({}), [AUTHENTICATION, WITHDRAWN])
+
+    const sheet = await screen.findByRole('article', { name: 'Documents' })
+    const [authentication, withdrawn] = within(sheet).getAllByRole('row').slice(1)
+    expect(within(withdrawn).getAllByRole('cell')[4].textContent).toBe('Withdrawn')
+    expect(within(withdrawn).queryAllByRole('button')).toHaveLength(0)
+    expect(within(authentication).queryByRole('button', { name: /Withdraw/ })).toBeNull()
+  })
+
+  it('asks first in the app; Cancel withdraws nothing', async () => {
+    const { fetch } = withdrawing(() => json({}))
+    await press('Withdraw Visitor badge policy')
+
+    expect(screen.getByRole('alert').textContent).toBe(ASK)
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(fetch.mock.calls.some(([url]) => url.endsWith('/withdraw'))).toBe(false)
+  })
+
+  it('withdraws on Withdraw: busy and disabled while it runs, then reads the documents again', async () => {
+    let finish: (answer: Response) => void = () => {}
+    const { fetch, onAdded } = withdrawing(() => new Promise<Response>((done) => { finish = done }))
+    await press('Withdraw Visitor badge policy')
+    await confirm()
+
+    const busy = screen.getByRole('button', { name: 'Withdrawing Visitor badge policy' })
+    expect(busy.getAttribute('aria-busy')).toBe('true')
+    expect(busy.getAttribute('aria-disabled')).toBe('true')
+    expect(fetch).toHaveBeenCalledWith('/api/documents/visitor-badge-policy/withdraw',
+      expect.objectContaining({ method: 'POST' }))
+    finish(Response.json({ document: { id: 'visitor-badge-policy', withdrawn: true } }))
+    await waitFor(() => expect(onAdded).toHaveBeenCalledOnce())
+  })
+
+  it.each([
+    ['a 503', () => json({ detail: 'The database is unavailable.' }, 503)],
+    ['a network error', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('on %s says it could not be withdrawn, and Withdraw may be pressed again', async (_, failing) => {
+    const { onAdded } = withdrawing(failing)
+    await press('Withdraw Visitor badge policy')
+    await confirm()
+
+    expect((await screen.findByText(WITHDRAW_FAILED)).getAttribute('role')).toBe('alert')
+    expect(screen.getByRole('button', { name: 'Withdraw Visitor badge policy' })).toBeTruthy()
+    expect(onAdded).not.toHaveBeenCalled()
   })
 })

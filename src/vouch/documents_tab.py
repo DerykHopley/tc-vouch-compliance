@@ -54,6 +54,7 @@ DOCUMENT_WORDS: dict[str, dict[str, Any]] = {
         "not_cited": "Not cited yet",
         "no_documents": "This profile has no evidence documents.",
         "origins": {"built-in": "Built in", "added": "Added"},
+        "withdrawn": "Withdrawn",
     },
     "de": {
         "title": "Dokumente",
@@ -88,6 +89,7 @@ DOCUMENT_WORDS: dict[str, dict[str, Any]] = {
         "not_cited": "Noch nicht zitiert",
         "no_documents": "Dieses Profil hat keine Nachweisdokumente.",
         "origins": {"built-in": "Mitgeliefert", "added": "Hinzugefügt"},
+        "withdrawn": "Zurückgezogen",
     },
 }
 
@@ -110,14 +112,17 @@ class ProfileDocument:
     stale: bool
     cited_by: tuple[str, ...]
     added: bool = False
+    withdrawn: bool = False
+    """An added document the lead withdrew (#586): listed, no longer searched or cited."""
 
     def as_dict(self) -> dict[str, Any]:
-        """The summary's fields with `stale`, `cited_by` and `origin` (`added` or `built-in`):
-        how the API sends it."""
+        """The summary's fields with `stale`, `cited_by`, `origin` (`added` or `built-in`) and
+        `withdrawn`: how the API sends it."""
         return asdict(self.summary) | {
             "stale": self.stale,
             "cited_by": list(self.cited_by),
             "origin": "added" if self.added else "built-in",
+            "withdrawn": self.withdrawn,
         }
 
 
@@ -160,13 +165,14 @@ def profile_documents(
 ) -> list[ProfileDocument]:
     """Each document the profile uses: its sources in the profile's order, each source's
     documents it may use (EvidenceSource.usable_documents) with its `added` documents (#585,
-    the newest version of each not withdrawn), by title as the library is listed, then a
+    the newest version of each, a withdrawn one marked `withdrawn`, #586), by title as the library is listed, then a
     source only added documents use; each a DocumentSummary judged on `today`, with `stale`
     and `cited_by`. A citation has no source, so a cited id matches every listed document with
     that id. An unreadable folder or document raises (OSError, or ValueError for one that
     isn't UTF-8 text)."""
     cited_by = _cited_by(controls, latest)
     added_ids = {(d.source, d.doc_id) for d in added}
+    withdrawn_ids = {(d.source, d.doc_id) for d in added if d.withdrawn_at is not None}
     by_source: dict[str, list[DocumentSummary]] = {}
     for name, source in profile.evidence_sources.items():
         by_source[name] = [document_summary(p, name, today) for p in source.usable_documents()]
@@ -178,6 +184,7 @@ def profile_documents(
             stale=summary.stale_because is not None,
             cited_by=tuple(cited_by.get(summary.id, [])),
             added=(summary.source, summary.id) in added_ids,
+            withdrawn=(summary.source, summary.id) in withdrawn_ids,
         )
         for summaries in by_source.values()
         for summary in by_title(summaries)
