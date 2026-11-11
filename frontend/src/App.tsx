@@ -33,7 +33,7 @@ type View = { name: 'dossier' } | { name: 'report' } | { name: 'company' } | { n
   | { name: 'paper'; controlId: string }
 
 export const DEVELOPER_PATH = '/developer'
-const SETUP_PATH = '/developer/setup'
+export const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
 const COMPANY_PATH = '/company'
 const DOCUMENTS_PATH = '/documents' // the documents' own page before #495: it leads to the Company tab
