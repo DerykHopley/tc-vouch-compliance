@@ -8,13 +8,14 @@ import pytest
 from assess_steps import in_order
 from fastapi.testclient import TestClient
 from isa_editions import GERMAN_5_1_1
+from pydantic import SecretStr
 from reviewing import accepted, confirm, plan_fixes
 
 from vouch import ScriptedChatModel, isa, profile
 from vouch.api import PROFILE_HEADER, create_app
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import read_profile_once
-from vouch.settings import Settings
+from vouch.settings import Build, Settings
 
 DEMO_CONTROL = "4.1.2"
 
@@ -76,14 +77,19 @@ def read_events(response) -> list[tuple[str, dict]]:
     return events
 
 
-def test_health_answers_ok_with_the_version(client):
-    response = client.get("/api/health")
+def test_health_answers_ok_with_the_version_and_the_build_and_nothing_else():
+    """The build is the user menu's last line (#580). The whole answer is compared, with a secret
+    in the settings: only the short commit and the revision name join what health served."""
+    build = Build(commit="1a2b3c4", revision="vouch-00029")
+    settings = Settings(openrouter_api_key=SecretStr("sk-or-secret"), build=build)
+    response = TestClient(create_app(settings)).get("/api/health")
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
         "version": version("vouch"),
         "auth": {"mode": "local", "publishable_key": None, "gate": "none"},
+        "build": {"commit": "1a2b3c4", "revision": "vouch-00029"},
     }
 
 
