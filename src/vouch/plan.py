@@ -130,6 +130,11 @@ class ProcessPlan:
         self._marks: dict[ItemKey, Mark] = {}
         self._guard = threading.Lock()
 
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's marks under the profile gone."""
+        with self._guard:
+            self._marks = {k: v for k, v in self._marks.items() if k.profile_id != profile_id}
+
     @contextmanager
     def marking(self, key: str) -> Iterator[Marking]:
         with self._trail().holding(key, wait=True) as saver:

@@ -189,6 +189,32 @@ export async function removeCompany(id: string): Promise<CompanyRemoval> {
   return { status: 'failed' }
 }
 
+/** How a Reset demo went (#605): reset (with the demo round played, or the API's note why not), or not. */
+export type DemoReset =
+  | { status: 'reset'; seeded: boolean; note?: string }
+  | { status: 'signed-out' }
+  | { status: 'unavailable' }
+  | { status: 'failed' }
+
+/** Resets the company `id` to its demo state (#605): every user's progress and history under it deleted, and on
+ * Nordlicht the demo round played. A developer's only. */
+export async function resetDemo(id: string): Promise<DemoReset> {
+  let response: Response
+  try {
+    response = await fetch(`/api/developer/profiles/${encodeURIComponent(id)}/reset-demo`,
+      { method: 'POST', headers: await authHeaders() })
+  } catch {
+    return { status: 'failed' }
+  }
+  if (response.ok) {
+    const body = (await response.json().catch(() => null)) as { seeded?: boolean; note?: string } | null
+    return { status: 'reset', seeded: Boolean(body?.seeded), note: body?.note }
+  }
+  if (sessionEnded(response)) return { status: 'signed-out' }
+  if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
+  return { status: 'failed' }
+}
+
 /** Makes the company `id` the current company (#480): every user's, from their next page open. */
 export async function makeCurrent(id: string): Promise<CurrentChange> {
   let response: Response

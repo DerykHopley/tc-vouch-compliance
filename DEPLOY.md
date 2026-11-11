@@ -361,37 +361,34 @@ does; health then says `unavailable` (docs/requirements.md, 2026-11-04).
 
 ## The demo round (#579)
 
-`vouch-seed-demo-round` plays a compliance lead's work under Nordlicht through the app's own
-code, on the fake model (no key is read, so no paid call), so Company › Rounds opens on a closed
-round, "Q2 2026", and an improvement since: a profile pass accepted as judged, "Q2 2026" closed and
-"Q3 2026" started, two not-evidenced controls and one partly-evidenced control assessed again and
-accepted as evidenced, one remediation item done and one open question answered. Every step is a
-real request with its audit entries (named "Demo lead", or `--name`, on the database target; a preview uses its own local user's name), at the time it runs.
+**Reset demo** (#605), on the Developer page, puts a company back to its demo state: a
+developer presses Reset demo on the company's row (current or not) and OKs the confirm naming it.
+Every user's progress and history under that company is deleted (assessments, rounds, the audit
+trail, open questions, remediation, the Goal, added documents with their versions), the reset's own
+audit entry is written, and on Nordlicht the demo round is played for the developer through the
+app's own code, on the fake model (no key is read, so no paid call): "Q2 2026" closed, "Q3 2026"
+open, three controls better since. Other companies are left empty. It counts against no daily
+limit and uses no profile pass; assessments already used today aren't given back.
 
-Rounds are kept per user, so it seeds one user. **Find your user id** in the Clerk dashboard:
-Users, your user, the id starting `user_` (*unverified*: from Clerk's docs, not checked in this
-dashboard). Then, with the Cloud SQL proxy running as for `vouch-db-setup` above:
+**The delete exception.** The audit trail, remediation decisions and added documents refuse every
+delete in Postgres. Reset demo's own transaction sets `vouch.reset_demo = 'on'` (`SET LOCAL`), and
+only under it do those tables let a row be deleted; every other delete, any update and any truncate
+stay refused. `vouch-db-setup` applies the changed guards (`CREATE OR REPLACE`, safe to rerun on a
+database holding data). **A real deployment would drop this exception**, so its audit trail stays
+append-only whoever asks.
 
-```bash
-uv run vouch-seed-demo-round --user user_XXXXXXXX   # .envrc gives VOUCH_DATABASE_URL
-```
-
-- **Once.** With "Q2 2026" there since the fresh start it stops, writing nothing (exit 1).
-- **On a fresh start only.** With assessments under Nordlicht since the fresh start (your own
-  work) it stops, writing nothing: Start afresh in the app first, then seed.
-- **The profile pass counts** against the day's profile passes (3): over it, it stops at once with the 429, writing nothing more.
-- **Stopped partway** (a refused request, a limit, Ctrl-C), it leaves part of the work written:
-  Start afresh in the app, then seed again. The goal it switches for marking the item done is
-  put back either way.
-- Without `VOUCH_DATABASE_URL` or `--api` it refuses and says what it needs (exit 2).
-
-**On a preview** (`scripts/dev.sh`, in memory), give its API port instead: only a loopback
-address is taken, and the preview's one local user is seeded.
+`vouch-seed-demo-round` still plays the same steps from a terminal: to seed a user without signing
+in as them, or a preview from a script. It stops, writing nothing, when "Q2 2026" is closed already
+since the fresh start, or when the user has assessments since it; Reset demo first, then seed. Its
+profile pass counts against the day's three, as a lead's would.
 
 ```bash
-scripts/dev.sh --api-port 8010 --web-port 5180 --detach demo
-env -u VOUCH_DATABASE_URL uv run vouch-seed-demo-round --api http://127.0.0.1:8010
+uv run vouch-seed-demo-round --user user_XXXXXXXX   # .envrc gives VOUCH_DATABASE_URL; the Cloud SQL proxy running
+env -u VOUCH_DATABASE_URL uv run vouch-seed-demo-round --api http://127.0.0.1:8010   # a preview
 ```
+
+Find your user id in the Clerk dashboard: Users, your user, the id starting `user_` (*unverified*:
+from Clerk's docs, not checked in this dashboard).
 
 ## Redeploy, roll back, remove
 

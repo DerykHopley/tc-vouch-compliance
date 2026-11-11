@@ -33,6 +33,8 @@
 #   - a sixteenth, for adding documents (#585): an added document is kept for its company and found
 #     by every search on that server, which would change what the other servers' checks read; its fake
 #     script (tests/scripts/added-evidence.json, #586) also cites an added document, badge-register;
+#   - a seventeenth, for Reset demo (#605): it deletes every user's progress under Nordlicht and
+#     seeds the demo round, which the other servers' checks would read;
 #   - an API on a broken fake script, for the error event (tests route the assessment call to it).
 # Never touches the owner's servers on 8000/5173: the OS picks the ports.
 # Every server runs with a request-rate limit high enough for the whole suite (VOUCH_RATE_REQUESTS):
@@ -63,7 +65,7 @@ SERVERS=(
   vouch:VOUCH_URL dossier:DOSSIER_URL profiles:PROFILES_URL paper:PAPER_URL chat:CHAT_URL
   report:REPORT_URL afresh:AFRESH_URL pass:PASS_URL rounds:ROUNDS_URL plan:PLAN_URL
   questions:QUESTIONS_URL improvement:IMPROVEMENT_URL setup:SETUP_URL firstpass:FIRST_PASS_URL
-  removal:REMOVAL_URL documents:DOCUMENTS_URL
+  removal:REMOVAL_URL documents:DOCUMENTS_URL reset:RESET_URL
 )
 cleanup() {
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
