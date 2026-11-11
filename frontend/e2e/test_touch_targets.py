@@ -62,6 +62,17 @@ def test_the_review_round_s_name_field_and_start_round_are_at_least_44px(page: P
         assert small_targets(page) == []
 
 
+def test_the_company_page_s_rounds_links_are_at_least_44px(page: Page, rounds_url):
+    # #572: the Rounds section with a closed round to choose, under Alpenwerk as above (#525).
+    with current_company(page.request, rounds_url, "alpenwerk"):
+        closed = page.request.post(f"{rounds_url}/api/rounds/close")
+        assert closed.status in (200, 409), closed.status  # 409: none was open
+        at_phone_width(page, f"{rounds_url}/company")
+        rounds = page.get_by_role("region", name="Rounds", exact=True)
+        expect(rounds.get_by_role("link").first).to_be_visible()
+        assert small_targets(page) == []
+
+
 def test_the_improvement_plan_s_priority_and_mark_done_are_at_least_44px(page: Page, plan_url):
     # #410: an approved item of an accepted control, its Priority select, Mark done and the done
     # form open, in the Internal improvement goal; on the plan's own server.

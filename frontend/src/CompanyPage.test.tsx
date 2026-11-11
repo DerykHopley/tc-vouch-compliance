@@ -51,11 +51,19 @@ const DOCUMENTS = {
 
 const json = (body: unknown, status = 200) => Promise.resolve(Response.json(body, { status }))
 
-/** The API: the company's facts and the documents, each as given; nothing else answers. */
+/** The review rounds as GET /api/rounds serves them (#571): the first closed, Q4 2026 open. */
+const ROUNDS = { rounds: [
+  { number: 1, name: 'First round', opened_at: null, closed_at: '2026-11-08T16:00:00+00:00', before_fresh_start: false },
+  { number: 2, name: 'Q4 2026', opened_at: '2026-11-09T09:00:00+00:00', closed_at: null, before_fresh_start: false },
+], default: 1 }
+
+/** The API: the company's facts, the documents and the rounds, each as given; a round's close goes through; nothing
+ * else answers. */
 function serve(company: () => Promise<Response> = () => json(NORDLICHT),
-  documents: () => Promise<Response> = () => json(DOCUMENTS)) {
+  documents: () => Promise<Response> = () => json(DOCUMENTS), rounds: () => Promise<Response> = () => json(ROUNDS)) {
   const fetch = vi.fn((url: string) => url === '/api/company' ? company()
-    : url === '/api/documents' ? documents() : new Promise<Response>(() => {}))
+    : url === '/api/documents' ? documents() : url === '/api/rounds' ? rounds()
+      : url === '/api/rounds/close' ? json({}) : new Promise<Response>(() => {}))
   vi.stubGlobal('fetch', fetch)
   return fetch
 }
@@ -198,7 +206,43 @@ describe('the Company page (ticket 505)', () => {
     await screen.findByRole('heading', { level: 1 })
     const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label')
       ?? document.getElementById(r.getAttribute('aria-labelledby') ?? '')?.textContent)
-    expect(names).toEqual(['Goal', 'Review rounds', 'Scope', 'Not applicable', 'Upload documents', 'Documents'])
+    expect(names).toEqual(['Goal', 'Review rounds', 'Rounds', 'Scope', 'Not applicable', 'Upload documents', 'Documents'])
+  })
+
+  it('lists the review rounds in the Rounds panel, the closed one a link to its comparison (ticket 572)', async () => {
+    serve()
+    show()
+
+    const rounds = await screen.findByRole('region', { name: 'Rounds' })
+    await within(rounds).findByRole('list')
+    expect(within(rounds).getAllByRole('listitem').map((i) => i.querySelector('.rounds-name')?.textContent))
+      .toEqual(['Q4 2026', 'First round'])
+    expect(within(rounds).getByRole('link', { name: /First round/ }).getAttribute('href')).toBe('/company/rounds/1')
+  })
+
+  it("keeps the page up when the rounds can't be read, their notice and Try again in their panel (ticket 572)",
+    async () => {
+      serve(undefined, undefined, () => json({}, 500))
+      show()
+
+      const rounds = await screen.findByRole('region', { name: 'Rounds' })
+      expect((await within(rounds).findByRole('alert')).textContent).toBe('The review rounds could not be loaded.')
+      expect(within(rounds).getByRole('button', { name: 'Try again' })).toBeTruthy()
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Nordlicht Komponenten GmbH')
+      expect(within(panel('Goal')).getByText('Goal: Audit readiness')).toBeTruthy()
+    })
+
+  it('reads the rounds again after a round is closed in the Review rounds panel (ticket 572)', async () => {
+    const fetch = serve()
+    show()
+    await within(await screen.findByRole('region', { name: 'Rounds' })).findByRole('list')
+    const reads = () => fetch.mock.calls.filter(([url]) => url === '/api/rounds').length
+    expect(reads()).toBe(1)
+
+    const control = panel('Review rounds')
+    await userEvent.click(within(control).getByRole('button', { name: 'Close round' }))
+    await userEvent.click(within(control).getAllByRole('button', { name: 'Close round' }).at(-1)!)
+    await waitFor(() => expect(reads()).toBe(2))
   })
 
   it('shows the documents sheet in the Documents panel, its served title an h2', async () => {
@@ -269,7 +313,7 @@ describe('the Company page (ticket 505)', () => {
     show({ status: 'loading' })
 
     expect(screen.getByRole('status').textContent).toBe('Loading the company…')
-    await waitFor(() => expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/company', '/api/documents']))
+    await waitFor(() => expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/company', '/api/documents', '/api/rounds']))
   })
 
   it("reads the company again on Try again, not the documents already read", async () => {
