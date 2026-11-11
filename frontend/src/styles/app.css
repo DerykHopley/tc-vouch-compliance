@@ -461,11 +461,11 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 1000px) {
   .band { grid-template-columns: 1fr; padding: 22px; }
   .wp { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  .wp-index { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 260px; overflow: auto;
-    scroll-padding-bottom: 40px; }
+  .wp-index { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 260px; overflow: auto; }
   /* The stacked index shows that it scrolls (#555): while rows lie below its foot (data-more, which ControlIndex
-     keeps), its foot fades into the sheet, over the row the 260px cuts; gone at the list's end. No new control. A row
-     brought into view (focused, or the open control's) stops above the fade: the scroll padding is its height. */
+     keeps), its foot fades into the sheet, over the row the 260px cuts; gone at the list's end. No new control. No
+     scroll padding (the owner's answer B): with it, pressing the half-shown row focused and scrolled it away before
+     release, so it didn't open; a row reached with Tab may sit partly under the fade. */
   .wp-index[data-more]::after { content: ""; display: block; position: sticky; bottom: 0; height: 40px;
     margin-top: -40px; pointer-events: none; background: linear-gradient(transparent, var(--sheet)); }
 }

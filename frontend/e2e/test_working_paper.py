@@ -922,17 +922,24 @@ INDEX_FADES = """(() => {
   const after = getComputedStyle(document.querySelector('.wp-index'), '::after')
   return after.display !== 'none' && after.backgroundImage.includes('gradient')
 })()"""
-ROW_CLEAR_OF_FADE = """async (row) => {
-  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-  const nav = document.querySelector('.wp-index'), after = getComputedStyle(nav, '::after')
-  if (!after.backgroundImage.includes('gradient')) return null  // no fade: at the list's end
-  const n = nav.getBoundingClientRect(), r = (row ?? document.activeElement).getBoundingClientRect()
-  const fadeTop = n.top + nav.clientTop + nav.clientHeight - parseFloat(after.height)
-  return { id: (row ?? document.activeElement).querySelector('.mono').textContent, bottom: r.bottom, fadeTop }
-}"""
+
+
+def as_never_assessed(page: Page) -> None:
+    """The overview with every card not assessed, as a fresh profile's index shows it: the rows'
+    heights then don't hang on the review tags other checks on this server leave (a tag makes a
+    row taller, and then an area heading, not a row, can meet the box's foot)."""
+
+    def fresh(route: Route) -> None:
+        served = route.fetch().json()
+        for card in served["controls"]:
+            card |= {"status": "not-assessed", "verdict": None}
+        route.fulfill(json=served)
+
+    page.route("**/api/overview", fresh)
 
 
 def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page: Page, paper_url):
+    as_never_assessed(page)
     page.set_viewport_size({"width": 390, "height": 844})
     open_paper(page, paper_url, "1.1.1", assessed=False)
     nav = page.get_by_role("navigation", name="Controls")
@@ -950,25 +957,35 @@ def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page
     page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
 
 
-def test_on_a_phone_a_focused_or_open_index_row_stops_above_the_fade(page: Page, paper_url):
-    """#555's verifier: a row tabbed to, or the open control's row, brought into the stacked
-    index's view lands above its fading foot, not washed out under it."""
-    page.set_viewport_size({"width": 390, "height": 844})
-    open_paper(page, paper_url, "1.1.1", assessed=False)
-    links = page.get_by_role("navigation", name="Controls").get_by_role("link")
-    expect(links).to_have_count(12)
-    links.first.focus()
-    for _ in range(12):
-        seen = page.evaluate(ROW_CLEAR_OF_FADE)
-        assert seen is None or seen["bottom"] <= seen["fadeTop"] + 1, seen
-        page.keyboard.press("Tab")
-
-    for control in ("2.1.3", "4.2.1"):
-        open_paper(page, paper_url, control, assessed=False)
-        row = page.locator('.wp-index [aria-current="page"]')
-        expect(row).to_contain_text(control)
-        seen = row.evaluate(ROW_CLEAR_OF_FADE)
-        assert seen is None or seen["bottom"] <= seen["fadeTop"] + 1, seen
+@pytest.mark.parametrize("how", ["tap", "click"])
+def test_on_a_phone_the_half_shown_row_under_the_fade_opens_on_the_first_press(
+    browser, paper_url, how
+):
+    """#555, the owner's answer B: a tap or click on the row the fade covers opens it on the
+    first press, as on main. Nothing scrolls the row away between press and release (a row
+    reached with Tab may sit partly under the fade)."""
+    context = browser.new_context(has_touch=how == "tap", viewport={"width": 390, "height": 844})
+    page = context.new_page()
+    as_never_assessed(page)
+    try:
+        open_paper(page, paper_url, "1.1.1", assessed=False)
+        nav = page.get_by_role("navigation", name="Controls")
+        expect(nav.get_by_role("link")).to_have_count(12)
+        page.wait_for_function(INDEX_FADES, timeout=5000)
+        edge = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop + n.clientHeight")
+        links = nav.get_by_role("link").all()
+        cut = next(link for link in links if box(link)["y"] + box(link)["height"] > edge + 0.5)
+        control = cut.locator(".mono").inner_text()
+        shown = box(cut)
+        assert shown["y"] < edge - 8, (control, shown, edge)  # a part of it shows to press
+        x, y = shown["x"] + shown["width"] / 2, (shown["y"] + edge) / 2  # its visible part
+        if how == "tap":
+            page.touchscreen.tap(x, y)
+        else:
+            page.mouse.click(x, y)
+        expect(page).to_have_url(f"{paper_url}/controls/{control}")
+    finally:
+        context.close()
 
 
 def test_a_stacked_index_that_fits_shows_no_fade_nor_does_the_index_beside_the_paper(
