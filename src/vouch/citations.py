@@ -16,6 +16,10 @@ The lead's own answers to open questions on the control are lead-supplied eviden
 LeadStatement, cited as "Q<id>" and checked by the same rule, each paragraph of the answer a
 block. Its citation's version is the day it was answered, its section the label (LEAD_STATEMENT
 in English; vouch.language has the other languages'), its kind documented, never stale.
+
+A document added to the profile (#584, vouch.added_documents) is checked as a built-in one is:
+its newest version not withdrawn, the one the checker is given, its version number the
+citation's version.
 """
 
 import copy
@@ -29,6 +33,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from vouch.added_documents import AddedDocument
 from vouch.documents import (
     DOCUMENTED,
     EvidenceKind,
@@ -163,6 +168,15 @@ def occurs(quote: str, text: str) -> bool:
     return re.search(start + re.escape(quote) + end, text) is not None
 
 
+def _added_document(document: AddedDocument, today: datetime.date) -> _Document:
+    """An added document's version as the checker reads it, as a built-in one's."""
+    facts = document.facts(today)
+    quotable = tuple((s.heading, b) for s in sections(document.body) for b in blocks(s))
+    return _Document(
+        document.doc_id, str(document.version), facts.kind, facts.stale_because, quotable
+    )
+
+
 def _load(
     doc_id: str,
     sources: dict[str, Path],
@@ -202,7 +216,10 @@ class QuoteChecker:
 
     `statements` are the lead's statements on the control checked (#422), each cited by its
     "Q<id>" and shown under `label`. An id naming both a statement and a document in a source
-    is dropped as IN_TWO_SOURCES, as one naming two documents is."""
+    is dropped as IN_TWO_SOURCES, as one naming two documents is.
+
+    `added` are the documents added to the profile that may be cited (#584): the newest version
+    of each not withdrawn. A withdrawn one, not given, is NO_DOCUMENT."""
 
     def __init__(
         self,
@@ -213,7 +230,9 @@ class QuoteChecker:
         seen_as: Callable[[str], str] | None = None,
         statements: Iterable[LeadStatement] = (),
         label: str = LEAD_STATEMENT,
+        added: Iterable[AddedDocument] = (),
     ):
+        self._added = {d.doc_id: d for d in added}
         self._sources = {name: Path(folder) for name, folder in sources.items()}
         self._choices = dict(choices or {})
         self._today = today
@@ -242,6 +261,12 @@ class QuoteChecker:
         key = doc_id.removesuffix(".md")
         if key not in self._documents:
             document = _load(key, self._sources, self._choices, self._today)
+            added = self._added.get(key)
+            if added is not None:  # an id in a folder too can't be told apart: neither is taken
+                found = document is DropReason.NO_DOCUMENT
+                document = (
+                    _added_document(added, self._today) if found else DropReason.IN_TWO_SOURCES
+                )
             if isinstance(document, _Document):
                 document = self._as_seen(document)
             self._documents[key] = document

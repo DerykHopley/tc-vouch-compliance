@@ -42,6 +42,7 @@ from vouch import (
     rounds,
     tracing,
 )
+from vouch.added_documents import added_documents_store, added_index
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -2512,6 +2513,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # The added documents (#584), so a search finds them from the first assessment on.
+        await asyncio.to_thread(added_index().load, app.state.added_documents)
         yield
         if app.state.auth is not None:
             app.state.auth.close()
@@ -2534,6 +2537,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
     app.state.current_company = current_company_store(app.state.database)
+    app.state.added_documents = added_documents_store(app.state.database)
     app.state.spending = SpendingGuard(spending_store(app.state.database))
     app.state.running = RunningAssessments()
     frontend = settings.frontend

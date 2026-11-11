@@ -33,6 +33,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
+from vouch.added_documents import added_index
 from vouch.citations import LeadStatement, QuoteChecker
 from vouch.documents import escaped, facts_of
 from vouch.dossier import applicable_controls
@@ -166,7 +167,8 @@ class IncludedControl:
 
 def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
     """Every document of every evidence source the profile allows (only the chosen ones, where
-    it chose: EvidenceSource.documents), whole, with its source, kind and staleness on `today`.
+    it chose: EvidenceSource.documents), then the documents added to it (#584: the newest
+    version of each not withdrawn), whole, with its source, kind and staleness on `today`.
     ProfilePassRefused for a source whose folder can't be read (missing, unreadable, or
     `escaped` since the profile loaded)."""
 
@@ -196,6 +198,18 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
                 )
         except (OSError, UnicodeDecodeError):
             raise refused(f"the {source} folder can't be read") from None
+        for added in added_index().searchable(profile.id, source):  # #584
+            facts = added.facts(today)
+            found.append(
+                EvidencePassage(
+                    doc_id=added.doc_id,
+                    heading="",
+                    text=added.body.strip(),
+                    source=source,
+                    kind=facts.kind,
+                    stale=facts.stale_because is not None,
+                )
+            )
     return found
 
 

@@ -32,6 +32,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command, StateSnapshot, interrupt
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from vouch.added_documents import AddedDocument, added_index
 from vouch.citations import (
     LEAD_STATEMENT,
     Citation,
@@ -253,11 +254,18 @@ SEARCH_RECORDS_TOOL = _search_tool_spec(
 
 
 def _search(
-    args: dict[str, Any], folder: Path, documents: DocumentChoice
+    args: dict[str, Any],
+    folder: Path,
+    documents: DocumentChoice,
+    added: Sequence[AddedDocument] = (),
 ) -> list[Passage] | ErrorResult:
     # Looked up when called, so a test can replace vouch.graph.search_folder.
     return search_folder(
-        args.get("query"), args.get("limit", DEFAULT_LIMIT), folder=folder, documents=documents
+        args.get("query"),
+        args.get("limit", DEFAULT_LIMIT),
+        folder=folder,
+        documents=documents,
+        added=added,
     )
 
 
@@ -299,12 +307,20 @@ def statements_text(passages: list[EvidencePassage]) -> str:
 
 
 def with_facts(
-    passages: list[Passage], source: str, folder: Path, today: date
+    passages: list[Passage],
+    source: str,
+    folder: Path,
+    today: date,
+    added: Sequence[AddedDocument] = (),
 ) -> list[EvidencePassage]:
-    """Each passage with its document's source, kind and staleness, each document read once.
-    One that can't be read again takes its source's kind and counts as stale."""
+    """Each passage with its document's source, kind and staleness, each document read once: an
+    added one's (#584) from what was added. One that can't be read again takes its source's kind
+    and counts as stale."""
+    added_by_id = {d.doc_id: d for d in added}
 
     def facts_for(doc_id: str) -> DocumentFacts:
+        if doc_id in added_by_id:
+            return added_by_id[doc_id].facts(today)
         path = document_path(folder, doc_id)
         try:
             if path is not None:
@@ -338,7 +354,7 @@ VULNERABILITY_STATUS_TOOL = {
 
 
 def _vulnerability_status(
-    _args: dict[str, Any], folder: Path, documents: DocumentChoice
+    _args: dict[str, Any], folder: Path, documents: DocumentChoice, _added: object = ()
 ) -> list[Passage] | ErrorResult:
     return vulnerability_status(folder, documents)
 
@@ -358,7 +374,9 @@ class EvidenceTool:
     source: EvidenceSourceName
     label: str  # in step text, never the tool's name: "the policies"
     spec: dict[str, Any] | None = None  # None: not built yet, so never offered or run
-    run: Callable[[dict[str, Any], Path, DocumentChoice], list[Passage] | ErrorResult] | None = None
+    run: Callable[..., list[Passage] | ErrorResult] | None = None
+    """Called with the call's args, the folder, the profile's choice of its documents and the
+    documents added to the source (#584); a source without added documents ignores them."""
 
 
 # Every evidence-source tool, by the name the model calls. A new source tool goes here, so the
@@ -1157,9 +1175,10 @@ def build_graph(
             else:
                 # The state's choice, not the live profile's: the quote check reads the same one.
                 documents = choice_in(state.get("document_choices"), tool.source)
-                result = tool_span(name, args, partial(tool.run, args, folder, documents))
+                added = added_index().searchable(profile.id, tool.source)
+                result = tool_span(name, args, partial(tool.run, args, folder, documents, added))
                 if isinstance(result, list):
-                    result = with_facts(result, tool.source, folder, today)
+                    result = with_facts(result, tool.source, folder, today, added)
                 content = as_data(result) if isinstance(result, list) else json.dumps(result)
                 if isinstance(result, list):
                     run += 1
@@ -1788,14 +1807,21 @@ def state_serializer() -> JsonPlusSerializer:
 
 def quote_checker(state: AssessState, *, label: str = LEAD_STATEMENT) -> QuoteChecker:
     """The quote check for an assessment's state: its folders, limited to the documents it
-    chose, and the lead's statements it was given (#422), shown under `label`; a state saved
+    chose, the documents added to its profile (#584: the newest version of each not withdrawn,
+    as the index holds them now), and the lead's statements it was given (#422), shown under
+    `label`; a state saved
     before `document_choices` (#384) is checked against the whole folders."""
+    folders = state["document_folders"]
+    added = [
+        d for d in added_index().searchable(state.get("profile_id", "")) if d.source in folders
+    ]
     return QuoteChecker(
-        state["document_folders"],
+        folders,
         today=date.fromisoformat(state["today"]),
         choices=state.get("document_choices"),
         statements=state.get("lead_statements", []),
         label=label,
+        added=added,
     )
 
 
