@@ -128,6 +128,7 @@ def test_the_chat_agent_is_told_it_never_signs_off_and_has_no_tool_that_could(cl
     assert "You never accept, reject or override a verdict" in prompt
     assert sorted(tool["function"]["name"] for tool in CHAT_TOOLS) == [
         "assessed_controls",  # reads only (#210)
+        "compare_rounds",  # reads only (#581)
         "explain_control",
         "progress",
         "search_evidence",

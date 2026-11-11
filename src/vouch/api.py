@@ -56,6 +56,8 @@ from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, Page, PageContext
 from vouch.chat_agent import (
     GREETING_REQUEST,
     ChatTools,
+    Compared,
+    RoundsReader,
     chat_context,
     chat_graph,
     chat_prompt,
@@ -1603,33 +1605,63 @@ def round_comparison(
     control, with readiness then and now, and the remediation items done and open questions
     answered since it closed. An unknown number is a 404; the open round, or one closed before
     the fresh start, a 409."""
-    fresh_start = memory.fresh_start()
-    listed = review.listed(memory.user_id, memory.profile_id, fresh_start)
+    listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
     if not 1 <= number <= len(listed):
         raise HTTPException(status_code=404, detail="No review round has that number.")
     chosen = listed[number - 1]
-    closed_at = chosen.closed_at
-    if closed_at is None:
+    if chosen.closed_at is None:
         raise HTTPException(status_code=409, detail=rounds.STILL_OPEN)
     if chosen.before_fresh_start:
         raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
+    comparison, done, answered = _compared(chosen, profile, memory, saver, marks, asked)
+    return {
+        "round": _listed(chosen),
+        **comparison,
+        "remediation_done": [d | {"at": d["at"].isoformat()} for d in done],
+        "questions_answered": [a | {"at": a["at"].isoformat()} for a in answered],
+    }
+
+
+def _compared(
+    chosen: rounds.ListedRound,
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    marks: plan.RemediationPlan,
+    asked: questions.OpenQuestions,
+) -> Compared:
+    """Now against the closed round `chosen` (#571): the comparison, and the remediation items
+    done and open questions answered since it closed; the route's and the chat's (#581)."""
+    closed_at = chosen.closed_at
+    assert closed_at is not None
     scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
     entries = memory.entries()  # newest first, since the fresh start
     earlier = _accepted_earlier(memory, saver, latest, entries)
     control_of = {e.thread_id: e.control_id for e in entries}
     marked = marks.marks(memory.user_id, memory.profile_id, list(control_of))
     in_scope = {c.id for c in scope.applicable}
-    since_fresh = questions.since(asked.listed(memory.user_id, memory.profile_id), fresh_start)
+    listed = asked.listed(memory.user_id, memory.profile_id)
+    since_fresh = questions.since(listed, memory.fresh_start())
+    comparison = rounds.round_comparison(
+        chosen.results, scope.controls, scope.applicable, latest, earlier
+    )
     done = rounds.done_since(control_of, marked, closed_at, in_scope)
-    answered = rounds.answered_since(since_fresh, closed_at, in_scope)
-    return {
-        "round": _listed(chosen),
-        **rounds.round_comparison(
-            chosen.results, scope.controls, scope.applicable, latest, earlier
-        ),
-        "remediation_done": [d | {"at": d["at"].isoformat()} for d in done],
-        "questions_answered": [a | {"at": a["at"].isoformat()} for a in answered],
-    }
+    return comparison, done, rounds.answered_since(since_fresh, closed_at, in_scope)
+
+
+def rounds_reader(
+    review: rounds.ReviewRounds,
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    marks: plan.RemediationPlan,
+    asked: questions.OpenQuestions,
+) -> RoundsReader:
+    """The lead's rounds and the round comparison, as the chat's `compare_rounds` reads them."""
+    return RoundsReader(
+        listed=lambda: review.listed(memory.user_id, memory.profile_id, memory.fresh_start()),
+        compared=lambda chosen: _compared(chosen, profile, memory, saver, marks, asked),
+    )
 
 
 def _control_of(profile: ComplianceProfile, control_id: str, failed: str) -> IsaControl:
@@ -2068,6 +2100,9 @@ def chat(
     memory: UserMemory,
     run: Annotated[AssessmentRun, Depends(assessment_run)],
     running: Running,
+    review: ReviewRounds,
+    marks: RemediationPlan,
+    asked: OpenQuestions,
 ) -> Iterable[ServerSentEvent]:
     """The chat agent's reply to the compliance lead's message (vouch.chat_agent), knowing the
     page and control they are on: first a `thread` event, the chat thread's `thread_id` to send
@@ -2097,7 +2132,8 @@ def chat(
 
     yield ServerSentEvent(event="thread", data={"thread_id": thread_id})
     try:
-        tools = ChatTools(profile, memory, run, spending, running, record)
+        reader = rounds_reader(review, profile, memory, run.saver, marks, asked)
+        tools = ChatTools(profile, memory, run, spending, running, record, reader)
         chat = chat_context(
             models.for_chat(chosen, callbacks=[meter], answer_language=profile.answer_language),
             tools,
