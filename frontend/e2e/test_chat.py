@@ -8,9 +8,9 @@ import json
 import pytest
 from dossier_cards import click_on_card
 from fonts import FONTS_SETTLED
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 from touch_targets import small_targets
-from unbreakable import LONG_QUOTES
+from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST
 
 # Wide enough to pin the chat at any width from 360px to 720px: pinning is offered from 1402px, and the
 # page keeps 1042px beside it (chatWidth.ts, #465).
@@ -387,6 +387,14 @@ def test_a_message_gets_vouchs_formal_reply(page: Page, chat_url):
     expect(field).to_have_value("")
 
 
+def fulfil_reply(route: Route, thread_id: str, text: str) -> None:
+    """Answers a routed chat message with `text` as Vouch's whole reply, in the chat's
+    server-sent events: no model call."""
+    events = [("thread", {"thread_id": thread_id}), ("token", {"text": text}), ("done", {})]
+    sse = "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
+    route.fulfill(status=200, content_type="text/event-stream", body=sse)
+
+
 # Two list shapes a model writes (#223): numbers across blank lines, and an item's indented sub-bullets.
 LISTS = {
     "blank lines": "Schritte:\n1. a\n\n2. b\n\n3. c",
@@ -397,12 +405,9 @@ LISTS = {
 def test_a_numbered_list_stays_one_list_across_blank_lines_and_sub_bullets(page: Page, chat_url):
     """Each message is answered with the list shape it names, as a routed reply: no model call."""
 
-    def answer(route):
+    def answer(route: Route) -> None:
         body = route.request.post_data_json
-        text = LISTS.get(body.get("message", ""), "Hello.")
-        events = [("thread", {"thread_id": "t-223"}), ("token", {"text": text}), ("done", {})]
-        sse = "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
-        route.fulfill(status=200, content_type="text/event-stream", body=sse)
+        fulfil_reply(route, "t-223", LISTS.get(body.get("message", ""), "Hello."))
 
     page.route("**/api/chat", answer)
     open_page(page, chat_url, WIDE)
@@ -428,7 +433,7 @@ def test_a_numbered_list_stays_one_list_across_blank_lines_and_sub_bullets(page:
 LOG_WIDTH = (
     "async (log) => {"
     + FONTS_SETTLED
-    + "  return { scroll: log.scrollWidth, room: log.clientWidth }\n}"
+    + "  return { wide: log.scrollWidth, room: log.clientWidth }\n}"
 )
 """The chat log's width against its box's, once the fonts have settled."""
 
@@ -443,12 +448,9 @@ def test_a_quote_holding_a_long_link_or_path_stays_inside_the_chat(page: Page, c
         f'- <cite doc="logging-policy">{quote}</cite>' for quote in LONG_QUOTES
     )
 
-    def answer(route):  # the chat's opening greeting is a POST too: it gets a plain hello
+    def answer(route: Route) -> None:  # the chat's opening greeting is a POST too: a plain hello
         asked = route.request.post_data_json.get("message") == question
-        text = cited if asked else "Hello."
-        events = [("thread", {"thread_id": "t-538"}), ("token", {"text": text}), ("done", {})]
-        sse = "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
-        route.fulfill(status=200, content_type="text/event-stream", body=sse)
+        fulfil_reply(route, "t-538", cited if asked else "Hello.")
 
     page.route("**/api/chat", answer)
     open_page(page, chat_url, width)
@@ -460,8 +462,11 @@ def test_a_quote_holding_a_long_link_or_path_stays_inside_the_chat(page: Page, c
     log = chat(page).get_by_role("log")
     for quote in LONG_QUOTES:
         expect(log.locator("blockquote").filter(has_text=quote)).to_have_count(1)
+    quotes = page.evaluate(LONG_QUOTES_LEAST, {"box": ".bubble-log", "hide": False})
+    assert len(quotes) == len(LONG_QUOTES), quotes
+    assert all(q["wide"] <= q["room"] for q in quotes), (width, quotes)
     measured = log.evaluate(LOG_WIDTH)
-    assert measured["scroll"] <= measured["room"], (width, measured)
+    assert measured["wide"] <= measured["room"], (width, measured)
 
 
 def test_with_the_chat_endpoint_down_a_message_shows_and_the_typed_text_stays(page: Page, chat_url):

@@ -21,7 +21,7 @@ from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from test_working_paper import as_company
 from touch_targets import small_targets
-from unbreakable import LONG_QUOTES, UNBREAKABLE
+from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, UNBREAKABLE, with_long_quotes
 
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
@@ -361,31 +361,11 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(page: Page, request, go
                 assert days and all(lines == 1 for lines in days), (profile, width, days)
 
 
-CONTROLS_WIDTH = (
-    "async (el) => {"
-    + FONTS_SETTLED
-    + """  const table = el.querySelector('table.report-controls')
-  const box = table.parentElement
-  return { wide: Math.max(table.scrollWidth, box.scrollWidth), room: box.clientWidth }
-}"""
-)
-"""The controls table's width (its own or its box's scroll width) and its box's, once the fonts
-have settled."""
-
-
-def with_long_quotes(page: Page, profile: str) -> None:
-    """The profile's report as served (as_company's header: this route answers before its), with
-    an accepted control's quotes holding LONG_QUOTES: one quote each, copying its first."""
-
-    def patched(route: Route) -> None:
-        headers = {**route.request.headers, "x-vouch-profile": profile}
-        served = route.fetch(headers=headers).json()
-        control = next(c for c in served["controls"] if c["status"] == "accepted" and c["quotes"])
-        first = control["quotes"][0]
-        control["quotes"] = [{**first, "quote": quote} for quote in LONG_QUOTES]
-        route.fulfill(json=served)
-
-    page.route("**/api/report", patched)
+def long_report_quotes(served: dict) -> None:
+    """An accepted control's quotes hold LONG_QUOTES, one each, copying its first quote."""
+    control = next(c for c in served["controls"] if c["status"] == "accepted" and c["quotes"])
+    first = control["quotes"][0]
+    control["quotes"] = [{**first, "quote": quote} for quote in LONG_QUOTES]
 
 
 @pytest.mark.parametrize("width", [701, 390])
@@ -394,29 +374,24 @@ def test_a_quote_holding_a_long_link_or_path_does_not_widen_the_controls_table(
 ):
     """#538: a quote broke only at hyphens or spaces (#511), and the quote row spans the controls
     table, so a link, a signed link or a path widened the table to its own width (653 in 603 at
-    701, 645 in 324 at 390). A token too long for the line breaks anywhere, as #530's columns do.
-    Alpenwerk's table is about 16px too wide at 701 with its served quotes already (its Verdict
-    column, a separate bug): there it is no wider with the long ones."""
+    701, 645 in 324 at 390). A token too long for the line breaks anywhere, as #530's columns do:
+    each such quote's least width fits the table's box. Measured on the quote in one page load, so
+    it holds whatever the Verdict column does (#550)."""
     page.set_viewport_size({"width": width, "height": 900})
     for profile in ("nordlicht", "alpenwerk"):
         accepted(page.request, report_url, "4.1.2", profile)
         page.unroute_all()
         as_company(page, profile)
-        served = open_report(page, report_url)
-        expect(served.locator("table.report-controls blockquote").first).to_be_visible()
-        before = served.evaluate(CONTROLS_WIDTH)
+        with_long_quotes(page, "**/api/report", profile, long_report_quotes)
 
-        with_long_quotes(page, profile)
         report = open_report(page, report_url)
         quotes = report.locator("table.report-controls blockquote")
         for quote in LONG_QUOTES:
             expect(quotes.filter(has_text=quote)).to_have_count(1)
-        after = report.evaluate(CONTROLS_WIDTH)
+        measured = page.evaluate(LONG_QUOTES_LEAST, {"box": ".table-wrap", "hide": False})
 
-        if profile == "alpenwerk" and width == 701:
-            assert after["wide"] <= before["wide"] + 1, (profile, width, before, after)
-        else:
-            assert after["wide"] <= after["room"], (profile, width, after)
+        assert len(measured) == len(LONG_QUOTES), measured
+        assert all(q["wide"] <= q["room"] for q in measured), (profile, width, measured)
 
 
 def test_at_390_each_row_of_both_tables_reads_as_a_stacked_card(
