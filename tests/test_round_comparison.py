@@ -6,7 +6,6 @@ comparison, remediation done since and questions answered since directly; then t
 through the HTTP API on both backends and in both goals.
 """
 
-from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -147,7 +146,9 @@ def test_scope_changes_are_new_since_and_out_of_scope_since_left_out_of_the_coun
     assert changes[b] == ("new-since", None, "evidenced", False)
     assert changes[c][0] == "unchanged"
     assert shown["changes"] == {"better": 0, "worse": 0, "new": 0, "unchanged": len(IDS) - 2}
-    assert shown["readiness"]["accepted"] == {"now": 1, "then": 0}
+    # then counts the round as it closed: a, out of scope now, was accepted
+    assert shown["readiness"]["accepted"] == {"now": 1, "then": 1}
+    assert shown["readiness"]["by_verdict"]["evidenced"] == {"now": 1, "then": 1}
 
 
 def test_controls_come_in_the_base_frameworks_order_each_with_its_chapter():
@@ -176,23 +177,25 @@ def test_a_control_waiting_for_review_is_proposed_and_counted_under_its_earlier_
     assert shown["readiness"]["by_verdict"]["evidenced"] == {"now": 0, "then": 1}
 
 
-def test_remediation_items_done_since_the_close_are_listed_with_their_control_and_when():
-    a, b = IDS[:2]
-    history = [replace(seeded(i, "evidenced", "accepted"), thread_id=f"t-{i}") for i in (a, b)]
+def test_remediation_items_done_since_the_close_in_scope_now_are_listed_with_control_and_when():
+    a, b, c = IDS[:3]
+    control_of = {f"t-{i}": i for i in (a, b, c)}
     marked = {
         ("t-" + a, "M1"): Mark(None, AT + HOUR, "Done."),
         ("t-" + a, "M2"): Mark(None, AT - HOUR, "Before."),  # done before the close
         ("t-" + b, "M1"): Mark("low", None, None),  # not done
+        ("t-" + c, "M1"): Mark(None, AT + HOUR, "Done."),  # c out of scope now
+        ("t-other", "M1"): Mark(None, AT + HOUR, "Done."),  # a thread not listed
     }
 
-    done = rounds.done_since(history, marked, AT)
+    done = rounds.done_since(control_of, marked, AT, in_scope={a, b})
 
     assert done == [
         {"control_id": a, "requirement_id": "M1", "at": AT + HOUR},
     ]
 
 
-def test_open_questions_answered_since_the_close_are_listed_with_their_control_and_when():
+def test_open_questions_answered_since_the_close_in_scope_now_are_listed_with_control_and_when():
     def question(i: int, answered_at: datetime | None) -> OpenQuestion:
         return OpenQuestion(
             i, IDS[i], "Who?", "IT", date(2026, 12, 1), AT - 2 * HOUR,
@@ -200,8 +203,10 @@ def test_open_questions_answered_since_the_close_are_listed_with_their_control_a
         )  # fmt: skip
 
     asked = [question(0, AT + HOUR), question(1, AT - HOUR), question(2, None)]
+    asked.append(question(3, AT + HOUR))  # out of scope now
+    in_scope = set(IDS[:3])
 
-    assert rounds.answered_since(asked, AT) == [
+    assert rounds.answered_since(asked, AT, in_scope) == [
         {"control_id": IDS[0], "question_id": 0, "at": AT + HOUR}
     ]
 

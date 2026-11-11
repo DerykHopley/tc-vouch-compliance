@@ -97,6 +97,7 @@ from vouch.isa import (
 from vouch.language import lead_statement_label, stale_reason, statement_note
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
+    Entry,
     Memory,
     newest_by_control,
     process_checkpointer,
@@ -1441,7 +1442,10 @@ def _plan_reads(
 
 
 def _accepted_earlier(
-    memory: Memory, saver: BaseCheckpointSaver, latest: dict[str, Assessment]
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    latest: dict[str, Assessment],
+    entries: list[Entry] | None = None,
 ) -> dict[str, Assessment]:
     """Each control whose newest assessment waits for review: its newest accepted assessment
     before that one, listed since the fresh start (a control with none left out), which the
@@ -1451,7 +1455,7 @@ def _accepted_earlier(
         return {}
     load = assessment_loader(saver, scope=memory.scope)
     found: dict[str, Assessment] = {}
-    for entry in memory.entries():  # newest first
+    for entry in memory.entries() if entries is None else entries:  # newest first
         control_id = entry.control_id
         if control_id not in waiting or control_id in found:
             continue
@@ -1592,7 +1596,6 @@ def round_comparison(
     profile: Profile,
     memory: UserMemory,
     saver: Checkpointer,
-    items: RemediationItems,
     marks: RemediationPlan,
     asked: OpenQuestions,
 ) -> dict[str, Any]:
@@ -1611,11 +1614,14 @@ def round_comparison(
     if chosen.before_fresh_start:
         raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
     scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
-    earlier = _accepted_earlier(memory, saver, latest)
-    history, _, marked = _plan_reads(memory, saver, items, marks)
+    entries = memory.entries()  # newest first, since the fresh start
+    earlier = _accepted_earlier(memory, saver, latest, entries)
+    control_of = {e.thread_id: e.control_id for e in entries}
+    marked = marks.marks(memory.user_id, memory.profile_id, list(control_of))
+    in_scope = {c.id for c in scope.applicable}
     since_fresh = questions.since(asked.listed(memory.user_id, memory.profile_id), fresh_start)
-    done = rounds.done_since(history, marked, closed_at)
-    answered = rounds.answered_since(since_fresh, closed_at)
+    done = rounds.done_since(control_of, marked, closed_at, in_scope)
+    answered = rounds.answered_since(since_fresh, closed_at, in_scope)
     return {
         "round": _listed(chosen),
         **rounds.round_comparison(
