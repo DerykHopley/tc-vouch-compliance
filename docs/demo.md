@@ -33,8 +33,9 @@ and records, drafts a verdict for each requirement with the exact quotes behind 
 what to fix. Vouch drafts; the lead decides.
 
 The lead has been at it for a while already: a review round, "Q2 2026", is closed, and the next,
-"Q3 2026", is open, with every control reviewed once. Starting Nordlicht afresh puts it back in
-exactly this demo state each time, so every rehearsal starts from the same place.
+"Q3 2026", is open, with every control reviewed once. A developer's **Reset demo**, on the
+Developer page, puts Nordlicht back in exactly this demo state each time, so every rehearsal
+starts from the same place.
 
 After the audit, the same lead keeps going: no audit is planned, but the company wants its own
 security to improve, round by round, with a plan its team can follow.
@@ -51,23 +52,23 @@ security to improve, round by round, with a plan its team can follow.
 - The top bar must name **Nordlicht Komponenten GmbH**, the current company. If it names another,
   make Nordlicht current: in the user menu (your initials, top right), choose **Developer page**,
   and under "Companies" select **Make current** in Nordlicht Komponenten GmbH's row.
-- Start Alpenwerk afresh, so step 5's 1.6.2 shows **Assess**, not **Assess again**: on the
-  Developer page, under "Companies", select **Make current** in Alpenwerk Präzision GmbH's row.
-  Then in the user menu choose **Start Alpenwerk Präzision GmbH afresh…** and OK the question.
-  Back on the Developer page, select **Make current** in Nordlicht Komponenten GmbH's row.
-- Start Nordlicht afresh before each run: in the user menu, choose **Start Nordlicht Komponenten
-  GmbH afresh…** and OK the question. Nordlicht is back in its demo state: "Q2 2026" closed,
-  "Review round: Q3 2026" open, every control "Accepted", and the chat opens a new conversation,
-  so each run starts from the same place. Nothing is deleted: the report's audit trail still lists
-  every earlier rehearsal's entries. Wait until no assessment is running, or Vouch asks you to.
-- Restoring the demo state runs on the scripted fake model, so it costs nothing, but it uses one
-  of the day's 3 profile passes. When they are used up, the fresh start still clears Nordlicht and
-  says the demo state couldn't be restored: rehearse Part 1 at most three times a day.
-- The Overview must read "Goal: Audit readiness". A fresh start keeps the goal: if Part 2 left it
-  on Internal improvement, select **Change goal**, then the **Change goal** that appears with the
-  question in its place.
-- A fresh start doesn't give back assessments: the earlier rehearsals still count towards
-  today's limit.
+- Reset Alpenwerk, so step 5's 1.6.2 shows **Assess**, not **Assess again**: on the Developer
+  page, under "Companies", select **Reset demo** in Alpenwerk Präzision GmbH's row and confirm.
+  Alpenwerk is left empty: nothing assessed, no rounds closed.
+- Reset Nordlicht before each run: in the same list, select **Reset demo** in Nordlicht
+  Komponenten GmbH's row and confirm; the question names the company and says the demo state
+  replaces its progress. Nordlicht is back in its demo state, the same every time: "Q2 2026"
+  closed, "Review round: Q3 2026" open, every control "Accepted". A reset deletes the company's
+  earlier progress and history, the audit trail of earlier rehearsals included, so each run starts
+  from the same place. Wait until no assessment is running.
+- Reset demo runs the demo story on the scripted fake model, so it costs nothing, and its work
+  doesn't count against the day's limits.
+- The Overview must read "Goal: Audit readiness". If it reads Internal improvement, select
+  **Change goal**, then the **Change goal** that appears with the question in its place.
+- A reset doesn't give back the assessments a rehearsal made: they still count towards today's
+  limit.
+- Use Reset demo, not **Start afresh** in the user menu: Start afresh is the lead's own action,
+  which keeps the history and starts Nordlicht empty, without the demo state.
 - Each assessment counts towards your daily limit. One run of the script makes two (5.1.1 and
   1.6.2) and two or three chat messages.
 
@@ -170,9 +171,9 @@ Budgets: 0:30 + 1:30 + 1:15 + 0:50 + 1:15 + 1:30 = 6 minutes 50 seconds.
 Start the app on your own machine as [setup](setup.md#run-the-app) says (`scripts/dev.sh`, then
 open the URL it prints). It runs on the scripted fake model, offline and free, with no sign-in:
 you are the local user (the user menu shows **LU**), a developer, so the user menu offers
-**Developer page** and Make current works as on the live app. Start Nordlicht afresh in the user
-menu first, as on the live app, so it opens in its demo state. The fake covers 1.1.1, 1.6.2, 4.1.2
-and 5.1.1, so the steps run as on the live app, with one difference:
+**Developer page**, where Make current and Reset demo work as on the live app. Reset Nordlicht
+and Alpenwerk first, as on the live app, so Nordlicht opens in its demo state. The fake covers
+1.1.1, 1.6.2, 4.1.2 and 5.1.1, so the steps run as on the live app, with one difference:
 
 - **Step 4:** the fake recognises only some phrasings
   ([features](features.md#3-ask-a-question)): ask "What's missing for 5.1.1?" or "Is there
@@ -196,12 +197,11 @@ model** only, so its verdicts are the same in every run and nothing costs money.
   ([setup](setup.md#run-the-app)), then open the URL it prints. You are the local user (the user
   menu shows **LU**), and **Nordlicht Komponenten GmbH** is the current company, named in the top
   bar. On the local app everything lives in the running process, the current company and the
-  day's 3 profile passes included, so a restart starts every count from nothing.
-- Then start Nordlicht afresh: in the user menu, choose **Start Nordlicht Komponenten GmbH
-  afresh…** and OK the question. Nordlicht is back in its demo state, on the scripted fake model:
-  a lead's earlier work, with "Q2 2026" closed and "Q3 2026" open. It uses one of the day's 3
-  profile passes; when they are used up, it says the demo state couldn't be restored: restart the
-  local app and start afresh again.
+  day's limits included, so a restart starts every count from nothing.
+- Then reset Nordlicht: in the user menu, choose **Developer page**, and under "Companies" select
+  **Reset demo** in Nordlicht Komponenten GmbH's row and confirm. Nordlicht is back in its demo
+  state, on the scripted fake model: a lead's earlier work, with "Q2 2026" closed and "Q3 2026"
+  open. Then select **Overview** in the top bar.
 - Check the demo state is there: the Overview reads "Goal: Audit readiness", "Review round: Q3
   2026, open since" today, "12 of 12 controls accepted", and a section "Compared with Q2 2026".
 
@@ -324,8 +324,7 @@ The company and its answers below are invented for the demo; any name works.
   menu shows **LU**), a developer: the user menu offers **Developer page** and **Set up a
   company**. The top bar names **Nordlicht Komponenten GmbH**, the current company.
 - Creating a company runs one profile pass, which counts towards the local app's daily limit of
-  3 passes (Part 2's fresh start on Nordlicht uses one too). When a pass is refused, restart the
-  app.
+  3 passes. After three rehearsals in one run of the app, restart it.
 
 ### The steps
 
@@ -463,5 +462,5 @@ are refused). It isn't in the timed steps.
   id (`hafenblick-logistik-gmbh-2`), since a removed company's id is never used again.
 - Or restart the local app: without a database, the companies made in setup live in the running
   process, so a restart drops them, and the profile pass count with them.
-- **Fresh start** in the user menu (**Start Nordlicht Komponenten GmbH afresh…**) still serves
-  Parts 1 and 2: it doesn't touch the companies made in setup.
+- **Reset demo** on the Developer page still serves Parts 1 and 2: it resets only the company in
+  whose row you select it, never the companies made in setup.
