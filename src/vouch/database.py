@@ -1053,6 +1053,21 @@ class Database:
                 return False, None, None
         return bool(kept and kept["kept"]), open_round, closed
 
+    def listed_rounds(self, user_id: str, profile_id: str) -> list[dict[str, Any]]:
+        """Every review round the user keeps under the profile, in the order opened (#571), each
+        a mapping of `name`, `opened_at`, `closed_at` and `results`. Before vouch-db-setup made
+        the table, none (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                return conn.execute(
+                    f"SELECT name, opened_at, closed_at, results FROM {ROUNDS_TABLE} "
+                    "WHERE user_id = %s AND profile_id = %s ORDER BY id",
+                    (user_id, profile_id),
+                ).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", ROUNDS_TABLE)
+                return []
+
     def start_round(
         self,
         user_id: str,

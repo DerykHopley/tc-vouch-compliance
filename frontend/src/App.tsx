@@ -19,6 +19,9 @@ import TopBar from './TopBar.tsx'
 import UserMenu from './UserMenu.tsx'
 import type { Theme } from './user.ts'
 import { type Run, useAssessment } from './useAssessment.ts'
+import RoundComparisonView from './RoundComparison.tsx'
+import { forgetScrolls } from './roundComparison.ts'
+import { COMPANY_PATH, roundPath } from './rounds.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
 
@@ -30,21 +33,21 @@ function startingTheme(): Theme {
 }
 
 type View = { name: 'dossier' } | { name: 'report' } | { name: 'company' } | { name: 'developer' } | { name: 'setup' }
-  | { name: 'paper'; controlId: string }
+  | { name: 'paper'; controlId: string } | { name: 'round'; number: number }
 
 export const DEVELOPER_PATH = '/developer'
 export const SETUP_PATH = '/developer/setup'
 const REPORT_PATH = '/report'
-const COMPANY_PATH = '/company'
 const DOCUMENTS_PATH = '/documents' // the documents' own page before #495: it leads to the Company tab
 const CONTROL_PATH = /^\/controls\/([^/]+)$/
+const ROUND_PATH = /^\/company\/rounds\/([1-9]\d{0,8})$/
 
 /** Each view's address: a control's working paper at /controls/<id>, the readiness report at /report, the Company page
  * at /company (#495, #505), the developer page at /developer and its company setup at /developer/setup (#403), the
  * Dossier at /. */
 const pathOf = (view: View) =>
   view.name === 'paper' ? controlPath(view.controlId) : view.name === 'report' ? REPORT_PATH
-    : view.name === 'company' ? COMPANY_PATH : view.name === 'developer' ? DEVELOPER_PATH
+    : view.name === 'company' ? COMPANY_PATH : view.name === 'round' ? roundPath(view.number) : view.name === 'developer' ? DEVELOPER_PATH
       : view.name === 'setup' ? SETUP_PATH : '/'
 
 /** The page the chat says the lead is on for the view shown: company setup is the developer page's, and the Company
@@ -52,7 +55,7 @@ const pathOf = (view: View) =>
  * panels (#505 left the chat's page out of scope; a 'company' page would change the chat's prompt and its version).
  * The not-found page (no view shown) speaks as the Dossier, where its way back leads. */
 const chatPage = (shown: View['name'] | null): PageContext['page'] =>
-  shown === 'setup' ? 'developer' : shown === 'company' ? 'documents' : shown ?? 'dossier'
+  shown === 'setup' ? 'developer' : shown === 'company' || shown === 'round' ? 'documents' : shown ?? 'dossier'
 
 /** The view an address shows; the Dossier for one it does not know, and the Company tab for /documents, the documents'
  * old address (#495). An id with a broken escape stays as written, so its paper says not found. */
@@ -61,6 +64,8 @@ function viewAt(path: string): View {
   if (path === SETUP_PATH) return { name: 'setup' }
   if (path === REPORT_PATH) return { name: 'report' }
   if (path === COMPANY_PATH || path === DOCUMENTS_PATH) return { name: 'company' }
+  const round = ROUND_PATH.exec(path)
+  if (round) return { name: 'round', number: Number(round[1]) }
   const control = CONTROL_PATH.exec(path)
   if (!control) return { name: 'dossier' }
   try {
@@ -141,6 +146,14 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     return viewAt(pathname)
   })
   const [focusHeading, setFocusHeading] = useState(arrival !== null) // ends with the first move to another view
+  // The round comparison a working paper was opened from (#573): that control's breadcrumb leads back there, until
+  // another view; another control's paper, reached by a link from it, has the Overview's.
+  const [paperFrom, setPaperFrom] = useState<{ number: number; name: string; controlId: string } | null>(null)
+  /** Off to a view other than a paper or a comparison: no breadcrumb back, and no comparison's old scroll (#573). */
+  const leaveRounds = () => {
+    setPaperFrom(null)
+    forgetScrolls()
+  }
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
@@ -153,7 +166,9 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
         return
       }
       setFocusHeading(false)
-      setView(viewAt(window.location.pathname))
+      const next = viewAt(window.location.pathname)
+      if (next.name !== 'paper' && next.name !== 'round') leaveRounds()
+      setView(next)
     }
     // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -171,6 +186,8 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
   const showView = (next: View) => {
     const path = pathOf(next)
     if (path !== shownPath.current && !mayLeave()) return false // the view shown again asks nothing
+    if (next.name !== 'paper') setPaperFrom(null)
+    if (next.name !== 'paper' && next.name !== 'round') forgetScrolls()
     if (window.location.pathname !== path) window.history.pushState(null, '', path)
     setFocusHeading(false)
     setView(next)
@@ -220,7 +237,8 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     ? overview.state.overview.controls.find((c) => c.id === view.controlId)
     : undefined
   const notFound = view.name === 'paper' && overview.state.status === 'ready' && !control ? view.controlId : null
-  const shown: View['name'] | null = view.name === 'report' || view.name === 'company' ? view.name
+  const shown: View['name'] | null = view.name === 'report' || view.name === 'company' || view.name === 'round'
+    ? view.name
     : (view.name === 'developer' || view.name === 'setup') && developer ? view.name : control ? 'paper'
     : notFound !== null ? null : 'dossier'
   // The paper's control's newest stored assessment (#38), read as its paper opens; null while that read is out. None
@@ -325,7 +343,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
               onClick={(e) => { e.preventDefault(); go({ name: 'dossier' }) }}>Overview</a>
             <a href={REPORT_PATH} aria-current={shown === 'report' ? 'page' : undefined}
               onClick={(e) => { e.preventDefault(); go({ name: 'report' }) }}>Report</a>
-            <a href={COMPANY_PATH} aria-current={shown === 'company' ? 'page' : undefined}
+            <a href={COMPANY_PATH} aria-current={shown === 'company' || shown === 'round' ? 'page' : undefined}
               onClick={(e) => { e.preventDefault(); go({ name: 'company' }) }}>Company</a>
           </nav>
           <UserMenu name={userName} theme={theme} onTheme={() => setTheme(other)} onSignOut={onSignOut}
@@ -339,6 +357,13 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
           <CompanyPage overview={overview.state} onRetryOverview={overview.retry} onGoalChanged={changedGoal}
             onRoundChanged={overview.roundChanged} arriving={arriving} goalNotSet={goalNotSet}
             documentsReloads={documentsReloads} />
+        )
+        : view.name === 'round' ? (
+          <RoundComparisonView key={view.number} number={view.number}
+            names={overview.state.status === 'ready' ? overview.state.overview : undefined}
+            onRounds={() => showView({ name: 'company' })} onOpen={(controlId, name) => {
+              if (showView({ name: 'paper', controlId })) setPaperFrom({ number: view.number, name, controlId })
+            }} />
         )
         : shown === 'developer' && developer ? (
           <main>
@@ -362,6 +387,8 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
               run={paperRun ?? idle} checking={paperRun === null}
               passing={passing} onAssess={() => { if (!passing) void start(control.id) }} onOpen={(id) => open(id, false)}
               onOverview={() => showView({ name: 'dossier' })} onReviewed={noteReviewed} onRefresh={refresh}
+              back={paperFrom?.controlId === control.id ? { label: `Compared with ${paperFrom.name}`, href: roundPath(paperFrom.number),
+                onBack: () => showView({ name: 'round', number: paperFrom.number }) } : undefined}
               onItemDecided={noteItem} onQuestionsChanged={() => void refreshOverview()} />
           </main>
         )

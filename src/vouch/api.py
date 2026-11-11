@@ -97,6 +97,7 @@ from vouch.isa import (
 from vouch.language import lead_statement_label, stale_reason, statement_note
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
+    Entry,
     Memory,
     newest_by_control,
     process_checkpointer,
@@ -1441,7 +1442,10 @@ def _plan_reads(
 
 
 def _accepted_earlier(
-    memory: Memory, saver: BaseCheckpointSaver, latest: dict[str, Assessment]
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    latest: dict[str, Assessment],
+    entries: list[Entry] | None = None,
 ) -> dict[str, Assessment]:
     """Each control whose newest assessment waits for review: its newest accepted assessment
     before that one, listed since the fresh start (a control with none left out), which the
@@ -1451,7 +1455,7 @@ def _accepted_earlier(
         return {}
     load = assessment_loader(saver, scope=memory.scope)
     found: dict[str, Assessment] = {}
-    for entry in memory.entries():  # newest first
+    for entry in memory.entries() if entries is None else entries:  # newest first
         control_id = entry.control_id
         if control_id not in waiting or control_id in found:
             continue
@@ -1563,6 +1567,69 @@ def close_round(
         raise HTTPException(status_code=409, detail=str(error)) from None
     assert closed.closed_at is not None
     return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
+
+
+def _listed(listed: rounds.ListedRound) -> dict[str, Any]:
+    opened, closed = listed.opened_at, listed.closed_at
+    return {
+        "number": listed.number,
+        "name": listed.name,
+        "opened_at": None if opened is None else opened.isoformat(),
+        "closed_at": None if closed is None else closed.isoformat(),
+        "before_fresh_start": listed.before_fresh_start,
+    }
+
+
+@router.get("/rounds")
+def list_rounds(review: ReviewRounds, memory: UserMemory) -> dict[str, Any]:
+    """The user's review rounds under the profile, oldest first (the open one last), each
+    numbered from 1 in the order opened, and the default choice to compare with (#571): the
+    number of the last round closed since the fresh start, or None."""
+    listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
+    return {"rounds": [_listed(r) for r in listed], "default": rounds.default_choice(listed)}
+
+
+@router.get("/rounds/{number}/comparison")
+def round_comparison(
+    number: int,
+    review: ReviewRounds,
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    marks: RemediationPlan,
+    asked: OpenQuestions,
+) -> dict[str, Any]:
+    """The round comparison (#571): now against the closed round numbered `number`, control by
+    control, with readiness then and now, and the remediation items done and open questions
+    answered since it closed. An unknown number is a 404; the open round, or one closed before
+    the fresh start, a 409."""
+    fresh_start = memory.fresh_start()
+    listed = review.listed(memory.user_id, memory.profile_id, fresh_start)
+    if not 1 <= number <= len(listed):
+        raise HTTPException(status_code=404, detail="No review round has that number.")
+    chosen = listed[number - 1]
+    closed_at = chosen.closed_at
+    if closed_at is None:
+        raise HTTPException(status_code=409, detail=rounds.STILL_OPEN)
+    if chosen.before_fresh_start:
+        raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
+    scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    entries = memory.entries()  # newest first, since the fresh start
+    earlier = _accepted_earlier(memory, saver, latest, entries)
+    control_of = {e.thread_id: e.control_id for e in entries}
+    marked = marks.marks(memory.user_id, memory.profile_id, list(control_of))
+    in_scope = {c.id for c in scope.applicable}
+    since_fresh = questions.since(asked.listed(memory.user_id, memory.profile_id), fresh_start)
+    done = rounds.done_since(control_of, marked, closed_at, in_scope)
+    answered = rounds.answered_since(since_fresh, closed_at, in_scope)
+    return {
+        "round": _listed(chosen),
+        **rounds.round_comparison(
+            chosen.results, scope.controls, scope.applicable, latest, earlier
+        ),
+        "remediation_done": [d | {"at": d["at"].isoformat()} for d in done],
+        "questions_answered": [a | {"at": a["at"].isoformat()} for a in answered],
+    }
 
 
 def _control_of(profile: ComplianceProfile, control_id: str, failed: str) -> IsaControl:
