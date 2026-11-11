@@ -15,8 +15,8 @@ Cloud Run" and "the walking skeleton has no secrets").
 > deploys with the secrets and the Cloud SQL instance: see "Secrets and access" below.
 
 > *Unverified:* nothing here has run against a real project yet. The first deploy is #15. The
-> wizard's own behaviour is *checked* with fake `gcloud`, `docker`, `curl` and `secret-tool`
-> (`tests/test_deploy_wizard.py`). Each claim below says *checked* (and where) or *unverified*.
+> wizard's own behaviour is *checked* with fake `gcloud`, `docker`, `curl`, `secret-tool`,
+> `cloud-sql-proxy` and `uv` (`tests/test_deploy_wizard.py`). Each claim below says *checked* (and where) or *unverified*.
 
 ## What runs where
 
@@ -64,6 +64,10 @@ After a week, check Billing, then Reports, filtered to the project: expected 0.
 - `gcloud`, signed in: `gcloud auth login`. On Fedora Atomic, install it in your home folder (as for Patch)
   (`curl https://sdk.cloud.google.com | bash`), then open a new terminal.
 - Docker, and a checkout of the code to deploy.
+- `cloud-sql-proxy` (v2; `gcloud components install cloud-sql-proxy`) and `uv`: the wizard runs
+  `vouch-db-setup` through the proxy before each deploy ("The database"). The proxy signs in with
+  Application Default Credentials (`gcloud auth application-default login`); the wizard checks
+  they are there at its Sign-in step, before anything is built.
 
 Run every command from the repo root, in one shell:
 
@@ -175,9 +179,10 @@ keyring's `clerk-vouch-publishable`; the browser gets it anyway) and `CLERK_AUTH
    account is the service's own (`spec.template.spec.serviceAccountName`), or, for a service with
    none, Compute Engine's default, `<project number>-compute@developer.gserviceaccount.com`
    (*checked*, Cloud Run's service identity page). Granting a role twice changes nothing.
-4. **Database:** it finds the instance's connection name and prints the two commands that run
-   `vouch-db-setup` against it ("The database", below). Without `--db-ready` it stops there; once
-   setup has run, `scripts/deploy-wizard.sh --db-ready` goes on to the deploy.
+4. **Database:** it finds the instance's connection name and runs `vouch-db-setup` against it
+   itself, from the image it deploys, through a Cloud SQL Auth Proxy on a private Unix socket ("The
+   database", below). If setup fails it
+   stops there, with nothing deployed. `--db-ready` is still accepted and does nothing (#594).
 5. **Deploy:** step 5's command, each secret pinned to the version it ended with in step 2.
 
 **Pinned versions, not `:latest`.** Env-var secrets are read when an instance starts (*checked*,
@@ -205,7 +210,7 @@ gcloud secrets add-iam-policy-binding CLERK_SECRET_KEY --member=serviceAccount:$
 **Rotate a secret:** put the new value in the keyring
 (`scripts/store-secret.sh clerk-vouch-secret < new-value`, which stores it whole, multi-line too,
 and says only its size: `secret-tool store` typed at its prompt keeps one line only, #130), then
-run `scripts/deploy-wizard.sh --db-ready`. It adds a version only to the secret that changed and
+run `scripts/deploy-wizard.sh`. It adds a version only to the secret that changed and
 deploys a new revision pinned to it; the old revision keeps the old version until then. Once the
 new revision is healthy, revoke the old key where it was issued (Clerk, OpenRouter, Cloud SQL's
 user), then disable its version:
@@ -237,7 +242,7 @@ secret-tool lookup service langfuse-cloud-secret-key | gcloud secrets create LAN
   --replication-policy=automatic --data-file=- --project=$PROJECT_ID
 ```
 
-then `scripts/deploy-wizard.sh --db-ready`. A project in Langfuse's US region also needs a
+then `scripts/deploy-wizard.sh`. A project in Langfuse's US region also needs a
 `LANGFUSE_BASE_URL=https://us.cloud.langfuse.com` line in `wizard.env` (not a secret); without
 one, traces go to the EU region, `https://cloud.langfuse.com`. To turn tracing off again, disable
 every version of either secret (or delete it) and deploy. `scripts/dev.sh` drops both keys, so a
@@ -292,7 +297,8 @@ from Secret Manager as `VOUCH_DATABASE_URL` (the wizard does both, "Secrets and 
 wizard's health check (step 11) passes only on `"status": "ok"` *and* `"database": "reachable"`
 (*checked*, `tests/test_deploy_wizard.py`). A deploy without the database URL or the instance
 flag fails there, with the logs command. The wizard's deploy carries both (#118). On
-`"needs-setup"` it stops with the two `vouch-db-setup` commands (*checked*,
+`"needs-setup"` it stops, saying setup ran on `VOUCH_DATABASE_URL`'s pinned version just before
+the deploy, so check that `cloudsql-vouch-run-url` names the database the service uses (*checked*,
 `tests/test_deploy_wizard.py`). It says Done only when this run deployed: answering n to the
 deploy ends with "Nothing was deployed" and a non-zero exit, since health would pass on the old
 revision (#123; *checked*, `tests/test_deploy_wizard.py`).
@@ -302,9 +308,39 @@ flags page for ~0.5 GB instances). It checks each connection before use and reco
 instance restart. A wrong password or a missing database: the app answers 503 after a 5 s wait,
 and `vouch-db-setup` names the reason at once.
 
-**LangGraph's tables, once per database** (and again after an upgrade of
-`langgraph-checkpoint-postgres`; it only migrates). Run from your machine through the Cloud SQL
-Auth Proxy, in two terminals from the repo root:
+**The wizard runs `vouch-db-setup` before every deploy (#594),** so a deploy whose code needs a
+new table or column never goes live before the database has it. In its Database step it:
+
+- starts `cloud-sql-proxy $SQL_INSTANCE --unix-socket <folder> --quiet` on a private folder
+  (`mktemp -d`, mode 700), so no port is involved: 5432, where your own proxy and servers listen,
+  is never touched, and no other program can take the proxy's place;
+- waits until the proxy's socket, `<folder>/<connection name>/.s.PGSQL.5432`, is there while the
+  proxy still runs (up to 30 s), and stops if the proxy exits first;
+- pipes `VOUCH_DATABASE_URL`, the version the deploy pins, from Secret Manager to
+  `scripts/proxy-database-url.py`. That helper reads it as the app does (psycopg's
+  `conninfo_to_dict`: `postgresql://`, `postgres://` or key=value), sets its host to the socket's
+  folder, drops any other address, port and every TLS setting (the socket is plain; the proxy
+  encrypts), and keeps the user, password and database as stored. It then runs setup with the
+  result in its environment: the value is never printed, an argument, a file or a shell variable;
+- runs setup from **the image being deployed**, not this checkout:
+  `docker run --rm --network none --user <you> -v <folder>:/cloudsql-proxy:z -e VOUCH_DATABASE_URL <image>:<tag> vouch-db-setup`.
+  When you skip the build, that is the registry's tag the deploy uses. `--user` lets the container
+  reach your private folder (the image runs as `nobody`); this assumes Docker runs containers as
+  root-mapped users (rootful Docker), as here;
+- stops the proxy and removes its folder on every exit: done, a failed step, Ctrl-C or a kill (a trap);
+- stops with nothing deployed if the proxy or setup fails, or you answer n.
+
+(*checked* with fakes, `tests/test_deploy_wizard.py`.)
+
+**Setup only adds what's missing.** `vouch-db-setup` creates the tables, columns and constraints
+the code needs that the database lacks, and runs LangGraph's own migrations; a second run does
+nothing. It deletes nothing, and fills a column only as part of adding it (the audit trail's
+`reviewer_name`, #154; *checked* in `vouch.database`). A change that rewrites data already stored
+(a backfill, a column whose meaning changes, a split table) still needs its own reviewed step,
+run and checked before the deploy that relies on it.
+
+By hand, as before (once per database, and again after an upgrade of
+`langgraph-checkpoint-postgres`; it only migrates), from the repo root in two terminals:
 
 ```bash
 cloud-sql-proxy $SQL_INSTANCE --port 5432          # terminal 1: leave it running
@@ -316,8 +352,8 @@ it has run, changing the model answers 503 and the log says to run `vouch-db-set
 It prints `vouch-db-setup: LangGraph's tables are ready (checkpointer and store)`, or why it
 couldn't connect, without the password.
 
-**Run `vouch-db-setup` again after any deploy that adds a table** (as #43 adds the remediation
-items' table). It is safe to rerun. Until it has run, what reads the new table carries on as if
+**A deploy that adds a table** (as #43 adds the remediation items' table) needs `vouch-db-setup`
+again: the wizard does that before the deploy. It is safe to rerun. Until it has run, what reads the new table carries on as if
 it were empty, and what writes to it answers 503, the log saying to run `vouch-db-setup`.
 
 **When the trial ends** the instance stops unless the billing account is upgraded, as Cloud Run
@@ -367,8 +403,8 @@ env -u VOUCH_DATABASE_URL uv run vouch-seed-demo-round --api http://127.0.0.1:80
 
 ## Redeploy, roll back, remove
 
-- **Redeploy after a change:** `scripts/deploy-wizard.sh --db-ready` (once `vouch-db-setup` has
-  run). It skips what exists and builds the next tag.
+- **Redeploy after a change:** `scripts/deploy-wizard.sh`. It skips what exists, builds the next
+  tag and runs `vouch-db-setup` before the deploy.
 - **Roll back:** `gcloud run revisions list --service=vouch --region=$REGION`, then
   `gcloud run services update-traffic vouch --region=$REGION --to-revisions=<revision>=100`.
 - **Delete an old image:** `gcloud artifacts docker images delete $IMAGE:<tag> --delete-tags`.
