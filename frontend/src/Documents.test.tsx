@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Documents from './Documents.tsx'
@@ -16,7 +16,7 @@ const ENGLISH: DocumentWords = {
   title: 'Documents',
   sources: { policies: 'Policies', records: 'Records', patch: 'Patch' },
   columns: { document: 'Document', kind: 'Kind', version: 'Version', approved: 'Approved', review: 'Review',
-    status: 'Status', cited_by: 'Cited by' },
+    status: 'Status', cited_by: 'Cited by', origin: 'Origin' },
   kinds: { documented: 'Documented', implemented: 'Implemented' },
   cycles: { quarterly: 'Quarterly', 'half-yearly': 'Half-yearly', yearly: 'Yearly', 'two-yearly': 'Two-yearly' },
   stale: 'Stale',
@@ -24,25 +24,31 @@ const ENGLISH: DocumentWords = {
     unknown_cycle: 'unknown review cycle' },
   current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
   not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.',
+  origins: { 'built-in': 'Built in', added: 'Added' },
 }
 
 const AUTHENTICATION: ProfileDocument = {
   id: 'authentication-standard', source: 'policies', title: 'Authentication standard', kind: 'documented',
   version: '3.1', approval_date: '2026-04-08', review_cycle: 'two-yearly', stale_because: null, stale: false,
-  language: 'en', cited_by: ['1.1.1', '4.1.2'],
+  language: 'en', cited_by: ['1.1.1', '4.1.2'], origin: 'built-in',
 }
-const BACKUP: ProfileDocument = { ...BACKUP_POLICY, cited_by: [] }
+const BACKUP: ProfileDocument = { ...BACKUP_POLICY, cited_by: [], origin: 'built-in' }
 const RECORD: ProfileDocument = {
   id: 'mfa-rollout-record', source: 'records', title: 'MFA roll-out record', kind: 'implemented', version: '2026-Q3',
   approval_date: '2026-10-01', review_cycle: 'yearly', stale_because: null, stale: false, language: 'en',
-  cited_by: ['4.1.2'],
+  cited_by: ['4.1.2'], origin: 'built-in',
+}
+const ADDED: ProfileDocument = {
+  id: 'visitor-badge-policy', source: 'policies', title: 'Visitor badge policy', kind: 'documented', version: '2',
+  approval_date: '2026-10-01', review_cycle: 'yearly', stale_because: null, stale: false, language: null,
+  cited_by: [], origin: 'added',
 }
 const NORDLICHT: ProfileDocuments = { documents: [AUTHENTICATION, BACKUP, RECORD], words: ENGLISH, words_language: 'en' }
 
 /** The panel as the Company page shows it: read with useDocuments, then shown. */
 function Shown() {
   const { state, tryAgain } = useDocuments()
-  return <Documents state={state} tryAgain={tryAgain} />
+  return <Documents state={state} tryAgain={tryAgain} onAdded={() => {}} />
 }
 
 const json = (body: unknown, status = 200) => Promise.resolve(Response.json(body, { status }))
@@ -66,11 +72,12 @@ describe('the Documents panel of the Company page (ticket 505: its title an h2)'
     expect(tables.map((t) => t.querySelector('caption')?.textContent)).toEqual(['Policies', 'Records'])
     const [policies] = tables
     expect(within(policies).getAllByRole('columnheader').map((h) => h.textContent))
-      .toEqual(['Document', 'Kind', 'Version', 'Approved', 'Review', 'Status', 'Cited by'])
+      .toEqual(['Document', 'Kind', 'Version', 'Approved', 'Review', 'Status', 'Cited by', 'Origin'])
     const [authentication, backup] = within(policies).getAllByRole('row').slice(1)
     const cells = (row: HTMLElement) => within(row).getAllByRole('cell').map((c) => c.textContent)
-    expect(cells(authentication)).toEqual(['Documented', '3.1', '2026-04-08', 'Two-yearly', 'Current', '1.1.1, 4.1.2'])
-    expect(cells(backup).slice(3)).toEqual(['Yearly', 'Stale', 'Not cited yet'])
+    expect(cells(authentication)).toEqual(['Documented', '3.1', '2026-04-08', 'Two-yearly', 'Current', '1.1.1, 4.1.2',
+      'Built in'])
+    expect(cells(backup).slice(3)).toEqual(['Yearly', 'Stale', 'Not cited yet', 'Built in'])
     expect(within(backup).getByText('Not cited yet').className).toBe('report-muted')
   })
 
@@ -108,5 +115,54 @@ describe('the Documents panel of the Company page (ticket 505: its title an h2)'
     expect(await screen.findByRole('article', { name: 'Documents' })).toBeTruthy()
     expect(fetch.mock.calls.filter(([url]) => url === '/api/documents')).toHaveLength(2)
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('adding documents on the Documents panel (ticket 585)', () => {
+  it('labels built-in documents "Built in" with no action, and offers Add new version on an added one', async () => {
+    serve(() => json({ ...NORDLICHT, documents: [AUTHENTICATION, ADDED] }))
+    render(<Shown />)
+
+    const sheet = await screen.findByRole('article', { name: 'Documents' })
+    const [authentication, added] = within(sheet).getAllByRole('row').slice(1)
+    expect(within(authentication).getByText('Built in')).toBeTruthy()
+    expect(within(authentication).queryAllByRole('button')).toHaveLength(0)
+    expect(within(added).getByText('Added')).toBeTruthy()
+    expect(within(added).getByRole('button', { name: 'Add new version of Visitor badge policy' })).toBeTruthy()
+  })
+
+  it('Add document opens the form, Cancel closes it; Add new version opens it with the title fixed', async () => {
+    serve(() => json({ ...NORDLICHT, documents: [ADDED] }))
+    render(<Shown />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add document' }))
+    expect(screen.getByRole('form', { name: 'Add document' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form')).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add new version of Visitor badge policy' }))
+    const form = screen.getByRole('form', { name: 'Add new version' })
+    expect((within(form).getByLabelText('Title') as HTMLInputElement).value).toBe('Visitor badge policy')
+    expect(within(form).getByText('Vouch will add this as version 3.')).toBeTruthy()
+  })
+
+  it('after an add, closes the form and asks the page to read the documents again', async () => {
+    const fetch = vi.fn((url: string) => url === '/api/documents' && fetch.mock.calls.length > 1
+      ? json({ document: { id: 'x', version: 1 } }, 201) : json(NORDLICHT))
+    vi.stubGlobal('fetch', fetch)
+    const onAdded = vi.fn()
+    function Page() {
+      const { state, tryAgain } = useDocuments()
+      return <Documents state={state} tryAgain={tryAgain} onAdded={onAdded} />
+    }
+    render(<Page />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add document' }))
+    await userEvent.upload(screen.getByLabelText('File (.md or .txt)'), new File(['# x'], 'x.md'))
+    await userEvent.type(screen.getByLabelText('Title'), 'X')
+
+    await userEvent.click(within(screen.getByRole('form')).getByRole('button', { name: 'Add document' }))
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('form')).toBeNull()
   })
 })

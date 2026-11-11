@@ -1,7 +1,8 @@
-import { type ReactNode, useLayoutEffect, useRef } from 'react'
+import { type ReactNode, useRef } from 'react'
 import { goalWording } from './overview.ts'
 import { profileTag, type ProfileSummary } from './profiles.ts'
 import type { Goal } from './report.ts'
+import { useHeightVar } from './useHeightVar.ts'
 
 /** The company the top bar names: the overview's company once it is read, the listed profile's summary before. */
 export type BarCompany = Pick<ProfileSummary, 'company' | 'country' | 'answer_language'>
@@ -15,19 +16,7 @@ export type BarCompany = Pick<ProfileSummary, 'company' | 'country' | 'answer_la
 export default function TopBar({ children, goal, language, company }:
   { children?: ReactNode; goal?: Goal; language?: string; company?: BarCompany }) {
   const bar = useRef<HTMLElement>(null)
-  useLayoutEffect(() => {
-    const el = bar.current
-    if (!el) return
-    const root = document.documentElement
-    const measure = () => root.style.setProperty('--top-bar', `${el.getBoundingClientRect().height}px`)
-    measure()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(el)
-    return () => {
-      observer?.disconnect()
-      root.style.removeProperty('--top-bar')
-    }
-  }, [])
+  useHeightVar(bar, '--top-bar')
   const { label, lang } = goalWording(goal, language)
   return (
     <header ref={bar} className="top">

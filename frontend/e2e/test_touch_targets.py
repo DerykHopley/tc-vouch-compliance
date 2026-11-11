@@ -1,6 +1,7 @@
 """Every page's controls meet the touch-target floor at phone width (docs/design.md, Accessibility
 floor). The pages on the profiles server, which reaches the developer page; the chat on its own."""
 
+import base64
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -47,6 +48,27 @@ def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url,
     if path == "/":
         quotes = page.get_by_role("region", name="What the evidence says")
         expect(quotes.get_by_role("link").first).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_add_document_form_and_add_new_version_are_at_least_44px(page: Page, documents_url):
+    # #585: on the documents' own server, a document added first so a row offers Add new version.
+    added = page.request.post(
+        f"{documents_url}/api/documents",
+        data={
+            "filename": "touch.txt",
+            "content": base64.b64encode(b"Touch targets.").decode(),
+            "title": "Touch target note",
+            "kind": "record",
+            "approval_date": "2026-10-01",
+            "review_cycle": "yearly",
+        },
+    )
+    assert added.status == 201, added.status
+    at_phone_width(page, f"{documents_url}/company")
+    page.get_by_role("article", name="Documents").get_by_role("button", name="Add document").click()
+    expect(page.get_by_role("form", name="Add document")).to_be_visible()
+    expect(page.get_by_role("button", name="Add new version of Touch target note")).to_be_visible()
     assert small_targets(page) == []
 
 
