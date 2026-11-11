@@ -216,7 +216,9 @@ def _assess(client: Client, control_id: str) -> str:
 
 def _check_fresh(client: Client) -> None:
     rounds = _json(client, "GET", "/api/rounds")["rounds"]
-    if any(r["name"] == ROUND_NAME and not r["before_fresh_start"] for r in rounds):
+    if any(
+        r["name"] == ROUND_NAME and r["closed_at"] and not r["before_fresh_start"] for r in rounds
+    ):  # open, it is Reset demo's first round (#605): not seeded yet
         raise AlreadySeeded(f'"{ROUND_NAME}" is there already: nothing written.')
     if _json(client, "GET", "/api/assessments")["assessments"]:
         raise NotFresh(
@@ -230,9 +232,11 @@ def seed(client: Client, say: Callable[[str], None] | None = None) -> Seeded:
     NotFresh before writing anything, and SeedError for a request the app refuses."""
     say = say or (lambda _: None)
     _check_fresh(client)
-    if _json(client, "GET", "/api/overview")["rounds"]["current"] is not None:
-        _call(client, "POST", "/api/rounds/close")
-    _call(client, "POST", "/api/rounds", {"name": ROUND_NAME})
+    current = _json(client, "GET", "/api/overview")["rounds"]["current"]
+    if current is None or current["name"] != ROUND_NAME:  # Reset demo opens it (#605)
+        if current is not None:
+            _call(client, "POST", "/api/rounds/close")
+        _call(client, "POST", "/api/rounds", {"name": ROUND_NAME})
     say(f'Started "{ROUND_NAME}"; running a profile pass on the fake model.')
 
     passed = _json(client, "POST", "/api/profile-pass")["assessments"]

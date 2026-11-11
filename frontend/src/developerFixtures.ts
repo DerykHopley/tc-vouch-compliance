@@ -18,8 +18,8 @@ export const DEVELOPER_SETTINGS = {
   broken_profiles: [],
   companies: [],
   listed_companies: [
-    { id: 'alpenwerk', company: 'Alpenwerk Präzision GmbH', country: 'Austria', answer_language: 'de' },
-    { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en' },
+    { id: 'alpenwerk', company: 'Alpenwerk Präzision GmbH', country: 'Austria', answer_language: 'de', demo: false },
+    { id: 'nordlicht', company: 'Nordlicht Komponenten GmbH', country: 'Germany', answer_language: 'en', demo: true },
   ],
   current_company: 'nordlicht',
   prices: [

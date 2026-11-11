@@ -180,6 +180,11 @@ class ProcessRounds:
         self._rounds: dict[tuple[str, str], list[Round]] = {}
         self._guard = threading.Lock()
 
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's rounds under the profile gone."""
+        with self._guard:
+            self._rounds = {k: v for k, v in self._rounds.items() if k[1] != profile_id}
+
     def current(self, user_id: str, profile_id: str) -> Round | None:
         kept = self._kept(user_id, profile_id)
         if not kept:
@@ -195,6 +200,12 @@ class ProcessRounds:
     def _kept(self, user_id: str, profile_id: str) -> list[Round]:
         with self._guard:
             return list(self._rounds.get((user_id, profile_id), []))
+
+    def open_first(self, user_id: str, profile_id: str, name: str, at: datetime) -> None:
+        """Reset demo (#605): the user's first round under the profile, named `name` and open
+        since `at`, with nothing kept before it (as Database.reset_company's `first_round`)."""
+        with self._guard:
+            self._rounds[(user_id, profile_id)] = [Round(name, at, None)]
 
     def listed(
         self, user_id: str, profile_id: str, fresh_start: datetime | None

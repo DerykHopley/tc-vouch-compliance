@@ -205,11 +205,12 @@ def test_the_developer_page_carries_the_current_and_listed_companies_on_read_and
 
     assert read["current_company"] == "nordlicht"
     assert [c["id"] for c in read["listed_companies"]] == listed_ids
-    assert read["listed_companies"] == profiles  # as GET /api/profiles lists them
+    demo = [p | {"demo": p["id"] == "nordlicht"} for p in profiles]  # #605
+    assert read["listed_companies"] == demo  # as GET /api/profiles lists them, marked
     assert changed["current_company"] == MUSTERFIRMA_ID
-    assert changed["listed_companies"] == profiles
+    assert changed["listed_companies"] == demo
     assert limit["current_company"] == MUSTERFIRMA_ID
-    assert limit["listed_companies"] == profiles
+    assert limit["listed_companies"] == demo
 
 
 class CompaniesDown:

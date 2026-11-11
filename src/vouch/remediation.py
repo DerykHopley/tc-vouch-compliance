@@ -279,6 +279,11 @@ class ProcessItems:
         self._items: dict[ItemKey, DecidedItem] = {}
         self._guard = threading.Lock()
 
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's decisions under the profile gone."""
+        with self._guard:
+            self._items = {k: v for k, v in self._items.items() if k.profile_id != profile_id}
+
     @contextmanager
     def deciding(self, key: str) -> Iterator[Deciding]:
         with self._trail().holding(key, wait=True) as saver:

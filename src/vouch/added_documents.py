@@ -419,6 +419,12 @@ class ProcessAddedDocuments:
         with self._guard:
             return _ordered(self._kept.get(profile_id, []))
 
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): the profile's documents gone, every version."""
+        with self._guard:
+            self._kept.pop(profile_id, None)
+            _refresh(self._index, profile_id, [])
+
     def everything(self) -> list[AddedDocument]:
         with self._guard:
             return _ordered(d for docs in self._kept.values() for d in docs)
