@@ -331,22 +331,28 @@ def restoring_client(app: FastAPI, user_id: str, name: str) -> Client:
         setattr(seeding.state, key, getattr(app.state, key))
     guard: SpendingGuard = app.state.spending
     seeding.state.spending = PassesOnly(guard.store, guard.clock)
-    return TestClient(seeding)  # never entered: its lifespan would close `app`'s stores
+    # Never entered: its lifespan would close `app`'s stores. A server error is a 500, so a
+    # SeedError, never an exception out of the seed.
+    return TestClient(seeding, raise_server_exceptions=False)
 
 
-def prepare(client: Client, app: FastAPI, user_id: str) -> None:
+def prepare(client: Client, app: FastAPI, user_id: str) -> str | None:
     """Before the fresh start that restores the demo state (#605): the seed's profile pass
     checked against the lead's limit (OverLimit, nothing written), then the open round closed,
     so it closes before the fresh start and isn't listed since: every restore then lists the
-    same rounds, "Q2 2026" closed and "Q3 2026" open. `seed` follows the fresh start."""
+    same rounds, "Q2 2026" closed and "Q3 2026" open. `seed` follows the fresh start. Returns
+    the name of the round closed, or None."""
     from vouch.spending import DailyLimitReached
 
     try:
         app.state.spending.check_profile_pass(user_id)
     except DailyLimitReached as error:
         raise OverLimit(error.message()) from None
-    if _json(client, "GET", "/api/overview")["rounds"]["current"] is not None:
-        _call(client, "POST", "/api/rounds/close")
+    current = _json(client, "GET", "/api/overview")["rounds"]["current"]
+    if current is None:
+        return None
+    _call(client, "POST", "/api/rounds/close")
+    return str(current["name"])
 
 
 # --- The command -------------------------------------------------------------------------------

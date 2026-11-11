@@ -2249,13 +2249,14 @@ def fresh_start(
         raise HTTPException(status_code=409, detail=RUNNING_NO_FRESH_START)
     client = None
     refused: demo_round.SeedError | None = None
+    closed: str | None = None
     try:
         if demo:  # its limit checked and the open round closed before the fresh start
             client = demo_round.restoring_client(
                 request.app, user.id, reviewer_name(request, user, settings)
             )
             try:
-                demo_round.prepare(client, request.app, user.id)
+                closed = demo_round.prepare(client, request.app, user.id)
             except demo_round.SeedError as error:
                 client, refused = None, error
         at = memory.start_afresh()
@@ -2263,23 +2264,28 @@ def fresh_start(
         running.release(memory.scope)
     answer: dict[str, Any] = {"fresh_start": at.isoformat()}
     if refused is not None:
-        answer["demo"] = _not_restored(memory, refused)
+        answer["demo"] = _not_restored(memory, refused, closed)
     elif client is not None:
         try:
             demo_round.seed(client)
             left, limit = request.app.state.spending.profile_passes_left(user.id)
             answer["demo"] = {"restored": True, "passes_left": left, "passes": limit}
         except demo_round.SeedError as error:
-            answer["demo"] = _not_restored(memory, error)
+            answer["demo"] = _not_restored(memory, error, closed)
     return answer
 
 
-def _not_restored(memory: Memory, error: demo_round.SeedError) -> dict[str, Any]:
+def _not_restored(
+    memory: Memory, error: demo_round.SeedError, closed: str | None
+) -> dict[str, Any]:
     """The demo state not restored (#605): stopped partway, the lead's progress starts afresh
-    again, so nothing half-seeded is listed; the answer says why."""
+    again, so nothing half-seeded is listed; the answer says why, and names the round the
+    restore closed before it stopped (`closed`), as that close stays."""
     log.warning("the demo round could not be restored: %s", error)
     memory.start_afresh()
     reason = str(error) if isinstance(error, demo_round.OverLimit) else DEMO_NOT_RESTORED
+    if closed is not None:
+        reason += f' The open round, "{closed}", was closed first.'
     return {"restored": False, "reason": reason}
 
 

@@ -374,7 +374,8 @@ uses 1 of the day's profile passes, on the fake model, and says how many are lef
 assessments don't count against the day's assessments. With the passes used up it starts afresh
 without the demo state (the rounds as a plain fresh start leaves them) and says why. Each reset
 closes the open round before the fresh start, so every reset lists the same rounds since:
-"Q2 2026" closed and "Q3 2026" open. Other companies start afresh empty. The command below is still useful to seed a user without
+"Q2 2026" closed and "Q3 2026" open. If the restore then stops (a server error), that close
+stays: the app starts afresh with no round open, and its message names the round it closed. Other companies start afresh empty. The command below is still useful to seed a user without
 signing in as them, or a preview from a script.
 
 Rounds are kept per user, so it seeds one user. **Find your user id** in the Clerk dashboard:

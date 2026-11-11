@@ -8,12 +8,15 @@ Through the HTTP API on both backends (memory, and Postgres under `scripts/test-
 
 from typing import Any
 
+import pytest
 import test_memory
 from fastapi.testclient import TestClient
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
 from test_memory import DEMO_CONTROL, app_on, set_daily_limit
 
+from vouch import api
 from vouch.api import PROFILE_HEADER
+from vouch.database import DatabaseUnavailable
 from vouch.demo_round import ROUND_NAME
 
 database_url = test_memory.database_url
@@ -128,3 +131,35 @@ def test_the_restores_assessments_dont_count_against_the_daily_limit(database_ur
 
     assert restored["restored"] is True
     assert own.status_code == 200, own.text  # the lead's one assessment today is still theirs
+
+
+@pytest.mark.parametrize("error", [DatabaseUnavailable, RuntimeError])
+def test_a_restore_that_fails_on_the_server_clears_and_says_the_round_was_closed(
+    database_url, users, monkeypatch, error
+):
+    lead, _ = users
+    started = api.rounds.start
+
+    def fails_on_q3(*args: Any, **kwargs: Any) -> Any:
+        if "Q3 2026" in args or kwargs.get("name") == "Q3 2026":
+            raise error("down mid-seed")
+        return started(*args, **kwargs)
+
+    monkeypatch.setattr(api.rounds, "start", fails_on_q3)
+    with TestClient(app_on(database_url)) as client:
+        answer = reset(client, lead)
+        assessed = client.get("/api/assessments", headers=lead).json()["assessments"]
+
+    assert answer["demo"]["restored"] is False
+    assert 'The open round, "First round", was closed first.' in answer["demo"]["reason"]
+    assert assessed == []
+
+
+def test_a_restore_refused_before_anything_is_written_closes_no_round(database_url, users):
+    lead, _ = users
+    with TestClient(app_on(database_url)) as client:
+        for _ in range(3):
+            assert client.post("/api/profile-pass", headers=lead).status_code == 200
+        answer = reset(client, lead)
+
+    assert "closed" not in answer["demo"]["reason"]
