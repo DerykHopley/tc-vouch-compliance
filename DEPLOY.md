@@ -66,7 +66,8 @@ After a week, check Billing, then Reports, filtered to the project: expected 0.
 - Docker, and a checkout of the code to deploy.
 - `cloud-sql-proxy` (v2; `gcloud components install cloud-sql-proxy`) and `uv`: the wizard runs
   `vouch-db-setup` through the proxy before each deploy ("The database"). The proxy signs in with
-  Application Default Credentials (`gcloud auth application-default login`).
+  Application Default Credentials (`gcloud auth application-default login`); the wizard checks
+  they are there at its Sign-in step, before anything is built.
 
 Run every command from the repo root, in one shell:
 
@@ -179,7 +180,8 @@ keyring's `clerk-vouch-publishable`; the browser gets it anyway) and `CLERK_AUTH
    none, Compute Engine's default, `<project number>-compute@developer.gserviceaccount.com`
    (*checked*, Cloud Run's service identity page). Granting a role twice changes nothing.
 4. **Database:** it finds the instance's connection name and runs `vouch-db-setup` against it
-   itself, through a Cloud SQL Auth Proxy on a free port ("The database", below). If setup fails it
+   itself, from the image it deploys, through a Cloud SQL Auth Proxy on a private Unix socket ("The
+   database", below). If setup fails it
    stops there, with nothing deployed. `--db-ready` is still accepted and does nothing (#594).
 5. **Deploy:** step 5's command, each secret pinned to the version it ended with in step 2.
 
@@ -295,7 +297,8 @@ from Secret Manager as `VOUCH_DATABASE_URL` (the wizard does both, "Secrets and 
 wizard's health check (step 11) passes only on `"status": "ok"` *and* `"database": "reachable"`
 (*checked*, `tests/test_deploy_wizard.py`). A deploy without the database URL or the instance
 flag fails there, with the logs command. The wizard's deploy carries both (#118). On
-`"needs-setup"` it stops with the two `vouch-db-setup` commands (*checked*,
+`"needs-setup"` it stops, saying setup ran on `VOUCH_DATABASE_URL`'s pinned version just before
+the deploy, so check that `cloudsql-vouch-run-url` names the database the service uses (*checked*,
 `tests/test_deploy_wizard.py`). It says Done only when this run deployed: answering n to the
 deploy ends with "Nothing was deployed" and a non-zero exit, since health would pass on the old
 revision (#123; *checked*, `tests/test_deploy_wizard.py`).
@@ -308,14 +311,23 @@ and `vouch-db-setup` names the reason at once.
 **The wizard runs `vouch-db-setup` before every deploy (#594),** so a deploy whose code needs a
 new table or column never goes live before the database has it. In its Database step it:
 
-- picks a free port from 20000 to 31999 at run time, never 5432 (your own proxy and servers use it);
-- starts `cloud-sql-proxy $SQL_INSTANCE --port <port> --address 127.0.0.1 --quiet` and waits until
-  it listens there (up to 30 s);
-- reads `VOUCH_DATABASE_URL` from Secret Manager, the version the deploy pins, into a variable
-  (never printed, never an argument or a file), points its host and port at the proxy
-  (`127.0.0.1:<port>`; the `?host=/cloudsql/...` socket parameter is dropped, the user, password
-  and database kept as stored) and gives it to `uv run vouch-db-setup` in its environment;
-- stops the proxy on every exit: done, a failed step, Ctrl-C or a kill (a trap);
+- starts `cloud-sql-proxy $SQL_INSTANCE --unix-socket <folder> --quiet` on a private folder
+  (`mktemp -d`, mode 700), so no port is involved: 5432, where your own proxy and servers listen,
+  is never touched, and no other program can take the proxy's place;
+- waits until the proxy's socket, `<folder>/<connection name>/.s.PGSQL.5432`, is there while the
+  proxy still runs (up to 30 s), and stops if the proxy exits first;
+- pipes `VOUCH_DATABASE_URL`, the version the deploy pins, from Secret Manager to
+  `scripts/proxy-database-url.py`. That helper reads it as the app does (psycopg's
+  `conninfo_to_dict`: `postgresql://`, `postgres://` or key=value), sets its host to the socket's
+  folder, drops any other address, port and every TLS setting (the socket is plain; the proxy
+  encrypts), and keeps the user, password and database as stored. It then runs setup with the
+  result in its environment: the value is never printed, an argument, a file or a shell variable;
+- runs setup from **the image being deployed**, not this checkout:
+  `docker run --rm --network none --user <you> -v <folder>:/cloudsql-proxy:z -e VOUCH_DATABASE_URL <image>:<tag> vouch-db-setup`.
+  When you skip the build, that is the registry's tag the deploy uses. `--user` lets the container
+  reach your private folder (the image runs as `nobody`); this assumes Docker runs containers as
+  root-mapped users (rootful Docker), as here;
+- stops the proxy and removes its folder on every exit: done, a failed step, Ctrl-C or a kill (a trap);
 - stops with nothing deployed if the proxy or setup fails, or you answer n.
 
 (*checked* with fakes, `tests/test_deploy_wizard.py`.)

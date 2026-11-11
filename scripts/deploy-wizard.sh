@@ -10,14 +10,14 @@ set -euo pipefail
 STEPS=("Sign in" "Keyring" "Project" "Artifact Registry" "Build and push" "Secret Manager" "Access"
   "Database" "Deploy" "URL" "Health check")
 WHAT=(
-  "gcloud is signed in (or it stops with the sign-in command)"
+  "gcloud is signed in, with Application Default Credentials for the proxy (or it stops with the sign-in command)"
   "every keyring entry the deploy needs holds a usable value (or it stops, naming them, before anything changes)"
   "the project id, asked once; the Cloud Run, Artifact Registry, Secret Manager and Cloud SQL Admin APIs on"
   "the image registry \"vouch\" in the region, and docker allowed to push to it"
   "the image from the Dockerfile, tagged one past the registry's highest vN (v1 when it has none)"
   "a secret each for the four secret settings, a new version only when the keyring's value changed; the two Langfuse keys too when you made both there (tracing, #460)"
   "the service's account may read those secrets (Secret Accessor) and reach Cloud SQL (Cloud SQL Client)"
-  "vouch-db-setup against the instance, through a Cloud SQL Auth Proxy on a free port (never 5432), stopped after; a failed setup stops the run before the deploy"
+  "vouch-db-setup from the image being deployed, through a Cloud SQL Auth Proxy on a private Unix socket, stopped after; a failed setup stops the run before the deploy"
   "Cloud Run service \"vouch\": public, min 0 and max 1 instance, each secret's version pinned, the Cloud SQL instance"
   "print the service's address"
   "GET /api/health answers {\"status\": \"ok\", \"database\": \"reachable\"} (or it stops, with the logs command)"
@@ -50,8 +50,8 @@ Deploy Vouch to Google Cloud Run, step by step (DEPLOY.md has the same steps by 
   scripts/deploy-wizard.sh --help
   --db-ready                           # still accepted, does nothing: setup always runs (#594)
 
-Before the deploy it runs vouch-db-setup itself, through a Cloud SQL Auth Proxy it starts on a free
-port and stops after. It skips what already exists, so it is safe to run again. Its plain answers (project id, region)
+Before the deploy it runs vouch-db-setup from the image it deploys, through a Cloud SQL Auth Proxy
+it starts on a private Unix socket and stops after. It skips what already exists, so it is safe to run again. Its plain answers (project id, region)
 stay in deploy/cloudrun/wizard.env, git-ignored; the image tag comes from the registry. Secrets go
 from the keyring to Secret Manager through a pipe: never shown, never an argument, never in a file.
 
@@ -184,82 +184,63 @@ secret_matches_keyring() {
 version_number() { [[ $1 =~ /versions/([0-9]+)$ ]] && printf '%s' "${BASH_REMATCH[1]}"; return 0; }
 
 # --- The database step's helpers (#594) ---
-# listening PORT: true when something on this machine accepts a connection there.
-listening() { (: <>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+# Setup runs in the image this run deploys (its own vouch-db-setup, whatever this checkout holds)
+# and reaches the instance through a Cloud SQL Auth Proxy on a Unix socket in a private folder:
+# no port another program could take first.
+PROXY_WAIT_SECONDS=30          # how long the proxy may take to make its socket
+IN_CONTAINER=/cloudsql-proxy   # where setup's container sees the proxy's socket folder
 
-# free_port: a port nothing listens on, from 20000 to 31999 (below Linux's ephemeral ports), and
-# never 5432, where the owner's own proxy and servers listen.
-free_port() {
-  local port
-  for _ in {1..50}; do
-    port=$((20000 + RANDOM % 12000))
-    (( port != 5432 )) || continue
-    listening "$port" || { printf '%s' "$port"; return 0; }
-  done
-  return 1
-}
-
-# proxied_url URL PORT: URL with its host and port the proxy's, 127.0.0.1:PORT; the user, password,
-# database and every other parameter kept as stored. It splits the URL as libpq does: the user part
-# ends at the first @ or /, so a password keeps its special characters (raw ? # : & or %-encoded);
-# the host part ends at / or ?. The host, hostaddr and port parameters (the Unix-socket form,
-# ?host=/cloudsql/...) are dropped, as they would beat the new host. Fails, printing nothing, on
-# anything but a postgresql:// or postgres:// URL.
-proxied_url() {
-  local scheme rest head user="" hosts path param params=() kept=()
-  [[ $1 =~ ^(postgresql|postgres)://(.*)$ ]] || return 1
-  scheme=${BASH_REMATCH[1]}; rest=${BASH_REMATCH[2]}
-  head=${rest%%[@/]*}
-  if [[ ${rest:${#head}:1} == @ ]]; then user="$head@"; rest=${rest:${#head}+1}; fi
-  hosts=${rest%%[/?]*}; rest=${rest:${#hosts}}
-  path=${rest%%\?*}
-  IFS='&' read -r -a params <<< "${rest:${#path}+1}"
-  for param in "${params[@]}"; do
-    case ${param%%=*} in host|hostaddr|port|'') ;; *) kept+=("$param") ;; esac
-  done
-  printf '%s://%s127.0.0.1:%s%s' "$scheme" "$user" "$2" "$path"
-  if (( ${#kept[@]} )); then (IFS='&'; printf '?%s' "${kept[*]}"); fi
-}
-
-# The proxy this run starts: stopped on every exit (done, a failed step, Ctrl-C or a kill), so it
-# never outlives the wizard. Without job control a background program ignores Ctrl-C, so the
-# trap is what stops it.
-PROXY_PID=""
+# The proxy this run starts and its socket folder: both gone on every exit (done, a failed step,
+# Ctrl-C or a kill), so neither outlives the wizard. Without job control a background program
+# ignores Ctrl-C, so the trap is what stops it.
+PROXY_PID="" SOCKETS=""
 stop_proxy() {
-  [[ -n $PROXY_PID ]] || return 0
-  kill "$PROXY_PID" 2>/dev/null || true
-  wait "$PROXY_PID" 2>/dev/null || true
-  PROXY_PID=""
+  if [[ -n $PROXY_PID ]]; then
+    kill "$PROXY_PID" 2>/dev/null || true
+    wait "$PROXY_PID" 2>/dev/null || true
+    PROXY_PID=""
+  fi
+  if [[ -n $SOCKETS ]]; then rm -rf -- "$SOCKETS"; SOCKETS=""; fi
 }
 trap stop_proxy EXIT
+# These two cover the whole script, not only the database step: Ctrl-C (INT) or a kill (TERM)
+# anywhere ends it through the EXIT trap above.
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# db_setup VERSION: vouch-db-setup against the instance through a proxy on $DB_PORT, which it
-# starts, waits for and stops. The URL is VOUCH_DATABASE_URL's VERSION in Secret Manager, the one
-# the deploy pins: it goes from gcloud's output to a variable to setup's environment, never an
-# argument, a file or the screen. Any failure stops the wizard before the deploy.
+# db_setup VERSION IMAGE: vouch-db-setup from IMAGE against the instance, through a proxy it starts
+# on a private socket folder, waits for and stops. The URL is VOUCH_DATABASE_URL's VERSION in
+# Secret Manager, the one the deploy pins. It goes through a pipe from gcloud to
+# scripts/proxy-database-url.py, which points it at the socket and gives it to `docker run` in its
+# environment (-e by name): never a shell variable (so `bash -x` can't trace it), an argument, a
+# file or the screen. Any failure stops the wizard before the deploy.
 db_setup() {
-  local stored url waited=0
-  stored=$(gcloud secrets versions access "$1" --secret=VOUCH_DATABASE_URL --project="$PROJECT_ID") \
-    || stop "Couldn't read VOUCH_DATABASE_URL version $1 from Secret Manager (above). Nothing was deployed: run this again."
-  url=$(proxied_url "${stored%$'\r'}" "$DB_PORT") \
-    || stop "VOUCH_DATABASE_URL version $1 isn't a postgresql:// URL (not shown), so setup can't reach it through the proxy.
-    Nothing was deployed. Fix the keyring's cloudsql-vouch-run-url, then run scripts/deploy-wizard.sh again."
-  cloud-sql-proxy "$SQL_INSTANCE" --port "$DB_PORT" --address 127.0.0.1 --quiet </dev/null &
+  local socket tick=0
+  # mktemp -d makes it mode 700. Under /tmp, so the socket's path stays inside the 108 bytes a
+  # Unix socket's path may have, whatever TMPDIR is.
+  SOCKETS=$(mktemp -d /tmp/vouch-proxy.XXXXXX)
+  socket="$SOCKETS/$SQL_INSTANCE/.s.PGSQL.5432"  # where cloud-sql-proxy v2 puts a Postgres socket
+  cloud-sql-proxy "$SQL_INSTANCE" --unix-socket "$SOCKETS" --quiet </dev/null &
   PROXY_PID=$!
-  until listening "$DB_PORT"; do
+  # Ready: the proxy still runs and its socket is there, both checked each tick.
+  while :; do
     if ! kill -0 "$PROXY_PID" 2>/dev/null; then
       PROXY_PID=""
-      stop "The Cloud SQL Auth Proxy stopped before it listened (above). Nothing was deployed: fix it, then run this again."
+      stop "The Cloud SQL Auth Proxy stopped before its socket was ready (above). Nothing was deployed: fix it, then run this again."
     fi
-    (( waited++ < 120 )) \
-      || stop "The Cloud SQL Auth Proxy didn't listen on port $DB_PORT within 30 s. Nothing was deployed: run this again."
+    [[ -S $socket ]] && break
+    (( tick++ < PROXY_WAIT_SECONDS * 4 )) \
+      || stop "The Cloud SQL Auth Proxy made no socket within $PROXY_WAIT_SECONDS s. Nothing was deployed: run this again."
     sleep 0.25
   done
-  ok "the proxy listens on 127.0.0.1:$DB_PORT"
-  VOUCH_DATABASE_URL="$url" uv run vouch-db-setup </dev/null \
-    || stop "vouch-db-setup failed (above), and the deploy needs its tables. Nothing was deployed: fix it, then run this again."
+  ok "the proxy's socket is ready"
+  # With pipefail, a failed read fails the pipe (and the helper refuses the empty value it got).
+  # --user: the folder is the owner's alone (700), and the image runs as nobody.
+  gcloud secrets versions access "$1" --secret=VOUCH_DATABASE_URL --project="$PROJECT_ID" \
+    | uv run --frozen python -I scripts/proxy-database-url.py "$IN_CONTAINER/$SQL_INSTANCE" -- \
+      docker run --rm --network none --user "$(id -u):$(id -g)" -v "$SOCKETS:$IN_CONTAINER:z" \
+      -e VOUCH_DATABASE_URL "$2" vouch-db-setup \
+    || stop "vouch-db-setup didn't complete (above), and the deploy needs its tables. Nothing was deployed: fix it, then run this again."
   stop_proxy
   ok "vouch-db-setup ran; the proxy is stopped"
 }
@@ -276,6 +257,13 @@ ACCOUNT=$(query gcloud auth list --filter=status:ACTIVE --format='value(account)
 if [[ $DRY == no ]]; then
   [[ -n "$ACCOUNT" ]] || stop "gcloud isn't signed in. Run: gcloud auth login   (then this wizard again)"
   ok "signed in as $ACCOUNT"
+fi
+# The Cloud SQL Auth Proxy (the Database step) signs in with Application Default Credentials:
+# missing ones stop the run here, before anything is built or pushed. The token goes to /dev/null.
+if has gcloud auth application-default print-access-token; then
+  ok "Application Default Credentials are set (the Cloud SQL Auth Proxy uses them)"
+elif [[ $DRY == no ]]; then
+  stop "Application Default Credentials aren't set, and the Cloud SQL Auth Proxy needs them. Run: gcloud auth application-default login   (then this wizard again)"
 fi
 
 step  # Keyring: before anything changes, so a missing entry stops a run that has done nothing.
@@ -471,16 +459,14 @@ DB_VERSION=""  # the VOUCH_DATABASE_URL version the deploy pins: setup runs on t
 for pin in "${PINNED[@]}"; do
   if [[ $pin == VOUCH_DATABASE_URL=* ]]; then DB_VERSION=${pin##*:}; fi
 done
-if [[ $DRY == yes ]]; then DB_PORT=PORT
-else
-  DB_PORT=$(free_port) || stop "No free port from 20000 to 31999 for the Cloud SQL Auth Proxy. Nothing was deployed: run this again."
-fi
+SETUP_IMAGE="$IMAGE:$TAG"  # the image this run deploys: the new one, else the registry's highest
 say "vouch-db-setup adds the tables and columns this image needs that the database lacks. A change"
 say "that rewrites stored data needs its own reviewed step first (DEPLOY.md, The database)."
-if confirm "Set the database up: vouch-db-setup through a Cloud SQL Auth Proxy on port $DB_PORT, stopped after" \
-  "$(quoted cloud-sql-proxy "$SQL_INSTANCE" --port "$DB_PORT" --address 127.0.0.1 --quiet) &  then
-    VOUCH_DATABASE_URL=<VOUCH_DATABASE_URL:$DB_VERSION, at 127.0.0.1:$DB_PORT> uv run vouch-db-setup"; then
-  db_setup "$DB_VERSION"
+if confirm "Set the database up: vouch-db-setup from $SETUP_IMAGE, through a Cloud SQL Auth Proxy on a private socket, stopped after" \
+  "cloud-sql-proxy $SQL_INSTANCE --unix-socket <private folder> --quiet &  then
+    gcloud secrets versions access $DB_VERSION --secret=VOUCH_DATABASE_URL ... | scripts/proxy-database-url.py ... --
+    docker run --rm --network none -v <private folder>:$IN_CONTAINER:z -e VOUCH_DATABASE_URL $SETUP_IMAGE vouch-db-setup"; then
+  db_setup "$DB_VERSION" "$SETUP_IMAGE"
 elif [[ $RAN == no ]]; then
   stop "vouch-db-setup didn't run, and the deploy needs its tables. Nothing was deployed: run scripts/deploy-wizard.sh again and answer y."
 fi

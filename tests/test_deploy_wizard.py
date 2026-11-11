@@ -3,8 +3,9 @@ each call.
 
 Nothing reaches Google or the real keyring: the fake secret-tool reads planted values from a
 folder, and the fake gcloud keeps its secrets' versions in another, as they came on standard input.
-The fake cloud-sql-proxy listens on the port it's given; the fake uv stands in for vouch-db-setup
-and keeps the database URL it got in a file, never in the call log.
+The fake cloud-sql-proxy makes its Unix socket in the folder it's given; the fake uv runs the real
+URL helper, whose command is the fake `docker run`: it stands in for vouch-db-setup in the image and
+keeps the database URL it got in a file, never in the call log.
 The tests answer the wizard's prompts by their text, as the owner would, not by counting them.
 """
 
@@ -74,12 +75,25 @@ case "$tool $*" in
     if [ "$FAIL_LOOKUP" = "$3:$n" ]; then head -c 12 "$KEYRING/$3"; exit 1; fi
     cat "$KEYRING/$3" ;;
   "gcloud auth list"*) [ -n "$SIGNED_IN" ] && echo owner@example.com ;;
+  "gcloud auth application-default print-access-token"*) [ -n "$ADC" ] || exit 1
+    echo ya29.plantedAccessToken ;;
   "gcloud services list"*) printf '%s\n' $APIS_ON ;;
   "gcloud artifacts docker tags list"*) [ -z "$TAGS_ERROR" ] || { echo "ERROR: $TAGS_ERROR" >&2; exit 1; }
     for t in $TAGS $(cat "$STATE/tags" 2>/dev/null); do
       echo "projects/vouch-demo-123/locations/europe-west1/repositories/vouch/packages/vouch/tags/$t"
     done ;;
   "docker push"*) echo "${2##*:}" >> "$STATE/tags" ;;
+  "docker run"*) printf '%s' "$VOUCH_DATABASE_URL" > "$STATE/setup_url"
+    mount=""; prev=""
+    for a in "$@"; do [ "$prev" = "-v" ] && mount="${a%%:*}"; prev="$a"; done
+    if [ -n "$mount" ] && [ -n "$(find "$mount" -name .s.PGSQL.5432 -type s 2>/dev/null)" ]
+    then echo yes; else echo no; fi > "$STATE/setup_saw_proxy"
+    if [ -n "$SETUP_WAITS" ]; then
+      touch "$STATE/setup_started"; i=0
+      while [ ! -e "$STATE/release" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+    fi
+    [ -z "$SETUP_FAILS" ] || { echo "vouch-db-setup: (fake) couldn't connect" >&2; exit 69; }
+    echo "vouch-db-setup: LangGraph's tables are ready (checkpointer and store)" ;;
   "gcloud projects describe"*"projectNumber"*) echo "$PROJECT_NUMBER" ;;
   "gcloud sql instances describe"*) [ -n "$SQL" ] || exit 1; echo "$SQL" ;;
   "gcloud run services describe"*"serviceAccountName"*) echo "$SERVICE_ACCOUNT" ;;
@@ -105,19 +119,23 @@ exit 0
 """
 
 
-# The two fakes that run as programs of their own (Python, the test's interpreter): the proxy
-# must really listen, so the setup can find it there. The proxy logs its arguments, waits
-# $PROXY_DELAY seconds, then listens on --port until a TERM or INT, which it logs as "stopped";
-# $PROXY_FAILS makes it fail at start. It gives up by itself after 60 s, so a wizard that never
-# stops it can't leave it running. The uv fake logs only its arguments; it keeps the URL it got in
-# $STATE/setup_url and whether the proxy answered at that URL's port in $STATE/setup_saw_proxy.
-# $SETUP_FAILS makes it fail; $SETUP_WAITS makes it wait for $STATE/release.
+# The two fakes that run as programs of their own (Python, the test's interpreter). The proxy
+# logs its arguments and the mode of its --unix-socket folder (in $STATE/socket_dir_mode), waits
+# $PROXY_DELAY seconds, then makes <folder>/<instance>/.s.PGSQL.5432, as cloud-sql-proxy v2 does for
+# Postgres, and keeps it until a TERM or INT, which it logs as "stopped". $PROXY_FAILS makes it fail
+# at start. It gives up by itself after 60 s, so a wizard that never stops it can't leave it
+# running. The uv fake logs its arguments and runs what follows "python" with the test's own
+# interpreter: the real URL helper, which then runs the fake `docker run`.
 FAKE_PROXY = r"""
-import os, signal, socket, sys, time
+import os, signal, socket, stat, sys, time
+from pathlib import Path
 def log(line):
     with open(os.environ["CALLS"], "a") as calls:
         calls.write(line + "\n")
 log("cloud-sql-proxy " + " ".join(sys.argv[1:]))
+folder = Path(sys.argv[sys.argv.index("--unix-socket") + 1])
+mode = oct(stat.S_IMODE(folder.stat().st_mode))[2:]
+(Path(os.environ["STATE"]) / "socket_dir_mode").write_text(mode)
 if os.environ.get("PROXY_FAILS"):
     print("(fake) cloud-sql-proxy: couldn't start", file=sys.stderr)
     sys.exit(1)
@@ -127,44 +145,20 @@ def stopped(signum, frame):
 signal.signal(signal.SIGTERM, stopped)
 signal.signal(signal.SIGINT, stopped)
 time.sleep(float(os.environ.get("PROXY_DELAY") or 0))
-port = int(sys.argv[sys.argv.index("--port") + 1])
-server = socket.socket()
-server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind(("127.0.0.1", port))
+instance = folder / sys.argv[1]
+instance.mkdir()
+server = socket.socket(socket.AF_UNIX)
+server.bind(str(instance / ".s.PGSQL.5432"))
 server.listen()
-server.settimeout(0.2)
-end = time.monotonic() + 60
-while time.monotonic() < end:
-    try:
-        server.accept()[0].close()
-    except OSError:
-        pass
+time.sleep(60)
 log("cloud-sql-proxy gave up: nobody stopped it")
 """
 FAKE_UV = r"""
-import os, re, socket, sys, time
-from pathlib import Path
-state = Path(os.environ["STATE"])
+import os, sys
 with open(os.environ["CALLS"], "a") as calls:
     calls.write("uv " + " ".join(sys.argv[1:]) + "\n")
-url = os.environ.get("VOUCH_DATABASE_URL", "")
-(state / "setup_url").write_text(url)
-found = re.search(r"127\.0\.0\.1:([0-9]+)", url)
-try:
-    socket.create_connection(("127.0.0.1", int(found[1])), timeout=1).close()
-    saw = "yes"
-except (OSError, TypeError):
-    saw = "no"
-(state / "setup_saw_proxy").write_text(saw)
-if os.environ.get("SETUP_WAITS"):
-    (state / "setup_started").touch()
-    end = time.monotonic() + 20
-    while not (state / "release").exists() and time.monotonic() < end:
-        time.sleep(0.05)
-if os.environ.get("SETUP_FAILS"):
-    print("vouch-db-setup: (fake) couldn't connect", file=sys.stderr)
-    sys.exit(69)
-print("vouch-db-setup: LangGraph's tables are ready (checkpointer and store)")
+rest = sys.argv[sys.argv.index("python") + 1:]
+os.execv(sys.executable, [sys.executable, *rest])
 """
 
 
@@ -237,6 +231,8 @@ def run_wizard(
     setup_fails: bool = False,
     interrupt: signal.Signals | None = None,
     missing_tool: str = "",
+    adc: bool = True,
+    bash_x: bool = False,
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -279,9 +275,10 @@ def run_wizard(
         "PROXY_DELAY": str(proxy_delay),
         "SETUP_FAILS": "yes" if setup_fails else "",
         "SETUP_WAITS": "yes" if interrupt else "",
+        "ADC": "yes" if adc else "",
     }
     proc = subprocess.Popen(
-        [BASH, str(WIZARD), *args],
+        [BASH, *(["-x"] if bash_x else []), str(WIZARD), *args],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -357,15 +354,10 @@ def deployed(tmp_path: Path, *args: str, **kwargs):
     return run_wizard(tmp_path, *args, healthy=True, **kwargs)
 
 
-def proxy_port(calls: str) -> int:
-    """The port the wizard gave the one cloud-sql-proxy it started."""
+def socket_folder(calls: str) -> Path:
+    """The --unix-socket folder the wizard gave the one cloud-sql-proxy it started."""
     [start] = [c for c in calls_to(calls, "cloud-sql-proxy ") if c[1] != "stopped"]
-    return int(start[start.index("--port") + 1])
-
-
-def setup_url(tmp_path: Path) -> str:
-    """The VOUCH_DATABASE_URL the fake vouch-db-setup was given."""
-    return (tmp_path / "state" / "setup_url").read_text()
+    return Path(start[start.index("--unix-socket") + 1])
 
 
 def test_the_script_parses():
@@ -482,7 +474,10 @@ def test_a_missing_keyring_entry_stops_before_anything_changes(tmp_path):
     assert "clerk-vouch-publishable" in result.stderr
     assert "clerk-vouch-secret" not in result.stderr  # only what's wrong is named
     gcloud = [" ".join(call) for call in calls_to(calls, "gcloud ")]
-    assert gcloud == ["gcloud auth list --filter=status:ACTIVE --format=value(account)"]
+    assert gcloud == [
+        "gcloud auth list --filter=status:ACTIVE --format=value(account)",
+        "gcloud auth application-default print-access-token",
+    ]
     assert "\ndocker " not in "\n" + calls
     assert list((tmp_path / "state").iterdir()) == []
     assert not (tmp_path / "wizard.env").exists()
@@ -505,7 +500,8 @@ def test_an_entry_of_only_whitespace_or_a_jwt_key_with_no_pem_counts_as_missing(
     assert "openrouter" in result.stderr and "clerk-vouch-jwt-key" in result.stderr
     assert "planted" not in result.stdout + result.stderr + calls
     assert [" ".join(c) for c in calls_to(calls, "gcloud ")] == [
-        "gcloud auth list --filter=status:ACTIVE --format=value(account)"
+        "gcloud auth list --filter=status:ACTIVE --format=value(account)",
+        "gcloud auth application-default print-access-token",
     ]
 
 
@@ -625,76 +621,76 @@ def test_the_service_s_own_account_gets_the_roles_when_it_has_one(tmp_path):
     assert all(f"--member=serviceAccount:{account}" in call for call in bindings)
 
 
-# --- The database step (#594): the wizard runs vouch-db-setup itself, through a proxy -----------
+# --- The database step (#594): vouch-db-setup from the deployed image, through a proxy ----------
 
 RUN_URL = SECRETS["cloudsql-vouch-run-url"][1]
+IN_THE_CONTAINER = f"/cloudsql-proxy/{SQL_INSTANCE}"  # where setup finds the proxy's socket
 
 
-def at_the_proxy(stored: str, port: int) -> dict[str, object]:
-    """libpq's reading of `stored` with its host and port the proxy's: every other part kept."""
-    parts: dict[str, object] = dict(conninfo.conninfo_to_dict(stored))
-    for key in ("host", "hostaddr", "port"):
-        parts.pop(key, None)
-    return parts | {"host": "127.0.0.1", "port": str(port)}
+def setup_steps(calls: str) -> list[str]:
+    """The proxy, the URL helper, setup and the deploy, as called, in order."""
+    starts = ("cloud-sql-proxy", "uv ", "docker run", "gcloud run deploy")
+    return [line for line in calls.splitlines() if line.startswith(starts)]
 
 
-def test_setup_runs_through_a_proxy_on_a_free_port_then_the_proxy_stops_then_the_deploy(tmp_path):
+def test_setup_runs_the_deployed_image_through_a_proxy_socket_then_the_proxy_stops_then_the_deploy(
+    tmp_path,
+):
     result, calls = deployed(tmp_path, proxy_delay=0.5)
     assert result.returncode == 0, result.stdout + result.stderr
-    port = proxy_port(calls)
-    assert port != 5432  # the owner's own proxy and servers use it
-    order = [
-        line
-        for line in calls.splitlines()
-        if line.startswith(("cloud-sql-proxy", "uv ", "gcloud run deploy"))
-    ]
-    assert order[:3] == [
-        f"cloud-sql-proxy {SQL_INSTANCE} --port {port} --address 127.0.0.1 --quiet",
-        "uv run vouch-db-setup",
+    folder = socket_folder(calls)
+    image = f"{IMAGE}:v1"
+    steps = setup_steps(calls)
+    setup = (
+        f"docker run --rm --network none --user {os.getuid()}:{os.getgid()} "
+        f"-v {folder}:/cloudsql-proxy:z -e VOUCH_DATABASE_URL {image} vouch-db-setup"
+    )
+    helper = f"uv run --frozen python -I scripts/proxy-database-url.py {IN_THE_CONTAINER} --"
+    assert steps[:4] == [
+        f"cloud-sql-proxy {SQL_INSTANCE} --unix-socket {folder} --quiet",
+        f"{helper} {setup}",
+        setup,
         "cloud-sql-proxy stopped",
     ]
-    assert order[3].startswith("gcloud run deploy ") and len(order) == 4
-    # The URL is the one the service gets (the version the deploy pins), at the proxy's port...
+    assert steps[4].startswith(f"gcloud run deploy vouch --image={image} ") and len(steps) == 5
+    # The URL is the version the deploy pins, pointed at the socket as the container sees it...
     access = "gcloud secrets versions access 1 --secret=VOUCH_DATABASE_URL --project=vouch-demo-123"
     assert access in calls
-    assert conninfo.conninfo_to_dict(setup_url(tmp_path)) == at_the_proxy(RUN_URL, port)
-    # ...and the proxy was listening there when setup started, though it took half a second.
-    assert (tmp_path / "state" / "setup_saw_proxy").read_text() == "yes"
+    url = (tmp_path / "state" / "setup_url").read_text()
+    assert conninfo.conninfo_to_dict(url)["host"] == IN_THE_CONTAINER
+    # ...the socket was there when setup started, though the proxy took half a second...
+    assert (tmp_path / "state" / "setup_saw_proxy").read_text().strip() == "yes"
+    # ...and its folder was private, and is gone.
+    assert (tmp_path / "state" / "socket_dir_mode").read_text() == "700"
+    assert not folder.exists()
 
 
-@pytest.mark.parametrize(
-    "stored",
-    [
-        f"postgresql://vouch:plantedDbPassword789@/vouch?host=/cloudsql/{SQL_INSTANCE}",
-        f"postgresql://vouch:pl%40nted:p?w#d&x=y@/vouch?host=/cloudsql/{SQL_INSTANCE}",
-        "postgresql://vouch:planted%2F%3A%40@/vouch?host=%2Fcloudsql%2Fvouch-demo-123%3Aeu%3Adb",
-        "postgresql://vouch:planted@10.1.2.3:5432/vouch?sslmode=disable",
-        "postgres://vouch:planted@localhost/vouch?port=5432&hostaddr=10.0.0.1&application_name=v",
-        "postgresql://planted@/vouch?host=/cloudsql/x:y:z&connect_timeout=10",
-    ],
-    ids=["unix-socket", "special-password", "encoded", "tcp", "postgres-scheme", "no-password"],
-)
-def test_setup_gets_the_stored_url_with_the_proxy_s_host_and_port_and_all_else_kept(
-    tmp_path, stored
-):
-    plant(tmp_path, cloudsql_vouch_run_url=stored)
+def test_the_database_url_is_never_printed_or_an_argument(tmp_path):
+    special = f"postgresql://vouch:pl%40nted:p?w#d&x=y@/vouch?host=/cloudsql/{SQL_INSTANCE}"
+    plant(tmp_path, cloudsql_vouch_run_url=special)
     result, calls = deployed(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    port = proxy_port(calls)
-    assert conninfo.conninfo_to_dict(setup_url(tmp_path)) == at_the_proxy(stored, port)
+    url = (tmp_path / "state" / "setup_url").read_text()
+    assert conninfo.conninfo_to_dict(url)["password"] == "pl@nted:p?w#d&x=y"
     seen = calls + result.stdout + result.stderr
-    assert "planted" not in seen
-    assert stored not in seen and setup_url(tmp_path) not in seen
+    assert "planted" not in seen and "pl@nted" not in seen and "pl%40nted" not in seen
+    assert special not in seen and url not in seen
 
 
-def test_a_stored_url_that_isn_t_a_postgresql_one_stops_before_the_proxy_unshown(tmp_path):
-    plant(tmp_path, cloudsql_vouch_run_url="host=/cloudsql/x user=vouch password=planted")
+def test_the_setup_step_never_runs_traced_even_under_bash_x(tmp_path):
+    result, calls = run_wizard(tmp_path, healthy=True, bash_x=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "planted" not in result.stdout + result.stderr + calls
+
+
+def test_a_stored_url_libpq_can_t_read_stops_before_setup_unshown(tmp_path):
+    plant(tmp_path, cloudsql_vouch_run_url="postgresql://vouch:planted@/vouch?nonsense=planted")
     result, calls = deployed(tmp_path)
     assert result.returncode != 0
-    assert "VOUCH_DATABASE_URL" in result.stderr
+    assert "VOUCH_DATABASE_URL" in result.stderr and "Nothing was deployed" in result.stderr
     assert "planted" not in calls + result.stdout + result.stderr
-    assert "cloud-sql-proxy" not in calls and "uv " not in calls
-    assert "gcloud run deploy" not in calls
+    assert not calls_to(calls, "docker run ") and "gcloud run deploy" not in calls
+    assert calls.splitlines()[-1] == "cloud-sql-proxy stopped"
 
 
 def test_a_failed_setup_stops_the_proxy_and_deploys_nothing(tmp_path):
@@ -703,14 +699,16 @@ def test_a_failed_setup_stops_the_proxy_and_deploys_nothing(tmp_path):
     assert "vouch-db-setup" in result.stderr and "Nothing was deployed" in result.stderr
     assert calls.splitlines()[-1] == "cloud-sql-proxy stopped"
     assert "gcloud run deploy" not in calls
+    assert not socket_folder(calls).exists()
     assert "planted" not in calls + result.stdout + result.stderr
 
 
-def test_a_proxy_that_fails_to_start_stops_before_setup_and_the_deploy(tmp_path):
+def test_a_proxy_that_exits_before_its_socket_stops_before_setup_and_the_deploy(tmp_path):
     result, calls = deployed(tmp_path, proxy_fails=True)
     assert result.returncode != 0
     assert "proxy" in result.stderr and "Nothing was deployed" in result.stderr
-    assert "uv " not in calls and "gcloud run deploy" not in calls
+    assert not calls_to(calls, "docker run ") and "gcloud run deploy" not in calls
+    assert not socket_folder(calls).exists()
 
 
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM], ids=["interrupt", "terminate"])
@@ -720,6 +718,7 @@ def test_an_interrupt_during_setup_stops_the_proxy_and_deploys_nothing(tmp_path,
     assert "cloud-sql-proxy stopped" in calls
     assert "gcloud run deploy" not in calls
     assert "Done" not in result.stdout
+    assert not socket_folder(calls).exists()
 
 
 def test_answering_n_to_the_setup_stops_with_nothing_deployed_and_no_proxy(tmp_path):
@@ -729,11 +728,19 @@ def test_answering_n_to_the_setup_stops_with_nothing_deployed_and_no_proxy(tmp_p
     assert "cloud-sql-proxy" not in calls and "gcloud run deploy" not in calls
 
 
+def test_a_skipped_build_sets_up_with_the_registry_image_the_deploy_uses(tmp_path):
+    result, calls = deployed(tmp_path, no=("Build the image",), tags="v1 v3 v2")
+    assert result.returncode == 0, result.stdout + result.stderr
+    [setup] = calls_to(calls, "docker run ")
+    assert f"{IMAGE}:v3" in setup
+    assert f"gcloud run deploy vouch --image={IMAGE}:v3" in calls
+
+
 def test_db_ready_still_parses_does_nothing_and_says_so(tmp_path):
     result, calls = deployed(tmp_path, DB_READY)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "--db-ready does nothing" in result.stdout
-    assert "uv run vouch-db-setup" in calls  # setup runs all the same
+    assert "docker run" in calls  # setup runs all the same
     assert "gcloud run deploy" in calls
 
 
@@ -743,6 +750,14 @@ def test_a_missing_proxy_or_uv_stops_before_anything_changes(tmp_path, tool):
     assert result.returncode != 0
     assert f"{tool} is missing" in result.stderr
     assert calls == ""
+
+
+def test_no_application_default_credentials_stops_at_sign_in_before_anything_is_built(tmp_path):
+    result, calls = deployed(tmp_path, adc=False)
+    assert result.returncode != 0
+    assert "gcloud auth application-default login" in result.stderr
+    assert "docker " not in calls and "secret-tool" not in calls
+    assert "planted" not in calls + result.stdout + result.stderr
 
 
 def test_a_missing_cloud_sql_instance_stops_before_the_deploy(tmp_path):
@@ -795,7 +810,7 @@ def test_the_project_id_is_asked_once(tmp_path):
 def test_a_skipped_build_deploys_the_registry_s_highest_tag(tmp_path):
     result, calls = deployed(tmp_path, no=("Build the image",), tags="v1 v3 v2")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "\ndocker " not in "\n" + calls
+    assert not calls_to(calls, "docker build") and not calls_to(calls, "docker push")
     assert f"gcloud run deploy vouch --image={IMAGE}:v3" in calls
 
 
