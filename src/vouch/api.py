@@ -1657,11 +1657,12 @@ def round_comparison(
     saver: Checkpointer,
     marks: RemediationPlan,
     asked: OpenQuestions,
+    added: AddedDocumentsStore,
 ) -> dict[str, Any]:
     """The round comparison (#571): now against the closed round numbered `number`, control by
-    control, with readiness then and now, and the remediation items done and open questions
-    answered since it closed. An unknown number is a 404; the open round, or one closed before
-    the fresh start, a 409."""
+    control, with readiness then and now, the evidence changed (#575) and the remediation items
+    done and open questions answered since it closed. An unknown number is a 404; the open
+    round, or one closed before the fresh start, a 409."""
     listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
     if not 1 <= number <= len(listed):
         raise HTTPException(status_code=404, detail="No review round has that number.")
@@ -1670,10 +1671,11 @@ def round_comparison(
         raise HTTPException(status_code=409, detail=rounds.STILL_OPEN)
     if chosen.before_fresh_start:
         raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
-    comparison, done, answered = _compared(chosen, profile, memory, saver, marks, asked)
+    comparison, done, answered = _compared(chosen, profile, memory, saver, marks, asked, added)
     return {
         "round": _listed(chosen),
         **comparison,
+        "evidence": [e | {"at": e["at"].isoformat()} for e in comparison["evidence"]],
         "remediation_done": [d | {"at": d["at"].isoformat()} for d in done],
         "questions_answered": [a | {"at": a["at"].isoformat()} for a in answered],
     }
@@ -1686,9 +1688,11 @@ def _compared(
     saver: BaseCheckpointSaver,
     marks: plan.RemediationPlan,
     asked: questions.OpenQuestions,
+    added: AddedDocuments,
 ) -> Compared:
-    """Now against the closed round `chosen` (#571): the comparison, and the remediation items
-    done and open questions answered since it closed; the route's and the chat's (#581)."""
+    """Now against the closed round `chosen` (#571): the comparison with the evidence changed
+    (#575), and the remediation items done and open questions answered since it closed; the
+    route's and the chat's (#581)."""
     closed_at = chosen.closed_at
     assert closed_at is not None
     scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
@@ -1700,7 +1704,13 @@ def _compared(
     listed = asked.listed(memory.user_id, memory.profile_id)
     since_fresh = questions.since(listed, memory.fresh_start())
     comparison = rounds.round_comparison(
-        chosen.results, scope.controls, scope.applicable, latest, earlier
+        chosen.results,
+        scope.controls,
+        scope.applicable,
+        latest,
+        earlier,
+        added=added.listed(profile.id),
+        closed_at=closed_at,
     )
     done = rounds.done_since(control_of, marked, closed_at, in_scope)
     return comparison, done, rounds.answered_since(since_fresh, closed_at, in_scope)
@@ -1713,11 +1723,12 @@ def rounds_reader(
     saver: BaseCheckpointSaver,
     marks: plan.RemediationPlan,
     asked: questions.OpenQuestions,
+    added: AddedDocuments,
 ) -> RoundsReader:
     """The lead's rounds and the round comparison, as the chat's `compare_rounds` reads them."""
     return RoundsReader(
         listed=lambda: review.listed(memory.user_id, memory.profile_id, memory.fresh_start()),
-        compared=lambda chosen: _compared(chosen, profile, memory, saver, marks, asked),
+        compared=lambda chosen: _compared(chosen, profile, memory, saver, marks, asked, added),
     )
 
 
@@ -2264,6 +2275,7 @@ def chat(
     review: ReviewRounds,
     marks: RemediationPlan,
     asked: OpenQuestions,
+    added: AddedDocumentsStore,
 ) -> Iterable[ServerSentEvent]:
     """The chat agent's reply to the compliance lead's message (vouch.chat_agent), knowing the
     page and control they are on: first a `thread` event, the chat thread's `thread_id` to send
@@ -2293,7 +2305,7 @@ def chat(
 
     yield ServerSentEvent(event="thread", data={"thread_id": thread_id})
     try:
-        reader = rounds_reader(review, profile, memory, run.saver, marks, asked)
+        reader = rounds_reader(review, profile, memory, run.saver, marks, asked, added)
         tools = ChatTools(profile, memory, run, spending, running, record, reader)
         chat = chat_context(
             models.for_chat(chosen, callbacks=[meter], answer_language=profile.answer_language),

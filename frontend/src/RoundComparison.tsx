@@ -3,7 +3,7 @@ import { VERDICT_WORDS } from './assessment.ts'
 import { controlPath, dateWords, openInPlace, type Overview, SEGMENTS } from './overview.ts'
 import { areas } from './paper.ts'
 import {
-  acceptedWord, CHANGE_WORDS, changesFirst, type ControlChange, keepPlace, placeOf, type RoundComparison, useComparison,
+  acceptedWord, CHANGE_WORDS, changesFirst, type ControlChange, evidenceWords, keepPlace, KIND_WORDS, placeOf, type RoundComparison, useComparison,
 } from './roundComparison.ts'
 import { COMPANY_PATH } from './rounds.ts'
 
@@ -83,6 +83,7 @@ function Loaded({ comparison, names, onOpen, back }: { comparison: RoundComparis
         <h1>Compared with {round.name}</h1>
       </div>
       <Summary comparison={comparison} />
+      <EvidenceChanges comparison={comparison} />
       {chapters.map(([area, controls]) => {
         const { changed, unchanged } = changesFirst(controls)
         const id = `chapter-${controls[0].chapter}`
@@ -127,6 +128,29 @@ function Summary({ comparison }: { comparison: RoundComparison }) {
         {counted.map((v) => <li key={v}>{VERDICT_WORDS[v]}: {verdicts[v].then} → {verdicts[v].now}</li>)}
       </ul>
       {nothing && <p>Nothing has changed since {round.name} closed.</p>}
+    </section>
+  )
+}
+
+/** The added documents changed since the round closed (#575): one line each, or the empty sentence. */
+function EvidenceChanges({ comparison }: { comparison: RoundComparison }) {
+  const { round, evidence } = comparison
+  return (
+    <section className="sheet compare-evidence" aria-labelledby="evidence-changes">
+      <h2 id="evidence-changes">Evidence changes</h2>
+      {evidence.length === 0
+        ? <p>No evidence has changed since {round.name} closed.</p>
+        : (
+          <ul className="compare-evidence-rows">
+            {evidence.map((e) => (
+              <li key={e.doc_id}>
+                <span>{e.title}: {evidenceWords(e)}</span>
+                <span className="mono">{e.doc_id}</span>
+                <span className="tag">{KIND_WORDS[e.kind]}</span>
+              </li>
+            ))}
+          </ul>
+        )}
     </section>
   )
 }

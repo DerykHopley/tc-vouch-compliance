@@ -22,6 +22,7 @@ from browser_dialogs import dialogs_of, no_dialog
 from current_company import current_company
 from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
+from test_documents import added_by_api
 from touch_targets import small_targets
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -261,6 +262,29 @@ def test_the_lead_opens_a_control_from_the_round_comparison_and_comes_back_to_th
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         ), "the round comparison scrolls sideways at 400px"
         assert small_targets(page) == []
+
+
+def test_after_a_new_version_the_round_comparison_lists_it_under_evidence_changes(
+    page: Page, rounds_url
+):
+    """#575, the user story: a document added before a round closed, a new version of it added
+    after; the lead opens the comparison with that round and sees "new version, 1 → 2". Under
+    Alpenwerk, as #573's check, so Nordlicht's first round stays open for the checks above."""
+    title = "Evidence change check"
+    with current_company(page.request, rounds_url, "alpenwerk"):
+        added_by_api(page, rounds_url, title, "# Visitor rules\n\nBadges are worn on site.\n")
+        listed = page.request.get(f"{rounds_url}/api/rounds").json()["rounds"]
+        if listed[-1]["closed_at"] is None:
+            assert page.request.post(f"{rounds_url}/api/rounds/close").ok
+        assert page.request.post(f"{rounds_url}/api/rounds", data={"name": "Evidence check"}).ok
+        number = page.request.get(f"{rounds_url}/api/rounds").json()["default"]
+        added_by_api(page, rounds_url, title, "# Visitor rules\n\nBadges are worn and returned.\n")
+        page.set_viewport_size({"width": 1280, "height": 900})
+        with page.expect_response(f"**/api/rounds/{number}/comparison"):
+            page.goto(f"{rounds_url}/company/rounds/{number}")
+        section = page.get_by_role("region", name="Evidence changes")
+        expect(section.get_by_role("listitem")).to_have_count(1)
+        expect(section.get_by_role("listitem")).to_contain_text(f"{title}: new version, 1 → 2")
 
 
 def test_the_lead_asks_the_chat_what_improved_since_the_last_round(page: Page, rounds_url):

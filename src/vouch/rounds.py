@@ -35,6 +35,7 @@ from typing import Annotated, Any, Literal, Protocol, TypedDict
 
 from pydantic import BaseModel, StringConstraints
 
+from vouch.added_documents import AddedDocument, AddedKind
 from vouch.audit import AuditEntry, ProcessTrail, Reviewer, now, process_trail
 from vouch.database import AuditAction, Database
 from vouch.dossier import NOT_ASSESSED, VERDICTS, CardStatus, readiness
@@ -511,12 +512,71 @@ class Readiness(TypedDict):
     by_verdict: dict[Verdict, Count]
 
 
+EvidenceChangeKind = Literal["added", "new-version", "withdrawn"]
+
+
+class EvidenceChange(TypedDict):
+    """An added document changed since a round closed (#575, Q14): added (its first version came
+    after the close), a new version (a later one did: `from_version` to `to_version`), or
+    withdrawn (after the close; added and withdrawn since reads withdrawn)."""
+
+    doc_id: str
+    title: str
+    """Its newest version's."""
+    kind: AddedKind
+    change: EvidenceChangeKind
+    from_version: int | None
+    """The newest version kept when the round closed, for a new version; None otherwise."""
+    to_version: int
+    at: datetime
+    """When it last changed."""
+
+
 class RoundComparison(TypedDict):
-    """Now against a chosen closed round (#571), control by control."""
+    """Now against a chosen closed round (#571), control by control, and the evidence changed
+    since it closed (#575)."""
 
     changes: dict[ChangeKind, int]
     readiness: Readiness
     controls: list[ControlChange]
+    evidence: list[EvidenceChange]
+
+
+def _evidence_change(
+    versions: Sequence[AddedDocument], closed_at: datetime
+) -> EvidenceChange | None:
+    """One added document's change since `closed_at` (`versions` oldest first), or None."""
+    newest = versions[-1]
+    withdrawn = max((v.withdrawn_at for v in versions if v.withdrawn_at), default=None)
+    before = [v.version for v in versions if v.added_at <= closed_at]
+    if withdrawn is not None:
+        change: EvidenceChangeKind = "withdrawn"
+        at, from_version = withdrawn, None
+    else:
+        change = "new-version" if before else "added"
+        at, from_version = newest.added_at, (max(before) if before else None)
+    if at <= closed_at:
+        return None
+    return {
+        "doc_id": newest.doc_id,
+        "title": newest.title,
+        "kind": newest.kind,
+        "change": change,
+        "from_version": from_version,
+        "to_version": newest.version,
+        "at": at,
+    }
+
+
+def evidence_since(added: Iterable[AddedDocument], closed_at: datetime) -> list[EvidenceChange]:
+    """The added documents (`added`: every version kept, withdrawn ones too) added, versioned or
+    withdrawn after `closed_at`, newest change first (#575). Built-in documents are never in
+    `added`, so never listed."""
+    by_id: dict[str, list[AddedDocument]] = {}
+    for d in sorted(added, key=lambda d: d.version):
+        by_id.setdefault(d.doc_id, []).append(d)
+    rows = [r for v in by_id.values() if (r := _evidence_change(v, closed_at)) is not None]
+    return sorted(rows, key=lambda r: r["at"], reverse=True)
 
 
 def _change(before: Verdict | None, after: Verdict | None) -> ChangeKind:
@@ -563,6 +623,9 @@ def round_comparison(
     applicable: Iterable[IsaControl],
     latest: Mapping[str, Assessment],
     earlier: Mapping[str, Assessment] | None = None,
+    *,
+    added: Iterable[AddedDocument],
+    closed_at: datetime,
 ) -> RoundComparison:
     """Now against a closed round's `frozen` results, each control of `controls` (the base
     framework's order) that is applicable now (`applicable`) or was frozen then: better, worse,
@@ -571,7 +634,8 @@ def round_comparison(
     counts leave out. A control whose newest assessment waits for review is proposed, and counts
     under its earlier accepted verdict (`earlier`, as `compare` reads it, #438). Readiness now
     is the overview's, of the controls in scope now; readiness then is the round's as it closed,
-    every frozen accepted control (those out of scope now too)."""
+    every frozen accepted control (those out of scope now too). The evidence changed since
+    `closed_at` is read from `added`, the company's added documents (#575)."""
     controls = list(controls)
     applicable = list(applicable)
     now_ids = {c.id for c in applicable}
@@ -597,6 +661,7 @@ def round_comparison(
             },
         },
         "controls": rows,
+        "evidence": evidence_since(added, closed_at),
     }
 
 

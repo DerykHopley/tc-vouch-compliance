@@ -231,6 +231,12 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .compare-controls th[scope="row"] { font-weight: 400; overflow-wrap: anywhere; }
 .compare-since { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .compare-proposed { margin-left: 8px; }
+/* Evidence changes (#575): one line per added document changed since the round closed; stacked under 700px. */
+.compare-evidence h2 { font-size: 18px; }
+.compare-evidence-rows { list-style: none; margin: 0; padding: 0; display: grid; justify-self: stretch; width: 100%; }
+.compare-evidence-rows li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 699px) { .compare-evidence-rows li { flex-direction: column; align-items: flex-start; } }
 @media (min-width: 700px) {
   .company-grid { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
   .company-documents { grid-column: 1; grid-row: 1; }
