@@ -170,8 +170,20 @@ def _budgeted_chat_openai() -> type[BaseChatModel]:
             return super()._generate(*args, **kwargs)
 
         def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
+            # OpenRouter names the model in each chunk that carries a `finish_reason`, and its
+            # usage chunk repeats the last one's; langchain-core's chunk merge (merge_dicts)
+            # adds strings up, so the merged answer would name `openai/gpt-6-lunaopenai/...`
+            # (#551). Only the first chunk naming the model keeps it.
             self._spend()
-            yield from super()._stream(*args, **kwargs)
+            named = False
+            for chunk in super()._stream(*args, **kwargs):
+                info = chunk.generation_info or {}
+                if "model_name" in info:
+                    if named:
+                        rest = {k: v for k, v in info.items() if k != "model_name"}
+                        chunk.generation_info = rest or None
+                    named = True
+                yield chunk
 
     return BudgetedChatOpenAI
 
