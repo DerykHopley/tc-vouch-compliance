@@ -37,7 +37,7 @@ export type DocumentWords = {
   /** Each origin's word: "Built in", "Added". */
   origins: Record<Origin, string>
   /** A withdrawn document's status (#586). */
-  withdrawn?: string
+  withdrawn: string
 }
 
 export type ProfileDocuments = {

@@ -165,11 +165,11 @@ def profile_documents(
 ) -> list[ProfileDocument]:
     """Each document the profile uses: its sources in the profile's order, each source's
     documents it may use (EvidenceSource.usable_documents) with its `added` documents (#585,
-    the newest version of each, a withdrawn one marked `withdrawn`, #586), by title as the library is listed, then a
-    source only added documents use; each a DocumentSummary judged on `today`, with `stale`
-    and `cited_by`. A citation has no source, so a cited id matches every listed document with
-    that id. An unreadable folder or document raises (OSError, or ValueError for one that
-    isn't UTF-8 text)."""
+    the newest version of each, a withdrawn one marked `withdrawn`, #586), by title as the
+    library is listed, then a source only added documents use; each a DocumentSummary judged
+    on `today`, with `stale` and `cited_by`. A citation has no source, so a cited id matches
+    every listed document with that id. An unreadable folder or document raises (OSError, or
+    ValueError for one that isn't UTF-8 text)."""
     cited_by = _cited_by(controls, latest)
     added_ids = {(d.source, d.doc_id) for d in added}
     withdrawn_ids = {(d.source, d.doc_id) for d in added if d.withdrawn_at is not None}

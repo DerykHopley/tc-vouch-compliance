@@ -98,7 +98,7 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
               <td>{d.approval_date ?? w.no_date}</td>
               <td>{d.review_cycle === null ? w.no_cycle : wordFor(w.cycles, d.review_cycle) ?? d.review_cycle}</td>
               <td>
-                {d.withdrawn ? <span className="doc-withdrawn">{w.withdrawn ?? 'Withdrawn'}</span>
+                {d.withdrawn ? <span className="doc-withdrawn">{w.withdrawn}</span>
                   : d.stale ? <span className="flag">{staleWord(d)}</span>
                     : <span className="doc-current">{w.current}</span>}
               </td>

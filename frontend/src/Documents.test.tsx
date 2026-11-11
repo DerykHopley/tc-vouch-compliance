@@ -24,7 +24,7 @@ const ENGLISH: DocumentWords = {
     unknown_cycle: 'unknown review cycle' },
   current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
   not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.',
-  origins: { 'built-in': 'Built in', added: 'Added' },
+  origins: { 'built-in': 'Built in', added: 'Added' }, withdrawn: 'Withdrawn',
 }
 
 const AUTHENTICATION: ProfileDocument = {
@@ -48,7 +48,7 @@ const NORDLICHT: ProfileDocuments = { documents: [AUTHENTICATION, BACKUP, RECORD
 /** The panel as the Company page shows it: read with useDocuments, then shown. */
 function Shown() {
   const { state, tryAgain } = useDocuments()
-  return <Documents state={state} tryAgain={tryAgain} onAdded={() => {}} />
+  return <Documents state={state} tryAgain={tryAgain} onChanged={() => {}} />
 }
 
 const json = (body: unknown, status = 200) => Promise.resolve(Response.json(body, { status }))
@@ -150,10 +150,10 @@ describe('adding documents on the Documents panel (ticket 585)', () => {
     const fetch = vi.fn((url: string) => url === '/api/documents' && fetch.mock.calls.length > 1
       ? json({ document: { id: 'x', version: 1 } }, 201) : json(NORDLICHT))
     vi.stubGlobal('fetch', fetch)
-    const onAdded = vi.fn()
+    const onChanged = vi.fn()
     function Page() {
       const { state, tryAgain } = useDocuments()
-      return <Documents state={state} tryAgain={tryAgain} onAdded={onAdded} />
+      return <Documents state={state} tryAgain={tryAgain} onChanged={onChanged} />
     }
     render(<Page />)
     await userEvent.click(await screen.findByRole('button', { name: 'Add document' }))
@@ -162,7 +162,7 @@ describe('adding documents on the Documents panel (ticket 585)', () => {
 
     await userEvent.click(within(screen.getByRole('form')).getByRole('button', { name: 'Add document' }))
 
-    await waitFor(() => expect(onAdded).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
     expect(screen.queryByRole('form')).toBeNull()
   })
 })
@@ -178,13 +178,13 @@ describe('withdrawing an added document (ticket 586)', () => {
     const fetch = vi.fn((url: string) => url.endsWith('/withdraw') ? answer()
       : json({ ...NORDLICHT, words: WORDS, documents }))
     vi.stubGlobal('fetch', fetch)
-    const onAdded = vi.fn()
+    const onChanged = vi.fn()
     function Page() {
       const { state, tryAgain } = useDocuments()
-      return <Documents state={state} tryAgain={tryAgain} onAdded={onAdded} />
+      return <Documents state={state} tryAgain={tryAgain} onChanged={onChanged} />
     }
     render(<Page />)
-    return { fetch, onAdded }
+    return { fetch, onChanged }
   }
   const press = async (name: string) => userEvent.click(await screen.findByRole('button', { name }))
   const confirm = () => userEvent.click(within(screen.getByRole('alert').parentElement!)
@@ -211,7 +211,7 @@ describe('withdrawing an added document (ticket 586)', () => {
 
   it('withdraws on Withdraw: busy and disabled while it runs, then reads the documents again', async () => {
     let finish: (answer: Response) => void = () => {}
-    const { fetch, onAdded } = withdrawing(() => new Promise<Response>((done) => { finish = done }))
+    const { fetch, onChanged } = withdrawing(() => new Promise<Response>((done) => { finish = done }))
     await press('Withdraw Visitor badge policy')
     await confirm()
 
@@ -221,19 +221,19 @@ describe('withdrawing an added document (ticket 586)', () => {
     expect(fetch).toHaveBeenCalledWith('/api/documents/visitor-badge-policy/withdraw',
       expect.objectContaining({ method: 'POST' }))
     finish(Response.json({ document: { id: 'visitor-badge-policy', withdrawn: true } }))
-    await waitFor(() => expect(onAdded).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
   })
 
   it.each([
     ['a 503', () => json({ detail: 'The database is unavailable.' }, 503)],
     ['a network error', () => Promise.reject(new TypeError('Failed to fetch'))],
   ])('on %s says it could not be withdrawn, and Withdraw may be pressed again', async (_, failing) => {
-    const { onAdded } = withdrawing(failing)
+    const { onChanged } = withdrawing(failing)
     await press('Withdraw Visitor badge policy')
     await confirm()
 
     expect((await screen.findByText(WITHDRAW_FAILED)).getAttribute('role')).toBe('alert')
     expect(screen.getByRole('button', { name: 'Withdraw Visitor badge policy' })).toBeTruthy()
-    expect(onAdded).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
   })
 })
