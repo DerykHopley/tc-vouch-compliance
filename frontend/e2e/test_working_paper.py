@@ -635,3 +635,73 @@ def test_on_a_german_profile_a_stale_citations_flag_is_german(
     current = row(paper, "M1").locator(".evidence-col .why")
     expect(current).to_have_text("Aktuell")
     expect(current).to_have_attribute("lang", "de")
+
+
+# Where the review bar sits against the viewport, the top bar, the Ask Vouch button and the last
+# requirement row, scrolled to `at` of the page (0 the top, 0.5 the middle, 1 the bottom; #467).
+REVIEW_BAR_AT = (
+    "async (at) => {"
+    + FONTS_SETTLED
+    + """
+  window.scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * at)
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  const rect = (sel) => document.querySelector(sel).getBoundingClientRect().toJSON()
+  const rows = [...document.querySelectorAll('table.reqs.judged tbody tr')]
+  return {
+    viewport: innerHeight, top: rect('header.top').bottom, bar: rect('.review-bar'),
+    button: rect('.review-bar :is(.btn-primary, .btn-sign)'), fab: rect('.fab'),
+    last: rows[rows.length - 1].getBoundingClientRect().toJSON(),
+  }
+}"""
+)
+
+
+def meets(a: dict, b: dict) -> bool:
+    """Whether two boxes overlap, with 1px of slack for sub-pixel rounding."""
+    return (
+        a["left"] < b["right"] - 1
+        and a["right"] > b["left"] + 1
+        and a["top"] < b["bottom"] - 1
+        and a["bottom"] > b["top"] + 1
+    )
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (390, 844)], ids=lambda size: str(size[0]))
+def test_the_review_bars_buttons_stay_in_view_and_cover_neither_the_last_row_nor_ask_vouch(
+    page: Page, paper_url, size, nordlicht_later
+):
+    """#467: on a proposed 5.2.4 (Alpenwerk's, a long paper), the review bar's primary button is
+    in the viewport, below the top bar, scrolled to the top, the middle and the bottom; the bar
+    never meets the Ask Vouch button; at the bottom the last requirement row ends above the bar;
+    and the last row's Change, brought into view by focus, stops above the bar, not under it."""
+    page.set_viewport_size({"width": size[0], "height": size[1]})
+    nordlicht_later(paper_url)
+    response = page.request.post(
+        f"{paper_url}/api/assessments",
+        data={"control_id": WIDE},
+        headers={"X-Vouch-Profile": "alpenwerk"},
+    )
+    assert response.ok, response.status
+    assert "event: result" in response.text()
+    make_current(page.request, paper_url, "alpenwerk")
+    paper = open_paper(page, paper_url, WIDE, assessed=True)
+    expect(paper.get_by_role("button", name="Confirm findings")).to_be_visible()
+
+    for at in (0, 0.5, 1):
+        seen = page.evaluate(REVIEW_BAR_AT, at)
+        where = f"{size[0]}px, scrolled to {at}: {seen}"
+        assert seen["button"]["top"] >= seen["top"] - 1, where
+        assert seen["button"]["bottom"] <= seen["viewport"] + 1, where
+        assert not meets(seen["bar"], seen["fab"]), where
+        if at == 1:
+            assert seen["last"]["bottom"] <= seen["bar"]["top"] + 1, where
+
+    # As fab_clearance's check: scrollIntoView keeps clear of the page's scroll padding and the
+    # field's scroll margin, as tabbing to a field just below the fold does.
+    page.evaluate("window.scrollTo(0, 0)")
+    change = paper.get_by_role("button", name=re.compile(r"^Change ")).last
+    change.evaluate(
+        "el => { el.scrollIntoView({ block: 'nearest' }); el.focus({ preventScroll: true }) }"
+    )
+    focused, bar = box(change), box(paper.get_by_role("region", name="Review"))
+    assert focused["y"] + focused["height"] <= bar["y"] + 1, (focused, bar)

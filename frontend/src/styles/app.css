@@ -309,8 +309,7 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .cite blockquote { margin: 0; border-left: 2px solid var(--brass); padding: 2px 10px; font: italic 13px/1.5 var(--f-quote); hyphens: auto; overflow-wrap: anywhere; }
 .cite figcaption { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 12px; }
 /* The review (#42): "Change" under a requirement's verdict opens the override row (a verdict and a required reason).
-   The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). Unlike the prototype
-   it doesn't stick to the window's foot, where the Ask Vouch button floats over it. */
+   The review bar at the paper's foot is square, ruled in the `--sign` colour (design.md, Shape). */
 .verdict-cell { display: grid; gap: 4px; justify-items: start; }
 .verdict-cell .btn-ghost { margin-left: -10px; }
 .override-row td { background: var(--paper); }
@@ -323,6 +322,15 @@ textarea.field { resize: vertical; font-family: inherit; }
   border-top: 2px solid var(--sign); border-radius: 0; padding: 12px; display: grid; gap: 8px; }
 .review-bar .decided { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); }
 .review-bar .note { margin: 0; border-left: 2px solid var(--rule); padding: 2px 10px; overflow-wrap: anywhere; }
+/* A review in progress keeps its bar in reach (#467): it sticks to the window's foot as the paper scrolls, above the
+   Ask Vouch button's 88px clearance (below), so it never covers the button, and settles in its place after the last
+   requirement at the paper's foot. A field on the paper brought into view (tabbed or scrolled to) stops above the bar
+   (`--review-bar`, its height, which ReviewBar measures); the bar's own fields keep the page's clearance. The head
+   names the step too (`.review-at`). */
+.review-bar.reviewing { position: sticky; bottom: calc(88px + env(safe-area-inset-bottom, 0px)); z-index: 2; }
+.paper:has(> .review-bar.reviewing) * { scroll-margin-bottom: calc(var(--review-bar, 0px) + 8px); }
+.paper .review-bar.reviewing * { scroll-margin-bottom: 0; }
+.review-at { color: var(--ink); font-weight: 600; }
 /* The review's three steps (#372): numbered in order, the current one in --ink under a 2px --ink rule, the others
    --muted; the number is a counter, so each step's name is its text. --sign stays for sign-off (design.md, Tokens). */
 .review-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px;
@@ -565,6 +573,7 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 @media print {
   .top, .fab, .bubble, .report-actions, .report-older { display: none !important; }
   :root[data-chat="pinned"] body { padding-right: 0; }
+  .review-bar.reviewing { position: static; } /* printed in its place at the paper's foot (#467) */
   body { background: var(--sheet); }
   .report { max-width: none; padding: 0; display: block; }
   .report.wrap { padding-inline: 0; }

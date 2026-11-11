@@ -12,7 +12,7 @@ import Prose from './Prose.tsx'
 import Remediation, { type Plan } from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
 import type { Goal } from './report.ts'
-import { type Override, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
+import { type Override, REVIEW_STEPS, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import StepText from './StepText.tsx'
 import InlineConfirm from './InlineConfirm.tsx'
@@ -198,6 +198,8 @@ export default function WorkingPaper(props: PaperProps) {
               <span>Verdict</span>
               {excluded ? <VerdictChip verdict="not-applicable" language={overview.answer_language} /> : <RunChip run={run} />}
               {review && <span className={`tag tag-${review}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[review]}</span>}
+              {/* The step a proposed control's review is at, near the head (#467): its bar is at the paper's foot. */}
+              {step && <span className="review-at">Review step: {REVIEW_STEPS.find(([s]) => s === step)?.[1]}</span>}
             </div>
           )}
           {excluded && card.not_applicable && (

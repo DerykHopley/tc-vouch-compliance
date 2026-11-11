@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { type Assessment, dateTimeLabel, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { confirmFindings, JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, REVIEW_STEPS,
   type Review, type ReviewDecision, type ReviewStep, submitReview } from './review.ts'
@@ -119,7 +119,9 @@ function Steps({ step, items }: { step: ReviewStep; items: ReviewBarProps['items
  * retry; a 409 shows the review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
  * a rejected one Assess again; an accepted one reviewed before the three steps is marked "before the three-step review"
  * (#373). Shown afresh (a new key) whenever its assessment is read again, so a message about an
- * older read never lingers.
+ * older read never lingers. While the review is in progress, the bar sticks to the window's foot above the Ask Vouch
+ * button's clearance as the paper scrolls (#467), and its height is kept in `--review-bar` on the page (app.css), so a
+ * field on the paper brought into view by focus stops above the bar, not under it.
  */
 export default function ReviewBar(props: ReviewBarProps) {
   const { status, threadId, review, beforeThreeStep, step, overrides, editing, items, onReviewed, onRefresh,
@@ -130,6 +132,21 @@ export default function ReviewBar(props: ReviewBarProps) {
   const [notReadAgain, setNotReadAgain] = useState(false)
   const noteId = useId()
   const whyId = useId()
+  const reviewing = status === 'waiting-for-review' && step !== null
+  const bar = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const el = bar.current
+    if (!reviewing || !el) return
+    const root = document.documentElement
+    const measure = () => root.style.setProperty('--review-bar', `${el.getBoundingClientRect().height}px`)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(el)
+    return () => {
+      observer?.disconnect()
+      root.style.removeProperty('--review-bar')
+    }
+  }, [reviewing])
 
   const act = async (action: Action) => {
     setSending(action)
@@ -145,7 +162,7 @@ export default function ReviewBar(props: ReviewBarProps) {
     if (!(await onRefresh())) setNotReadAgain(true)
   }
 
-  if (status !== 'waiting-for-review' || step === null) {
+  if (!reviewing) {
     return (
       <section className="review-bar" aria-label="Review">
         <p className="decided">
@@ -163,7 +180,7 @@ export default function ReviewBar(props: ReviewBarProps) {
   const held = sending !== null || editing !== null
   const planning = step === 'plan-fixes'
   return (
-    <section className="review-bar" aria-label="Review">
+    <section ref={bar} className="review-bar reviewing" aria-label="Review">
       <Steps step={step} items={items} />
       <label className="lbl" htmlFor={noteId}>Your note (kept in the audit trail)</label>
       <textarea id={noteId} className="field" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
