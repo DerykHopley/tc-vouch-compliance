@@ -16,6 +16,12 @@ writes can't fail). Two at once take turns, so one goes through and the other is
 The comparison (`compare`) is of accepted verdicts only, as readiness is (GLOSSARY: Readiness):
 now against the last round closed since the fresh start (a fresh start leaves the rounds as
 they are, but a round closed before it is not compared with). It is never called progress.
+
+The round comparison (#571, `round_comparison`; GLOSSARY: Round comparison) is of any closed
+round the lead chooses from the listing (`listed`, each round numbered by its position from 1 in
+the order opened, as no id is kept on them), control by control: better, worse, new or
+unchanged, and the scope changes since, with readiness then and now, and the remediation items
+done and open questions answered since it closed (`done_since`, `answered_since`).
 """
 
 import threading
@@ -24,7 +30,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from functools import cache
-from typing import Annotated, Any, Protocol, TypedDict
+from typing import Annotated, Any, Literal, Protocol, TypedDict
 
 from pydantic import BaseModel, StringConstraints
 
@@ -33,6 +39,8 @@ from vouch.database import AuditAction, Database
 from vouch.dossier import NOT_ASSESSED, VERDICTS, CardStatus, readiness
 from vouch.graph import Assessment, Verdict
 from vouch.isa import IsaControl
+from vouch.questions import OpenQuestion
+from vouch.remediation import Mark
 
 FIRST_ROUND = "First round"
 """The round open while none is kept: open since the start."""
@@ -40,6 +48,8 @@ NAME_LENGTH = 60
 """A round's name, trimmed, is 1 to NAME_LENGTH characters."""
 ROUND_OPEN = "Close the current review round before starting the next."
 NO_ROUND_OPEN = "No review round is open."
+STILL_OPEN = "Close this review round to compare with it."
+BEFORE_FRESH_START = "This review round closed before the fresh start, so it can't be compared."
 
 
 class RoundOpen(Exception):
@@ -82,6 +92,39 @@ class Round:
 
 FIRST = Round(FIRST_ROUND, None, None)
 
+
+@dataclass(frozen=True)
+class ListedRound:
+    """A round as the listing shows it (#571): `number` its position from 1 in the order opened;
+    `before_fresh_start` when it closed before the fresh start, so it can't be compared with."""
+
+    number: int
+    name: str
+    opened_at: datetime | None
+    closed_at: datetime | None
+    before_fresh_start: bool
+
+
+def numbered(kept: Sequence[Round], fresh_start: datetime | None) -> list[ListedRound]:
+    """The kept rounds, in the order opened, as listed; with none kept, the first round, open."""
+    return [
+        ListedRound(
+            number,
+            r.name,
+            r.opened_at,
+            r.closed_at,
+            fresh_start is not None and r.closed_at is not None and r.closed_at < fresh_start,
+        )
+        for number, r in enumerate(kept or [FIRST], start=1)
+    ]
+
+
+def default_choice(listed: Sequence[ListedRound]) -> int | None:
+    """The number of the last round closed since the fresh start; None when there is none."""
+    closed = [r.number for r in listed if r.closed_at is not None and not r.before_fresh_start]
+    return closed[-1] if closed else None
+
+
 CloseEntry = Callable[[str], AuditEntry]
 """A close's audit entry, from the closed round's name."""
 
@@ -96,6 +139,18 @@ class ReviewRounds(Protocol):
 
     def last_closed(self, user_id: str, profile_id: str, since: datetime | None) -> Round | None:
         """The last round closed at or after `since` (the fresh start; any when None)."""
+        ...
+
+    def listed(
+        self, user_id: str, profile_id: str, fresh_start: datetime | None
+    ) -> list[ListedRound]:
+        """Every round kept, oldest first (the open one last); the first round alone, open,
+        while none is kept (#571)."""
+        ...
+
+    def closed(self, user_id: str, profile_id: str, number: int) -> Round | None:
+        """The round numbered `number` in the listing, with its frozen results; None when there
+        is none of that number."""
         ...
 
     def start(
@@ -140,6 +195,18 @@ class ProcessRounds:
         if since is not None:
             closed = [r for r in closed if r.closed_at is not None and r.closed_at >= since]
         return closed[-1] if closed else None
+
+    def _kept(self, user_id: str, profile_id: str) -> list[Round]:
+        with self._guard:
+            return list(self._rounds.get((user_id, profile_id), []))
+
+    def listed(
+        self, user_id: str, profile_id: str, fresh_start: datetime | None
+    ) -> list[ListedRound]:
+        return numbered(self._kept(user_id, profile_id), fresh_start)
+
+    def closed(self, user_id: str, profile_id: str, number: int) -> Round | None:
+        return _numbered(self._kept(user_id, profile_id), number)
 
     def start(
         self, user_id: str, profile_id: str, name: str, at: datetime, entry: AuditEntry
@@ -193,6 +260,17 @@ class PostgresRounds:
         _, _, closed = self.db.review_rounds(user_id, profile_id, since)
         return _round(closed) if closed is not None else None
 
+    def listed(
+        self, user_id: str, profile_id: str, fresh_start: datetime | None
+    ) -> list[ListedRound]:
+        return numbered(
+            [_round(r) for r in self.db.listed_rounds(user_id, profile_id)], fresh_start
+        )
+
+    def closed(self, user_id: str, profile_id: str, number: int) -> Round | None:
+        kept = [_round(r) for r in self.db.listed_rounds(user_id, profile_id)]
+        return _numbered(kept, number)
+
     def start(
         self, user_id: str, profile_id: str, name: str, at: datetime, entry: AuditEntry
     ) -> Round:
@@ -221,6 +299,12 @@ class PostgresRounds:
 def _row(entry: AuditEntry) -> dict[str, Any]:
     """An entry as a mapping of vouch.database's AUDIT_COLUMNS."""
     return {k: v for k, v in asdict(entry).items() if k != "id"}
+
+
+def _numbered(kept: Sequence[Round], number: int) -> Round | None:
+    """The round numbered `number` (from 1) among those kept, the first round while none is."""
+    listed = list(kept) or [FIRST]
+    return listed[number - 1] if 1 <= number <= len(listed) else None
 
 
 def _round(row: Mapping[str, Any]) -> Round:
@@ -385,3 +469,145 @@ def compare(
         },
         "changed": changed,
     }
+
+
+ChangeKind = Literal["better", "worse", "new", "unchanged", "new-since", "out-of-scope-since"]
+COUNTED: tuple[ChangeKind, ...] = ("better", "worse", "new", "unchanged")
+"""The changes counted in the summary; the scope changes are left out of it."""
+RANK: dict[Verdict, int] = {
+    "not-evidenced": 0,
+    "partly-evidenced": 1,
+    "evidenced": 2,
+    "not-applicable": 2,
+}
+"""Not evidenced < Partly evidenced < Evidenced; a control's Not applicable verdict ranks with
+Evidenced (it asks nothing more), so a change between the two is unchanged."""
+
+
+class ControlChange(TypedDict):
+    control_id: str
+    chapter: str
+    """The ISA chapter: the first part of the control's id."""
+    change: ChangeKind
+    before: Verdict | None
+    """The accepted verdict when the round closed; None when not accepted."""
+    after: Verdict | None
+    """The accepted verdict now (the earlier one while a newer assessment waits)."""
+    proposed: bool
+    """Its newest assessment waits for review ("Proposed, waiting for review")."""
+
+
+class Readiness(TypedDict):
+    accepted: Count
+    by_verdict: dict[Verdict, Count]
+
+
+class RoundComparison(TypedDict):
+    """Now against a chosen closed round (#571), control by control."""
+
+    changes: dict[ChangeKind, int]
+    readiness: Readiness
+    controls: list[ControlChange]
+
+
+def _change(before: Verdict | None, after: Verdict | None) -> ChangeKind:
+    if before is None:
+        return "unchanged" if after is None else "new"
+    if after is None or RANK[after] < RANK[before]:
+        return "worse"
+    return "better" if RANK[after] > RANK[before] else "unchanged"
+
+
+def round_comparison(
+    frozen: Sequence[FrozenControl],
+    controls: Iterable[IsaControl],
+    applicable: Iterable[IsaControl],
+    latest: Mapping[str, Assessment],
+    earlier: Mapping[str, Assessment] | None = None,
+) -> RoundComparison:
+    """Now against a closed round's `frozen` results, each control of `controls` (the base
+    framework's order) that is applicable now (`applicable`) or was frozen then: better, worse,
+    new (no accepted verdict then, one now) or unchanged by accepted verdict; new since (applicable
+    now, not frozen then) or out of scope since (frozen then, not applicable now), which the
+    counts leave out. A control whose newest assessment waits for review is proposed, and counts
+    under its earlier accepted verdict (`earlier`, as `compare` reads it, #438). Readiness then
+    and now is `compare`'s."""
+    controls = list(controls)
+    applicable = list(applicable)
+    now_ids = {c.id for c in applicable}
+    then = {f.control_id: f for f in frozen}
+    standing = compare(frozen, applicable, latest, earlier)
+    reassessing = {c["control_id"] for c in standing["changed"] if c["reassessing"]}
+    counted = {**latest, **{i: (earlier or {})[i] for i in reassessing}}
+    listed: list[ControlChange] = []
+    ordered = [c.id for c in controls]
+    ordered += [i for i in then if i not in set(ordered)]  # frozen, no longer in the edition
+    for control_id in ordered:
+        if control_id not in now_ids and control_id not in then:
+            continue
+        kept = then.get(control_id)
+        before = kept.verdict if kept is not None and kept.status == "accepted" else None
+        assessment = counted.get(control_id) if control_id in now_ids else None
+        after = assessment.verdict if assessment and assessment.status == "accepted" else None
+        newest = latest.get(control_id) if control_id in now_ids else None
+        if kept is None:
+            change: ChangeKind = "new-since"
+        elif control_id not in now_ids:
+            change = "out-of-scope-since"
+        else:
+            change = _change(before, after)
+        listed.append(
+            {
+                "control_id": control_id,
+                "chapter": control_id.split(".")[0],
+                "change": change,
+                "before": before,
+                "after": after,
+                "proposed": newest is not None and newest.status == "waiting-for-review",
+            }
+        )
+    tally = Counter(c["change"] for c in listed)
+    return {
+        "changes": {k: tally[k] for k in COUNTED},
+        "readiness": {"accepted": standing["accepted"], "by_verdict": standing["by_verdict"]},
+        "controls": listed,
+    }
+
+
+class Done(TypedDict):
+    control_id: str
+    requirement_id: str
+    at: str
+
+
+class Answered(TypedDict):
+    control_id: str
+    question_id: int
+    at: str
+
+
+def done_since(
+    history: Iterable[Assessment], marked: Mapping[tuple[str, str], Mark], closed_at: datetime
+) -> list[Done]:
+    """The remediation items marked done after `closed_at` (`marked`: by thread and requirement,
+    of the assessments in `history`), each with its control, oldest first."""
+    control_of = {a.thread_id: a.control_id for a in history}
+    done: list[tuple[datetime, Done]] = [
+        (m.done_at, {"control_id": control_of[t], "requirement_id": r, "at": m.done_at.isoformat()})
+        for (t, r), m in marked.items()
+        if m.done_at is not None and m.done_at > closed_at and t in control_of
+    ]
+    return [d for _, d in sorted(done, key=lambda pair: pair[0])]
+
+
+def answered_since(asked: Iterable[OpenQuestion], closed_at: datetime) -> list[Answered]:
+    """The open questions answered after `closed_at`, each with its control, oldest first."""
+    answered = sorted(
+        (q for q in asked if q.answered_at is not None and q.answered_at > closed_at),
+        key=lambda q: q.answered_at or closed_at,
+    )
+    return [
+        {"control_id": q.control_id, "question_id": q.id, "at": q.answered_at.isoformat()}
+        for q in answered
+        if q.answered_at is not None
+    ]

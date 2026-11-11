@@ -1561,6 +1561,66 @@ def close_round(
     return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
 
 
+def _listed(listed: rounds.ListedRound) -> dict[str, Any]:
+    opened, closed = listed.opened_at, listed.closed_at
+    return {
+        "number": listed.number,
+        "name": listed.name,
+        "opened_at": None if opened is None else opened.isoformat(),
+        "closed_at": None if closed is None else closed.isoformat(),
+        "before_fresh_start": listed.before_fresh_start,
+    }
+
+
+@router.get("/rounds")
+def list_rounds(review: ReviewRounds, memory: UserMemory) -> dict[str, Any]:
+    """The user's review rounds under the profile, oldest first (the open one last), each
+    numbered from 1 in the order opened, and the default choice to compare with (#571): the
+    number of the last round closed since the fresh start, or None."""
+    listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
+    return {"rounds": [_listed(r) for r in listed], "default": rounds.default_choice(listed)}
+
+
+@router.get("/rounds/{number}/comparison")
+def round_comparison(
+    number: int,
+    review: ReviewRounds,
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    items: RemediationItems,
+    marks: RemediationPlan,
+    asked: OpenQuestions,
+) -> dict[str, Any]:
+    """The round comparison (#571): now against the closed round numbered `number`, control by
+    control, with readiness then and now, and the remediation items done and open questions
+    answered since it closed. An unknown number is a 404; the open round, or one closed before
+    the fresh start, a 409."""
+    fresh_start = memory.fresh_start()
+    listed = review.listed(memory.user_id, memory.profile_id, fresh_start)
+    if not 1 <= number <= len(listed):
+        raise HTTPException(status_code=404, detail="No review round has that number.")
+    chosen = listed[number - 1]
+    if chosen.closed_at is None:
+        raise HTTPException(status_code=409, detail=rounds.STILL_OPEN)
+    if chosen.before_fresh_start:
+        raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
+    against = review.closed(memory.user_id, memory.profile_id, number)
+    assert against is not None and against.closed_at is not None
+    scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    earlier = _accepted_earlier(memory, saver, latest)
+    history, _, marked = _plan_reads(memory, saver, items, marks)
+    since_fresh = questions.since(asked.listed(memory.user_id, memory.profile_id), fresh_start)
+    return {
+        "round": _listed(chosen),
+        **rounds.round_comparison(
+            against.results, scope.controls, scope.applicable, latest, earlier
+        ),
+        "remediation_done": rounds.done_since(history, marked, against.closed_at),
+        "questions_answered": rounds.answered_since(since_fresh, against.closed_at),
+    }
+
+
 def _control_of(profile: ComplianceProfile, control_id: str, failed: str) -> IsaControl:
     """The profile's control, else a 404; an unreadable edition a plain 500 with `failed`."""
     try:
