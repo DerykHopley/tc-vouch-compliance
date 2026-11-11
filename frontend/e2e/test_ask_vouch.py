@@ -152,3 +152,38 @@ def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
     page.get_by_role("button", name="Ask Vouch").click()
     page.keyboard.press("Escape")
     expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
+
+
+@pytest.mark.parametrize("width", [400, 1400])
+@pytest.mark.parametrize("how", ["double click", "double tap"])
+def test_a_double_click_on_close_closes_the_chat_once_and_presses_nothing_behind(
+    browser, dossier_url, width, how
+):
+    # #333: the first click closes the chat, and the second would land on what was under Close:
+    # the top bar's Menu at 400px (focused and opened), the page at 1400px (focus lost). It
+    # presses nothing, as #527's guard does for the in-app ask, and focus stays on Ask Vouch.
+    context = browser.new_context(
+        has_touch=how == "double tap", viewport={"width": width, "height": 800}
+    )
+    page = context.new_page()
+    try:
+        page.goto(dossier_url)
+        page.get_by_role("button", name="Ask Vouch").click()
+        sheet = page.locator(SHEET)
+        sheet.evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")
+        close = page.get_by_role("button", name="Close the chat")
+        if how == "double click":
+            close.dblclick()
+        else:
+            b = close.bounding_box()
+            assert b is not None
+            x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+            page.touchscreen.tap(x, y)
+            page.touchscreen.tap(x, y)
+        expect(sheet).to_have_count(0)
+        menu = page.get_by_role("banner").locator(".bar-toggle")
+        expect(menu).to_have_attribute("aria-expanded", "false")
+        expect(menu).not_to_be_focused()
+        expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
+    finally:
+        context.close()

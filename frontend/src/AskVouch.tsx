@@ -11,6 +11,7 @@ import {
   canPinChat, CHAT_WIDTH_STEP, type ChatWidthRange, chatWidthRange, clampChatWidth, pageWidth, rememberChatWidth,
   rememberedChatWidth,
 } from './chatWidth.ts'
+import { swallowNextPointerClick } from './doubleClickGuard.ts'
 import { controlPath, type NextStep } from './overview.ts'
 import StepText from './StepText.tsx'
 
@@ -411,8 +412,12 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
         {/* "New" on screen, so the 390px bubble's header keeps to one line; its name says what it starts. */}
         <button className="btn btn-ghost" onClick={() => void startAfresh()} disabled={busy}
           aria-label="New conversation" title="New conversation">New</button>
-        {/* An icon button (design.md, Components): the glyph is hidden; the name and tooltip say the action (#72). */}
-        <button className="btn btn-ghost btn-icon" onClick={() => setState('closed')}
+        {/* An icon button (design.md, Components): the glyph is hidden; the name and tooltip say the action (#72).
+            A double click's second click presses nothing under it, and focus stays on Ask Vouch (#333, #527's guard). */}
+        <button className="btn btn-ghost btn-icon" onClick={(e) => {
+          if (e.detail > 0) swallowNextPointerClick(() => fabRef.current?.focus())
+          setState('closed')
+        }}
           aria-label="Close the chat" title="Close the chat">
           <span aria-hidden="true">×</span>
         </button>

@@ -9,15 +9,17 @@ let endGuard: (() => void) | null = null
  * on the in-app ask's confirm collapses the ask, and its second click would land on whatever moves up under the
  * pointer. A keyboard click (`detail === 0`) is never swallowed. The guard outlives the ask, which can leave the page
  * as its confirm takes effect (Close round's, as the round closes) with something else in its place. It goes by
- * itself, on that click or after `DOUBLE_CLICK_MS`.
+ * itself, on that click or after `DOUBLE_CLICK_MS`. `onSwallowed` runs after a click is swallowed: the chat's Close
+ * (#333) puts focus back on Ask Vouch, which the second click's press took away.
  */
-export function swallowNextPointerClick() {
+export function swallowNextPointerClick(onSwallowed?: () => void) {
   endDoubleClickGuard()
   const swallow = (e: MouseEvent) => {
     if (e.detail === 0) return
     e.preventDefault()
     e.stopPropagation()
     endDoubleClickGuard()
+    onSwallowed?.()
   }
   const timer = window.setTimeout(endDoubleClickGuard, DOUBLE_CLICK_MS)
   endGuard = () => {
