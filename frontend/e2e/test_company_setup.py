@@ -13,7 +13,7 @@ passes' daily limit (3).
 import re
 
 import pytest
-from playwright.sync_api import Page, Response, expect
+from playwright.sync_api import Page, Response, Route, expect
 from test_developer_page import as_compliance_lead
 from top_bar import bar_company, from_user_menu
 from touch_targets import small_targets
@@ -601,6 +601,14 @@ def test_a_developer_sets_up_a_company_and_lands_on_it(page: Page, setup_url, no
     expect(page.get_by_role("region", name="Profile pass")).to_be_visible()
     assert current_of(page, setup_url) == profile["id"]  # every user's company now (#480)
 
+    # The create replaced the wizard's history entry (#476): Back goes to where the developer was
+    # before setup (the Dossier, opened first), not to an empty wizard that could make a second.
+    page.go_back()
+    expect(page).to_have_url(f"{setup_url}/")
+    expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+    expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+    expect(bar_company(page)).to_have_text("Musterfirma Nord GmbH")
+
     overview = page.request.get(
         f"{setup_url}/api/overview", headers={"X-Vouch-Profile": profile["id"]}
     )
@@ -840,3 +848,70 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
     expect(cited.first).to_be_visible()
     for doc in cited.evaluate_all("spans => spans.map(s => s.dataset.docId)"):
         assert doc in CHOSEN.values(), doc
+
+
+CURRENT_COMPANY = "**/api/developer/current-company"
+
+
+def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizard(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#476: Back pressed while the create is still answering (its Make current held) leaves the
+    wizard for the developer page. When the answer lands the developer stays there, under the new
+    company, its first pass run (#447); Forward never reaches an empty wizard. On first_pass_url:
+    its pass is the second of the passes' daily limit (3) there, after story 5's."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    with page.expect_response("**/api/developer/settings"):
+        page.goto(f"{first_pass_url}/developer")
+    page.get_by_role("button", name="Set up a company").click()
+    to_step_7(page, "Zurück GmbH")
+    held: list[Route] = []
+    page.route(CURRENT_COMPANY, lambda route: held.append(route))
+    with page.expect_response(
+        lambda r: r.url.endswith(PROFILES) and r.request.method == "POST"
+    ) as created:
+        press(page, "Create company")
+    assert created.value.status == 201
+    profile = created.value.json()["id"]
+    page.wait_for_timeout(200)
+    assert len(held) == 1  # the create's Make current, still unanswered
+
+    page.go_back()
+    expect(page).to_have_url(f"{first_pass_url}/developer")
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
+        held[0].continue_()
+    assert passed.value.ok, passed.value.status
+
+    expect(bar_company(page)).to_have_text("Zurück GmbH")
+    assert current_of(page, first_pass_url) == profile
+    expect(page).to_have_url(f"{first_pass_url}/developer")  # no jump to the Dossier
+    expect(page.get_by_role("button", name="Set up a company")).to_be_visible()
+    page.go_forward()
+    page.wait_for_timeout(SETTLE_MS)
+    expect(page).not_to_have_url(re.compile(r"/developer/setup$"))
+    expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+
+
+def test_a_company_not_made_current_replaces_the_setup_in_history(page: Page, first_pass_url):
+    """#476's other way out of a create: Make current fails (routed 500), so the developer page
+    opens under the current company with its note, in place of the wizard's history entry: Back
+    goes to the Dossier the setup was opened from. No first pass runs, so no daily limit is spent."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.route(CURRENT_COMPANY, lambda route: route.fulfill(status=500))
+    open_setup(page, first_pass_url)
+    to_step_7(page, "Nicht Aktuell GmbH")
+    with page.expect_response(
+        lambda r: r.url.endswith(PROFILES) and r.request.method == "POST"
+    ) as created:
+        press(page, "Create company")
+    assert created.value.status == 201
+
+    expect(page).to_have_url(f"{first_pass_url}/developer")
+    expect(
+        page.get_by_text("Nicht Aktuell GmbH was made but could not be made current.")
+    ).to_be_visible()
+    expect(bar_company(page)).not_to_have_text("Nicht Aktuell GmbH")
+    page.go_back()
+    expect(page).to_have_url(f"{first_pass_url}/")
+    expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)

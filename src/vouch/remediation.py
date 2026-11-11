@@ -36,7 +36,6 @@ from vouch.database import Database, Priority, RemediationWrites
 from vouch.graph import (
     MAX_DUE_DAYS,
     NO_NUL_PATTERN,
-    NO_OWNER,
     WAITING,
     Assessment,
     RemediationItem,
@@ -44,6 +43,7 @@ from vouch.graph import (
     state_serializer,
     thread_key,
 )
+from vouch.language import decided_note, placeholder, says_no_owner
 
 ItemStatus = Literal["draft", "approved", "discarded"]
 Decision = Literal["approve", "discard"]
@@ -157,16 +157,21 @@ def item_data(
     status: ItemStatus,
     priority: Priority | None,
     mark: Mark | None = None,
+    *,
+    language: str,
 ) -> dict[str, Any]:
     """An item as the API shows it: with its priority (None for a discarded one) and, once an
-    approved one is marked done, `done` (when and the lead's note; else None)."""
+    approved one is marked done, `done` (when and the lead's note; else None). Its "not drafted"
+    in its assessment's answer `language` (vouch.language.placeholder, #535), as every route
+    serves it; its owner role stays the NO_OWNER sentinel the frontend compares with, and the
+    stored item stays English."""
     due = item.due_date
     done = None
     if status == "approved" and mark is not None and mark.done_at is not None:
         done = {"at": mark.done_at.isoformat(), "note": mark.done_note}
     return {
         "requirement_id": item.requirement_id,
-        "missing": item.missing,
+        "missing": placeholder(item.missing, language),
         "owner_role": item.owner_role,
         "due_date": due.isoformat() if isinstance(due, date) else due,
         "status": status,
@@ -191,10 +196,11 @@ def shown_items(
         priority = (mark.priority if mark else None) or default_priority(
             assessment, item.requirement_id
         )
+        language = assessment.answer_language
         shown.append(
-            item_data(kept, kept.status, priority, mark)
+            item_data(kept, kept.status, priority, mark, language=language)
             if kept
-            else item_data(item, "draft", priority)
+            else item_data(item, "draft", priority, language=language)
         )
     return shown
 
@@ -385,7 +391,7 @@ def _entry(
         thread_id=assessment.thread_id,
         action=decision,
         requirement_id=item.requirement_id,
-        note=f"{item.missing} Owner: {item.owner_role}. Due {item.due_date.isoformat()}.",
+        note=decided_note(item.missing, item.owner_role, item.due_date),
         verdict_before=verdict,
         verdict_after=verdict,
         evidence=evidence_versions([requirement] if requirement else []),
@@ -462,7 +468,7 @@ def _decide(
     owner = request.owner_role or draft.owner_role
     due = request.due_date or date.fromisoformat(draft.due_date)
     if request.decision == "approve":
-        if owner == NO_OWNER:
+        if says_no_owner(owner):  # in any answer language's words (#535)
             raise OwnerNeededError(OWNER_NEEDED)
         check_due(due, at)
     item = DecidedItem(
