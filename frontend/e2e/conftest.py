@@ -24,6 +24,7 @@ SERVERS = (
     "SETUP_URL",
     "FIRST_PASS_URL",
     "REMOVAL_URL",
+    "DOCUMENTS_URL",
     "FAILING_API_URL",
 )
 """Every test server's URL variable, as run.sh exports them."""
@@ -179,6 +180,14 @@ def removal_url() -> str:
     creates each run a profile pass (#447), and with setup_url's three they would pass the
     passes' daily limit (3 a user)."""
     return os.environ["REMOVAL_URL"]
+
+
+@pytest.fixture
+def documents_url() -> str:
+    """A sixteenth Vouch like vouch_url, for adding documents (#585): an added document is kept
+    in that process for its company and found by every search there, which would change the
+    documents and the evidence other servers' checks read."""
+    return os.environ["DOCUMENTS_URL"]
 
 
 @pytest.fixture

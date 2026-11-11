@@ -4,7 +4,8 @@ One entry per action of the compliance lead: the findings confirmed and each ove
 them (the review's first step, #372), the review's accept or reject, and each remediation item
 approved or discarded (vouch.remediation, #43), and each change of the profile's Goal
 (vouch.goal, #369, with the goal before and after), and each review round started or closed
-(vouch.rounds, #402, with the round's name). An entry says
+(vouch.rounds, #402, with the round's name), and each evidence document added (`add_document`,
+#585, with the document's id and version as its evidence). An entry says
 who, when, under which profile, on which control (and requirement), the note, the verdict
 before and after, the versions of the evidence documents it rests on, and the model and prompt
 version of the run, read from the assessment's thread, never assumed.
@@ -24,7 +25,7 @@ Nothing offers an update or a delete: the table refuses both too (vouch-db-setup
 
 import logging
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -34,6 +35,7 @@ from typing import Any, Protocol
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from vouch import graph
+from vouch.added_documents import AddedDocument, AddedDocuments, NewDocument
 from vouch.database import AuditAction, Database, Goal, ReviewInProgress
 from vouch.graph import (
     NO_DRAFTS,
@@ -330,6 +332,13 @@ class PostgresTrail:
         ]
 
 
+def keep_row(row: Mapping[str, Any]) -> None:
+    """Keep an entry given as a mapping of vouch.database's AUDIT_COLUMNS in the process's trail
+    (the process store of added documents keeps its adds' entries so)."""
+    evidence = tuple(EvidenceVersion(**e) for e in row["evidence"])
+    process_trail().keep([AuditEntry(**({**row, "id": None, "evidence": evidence}))])
+
+
 @cache
 def process_trail() -> ProcessTrail:
     """The trail without a database: one per process, so a restart forgets it with the
@@ -425,3 +434,48 @@ def review(
             reviewed_at=at,
             drafts=drafts,
         )
+
+
+def document_entry(reviewer: Reviewer, added: AddedDocument, note: str, at: datetime) -> AuditEntry:
+    """The audit entry of a document added (#585): who, when and under which profile, the
+    document's id and version as its evidence, and the note; no control, thread, verdict,
+    model or prompt."""
+    return AuditEntry(
+        id=None,
+        user_id=reviewer.id,
+        reviewer_name=reviewer.name,
+        at=at,
+        profile_id=added.profile_id,
+        control_id="",
+        thread_id="",
+        action="document-add",
+        requirement_id=None,
+        note=note,
+        verdict_before=None,
+        verdict_after=None,
+        evidence=(EvidenceVersion(added.doc_id, str(added.version)),),
+        model="",
+        prompt_version="",
+    )
+
+
+def add_document(
+    store: AddedDocuments,
+    new: NewDocument,
+    *,
+    reviewer: Reviewer,
+    profile_id: str,
+    builtin_ids: set[str],
+    note: str = "",
+    clock: Callable[[], datetime] = now,
+) -> AddedDocument:
+    """The lead adds a document (or its next version) under the profile, with its
+    `document-add` entry, together, at `clock()`: the version kept. Raises DocumentRefused
+    (nothing written) and DatabaseUnavailable (Postgres)."""
+    at = clock()
+
+    def entry(added: AddedDocument) -> dict[str, Any]:
+        row = asdict(document_entry(reviewer, added, note, at))
+        return {k: v for k, v in row.items() if k != "id"}
+
+    return store.add(profile_id, new, builtin_ids, reviewer.id, reviewer.name, at, entry)

@@ -1321,12 +1321,16 @@ class Database:
         return (0, 0, None) if row is None else (int(row["n"]), int(row["w"]), row["at"])
 
     def add_document(
-        self, profile_id: str, made: Callable[[list[dict[str, Any]]], Mapping[str, Any]]
+        self,
+        profile_id: str,
+        made: Callable[[list[dict[str, Any]]], Mapping[str, Any]],
+        entry: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Keep the version `made` gives from the profile's versions already kept (a mapping of
-        ADDED_DOCUMENT_COLUMNS), in one transaction holding the profile's lock, so two writes
-        take turns: the version kept, and every version of the profile as it then stands. An
-        exception from `made` writes nothing and is raised as itself. Raises
+        ADDED_DOCUMENT_COLUMNS), with `entry`'s audit entry of the version kept when given (a
+        mapping of AUDIT_COLUMNS, #585), in one transaction holding the profile's lock, so two
+        writes take turns: the version kept, and every version of the profile as it then
+        stands. An exception from `made` writes nothing and is raised as itself. Raises
         DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
         columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
         with (
@@ -1350,6 +1354,8 @@ class Database:
             ).fetchone()
             if added is None:  # an INSERT … RETURNING returns its row
                 raise DatabaseUnavailable(f"a document in {ADDED_DOCUMENTS_TABLE} was not kept")
+            if entry is not None:
+                _insert_audit(conn, [entry(added)])
         return added, [*kept, added]
 
     def withdraw_document(self, profile_id: str, doc_id: str, at: datetime) -> list[dict[str, Any]]:
