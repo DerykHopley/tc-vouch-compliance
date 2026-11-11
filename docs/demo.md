@@ -56,13 +56,15 @@ security to improve, round by round, with a plan its team can follow.
   page, under "Companies", select **Reset demo** in Alpenwerk Präzision GmbH's row and confirm.
   Alpenwerk is left empty: nothing assessed, no rounds closed.
 - Reset Nordlicht before each run: in the same list, select **Reset demo** in Nordlicht
-  Komponenten GmbH's row and confirm; the question names the company and says the demo state
-  replaces its progress. Nordlicht is back in its demo state, the same every time: "Q2 2026"
-  closed, "Review round: Q3 2026" open, every control "Accepted". A reset deletes the company's
-  earlier progress and history, the audit trail of earlier rehearsals included, so each run starts
-  from the same place. Wait until no assessment is running.
-- Reset demo runs the demo story on the scripted fake model, so it costs nothing, and its work
-  doesn't count against the day's limits.
+  Komponenten GmbH's row and OK "Reset the demo of Nordlicht Komponenten GmbH? …". The page reads
+  "Reset Nordlicht Komponenten GmbH to its demo state: Q2 2026 closed, Q3 2026 open." Nordlicht
+  is back in its demo state, the same every time, with every control "Accepted". Wait until no
+  assessment is running.
+- A reset can't be undone. It deletes every user's progress and history under the company, not
+  only yours: assessments, rounds, the audit trail (earlier rehearsals' entries too), open
+  questions, remediation and added documents.
+- Reset demo plays the demo round on the scripted fake model, so it costs nothing, and it uses no
+  profile pass.
 - The Overview must read "Goal: Audit readiness". If it reads Internal improvement, select
   **Change goal**, then the **Change goal** that appears with the question in its place.
 - A reset doesn't give back the assessments a rehearsal made: they still count towards today's
@@ -199,9 +201,10 @@ model** only, so its verdicts are the same in every run and nothing costs money.
   bar. On the local app everything lives in the running process, the current company and the
   day's limits included, so a restart starts every count from nothing.
 - Then reset Nordlicht: in the user menu, choose **Developer page**, and under "Companies" select
-  **Reset demo** in Nordlicht Komponenten GmbH's row and confirm. Nordlicht is back in its demo
-  state, on the scripted fake model: a lead's earlier work, with "Q2 2026" closed and "Q3 2026"
-  open. Then select **Overview** in the top bar.
+  **Reset demo** in Nordlicht Komponenten GmbH's row and OK "Reset the demo of Nordlicht
+  Komponenten GmbH? …". The page reads "Reset Nordlicht Komponenten GmbH to its demo state: Q2
+  2026 closed, Q3 2026 open.": a lead's earlier work, played on the scripted fake model. Then
+  select **Overview** in the top bar.
 - Check the demo state is there: the Overview reads "Goal: Audit readiness", "Review round: Q3
   2026, open since" today, "12 of 12 controls accepted", and a section "Compared with Q2 2026".
 
