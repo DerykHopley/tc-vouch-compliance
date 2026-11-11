@@ -90,7 +90,9 @@ jobs:
     # Fast lane (a PR): Chromium. Full lane (main, nightly, by hand): Chromium and Firefox.
     name: Browser check (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A ceiling, not the budget: a healthy run takes about 6.5 minutes (Chromium) and 8.5
+    # (Firefox); the headroom lets a slow mirror on a cache miss cost time, not the run (#611).
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -122,11 +124,60 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ matrix.browser }}-${{ hashFiles('frontend/e2e/uv.lock') }}
-      # The system packages once, bounded by the step only: a `timeout` around apt killed uv but not
-      # apt, which kept the dpkg lock, so its retry failed (#290).
-      - name: install the browser's system packages
-        timeout-minutes: 6
-        run: uv run --locked --project frontend/e2e playwright install-deps ${{ matrix.browser }}
+      # The browser's system packages from cache (#611): `install-deps` ran `apt-get update` and
+      # downloaded from the Ubuntu mirrors every run, and a mirror DNS outage timed the step out
+      # with no test run. The .debs it needs on this runner image are cached; the mirror is used
+      # only on a miss, or when the cached set doesn't install.
+      - name: key for the system packages' cache (runner image, Playwright, browser)
+        id: apt-key
+        run: |
+          : "${ImageOS:?no ImageOS on this runner}" "${ImageVersion:?no ImageVersion on this runner}"
+          version=$(uv run --locked --project frontend/e2e playwright --version | awk '{print $2}')
+          echo "key=apt-debs-$ImageOS-$ImageVersion-playwright-$version-${{ matrix.browser }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: apt-cache
+        with:
+          path: ~/.cache/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+      # Bounded by the step only: a `timeout` around apt killed uv but not apt, which kept the dpkg
+      # lock, so its retry failed (#290). An apt that exits on its own frees the lock for the retry.
+      - name: install the browser's system packages, from the cache or the mirror tried twice
+        id: apt-install
+        timeout-minutes: 8
+        run: |
+          debs=~/.cache/apt-debs
+          e2e() { uv run --locked --project frontend/e2e playwright "$@"; }
+          # What install-deps would install on this image, from apt's local lists (no network).
+          pkgs=$(e2e install-deps --dry-run ${{ matrix.browser }} | sed -n 's/^  //p')
+          if [ -z "$pkgs" ]; then e2e install-deps --dry-run ${{ matrix.browser }}; exit 0; fi
+          echo "Missing system packages:" $pkgs
+          mkdir -p "$debs/partial"
+          apt_install() { sudo apt-get install -y --no-install-recommends -o Dir::Cache::archives="$debs" "$@" $pkgs; }
+          if [ "${{ steps.apt-cache.outputs.cache-hit }}" = true ] && apt_install --no-download; then
+            echo "Installed from the cache, no download."
+          else
+            if [ "${{ steps.apt-cache.outputs.cache-hit }}" = true ]; then
+              echo "::warning::the cached system packages didn't install; downloading from the mirror"
+            fi
+            # Once on the image's package lists, then once more after `apt-get update`: a mirror
+            # failure, or lists older than the mirror, gets one retry.
+            for attempt in 1 2; do
+              if [ "$attempt" = 2 ]; then sudo apt-get update || true; fi
+              if apt_install --download-only; then break; fi
+              echo "::warning::system package download attempt $attempt failed"
+              if [ "$attempt" = 2 ]; then exit 1; fi
+            done
+            apt_install --no-download
+            sudo rm -rf "$debs/partial" "$debs/lock"
+            sudo chown -R "$(id -u):$(id -g)" "$debs"
+            if ls "$debs"/*.deb > /dev/null; then echo "save=true" >> "$GITHUB_OUTPUT"; fi
+          fi
+          e2e install-deps --dry-run ${{ matrix.browser }}  # exits non-zero if any are still missing
+      - if: steps.apt-install.outputs.save == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/apt-debs
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
       - name: download the browser, bounded and tried twice
         timeout-minutes: 7
         run: |
