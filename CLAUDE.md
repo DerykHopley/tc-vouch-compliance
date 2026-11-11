@@ -16,7 +16,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Working state
 
-Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-06 @ce63a03); rerun it to change either, or to bring in the rig's newer rules.
+Level: **Standard**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/development/rig`, rig 2026-11-10 @29edcb4); rerun it to change either, or to bring in the rig's newer rules.
 
 - Work lives in GitHub issues; one ticket is one PR into main.
 - Build in the main session, where every step's results stay in view. Spawn a subagent only for an independent check (the `code-review` skill, the `rig:verifier` agent) or for work that would flood the context (screenshots, a long log): it returns a verdict, not a summary to act on.
@@ -31,29 +31,15 @@ Level: **Spec**, review mode: **Factory**. Set by `/rig:project-kickoff` (`~/dev
 - Name `/mattpocock-skills:improve-codebase-architecture` to the owner when the same files keep changing together across tickets.
 
 
-### Specs
 
-- A spec holds at most **12 tickets**: about one day of review. A larger plan becomes two specs.
-- **Tickets are written just in time (on trial).** The spec carries a `## Build order`: numbered slices, one line each, naming the user stories each delivers. `/rig:spec-build` writes it when it's missing and a `rig:ticket-writer` writes each slice's ticket when a build slot frees up, against the code as it is then. `/to-tickets` isn't needed at Spec level; tickets it wrote count as slices, rewritten in place when their turn comes.
-- Parallel implementers are the one other use of subagents: each ticket needs little from the others, so a fresh context per ticket loses nothing.
-- **`/rig:spec-build <spec>` builds a spec** (not Matt's `/implement-spec`, which merges locally and reviews once at the end): each ticket goes through the ticket loop below, its own PR into the spec's integration branch (`spec/<spec>-<slug>`) through the merge gate, and a `rig:verifier` on the merge commit. One PR then takes the spec into main and closes its tickets. In Factory mode, this is the queue: a spec's tickets are built by `/rig:spec-build`, never picked up from main on their own. Up to 3 tickets build at once, never two whose `Touches` lines share a file or area.
-- **A spec starts when the specs it depends on have landed in main.** A ticket closes only when its spec lands, so a ticket blocked by another spec's ticket waits until that code is in main. Two specs with no link between them may build at the same time, each on its own branch. In Factory mode, Claude starts `/rig:spec-build` on each spec as soon as nothing blocks it; in the other modes it names the startable specs and asks.
-- Ticket branches merge into the integration branch with `git merge --no-ff`, so each ticket stays one merge commit. After the spec lands, one bad ticket is undone alone with `git revert -m 1 <its merge-sha>`; a revert that conflicts goes to the owner.
-- An implementer's prompt holds the ticket number and the integration branch; the ticket was written against that branch, and the implementer agent carries the rest.
-- The integration branch merges main in after each Fix lands, so the spec builds on fixed code.
-- Steps only the owner can do are `ready-for-human` tickets, each self-contained: what it waits for, every step, and how to finish it.
-- **Close the spec before improving it.** Work joins an open spec only when it is one of these:
-  - something its acceptance criteria need;
-  - a bug the spec's own code caused;
-  - a prerequisite that makes the remaining tickets smaller, approved by the owner.
-- Everything else goes to a lane below, with a one-line answer: "Filed #N in `<lane>`. It isn't in the spec because …".
-- Bug tickets count toward the 12, so a spec that keeps finding its own bugs reaches the owner instead of never closing.
-- When no slice can start and none is running, report why rather than wait.
-- When the owner says "put it in the spec", add it. Past 12 tickets, say so once ("Spec is now 13 of 12: split it, or drop something?") and let the owner choose.
-- When the spec's last slice is done, `/rig:spec-build` runs `/rig:spec-close`'s Ready part: the stories verified, then a running copy for the owner to test (**Owner preview**, below). Blocking feedback becomes new slices before the merge, polish becomes Fix tickets after; after the owner's go, the agent merges the spec PR (in Learning mode the owner merges it, and the next spec-build run finds it) and Landed closes the spec and starts the next.
-- **Owner preview:** `scripts/dev.sh --api-port <spare> --web-port <spare> --detach <name>` from a worktree of the spec's integration branch, so it outlives the agent's turn as its own user unit (`scripts/dev.sh --stop <name>` stops it, #309): local sign-in mode, the scripted fake model, never the owner's own running app or the live database. A few real model calls only with the owner's OK and a cost estimate. Cloud Run previews are out while sign-in accepts only the fixed address (#178).
-- **The desk:** every spec-build or spec-run message ends with what's waiting on the owner (Blocking, Hands-on steps, Ready to merge, Decided for you), so the latest message is all the owner needs to read.
+### Feature tickets (this project)
 
+Vouch moved from Spec to Standard on 2026-11-11, after M9: grouping tickets into specs made specs wait on each other and clash on shared files. A feature ticket now runs like a small spec:
+
+- **One feature ticket is one PR into main,** through the ticket loop below (implementer, Standards review, verifier before the PR, merge gate).
+- **A ticket with a UI change gets an owner preview before its merge:** `scripts/dev.sh --api-port <spare> --web-port <spare> --detach <name>` from the ticket's worktree (fake model, local sign-in, never the owner's own app or the live database; `scripts/dev.sh --stop <name>` stops it), with one-line "try this" steps. Blocking feedback is built on the same PR; polish becomes a Fix. It merges after the owner's go. A Fix keeps the Fixes lane's batch check instead.
+- **Bigger work** (a new screen, a data or model change, several stories) is grilled first with `/grill-with-docs`, then split with `/to-tickets` into tickets that each land on their own. A grilled plan can carry a `## Build order` like a spec's, but there is no integration branch.
+- **The desk:** every report to the owner ends with what's waiting on them (Blocking, Hands-on, Ready to merge, Decided for you).
 
 ### Each ticket
 
@@ -94,21 +80,21 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 
 | Lane | What | Goes |
 |---|---|---|
-| **Current spec** | meets the "joins an open spec" rule above (Spec level) | a ticket on the integration branch |
 | **Fixes** | a bug already on main, a process fix (tooling, CI, hooks, agent docs), or a small enhancement (below) | its own PR straight into main, through the Fixes lane below |
-| **Idea pool** | a feature, a new screen, a data or model change, or anything else bigger than a small enhancement; tag ideas that improve the open spec "follow-up to <spec>" | the `Next` milestone |
-| **Architecture** | a change to the code's structure | grouped into its own small spec, after the open one |
+| **Idea pool** | a feature, a new screen, a data or model change, or anything else bigger than a small enhancement; tag ideas that follow up a landed feature "follow-up to #<n>" | the `Next` milestone |
+| **Architecture** | a change to the code's structure | grilled into its own small set of tickets |
 
 - **Who files what (on trial):** a bug on main with a way to reproduce it may be filed straight in as a Fix (`ready-for-agent`, with a `Touches` section). Anything else an agent or a retro files lands as `needs-triage`, and the triage pass sorts it. Vouch, 2026-11-06: 18 issues filed in one day went straight to `ready-for-agent`, and a top-bar redesign ran as a Fix beside the spec redesigning the same screens.
-- **Triage when a spec lands (on trial):** `/rig:spec-close`'s Landed part sorts `needs-triage` into lanes, marks duplicates, closes stale or superseded issues with the reason (reopening is the overrule), and groups the idea pool into candidate specs. Each move is flagged; making a new spec from a group is the owner's, with `/grill-with-docs`.
+- **Triage after a feature lands (on trial):** after a feature ticket (or a grilled group of them) merges, a triage pass sorts `needs-triage` into lanes, marks duplicates, closes stale or superseded issues with the reason (reopening is the overrule), and groups the idea pool into candidate features. Each move is flagged; planning a feature from a group is the owner's, with `/grill-with-docs`.
 - **A small enhancement (on trial)** is a Fix when all of these hold: one change you can say in a sentence; one PR of about 300 changed lines at most; and every design choice in it is reversible: wording, placement, sizing, spacing or layout on a screen that already exists. A new screen, a new feature, a data or model change, or a change to a `docs/design.md` decision is the idea pool. Its choices are decided and flagged on the issue (`**Decided for you:**`, the `decided` label); a follow-up Fix is the overrule. Vouch, 2026-11-10: M9 bundled eight separate polish items (hero wording, review bar placement, chat button sizing, report tables on a phone) into a 10-slice spec only because a Fix couldn't carry a layout choice.
 - For a backlog that needs a proper sort between specs, suggest `/triage`.
+- **A ticket that edits a markdown table** checks the rendered table (every row has the header's cell count); a `|` inside a cell is written `\|`.
 
 ### The Fixes lane (on trial)
 
-- **One Fixes thread** works the lane (under `/rig:spec-run`, the coordinator starts it and keeps its queue), up to 3 Fixes at once when their `Touches` lines share no file or area.
-- **Order, by what waiting costs:** a bug users hit on main; then anything blocking a spec; then tooling and process fixes; then small enhancements, oldest first.
-- **Checked against open specs before it starts:** compare its `Touches` with each open spec's changed files (`git diff --name-only origin/main...origin/spec/<n>-<slug>`) and its running tickets' `Touches`. A bug users hit goes ahead, and the spec's thread is told while the Fix's PR is still open, so the spec can add its cases to that PR. Anything else that overlaps a spec still building is offered to that spec's thread as a slice (`fix #<n> overlaps your <files>: take it as a slice?`); if the spec takes it, it leaves the queue. It waits only when the spec declines, or is at Ready.
+- **One Fixes thread** works the lane (the coordinator session starts it and keeps its queue), up to 3 Fixes at once when their `Touches` lines share no file or area.
+- **Order, by what waiting costs:** a bug users hit on main; then anything blocking a feature ticket; then tooling and process fixes; then small enhancements, oldest first.
+- **Checked against running feature tickets before it starts:** compare its `Touches` with theirs; a Fix that overlaps one is offered to that ticket (`fix #<n> overlaps your <files>: take it?`). A bug users hit goes ahead, and the ticket's thread is told.
 - **A Fix keeps its PR** (CI and a one-merge revert), and its loop scales with its size: **under about 100 changed lines with no UI change**, the implementer's test seen red then green plus CI are the check, with no Standards review and no verifier; anything bigger, or any UI change, takes the full ticket loop. A UI change merges on green after its verifier, and goes on `STATUS.md`'s "ready to check" list with what to try, so the owner checks enhancements in batches rather than one at a time.
 
 
@@ -124,9 +110,9 @@ Whoever files an issue sorts it into one lane straight away, with a label or mil
 
 ### Review mode: Throughput
 
-- **Merge gate (no branch protection: GitHub's free plan on a private repo):** merge only with `scripts/merge-on-green.sh <pr>`, run as a background task. It prints the PR's changed lines, lockfiles left out, and notes one over the 400 target without refusing it, then waits for every check on the PR's current commit (limit 20 minutes, about twice the fast lane), merges with a merge commit only if all pass, and refuses a PR with no checks. For a PR into main it first checks the merge against every open `origin/spec/*` branch (`git merge-tree`) and refuses one that would make a spec conflict, naming the branch and files; `--conflicts-ok <spec branch>` merges anyway, only after that spec's thread has been told (#235). Never merge a PR any other way, unless the owner says so for that PR.
+- **Merge gate (no branch protection: GitHub's free plan on a private repo):** merge only with `scripts/merge-on-green.sh <pr>`, run as a background task. It prints the PR's changed lines, lockfiles left out, and notes one over the 400 target without refusing it, then waits for every check on the PR's current commit (limit 20 minutes, about twice the fast lane), merges with a merge commit only if all pass, and refuses a PR with no checks. Never merge a PR any other way, unless the owner says so for that PR.
 - A ticket or a Fix: when the local checks pass, push, open the PR, start the merge gate, then start the next ticket. Report a red or timed-out result, not a green one.
-- A spec: its one PR into main merges after the owner has tested a running copy and their blocking points are built (`/rig:spec-close`'s Ready part), with a merge commit through the merge gate. The owner can also merge it themselves, or say "merge it".
+- A feature ticket with a UI change: its PR merges after the owner's go on its preview (Feature tickets, above), through the merge gate.
 - After merges, refresh the owner's running app when it won't break what they're doing; say what changed.
 - The owner tests in batches: keep a short "ready to check" list in `STATUS.md`, naming any PR over the 400 target and its size.
 
@@ -149,8 +135,8 @@ The Throughput rules above hold. Factory adds a queue agents work through on the
 
 ### This project
 
-- **Decisions** stay dated in `docs/requirements.md` under Decisions, each with its reason; the build plan is milestones M0 to M5 there, one spec each (issues #1 to #6, label `spec`). Specs are written ahead and their tickets just in time (rig 2026-11-06); **owner-only tickets (`ready-for-human`) are filed first and listed for the owner up front**, so nothing waits on them. Issues labelled `spec` aren't queue tickets. **The 12-ticket cap is a guide here:** what counts is that the owner can review the spec's one PR in about a day; 14 to 16 small tickets, or 5 large ones, are fine (the owner, 2026-11-03). Domain words are in `GLOSSARY.md`.
+- **Decisions** stay dated in `docs/requirements.md` under Decisions, each with its reason. Milestones M0 to M9 were built as specs (label `spec`, closed); new work runs as feature tickets (above). **Owner-only tickets (`ready-for-human`) are filed first and listed for the owner up front**, so nothing waits on them. Domain words are in `GLOSSARY.md`.
 - **Carried over at M0:** trial-b's backend (`src/`, `tests/`, `fixtures/`, `pyproject.toml`, `uv.lock`, its CI workflow) from `sprint3-trail-b` at `863ae43`, package renamed `audit_agent` → `vouch`, its tests with it. The trial's evidence stays in `trial/`.
 - **The UI prototype** is on branch `prototype/ui` (never merged); its answers are decisions in `docs/requirements.md` and `docs/design.md`. A ticket that builds a prototyped screen links the branch.
-- **The course submission repo** (`submission` remote, TuringCollegeSubmissions/dhople-AE.AFA.updated0209.3.6) is updated once per milestone, after its spec PR lands on main and CI is green: `scripts/push-submission.sh` (local only, git-ignored; `--dry-run` first). It merges origin/main into the submission repo, keeps Turing's first commit, and adds a reviewer note pointing at this repo's issues, PRs and CI. Issues and PRs stay here only.
+- **The course submission repo** (`submission` remote, TuringCollegeSubmissions/dhople-AE.AFA.updated0209.3.6) is updated after each feature (or batch of Fixes) the owner has checked lands on main and CI is green: `scripts/push-submission.sh` (local only, git-ignored; `--dry-run` first). It merges origin/main into the submission repo, keeps Turing's first commit, and adds a reviewer note pointing at this repo's issues, PRs and CI. Issues and PRs stay here only.
 - **No paid model run without the owner's OK** and a cost and time estimate; tests run on the scripted fake model, offline.

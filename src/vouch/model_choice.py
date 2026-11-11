@@ -165,6 +165,11 @@ class DatabaseModelStore(DatabaseSettingStore):
         super().__init__(db, MODEL_SETTING)
 
 
+STREAMED_COST = "reported_cost"
+"""The `generation_info` key BudgetedChatOpenAI keeps a streamed call's reported cost under,
+which vouch.spending.UsageMeter reads (#553)."""
+
+
 def _budgeted_chat_openai() -> type[BaseChatModel]:
     """ChatOpenAI counting its calls: past `call_budget`, a call raises CallBudgetSpent before
     any request. One instance serves one assessment (ModelChoice.for_assessment)."""
@@ -201,6 +206,26 @@ def _budgeted_chat_openai() -> type[BaseChatModel]:
                         chunk.generation_info = rest or None
                     named = True
                 yield chunk
+
+        def _convert_chunk_to_generation_chunk(
+            self,
+            chunk: dict,
+            default_chunk_class: type,
+            base_generation_info: dict | None,
+        ) -> ChatGenerationChunk | None:
+            # OpenRouter's usage chunk carries the call's `cost`; langchain-openai's hook keeps
+            # only its token counts (as usage_metadata), and a streamed call has no llm_output.
+            # So the cost stays on the chunk's generation_info, which langchain-core merges into
+            # the streamed generation (#553). The hook serves _stream and _astream alike.
+            generation = super()._convert_chunk_to_generation_chunk(
+                chunk, default_chunk_class, base_generation_info
+            )
+            usage = chunk.get("usage")
+            if generation is not None and isinstance(usage, dict) and "cost" in usage:
+                # A new dict: the library may hand the first chunk its shared base dict.
+                info = generation.generation_info or {}
+                generation.generation_info = info | {STREAMED_COST: usage["cost"]}
+            return generation
 
     return BudgetedChatOpenAI
 

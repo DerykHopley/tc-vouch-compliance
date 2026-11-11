@@ -834,16 +834,17 @@ def test_a_call_whose_cost_cant_be_known_sends_none_never_zero():
     assert tracing_module.cost_details(llm_result(12, 5), UNPRICED_MODEL) is None
 
 
-def streamed_answer(request: httpx2.Request) -> httpx2.Response:
+def streamed_answer(request: httpx2.Request, **reported: object) -> httpx2.Response:
     """OpenRouter streaming a chat answer, as its streaming docs show: every chunk names the
-    model, and the usage chunk repeats the last one's `finish_reason`."""
+    model, and the usage chunk repeats the last one's `finish_reason`. `reported` joins the
+    usage chunk's `usage` (OpenRouter's `cost`, #553)."""
 
     def chunk(delta: dict, finish: str | None, **extra) -> str:
         choice = {"index": 0, "delta": delta, "finish_reason": finish}
         body = {"id": "gen-1", "object": "chat.completion.chunk", "created": 1, "model": GPT_LUNA}
         return "data: " + json.dumps(body | {"choices": [choice]} | extra) + "\n\n"
 
-    usage = {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200}
+    usage = {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200} | reported
     stream = (
         chunk({"role": "assistant", "content": "Laptops use full-disk encryption."}, None)
         + chunk({"content": ""}, "stop")
@@ -875,6 +876,51 @@ def test_a_streamed_call_s_generation_names_the_served_model_once_with_its_recor
     assert meter.usage().served_models == {GPT_LUNA: 1}
     [cost] = costs(spans)
     assert cost["total"] == pytest.approx(meter.usage().cost_usd)
+    assert cost["total"] == pytest.approx(PRICES[GPT_LUNA].cost(1000, 200))
+
+
+def streamed_with_cost(cost: object, exported) -> tuple[UsageMeter, list[dict[str, float]]]:
+    """One chat answer streamed through OpenRouter's chat model, its usage chunk carrying
+    `cost`: the call's meter, and its Langfuse generation's cost."""
+    on, exporter = exported
+    meter = UsageMeter(GPT_LUNA)
+    openrouter = OpenRouter(
+        SecretStr("sk-test"),
+        chat_client=httpx2.Client(
+            transport=httpx2.MockTransport(lambda request: streamed_answer(request, cost=cost))
+        ),
+    )
+    model = openrouter.chat_model(GPT_LUNA, [meter])
+    facts = TraceFacts(CHAT_TURN, "user_1", "demo", GPT_LUNA, PROMPT_VERSION)
+
+    list(model.stream([HumanMessage("Are laptops encrypted?")], on.config(facts)))
+
+    [spans] = traces(on, exporter).values()
+    return meter, costs(of_type(spans, "generation"))
+
+
+@pytest.mark.filterwarnings("ignore:A test tried to use socket.socket")
+def test_a_streamed_call_records_the_cost_its_usage_chunk_reports(exported):
+    """langchain-openai turns the usage chunk into `usage_metadata` and drops its `cost`, and a
+    streamed call has no `llm_output`: the chat recorded the price-list estimate (#553)."""
+    meter, [cost] = streamed_with_cost(0.0042, exported)
+
+    usage = meter.usage()
+    assert usage.reported_cost_usd == pytest.approx(0.0042)
+    assert usage.estimated_cost_usd == 0
+    assert usage.estimated is False
+    assert usage.cost_complete is True
+    assert usage.served_models == {GPT_LUNA: 1}
+    assert cost["total"] == pytest.approx(0.0042)
+
+
+@pytest.mark.filterwarnings("ignore:A test tried to use socket.socket")
+def test_a_streamed_cost_that_isnt_a_number_records_the_estimate(exported):
+    meter, [cost] = streamed_with_cost("0.0042", exported)
+
+    usage = meter.usage()
+    assert usage.estimated is True
+    assert usage.reported_cost_usd == 0
     assert cost["total"] == pytest.approx(PRICES[GPT_LUNA].cost(1000, 200))
 
 
