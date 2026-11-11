@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { type Assessment, dateTimeLabel, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { confirmFindings, JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, REVIEW_STEP_WORDS,
   REVIEW_STEPS, type Review, type ReviewDecision, type ReviewStep, submitReview } from './review.ts'
@@ -112,19 +112,36 @@ function Steps({ step, items }: { step: ReviewStep; items: ReviewBarProps['items
   )
 }
 
-/** How far above the window's foot the docked buttons sit: the Ask Vouch button's clearance (app.css, `main`). */
-const CLEARANCE = 88
-/** The room kept between a focused field and the docked buttons. */
+/** The room kept between a focused field and the docked buttons, or the top bar. */
 const GAP = 8
+/** Rounding the browser's own focus scroll may leave, under which nothing scrolls again: one scroll a focus. */
+const SLACK = 2
+
+/** A length the page holds in px, read from the root's computed style; `fallback` where there is none (a test page). */
+const rootPx = (read: (style: CSSStyleDeclaration) => string, fallback: number) =>
+  parseFloat(read(getComputedStyle(document.documentElement))) || fallback
+
+/** The window's foot the buttons dock above: the page's bottom scroll padding (app.css: the Ask Vouch button's 88px
+ * clearance and the safe area), the same length the docked row's `bottom` is, so the two never disagree. */
+const foot = () => rootPx((style) => style.scrollPaddingBottom, 88)
+
+/** The sticky top bar's height (`--top-bar`, TopBar). */
+const topBar = () => rootPx((style) => style.getPropertyValue('--top-bar'), 0)
+
+/** Whether the buttons' place in the bar ends below the window's foot, so they dock. */
+const docks = (slot: HTMLElement) => slot.getBoundingClientRect().bottom > window.innerHeight - foot() + 1
 
 /**
  * The review's buttons in reach (#467, `docs/design.md`, Components: Review bar): while the review is in progress and
- * the buttons' place in the bar (`slot`) is below the window's foot (above the Ask Vouch button's clearance), the
- * buttons (`dock`) are `stuck` there, over the bar's width (`place`), and the slot keeps their room; once the slot
- * comes into view they are back in it. The steps, the note and the explanations stay in the bar's place. The slot's
- * height is kept in `--review-actions` (app.css: a field brought into view stops above the docked buttons), and a field
- * focused under them, or under them as they change, is scrolled clear of them: Firefox doesn't scroll a field it
- * already counts as in view.
+ * the buttons' place in the bar (`slot`) ends below the window's foot (above the Ask Vouch button's clearance), the
+ * buttons (`dock`) are `stuck` there, over the bar's width (`place`, given to app.css as `--dock-left` and
+ * `--dock-width`, which print leaves out), and the slot keeps their room; once the slot comes into view they are back
+ * in it. Whether they dock is read before the bar's first paint, so a bar shown afresh (each time its assessment is
+ * read again) never blinks back into its place. The docked row's height inside its padding (`--review-actions`) is the
+ * slot's room and, in app.css, the scroll margin that keeps a field brought into view above the row; a field focused
+ * under the row anyway, or under it as it grows, is scrolled clear of it once (Firefox doesn't scroll a field it
+ * counts as in view), never so far that its top goes under the top bar; a field too tall for the room between them
+ * keeps its top in view.
  */
 function useDock(reviewing: boolean) {
   const bar = useRef<HTMLElement>(null)
@@ -132,15 +149,16 @@ function useDock(reviewing: boolean) {
   const dock = useRef<HTMLDivElement>(null)
   const [stuck, setStuck] = useState(false)
   const [place, setPlace] = useState<{ left: number; width: number } | null>(null)
-  useHeightVar(slot, '--review-actions', reviewing)
+  useHeightVar(dock, '--review-actions', reviewing, 'content')
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = slot.current
-    if (!reviewing || !el || typeof IntersectionObserver === 'undefined') return
-    const observer = new IntersectionObserver(([entry]) => {
-      const foot = entry.rootBounds?.bottom ?? window.innerHeight - CLEARANCE
-      setStuck(entry.boundingClientRect.bottom > foot + 1)
-    }, { rootMargin: `0px 0px -${CLEARANCE}px 0px`, threshold: [0, 1] })
+    if (!reviewing || !el) return
+    const check = () => setStuck(docks(el))
+    check()
+    if (typeof IntersectionObserver === 'undefined') return
+    // The observer only says when to look again; the slot is read as it is then, not from the entries.
+    const observer = new IntersectionObserver(check, { rootMargin: `0px 0px -${foot()}px 0px`, threshold: [0, 1] })
     observer.observe(el)
     return () => {
       observer.disconnect()
@@ -173,12 +191,16 @@ function useDock(reviewing: boolean) {
       cancelAnimationFrame(pending.frame)
       pending.frame = requestAnimationFrame(() => {
         const field = document.activeElement
-        if (!el.classList.contains('stuck') || !(field instanceof HTMLElement) || el.contains(field)) return
+        const paper = el.closest('.paper')
+        if (!el.classList.contains('stuck') || !(field instanceof HTMLElement) || el.contains(field)
+          || !paper?.contains(field)) return
         const f = field.getBoundingClientRect()
-        const top = el.getBoundingClientRect().top
-        if (f.height + GAP < top && f.bottom + GAP > top && f.top < window.innerHeight) {
-          window.scrollBy(0, f.bottom + GAP - top)
-        }
+        const below = topBar() + GAP
+        if (f.top >= window.innerHeight || f.height > window.innerHeight - below) return // a whole scrolling table
+        const over = below - f.top // its top under the top bar: a field taller than the room, lined up by its foot
+        const under = f.bottom + GAP - el.getBoundingClientRect().top
+        if (over > SLACK) window.scrollBy(0, -over)
+        else if (under > SLACK) window.scrollBy(0, Math.min(under, -over))
       })
     }
     document.addEventListener('focusin', clear)
@@ -262,7 +284,8 @@ export default function ReviewBar(props: ReviewBarProps) {
       )}
       <div ref={slot} className={stuck ? 'review-slot holding' : 'review-slot'}>
         <div ref={dock} className={stuck ? 'review-dock stuck' : 'review-dock'}
-          style={stuck && place ? { left: place.left, width: place.width } : undefined}>
+          style={stuck && place
+            ? { '--dock-left': `${place.left}px`, '--dock-width': `${place.width}px` } as CSSProperties : undefined}>
           <div className="review-actions">
             {step === 'confirm-findings' ? (
               <button className="btn btn-primary" disabled={held} aria-busy={sending === 'confirm'}
