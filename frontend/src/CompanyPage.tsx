@@ -8,10 +8,12 @@ import type { Overview, OverviewState } from './overview.ts'
 import { COLUMN_WORDS } from './paper.ts'
 import type { Goal } from './report.ts'
 import { SESSION_ENDED } from './session.ts'
+import Rounds from './Rounds.tsx'
+import { useRounds } from './rounds.ts'
 import { LANGUAGES, PROTECTION_LEVELS } from './setup.ts'
 
 /** The Company page (#505; `docs/design.md`, Components: Company page): the current company's facts, read-only apart
- * from the Goal, over a grid of panels (Goal, Review rounds, Scope, Not applicable, Upload documents) beside the
+ * from the Goal, over a grid of panels (Goal, Review rounds, Rounds, Scope, Not applicable, Upload documents) beside the
  * Documents. Its words are English, as the interface; what the profile writes in its answer language (overlay names,
  * not-applicable reasons) carries that `lang`. The facts are read each time the page opens; the Goal and review
  * rounds are the overview's, which App reads. */
@@ -49,6 +51,13 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
   }, [attempt])
   // Read alongside the company, so the panel is ready with the page; a company Try again leaves them as read.
   const documents = useDocuments(documentsReloads)
+  // The rounds too (#572), read again after a round is closed or started in the Review rounds panel.
+  const [roundsReloads, setRoundsReloads] = useState(0)
+  const rounds = useRounds(roundsReloads)
+  const roundChanged = () => {
+    setRoundsReloads((n) => n + 1)
+    return onRoundChanged()
+  }
   // The overview as last read: a later read that fails (on arriving, after a pass or a chat assessment) keeps it, as
   // useOverview's refresh does, so only a first read that fails shows the notice.
   const [kept, setKept] = useState<Overview | null>(overview.status === 'ready' ? overview.overview : null)
@@ -106,8 +115,9 @@ export default function CompanyPage({ overview, onRetryOverview, onGoalChanged, 
               notSet={goalNotSet} />
           </Panel>
           <Panel title="Review rounds" className="goal-controls">
-            <RoundControl overview={shownOverview} onChanged={onRoundChanged} />
+            <RoundControl overview={shownOverview} onChanged={roundChanged} />
           </Panel>
+          <Panel title="Rounds"><Rounds state={rounds.state} tryAgain={rounds.tryAgain} /></Panel>
           <Panel title="Scope"><Scope company={company} /></Panel>
           <Panel title="Not applicable"><NotApplicable company={company} /></Panel>
           <Panel title="Upload documents">

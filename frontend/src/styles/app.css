@@ -210,6 +210,15 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .company-na { gap: 0; }
 .company-na li { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--rule); }
 .company-documents { display: grid; min-width: 0; }
+/* The Rounds section (#572, design.md Components: Rounds section): newest first, each round's name over its times, a
+   closed one since the fresh start a 44px --navy link to its comparison; the default's pill and a before-fresh-start
+   note after it. */
+.rounds-list { gap: 0; }
+.rounds-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 0; border-top: 1px solid var(--rule); }
+.rounds-link, .rounds-row { display: grid; align-content: center; min-height: 44px; min-width: 0; overflow-wrap: anywhere; }
+.rounds-link { color: var(--navy); }
+.rounds-name { font-weight: 600; }
+.rounds-times, .rounds-note { color: var(--muted); font-size: 14px; }
 @media (min-width: 700px) {
   .company-grid { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
   .company-documents { grid-column: 1; grid-row: 1; }

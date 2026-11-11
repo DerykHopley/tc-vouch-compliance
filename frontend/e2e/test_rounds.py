@@ -168,3 +168,30 @@ def test_the_round_line_and_the_comparison_fit_in_both_states(
         start_round(page, name)
     expect(line).to_contain_text(f"Review round: {name}, open since")
     fits(page, f"{width}px {scheme}, open")
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+def test_the_lead_picks_a_closed_round_on_the_company_page(page: Page, rounds_url, width):
+    """#572: the Company page's Rounds section, newest first, the default marked; choosing a
+    round goes to its comparison's address. Runs after the tests above, so a round is closed;
+    with none (run alone), one is closed through the API first."""
+    listed = page.request.get(f"{rounds_url}/api/rounds").json()
+    if listed["default"] is None:
+        assert page.request.post(f"{rounds_url}/api/rounds/close").ok
+        listed = page.request.get(f"{rounds_url}/api/rounds").json()
+    chosen = listed["default"]
+    page.set_viewport_size({"width": width, "height": 900})
+    with page.expect_response(re.compile(r".*/api/rounds$")):
+        page.goto(f"{rounds_url}/company")
+    section = page.get_by_role("region", name="Rounds", exact=True)
+    names = section.locator(".rounds-name")
+    expect(names).to_have_count(len(listed["rounds"]))
+    assert names.all_inner_texts() == [r["name"] for r in reversed(listed["rounds"])]
+    marked = section.get_by_role("listitem").filter(has_text="Compared by default")
+    expect(marked).to_have_count(1)
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    ), f"the Company page scrolls sideways at {width}px"
+    assert small_targets(page) == [], width
+    marked.get_by_role("link").click()
+    expect(page).to_have_url(f"{rounds_url}/company/rounds/{chosen}")
