@@ -100,7 +100,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: docker build -t vouch:ci .
+      - run: docker build --build-arg "VOUCH_COMMIT=$(git rev-parse --short HEAD)" -t vouch:ci .
+      - name: the image names the commit it was built from (#580)
+        run: test "$(docker run --rm vouch:ci printenv VOUCH_COMMIT)" = "$(git rev-parse --short HEAD)"
       - name: without a front-end build the container refuses to start
         run: |
           if out=$(docker run --rm -e VOUCH_AUTH_MODE=local --tmpfs /app/frontend/dist vouch:ci 2>&1); then

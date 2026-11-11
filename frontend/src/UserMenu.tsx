@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from 'react'
+import { buildLine } from './build.ts'
 import Menu, { MenuItem } from './Menu.tsx'
 import { startAfresh } from './profiles.ts'
 import { initials, LOCAL_USER, type Theme } from './user.ts'
@@ -37,7 +38,8 @@ async function confirmFreshStart(company: string | undefined, onStarted: () => v
 }
 
 /** The user menu behind the user's initials (#222), in the Letterhead order (#495, option A): "Signed in as <name>" and
- * the theme; Developer page and Set up a company (developers only); Sign out; the fresh start (#285), last. A separator
+ * the theme; Developer page and Set up a company (developers only); Sign out; the fresh start (#285); and, muted and
+ * last, the running build (#580: "Vouch 1a2b3c4 · vouch-00029", "Vouch dev" locally). A separator
  * splits the groups (the arrow keys skip it), and a group with nothing in it leaves none. In local mode, with no
  * sign-in, no "Signed in as" or Sign out. */
 export default function UserMenu({ name, theme, onTheme, onSignOut, company, onStartedAfresh, developerTools }:
@@ -69,7 +71,10 @@ export default function UserMenu({ name, theme, onTheme, onSignOut, company, onS
         )
         // Each group keyed by its name, so a group arriving while the menu is open (the developer's, once the settings
         // are read) moves no item into another's place, and the focused item stays the one focused.
-        const groups = ([['you', you], ['tools', tools], ['sign-out', signOut], ['reset', reset]] as [string, ReactNode][])
+        // Which build is running (issue 580): muted, last, never an item.
+        const build = <p className="menu-note" role="none">{buildLine()}</p>
+        const groups = ([['you', you], ['tools', tools], ['sign-out', signOut], ['reset', reset], ['build', build]] as
+          [string, ReactNode][])
           .filter(([, items]) => items)
         return groups.map(([key, items], i) => (
           <Fragment key={key}>
