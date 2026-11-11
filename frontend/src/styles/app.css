@@ -704,6 +704,24 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 @media (forced-colors: active) {
   .doc-table .doc-choose .setup-choice input { margin: 13px; }
 }
+/* Adding documents (#585, design.md Components: Documents tab): Add document beside the sheet's title; an added row's
+   Origin is "Added" over a 44px ghost Add new version. The form sits under the title on a --rule hairline: its fields
+   in two columns from 700px, stacked under it; the version and invented-data notes, any alert, then its buttons. */
+.documents-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.doc-origin { display: grid; justify-items: start; gap: 2px; }
+/* Cancels .btn-ghost's 10px inline padding, so the pill's text lines up with "Added" above it. */
+.doc-origin .btn { margin-left: -10px; }
+.doc-form { display: grid; gap: 10px; padding: 12px 0; border-block: 1px solid var(--rule); min-width: 0; }
+.doc-form h3 { margin: 0; font-size: 16px; }
+.doc-form-fields { display: grid; gap: 10px 16px; grid-template-columns: minmax(0, 1fr); }
+.doc-form-field { display: grid; gap: 4px; min-width: 0; font-weight: 500; }
+.doc-form-field .field { width: 100%; font-weight: 400; }
+.doc-form-field input[readonly] { background: var(--paper); color: var(--muted); }
+.doc-form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (min-width: 700px) {
+  .doc-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .doc-form-file { grid-column: 1 / -1; }
+}
 /* Step 6's Select all and Deselect all (#475): ghost pills at the right, over their folder's table and its caption.
    The folder is positioned, so the buttons' screen-reader words (.sr-only) stay inside it, as the table's do. */
 .setup-folder { position: relative; display: grid; min-width: 0; }

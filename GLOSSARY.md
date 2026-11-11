@@ -71,8 +71,12 @@ The compliance profile over the whole sample library that the eval scores; it is
 _Avoid_: Sample company, test profile
 
 **Documents tab**:
-The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505).
+The list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505). A compliance lead may add a document or a new version of one, and withdraw an added one; built-in documents can't be changed (#345).
 _Avoid_: Document library, uploads, files
+
+**Withdrawn document**:
+An added evidence document the lead has taken away: no longer searched or cited, still listed, its versions kept so the audit trail stays true (#345).
+_Avoid_: Deleted, archived
 
 **Remove company**:
 A developer hiding a company made in company setup everywhere: it leaves every list and can't be opened again, but its audit trail is kept and its id is never used again. When it was the current company, everyone falls back to Nordlicht. File-defined profiles can't be removed.

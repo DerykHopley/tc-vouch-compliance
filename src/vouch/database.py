@@ -22,12 +22,13 @@ direct connection outside the pool, so a wrong password or a missing database is
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
 limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39), the
 remediation items the lead decided on (#43), the improvement plan's marks on them (#410), each
-profile's Goal (#369), its review rounds (#402), the open questions on its controls (#414) and the
-companies made in the app (#385); nothing else does. Before it has run, a setting reads as unset, a
-Goal as Audit readiness, the plan as no marks, the review rounds as the first one, open, the open
-questions as none, and no company is found; and a write, a count, the usage, a review, a
-remediation decision, a plan mark, a Goal change, a round started or closed, a question logged or
-answered, or a new company is DatabaseUnavailable (a 503).
+profile's Goal (#369), its review rounds (#402), the open questions on its controls (#414), the
+evidence documents added to it (#584) and the companies made in the app (#385); nothing else
+does. Before it has run, a setting reads as unset, a Goal as Audit readiness, the plan as no
+marks, the review rounds as the first one, open, the open questions and added documents as none,
+and no company is found; and a write, a count, the usage, a review, a remediation decision, a
+plan mark, a Goal change, a round started or closed, a question logged or answered, a document
+added or withdrawn, or a new company is DatabaseUnavailable (a 503).
 """
 
 import hashlib
@@ -129,12 +130,15 @@ AuditAction = Literal[
     "done",
     "question",
     "answer",
+    "document-add",
+    "document-withdraw",
 ]
 """What an audit entry records the compliance lead doing (vouch.audit's Action): `goal` is a
 change of the profile's Goal (#369); `round-start` and `round-close` a review round started or
 closed (#402); `priority` and `done` a remediation item's priority changed or marked done, in the
 improvement plan (#410); `question` and `answer` an open question logged on a control and its
-answer recorded (#414)."""
+answer recorded (#414); `document-add` and `document-withdraw` an evidence document (or a new
+version of one) added to the profile, or withdrawn (#584)."""
 Goal = Literal["audit-readiness", "internal-improvement"]
 """What a compliance profile is used for (#369, vouch.goal): kept per user and profile."""
 Priority = Literal["high", "medium", "low"]
@@ -228,7 +232,7 @@ REPLACE_AUDIT_ACTION_CHECK = (
     "END IF; END $$"
 )
 """A trail made before an action was added (`confirm`, #372; `goal`, #369; the rounds', #402;
-the plan's, #410; the open questions', #414)
+the plan's, #410; the open questions', #414; the added documents', #584)
 has a CHECK refusing it: replaced
 by one naming every AuditAction. No row is changed (the trail's guard is on update and delete,
 which an ALTER doesn't fire), and once the CHECK names them all, a second run does nothing."""
@@ -362,6 +366,57 @@ CREATE_QUESTIONS_INDEX = (
     f"CREATE INDEX IF NOT EXISTS {QUESTIONS_TABLE}_by_owner ON {QUESTIONS_TABLE} "
     "(user_id, profile_id, asked_at, id)"
 )
+ADDED_DOCUMENTS_TABLE = "vouch_added_documents"
+"""Each version of each evidence document a lead added to a compliance profile
+(vouch.added_documents, #584): never deleted or rewritten, but for the withdrawn mark
+(`withdrawn_at`, set once)."""
+ADDED_DOCUMENT_COLUMNS = (
+    "profile_id",
+    "doc_id",
+    "version",
+    "title",
+    "kind",
+    "approval_date",
+    "review_cycle",
+    "text",
+    "added_by",
+    "added_by_name",
+    "added_at",
+    "withdrawn_at",
+)
+CREATE_ADDED_DOCUMENTS = (
+    f"CREATE TABLE IF NOT EXISTS {ADDED_DOCUMENTS_TABLE} (profile_id text NOT NULL, "
+    "doc_id text NOT NULL, version integer NOT NULL CHECK (version >= 1), title text NOT NULL, "
+    "kind text NOT NULL CHECK (kind IN ('policy', 'record')), approval_date date NOT NULL, "
+    "review_cycle text NOT NULL, text text NOT NULL, added_by text NOT NULL, "
+    "added_by_name text NOT NULL, added_at timestamptz NOT NULL, withdrawn_at timestamptz, "
+    "PRIMARY KEY (profile_id, doc_id, version))"
+)
+_KEPT_COLUMNS = tuple(c for c in ADDED_DOCUMENT_COLUMNS if c != "withdrawn_at")
+CREATE_ADDED_DOCUMENTS_GUARD = (
+    "CREATE OR REPLACE FUNCTION vouch_added_documents_kept() RETURNS trigger LANGUAGE plpgsql "
+    "AS $$ BEGIN "
+    "IF TG_OP = 'UPDATE' AND OLD.withdrawn_at IS NULL AND NEW.withdrawn_at IS NOT NULL "
+    f"AND ({', '.join(f'NEW.{c}' for c in _KEPT_COLUMNS)}) IS NOT DISTINCT FROM "
+    f"({', '.join(f'OLD.{c}' for c in _KEPT_COLUMNS)}) THEN RETURN NEW; END IF; "
+    "RAISE EXCEPTION 'an added document is kept as added; only the withdrawn mark is set'; "
+    "END $$"
+)
+CREATE_ADDED_DOCUMENTS_TRIGGERS = (
+    (
+        f"CREATE OR REPLACE TRIGGER {ADDED_DOCUMENTS_TABLE}_kept BEFORE UPDATE OR DELETE ON "
+        f"{ADDED_DOCUMENTS_TABLE} FOR EACH ROW EXECUTE FUNCTION vouch_added_documents_kept()"
+    ),
+    (
+        f"CREATE OR REPLACE TRIGGER {ADDED_DOCUMENTS_TABLE}_no_truncate BEFORE TRUNCATE ON "
+        f"{ADDED_DOCUMENTS_TABLE} FOR EACH STATEMENT EXECUTE FUNCTION vouch_added_documents_kept()"
+    ),
+)
+"""The table refuses a delete, a truncate, and any update but setting the withdrawn mark once,
+whoever asks: an earlier version stays as it was cited."""
+ADD_DOCUMENT_LOCK = "SELECT pg_advisory_xact_lock(%s)"
+"""Two writes to one profile (adds, withdraws) take turns, so the limit and the next version are
+read as written, and no add slips a live version in beside a withdraw."""
 REVIEW_LOCK = "SELECT pg_try_advisory_xact_lock(%s) AS taken"
 """One review of a thread at a time, from any process: held until the transaction ends. Taken
 without waiting, so a second review is refused at once and holds no connection meanwhile."""
@@ -387,6 +442,7 @@ SETUP_TABLES = (
     GOALS_TABLE,
     ROUNDS_TABLE,
     QUESTIONS_TABLE,
+    ADDED_DOCUMENTS_TABLE,
 )
 """Every table vouch-db-setup creates: LangGraph's (checkpointer and store, as the installed
 langgraph-checkpoint-postgres creates them) and Vouch's own. Health checks they're all there."""
@@ -1231,6 +1287,101 @@ class Database:
             _insert_audit(conn, [entry])
         return answered, True
 
+    def added_documents(self, profile_id: str | None) -> list[dict[str, Any]]:
+        """Every version of the profile's added documents (every profile's, for None), by
+        profile, id and version: mappings of ADDED_DOCUMENT_COLUMNS. An empty list before
+        vouch-db-setup made the table (logged: run vouch-db-setup). Raises DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                return conn.execute(
+                    f"SELECT {', '.join(ADDED_DOCUMENT_COLUMNS)} FROM {ADDED_DOCUMENTS_TABLE} "
+                    "WHERE %(p)s::text IS NULL OR profile_id = %(p)s "
+                    "ORDER BY profile_id, doc_id, version",
+                    {"p": profile_id},
+                ).fetchall()
+            except psycopg.errors.UndefinedTable:
+                log.error("no %s table: run vouch-db-setup on this database", ADDED_DOCUMENTS_TABLE)
+                return []
+
+    def added_watermark(self, profile_id: str) -> tuple[int, int, datetime | None]:
+        """How many versions of the profile's added documents are kept, how many are withdrawn,
+        and the latest time one was added or withdrawn: (0, 0, None) for none, also before vouch-db-setup made the table.
+        One aggregate on the table, which an instance asks before using what it holds. Raises
+        DatabaseUnavailable."""
+        with self.connection() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT count(*) AS n, count(withdrawn_at) AS w, "
+                    "max(greatest(added_at, withdrawn_at)) AS at "
+                    f"FROM {ADDED_DOCUMENTS_TABLE} WHERE profile_id = %s",
+                    (profile_id,),
+                ).fetchone()
+            except psycopg.errors.UndefinedTable:
+                return 0, 0, None
+        return (0, 0, None) if row is None else (int(row["n"]), int(row["w"]), row["at"])
+
+    def add_document(
+        self,
+        profile_id: str,
+        made: Callable[[list[dict[str, Any]]], Mapping[str, Any]],
+        entry: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Keep the version `made` gives from the profile's versions already kept (a mapping of
+        ADDED_DOCUMENT_COLUMNS), with `entry`'s audit entry of the version kept when given (a
+        mapping of AUDIT_COLUMNS, #585), in one transaction holding the profile's lock, so two
+        writes take turns: the version kept, and every version of the profile as it then
+        stands. An exception from `made` writes nothing and is raised as itself. Raises
+        DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
+        columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
+        with (
+            self.connection() as conn,
+            self._failed(ADDED_DOCUMENTS_TABLE),
+            self._needs_setup(ADDED_DOCUMENTS_TABLE),
+            conn.transaction(),
+        ):
+            conn.execute(ADD_DOCUMENT_LOCK, (lock_id(f"added-documents:{profile_id}"),))
+            kept = conn.execute(
+                f"SELECT {columns} FROM {ADDED_DOCUMENTS_TABLE} WHERE profile_id = %s "
+                "ORDER BY doc_id, version",
+                (profile_id,),
+            ).fetchall()
+            row = made(kept)
+            added = conn.execute(
+                f"INSERT INTO {ADDED_DOCUMENTS_TABLE} ({columns}) "
+                f"VALUES ({', '.join(f'%({c})s' for c in ADDED_DOCUMENT_COLUMNS)}) "
+                f"RETURNING {columns}",
+                row,
+            ).fetchone()
+            if added is None:  # an INSERT … RETURNING returns its row
+                raise DatabaseUnavailable(f"a document in {ADDED_DOCUMENTS_TABLE} was not kept")
+            if entry is not None:
+                _insert_audit(conn, [entry(added)])
+        return added, [*kept, added]
+
+    def withdraw_document(self, profile_id: str, doc_id: str, at: datetime) -> list[dict[str, Any]]:
+        """Mark every version of the document not yet withdrawn withdrawn at `at`, holding the
+        profile's lock as an add does (so an add can't slip a live version in beside it): every
+        version of the profile as it then stands, by id and version. Raises DatabaseUnavailable
+        for any database failure, also before vouch-db-setup ran."""
+        columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
+        with (
+            self.connection() as conn,
+            self._failed(ADDED_DOCUMENTS_TABLE),
+            self._needs_setup(ADDED_DOCUMENTS_TABLE),
+            conn.transaction(),
+        ):
+            conn.execute(ADD_DOCUMENT_LOCK, (lock_id(f"added-documents:{profile_id}"),))
+            conn.execute(
+                f"UPDATE {ADDED_DOCUMENTS_TABLE} SET withdrawn_at = %s WHERE profile_id = %s "
+                "AND doc_id = %s AND withdrawn_at IS NULL",
+                (at, profile_id, doc_id),
+            )
+            return conn.execute(
+                f"SELECT {columns} FROM {ADDED_DOCUMENTS_TABLE} WHERE profile_id = %s "
+                "ORDER BY doc_id, version",
+                (profile_id,),
+            ).fetchall()
+
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[dict[str, Any]]:
@@ -1289,6 +1440,10 @@ class Database:
                 conn.execute(CREATE_ROUNDS_ONE_OPEN)
                 conn.execute(CREATE_QUESTIONS)
                 conn.execute(CREATE_QUESTIONS_INDEX)
+                conn.execute(CREATE_ADDED_DOCUMENTS)
+                conn.execute(CREATE_ADDED_DOCUMENTS_GUARD)
+                for trigger in CREATE_ADDED_DOCUMENTS_TRIGGERS:
+                    conn.execute(trigger)
         finally:
             conn.close()
 

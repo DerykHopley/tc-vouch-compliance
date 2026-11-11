@@ -12,7 +12,10 @@ open with the name field) and the comparison fit: nothing scrolls sideways and e
 at least 44px. The layout check runs from whatever state the server is in."""
 
 import json
+import os
 import re
+import subprocess
+from pathlib import Path
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
@@ -20,6 +23,8 @@ from current_company import current_company
 from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
 from touch_targets import small_targets
+
+ROOT = Path(__file__).resolve().parents[2]
 
 CLOSE_FIRST = (
     'Close the review round "First round"? Its results are frozen, and the overview compares '
@@ -284,3 +289,32 @@ def test_the_lead_asks_the_chat_what_improved_since_the_last_round(page: Page, r
     expect(link).to_be_visible()
     link.click()
     expect(page).to_have_url(f"{rounds_url}/controls/{control_id}")
+
+
+def test_the_lead_opens_company_rounds_on_the_seeded_demo_round(page: Page, rounds_url):
+    """#579, the user story: Nordlicht started afresh, then the demo round seeded through this
+    server's API (`vouch-seed-demo-round --api`, as for a preview); Company › Rounds marks
+    "Q2 2026" compared by default, and its comparison opens on three controls better and none
+    worse. Last in this file, after #581's chat check: the seed starts Nordlicht afresh."""
+    assert page.request.post(f"{rounds_url}/api/progress/fresh-start").ok
+    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "VOUCH_DATABASE_URL")}
+    seeded = subprocess.run(
+        ["uv", "run", "--project", str(ROOT), "vouch-seed-demo-round", "--api", rounds_url],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    page.set_viewport_size({"width": 1280, "height": 900})
+    with page.expect_response(re.compile(r".*/api/rounds$")):
+        page.goto(f"{rounds_url}/company")
+    section = page.get_by_role("region", name="Rounds", exact=True)
+    marked = section.get_by_role("listitem").filter(has_text="Compared by default")
+    expect(marked).to_contain_text("Q2 2026")
+    with page.expect_response(re.compile(r".*/api/rounds/\d+/comparison$")):
+        marked.get_by_role("link").click()
+    changes = page.get_by_role("region", name="Summary").get_by_role("list", name="Changes")
+    expect(changes).to_contain_text("Better 3")
+    expect(changes).to_contain_text("Worse 0")

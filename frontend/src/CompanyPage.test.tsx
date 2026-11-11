@@ -40,12 +40,13 @@ const READY: OverviewState = { status: 'ready', overview: OVERVIEW }
 const DOCUMENTS = {
   documents: [{ id: 'backup-policy', source: 'policies', title: 'Backup policy', kind: 'documented', version: '1.0',
     approval_date: '2026-01-01', review_cycle: 'yearly', stale_because: null, stale: false, language: 'en',
-    cited_by: [] }],
+    cited_by: [], origin: 'built-in' }],
   words: { title: 'Documents', sources: { policies: 'Policies' }, columns: { document: 'Document', kind: 'Kind',
-    version: 'Version', approved: 'Approved', review: 'Review', status: 'Status', cited_by: 'Cited by' },
+    version: 'Version', approved: 'Approved', review: 'Review', status: 'Status', cited_by: 'Cited by', origin: 'Origin' },
   kinds: { documented: 'Documented', implemented: 'Implemented' }, cycles: { yearly: 'Yearly' }, stale: 'Stale',
   stale_reasons: {}, current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
-  not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.' },
+  not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.',
+  origins: { 'built-in': 'Built in', added: 'Added' } },
   words_language: 'en',
 }
 
@@ -176,17 +177,15 @@ describe('the Company page (ticket 505)', () => {
     expect(within(panel('Not applicable')).getByText('Nothing is marked not applicable.')).toBeTruthy()
   })
 
-  it('the Upload documents panel is a placeholder with no control', async () => {
+  it('has no Upload documents placeholder: documents are added in the Documents panel (ticket 585)', async () => {
     serve()
     show()
 
     await screen.findByRole('heading', { level: 1 })
-    const upload = panel('Upload documents')
-    expect(within(upload).getByText(
-      "Uploading documents isn't available yet. For now, Vouch reads the documents listed under Documents.")).toBeTruthy()
-    expect(within(upload).queryAllByRole('button')).toHaveLength(0)
-    expect(within(upload).queryAllByRole('link')).toHaveLength(0)
-    expect(upload.querySelectorAll('input, select, textarea')).toHaveLength(0)
+    expect(screen.queryByRole('heading', { name: 'Upload documents' })).toBeNull()
+    expect(screen.queryByText(/Uploading documents/)).toBeNull()
+    const documents = await screen.findByRole('region', { name: 'Documents' })
+    expect(await within(documents).findByRole('button', { name: 'Add document' })).toBeTruthy()
   })
 
   it('the Goal and Review rounds panels hold the Goal and round controls', async () => {
@@ -206,7 +205,7 @@ describe('the Company page (ticket 505)', () => {
     await screen.findByRole('heading', { level: 1 })
     const names = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label')
       ?? document.getElementById(r.getAttribute('aria-labelledby') ?? '')?.textContent)
-    expect(names).toEqual(['Goal', 'Review rounds', 'Rounds', 'Scope', 'Not applicable', 'Upload documents', 'Documents'])
+    expect(names).toEqual(['Goal', 'Review rounds', 'Rounds', 'Scope', 'Not applicable', 'Documents'])
   })
 
   it('lists the review rounds in the Rounds panel, the closed one a link to its comparison (ticket 572)', async () => {

@@ -22,7 +22,7 @@ from reviewing import accepted, confirm, plan_fixes
 from test_api import read_events
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401 (a fixture)
 
-from vouch import audit, company_profiles, graph, memory, remediation
+from vouch import added_documents, audit, company_profiles, graph, memory, remediation
 from vouch.api import create_app, current_user
 from vouch.database import Database, DatabaseUnavailable
 from vouch.graph import state_serializer
@@ -38,13 +38,15 @@ def as_user(request: Request) -> User:
 
 def restart() -> None:
     """What a restart of the process forgets: its in-memory saver, store and audit trail, and the
-    companies made in it with the profiles read from them."""
+    companies made in it with the profiles read from them, and its added documents."""
     memory.process_checkpointer.cache_clear()
     memory.process_store.cache_clear()
     audit.process_trail.cache_clear()
     remediation.process_items.cache_clear()
     company_profiles.process_company_profiles.cache_clear()
     company_profiles.read_stored_once.cache_clear()
+    added_documents.process_added_documents.cache_clear()
+    added_documents.added_index().clear()
 
 
 def app_on(url: SecretStr | None) -> Any:

@@ -23,7 +23,7 @@ data, and checked against that control's citations only: one cited for another c
 
 import logging
 import math
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal
@@ -33,6 +33,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
+from vouch.added_documents import AddedDocument, added_index
 from vouch.citations import LeadStatement, QuoteChecker
 from vouch.documents import escaped, facts_of
 from vouch.dossier import applicable_controls
@@ -164,9 +165,19 @@ class IncludedControl:
     passages: list[EvidencePassage] = field(default_factory=list)  # those, as the prompt lists them
 
 
-def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]:
+def added_documents_of(profile: ComplianceProfile) -> list[AddedDocument]:
+    """The documents added to the profile's sources (#584): the newest version of each not
+    withdrawn, as the index holds them now."""
+    found = added_index().searchable(profile.id)
+    return [d for d in found if d.source in profile.evidence_sources]
+
+
+def _documents(
+    profile: ComplianceProfile, today: date, added: Sequence[AddedDocument] | None = None
+) -> list[EvidencePassage]:
     """Every document of every evidence source the profile allows (only the chosen ones, where
-    it chose: EvidenceSource.documents), whole, with its source, kind and staleness on `today`.
+    it chose: EvidenceSource.documents), then the documents added to it (#584: `added`, else
+    added_documents_of), whole, with its source, kind and staleness on `today`.
     ProfilePassRefused for a source whose folder can't be read (missing, unreadable, or
     `escaped` since the profile loaded)."""
 
@@ -175,6 +186,7 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
             f"The profile pass can't run: {why}. Assess the controls one at a time instead."
         )
 
+    added_documents = added_documents_of(profile) if added is None else added
     found: list[EvidencePassage] = []
     for source, allowed in profile.evidence_sources.items():
         folder = allowed.folder
@@ -196,6 +208,18 @@ def _documents(profile: ComplianceProfile, today: date) -> list[EvidencePassage]
                 )
         except (OSError, UnicodeDecodeError):
             raise refused(f"the {source} folder can't be read") from None
+        for doc in (d for d in added_documents if d.source == source):  # #584
+            facts = doc.facts(today)
+            found.append(
+                EvidencePassage(
+                    doc_id=doc.doc_id,
+                    heading="",
+                    text=doc.body.strip(),
+                    source=source,
+                    kind=facts.kind,
+                    stale=facts.stale_because is not None,
+                )
+            )
     return found
 
 
@@ -422,7 +446,8 @@ def run_profile_pass(
             included.append(IncludedControl(control, requirements, mine, passages))
     if not included:
         return ProfilePassResult([], skipped)
-    documents = _documents(profile, today)
+    added = added_documents_of(profile)
+    documents = _documents(profile, today, added)
     prompt = profile_pass_prompt(profile, included, documents)
     tokens_in = estimate_tokens(prompt, profile.answer_language)
     tokens_out = estimate_output_tokens(
@@ -451,6 +476,7 @@ def run_profile_pass(
         "note": "",
         "document_folders": {n: str(s.folder) for n, s in profile.evidence_sources.items()},
         "document_choices": profile.document_choices(),
+        "added_read": [{"doc_id": d.doc_id, "version": d.version} for d in added],
         "claims": {},
     }
     checker = quote_checker(shared, label=lead_statement_label(profile.answer_language))
