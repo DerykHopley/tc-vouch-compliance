@@ -2397,7 +2397,9 @@ def _company_settings(
     return {
         "broken_profiles": [asdict(b) for b in scan.broken],
         "companies": made,
-        "listed_companies": [listed_profile(p) for p in scan.loaded],
+        "listed_companies": [
+            listed_profile(p) | {"demo": p.id == demo_reset.DEMO_COMPANY} for p in scan.loaded
+        ],
         "current_company": current_of(scan, stored_current_company(current)),
     }
 

@@ -157,7 +157,7 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
     page: Page, profiles_url
 ):
     """#418, #480: a company made in setup listed with Make current and Remove, the others with
-    Make current, the current one marked; the settings answered with one added, so no company is
+    Make current, the current one marked; Reset demo on every row, the current one's too (#605); the settings answered with one added, so no company is
     made on the profiles server."""
     made = {
         "id": "musterfirma-sud-gmbh",
@@ -169,6 +169,7 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
         "company": "Musterfirma Süd GmbH",
         "country": "Germany",
         "answer_language": "en",
+        "demo": False,
     }
 
     def with_a_company(route) -> None:
@@ -184,6 +185,8 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
     at_phone_width(page, f"{profiles_url}/developer")
     expect(page.get_by_role("button", name="Remove Musterfirma Süd GmbH")).to_be_visible()
     expect(page.get_by_role("button", name="Make Musterfirma Süd GmbH current")).to_be_visible()
+    for company in ("Musterfirma Süd GmbH", "Nordlicht Komponenten GmbH"):
+        expect(page.get_by_role("button", name=f"Reset the demo of {company}")).to_be_visible()
     # The Companies section's mark: the price list marks the current model too (#496).
     expect(page.locator(".companies .current-mark")).to_have_text("Current")
     assert small_targets(page) == []

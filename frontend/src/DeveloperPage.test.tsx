@@ -16,7 +16,7 @@ beforeEach(() => {
 const SETTINGS: DeveloperSettings = DEVELOPER_SETTINGS
 /** Musterfirma, made in setup, as GET /api/profiles lists it. */
 const LISTED_MUSTERFIRMA = { id: 'musterfirma-sud-gmbh', company: 'Musterfirma Süd GmbH', country: 'Germany',
-  answer_language: 'en' }
+  answer_language: 'en', demo: false }
 
 /** The Companies section's row naming `company`. */
 function rowOf(company: string): HTMLElement {
@@ -827,6 +827,17 @@ describe('Reset demo, issue 605', () => {
     await userEvent.click(button('Alpenwerk Präzision GmbH'))
     expect(confirm).toHaveBeenLastCalledWith(ALPENWERK_QUESTION)
     expect(posts(fetch)).toEqual([])
+  })
+
+  it("builds the confirm from the API's demo mark, not the company's id", async () => {
+    resetting(200)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const marked = { ...SETTINGS, listed_companies: SETTINGS.listed_companies.map((c) => ({ ...c, demo: !c.demo })) }
+    renderPage({ settings: marked })
+    await userEvent.click(button('Alpenwerk Präzision GmbH'))
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Then the demo round is played'))
+    await userEvent.click(button('Nordlicht Komponenten GmbH'))
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('It starts empty.'))
   })
 
   it('resets once on a double press, saying Resetting… while out, then says the demo state is back', async () => {

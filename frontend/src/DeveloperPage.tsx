@@ -83,16 +83,14 @@ const CURRENT_PROBLEM: Record<Extract<CurrentChange['status'], 'unavailable' | '
   failed: 'The company could not be made current. Nothing changed.',
 }
 
-/** The company whose Reset demo plays the demo round (#605, vouch.demo_reset's DEMO_COMPANY). */
-const DEMO_COMPANY = 'nordlicht'
 const RESET_PROBLEM = {
   unavailable: 'The database is unavailable just now. Nothing was reset; try again in a moment.',
   failed: 'The company could not be reset. Try again.',
 }
 
 /** Reset demo's confirm (#605): it names the company and what goes. */
-function resetQuestion({ id, company }: Row): string {
-  const then = id === DEMO_COMPANY ? 'Then the demo round is played: Q2 2026 closed, Q3 2026 open.' : 'It starts empty.'
+function resetQuestion({ company, demo }: Row): string {
+  const then = demo ? 'Then the demo round is played: Q2 2026 closed, Q3 2026 open.' : 'It starts empty.'
   return `Reset the demo of ${company}? Every user's progress and history under it is deleted: assessments, rounds, `
     + `the audit trail, open questions, remediation and added documents. ${then} This can't be undone.`
 }
@@ -128,7 +126,7 @@ function withCurrent(done: string, held: DeveloperSettings, now: ProfileSummary 
 
 /** One row of the Companies list: a listed company (Current, or Make current), with Remove when made in setup; or a
  * company made in setup that isn't listed (broken, or its id taken by a profile folder since), with Remove only. */
-type Row = { id: string; company: string; listed: boolean; made: MadeCompany | undefined }
+type Row = { id: string; company: string; listed: boolean; made: MadeCompany | undefined; demo: boolean }
 
 /** Every listed company in the API's order, then the companies made in setup that aren't listed. A company made in
  * setup is listed when it isn't among the profiles left out: a shadowed one is, and its id lists the file one. */
@@ -137,8 +135,10 @@ function rowsOf(settings: DeveloperSettings): Row[] {
   const made = settings.companies ?? []
   const listedMade = new Map(made.filter((c) => !left.has(c.id)).map((c) => [c.id, c]))
   return [
-    ...settings.listed_companies.map((c) => ({ id: c.id, company: c.company, listed: true, made: listedMade.get(c.id) })),
-    ...made.filter((c) => left.has(c.id)).map((c) => ({ id: c.id, company: c.company, listed: false, made: c })),
+    ...settings.listed_companies.map((c) => ({ id: c.id, company: c.company, listed: true, made: listedMade.get(c.id),
+      demo: c.demo })),
+    ...made.filter((c) => left.has(c.id)).map((c) => ({ id: c.id, company: c.company, listed: false, made: c,
+      demo: false })),
   ]
 }
 

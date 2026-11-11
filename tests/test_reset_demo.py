@@ -10,7 +10,9 @@ test_database's.
 """
 
 import base64
+import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -22,7 +24,9 @@ from test_database import empty_database, needs_postgres  # noqa: F401 (a fixtur
 from test_memory import DEMO_CONTROL, app_on, restart, set_daily_limit
 from test_remediation import confirmed_with_an_item, decide
 
+from vouch import demo_reset
 from vouch.api import PROFILE_HEADER
+from vouch.audit import Reviewer
 from vouch.database import (
     ADDED_DOCUMENTS_TABLE,
     AUDIT_TABLE,
@@ -31,6 +35,7 @@ from vouch.database import (
     Database,
 )
 from vouch.demo_round import NEXT_ROUND, ROUND_NAME
+from vouch.memory import process_store
 from vouch.spending import DAILY_LIMIT
 
 database_url = test_memory.database_url
@@ -279,3 +284,46 @@ def test_setup_twice_on_mains_data_keeps_it_and_allows_the_resets_delete(postgre
         conn.execute(f"SET LOCAL {RESET_DEMO_SETTING} = 'on'")
         conn.execute(f"DELETE FROM {AUDIT_TABLE}")
     assert counts(postgres)[AUDIT_TABLE] == 0
+
+
+def test_a_wipe_without_a_database_reaches_every_users_memory_past_a_page_of_100():
+    store = process_store()
+    for n in range(150):
+        store.put(("vouch", f"user_{n:03d}", "nordlicht", "assessments"), "t", {"control_id": "x"})
+    store.put(("vouch", "user_000", "alpenwerk", "assessments"), "t", {"control_id": "x"})
+
+    demo_reset.wipe(None, "nordlicht", Reviewer("user_dev", "Dev"), datetime.now(UTC))
+
+    namespaces = store.list_namespaces(prefix=("vouch",), limit=1_000)
+    kept = {ns[2] for ns in namespaces for _ in store.search(ns, limit=10)}
+    assert kept == {"alpenwerk"}  # an emptied namespace is still listed; its items are gone
+
+
+def test_the_developer_settings_mark_the_company_with_a_demo_story(users):
+    developer, _ = users
+    with TestClient(app_on(None)) as client:
+        listed = get(client, "/api/developer/settings", developer)["listed_companies"]
+
+    assert {c["id"]: c["demo"] for c in listed} == {"alpenwerk": False, "nordlicht": True}
+
+
+@needs_postgres
+def test_the_wipe_deletes_any_users_checkpointed_threads_under_the_company(postgres):
+    """Found by the thread key's start (vouch.memory's scope), not by the users other tables
+    name: a user with only a thread left still loses it; another company's stays."""
+    ghost = json.dumps(["user_ghost", "nordlicht"]) + "thread-1"
+    other = json.dumps(["user_ghost", "alpenwerk"]) + "thread-1"
+    with postgres.connection() as conn:
+        for thread in (ghost, other):
+            conn.execute(
+                "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, "
+                "metadata) VALUES (%s, '', 'c1', '{}', '{}')",
+                (thread,),
+            )
+
+    demo_reset.wipe(postgres, "alpenwerk-not", Reviewer("user_dev", "Dev"), datetime.now(UTC))
+    demo_reset.wipe(postgres, "nordlicht", Reviewer("user_dev", "Dev"), datetime.now(UTC))
+
+    with postgres.connection() as conn:
+        left = [r["thread_id"] for r in conn.execute("SELECT thread_id FROM checkpoints")]
+    assert left == [other]

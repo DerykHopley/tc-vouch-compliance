@@ -9,6 +9,9 @@ routes, on the bundled fake model, counting against no daily limit and using no 
 Postgres deletes in one transaction under the guarded tables' reset setting
 (vouch.database's `reset_company`, RESET_DEMO_SETTING); without a database, this process's
 stores forget the company. A real deployment would drop this delete exception.
+
+FastAPI's TestClient is imported at the top on purpose: the seed's client is the app's own
+routes, in this process, for the seeding app (`seed_demo`), not a test.
 """
 
 import json
@@ -16,16 +19,19 @@ from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
 from vouch import audit, demo_round, goal, plan, questions, remediation, rounds
 from vouch.added_documents import added_index, process_added_documents
 from vouch.audit import AuditEntry, Reviewer
 from vouch.database import Database
-from vouch.memory import _label, process_checkpointer, process_store
+from vouch.memory import process_checkpointer, process_store, store_label
 from vouch.profile import DEFAULT_PROFILE
 from vouch.spending import SpendingGuard
 
+PAGE = 100
+"""How many namespaces, or items, the wipe reads from the process's store at a time."""
 DEMO_COMPANY = DEFAULT_PROFILE
 """The company whose Reset demo seeds the demo round; every other one is left empty."""
 
@@ -59,7 +65,7 @@ def wipe(db: Database | None, profile_id: str, reviewer: Reviewer, at: datetime)
     first = (reviewer.id, demo_round.ROUND_NAME, at) if profile_id == DEMO_COMPANY else None
     if db is not None:
         row = {k: v for k, v in asdict(entry).items() if k != "id"}
-        db.reset_company(profile_id, row, first)
+        db.reset_company(profile_id, store_label(profile_id), row, first)
     else:
         _forget_in_process(profile_id)
         audit.process_trail().keep([entry])
@@ -70,10 +76,14 @@ def wipe(db: Database | None, profile_id: str, reviewer: Reviewer, at: datetime)
 
 def _forget_in_process(profile_id: str) -> None:
     store = process_store()
-    for namespace in store.list_namespaces(prefix=("vouch",)):
-        if len(namespace) > 2 and namespace[2] == _label(profile_id):
-            for item in store.search(namespace, limit=100_000):
-                store.delete(namespace, item.key)
+    company = ("vouch", "*", store_label(profile_id))  # every user's namespaces under it
+    page, offset = PAGE, 0
+    while namespaces := store.list_namespaces(prefix=company, limit=page, offset=offset):
+        for namespace in namespaces:
+            while items := store.search(namespace, limit=page):
+                for item in items:  # a search finds the namespaces under it too
+                    store.delete(tuple(item.namespace), item.key)
+        offset += page  # an emptied namespace stays listed, so the next page is further on
     saver = process_checkpointer()
     if isinstance(saver, InMemorySaver):
         for thread in [t for t in list(saver.storage) if _scoped_to(t, profile_id)]:
@@ -122,8 +132,6 @@ def seed_demo(app: FastAPI, user_id: str, name: str) -> demo_round.Seeded:
     """The demo round played for the developer inside `app` (vouch.demo_round's `seed`), on a
     seeding app of its own (as that user, on the bundled fake model, named `name` on the audit
     entries), its spending Uncounted. A server error is a 500, so a SeedError."""
-    from fastapi.testclient import TestClient
-
     seeding = demo_round.seeding_app(None, user_id, name)
     for key in SHARED_STATE:
         setattr(seeding.state, key, getattr(app.state, key))

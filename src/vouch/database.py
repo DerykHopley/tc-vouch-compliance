@@ -1174,17 +1174,18 @@ class Database:
     def reset_company(
         self,
         profile_id: str,
+        store_label: str,
         entry: Mapping[str, Any],
         first_round: tuple[str, str, datetime] | None = None,
     ) -> None:
-        """Reset demo's wipe (#605), in one transaction: every user's progress and history under
-        `profile_id` deleted (LangGraph's stored memory and checkpointed threads, the audit
-        trail, remediation decisions and the plan, the Goal, review rounds, open questions,
-        added documents with their versions), then `entry`, the reset's own audit entry (a
-        mapping of AUDIT_COLUMNS), and with `first_round` (user id, name, opened at) that user's
-        first round, open, in place of the unnamed "First round". The guarded tables let the delete through only under
-        RESET_DEMO_SETTING, set for this transaction alone. Raises DatabaseUnavailable."""
-        label = _store_label(profile_id)
+        """Reset demo's wipe (#605), in one transaction: every user's progress and history
+        under `profile_id` deleted (LangGraph's stored memory, under `store_label`, vouch.memory's
+        label of the profile; every user's checkpointed threads; the audit trail, remediation
+        decisions and the plan, the Goal, review rounds, open questions, added documents with
+        their versions), then `entry`, the reset's own audit entry (a mapping of AUDIT_COLUMNS),
+        and with `first_round` (user id, name, opened at) that user's first round, open, in
+        place of the unnamed "First round". The guarded tables let the delete through only
+        under RESET_DEMO_SETTING, set for this transaction alone. Raises DatabaseUnavailable."""
         where_profile = "split_part(prefix, '.', 1) = 'vouch' AND split_part(prefix, '.', 3) = %s"
         tables = "the company's progress"
         with (
@@ -1194,21 +1195,13 @@ class Database:
             conn.transaction(),
         ):
             conn.execute(f"SET LOCAL {RESET_DEMO_SETTING} = 'on'")
-            stored = conn.execute(
-                f"SELECT DISTINCT split_part(prefix, '.', 2) AS user FROM store WHERE {where_profile}",
-                (label,),
-            ).fetchall()
-            users = {urllib.parse.unquote(r["user"]) for r in stored}
-            for table in (AUDIT_TABLE, ROUNDS_TABLE, QUESTIONS_TABLE, GOALS_TABLE, PLAN_TABLE):
-                rows = conn.execute(
-                    f"SELECT DISTINCT user_id FROM {table} WHERE profile_id = %s", (profile_id,)
-                ).fetchall()
-                users |= {r["user_id"] for r in rows}
-            for user_id in sorted(users):
-                scope = json.dumps([user_id, profile_id])  # vouch.memory's Memory.scope
-                for table in CHECKPOINT_TABLES:
-                    conn.execute(f"DELETE FROM {table} WHERE starts_with(thread_id, %s)", (scope,))
-            conn.execute(f"DELETE FROM store WHERE {where_profile}", (label,))
+            # A thread's key is vouch.memory's scope, the JSON list [user id, profile id], then
+            # the thread id: any user's under the profile, by its key's start.
+            scope_end = re.escape(", " + json.dumps(profile_id) + "]")
+            any_users = r'^\["(?:[^"\\]|\\.)*"' + scope_end
+            for table in CHECKPOINT_TABLES:
+                conn.execute(f"DELETE FROM {table} WHERE thread_id ~ %s", (any_users,))
+            conn.execute(f"DELETE FROM store WHERE {where_profile}", (store_label,))
             for table in (
                 AUDIT_TABLE,
                 PLAN_TABLE,
@@ -1659,14 +1652,8 @@ class PlanWrites:
         _insert_audit(self.conn, entries)
 
 
-STORE_TABLES = ("store",)
 CHECKPOINT_TABLES = ("checkpoint_writes", "checkpoint_blobs", "checkpoints")
-"""LangGraph's tables (its store's and its checkpointer's), as its installed version names them."""
-
-
-def _store_label(value: str) -> str:
-    """`value` as vouch.memory writes it in a store namespace (its `_label`)."""
-    return urllib.parse.quote(value, safe="").replace(".", "%2E")
+"""LangGraph's checkpointer's tables, as its installed version names them."""
 
 
 def _insert_audit(conn: Connection, entries: list[Mapping[str, Any]]) -> None:

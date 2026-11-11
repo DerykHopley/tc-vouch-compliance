@@ -25,7 +25,8 @@ export type DeveloperSettings = {
   companies: MadeCompany[] | null
   /** Every company listed for users, as GET /api/profiles lists them: file companies first, then those made in setup
    * (#480). */
-  listed_companies: ProfileSummary[]
+  /** Every company listed for users; `demo` marks the one whose Reset demo plays the demo round (#605). */
+  listed_companies: (ProfileSummary & { demo: boolean })[]
   /** The current company's id (#480): every user's company; null with none listed. */
   current_company: string | null
   /** Each model's list price (#496), in vouch.spending.PRICES' order: for a cost OpenRouter doesn't report. */
