@@ -35,6 +35,14 @@ const SERVED: RoundComparison = {
   ],
   remediation_done: [{ control_id: '4.1.2', requirement_id: 'M2', at: '2026-11-02T10:00:00+00:00' }],
   questions_answered: [{ control_id: '1.3.1', question_id: 7, at: '2026-11-03T10:00:00+00:00' }],
+  evidence: [
+    { doc_id: 'access-control-policy', title: 'Access control policy', kind: 'policy', change: 'new-version',
+      from_version: 1, to_version: 2, at: '2026-11-05T10:00:00+00:00' },
+    { doc_id: 'badge-log', title: 'Badge log', kind: 'record', change: 'added', from_version: null, to_version: 1,
+      at: '2026-11-04T10:00:00+00:00' },
+    { doc_id: 'old-rule', title: 'Old rule', kind: 'policy', change: 'withdrawn', from_version: null, to_version: 3,
+      at: '2026-11-02T10:00:00+00:00' },
+  ],
 }
 
 const NAMES: ControlNames = {
@@ -85,7 +93,7 @@ describe('the round comparison view (ticket 573)', () => {
     show()
     await loaded()
 
-    const chapters = screen.getAllByRole('region').filter((r) => r.getAttribute('aria-label') !== 'Summary')
+    const chapters = screen.getAllByRole('region').filter((r) => r.classList.contains('compare-chapter'))
     expect(chapters.map((c) => within(c).getByRole('heading').textContent))
       .toEqual(['Policies and incidents', 'Access', 'IT security'])
     const [policies, access, it] = chapters
@@ -166,6 +174,33 @@ describe('the round comparison view (ticket 573)', () => {
 
     expect(screen.getByText('Nothing has changed since Q3 2026 closed.')).toBeTruthy()
     expect(screen.queryByRole('list', { name: 'Scope changes' })).toBeNull()
+  })
+
+  it('lists the evidence changed since the round closed after the summary, newest first (ticket 575)', async () => {
+    serve(() => json(SERVED))
+    show()
+    await loaded()
+
+    const section = screen.getByRole('region', { name: 'Evidence changes' })
+    const regions = screen.getAllByRole('region')
+    expect(regions.indexOf(section)).toBe(regions.findIndex((r) => r.getAttribute('aria-label') === 'Summary') + 1)
+    const rows = within(section).getAllByRole('listitem').map((li) => li.textContent)
+    expect(rows).toEqual([
+      'Access control policy: new version, 1 → 2access-control-policyPolicy',
+      'Badge log: addedbadge-logRecord',
+      'Old rule: withdrawnold-rulePolicy',
+    ])
+    expect(within(section).queryByText(/progress/i)).toBeNull()
+  })
+
+  it('says no evidence has changed when none has', async () => {
+    serve(() => json({ ...SERVED, evidence: [] }))
+    show()
+    await loaded()
+
+    const section = screen.getByRole('region', { name: 'Evidence changes' })
+    expect(section.textContent).toContain('No evidence has changed since Q3 2026 closed.')
+    expect(within(section).queryByRole('list')).toBeNull()
   })
 
   it('says it is loading, then, when the comparison cannot be read, a notice with Try again that reads it again', async () => {

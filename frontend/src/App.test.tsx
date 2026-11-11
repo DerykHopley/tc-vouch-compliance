@@ -828,7 +828,7 @@ describe('the round comparison (ticket 573)', () => {
       evidenced: { then: 0, now: 1 }, 'partly-evidenced': { then: 0, now: 0 }, 'not-evidenced': { then: 0, now: 0 },
       'not-applicable': { then: 0, now: 0 } } },
     controls: [{ control_id: '4.1.2', chapter: '4', change: 'better', before: null, after: 'evidenced', proposed: false }],
-    remediation_done: [], questions_answered: [],
+    remediation_done: [], questions_answered: [], evidence: [],
   }
 
   /** The app's API, plus the rounds and round 3's comparison. */

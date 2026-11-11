@@ -40,7 +40,29 @@ export type RoundComparison = {
   controls: ControlChange[]
   remediation_done: { control_id: string; requirement_id: string; at: string }[]
   questions_answered: { control_id: string; question_id: number; at: string }[]
+  /** The added documents changed since the round closed (#575), newest change first; built-in ones never. */
+  evidence: EvidenceChange[]
 }
+
+/** An added document added, given a new version or withdrawn since the round closed (#575). */
+export type EvidenceChange = {
+  doc_id: string
+  title: string
+  kind: 'policy' | 'record'
+  change: 'added' | 'new-version' | 'withdrawn'
+  /** The version kept when the round closed: only for a new version. */
+  from_version: number | null
+  to_version: number
+  at: string
+}
+
+/** What happened to it, as its line says ("new version, 1 → 2"). */
+export function evidenceWords(e: EvidenceChange): string {
+  if (e.change === 'new-version') return `new version, ${e.from_version} → ${e.to_version}`
+  return e.change
+}
+
+export const KIND_WORDS: Record<EvidenceChange['kind'], string> = { policy: 'Policy', record: 'Record' }
 
 /** The view's own sentence when the comparison can't be read. */
 export const COMPARISON_FAILED = 'The round comparison could not be loaded.'
