@@ -1,5 +1,7 @@
 /** How this Vouch signs users in, as `GET /api/health` says: Clerk on the live app, nobody locally. */
 
+import { setBuild } from './build.ts'
+
 /** Who may sign in: members of the course's Discord server (#152), or whoever Clerk's own restrictions let in. */
 export type Gate = 'discord-server' | 'clerk'
 
@@ -16,9 +18,11 @@ export async function authConfig(): Promise<AuthConfig> {
   try {
     const response = await fetch('/api/health')
     if (!response.ok) return { mode: 'unreachable' }
-    const { auth } = (await response.json()) as {
+    const { auth, build } = (await response.json()) as {
       auth?: { mode?: string; publishable_key?: string | null; gate?: string }
+      build?: unknown
     }
+    setBuild(build) // the user menu's last line (issue 580)
     if (auth?.mode === 'local') return { mode: 'local' }
     if (auth?.mode === 'clerk' && auth.publishable_key) {
       const gate: Gate = auth.gate === 'discord-server' ? 'discord-server' : 'clerk'

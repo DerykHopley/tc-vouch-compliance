@@ -31,6 +31,10 @@ HASHED = "https://vouch-abc123xyz-ew.a.run.app"  # status.url on the live servic
 IMAGE = "europe-west1-docker.pkg.dev/vouch-demo-123/vouch/vouch"
 SQL_INSTANCE = "vouch-demo-123:europe-west1:vouch-db"
 DEFAULT_ACCOUNT = "123-compute@developer.gserviceaccount.com"
+COMMIT = subprocess.run(
+    ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
+).stdout.strip()
+"""This checkout's short commit, which the wizard bakes into the image it builds (#580)."""
 DB_READY = "--db-ready"
 
 # Planted keyring values. Every secret holds "planted", so a leak anywhere is found.
@@ -404,7 +408,7 @@ def test_a_dry_run_prints_every_command_runs_none_and_writes_nothing(tmp_path):
         "gcloud auth list --filter=status:ACTIVE --format=value\\(account\\)",
         "check:  $ secret-tool lookup service clerk-vouch-publishable",
         "gcloud artifacts repositories create vouch",
-        f"docker build -t {IMAGE}:v1 .",
+        f"docker build --build-arg VOUCH_COMMIT={COMMIT} -t {IMAGE}:v1 .",
         f"docker push {IMAGE}:v1",
         "gcloud secrets create CLERK_JWT_KEY",
         (
@@ -430,7 +434,17 @@ def test_a_dry_run_needs_no_gcloud_docker_curl_or_secret_tool(tmp_path):
     result, calls = run_wizard(tmp_path, "--dry-run", path="")
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"docker push {IMAGE}:v1" in result.stdout
+    assert f"docker build --build-arg VOUCH_COMMIT=dev -t {IMAGE}:v1 ." in result.stdout  # no git
     assert calls == ""
+
+
+def test_the_image_is_built_with_this_checkout_s_short_commit_baked_in(tmp_path):
+    """#580: the user menu's last line names the commit the running image was built from."""
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    [build] = calls_to(calls, "docker build ")
+    assert build[2:4] == ["--build-arg", f"VOUCH_COMMIT={COMMIT}"]
+    assert len(COMMIT) >= 7 and all(c in "0123456789abcdef" for c in COMMIT)
 
 
 def test_a_deploy_saves_only_plain_answers_and_finishes(tmp_path):
@@ -817,7 +831,7 @@ def test_a_skipped_build_deploys_the_registry_s_highest_tag(tmp_path):
 def test_the_next_tag_is_one_past_the_registry_s_highest_with_no_wizard_env(tmp_path):
     result, calls = deployed(tmp_path, tags="v1 v2")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert f"docker build -t {IMAGE}:v3 ." in calls
+    assert f"docker build --build-arg VOUCH_COMMIT={COMMIT} -t {IMAGE}:v3 ." in calls
     assert f"gcloud run deploy vouch --image={IMAGE}:v3" in calls
     assert "TAG=" not in (tmp_path / "wizard.env").read_text()
 

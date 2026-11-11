@@ -767,7 +767,15 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     if settings.clerk is not None:
         gate = "discord-server" if settings.clerk.discord_server_id else "clerk"
     auth = {"mode": settings.auth_mode, "publishable_key": publishable_key, "gate": gate}
-    answer: dict[str, Any] = {"status": "ok", "version": version("vouch"), "auth": auth}
+    # Which build is running, for the user menu's last line (#580): the short commit and the
+    # revision's name, nothing else. The package version alone doesn't change between deploys.
+    build = {"commit": settings.build.commit, "revision": settings.build.revision}
+    answer: dict[str, Any] = {
+        "status": "ok",
+        "version": version("vouch"),
+        "auth": auth,
+        "build": build,
+    }
     if db is not None:
         answer["database"] = db.health()
     return answer

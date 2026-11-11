@@ -15,7 +15,7 @@ from fastapi import Depends
 from fastapi.testclient import TestClient
 
 from vouch.api import create_app, current_user
-from vouch.settings import DEFAULT_USER, ENV_NAMES, SettingsError, User, load_settings
+from vouch.settings import DEFAULT_USER, ENV_NAMES, Build, SettingsError, User, load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "Dockerfile"
@@ -272,3 +272,25 @@ def test_a_discord_server_id_that_isnt_one_refuses_naming_it(server):
 
     with pytest.raises(SettingsError, match="DISCORD_SERVER_ID"):
         load_settings(env)
+
+
+# --- The running build (#580) ------------------------------------------------------------------
+
+
+def test_the_build_is_dev_with_no_revision_when_nothing_is_baked_or_set():
+    assert load_settings({}).build == Build(commit="dev", revision=None)
+    assert load_settings({"VOUCH_COMMIT": " ", "K_REVISION": ""}).build == Build("dev", None)
+
+
+def test_the_build_names_the_baked_commit_and_cloud_run_s_revision_each_when_set():
+    assert load_settings({"VOUCH_COMMIT": "1a2b3c4"}).build == Build("1a2b3c4", None)
+    assert load_settings({"K_REVISION": "vouch-00029"}).build == Build("dev", "vouch-00029")
+    both = load_settings({"VOUCH_COMMIT": " 1a2b3c4 ", "K_REVISION": "vouch-00029"})
+    assert both.build == Build("1a2b3c4", "vouch-00029")
+
+
+def test_the_image_bakes_the_commit_it_was_built_from_into_vouch_commit():
+    """The build arg becomes the env var load_settings reads, in the stage that runs."""
+    final_stage = DOCKERFILE.read_text().rsplit("\nFROM ", 1)[1]
+    assert re.search(r"^ARG VOUCH_COMMIT=dev$", final_stage, re.MULTILINE)
+    assert re.search(r"^ENV .*\bVOUCH_COMMIT=\$VOUCH_COMMIT\b", final_stage, re.MULTILINE)

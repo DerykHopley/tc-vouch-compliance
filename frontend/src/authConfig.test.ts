@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { authConfig } from './authConfig.ts'
+import { buildLine, setBuild } from './build.ts'
 
 const health = (body: unknown, status = 200) =>
   vi.stubGlobal('fetch', (url: string) => {
@@ -41,5 +42,12 @@ describe('authConfig', () => {
     expect(await authConfig()).toEqual({ mode: 'unreachable' })
     health({ status: 'ok' })
     expect(await authConfig()).toEqual({ mode: 'unreachable' })
+  })
+
+  it("keeps the running build health serves, for the user menu's last line (issue 580)", async () => {
+    health({ status: 'ok', auth: { mode: 'local' }, build: { commit: '1a2b3c4', revision: 'vouch-00029' } })
+    await authConfig()
+    expect(buildLine()).toBe('Vouch 1a2b3c4 · vouch-00029')
+    setBuild(undefined)
   })
 })

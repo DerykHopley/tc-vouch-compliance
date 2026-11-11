@@ -8,13 +8,14 @@ import pytest
 from assess_steps import in_order
 from fastapi.testclient import TestClient
 from isa_editions import GERMAN_5_1_1
+from pydantic import SecretStr
 from reviewing import accepted, confirm, plan_fixes
 
 from vouch import ScriptedChatModel, isa, profile
 from vouch.api import PROFILE_HEADER, create_app
 from vouch.paths import FIXTURES_DIR
 from vouch.profile import read_profile_once
-from vouch.settings import Settings
+from vouch.settings import Build, LangfuseKeys, Settings
 
 DEMO_CONTROL = "4.1.2"
 
@@ -84,7 +85,25 @@ def test_health_answers_ok_with_the_version(client):
         "status": "ok",
         "version": version("vouch"),
         "auth": {"mode": "local", "publishable_key": None, "gate": "none"},
+        "build": {"commit": "dev", "revision": None},
     }
+
+
+def test_health_serves_the_build_s_commit_and_revision_and_nothing_else_of_the_settings():
+    """#580: the user menu's last line. Only the short commit and the revision name are served,
+    whatever secrets the settings hold."""
+    marker = "s3cr3t-marker-580"
+    settings = Settings(
+        openrouter_api_key=SecretStr(f"{marker}-openrouter"),
+        langfuse=LangfuseKeys("pk-lf-public", SecretStr(f"{marker}-langfuse")),
+        build=Build(commit="1a2b3c4", revision="vouch-00029"),
+    )
+    response = TestClient(create_app(settings)).get("/api/health")
+
+    answer = response.json()
+    assert answer["build"] == {"commit": "1a2b3c4", "revision": "vouch-00029"}
+    assert set(answer) == {"status", "version", "auth", "build"}
+    assert marker not in response.text and "pk-lf-public" not in response.text
 
 
 def test_demo_control_streams_steps_then_requirement_events_then_waits_for_review(client):
