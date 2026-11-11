@@ -219,7 +219,6 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .rounds-link { color: var(--navy); }
 .rounds-name { font-weight: 600; }
 .rounds-times, .rounds-note { color: var(--muted); font-size: 14px; }
-.rounds-link .rounds-times { color: inherit; }
 /* The round comparison view (#573, design.md Components: Round comparison view): the Company page's full width and head,
    a summary sheet, then a sheet per chapter: its changed controls as a report-table, the unchanged ones folded under a
    44px "<n> unchanged" disclosure. Under 700px each control is a stacked card, as the report's rows (below). */
