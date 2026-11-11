@@ -89,6 +89,9 @@ type PaperProps = {
   onAssess: () => void
   onOpen: (controlId: string) => void
   onOverview: () => void
+  /** The breadcrumb's way back when the paper was opened from elsewhere than the Overview (#573: a round comparison):
+   * its words and address; the Overview's without. */
+  back?: { label: string; href: string; onBack: () => void }
   /** The lead's decision is recorded: the reviewed assessment. */
   onReviewed: (assessment: Assessment) => void
   /** A remediation item's approval or discard is recorded (#43): the item as kept, to put in the latest copy of the
@@ -107,7 +110,7 @@ type PaperProps = {
  */
 export default function WorkingPaper(props: PaperProps) {
   const { overview, card, running, passing = false, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
-    onItemDecided, onQuestionsChanged } = props
+    onItemDecided, onQuestionsChanged, back } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
@@ -181,7 +184,9 @@ export default function WorkingPaper(props: PaperProps) {
         language={overview.answer_language} improving={improving} />
       <section className="paper wrap" aria-label="Working paper">
         <nav className="crumbs" aria-label="Breadcrumb">
-          <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>
+          {back
+            ? <a href={back.href} onClick={(e) => { e.preventDefault(); back.onBack() }}>{back.label}</a>
+            : <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>}
           <span aria-hidden="true">›</span>
           <span className="mono" aria-current="page">{card.id}</span>
         </nav>
