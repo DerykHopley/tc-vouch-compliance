@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from vouch import cli, database, evals
+from vouch import cli, database, demo_round, evals
 
 ROOT = Path(__file__).resolve().parents[1]
 CLERK_KEYS = {
@@ -54,6 +54,12 @@ TOOLS = {
         [],
         {"VOUCH_DATABASE_URL": "postgresql://dummy:dummy@localhost:1/dummy"},
         (database, "Database"),
+    ),
+    "vouch-seed-demo-round": Tool(
+        demo_round.main,
+        ["--user", "user_dummy"],
+        {"VOUCH_DATABASE_URL": "postgresql://dummy:dummy@localhost:1/dummy"},
+        (demo_round, "seeding_app"),
     ),
     "python -m vouch.evals": Tool(
         evals.main,

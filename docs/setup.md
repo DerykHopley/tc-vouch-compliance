@@ -42,6 +42,9 @@ passes `/api` to it. When both answer it prints `Vouch is running: http://127.0.
   those controls are for the live app, or for an eval script (below).
 - **Kept in memory.** Without `VOUCH_DATABASE_URL`, assessments and reviews last until the API
   stops.
+- **A demo round.** To open Company › Rounds on a closed "Q2 2026" and an improvement since,
+  seed it once the app runs: `env -u VOUCH_DATABASE_URL uv run vouch-seed-demo-round --api
+  http://127.0.0.1:<api port>` (#579; [`DEPLOY.md`](../DEPLOY.md), "The demo round").
 
 ### `ASSESS_FAKE_SCRIPT`: another scripted run
 
