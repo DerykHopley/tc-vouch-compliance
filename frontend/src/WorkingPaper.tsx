@@ -330,14 +330,32 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
  * view beside the paper as the paper scrolls and scrolls on its own (#466): the open control's row is brought into
- * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. */
+ * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. Stacked
+ * above the paper (1000px or less), the index scrolls in its own box: `data-more` marks it while rows lie below its
+ * foot, which app.css fades (#555). */
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   const list = useRef<HTMLDivElement>(null)
+  const nav = useRef<HTMLElement>(null)
+  const [more, setMore] = useState(false)
   useEffect(() => {
     list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
   }, [openId])
+  useEffect(() => {
+    const box = nav.current
+    if (!box) return
+    const measure = () => setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 1)
+    measure()
+    box.addEventListener('scroll', measure, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(box)
+    if (list.current) observer?.observe(list.current)
+    return () => {
+      box.removeEventListener('scroll', measure)
+      observer?.disconnect()
+    }
+  }, [controls])
   return (
-    <nav className="wp-index" aria-label="Controls">
+    <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
       <div className="wp-index-list" ref={list}
         onFocus={(e) => e.target.closest('.wp-row')?.scrollIntoView?.({ block: 'nearest' })}>
         {areas(controls).map(([area, cards]) => (

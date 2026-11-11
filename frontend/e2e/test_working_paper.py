@@ -12,7 +12,7 @@ import pytest
 from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
-from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import confirmed
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, with_long_quotes
 
@@ -913,3 +913,60 @@ def test_a_field_taller_than_the_room_keeps_its_top_below_the_top_bar(
     )
     top_bar = page.evaluate("document.querySelector('header.top').getBoundingClientRect().bottom")
     assert box(reason)["y"] >= top_bar - 1, (box(reason), top_bar)
+
+
+# The stacked control index's scroll hint (#555): at 1000px or less the index sits above the paper
+# in a box of its own that scrolls ("Policies and incidents" is its first area). Its foot fades
+# while more rows lie below, the next row cut by the edge, and the fade goes at the list's end.
+INDEX_FADE = """nav => {
+  const after = getComputedStyle(nav, '::after')
+  return after.display !== 'none' && after.backgroundImage.includes('gradient')
+}"""
+INDEX_FADES = f"({INDEX_FADE})(document.querySelector('.wp-index'))"
+
+
+@pytest.mark.parametrize("size", [(390, 844), (360, 740)])
+def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(
+    page: Page, paper_url, size
+):
+    page.set_viewport_size({"width": size[0], "height": size[1]})
+    open_paper(page, paper_url, "1.1.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    assert nav.evaluate("n => n.scrollHeight > n.clientHeight"), "the index doesn't scroll"
+
+    page.wait_for_function(INDEX_FADES, timeout=5000)
+    # The next row is cut by the edge: the first row not wholly shown starts inside the box.
+    edge = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop + n.clientHeight")
+    rows = [box(link) for link in nav.get_by_role("link").all()]
+    cut = next(r for r in rows if r["y"] + r["height"] > edge + 0.5)
+    assert cut["y"] < edge - 8, (cut, edge)  # at least 8px of it shows
+
+    nav.evaluate("n => { n.scrollTop = n.scrollHeight }")
+    page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
+
+
+def test_a_stacked_index_that_fits_shows_no_fade_nor_does_the_index_beside_the_paper(
+    page: Page, paper_url
+):
+    """#555: a short list (the overview's first two controls) fits its box and shows no fade;
+    at 1440 the index beside the paper is unchanged, with none."""
+
+    def two_controls(route: Route) -> None:
+        served = route.fetch().json()
+        served["controls"] = served["controls"][:2]
+        route.fulfill(json=served)
+
+    page.route("**/api/overview", two_controls)
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "1.1.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(2)
+    assert nav.evaluate("n => n.scrollHeight <= n.clientHeight"), "two rows overflow the index"
+    assert not page.evaluate(INDEX_FADES)
+
+    page.unroute("**/api/overview")
+    page.set_viewport_size({"width": 1440, "height": 900})
+    open_paper(page, paper_url, "1.1.1", assessed=False)
+    expect(nav.get_by_role("link")).to_have_count(12)
+    assert not page.evaluate(INDEX_FADES)
