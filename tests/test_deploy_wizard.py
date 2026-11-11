@@ -1,20 +1,26 @@
-"""The deploy wizard, with fake gcloud, docker, curl and secret-tool that log each call.
+"""The deploy wizard, with fake gcloud, docker, curl, secret-tool, cloud-sql-proxy and uv that log
+each call.
 
 Nothing reaches Google or the real keyring: the fake secret-tool reads planted values from a
 folder, and the fake gcloud keeps its secrets' versions in another, as they came on standard input.
+The fake cloud-sql-proxy listens on the port it's given; the fake uv stands in for vouch-db-setup
+and keeps the database URL it got in a file, never in the call log.
 The tests answer the wizard's prompts by their text, as the owner would, not by counting them.
 """
 
 import os
 import select
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from psycopg import conninfo
 
 ROOT = Path(__file__).resolve().parents[1]
 WIZARD = ROOT / "scripts" / "deploy-wizard.sh"
@@ -99,6 +105,69 @@ exit 0
 """
 
 
+# The two fakes that run as programs of their own (Python, the test's interpreter): the proxy
+# must really listen, so the setup can find it there. The proxy logs its arguments, waits
+# $PROXY_DELAY seconds, then listens on --port until a TERM or INT, which it logs as "stopped";
+# $PROXY_FAILS makes it fail at start. It gives up by itself after 60 s, so a wizard that never
+# stops it can't leave it running. The uv fake logs only its arguments; it keeps the URL it got in
+# $STATE/setup_url and whether the proxy answered at that URL's port in $STATE/setup_saw_proxy.
+# $SETUP_FAILS makes it fail; $SETUP_WAITS makes it wait for $STATE/release.
+FAKE_PROXY = r"""
+import os, signal, socket, sys, time
+def log(line):
+    with open(os.environ["CALLS"], "a") as calls:
+        calls.write(line + "\n")
+log("cloud-sql-proxy " + " ".join(sys.argv[1:]))
+if os.environ.get("PROXY_FAILS"):
+    print("(fake) cloud-sql-proxy: couldn't start", file=sys.stderr)
+    sys.exit(1)
+def stopped(signum, frame):
+    log("cloud-sql-proxy stopped")
+    sys.exit(143)
+signal.signal(signal.SIGTERM, stopped)
+signal.signal(signal.SIGINT, stopped)
+time.sleep(float(os.environ.get("PROXY_DELAY") or 0))
+port = int(sys.argv[sys.argv.index("--port") + 1])
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("127.0.0.1", port))
+server.listen()
+server.settimeout(0.2)
+end = time.monotonic() + 60
+while time.monotonic() < end:
+    try:
+        server.accept()[0].close()
+    except OSError:
+        pass
+log("cloud-sql-proxy gave up: nobody stopped it")
+"""
+FAKE_UV = r"""
+import os, re, socket, sys, time
+from pathlib import Path
+state = Path(os.environ["STATE"])
+with open(os.environ["CALLS"], "a") as calls:
+    calls.write("uv " + " ".join(sys.argv[1:]) + "\n")
+url = os.environ.get("VOUCH_DATABASE_URL", "")
+(state / "setup_url").write_text(url)
+found = re.search(r"127\.0\.0\.1:([0-9]+)", url)
+try:
+    socket.create_connection(("127.0.0.1", int(found[1])), timeout=1).close()
+    saw = "yes"
+except (OSError, TypeError):
+    saw = "no"
+(state / "setup_saw_proxy").write_text(saw)
+if os.environ.get("SETUP_WAITS"):
+    (state / "setup_started").touch()
+    end = time.monotonic() + 20
+    while not (state / "release").exists() and time.monotonic() < end:
+        time.sleep(0.05)
+if os.environ.get("SETUP_FAILS"):
+    print("vouch-db-setup: (fake) couldn't connect", file=sys.stderr)
+    sys.exit(69)
+print("vouch-db-setup: LangGraph's tables are ready (checkpointer and store)")
+"""
+
+
 def plant(tmp_path: Path, missing: tuple[str, ...] = (), **changed: str) -> None:
     """The fake keyring: a file per entry, holding its value with nothing added."""
     keyring = tmp_path / "keyring"
@@ -163,13 +232,23 @@ def run_wizard(
     tags: str = "",
     tags_error: str = "",
     project_number: str = "123",
+    proxy_fails: bool = False,
+    proxy_delay: float = 0,
+    setup_fails: bool = False,
+    interrupt: signal.Signals | None = None,
+    missing_tool: str = "",
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     # Every tool is faked, secret-tool too: the real one would read the owner's keyring.
-    for tool in ("gcloud", "docker", "curl", "secret-tool"):
-        (bin_dir / tool).write_text(FAKE)
+    fakes = {tool: FAKE for tool in ("gcloud", "docker", "curl", "secret-tool")}
+    fakes |= {"cloud-sql-proxy": FAKE_PROXY, "uv": FAKE_UV}
+    for tool, fake in fakes.items():
+        program = fake if fake is FAKE else f"#!{sys.executable}\n{fake}"
+        (bin_dir / tool).write_text(program)
         (bin_dir / tool).chmod(0o755)
+    if missing_tool:
+        (bin_dir / missing_tool).unlink()
     (tmp_path / "state").mkdir(exist_ok=True)
     if not (tmp_path / "keyring").exists():
         plant(tmp_path)
@@ -196,6 +275,10 @@ def run_wizard(
         "TAGS_ERROR": tags_error,
         "PROJECT_NUMBER": project_number,
         "WIZARD_ENV": str(tmp_path / "wizard.env"),
+        "PROXY_FAILS": "yes" if proxy_fails else "",
+        "PROXY_DELAY": str(proxy_delay),
+        "SETUP_FAILS": "yes" if setup_fails else "",
+        "SETUP_WAITS": "yes" if interrupt else "",
     }
     proc = subprocess.Popen(
         [BASH, str(WIZARD), *args],
@@ -208,6 +291,18 @@ def run_wizard(
     errors: list[bytes] = []
     reader = threading.Thread(target=lambda: errors.append(proc.stderr.read()))  # type: ignore[union-attr]
     reader.start()
+    if interrupt:
+        # Once setup is running: the signal to the wizard alone, then setup may finish.
+        def interrupt_setup() -> None:
+            started = tmp_path / "state" / "setup_started"
+            end = time.monotonic() + 20
+            while not started.exists() and time.monotonic() < end:
+                time.sleep(0.05)
+            proc.send_signal(interrupt)
+            time.sleep(0.2)
+            (tmp_path / "state" / "release").touch()
+
+        threading.Thread(target=interrupt_setup, daemon=True).start()
     stdout = answer_prompts(proc, project_id, no)
     proc.wait(timeout=30)
     reader.join(timeout=30)
@@ -257,9 +352,20 @@ def versions(tmp_path: Path, secret: str) -> dict[int, str]:
     return found
 
 
-def deployed(tmp_path: Path, **kwargs):
-    """A full run, every question answered yes, the database set up, the service healthy."""
-    return run_wizard(tmp_path, DB_READY, healthy=True, **kwargs)
+def deployed(tmp_path: Path, *args: str, **kwargs):
+    """A full run, every question answered yes, the service healthy."""
+    return run_wizard(tmp_path, *args, healthy=True, **kwargs)
+
+
+def proxy_port(calls: str) -> int:
+    """The port the wizard gave the one cloud-sql-proxy it started."""
+    [start] = [c for c in calls_to(calls, "cloud-sql-proxy ") if c[1] != "stopped"]
+    return int(start[start.index("--port") + 1])
+
+
+def setup_url(tmp_path: Path) -> str:
+    """The VOUCH_DATABASE_URL the fake vouch-db-setup was given."""
+    return (tmp_path / "state" / "setup_url").read_text()
 
 
 def test_the_script_parses():
@@ -519,13 +625,124 @@ def test_the_service_s_own_account_gets_the_roles_when_it_has_one(tmp_path):
     assert all(f"--member=serviceAccount:{account}" in call for call in bindings)
 
 
-def test_without_db_ready_it_stops_at_the_database_step_with_the_setup_commands(tmp_path):
-    result, calls = run_wizard(tmp_path, healthy=True)
+# --- The database step (#594): the wizard runs vouch-db-setup itself, through a proxy -----------
+
+RUN_URL = SECRETS["cloudsql-vouch-run-url"][1]
+
+
+def at_the_proxy(stored: str, port: int) -> dict[str, object]:
+    """libpq's reading of `stored` with its host and port the proxy's: every other part kept."""
+    parts: dict[str, object] = dict(conninfo.conninfo_to_dict(stored))
+    for key in ("host", "hostaddr", "port"):
+        parts.pop(key, None)
+    return parts | {"host": "127.0.0.1", "port": str(port)}
+
+
+def test_setup_runs_through_a_proxy_on_a_free_port_then_the_proxy_stops_then_the_deploy(tmp_path):
+    result, calls = deployed(tmp_path, proxy_delay=0.5)
+    assert result.returncode == 0, result.stdout + result.stderr
+    port = proxy_port(calls)
+    assert port != 5432  # the owner's own proxy and servers use it
+    order = [
+        line
+        for line in calls.splitlines()
+        if line.startswith(("cloud-sql-proxy", "uv ", "gcloud run deploy"))
+    ]
+    assert order[:3] == [
+        f"cloud-sql-proxy {SQL_INSTANCE} --port {port} --address 127.0.0.1 --quiet",
+        "uv run vouch-db-setup",
+        "cloud-sql-proxy stopped",
+    ]
+    assert order[3].startswith("gcloud run deploy ") and len(order) == 4
+    # The URL is the one the service gets (the version the deploy pins), at the proxy's port...
+    access = "gcloud secrets versions access 1 --secret=VOUCH_DATABASE_URL --project=vouch-demo-123"
+    assert access in calls
+    assert conninfo.conninfo_to_dict(setup_url(tmp_path)) == at_the_proxy(RUN_URL, port)
+    # ...and the proxy was listening there when setup started, though it took half a second.
+    assert (tmp_path / "state" / "setup_saw_proxy").read_text() == "yes"
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        f"postgresql://vouch:plantedDbPassword789@/vouch?host=/cloudsql/{SQL_INSTANCE}",
+        f"postgresql://vouch:pl%40nted:p?w#d&x=y@/vouch?host=/cloudsql/{SQL_INSTANCE}",
+        "postgresql://vouch:planted%2F%3A%40@/vouch?host=%2Fcloudsql%2Fvouch-demo-123%3Aeu%3Adb",
+        "postgresql://vouch:planted@10.1.2.3:5432/vouch?sslmode=disable",
+        "postgres://vouch:planted@localhost/vouch?port=5432&hostaddr=10.0.0.1&application_name=v",
+        "postgresql://planted@/vouch?host=/cloudsql/x:y:z&connect_timeout=10",
+    ],
+    ids=["unix-socket", "special-password", "encoded", "tcp", "postgres-scheme", "no-password"],
+)
+def test_setup_gets_the_stored_url_with_the_proxy_s_host_and_port_and_all_else_kept(
+    tmp_path, stored
+):
+    plant(tmp_path, cloudsql_vouch_run_url=stored)
+    result, calls = deployed(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    port = proxy_port(calls)
+    assert conninfo.conninfo_to_dict(setup_url(tmp_path)) == at_the_proxy(stored, port)
+    seen = calls + result.stdout + result.stderr
+    assert "planted" not in seen
+    assert stored not in seen and setup_url(tmp_path) not in seen
+
+
+def test_a_stored_url_that_isn_t_a_postgresql_one_stops_before_the_proxy_unshown(tmp_path):
+    plant(tmp_path, cloudsql_vouch_run_url="host=/cloudsql/x user=vouch password=planted")
+    result, calls = deployed(tmp_path)
     assert result.returncode != 0
-    assert f"cloud-sql-proxy {SQL_INSTANCE}" in result.stdout
-    assert "uv run vouch-db-setup" in result.stdout
-    assert "--db-ready" in result.stderr
+    assert "VOUCH_DATABASE_URL" in result.stderr
+    assert "planted" not in calls + result.stdout + result.stderr
+    assert "cloud-sql-proxy" not in calls and "uv " not in calls
     assert "gcloud run deploy" not in calls
+
+
+def test_a_failed_setup_stops_the_proxy_and_deploys_nothing(tmp_path):
+    result, calls = deployed(tmp_path, setup_fails=True)
+    assert result.returncode != 0
+    assert "vouch-db-setup" in result.stderr and "Nothing was deployed" in result.stderr
+    assert calls.splitlines()[-1] == "cloud-sql-proxy stopped"
+    assert "gcloud run deploy" not in calls
+    assert "planted" not in calls + result.stdout + result.stderr
+
+
+def test_a_proxy_that_fails_to_start_stops_before_setup_and_the_deploy(tmp_path):
+    result, calls = deployed(tmp_path, proxy_fails=True)
+    assert result.returncode != 0
+    assert "proxy" in result.stderr and "Nothing was deployed" in result.stderr
+    assert "uv " not in calls and "gcloud run deploy" not in calls
+
+
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM], ids=["interrupt", "terminate"])
+def test_an_interrupt_during_setup_stops_the_proxy_and_deploys_nothing(tmp_path, sig):
+    result, calls = deployed(tmp_path, interrupt=sig)
+    assert result.returncode != 0
+    assert "cloud-sql-proxy stopped" in calls
+    assert "gcloud run deploy" not in calls
+    assert "Done" not in result.stdout
+
+
+def test_answering_n_to_the_setup_stops_with_nothing_deployed_and_no_proxy(tmp_path):
+    result, calls = deployed(tmp_path, no=("vouch-db-setup",))
+    assert result.returncode != 0
+    assert "Nothing was deployed" in result.stderr
+    assert "cloud-sql-proxy" not in calls and "gcloud run deploy" not in calls
+
+
+def test_db_ready_still_parses_does_nothing_and_says_so(tmp_path):
+    result, calls = deployed(tmp_path, DB_READY)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--db-ready does nothing" in result.stdout
+    assert "uv run vouch-db-setup" in calls  # setup runs all the same
+    assert "gcloud run deploy" in calls
+
+
+@pytest.mark.parametrize("tool", ["cloud-sql-proxy", "uv"])
+def test_a_missing_proxy_or_uv_stops_before_anything_changes(tmp_path, tool):
+    result, calls = deployed(tmp_path, missing_tool=tool)
+    assert result.returncode != 0
+    assert f"{tool} is missing" in result.stderr
+    assert calls == ""
 
 
 def test_a_missing_cloud_sql_instance_stops_before_the_deploy(tmp_path):
@@ -652,7 +869,7 @@ def test_not_signed_in_stops_with_the_sign_in_command(tmp_path):
 
 
 def test_a_failed_health_check_stops_and_prints_the_logs_command(tmp_path):
-    result, calls = run_wizard(tmp_path, DB_READY)
+    result, calls = run_wizard(tmp_path)
     assert result.returncode != 0
     assert "gcloud run deploy vouch" in calls
     assert f"{URL}/api/health" in result.stderr
@@ -667,14 +884,14 @@ def test_a_health_check_with_the_database_unavailable_stops_the_deploy(tmp_path)
     assert "gcloud logging read" in result.stderr
 
 
-def test_a_health_check_saying_needs_setup_stops_naming_vouch_db_setup_and_the_proxy(tmp_path):
-    """#123: the database answers but vouch-db-setup never ran, so every assessment would 503."""
+def test_a_health_check_saying_needs_setup_stops_naming_vouch_db_setup(tmp_path):
+    """#123: the database answers but lacks vouch-db-setup's tables, so every assessment would 503.
+    The wizard ran setup just before (#594), so it names that and the database the service uses."""
     result, calls = deployed(tmp_path, database="needs-setup")
     assert result.returncode != 0
     assert "Done" not in result.stdout + result.stderr
-    assert "vouch-db-setup" in result.stderr
-    assert f"cloud-sql-proxy {SQL_INSTANCE} --port 5432" in result.stderr
-    assert "uv run vouch-db-setup" in result.stderr
+    assert "vouch-db-setup" in result.stderr and "VOUCH_DATABASE_URL" in result.stderr
+    assert "5432" not in result.stdout + result.stderr  # the wizard never sends you to it
     assert len(calls_to(calls, "curl ")) == 1  # a clear answer: no retry
 
 
