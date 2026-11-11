@@ -128,7 +128,9 @@ def pass_url() -> str:
 @pytest.fixture
 def rounds_url() -> str:
     """A ninth Vouch like vouch_url, for the review rounds' checks (#402): closing a round changes
-    the hero and the comparison other checks read, and accepting a control the counts."""
+    the hero and the comparison other checks read, and accepting a control the counts. Rounds are
+    kept per company: Nordlicht's there are test_rounds' alone (its first check needs the first
+    round still open), and a check from another file closes Alpenwerk's instead (#525)."""
     return os.environ["ROUNDS_URL"]
 
 
