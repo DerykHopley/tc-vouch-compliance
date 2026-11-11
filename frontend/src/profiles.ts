@@ -39,10 +39,11 @@ export function withoutProfile(held: Profiles | null, id: string): Profiles | nu
 }
 
 /** How a fresh start went: started, refused while an assessment runs (the 409), the session ended (a 401: signed out
- * already, so nothing more to say), or failed any other way. Started, but with Nordlicht's demo state not restored
- * (#605), the API's reason. */
+ * already, so nothing more to say), or failed any other way. Started on Nordlicht (#605): the demo state
+ * restored, with today's profile passes left, or not, with the API's reason. */
 export type FreshStart =
   | { kind: 'started' }
+  | { kind: 'demo-restored', passesLeft: number, passes: number }
   | { kind: 'demo-not-restored', reason?: string }
   | { kind: 'running' }
   | { kind: 'signed-out' }
@@ -57,8 +58,11 @@ export async function startAfresh(): Promise<FreshStart> {
       body: JSON.stringify({ restore_demo: true }),
     })
     if (response.ok) {
-      const demo = ((await response.json().catch(() => ({}))) as { demo?: { restored: boolean, reason?: string } }).demo
-      return demo && !demo.restored ? { kind: 'demo-not-restored', reason: demo.reason || undefined } : { kind: 'started' }
+      type Demo = { restored: boolean, reason?: string, passes_left?: number, passes?: number }
+      const demo = ((await response.json().catch(() => ({}))) as { demo?: Demo }).demo
+      if (!demo) return { kind: 'started' }
+      if (!demo.restored) return { kind: 'demo-not-restored', reason: demo.reason || undefined }
+      return { kind: 'demo-restored', passesLeft: demo.passes_left ?? 0, passes: demo.passes ?? 0 }
     }
     if (sessionEnded(response)) return { kind: 'signed-out' } // a 401 signs out, as every API call's does
     return { kind: response.status === 409 ? 'running' : 'failed' }

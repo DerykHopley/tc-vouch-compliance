@@ -715,13 +715,35 @@ class Database:
         """Whether the user started fewer assessments that day than the limit (as
         take_assessment reads it), counting nothing: (under it, the limit). Raises
         DatabaseUnavailable."""
-        with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
+        return self._under(COUNTS_TABLE, user_id, day, limit_setting, default_limit)
+
+    def profile_passes_used(
+        self, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[int, int]:
+        """The profile passes the user ran that day and their limit (as take_profile_pass reads
+        it), counting nothing (#605): (used, the limit). Raises DatabaseUnavailable."""
+        used, limit = self._used(
+            PROFILE_PASS_COUNTS_TABLE, user_id, day, limit_setting, default_limit
+        )
+        return used, limit
+
+    def _under(
+        self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Whether the user's count that day in the counts `table` is under the limit."""
+        used, limit = self._used(table, user_id, day, limit_setting, default_limit)
+        return used < limit, limit
+
+    def _used(
+        self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[int, int]:
+        """The user's count that day in the counts `table`, and the limit."""
+        with self.connection() as conn, self._needs_setup(table):
             row = conn.execute(
                 "WITH lim AS (SELECT coalesce((SELECT value::integer FROM "
                 f"{SETTINGS_TABLE} WHERE name = %(setting)s), %(default)s) AS n) "
                 "SELECT (SELECT n FROM lim) AS lim, coalesce((SELECT count FROM "
-                f"{COUNTS_TABLE} WHERE user_id = %(user_id)s AND day = %(day)s), 0) "
-                "< (SELECT n FROM lim) AS under",
+                f"{table} WHERE user_id = %(user_id)s AND day = %(day)s), 0) AS used",
                 {
                     "setting": limit_setting,
                     "default": default_limit,
@@ -730,7 +752,7 @@ class Database:
                 },
             ).fetchone()
         assert row is not None  # a SELECT of two values always gives one row
-        return row["under"], row["lim"]
+        return row["used"], row["lim"]
 
     def record_usage(
         self,

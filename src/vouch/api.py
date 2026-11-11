@@ -2244,32 +2244,43 @@ def fresh_start(
     runs and nothing counts against the daily limit. While one of the lead's assessments runs
     under the profile, a 409 with nothing written; the lead's scope is held meanwhile, so none
     starts mid-way. A store that can't be written is a 503 (DatabaseUnavailable)."""
+    demo = bool(options and options.restore_demo and memory.profile_id == DEFAULT_PROFILE)
     if not running.try_hold(memory.scope):
         raise HTTPException(status_code=409, detail=RUNNING_NO_FRESH_START)
+    client = None
+    refused: demo_round.SeedError | None = None
     try:
+        if demo:  # its limit checked and the open round closed before the fresh start
+            client = demo_round.restoring_client(
+                request.app, user.id, reviewer_name(request, user, settings)
+            )
+            try:
+                demo_round.prepare(client, request.app, user.id)
+            except demo_round.SeedError as error:
+                client, refused = None, error
         at = memory.start_afresh()
     finally:
         running.release(memory.scope)
     answer: dict[str, Any] = {"fresh_start": at.isoformat()}
-    if options and options.restore_demo and memory.profile_id == DEFAULT_PROFILE:
-        answer["demo"] = _restore_demo(memory, request, user, settings)
+    if refused is not None:
+        answer["demo"] = _not_restored(memory, refused)
+    elif client is not None:
+        try:
+            demo_round.seed(client)
+            left, limit = request.app.state.spending.profile_passes_left(user.id)
+            answer["demo"] = {"restored": True, "passes_left": left, "passes": limit}
+        except demo_round.SeedError as error:
+            answer["demo"] = _not_restored(memory, error)
     return answer
 
 
-def _restore_demo(
-    memory: Memory, request: Request, user: User, settings: Settings
-) -> dict[str, Any]:
-    """Nordlicht's demo round seeded after a fresh start (#605, vouch.demo_round's `restore`), on
-    the fake model. Stopped partway (a limit, a refusal), the lead's progress starts afresh
-    again, so the reset still leaves nothing half-seeded, and the answer says why."""
-    try:
-        demo_round.restore(request.app, user.id, reviewer_name(request, user, settings))
-    except demo_round.SeedError as error:
-        log.warning("the demo round could not be restored: %s", error)
-        memory.start_afresh()
-        reason = str(error) if isinstance(error, demo_round.OverLimit) else DEMO_NOT_RESTORED
-        return {"restored": False, "reason": reason}
-    return {"restored": True}
+def _not_restored(memory: Memory, error: demo_round.SeedError) -> dict[str, Any]:
+    """The demo state not restored (#605): stopped partway, the lead's progress starts afresh
+    again, so nothing half-seeded is listed; the answer says why."""
+    log.warning("the demo round could not be restored: %s", error)
+    memory.start_afresh()
+    reason = str(error) if isinstance(error, demo_round.OverLimit) else DEMO_NOT_RESTORED
+    return {"restored": False, "reason": reason}
 
 
 @router.post(

@@ -328,6 +328,11 @@ class SpendingStore(Protocol):
         limit read in the same step: (counted, the limit)."""
         ...
 
+    def profile_passes_used(self, user_id: str, day: date) -> tuple[int, int]:
+        """The profile passes the user ran that day and their limit, counting nothing: (used,
+        the limit)."""
+        ...
+
     def record(self, record: UsageRecord) -> None: ...
 
     def totals(self) -> UsageTotals: ...
@@ -383,6 +388,11 @@ class MemorySpendingStore:
             self._pass_counts[user_id] = count + 1
             return True, PROFILE_PASS_DAILY_LIMIT
 
+    def profile_passes_used(self, user_id: str, day: date) -> tuple[int, int]:
+        with self._lock:
+            count = self._pass_counts.get(user_id, 0) if day == self._pass_day else 0
+            return count, PROFILE_PASS_DAILY_LIMIT
+
     def record(self, record: UsageRecord) -> None:
         with self._lock:
             self._records.append(record)
@@ -431,6 +441,11 @@ class DatabaseSpendingStore:
 
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.take_profile_pass(
+            user_id, day, PROFILE_PASS_LIMIT_SETTING, PROFILE_PASS_DAILY_LIMIT
+        )
+
+    def profile_passes_used(self, user_id: str, day: date) -> tuple[int, int]:
+        return self.db.profile_passes_used(
             user_id, day, PROFILE_PASS_LIMIT_SETTING, PROFILE_PASS_DAILY_LIMIT
         )
 
@@ -564,6 +579,20 @@ class SpendingGuard:
         if not under:
             log.info("a user at the daily limit of %d assessments was refused a chat", limit)
             raise _reached(limit, now)
+
+    def profile_passes_left(self, user_id: str) -> tuple[int, int]:
+        """The profile passes the user has left today, counting nothing (#605, the demo state's
+        restore): (left, the limit). Raises DatabaseUnavailable."""
+        used, limit = self.store.profile_passes_used(user_id, self.clock().astimezone(UTC).date())
+        return max(limit - used, 0), limit
+
+    def check_profile_pass(self, user_id: str) -> None:
+        """Before a profile pass that must not start half-way (#605, the demo state's restore):
+        refused as the pass would be, counting nothing. The fake model only. Raises
+        ProfilePassLimitReached or DatabaseUnavailable."""
+        left, limit = self.profile_passes_left(user_id)
+        if not left:
+            raise _reached(limit, self.clock().astimezone(UTC), ProfilePassLimitReached)
 
     def set_daily_limit(self, limit: int) -> None:
         """Raises DatabaseUnavailable."""

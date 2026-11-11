@@ -52,6 +52,7 @@ from vouch.auth import USER_ID
 from vouch.limits import RATE_REQUESTS
 from vouch.profile import DEFAULT_PROFILE
 from vouch.settings import DATABASE_URL_ENV, Settings, User, load_database_url
+from vouch.spending import SpendingGuard
 
 ROUND_NAME = "Q2 2026"
 NEXT_ROUND = "Q3 2026"
@@ -304,22 +305,48 @@ def seed(client: Client, say: Callable[[str], None] | None = None) -> Seeded:
     return Seeded(tuple(a["control_id"] for a in improved), kept_weak["control_id"])
 
 
-RESTORED_STATE = ("database", "spending", "running", "current_company", "added_documents")
-"""What the restoring app shares with the app it runs in: its stores and its limits, so the
-seed's work lands where the lead reads it and counts against the lead's own limits."""
+RESTORED_STATE = ("database", "running", "current_company", "added_documents")
+"""What the restoring app shares with the app it runs in: its stores, so the seed's work lands
+where the lead reads it. Its spending guard is PassesOnly, on the same store."""
 
 
-def restore(app: FastAPI, user_id: str, name: str) -> Seeded:
-    """The seed played for one user inside `app`, the app serving them (#605, Start afresh on
-    Nordlicht): through a seeding app of its own (as that user, on the bundled fake model, named
-    `name` on the audit entries) that shares `app`'s stores and limits (RESTORED_STATE). Raises
-    what `seed` raises."""
+class PassesOnly(SpendingGuard):
+    """The restore's spending guard (#605): its profile pass counts against the lead's passes,
+    but its assessments, on the fake model, not against their daily limit."""
+
+    def start(self, user_id: str, paid: bool) -> None:
+        if paid:  # never: the seeding app has no key
+            super().start(user_id, paid)
+
+
+def restoring_client(app: FastAPI, user_id: str, name: str) -> Client:
+    """A client for restoring the demo state for one user inside `app`, the app serving them
+    (#605, Start afresh on Nordlicht): a seeding app of its own (as that user, on the bundled
+    fake model, named `name` on the audit entries) that shares `app`'s stores and limits
+    (RESTORED_STATE)."""
     from fastapi.testclient import TestClient
 
     seeding = seeding_app(None, user_id, name)
     for key in RESTORED_STATE:
         setattr(seeding.state, key, getattr(app.state, key))
-    return seed(TestClient(seeding))  # never entered: its lifespan would close `app`'s stores
+    guard: SpendingGuard = app.state.spending
+    seeding.state.spending = PassesOnly(guard.store, guard.clock)
+    return TestClient(seeding)  # never entered: its lifespan would close `app`'s stores
+
+
+def prepare(client: Client, app: FastAPI, user_id: str) -> None:
+    """Before the fresh start that restores the demo state (#605): the seed's profile pass
+    checked against the lead's limit (OverLimit, nothing written), then the open round closed,
+    so it closes before the fresh start and isn't listed since: every restore then lists the
+    same rounds, "Q2 2026" closed and "Q3 2026" open. `seed` follows the fresh start."""
+    from vouch.spending import DailyLimitReached
+
+    try:
+        app.state.spending.check_profile_pass(user_id)
+    except DailyLimitReached as error:
+        raise OverLimit(error.message()) from None
+    if _json(client, "GET", "/api/overview")["rounds"]["current"] is not None:
+        _call(client, "POST", "/api/rounds/close")
 
 
 # --- The command -------------------------------------------------------------------------------

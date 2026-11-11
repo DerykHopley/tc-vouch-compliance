@@ -41,6 +41,10 @@ async function confirmFreshStart(company: string | undefined, onStarted: () => v
   if (!window.confirm(freshStartQuestion(company))) return
   const result = await startAfresh()
   if (result.kind === 'started') onStarted()
+  else if (result.kind === 'demo-restored') {
+    onStarted()
+    window.alert(`Demo state restored. ${result.passesLeft} of today's ${result.passes} profile passes left.`)
+  }
   else if (result.kind === 'demo-not-restored') {
     onStarted()
     window.alert(result.reason ? `${NOT_RESTORED}: ${result.reason}` : `${NOT_RESTORED}.`)

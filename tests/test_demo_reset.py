@@ -11,7 +11,7 @@ from typing import Any
 import test_memory
 from fastapi.testclient import TestClient
 from test_database import empty_database, needs_postgres  # noqa: F401 (a fixture: postgres's)
-from test_memory import app_on
+from test_memory import DEMO_CONTROL, app_on, set_daily_limit
 
 from vouch.api import PROFILE_HEADER
 from vouch.demo_round import ROUND_NAME
@@ -30,10 +30,20 @@ def reset(client: TestClient, user: dict[str, str], **headers: str) -> dict[str,
     return response.json()
 
 
-def compared(client: TestClient, user: dict[str, str]) -> tuple[list[str], dict[str, Any]]:
-    """The rounds' names since the fresh start, and the default comparison's changes."""
+DEMO_ROUNDS = [(ROUND_NAME, True), ("Q3 2026", False)]
+"""The rounds since the fresh start in the demo state: (name, closed)."""
+
+
+def compared(
+    client: TestClient, user: dict[str, str]
+) -> tuple[list[tuple[str, bool]], dict[str, Any]]:
+    """The rounds since the fresh start, (name, closed), and the default comparison's changes."""
     listed = client.get("/api/rounds", headers=user).json()
-    names = [r["name"] for r in listed["rounds"] if not r["before_fresh_start"]]
+    names = [
+        (r["name"], r["closed_at"] is not None)
+        for r in listed["rounds"]
+        if not r["before_fresh_start"]
+    ]
     shown = client.get(f"/api/rounds/{listed['default']}/comparison", headers=user)
     assert shown.status_code == 200, shown.text
     return names, shown.json()["changes"]
@@ -53,8 +63,8 @@ def test_start_afresh_on_nordlicht_restores_the_demo_round(database_url, users):
         names, changes = compared(client, lead)
 
     assert answer["fresh_start"]
-    assert answer["demo"] == {"restored": True}
-    assert names[-2:] == [ROUND_NAME, "Q3 2026"]
+    assert answer["demo"] == {"restored": True, "passes_left": 2, "passes": 3}
+    assert names == DEMO_ROUNDS
     assert (changes["better"], changes["worse"]) == (3, 0)
 
 
@@ -73,13 +83,25 @@ def test_a_second_reset_gives_the_same_demo_state(database_url, users):
     with TestClient(app_on(database_url)) as client:
         reset(client, lead)
         first = compared(client, lead)
-        assert reset(client, lead)["demo"] == {"restored": True}
+        assert reset(client, lead)["demo"]["restored"]
         second = compared(client, lead)
 
-    # The round open at the reset is closed first, as the seed closes the open one: "First round"
-    # the first time, the last reset's "Q3 2026" the next; from "Q2 2026" on, the same.
-    assert first[0][1:] == second[0][1:] == [ROUND_NAME, "Q3 2026"]
-    assert first[1] == second[1]
+    assert first == second
+    assert first[0] == DEMO_ROUNDS
+
+
+def test_with_the_profile_passes_used_up_the_rounds_are_as_a_plain_fresh_start_leaves_them(
+    database_url, users
+):
+    lead, _ = users
+    with TestClient(app_on(database_url)) as client:
+        for _ in range(3):  # the day's three profile passes, used on the lead's own work
+            assert client.post("/api/profile-pass", headers=lead).status_code == 200
+        answer = reset(client, lead)
+        rounds = client.get("/api/rounds", headers=lead).json()["rounds"]
+
+    assert answer["demo"]["restored"] is False
+    assert [(r["name"], r["closed_at"]) for r in rounds] == [("First round", None)]
 
 
 def test_with_the_profile_passes_used_up_the_reset_clears_and_says_why(database_url, users):
@@ -92,3 +114,17 @@ def test_with_the_profile_passes_used_up_the_reset_clears_and_says_why(database_
 
     assert answer["demo"]["restored"] is False
     assert "profile passes" in answer["demo"]["reason"]
+
+
+def test_the_restores_assessments_dont_count_against_the_daily_limit(database_url, users):
+    lead, _ = users
+    with TestClient(app_on(database_url)) as client:
+        set_daily_limit(client, lead, 1)
+        try:
+            restored = reset(client, lead)["demo"]
+            own = client.post("/api/assessments", json={"control_id": DEMO_CONTROL}, headers=lead)
+        finally:
+            set_daily_limit(client, lead, 30)
+
+    assert restored["restored"] is True
+    assert own.status_code == 200, own.text  # the lead's one assessment today is still theirs
