@@ -1605,23 +1605,24 @@ def round_comparison(
     if not 1 <= number <= len(listed):
         raise HTTPException(status_code=404, detail="No review round has that number.")
     chosen = listed[number - 1]
-    if chosen.closed_at is None:
+    closed_at = chosen.closed_at
+    if closed_at is None:
         raise HTTPException(status_code=409, detail=rounds.STILL_OPEN)
     if chosen.before_fresh_start:
         raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
-    against = review.closed(memory.user_id, memory.profile_id, number)
-    assert against is not None and against.closed_at is not None
     scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
     earlier = _accepted_earlier(memory, saver, latest)
     history, _, marked = _plan_reads(memory, saver, items, marks)
     since_fresh = questions.since(asked.listed(memory.user_id, memory.profile_id), fresh_start)
+    done = rounds.done_since(history, marked, closed_at)
+    answered = rounds.answered_since(since_fresh, closed_at)
     return {
         "round": _listed(chosen),
         **rounds.round_comparison(
-            against.results, scope.controls, scope.applicable, latest, earlier
+            chosen.results, scope.controls, scope.applicable, latest, earlier
         ),
-        "remediation_done": rounds.done_since(history, marked, against.closed_at),
-        "questions_answered": rounds.answered_since(since_fresh, against.closed_at),
+        "remediation_done": [d | {"at": d["at"].isoformat()} for d in done],
+        "questions_answered": [a | {"at": a["at"].isoformat()} for a in answered],
     }
 
 

@@ -58,7 +58,8 @@ def test_the_listing_is_every_round_oldest_first_numbered_from_1_the_open_one_la
     alice, bob = users
     a = alice["X-Test-User"]
     who = {"reviewer": reviewer(alice), "profile_id": DEFAULT_PROFILE}
-    rounds.close(store, [], clock=lambda: AT, **who)
+    frozen = tuple(frozen_as({IDS[0]: ("accepted", "evidenced")}))
+    rounds.close(store, frozen, clock=lambda: AT, **who)
     rounds.start(store, "Q4 2026", clock=lambda: AT + HOUR, **who)
     rounds.close(store, [], clock=lambda: AT + 2 * HOUR, **who)
     rounds.start(store, "Q1 2027", clock=lambda: AT + 3 * HOUR, **who)
@@ -66,16 +67,13 @@ def test_the_listing_is_every_round_oldest_first_numbered_from_1_the_open_one_la
     listed = store.listed(a, DEFAULT_PROFILE, AT + HOUR)  # a fresh start between the closes
 
     assert listed == [
-        ListedRound(1, "First round", None, AT, before_fresh_start=True),
+        ListedRound(1, "First round", None, AT, before_fresh_start=True, results=frozen),
         ListedRound(2, "Q4 2026", AT + HOUR, AT + 2 * HOUR, before_fresh_start=False),
         ListedRound(3, "Q1 2027", AT + 3 * HOUR, None, before_fresh_start=False),
     ]
     assert store.listed(bob["X-Test-User"], DEFAULT_PROFILE, None) == [
         ListedRound(1, "First round", None, None, before_fresh_start=False)
     ]
-    assert store.closed(a, DEFAULT_PROFILE, 2) == rounds.Round(
-        "Q4 2026", AT + HOUR, AT + 2 * HOUR, ()
-    )
 
 
 def test_the_default_choice_is_the_last_round_closed_since_the_fresh_start():
@@ -190,7 +188,7 @@ def test_remediation_items_done_since_the_close_are_listed_with_their_control_an
     done = rounds.done_since(history, marked, AT)
 
     assert done == [
-        {"control_id": a, "requirement_id": "M1", "at": (AT + HOUR).isoformat()},
+        {"control_id": a, "requirement_id": "M1", "at": AT + HOUR},
     ]
 
 
@@ -204,7 +202,7 @@ def test_open_questions_answered_since_the_close_are_listed_with_their_control_a
     asked = [question(0, AT + HOUR), question(1, AT - HOUR), question(2, None)]
 
     assert rounds.answered_since(asked, AT) == [
-        {"control_id": IDS[0], "question_id": 0, "at": (AT + HOUR).isoformat()}
+        {"control_id": IDS[0], "question_id": 0, "at": AT + HOUR}
     ]
 
 
