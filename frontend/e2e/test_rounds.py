@@ -256,3 +256,31 @@ def test_the_lead_opens_a_control_from_the_round_comparison_and_comes_back_to_th
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         ), "the round comparison scrolls sideways at 400px"
         assert small_targets(page) == []
+
+
+def test_the_lead_asks_the_chat_what_improved_since_the_last_round(page: Page, rounds_url):
+    """#581, the user story: asked what improved since the last round, Ask Vouch compares now with
+    it (the canned chat model calls `compare_rounds`) and links each control it names to its
+    working paper. Last in the file: under Nordlicht, after the checks that need its first round
+    open; a round closed and a control accepted since, through the API, as #573's check does."""
+    _, control_id = compared_after_a_change(page.request, rounds_url, "Chat check")
+    page.request.delete(f"{rounds_url}/api/chat/current")
+    page.set_viewport_size({"width": 1280, "height": 900})
+    open_dossier(page, rounds_url)
+    with page.expect_response("**/api/chat"):  # the greeting
+        page.get_by_role("button", name="Ask Vouch").click()
+    chat = page.locator("aside[aria-label='Chat with Vouch']")
+    log = chat.get_by_role("log")
+
+    chat.get_by_role("textbox", name="Message to Vouch").fill("What improved since the last round?")
+    with page.expect_response("**/api/chat"):
+        chat.get_by_role("button", name="Send").click()
+
+    expect(log.locator(".msg-step").last).to_contain_text("Compared now with review round")
+    answer = log.locator(".msg").last
+    expect(answer).to_contain_text("Now compared with review round")
+    expect(answer).to_contain_text(f"{control_id}: new, not accepted →")
+    link = log.locator(".paper-links").last.get_by_role("link", name=f"Working paper {control_id}")
+    expect(link).to_be_visible()
+    link.click()
+    expect(page).to_have_url(f"{rounds_url}/controls/{control_id}")
