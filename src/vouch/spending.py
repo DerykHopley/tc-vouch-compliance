@@ -33,7 +33,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
 from vouch.database import Database, DatabaseUnavailable
-from vouch.model_choice import DEFAULT_MODEL, CallBudgetSpent, KeptIn
+from vouch.model_choice import DEFAULT_MODEL, STREAMED_COST, CallBudgetSpent, KeptIn
 from vouch.settings import DATABASE_URL_ENV
 
 log = logging.getLogger(__name__)
@@ -202,9 +202,7 @@ class UsageMeter(BaseCallbackHandler):
         self._served: dict[str, int] = {}
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
-        tokens = _tokens(response)
-        reported = ((response.llm_output or {}).get("token_usage") or {}).get("cost")
-        self._add(tokens, reported)
+        self._add(_tokens(response), _reported_cost(response))
         served = _served_model(response)
         if served is not None:
             with self._lock:
@@ -263,6 +261,20 @@ def _tokens(response: LLMResult) -> tuple[int, int] | None:
                 found = found or (0, 0)
                 found = (found[0] + meta["input_tokens"], found[1] + meta["output_tokens"])
     return found
+
+
+def _reported_cost(response: LLMResult) -> Any:
+    """The cost OpenRouter reported for the call: in `llm_output["token_usage"]`, or on a
+    streamed call (which has no llm_output) in its generation's info, where BudgetedChatOpenAI
+    keeps it from the usage chunk (#553). None when it reports none."""
+    if response.llm_output:
+        return (response.llm_output.get("token_usage") or {}).get("cost")
+    for generations in response.generations:
+        for generation in generations:
+            reported = (generation.generation_info or {}).get(STREAMED_COST)
+            if reported is not None:
+                return reported
+    return None
 
 
 def _served_model(response: LLMResult) -> str | None:
