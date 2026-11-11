@@ -8,6 +8,8 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import re
@@ -17,8 +19,9 @@ import unicodedata
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from datetime import date
 from importlib.metadata import version
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, NamedTuple, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request
@@ -42,7 +45,18 @@ from vouch import (
     rounds,
     tracing,
 )
-from vouch.added_documents import added_documents_store, added_index
+from vouch.added_documents import (
+    MAX_BYTES,
+    AddedDocument,
+    AddedDocuments,
+    DocumentRefused,
+    NewDocument,
+    added_documents_store,
+    added_index,
+    builtin_ids,
+    checked_fields,
+    checked_text,
+)
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
     ClerkAuth,
@@ -91,6 +105,7 @@ from vouch.graph import (
     new_thread_id,
     state_serializer,
 )
+from vouch.guards import instruction_like
 from vouch.isa import (
     BaseFrameworkError,
     IsaControl,
@@ -189,6 +204,18 @@ NO_PROMPT_CONTROL = "The current company applies no control."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
 DOCUMENTS_FAILED = "The documents could not be read."
 COMPANY_FAILED = "The company could not be loaded."
+INSTRUCTION_WARNING = (
+    "This document holds text that reads like an instruction to the assistant. Vouch treats "
+    "it as data. Add it anyway?"
+)
+"""The warning before a document with instruction-like text is added (#585, Q9)."""
+INSTRUCTION_NOTE = "Instruction-like text found"
+"""The note of a `document-add` entry whose document was added after that warning."""
+NOT_BASE64 = "The file could not be read. Choose it again."
+DOCUMENT_MESSAGE_BYTES = 2 * MAX_BYTES
+"""`POST /api/documents`'s body limit: the file in base64 (a third larger) and the form's
+fields, with room over, so a file a little over MAX_BYTES gets the add's own sentence rather
+than the message limit's."""
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
 # in the order step 6 lists them.
 LIBRARY_SOURCES = ("policies", "records")
@@ -405,6 +432,14 @@ def app_company_profiles(db: AppDatabase) -> company_profiles.CompanyProfiles:
 
 
 CompanyProfiles = Annotated[company_profiles.CompanyProfiles, Depends(app_company_profiles)]
+
+
+def app_added_documents(request: Request) -> AddedDocuments:
+    """Where added evidence documents are kept (vouch.added_documents, #584)."""
+    return request.app.state.added_documents
+
+
+AddedDocumentsStore = Annotated[AddedDocuments, Depends(app_added_documents)]
 
 
 def app_current_company(request: Request) -> CurrentCompanyStore:
@@ -1857,14 +1892,95 @@ def profile_documents_tab(
     none, #454), and the tab's words in the profile's language. Redacted as the overview is;
     an unreadable ISA edition, folder or document a plain 500 naming no path."""
     scope, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
+    added = added_index().searchable(profile.id)
     try:
-        listed = documents_tab.profile_documents(profile, scope.applicable, latest, report.today())
+        listed = documents_tab.profile_documents(
+            profile, scope.applicable, latest, report.today(), added
+        )
     except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
         log.exception("the documents of %s could not be read", profile.id)
         raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None
     clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
     language, words = documents_tab.document_words(profile.answer_language)
     return clean | {"words": words, "words_language": language}
+
+
+class DocumentRequest(BaseModel):
+    """The Add document form (#585): the file's name and its bytes in base64, and the fields.
+    Kind and review cycle are checked by the store, so a wrong one gets its sentence."""
+
+    filename: Annotated[str, StringConstraints(max_length=255)]
+    content: Annotated[bytes, Field(max_length=DOCUMENT_MESSAGE_BYTES)]
+    title: Annotated[str, StringConstraints(max_length=1_000)]
+    kind: Annotated[str, StringConstraints(max_length=20)]
+    approval_date: date
+    review_cycle: Annotated[str, StringConstraints(max_length=20)]
+    add_anyway: bool = False
+    """Add it although its text reads like an instruction (the lead saw the warning)."""
+
+    def new_document(self) -> NewDocument:
+        """The document to add, or a 400 for content that isn't base64."""
+        try:
+            raw = base64.b64decode(self.content, validate=True)
+        except binascii.Error:
+            raise HTTPException(status_code=400, detail=NOT_BASE64) from None
+        return NewDocument(
+            filename=self.filename,
+            content=raw,
+            title=self.title,
+            kind=cast(Any, self.kind),
+            approval_date=self.approval_date,
+            review_cycle=self.review_cycle,
+        )
+
+
+def _added_data(added: AddedDocument) -> dict[str, Any]:
+    """An added document's version as `POST /api/documents` answers it: no text, no user id."""
+    return {
+        "id": added.doc_id,
+        "version": added.version,
+        "title": added.title,
+        "kind": added.kind,
+        "source": added.source,
+        "approval_date": added.approval_date.isoformat(),
+        "review_cycle": added.review_cycle,
+        "added_at": added.added_at.isoformat(),
+    }
+
+
+@router.post("/documents", status_code=201)
+def add_document(
+    request: Annotated[DocumentRequest, Body()],
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+    store: AddedDocumentsStore,
+) -> Any:
+    """The lead adds an evidence document, or a new version of one with its title, to the
+    current company (#585): any signed-in user, as anyone may change the Goal. The file's
+    limits and the form's fields are checked first (a 400 with the sentence, nothing kept);
+    then text that reads like an instruction is a 409 warning, nothing kept, unless
+    `add_anyway`. Kept with its `document-add` entry, together (vouch.audit; noted when the
+    warning was shown): a 201 with the version kept. Nothing is re-assessed, no model runs. The
+    database down is a 503."""
+    new = request.new_document()
+    try:
+        checked_fields(new)
+        flagged = instruction_like(checked_text(new))
+        if flagged and not request.add_anyway:
+            warning = {"detail": INSTRUCTION_WARNING, "warning": "instruction-like"}
+            return JSONResponse(status_code=409, content=warning)
+        added = audit.add_document(
+            store,
+            new,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+            builtin_ids=builtin_ids(profile),
+            note=INSTRUCTION_NOTE if flagged else "",
+        )
+    except DocumentRefused as refusal:
+        raise HTTPException(status_code=400, detail=str(refusal)) from None
+    return {"document": _added_data(added)}
 
 
 @router.get("/company")
@@ -2529,7 +2645,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(_Refused, refused)
     app.add_exception_handler(RequestValidationError, request_refused)
     app.add_exception_handler(DailyLimitReached, daily_limit_reached)
-    app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
+    # Security layer 1: no oversized message reaches a route; an added document's own limit.
+    app.add_middleware(MessageLimit, larger={("POST", "/api/documents"): DOCUMENT_MESSAGE_BYTES})
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
     app.state.rate_limit = RateLimit(requests=settings.rate_requests)

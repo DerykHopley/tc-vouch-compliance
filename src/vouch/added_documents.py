@@ -28,7 +28,7 @@ import datetime
 import logging
 import re
 import threading
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import cache
 from pathlib import PurePath
@@ -77,6 +77,11 @@ WITHDRAWN_TITLE = (
     "A document with this title was withdrawn, so it can't take a new version. "
     "Add it under another title."
 )
+
+
+Entry = Callable[["AddedDocument"], Mapping[str, Any]]
+"""The audit entry of an add (#585), given the version kept: a mapping of vouch.database's
+AUDIT_COLUMNS, kept with the version, both or neither."""
 
 
 class DocumentRefused(ValueError):
@@ -351,9 +356,11 @@ class AddedDocuments(Protocol):
         added_by: str,
         added_by_name: str,
         at: datetime.datetime,
+        entry: Entry | None = None,
     ) -> AddedDocument:
         """Keep `new` as the next version of the document with its title, or version 1 of a new
-        one whose id is none of `builtin_ids`. DocumentRefused, writing nothing, for a limit."""
+        one whose id is none of `builtin_ids`, with `entry`'s audit entry when given, together.
+        DocumentRefused, writing nothing, for a limit."""
         ...
 
     def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
@@ -373,12 +380,19 @@ def _refresh(index: AddedIndex | None, profile_id: str, kept: Iterable[AddedDocu
 
 
 class ProcessAddedDocuments:
-    """Added documents without a database: in this process, so a restart forgets them."""
+    """Added documents without a database: in this process, so a restart forgets them. An add's
+    audit entry goes to `keep` (the process's trail) once the version is kept: a list append,
+    which can't fail."""
 
-    def __init__(self, index: AddedIndex | None = None) -> None:
+    def __init__(
+        self,
+        index: AddedIndex | None = None,
+        keep: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> None:
         self._kept: dict[str, list[AddedDocument]] = {}
         self._guard = threading.Lock()
         self._index = index
+        self._keep = keep
 
     def listed(self, profile_id: str) -> list[AddedDocument]:
         with self._guard:
@@ -399,6 +413,7 @@ class ProcessAddedDocuments:
         added_by: str,
         added_by_name: str,
         at: datetime.datetime,
+        entry: Entry | None = None,
     ) -> AddedDocument:
         with self._guard:
             kept = self._kept.setdefault(profile_id, [])
@@ -413,6 +428,8 @@ class ProcessAddedDocuments:
             )
             kept.append(added)
             _refresh(self._index, profile_id, kept)  # under the guard: puts land in order
+            if entry is not None and self._keep is not None:
+                self._keep(entry(added))
         return added
 
     def withdraw(self, profile_id: str, doc_id: str, at: datetime.datetime) -> list[AddedDocument]:
@@ -451,6 +468,7 @@ class PostgresAddedDocuments:
         added_by: str,
         added_by_name: str,
         at: datetime.datetime,
+        entry: Entry | None = None,
     ) -> AddedDocument:
         def made(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             added = next_version(
@@ -464,7 +482,8 @@ class PostgresAddedDocuments:
             )
             return _row(added)
 
-        added, rows = self.db.add_document(profile_id, made)
+        audit = None if entry is None else (lambda row: entry(_document(row)))
+        added, rows = self.db.add_document(profile_id, made, audit)
         _refresh(self._index, profile_id, map(_document, rows))
         return _document(added)
 
@@ -498,8 +517,11 @@ def _document(row: Mapping[str, Any]) -> AddedDocument:
 
 @cache
 def process_added_documents() -> ProcessAddedDocuments:
-    """Added documents without a database: one store per process, feeding the process's index."""
-    return ProcessAddedDocuments(added_index())
+    """Added documents without a database: one store per process, feeding the process's index,
+    its adds' entries kept in the process's audit trail."""
+    from vouch.audit import keep_row  # vouch.audit imports vouch.graph, which imports this module
+
+    return ProcessAddedDocuments(added_index(), keep_row)
 
 
 def added_documents_store(db: Database | None) -> AddedDocuments:

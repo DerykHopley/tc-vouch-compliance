@@ -6,16 +6,19 @@ import type { ShownDocument } from './DocumentTable.tsx'
 /** The Documents tab's data from `GET /api/documents` (#424): each evidence document the profile uses, as
  * `vouch.documents_tab.profile_documents` sends it, with the tab's own words in the profile's language. */
 
+/** Where a document comes from: built in (a profile's files, the sample library) or added by a lead (#585). */
+export type Origin = 'built-in' | 'added'
+
 /** A document of the profile, from any of its sources (patch too), with the controls whose newest assessment cites
- * it, in control order. */
-export type ProfileDocument = ShownDocument & { cited_by: string[] }
+ * it, in control order, and its origin. */
+export type ProfileDocument = ShownDocument & { cited_by: string[]; origin: Origin }
 
 /** The tab's own words (vouch.documents_tab.DOCUMENT_WORDS), in `words_language`. */
 export type DocumentWords = {
   title: string
   /** Each evidence source's name: policies, records, patch. */
   sources: Record<string, string>
-  columns: Record<'document' | 'kind' | 'version' | 'approved' | 'review' | 'status' | 'cited_by', string>
+  columns: Record<'document' | 'kind' | 'version' | 'approved' | 'review' | 'status' | 'cited_by' | 'origin', string>
   kinds: Record<EvidenceKind, string>
   /** Each known review cycle's word; a cycle not here shows as written. */
   cycles: Record<string, string>
@@ -29,6 +32,8 @@ export type DocumentWords = {
   no_cycle: string
   not_cited: string
   no_documents: string
+  /** Each origin's word: "Built in", "Added". */
+  origins: Record<Origin, string>
 }
 
 export type ProfileDocuments = {
@@ -81,4 +86,80 @@ export function useDocuments(reloads = 0): { state: DocumentsState; tryAgain: ()
     setAttempt((n) => n + 1)
   }
   return { state, tryAgain }
+}
+
+/** What a lead says an added document is (#585): a policy (Documented) or a record (Implemented). */
+export type AddedKind = 'policy' | 'record'
+
+/** The Add document form's fields, as `POST /api/documents` takes them. */
+export type DocumentFields = { title: string; kind: AddedKind; approval_date: string; review_cycle: string }
+
+/** The review cycles an added document may have (vouch.documents.CYCLE_MONTHS), in order. */
+export const CYCLES = ['quarterly', 'half-yearly', 'yearly', 'two-yearly'] as const
+
+const KIND_OF: Record<string, AddedKind> = { policy: 'policy', documented: 'policy', record: 'record',
+  implemented: 'record' }
+
+/** The fields a file's front matter gives (the `---` block at its top, as vouch.front_matter reads it): its title,
+ * kind (policy or documented, record or implemented), approval date (YYYY-MM-DD) and a known review cycle. A value
+ * it can't use is left out, so the form keeps its own. Flat `key: value` lines only, quotes dropped. */
+export function prefill(text: string): Partial<DocumentFields> {
+  const block = /^﻿?---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text)
+  if (!block) return {}
+  const values: Record<string, string> = {}
+  for (const line of block[1].split(/\r?\n/)) {
+    const pair = /^([A-Za-z_]+):\s*(.*?)\s*$/.exec(line)
+    if (pair) values[pair[1]] = pair[2].replace(/^(["'])(.*)\1$/, '$2')
+  }
+  const found: Partial<DocumentFields> = {}
+  if (values.title) found.title = values.title
+  if (values.kind && Object.hasOwn(KIND_OF, values.kind)) found.kind = KIND_OF[values.kind]
+  if (/^\d{4}-\d{2}-\d{2}$/.test(values.approval_date ?? '')) found.approval_date = values.approval_date
+  if ((CYCLES as readonly string[]).includes(values.review_cycle ?? '')) found.review_cycle = values.review_cycle
+  return found
+}
+
+/** The version Vouch will give a document added with this title: the next of the added document with that title
+ * (ignoring case and spaces at its ends, as the server does), else 1. */
+export function versionFor(documents: readonly ProfileDocument[], title: string): number {
+  const wanted = title.trim().toLowerCase()
+  const same = documents.find((d) => d.origin === 'added' && d.title.toLowerCase() === wanted)
+  return same ? Number(same.version) + 1 : 1
+}
+
+/** The answer to an add: added; a warning to confirm (instruction-like text); refused with the server's sentence;
+ * or failed. */
+export type AddAnswer = { status: 'added' } | { status: 'warning' | 'refused' | 'failed'; message: string }
+
+/** The page's own sentence when an add fails for any reason but a refusal. */
+export const ADD_FAILED = 'The document could not be added just now. Please try again.'
+
+/** The file's bytes in base64. */
+async function base64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+/** Add the file as an evidence document of the current company (`POST /api/documents`, #585); `addAnyway` once the
+ * lead has seen the warning. */
+export async function addDocument(file: File, fields: DocumentFields, addAnyway: boolean): Promise<AddAnswer> {
+  try {
+    const body = { filename: file.name, content: await base64(file), ...fields, add_anyway: addAnyway }
+    const response = await fetch('/api/documents', {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (response.ok) return { status: 'added' }
+    if (sessionEnded(response)) return { status: 'failed', message: SESSION_ENDED }
+    const read = (await response.json().catch(() => ({}))) as { detail?: unknown }
+    if (typeof read.detail !== 'string') return { status: 'failed', message: ADD_FAILED }
+    if (response.status === 409) return { status: 'warning', message: read.detail }
+    if (response.status === 400 || response.status === 413) return { status: 'refused', message: read.detail }
+    return { status: 'failed', message: ADD_FAILED }
+  } catch {
+    return { status: 'failed', message: ADD_FAILED }
+  }
 }
