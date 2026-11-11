@@ -1280,10 +1280,14 @@ def read_audit_trail(
 ) -> dict[str, Any]:
     """A page of the user's audit entries under the compliance profile, newest first, redacted
     as every answer is: at most `limit`, after the entry with id `before`; `next` is the
-    `before` for the page after (null: no more). The trail is append-only: no route changes or
-    removes an entry."""
+    `before` for the page after (null: no more). The notes Vouch wrote (an approval or discard,
+    a question, a priority change) are served in the profile's answer language, as the report's
+    trail serves them (vouch.report.trail_entries, #535); a lead's own notes as written. The
+    trail is append-only: every entry stays stored as written, and no route changes or removes
+    one."""
     page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
-    clean, _ = redact_data({"entries": [entry.to_dict() for entry in page.entries]})
+    entries = report.trail_entries(page.entries, profile.answer_language)
+    clean, _ = redact_data({"entries": entries})
     return clean | {"next": page.next}
 
 
