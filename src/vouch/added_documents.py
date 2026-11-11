@@ -59,6 +59,7 @@ EVIDENCE_KIND_OF: dict[AddedKind, EvidenceKind] = {"policy": DOCUMENTED, "record
 
 MAX_BYTES = 200 * 1024
 MAX_DOCUMENTS = 50
+MAX_VERSIONS = 20
 SUFFIXES = (".md", ".txt")
 TITLE_LENGTH = 120
 ID_LENGTH = 60
@@ -67,6 +68,10 @@ TOO_LARGE = f"This file is over {MAX_BYTES // 1024} KB, the most an added docume
 TOO_MANY = (
     f"This company already has {MAX_DOCUMENTS} documents added and not withdrawn, the most it "
     "may have. Withdraw one, or add a new version of one instead."
+)
+TOO_MANY_VERSIONS = (
+    f"This document already has {MAX_VERSIONS} versions, the most an added document may have. "
+    "Add this file under another title instead."
 )
 NOT_TEXT = "This file isn't valid UTF-8 text. Save it as UTF-8 and add it again."
 EMPTY = "This file is empty."
@@ -201,15 +206,18 @@ def next_version(
     at: datetime.datetime,
 ) -> AddedDocument:
     """The version the add keeps, from the profile's documents already kept: the next of the
-    document with the same title (ignoring case), else version 1 of a new one. Only documents
-    not withdrawn count toward MAX_DOCUMENTS. DocumentRefused for any limit it breaks, before
-    anything is written."""
+    document with the same title (ignoring case), at most MAX_VERSIONS of it, else version 1 of
+    a new one. Only documents not withdrawn count toward MAX_DOCUMENTS. DocumentRefused for any
+    limit it breaks, before anything is written; the stores call it holding the profile's lock,
+    so two adds at once can't both pass a limit."""
     title = checked_fields(new)
     text = checked_text(new)
     same = [d for d in kept if d.title.casefold() == title.casefold()]
     if same:
         if any(d.withdrawn_at is not None for d in same):
             raise DocumentRefused(WITHDRAWN_TITLE)
+        if len(same) >= MAX_VERSIONS:
+            raise DocumentRefused(TOO_MANY_VERSIONS)
         doc_id, version = same[0].doc_id, max(d.version for d in same) + 1
     else:
         ids = {d.doc_id for d in kept}
