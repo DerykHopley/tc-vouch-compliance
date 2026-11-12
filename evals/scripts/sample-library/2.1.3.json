@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information handling arising respect"}},
     {"tool": "search_records", "args": {"query": "information handling arising respect"}},
-    {"answer": "Draft answer for 2.1.3, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nawareness-training-concept: “Some groups get an extra module on their own risks: managers, administrators, staff who work in customers' networks, and the production staff on the shop floor.”\n\ntraining-record: “Yearly security course | All staff | March to May 2026 | 212 | 205”\n\ninformation-security-policy: “When a change affects staff, the information security officer sends a short summary of it to all employees; when a change affects suppliers or service providers, purchasing sends them the summary with the next order.”\n\n### What is missing\n\n- S1 is only partly evidenced.\n- S6 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

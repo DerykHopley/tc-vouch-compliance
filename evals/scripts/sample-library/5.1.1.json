@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "cryptographic procedures managed extent"}},
     {"tool": "search_records", "args": {"query": "cryptographic procedures managed extent"}},
-    {"answer": "Draft answer for 5.1.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\ncryptography-standard: “We use only methods that current national technical guidelines recommend:”\n\nencryption-check-record: “The key vault holds 41 keys; none is older than two years, and two were renewed this month.”\n\n### What is missing\n\n- H1 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

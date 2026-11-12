@@ -7,6 +7,7 @@ is gone). Local mode, on the fake model: its one user is a developer."""
 import re
 
 import pytest
+from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from top_bar import (
     back_to_overview,
@@ -200,6 +201,22 @@ def test_the_user_menu_moves_with_the_arrows_and_tab_closes_it(page: Page, profi
     expect(page.get_by_role("banner").get_by_role("menu")).to_have_count(0)
 
 
+def test_home_and_end_move_to_the_user_menus_first_and_last_item(page: Page, profiles_url):
+    # The ARIA menu pattern (#615): Home to the first item, End to the last.
+    opened(page, profiles_url)
+    button = page.get_by_role("banner").get_by_role("button", name="Your menu")
+    button.focus()
+    page.keyboard.press("Enter")
+    choices = page.get_by_role("banner").get_by_role("menuitem")
+    expect(choices).to_have_count(4)
+    page.keyboard.press("ArrowDown")
+    expect(choices.nth(1)).to_be_focused()
+    page.keyboard.press("End")
+    expect(choices.nth(3)).to_be_focused()
+    page.keyboard.press("Home")
+    expect(choices.nth(0)).to_be_focused()
+
+
 def test_esc_closes_a_top_bar_menu_but_leaves_an_open_chat_open(page: Page, profiles_url):
     opened(page, profiles_url)
     page.get_by_role("button", name="Ask Vouch").click()
@@ -223,3 +240,38 @@ def test_on_a_phone_a_profile_kept_by_an_earlier_version_changes_nothing(page: P
         page.get_by_role("banner").get_by_role("button", name="Menu", exact=True)
     ).to_have_attribute("aria-expanded", "false")
     assert not scrolls_sideways(page)
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
+    page: Page, profiles_url, width
+):
+    """#671: Chromium scrolled a scrolled-down page by about 213px as "Your menu" took focus. No
+    control in the sticky top bar moves the page as it takes focus; on a phone, with the Menu open."""
+    # its settings and prompts read, and its fonts in, before scrolling: its height settled
+    with (
+        page.expect_response("**/api/developer/settings"),
+        page.expect_response("**/api/developer/prompts"),
+    ):
+        opened(page, f"{profiles_url}/developer", width)
+    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+    bar = page.get_by_role("banner")
+    if width < 700:
+        bar.get_by_role("button", name="Menu", exact=True).click()
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 300, scrolled  # a long page, scrolled well down
+    page.evaluate("document.activeElement.blur()")
+    user = bar.get_by_role("button", name="Your menu")
+    for _ in range(20):
+        page.keyboard.press("Tab")
+        in_bar = page.evaluate("document.activeElement.closest('header.top') !== null")
+        assert in_bar, "Tab left the top bar before reaching Your menu"
+        control = page.evaluate("document.activeElement.textContent")
+        assert page.evaluate("window.scrollY") == scrolled, (
+            f"focusing {control!r} scrolled the page"
+        )
+        if user.evaluate("button => button === document.activeElement"):
+            break
+    expect(user).to_be_focused()

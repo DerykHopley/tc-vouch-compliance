@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "recovery services ensured backup"}},
     {"tool": "search_records", "args": {"query": "recovery services ensured backup"}},
-    {"answer": "Draft answer for 5.2.9, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nNo document found shows what 5.2.9 asks for.\n\n### What is missing\n\n- M1 is not evidenced.\n- M2 is not evidenced.\n- S1 is not evidenced."}
   ],
   "judge": {
     "requirements": [

@@ -11,7 +11,7 @@ import {
   canPinChat, CHAT_WIDTH_STEP, type ChatWidthRange, chatWidthRange, clampChatWidth, pageWidth, rememberChatWidth,
   rememberedChatWidth,
 } from './chatWidth.ts'
-import { swallowNextPointerClick } from './doubleClickGuard.ts'
+import { swallowPointerClickBurst } from './doubleClickGuard.ts'
 import { controlPath, type NextStep } from './overview.ts'
 import StepText from './StepText.tsx'
 
@@ -183,6 +183,7 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
   const [state, setState] = useState<ChatState>('closed')
   const open = state !== 'closed'
   const fabRef = useRef<HTMLButtonElement>(null)
+  const pinRef = useRef<HTMLButtonElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const sheetRef = useRef<HTMLElement>(null)
 
@@ -390,11 +391,17 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     )
   }
   const { className, size, pin } = STATES[state]
-  /** Close: a double click's second click presses nothing under it (#527's guard), and focus, which its press may have
-   * moved, goes back to Ask Vouch (#333). */
+  /** Close: a double or triple click's later clicks press nothing under it (#527's guard, #562), and focus, which
+   * their press may have moved, goes back to Ask Vouch (#333). */
   const close = (e: ReactMouseEvent<HTMLButtonElement>) => {
-    swallowNextPointerClick(e, () => fabRef.current?.focus())
+    swallowPointerClickBurst(e, () => fabRef.current?.focus())
     setState('closed')
+  }
+  /** The pin toggle: pinning or unpinning moves the chat, so a double click's later clicks would land on the page
+   * where the toggle was; they press nothing, and focus stays on the toggle (#563, as Close). */
+  const togglePin = (e: ReactMouseEvent<HTMLButtonElement>, to: ChatState) => {
+    swallowPointerClickBurst(e, () => pinRef.current?.focus())
+    setState(to)
   }
   return (
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
@@ -408,7 +415,8 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
           <span className="page-context">{pageLabel(context)}</span>
         </div>
         {pinnable && pin && (
-          <button className="btn btn-ghost" aria-pressed={state === 'pinned'} onClick={() => setState(pin)}>
+          <button ref={pinRef} className="btn btn-ghost" aria-pressed={state === 'pinned'}
+            onClick={(e) => togglePin(e, pin)}>
             Pin beside the page
           </button>
         )}

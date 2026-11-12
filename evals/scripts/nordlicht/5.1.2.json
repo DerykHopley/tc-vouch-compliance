@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information protected transfer during"}},
     {"tool": "search_records", "args": {"query": "information protected transfer during"}},
-    {"answer": "Draft answer for 5.1.2, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nnetwork-services-register: “On 8 September 2026 IT tested each service from outside our network with a TLS scanning tool: no service accepted a connection without encryption, and none offered a protocol older than TLS 1.2.”\n\nnetwork-transfer-standard: “IT keeps a register of the network services we use to send information in and out of the company, such as email, the supplier portal and the customer exchange platform.”\n\n### What is missing\n\n- S1 is not evidenced."}
   ],
   "judge": {
     "requirements": [

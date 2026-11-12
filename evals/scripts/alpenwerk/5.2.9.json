@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "wiederherstellung sichergestellt inwieweit sicherung"}},
     {"tool": "search_records", "args": {"query": "wiederherstellung sichergestellt inwieweit sicherung"}},
-    {"answer": "Antwortentwurf für 5.2.9: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\ndatensicherungskonzept: „Die Sicherungen werden verschlüsselt (AES 256 Bit) auf ein Speichersystem in einem zweiten Brandabschnitt geschrieben und wöchentlich auf Bänder ausgelagert, die in einem Bankschließfach in Kufstein liegen.“\n\nwiederherstellungstests: „Verzeichnisdienst | 2026-04-14 | Testsystem | 2 Stunden | ja | vollständig, Anmeldung geprüft“\n\n### Was fehlt\n\n- H2 ist nur teilweise nachgewiesen."}
   ],
   "judge": {
     "requirements": [

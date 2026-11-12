@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
-import { swallowNextPointerClick } from './doubleClickGuard.ts'
+import { swallowPointerClickBurst } from './doubleClickGuard.ts'
 
 /** The trigger's own attributes: its class (a ghost pill unless given), `disabled` (can't be pressed or focused),
  * `aria-disabled` (can't be pressed, keeps focus: busy), `aria-busy`, `aria-label`. */
@@ -21,6 +21,8 @@ type Props = {
    * question that changed under them. */
   subject?: string
   trigger?: Trigger
+  /** Given the trigger button as it mounts (and null as it goes), for a caller that moves focus to it. */
+  triggerRef?: (el: HTMLButtonElement | null) => void
 }
 
 /**
@@ -32,7 +34,7 @@ type Props = {
  * press on the confirm, the second click of a double-click presses nothing (#527).
  */
 export default function InlineConfirm({ label, confirmLabel = label, cancelLabel = 'Cancel', question, onConfirm,
-  confirmDisabled = false, ask = true, subject = question, trigger = {} }: Props) {
+  confirmDisabled = false, ask = true, subject = question, trigger = {}, triggerRef }: Props) {
   const [open, setOpen] = useState(false)
   // What the ask is about changed while it was open: it closes as this render's state, not after it.
   const [about, setAbout] = useState(subject)
@@ -52,7 +54,7 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
   }, [open])
   if (open) {
     const confirm = (e: ReactMouseEvent<HTMLButtonElement>) => {
-      swallowNextPointerClick(e)
+      swallowPointerClickBurst(e)
       setOpen(false)
       onConfirm()
     }
@@ -84,6 +86,9 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
     else onConfirm()
   }
   return (
-    <button type="button" ref={button} className="btn btn-ghost" {...trigger} onClick={press}>{label}</button>
+    <button type="button" ref={(el) => {
+      button.current = el
+      triggerRef?.(el)
+    }} className="btn btn-ghost" {...trigger} onClick={press}>{label}</button>
   )
 }

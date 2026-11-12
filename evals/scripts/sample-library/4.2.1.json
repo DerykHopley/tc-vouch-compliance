@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "assigned managed access extent"}},
     {"tool": "search_records", "args": {"query": "assigned managed access extent"}},
-    {"answer": "Draft answer for 4.2.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\naccess-rights-policy: “Rights that are no longer needed are removed.”\n\naccount-changes-record: “IT-4410 | 2026-07-01 | 2026-06-19 | 2026-06-22 | 2026-06-26 | Basic employee role”\n\nsign-in-settings-record: “Everyday accounts and administrator groups | Access rights policy | The directory refuses to add an everyday account to an administrator group; tried and refused”\n\n### What is missing\n\n- M2 is only partly evidenced.\n- H1 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

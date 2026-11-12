@@ -3,7 +3,7 @@
     {"tool": "search_policies", "args": {"query": "schwachstellen behandelt inwieweit erkannt"}},
     {"tool": "search_records", "args": {"query": "schwachstellen behandelt inwieweit erkannt"}},
     {"tool": "vulnerability_status", "args": {}},
-    {"answer": "Antwortentwurf für 5.2.5: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\npatch-vulnerability-status: „Patch sammelt jede Nacht die Hinweise der Hersteller und der CVE-Datenbank und bewertet jeden mit CVSS 3.1.“\n\n### Was fehlt\n\n- M3 ist nur teilweise nachgewiesen.\n- S1 ist nur teilweise nachgewiesen.\n- S2 ist nur teilweise nachgewiesen."}
   ],
   "judge": {
     "requirements": [

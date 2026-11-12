@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "services secured systems access"}},
     {"tool": "search_records", "args": {"query": "services secured systems access"}},
-    {"answer": "Draft answer for 4.1.2, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nauthentication-standard: “For each system, IT and the information security officer weigh the risk before deciding how users sign in: what information the system holds, who uses it, and whether it can be reached from the internet.”\n\nsign-in-settings-record: “On 13 October 2026 an administrator compared the live settings of the directory, the VPN and the internet-facing systems with the authentication standard and the user account standard, and tried each rule with a test account.”\n\n### What is missing\n\n- M1 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

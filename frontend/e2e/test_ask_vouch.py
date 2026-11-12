@@ -9,6 +9,7 @@ They run on DOSSIER_URL: #47 moved them off the main server while the request ra
 """
 
 import pytest
+from click_burst import DOUBLE_CLICK_MS, tap_burst
 from playwright.sync_api import Page, expect
 
 SHEET = "aside[aria-label='Chat with Vouch']"
@@ -155,15 +156,17 @@ def test_closing_the_sheet_gives_the_page_back(page: Page, dossier_url):
 
 
 @pytest.mark.parametrize("width", [400, 1400])
-@pytest.mark.parametrize("how", ["double click", "double tap"])
-def test_a_double_click_on_close_closes_the_chat_once_and_presses_nothing_behind(
+@pytest.mark.parametrize("how", ["triple click", "triple tap"])
+def test_a_triple_click_on_close_closes_the_chat_once_and_presses_nothing_behind(
     browser, dossier_url, width, how
 ):
-    # #333: the first click closes the chat, and the second would land on what was under Close:
-    # the top bar's Menu at 400px (focused and opened), the page at 1400px (focus lost). It
-    # presses nothing, as #527's guard does for the in-app ask, and focus stays on Ask Vouch.
+    # #333: the first click closes the chat, and the later ones would land on what was under
+    # Close: the top bar's Menu at 400px (focused and opened), the page at 1400px (focus lost).
+    # They press nothing, as #527's guard does for the in-app ask, and focus stays on Ask Vouch.
+    # #562: the guard swallows the whole burst, so a triple click's third click presses nothing
+    # either (a triple covers a double's second click too).
     context = browser.new_context(
-        has_touch=how == "double tap", viewport={"width": width, "height": 800}
+        has_touch=how == "triple tap", viewport={"width": width, "height": 800}
     )
     page = context.new_page()
     try:
@@ -172,14 +175,10 @@ def test_a_double_click_on_close_closes_the_chat_once_and_presses_nothing_behind
         sheet = page.locator(SHEET)
         sheet.evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")
         close = page.get_by_role("button", name="Close the chat")
-        if how == "double click":
-            close.dblclick()
+        if how == "triple click":
+            close.click(click_count=3)
         else:
-            b = close.bounding_box()
-            assert b is not None
-            x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
-            page.touchscreen.tap(x, y)
-            page.touchscreen.tap(x, y)
+            tap_burst(page, close, 3)
         expect(sheet).to_have_count(0)
         menu = page.get_by_role("banner").get_by_role(
             "button",
@@ -190,5 +189,37 @@ def test_a_double_click_on_close_closes_the_chat_once_and_presses_nothing_behind
         expect(menu).to_have_attribute("aria-expanded", "false")
         expect(menu).not_to_be_focused()
         expect(page.get_by_role("button", name="Ask Vouch")).to_be_focused()
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize("how", ["double click", "double tap"])
+def test_a_double_click_on_the_pinned_chats_pin_toggle_unpins_once_and_presses_nothing_behind(
+    browser, dossier_url, how
+):
+    # #563: at 1440px the first click unpins (the chat goes back to the enlarged bubble), and the
+    # second would land on the page where the toggle was: focus to the page, a word selected. It
+    # presses nothing, as #562's guard does for Close, and focus stays on the toggle.
+    context = browser.new_context(
+        has_touch=how == "double tap", viewport={"width": 1440, "height": 800}
+    )
+    page = context.new_page()
+    try:
+        page.goto(dossier_url)
+        page.get_by_role("button", name="Ask Vouch").click()
+        sheet = page.locator(SHEET)
+        sheet.get_by_role("button", name="Make larger").click()
+        pin = sheet.get_by_role("button", name="Pin beside the page")
+        pin.click()
+        expect(pin).to_have_attribute("aria-pressed", "true")
+        sheet.evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")
+        page.wait_for_timeout(DOUBLE_CLICK_MS)  # a person's double click comes after a pause
+        if how == "double click":
+            pin.click(click_count=2)
+        else:
+            tap_burst(page, pin, 2)
+        expect(pin).to_have_attribute("aria-pressed", "false")
+        expect(pin).to_be_focused()
+        assert page.evaluate("() => String(window.getSelection())") == ""
     finally:
         context.close()

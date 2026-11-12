@@ -14,7 +14,10 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
   repeating-linear-gradient(90deg, var(--check-a) 0 2px, transparent 2px 4px, var(--check-b) 4px 5px, transparent 5px 12px),
   repeating-linear-gradient(0deg, var(--check-a) 0 2px, transparent 2px 4px, var(--check-b) 4px 5px, transparent 5px 12px); }
 /* A field brought into view stops below the sticky bar; TopBar keeps --top-bar its height (#205). */
-html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
+html { --scroll-pad: calc(var(--top-bar, 0px) + var(--created-notice, 0px) + 8px); scroll-padding-top: var(--scroll-pad); }
+/* The bar's own controls sit inside that padding, the bar being sticky, so Chromium scrolled the page to "reveal" one
+   as it took focus, which the scroll never does (#671). A negative margin as deep as the padding: always in view. */
+.top * { scroll-margin-top: calc(-1 * var(--scroll-pad)); }
 .top-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-block: 6px; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand b { font: 400 20px var(--f-display); text-transform: uppercase; letter-spacing: .08em; }
@@ -60,8 +63,13 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .btn { min-height: 44px; border: 1px solid var(--rule); background: var(--sheet); border-radius: 999px; padding: 7px 16px; font-weight: 500; }
 .btn:hover { border-color: var(--navy); }
 .btn-ghost { border-color: transparent; background: none; color: var(--navy); padding: 4px 10px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
-.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; --dot: 7px; }
+.chip::before { content: ""; width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; }
+/* #550: in these two tables a verdict chip may wrap under 800px (design.md, Components, Verdict chip). */
+@media screen and (max-width: 799px) {
+  :is(.reqs.judged .verdict-col, .report-controls) .chip { white-space: normal; align-items: flex-start; }
+  :is(.reqs.judged .verdict-col, .report-controls) .chip::before { flex-shrink: 0; margin-top: calc((1lh - var(--dot)) / 2); }
+}
 /* Not assessed (design.md, 2026-11-04): hollow, no colour of its own: a 1px --rule ring, a hollow dot, --muted text. */
 .v-none { color: var(--muted); background: none; box-shadow: inset 0 0 0 1px var(--rule); }
 .v-none::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
@@ -171,7 +179,7 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 
 /* Working paper (minimal until M2): head ruled in ink, the agent's steps in mono, then the verdict and draft answer */
 /* The full width, with the .wrap gutters (design.md, Layout: Full width; #464); its prose keeps its own measure. */
-.paper { padding-block: 24px 110px; display: grid; gap: 16px; }
+.paper { --paper-gap: 16px; padding-block: 24px 110px; display: grid; gap: var(--paper-gap); }
 .paper-head { display: grid; gap: 6px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
 .paper-head h2 { font-size: clamp(22px, 3vw, 30px); overflow-wrap: anywhere; }
 .paper-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--muted); } /* wraps on a phone (#467) */
@@ -309,7 +317,7 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
   .wp-index { padding: 0; }
   /* The id keeps the chip's line when the tag wraps below it (centred, it sat half a line low). */
   .wp-row { align-items: start; }
-  .wp-index-list { position: sticky; top: var(--top-bar, 0px); max-height: calc(100vh - var(--top-bar, 0px) - 88px); overflow-y: auto; padding: 12px 0; }
+  .wp-index-list { position: sticky; top: calc(var(--top-bar, 0px) + var(--created-notice, 0px)); max-height: calc(100vh - var(--top-bar, 0px) - var(--created-notice, 0px) - 88px); overflow-y: auto; padding: 12px 0; }
   .wp-q { grid-column: 1 / -1; line-height: 1.4; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 }
 /* The requirement rows: a wide table scrolls inside its own container, never the page (design.md, Layout) */
@@ -410,6 +418,14 @@ textarea.field { resize: vertical; font-family: inherit; }
 .field[aria-invalid="true"] { border-color: var(--ink); border-width: 2px; }
 .field-note { margin: 0; color: var(--muted); max-width: 72ch; }
 .field-note.notice { color: var(--ink); padding-left: 10px; }
+/* A create that landed while the developer was on another page (#569): its notice held under the sticky top bar, so
+   it shows wherever the page is scrolled, then Open and Dismiss, wrapping on a phone. Empty (no notice) it takes no
+   room; shown, its height is --created-notice (App), which the scroll padding and the paper's sticky index add. */
+.created-notice.shown { position: sticky; top: var(--top-bar, 0px); z-index: 19; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 8px 16px; padding-block: 8px; background: var(--paper); border-bottom: 1px solid var(--rule); }
+/* Its buttons sit inside that scroll padding, being sticky: a negative margin keeps Chromium from scrolling the page
+   to "reveal" one as it takes focus. */
+.created-notice.shown button { scroll-margin-top: calc(-1 * var(--scroll-pad)); }
 .sheet a, .msg a { color: var(--navy); }
 
 /* Ask Vouch: button and bubble */
@@ -523,7 +539,7 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report { max-width: 1000px; margin: 0 auto; padding-block: 20px 110px; display: grid; gap: 16px; }
 /* Each part's gap is a property, so print's margins (below) use the same value. */
 .report-doc { --report-doc-gap: 28px; padding: 28px 32px; gap: var(--report-doc-gap); justify-items: stretch; min-width: 0; }
-.report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
+.report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); hyphens: auto; overflow-wrap: break-word; }
 .report-doc h2 { font-size: 20px; margin-bottom: 8px; }
 .report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
 .report-head, .setup-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
@@ -563,6 +579,8 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
    (KONTROLLE, ANFORDERUNG): 963px of trail in the 902px sheet. Scaled to Manrope's widths, they fit; Manrope unchanged. */
 @font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans"); font-weight: 400 500; size-adjust: 85%; }
 @font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans Bold"); font-weight: 600 800; size-adjust: 85%; }
+/* #550: the controls table the same way, whose DejaVu columns summed to 607px in the 603px sheet at 701px. */
+.report-controls { font-family: "Manrope", "Manrope Fallback", var(--f-body); }
 .report-table.report-trail :is(th, td) { padding-inline: 5px; }
 .report-table.report-trail .report-q { min-width: 16ch; }
 .report-trail .report-at > .report-line { min-width: 10ch; }
@@ -619,6 +637,12 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   :root[data-chat="pinned"] body { padding-right: 0; }
   .review-dock.stuck { position: static; left: auto; width: auto; border: 0; padding: 0; } /* in its place (#467) */
   .review-dock.stuck::after { display: none; }
+  /* The working paper flows as blocks too, as the report's sheet (#296): a grid placed the review bar as if the
+     requirements table had not grown from a page break, so the bar printed over the last remediation item (#591).
+     Its gap becomes a margin. A remediation item's Approve and Discard are for the screen: paper can't press them. */
+  .paper { display: block; }
+  .paper > * + * { margin-top: var(--paper-gap); }
+  .remediation .review-actions { display: none; }
   body { background: var(--sheet); }
   .report { max-width: none; padding: 0; display: block; }
   .report.wrap { padding-inline: 0; }
@@ -705,6 +729,12 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 /* The container may shrink below the table in a grid, so the table scrolls in it, not the page; and it holds the
    rows' screen-reader text (.sr-only, positioned), which would otherwise widen the page from outside it. */
 .doc-table-wrap { position: relative; min-width: 0; }
+/* The table shows that it scrolls (#607, #555's hint turned sideways): while columns lie beyond its right edge
+   (data-more, which DocumentTable keeps), that edge fades into the sheet (40px) over the column it cuts; gone at the
+   table's end. No new control. */
+.doc-table-hint { position: relative; width: 100%; min-width: 0; }
+.doc-table-hint[data-more]::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 40px;
+  pointer-events: none; background: linear-gradient(to right, transparent, var(--sheet)); }
 .doc-table caption { text-align: left; font-weight: 600; padding: 4px 0 6px; }
 .doc-table .doc-title { display: block; overflow-wrap: anywhere; }
 .doc-table .doc-id { display: block; font-size: 12px; color: var(--muted); }

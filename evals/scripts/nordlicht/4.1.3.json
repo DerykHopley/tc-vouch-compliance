@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information accounts securely applied"}},
     {"tool": "search_records", "args": {"query": "information accounts securely applied"}},
-    {"answer": "Draft answer for 4.1.3, from the evidence found."}
+    {"answer": "### What the evidence shows\n\naccount-management-procedure: “Accounts are never shared between people.”\n\njoiner-leaver-record: “Every joiner account was approved by the system owner before it was created.”\n\naccess-review-record: “Accounts that our staff hold in customers' systems were not part of this review.”\n\nacceptable-use-policy: “Do not write it down or keep it in a plain file; use the company password manager.”\n\nauthentication-standard: “Systems reachable only from the office network may rely on a password alone.”\n\nmfa-rollout-record: “Screenshot notes from the directory's password settings, 14 August 2026: minimum length 12 characters; breached-password check on; no expiry timer; account locked for 15 minutes after 10 failed attempts.”\n\n### What is missing\n\n- M6 is only partly evidenced.\n- M7 is only partly evidenced.\n- S2 is not evidenced.\n- S5 is only partly evidenced.\n- S7 is not evidenced.\n- S8 is not evidenced.\n- S9 is only partly evidenced.\n- S10 is not evidenced."}
   ],
   "judge": {
     "requirements": [

@@ -11,7 +11,7 @@ import json
 import re
 
 from playwright.sync_api import APIRequestContext, Dialog, Locator, Page, expect
-from reviewing import confirmed
+from reviewing import confirmed, decide
 from top_bar import back_to_overview
 from touch_targets import small_targets
 
@@ -125,9 +125,8 @@ def test_story_2_override_confirm_plan_fixes_and_accept_counts_on_the_overview(
     # Accept.
     expect(current_step(bar)).to_have_text("Accept")
     bar.get_by_label("Your note (kept in the audit trail)").fill("Checked against the records.")
-    with page.expect_response(re.compile(r"/review$")) as answer:
-        bar.get_by_role("button", name="Accept verdict").click()
-    assert answer.value.ok, answer.value.status
+    answer = decide(page, bar, "Accept verdict")
+    assert answer.ok, answer.status
     expect(bar.get_by_text("Accepted", exact=True)).to_be_visible()
     # Who and when, kept with the review: local mode's reviewer name (#154).
     expect(bar).to_contain_text(re.compile(r"by Local user on \d+ \w+ \d{4}, \d\d:\d\d"))
@@ -156,8 +155,7 @@ def test_reject_then_assess_again_carries_the_note_into_the_new_run(page: Page, 
 
     bar = paper.get_by_role("region", name="Review")
     bar.get_by_label("Your note (kept in the audit trail)").fill(note)
-    with page.expect_response(re.compile(r"/review$")):
-        bar.get_by_role("button", name="Reject verdict").click()
+    decide(page, bar, "Reject verdict")
     expect(bar.get_by_text("Rejected", exact=True)).to_be_visible()
     expect(bar).to_contain_text(note.strip())
 
@@ -284,6 +282,24 @@ def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(pag
     row(paper, "M1").get_by_role("button", name="Undo the override of M1").focus()
     page.keyboard.press("Enter")  # Undo goes once pressed: focus moves to Change, not the page
     expect(change).to_be_focused()
+
+
+def test_the_ask_on_switching_override_editors_moves_focus(page: Page, paper_url):
+    # #559: the ask on Change M2, with M1's override typed, moves focus as the in-app ask does (#441).
+    page.set_viewport_size({"width": 400, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    override(paper, "M1", "Evidenced", REASON)
+    change_m2 = row(paper, "M2").get_by_role("button", name="Change M2", exact=True)
+    change_m2.click()
+
+    expect(row(paper, "M2").get_by_role("button", name="Keep editing M1")).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(change_m2).to_be_focused()
+
+    page.keyboard.press("Enter")
+    row(paper, "M2").get_by_role("button", name="Change M2 anyway").click()
+    expect(page.get_by_role("form", name="Override M2").get_by_label("Verdict")).to_be_focused()
 
 
 def test_leaving_with_an_unsaved_override_asks_first_and_cancel_keeps_it(page: Page, paper_url):

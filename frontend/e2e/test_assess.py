@@ -33,7 +33,7 @@ def test_assess_shows_the_steps_one_by_one_then_the_verdict_and_the_answer(page:
     steps = paper.get_by_role("list", name="Agent steps").get_by_role("listitem")
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result.get_by_text("Partly evidenced", exact=True)).to_be_visible()
-    expect(result).to_contain_text("hardware security keys")
+    expect(result).to_contain_text("hardware security key")
     expect(
         result.get_by_role("region", name="Usage")
     ).to_have_text(  # #35: the fake's tokens, priced

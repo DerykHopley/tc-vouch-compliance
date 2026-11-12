@@ -37,6 +37,7 @@ from vouch.chat_agent import (
     EXPLAIN_CONTROL,
     GREETING_REQUEST,
     NO_EVIDENCE,
+    NO_ROUND_CLOSED,
     NO_SEARCH_ALLOWED,
     PROGRESS,
     SEARCH_EVIDENCE,
@@ -46,6 +47,7 @@ from vouch.chat_agent import (
 )
 from vouch.chat_citations import CITE
 from vouch.fake_model import _usage
+from vouch.rounds import BEFORE_FRESH_START, STILL_OPEN
 
 CHAT_REPLY = (
     "Thank you for your question. Please ask what is missing for a control, or whether there "
@@ -129,6 +131,15 @@ _MONTHS = {
     "November": "November",
     "December": "Dezember",
 }
+_DATE = rf"(\d+) ({'|'.join(_MONTHS)}) (\d{{4}})"
+"""A date as the tools write it ("3 March 2026"): its day, month and year."""
+
+
+def _date(day: str, month: str, year: str) -> str:
+    """A date _DATE found, in German: "3. März 2026"."""
+    return f"{day}. {_MONTHS[month]} {year}"
+
+
 _STATUSES = {  # vouch.chat_agent._STATUS_WORDS: (said of one control, of several)
     "accepted": ("akzeptiert", "akzeptiert"),
     "rejected": ("abgelehnt", "abgelehnt"),
@@ -221,6 +232,43 @@ def _why(german: Callable[[str, str, list[str]], str]) -> Callable[[re.Match[str
     return say
 
 
+_CHANGES = {"better": "besser", "worse": "schlechter", "new": "neu"}  # compare_rounds_words
+_PROPOSED = f"; {_STATUSES['proposed and waiting for your review'][0]}"
+"""A changed control's note in compare_rounds_words that its newest assessment waits."""
+
+
+def _accepted(verdict: str) -> str:
+    """A verdict then or now in compare_rounds_words: already German, or "not accepted"."""
+    return "Nicht akzeptiert" if verdict == "not accepted" else verdict
+
+
+def _scope(change: str) -> str:
+    """A scope change in compare_rounds_words: "1.2.3 new since" or "… out of scope since"."""
+    control_id, _, kind = change.partition(" ")
+    if kind == "new since":
+        return f"{control_id} seitdem neu im Anwendungsbereich"
+    return f"{control_id} seitdem nicht mehr im Anwendungsbereich"
+
+
+def _on(item: str) -> str:
+    """An item done or a question answered in compare_rounds_words: "<what> on <control>"."""
+    what, _, control_id = item.rpartition(" on ")
+    return f"{'eine' if what == 'one' else what} zu {control_id}"
+
+
+def _since(listed: str, german: Callable[[str], str], sep: str = ", ") -> str:
+    """compare_rounds_words' list of what changed since the round, its items split by `sep`,
+    each in German; "none" is "keine"."""
+    if listed == "none":
+        return "keine"
+    return sep.join(german(item) for item in listed.split(sep))
+
+
+def _and(listed: str) -> str:
+    """A list ending "… and <last>" (unknown_round's rounds), ending "… und <last>"."""
+    return " und ".join(listed.rsplit(" and ", 1))
+
+
 _GERMAN: list[tuple[re.Pattern[str], Say]] = [
     # progress_words and _next_words
     (
@@ -228,8 +276,8 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
         r"Sie haben noch keine der \1 Kontrollen bewertet.",
     ),
     (
-        re.compile(rf"You last worked on (\d+) ({'|'.join(_MONTHS)}) (\d{{4}})\."),
-        lambda f: f"Sie haben zuletzt am {f[1]}. {_MONTHS[f[2]]} {f[3]} gearbeitet.",
+        re.compile(rf"You last worked on {_DATE}\."),
+        lambda f: f"Sie haben zuletzt am {_date(f[1], f[2], f[3])} gearbeitet.",
     ),
     (re.compile(r"Of the (\d+) controls, ([^.]+)\."), _counts),
     (
@@ -397,6 +445,63 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
     (
         re.compile(rf"There is no VDA ISA control {_QUOTED}\. The controls are "),
         r"Die Kontrolle \1 gibt es in der VDA ISA nicht. Die Kontrollen sind ",
+    ),
+    # compare_rounds_words and its refusals (#582), in the report's words ("Prüfrunde",
+    # "Bereitschaft", "Geänderte Kontrollen", "Maßnahmen", "Nicht akzeptiert")
+    (
+        re.compile(rf"Now compared with review round (\d+), {_QUOTED}, closed on {_DATE}\."),
+        lambda f: (
+            f"Jetzt verglichen mit Prüfrunde {f[1]}, {f[2]}, abgeschlossen am "
+            f"{_date(f[3], f[4], f[5])}."
+        ),
+    ),
+    (
+        _line(r"Better: (\d+), worse: (\d+), new: (\d+), unchanged: (\d+)\."),
+        r"Besser: \1, schlechter: \2, neu: \3, unverändert: \4.",
+    ),
+    (
+        re.compile(r"Readiness: (\d+) controls? accepted then, (\d+) now\."),
+        lambda f: (
+            f"Bereitschaft: {f[1]} Kontrolle{'' if f[1] == '1' else 'n'} damals akzeptiert, "
+            f"{f[2]} jetzt."
+        ),
+    ),
+    (_line(r"Changed controls: none\."), "Geänderte Kontrollen: keine."),
+    (_line(r"Changed controls:"), "Geänderte Kontrollen:"),
+    (
+        _line(rf"- {_ID}: (better|worse|new), (.+?) → (.+?)(; proposed, waiting for review)?\."),
+        lambda f: (
+            f"- {f[1]}: {_CHANGES[f[2]]}, {_accepted(f[3])} → {_accepted(f[4])}"
+            f"{_PROPOSED if f[5] else ''}."
+        ),
+    ),
+    (
+        _line(r"Scope changes: (.*)\."),
+        lambda f: f"Änderungen im Anwendungsbereich: {_since(f[1], _scope, '; ')}.",
+    ),
+    (
+        _line(r"Remediation items done since: (.*)\."),
+        lambda f: f"Seitdem erledigte Maßnahmen: {_since(f[1], _on)}.",
+    ),
+    (
+        _line(r"Questions answered since: (.*)\."),
+        lambda f: f"Seitdem beantwortete Fragen: {_since(f[1], _on)}.",
+    ),
+    (
+        re.compile(re.escape(NO_ROUND_CLOSED)),
+        "Seit dem Neustart wurde keine Prüfrunde abgeschlossen, es gibt also keine zum Vergleich.",
+    ),
+    (
+        _line(rf"There is no review round {_QUOTED}\. The rounds are (.+)\."),
+        lambda f: f"Die Prüfrunde {f[1]} gibt es nicht. Die Prüfrunden sind {_and(f[2])}.",
+    ),
+    (
+        re.compile(re.escape(STILL_OPEN)),
+        "Schließen Sie diese Prüfrunde ab, um mit ihr zu vergleichen.",
+    ),
+    (
+        re.compile(re.escape(BEFORE_FRESH_START)),
+        "Diese Prüfrunde wurde vor dem Neustart abgeschlossen, daher ist kein Vergleich möglich.",
     ),
     # start_assessment
     (
