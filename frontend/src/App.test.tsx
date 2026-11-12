@@ -819,6 +819,68 @@ describe('the Company tab (ticket 495; the Company page, ticket 505)', () => {
     })
 })
 
+describe('the round comparison (ticket 573)', () => {
+  const ROUND = { number: 3, name: 'Q3 2026', opened_at: '2026-10-01T09:00:00+00:00',
+    closed_at: '2026-10-31T16:00:00+00:00', before_fresh_start: false }
+  const COMPARISON = {
+    round: ROUND, changes: { better: 1, worse: 0, new: 0, unchanged: 0 },
+    readiness: { accepted: { then: 0, now: 1 }, by_verdict: {
+      evidenced: { then: 0, now: 1 }, 'partly-evidenced': { then: 0, now: 0 }, 'not-evidenced': { then: 0, now: 0 },
+      'not-applicable': { then: 0, now: 0 } } },
+    controls: [{ control_id: '4.1.2', chapter: '4', change: 'better', before: null, after: 'evidenced', proposed: false }],
+    remediation_done: [], questions_answered: [], evidence: [],
+  }
+
+  /** The app's API, plus the rounds and round 3's comparison. */
+  function serveRounds() {
+    const base = serve()
+    const fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/rounds/3/comparison' ? Promise.resolve(Response.json(COMPARISON))
+        : url === '/api/rounds' ? Promise.resolve(Response.json({ rounds: [ROUND], default: 3 }))
+          : base(url, init))
+    vi.stubGlobal('fetch', fetch)
+    vi.stubGlobal('scrollTo', vi.fn())
+  }
+
+  const crumbs = () => screen.getByRole('navigation', { name: 'Breadcrumb' })
+
+  it("leads back to the comparison only from the paper opened from it, not from another control's", async () => {
+    serveRounds()
+    window.history.replaceState(null, '', '/company/rounds/3')
+    render(<App />)
+    await screen.findByRole('heading', { level: 1, name: 'Compared with Q3 2026' })
+    await userEvent.click(within(screen.getByRole('row', { name: /^4\.1\.2/ })).getByRole('link'))
+    expect(window.location.pathname).toBe('/controls/4.1.2')
+    expect(within(crumbs()).getByRole('link', { name: 'Compared with Q3 2026' })).toBeTruthy()
+
+    const index = screen.getByRole('navigation', { name: 'Controls' })
+    await userEvent.click(within(index).getByRole('link', { name: /^5\.2\.4/ }))
+    expect(window.location.pathname).toBe('/controls/5.2.4')
+    expect(within(crumbs()).queryByRole('link', { name: /^Compared with/ })).toBeNull()
+    expect(within(crumbs()).getByRole('link', { name: 'Overview' })).toBeTruthy()
+  })
+
+  it('starts at the top when the round is shown again after leaving its paper by the top bar', async () => {
+    serveRounds()
+    window.history.replaceState(null, '', '/company/rounds/3')
+    render(<App />)
+    await screen.findByRole('heading', { level: 1, name: 'Compared with Q3 2026' })
+    vi.stubGlobal('scrollY', 640)
+    await userEvent.click(within(screen.getByRole('row', { name: /^4\.1\.2/ })).getByRole('link'))
+    expect(window.location.pathname).toBe('/controls/4.1.2')
+
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('link', { name: 'Company' }))
+    expect(window.location.pathname).toBe('/company')
+    // The Rounds section's link loads the page afresh; reached in-app (History), the view must start at the top too.
+    act(() => {
+      window.history.pushState(null, '', '/company/rounds/3')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await screen.findByRole('heading', { level: 1, name: 'Compared with Q3 2026' })
+    expect(window.scrollTo).not.toHaveBeenCalledWith(0, 640)
+  })
+})
+
 describe('the improvement plan (ticket 410)', () => {
   const ITEM = { requirement_id: 'M1', missing: 'A record.', owner_role: 'CISO', due_date: '2027-02-01',
     status: 'approved', priority: 'medium', done: null }

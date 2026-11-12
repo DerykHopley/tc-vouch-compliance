@@ -1,6 +1,7 @@
 """Every page's controls meet the touch-target floor at phone width (docs/design.md, Accessibility
 floor). The pages on the profiles server, which reaches the developer page; the chat on its own."""
 
+import base64
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -20,6 +21,7 @@ from test_company_setup import (
     to_step_6,
     to_step_7,
 )
+from test_documents import NEW_EVIDENCE, added_by_api, cited_then_versioned
 from test_guided_chat import assess_in_the_chat
 from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
@@ -50,6 +52,27 @@ def test_every_control_is_at_least_44px_at_phone_width(page: Page, profiles_url,
     assert small_targets(page) == []
 
 
+def test_the_add_document_form_and_add_new_version_are_at_least_44px(page: Page, documents_url):
+    # #585: on the documents' own server, a document added first so a row offers Add new version.
+    added = page.request.post(
+        f"{documents_url}/api/documents",
+        data={
+            "filename": "touch.txt",
+            "content": base64.b64encode(b"Touch targets.").decode(),
+            "title": "Touch target note",
+            "kind": "record",
+            "approval_date": "2026-10-01",
+            "review_cycle": "yearly",
+        },
+    )
+    assert added.status == 201, added.status
+    at_phone_width(page, f"{documents_url}/company")
+    page.get_by_role("article", name="Documents").get_by_role("button", name="Add document").click()
+    expect(page.get_by_role("form", name="Add document")).to_be_visible()
+    expect(page.get_by_role("button", name="Add new version of Touch target note")).to_be_visible()
+    assert small_targets(page) == []
+
+
 def test_the_review_round_s_name_field_and_start_round_are_at_least_44px(page: Page, rounds_url):
     # #402: the overview above measures the open round's Close round; here, none open. On the
     # rounds' own server under Alpenwerk (#525): rounds are kept per company, and test_rounds
@@ -59,6 +82,17 @@ def test_the_review_round_s_name_field_and_start_round_are_at_least_44px(page: P
         assert closed.status in (200, 409), closed.status  # 409: none was open
         at_phone_width(page, rounds_url)
         expect(page.get_by_role("button", name="Start round")).to_be_visible()
+        assert small_targets(page) == []
+
+
+def test_the_company_page_s_rounds_links_are_at_least_44px(page: Page, rounds_url):
+    # #572: the Rounds section with a closed round to choose, under Alpenwerk as above (#525).
+    with current_company(page.request, rounds_url, "alpenwerk"):
+        closed = page.request.post(f"{rounds_url}/api/rounds/close")
+        assert closed.status in (200, 409), closed.status  # 409: none was open
+        at_phone_width(page, f"{rounds_url}/company")
+        rounds = page.get_by_role("region", name="Rounds", exact=True)
+        expect(rounds.get_by_role("link").first).to_be_visible()
         assert small_targets(page) == []
 
 
@@ -123,7 +157,7 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
     page: Page, profiles_url
 ):
     """#418, #480: a company made in setup listed with Make current and Remove, the others with
-    Make current, the current one marked; the settings answered with one added, so no company is
+    Make current, the current one marked; Reset demo on every row, the current one's too (#605); the settings answered with one added, so no company is
     made on the profiles server."""
     made = {
         "id": "musterfirma-sud-gmbh",
@@ -135,6 +169,7 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
         "company": "Musterfirma Süd GmbH",
         "country": "Germany",
         "answer_language": "en",
+        "demo": False,
     }
 
     def with_a_company(route) -> None:
@@ -150,6 +185,8 @@ def test_the_companies_section_s_buttons_and_current_mark_are_at_least_44px(
     at_phone_width(page, f"{profiles_url}/developer")
     expect(page.get_by_role("button", name="Remove Musterfirma Süd GmbH")).to_be_visible()
     expect(page.get_by_role("button", name="Make Musterfirma Süd GmbH current")).to_be_visible()
+    for company in ("Musterfirma Süd GmbH", "Nordlicht Komponenten GmbH"):
+        expect(page.get_by_role("button", name=f"Reset the demo of {company}")).to_be_visible()
     # The Companies section's mark: the price list marks the current model too (#496).
     expect(page.locator(".companies .current-mark")).to_have_text("Current")
     assert small_targets(page) == []
@@ -264,4 +301,35 @@ def test_the_app_s_own_error_page_s_try_again_is_at_least_44px(page: Page, profi
     expect(page.get_by_role("alert")).to_have_text(
         "Vouch could not show this page. Please try again."
     )
+    assert small_targets(page) == []
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_round_comparison_s_links_and_folds_are_at_least_44px(page: Page, rounds_url, scheme):
+    # #573: the round comparison with every chapter's unchanged controls unfolded, under Alpenwerk
+    # as above (#525).
+    page.emulate_media(color_scheme=scheme)
+    with current_company(page.request, rounds_url, "alpenwerk"):
+        closed = page.request.post(f"{rounds_url}/api/rounds/close")
+        assert closed.status in (200, 409), closed.status  # 409: none was open
+        number = page.request.get(f"{rounds_url}/api/rounds").json()["default"]
+        at_phone_width(page, f"{rounds_url}/company/rounds/{number}")
+        folds = page.locator(".compare-chapter summary")
+        expect(folds.first).to_be_visible()
+        for fold in folds.all():
+            fold.click()
+        assert small_targets(page) == []
+
+
+def test_the_new_evidence_tag_and_withdraw_s_ask_are_at_least_44px(page: Page, documents_url):
+    # #586: a control tagged "New evidence: assess again", then an added document's Withdraw ask.
+    cited_then_versioned(page, documents_url)
+    at_phone_width(page, documents_url)
+    expect(page.get_by_text(NEW_EVIDENCE)).to_be_visible()
+    assert small_targets(page) == []
+
+    added_by_api(page, documents_url, "Touch withdraw note", "# Touch\n\nWithdraw me.\n")
+    at_phone_width(page, f"{documents_url}/company")
+    page.get_by_role("button", name="Withdraw Touch withdraw note").click()
+    expect(page.get_by_role("button", name="Withdraw", exact=True)).to_be_visible()
     assert small_targets(page) == []

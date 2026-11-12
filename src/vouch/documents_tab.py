@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
 
+from vouch.added_documents import AddedDocument
 from vouch.documents import DocumentSummary, by_title, document_summary
 from vouch.dossier import cited_assessments
 from vouch.graph import Assessment
@@ -31,6 +32,7 @@ DOCUMENT_WORDS: dict[str, dict[str, Any]] = {
             "review": "Review",
             "status": "Status",
             "cited_by": "Cited by",
+            "origin": "Origin",
         },
         "kinds": {"documented": "Documented", "implemented": "Implemented"},
         "cycles": {
@@ -51,6 +53,8 @@ DOCUMENT_WORDS: dict[str, dict[str, Any]] = {
         "no_cycle": "none",
         "not_cited": "Not cited yet",
         "no_documents": "This profile has no evidence documents.",
+        "origins": {"built-in": "Built in", "added": "Added"},
+        "withdrawn": "Withdrawn",
     },
     "de": {
         "title": "Dokumente",
@@ -63,6 +67,7 @@ DOCUMENT_WORDS: dict[str, dict[str, Any]] = {
             "review": "Überprüfung",
             "status": "Status",
             "cited_by": "Zitiert von",
+            "origin": "Herkunft",
         },
         "kinds": {"documented": "Dokumentiert", "implemented": "Umgesetzt"},
         "cycles": {
@@ -83,6 +88,8 @@ DOCUMENT_WORDS: dict[str, dict[str, Any]] = {
         "no_cycle": "keine",
         "not_cited": "Noch nicht zitiert",
         "no_documents": "Dieses Profil hat keine Nachweisdokumente.",
+        "origins": {"built-in": "Mitgeliefert", "added": "Hinzugefügt"},
+        "withdrawn": "Zurückgezogen",
     },
 }
 
@@ -98,15 +105,42 @@ def document_words(language: str) -> tuple[str, dict[str, Any]]:
 @dataclass(frozen=True)
 class ProfileDocument:
     """A document the profile uses, as the tab lists it: what Vouch read from it, whether it is
-    stale, and the controls (in control order) whose newest assessment cites it."""
+    stale, the controls (in control order) whose newest assessment cites it, and whether a lead
+    added it (#585) or it is built in (a profile's fixtures, the sample library)."""
 
     summary: DocumentSummary
     stale: bool
     cited_by: tuple[str, ...]
+    added: bool = False
+    withdrawn: bool = False
+    """An added document the lead withdrew (#586): listed, no longer searched or cited."""
 
     def as_dict(self) -> dict[str, Any]:
-        """The summary's fields with `stale` and `cited_by`: how the API sends it."""
-        return asdict(self.summary) | {"stale": self.stale, "cited_by": list(self.cited_by)}
+        """The summary's fields with `stale`, `cited_by`, `origin` (`added` or `built-in`) and
+        `withdrawn`: how the API sends it."""
+        return asdict(self.summary) | {
+            "stale": self.stale,
+            "cited_by": list(self.cited_by),
+            "origin": "added" if self.added else "built-in",
+            "withdrawn": self.withdrawn,
+        }
+
+
+def added_summary(document: AddedDocument, today: date) -> DocumentSummary:
+    """What the tab shows of an added document's version, judged on `today`: the form's fields
+    and the version Vouch set. Its language isn't asked for, so the page's applies."""
+    facts = document.facts(today)
+    return DocumentSummary(
+        id=document.doc_id,
+        source=document.source,
+        title=document.title,
+        kind=facts.kind,
+        version=str(document.version),
+        approval_date=document.approval_date.isoformat(),
+        review_cycle=document.review_cycle,
+        stale_because=facts.stale_because,
+        language=None,
+    )
 
 
 def _cited_by(
@@ -127,22 +161,31 @@ def profile_documents(
     controls: Sequence[IsaControl],
     latest: Mapping[str, Assessment],
     today: date,
+    added: Sequence[AddedDocument] = (),
 ) -> list[ProfileDocument]:
     """Each document the profile uses: its sources in the profile's order, each source's
-    documents it may use (EvidenceSource.usable_documents), by title as the library is
-    listed; each a DocumentSummary judged on `today`, with `stale` and `cited_by`. A citation
-    has no source, so a cited id matches every listed document with that id. An unreadable
-    folder or document raises (OSError, or ValueError for one that isn't UTF-8 text)."""
+    documents it may use (EvidenceSource.usable_documents) with its `added` documents (#585,
+    the newest version of each, a withdrawn one marked `withdrawn`, #586), by title as the
+    library is listed, then a source only added documents use; each a DocumentSummary judged
+    on `today`, with `stale` and `cited_by`. A citation has no source, so a cited id matches
+    every listed document with that id. An unreadable folder or document raises (OSError, or
+    ValueError for one that isn't UTF-8 text)."""
     cited_by = _cited_by(controls, latest)
-    found: list[ProfileDocument] = []
+    added_ids = {(d.source, d.doc_id) for d in added}
+    withdrawn_ids = {(d.source, d.doc_id) for d in added if d.withdrawn_at is not None}
+    by_source: dict[str, list[DocumentSummary]] = {}
     for name, source in profile.evidence_sources.items():
-        summaries = [document_summary(path, name, today) for path in source.usable_documents()]
-        for summary in by_title(summaries):
-            found.append(
-                ProfileDocument(
-                    summary=summary,
-                    stale=summary.stale_because is not None,
-                    cited_by=tuple(cited_by.get(summary.id, [])),
-                )
-            )
-    return found
+        by_source[name] = [document_summary(p, name, today) for p in source.usable_documents()]
+    for document in added:
+        by_source.setdefault(document.source, []).append(added_summary(document, today))
+    return [
+        ProfileDocument(
+            summary=summary,
+            stale=summary.stale_because is not None,
+            cited_by=tuple(cited_by.get(summary.id, [])),
+            added=(summary.source, summary.id) in added_ids,
+            withdrawn=(summary.source, summary.id) in withdrawn_ids,
+        )
+        for summaries in by_source.values()
+        for summary in by_title(summaries)
+    ]

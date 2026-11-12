@@ -4,7 +4,8 @@ One entry per action of the compliance lead: the findings confirmed and each ove
 them (the review's first step, #372), the review's accept or reject, and each remediation item
 approved or discarded (vouch.remediation, #43), and each change of the profile's Goal
 (vouch.goal, #369, with the goal before and after), and each review round started or closed
-(vouch.rounds, #402, with the round's name). An entry says
+(vouch.rounds, #402, with the round's name), and each evidence document added (`add_document`,
+#585, with the document's id and version as its evidence). An entry says
 who, when, under which profile, on which control (and requirement), the note, the verdict
 before and after, the versions of the evidence documents it rests on, and the model and prompt
 version of the run, read from the assessment's thread, never assumed.
@@ -24,16 +25,17 @@ Nothing offers an update or a delete: the table refuses both too (vouch-db-setup
 
 import logging
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from functools import cache
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from vouch import graph
+from vouch.added_documents import AddedDocument, AddedDocuments, NewDocument
 from vouch.database import AuditAction, Database, Goal, ReviewInProgress
 from vouch.graph import (
     NO_DRAFTS,
@@ -255,6 +257,7 @@ class ProcessTrail:
     ) -> None:
         self._checkpointer = checkpointer
         self._entries: list[AuditEntry] = []
+        self._last_id = 0
         self._guard = threading.Lock()
         self._released = threading.Condition(self._guard)
         self._held: set[str] = set()
@@ -287,10 +290,16 @@ class ProcessTrail:
     def keep(self, entries: list[AuditEntry]) -> None:
         """Append entries, each given the trail's next id: a list append, which can't fail."""
         with self._guard:
-            first = len(self._entries) + 1
+            first = self._last_id + 1
             self._entries.extend(
                 AuditEntry(**(asdict(e) | {"id": first + n})) for n, e in enumerate(entries)
             )
+            self._last_id += len(entries)
+
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's entries under the profile gone."""
+        with self._guard:
+            self._entries = [e for e in self._entries if e.profile_id != profile_id]
 
     def entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
@@ -328,6 +337,13 @@ class PostgresTrail:
             AuditEntry(**(row | {"evidence": tuple(EvidenceVersion(**e) for e in row["evidence"])}))
             for row in rows
         ]
+
+
+def keep_row(row: Mapping[str, Any]) -> None:
+    """Keep an entry given as a mapping of vouch.database's AUDIT_COLUMNS in the process's trail
+    (the process store of added documents keeps its adds' entries so)."""
+    evidence = tuple(EvidenceVersion(**e) for e in row["evidence"])
+    process_trail().keep([AuditEntry(**({**row, "id": None, "evidence": evidence}))])
 
 
 @cache
@@ -425,3 +441,75 @@ def review(
             reviewed_at=at,
             drafts=drafts,
         )
+
+
+def document_entry(
+    reviewer: Reviewer,
+    added: AddedDocument,
+    note: str,
+    at: datetime,
+    action: Literal["document-add", "document-withdraw"] = "document-add",
+) -> AuditEntry:
+    """The audit entry of a document added (#585) or withdrawn (#586, its newest version):
+    who, when and under which profile, the document's id and version as its evidence, and the
+    note; no control, thread, verdict, model or prompt."""
+    return AuditEntry(
+        id=None,
+        user_id=reviewer.id,
+        reviewer_name=reviewer.name,
+        at=at,
+        profile_id=added.profile_id,
+        control_id="",
+        thread_id="",
+        action=action,
+        requirement_id=None,
+        note=note,
+        verdict_before=None,
+        verdict_after=None,
+        evidence=(EvidenceVersion(added.doc_id, str(added.version)),),
+        model="",
+        prompt_version="",
+    )
+
+
+def add_document(
+    store: AddedDocuments,
+    new: NewDocument,
+    *,
+    reviewer: Reviewer,
+    profile_id: str,
+    builtin_ids: set[str],
+    note: str = "",
+    clock: Callable[[], datetime] = now,
+) -> AddedDocument:
+    """The lead adds a document (or its next version) under the profile, with its
+    `document-add` entry, together, at `clock()`: the version kept. Raises DocumentRefused
+    (nothing written) and DatabaseUnavailable (Postgres)."""
+    at = clock()
+
+    def entry(added: AddedDocument) -> dict[str, Any]:
+        row = asdict(document_entry(reviewer, added, note, at))
+        return {k: v for k, v in row.items() if k != "id"}
+
+    return store.add(profile_id, new, builtin_ids, reviewer.id, reviewer.name, at, entry)
+
+
+def withdraw_document(
+    store: AddedDocuments,
+    doc_id: str,
+    *,
+    reviewer: Reviewer,
+    profile_id: str,
+    clock: Callable[[], datetime] = now,
+) -> list[AddedDocument]:
+    """The lead withdraws an added document of the profile (#586): every version marked
+    withdrawn at `clock()`, with one `document-withdraw` entry naming its newest version,
+    together; none written when it was withdrawn already. Its versions as kept now, none for an
+    unknown id. Raises DatabaseUnavailable (Postgres)."""
+    at = clock()
+
+    def entry(newest: AddedDocument) -> dict[str, Any]:
+        row = asdict(document_entry(reviewer, newest, "", at, "document-withdraw"))
+        return {k: v for k, v in row.items() if k != "id"}
+
+    return store.withdraw(profile_id, doc_id, at, entry)

@@ -1,7 +1,8 @@
 """Security layer 1, input limits, outside the model (docs/requirements.md, 2026-11-03).
 
 A request body over MAX_MESSAGE_BYTES is refused with 413 before any route runs (MessageLimit,
-an ASGI middleware); a user over RATE_REQUESTS in RATE_SECONDS is refused with 429 and a
+an ASGI middleware; a route named in its `larger` has its own, larger limit: an added document's
+file, #585); a user over RATE_REQUESTS in RATE_SECONDS is refused with 429 and a
 Retry-After (RateLimit, which the API's `rate_limit` dependency asks).
 """
 
@@ -9,7 +10,7 @@ import math
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -28,19 +29,27 @@ class MessageLimit:
     """ASGI middleware: a body over the limit gets 413 before the app sees the request.
 
     The body is read here, at most one chunk past the limit, then handed to the app as it came.
-    A declared Content-Length over the limit is refused without reading anything.
+    A declared Content-Length over the limit is refused without reading anything. A request
+    whose method and path are in `larger` has that limit instead of `max_bytes`.
     """
 
-    def __init__(self, app: ASGIApp, max_bytes: int = MAX_MESSAGE_BYTES) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        max_bytes: int = MAX_MESSAGE_BYTES,
+        larger: Mapping[tuple[str, str], int] | None = None,
+    ) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        self.larger = dict(larger or {})
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        limit = self.larger.get((scope["method"], scope["path"]), self.max_bytes)
         declared = dict(scope["headers"]).get(b"content-length", b"")
-        if declared.isdigit() and int(declared) > self.max_bytes:
+        if declared.isdigit() and int(declared) > limit:
             await _too_long(scope, receive, send)
             return
         body = bytearray()
@@ -51,7 +60,7 @@ class MessageLimit:
                 last = message
                 break
             body += message.get("body", b"")
-            if len(body) > self.max_bytes:
+            if len(body) > limit:
                 await _too_long(scope, receive, send)
                 return
             if not message.get("more_body", False):

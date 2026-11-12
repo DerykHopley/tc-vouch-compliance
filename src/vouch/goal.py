@@ -58,6 +58,11 @@ class ProcessGoals:
         self._goals: dict[tuple[str, str], Goal] = {}
         self._guard = threading.Lock()
 
+    def forget(self, profile_id: str) -> None:
+        """Reset demo (#605): every user's Goal under the profile gone."""
+        with self._guard:
+            self._goals = {k: v for k, v in self._goals.items() if k[1] != profile_id}
+
     def goal(self, user_id: str, profile_id: str) -> Goal:
         with self._guard:
             return self._goals.get((user_id, profile_id), DEFAULT_GOAL)

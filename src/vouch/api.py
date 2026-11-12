@@ -8,6 +8,8 @@ built front end (frontend/dist), it serves that too, on one origin, as the conta
 """
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import re
@@ -17,8 +19,9 @@ import unicodedata
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from datetime import date, timedelta
 from importlib.metadata import version
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, NamedTuple, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Path, Query, Request
@@ -32,6 +35,8 @@ from pydantic import BaseModel, Field, StringConstraints
 from vouch import (
     audit,
     company_profiles,
+    demo_reset,
+    demo_round,
     documents_tab,
     goal,
     plan,
@@ -41,6 +46,19 @@ from vouch import (
     report_pdf,
     rounds,
     tracing,
+)
+from vouch.added_documents import (
+    MAX_BYTES,
+    AddedDocument,
+    AddedDocuments,
+    AddedKind,
+    DocumentRefused,
+    NewDocument,
+    added_documents_store,
+    added_index,
+    builtin_ids,
+    checked_fields,
+    checked_text,
 )
 from vouch.allow_list import allowed_tools
 from vouch.auth import (
@@ -56,6 +74,8 @@ from vouch.chat import CHAT_FAILED, CHAT_PROMPT_VERSION, Page, PageContext
 from vouch.chat_agent import (
     GREETING_REQUEST,
     ChatTools,
+    Compared,
+    RoundsReader,
     chat_context,
     chat_graph,
     chat_prompt,
@@ -88,6 +108,7 @@ from vouch.graph import (
     new_thread_id,
     state_serializer,
 )
+from vouch.guards import instruction_like
 from vouch.isa import (
     BaseFrameworkError,
     IsaControl,
@@ -97,6 +118,7 @@ from vouch.isa import (
 from vouch.language import lead_statement_label, stale_reason, statement_note
 from vouch.limits import TOO_MANY_REQUESTS, MessageLimit, RateLimit
 from vouch.memory import (
+    Entry,
     Memory,
     newest_by_control,
     process_checkpointer,
@@ -185,6 +207,24 @@ NO_PROMPT_CONTROL = "The current company applies no control."
 SAMPLE_LIBRARY_FAILED = "The sample library could not be read."
 DOCUMENTS_FAILED = "The documents could not be read."
 COMPANY_FAILED = "The company could not be loaded."
+INSTRUCTION_WARNING = (
+    "This document holds text that reads like an instruction to the assistant. Vouch treats "
+    "it as data. Add it anyway?"
+)
+"""The warning before a document with instruction-like text is added (#585, Q9)."""
+INSTRUCTION_NOTE = "Instruction-like text found"
+"""The note of a `document-add` entry whose document was added after that warning."""
+BUILT_IN_NOT_WITHDRAWN = "A built-in document can't be withdrawn."
+"""`POST /api/documents/{id}/withdraw`'s 400 for a built-in document's id (#586)."""
+NO_ADDED_DOCUMENT = "This company has no added document with that id."
+"""`POST /api/documents/{id}/withdraw`'s 404 (#586)."""
+NOT_BASE64 = "The file could not be read. Choose it again."
+FUTURE_APPROVAL = "The approval date can't be after today."
+"""`POST /api/documents`'s 400 for a future approval date, which would never be stale (#627)."""
+DOCUMENT_MESSAGE_BYTES = 2 * MAX_BYTES
+"""`POST /api/documents`'s body limit: the file in base64 (a third larger) and the form's
+fields, with room over, so a file a little over MAX_BYTES gets the add's own sentence rather
+than the message limit's."""
 # The library's folders a company's evidence chooses from (company_profiles.Evidence's fields),
 # in the order step 6 lists them.
 LIBRARY_SOURCES = ("policies", "records")
@@ -401,6 +441,14 @@ def app_company_profiles(db: AppDatabase) -> company_profiles.CompanyProfiles:
 
 
 CompanyProfiles = Annotated[company_profiles.CompanyProfiles, Depends(app_company_profiles)]
+
+
+def app_added_documents(request: Request) -> AddedDocuments:
+    """Where added evidence documents are kept (vouch.added_documents, #584)."""
+    return request.app.state.added_documents
+
+
+AddedDocumentsStore = Annotated[AddedDocuments, Depends(app_added_documents)]
 
 
 def app_current_company(request: Request) -> CurrentCompanyStore:
@@ -723,7 +771,15 @@ def health(settings: AppSettings, db: AppDatabase) -> dict[str, Any]:
     if settings.clerk is not None:
         gate = "discord-server" if settings.clerk.discord_server_id else "clerk"
     auth = {"mode": settings.auth_mode, "publishable_key": publishable_key, "gate": gate}
-    answer: dict[str, Any] = {"status": "ok", "version": version("vouch"), "auth": auth}
+    # Which build is running, for the user menu's last line (#580): the short commit and the
+    # revision's name, nothing else. The package version alone doesn't change between deploys.
+    build = {"commit": settings.build.commit, "revision": settings.build.revision}
+    answer: dict[str, Any] = {
+        "status": "ok",
+        "version": version("vouch"),
+        "auth": auth,
+        "build": build,
+    }
     if db is not None:
         answer["database"] = db.health()
     return answer
@@ -1386,8 +1442,9 @@ def dossier_overview(
     (#369); and their review rounds (#402): the open one, and the comparison with the last one
     closed since the fresh start; in the Internal improvement goal, each card's improvement plan
     flags (#410); the open questions asked since the fresh start, by control id, oldest first,
-    and the reasons they suggest a re-assessment for, in both goals (#414). Redacted as the
-    stream's events are."""
+    and the reasons they suggest a re-assessment for, in both goals (#414); and the titles of the
+    added documents a newer version of which each control's newest assessment doesn't cite yet
+    (`new_evidence`, #586, its `new-evidence` reason). Redacted as the stream's events are."""
     scope, latest, counted = _standing(profile, memory, saver, OVERVIEW_FAILED)
     decided = items.decided(memory.user_id, memory.profile_id, counted)
     discarded = {key for key, item in decided.items() if item.status == "discarded"}
@@ -1395,11 +1452,16 @@ def dossier_overview(
     current = goals.goal(memory.user_id, memory.profile_id)
     listed = questions.since(asked.listed(memory.user_id, memory.profile_id), memory.fresh_start())
     at = audit.now()
-    flags = plan.with_reasons(
-        _plan_flags(current, memory, saver, items, marks), questions.reasons(latest, listed, at)
-    )
+    newer = plan.newer_evidence(latest, added_index().searchable(profile.id))
+    more: dict[str, list[plan.ReassessReason]] = questions.reasons(latest, listed, at)
+    for control_id in newer:
+        more.setdefault(control_id, []).append("new-evidence")
+    flags = plan.with_reasons(_plan_flags(current, memory, saver, items, marks), more)
     shown = dict(overview(profile, scope, latest, discarded, approved, flags))
-    clean, _ = redact_data(shown | {"questions": questions.by_control(listed, at)})
+    new_evidence = {i: [d.title for d in docs] for i, docs in newer.items()}
+    clean, _ = redact_data(
+        shown | {"questions": questions.by_control(listed, at), "new_evidence": new_evidence}
+    )
     return clean | {
         "requirements": paper_requirements(profile, scope.controls),
         "goal": current,
@@ -1441,7 +1503,10 @@ def _plan_reads(
 
 
 def _accepted_earlier(
-    memory: Memory, saver: BaseCheckpointSaver, latest: dict[str, Assessment]
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    latest: dict[str, Assessment],
+    entries: list[Entry] | None = None,
 ) -> dict[str, Assessment]:
     """Each control whose newest assessment waits for review: its newest accepted assessment
     before that one, listed since the fresh start (a control with none left out), which the
@@ -1451,7 +1516,7 @@ def _accepted_earlier(
         return {}
     load = assessment_loader(saver, scope=memory.scope)
     found: dict[str, Assessment] = {}
-    for entry in memory.entries():  # newest first
+    for entry in memory.entries() if entries is None else entries:  # newest first
         control_id = entry.control_id
         if control_id not in waiting or control_id in found:
             continue
@@ -1563,6 +1628,110 @@ def close_round(
         raise HTTPException(status_code=409, detail=str(error)) from None
     assert closed.closed_at is not None
     return {"closed": {"name": closed.name, "closed_at": closed.closed_at.isoformat()}}
+
+
+def _listed(listed: rounds.ListedRound) -> dict[str, Any]:
+    opened, closed = listed.opened_at, listed.closed_at
+    return {
+        "number": listed.number,
+        "name": listed.name,
+        "opened_at": None if opened is None else opened.isoformat(),
+        "closed_at": None if closed is None else closed.isoformat(),
+        "before_fresh_start": listed.before_fresh_start,
+    }
+
+
+@router.get("/rounds")
+def list_rounds(review: ReviewRounds, memory: UserMemory) -> dict[str, Any]:
+    """The user's review rounds under the profile, oldest first (the open one last), each
+    numbered from 1 in the order opened, and the default choice to compare with (#571): the
+    number of the last round closed since the fresh start, or None."""
+    listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
+    return {"rounds": [_listed(r) for r in listed], "default": rounds.default_choice(listed)}
+
+
+@router.get("/rounds/{number}/comparison")
+def round_comparison(
+    number: int,
+    review: ReviewRounds,
+    profile: Profile,
+    memory: UserMemory,
+    saver: Checkpointer,
+    marks: RemediationPlan,
+    asked: OpenQuestions,
+    added: AddedDocumentsStore,
+) -> dict[str, Any]:
+    """The round comparison (#571): now against the closed round numbered `number`, control by
+    control, with readiness then and now, the evidence changed (#575) and the remediation items
+    done and open questions answered since it closed. An unknown number is a 404; the open
+    round, or one closed before the fresh start, a 409."""
+    listed = review.listed(memory.user_id, memory.profile_id, memory.fresh_start())
+    if not 1 <= number <= len(listed):
+        raise HTTPException(status_code=404, detail="No review round has that number.")
+    chosen = listed[number - 1]
+    if chosen.closed_at is None:
+        raise HTTPException(status_code=409, detail=rounds.STILL_OPEN)
+    if chosen.before_fresh_start:
+        raise HTTPException(status_code=409, detail=rounds.BEFORE_FRESH_START)
+    comparison, done, answered = _compared(chosen, profile, memory, saver, marks, asked, added)
+    return {
+        "round": _listed(chosen),
+        **comparison,
+        "evidence": [e | {"at": e["at"].isoformat()} for e in comparison["evidence"]],
+        "remediation_done": [d | {"at": d["at"].isoformat()} for d in done],
+        "questions_answered": [a | {"at": a["at"].isoformat()} for a in answered],
+    }
+
+
+def _compared(
+    chosen: rounds.ListedRound,
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    marks: plan.RemediationPlan,
+    asked: questions.OpenQuestions,
+    added: AddedDocuments,
+) -> Compared:
+    """Now against the closed round `chosen` (#571): the comparison with the evidence changed
+    (#575), and the remediation items done and open questions answered since it closed; the
+    route's and the chat's (#581)."""
+    closed_at = chosen.closed_at
+    assert closed_at is not None
+    scope, latest, _ = _standing(profile, memory, saver, OVERVIEW_FAILED)
+    entries = memory.entries()  # newest first, since the fresh start
+    earlier = _accepted_earlier(memory, saver, latest, entries)
+    control_of = {e.thread_id: e.control_id for e in entries}
+    marked = marks.marks(memory.user_id, memory.profile_id, list(control_of))
+    in_scope = {c.id for c in scope.applicable}
+    listed = asked.listed(memory.user_id, memory.profile_id)
+    since_fresh = questions.since(listed, memory.fresh_start())
+    comparison = rounds.round_comparison(
+        chosen.results,
+        scope.controls,
+        scope.applicable,
+        latest,
+        earlier,
+        added=added.listed(profile.id),
+        closed_at=closed_at,
+    )
+    done = rounds.done_since(control_of, marked, closed_at, in_scope)
+    return comparison, done, rounds.answered_since(since_fresh, closed_at, in_scope)
+
+
+def rounds_reader(
+    review: rounds.ReviewRounds,
+    profile: ComplianceProfile,
+    memory: Memory,
+    saver: BaseCheckpointSaver,
+    marks: plan.RemediationPlan,
+    asked: questions.OpenQuestions,
+    added: AddedDocuments,
+) -> RoundsReader:
+    """The lead's rounds and the round comparison, as the chat's `compare_rounds` reads them."""
+    return RoundsReader(
+        listed=lambda: review.listed(memory.user_id, memory.profile_id, memory.fresh_start()),
+        compared=lambda chosen: _compared(chosen, profile, memory, saver, marks, asked, added),
+    )
 
 
 def _control_of(profile: ComplianceProfile, control_id: str, failed: str) -> IsaControl:
@@ -1757,14 +1926,123 @@ def profile_documents_tab(
     none, #454), and the tab's words in the profile's language. Redacted as the overview is;
     an unreadable ISA edition, folder or document a plain 500 naming no path."""
     scope, latest, _ = _standing(profile, memory, saver, DOCUMENTS_FAILED)
+    added = added_index().shown(profile.id)
     try:
-        listed = documents_tab.profile_documents(profile, scope.applicable, latest, report.today())
+        listed = documents_tab.profile_documents(
+            profile, scope.applicable, latest, report.today(), added
+        )
     except (OSError, ValueError):  # ValueError: a file not UTF-8, a date YAML refuses
         log.exception("the documents of %s could not be read", profile.id)
         raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None
     clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
     language, words = documents_tab.document_words(profile.answer_language)
     return clean | {"words": words, "words_language": language}
+
+
+class DocumentRequest(BaseModel):
+    """The Add document form (#585): the file's name and its bytes in base64, and the fields.
+    Kind and review cycle are checked by the store, so a wrong one gets its sentence."""
+
+    filename: Annotated[str, StringConstraints(max_length=255)]
+    content: Annotated[bytes, Field(max_length=DOCUMENT_MESSAGE_BYTES)]
+    title: Annotated[str, StringConstraints(max_length=1_000)]
+    kind: Annotated[str, StringConstraints(max_length=20)]
+    approval_date: date
+    review_cycle: Annotated[str, StringConstraints(max_length=20)]
+    add_anyway: bool = False
+    """Add it although its text reads like an instruction (the lead saw the warning)."""
+
+    def new_document(self) -> NewDocument:
+        """The document to add, or a 400 for content that isn't base64 or an approval date after
+        today."""
+        try:
+            raw = base64.b64decode(self.content, validate=True)
+        except binascii.Error:
+            raise HTTPException(status_code=400, detail=NOT_BASE64) from None
+        # Today somewhere: up to a day past the server's UTC date (UTC+14), as the form's
+        # date field allows the lead's own today.
+        if self.approval_date > report.today() + timedelta(days=1):
+            raise HTTPException(status_code=400, detail=FUTURE_APPROVAL)
+        return NewDocument(
+            filename=self.filename,
+            content=raw,
+            title=self.title,
+            kind=cast(AddedKind, self.kind),  # any other: the store refuses it with NO_KIND
+            approval_date=self.approval_date,
+            review_cycle=self.review_cycle,
+        )
+
+
+def _added_data(added: AddedDocument) -> dict[str, Any]:
+    """An added document's version as `POST /api/documents` answers it: no text, no user id."""
+    return {
+        "id": added.doc_id,
+        "version": added.version,
+        "title": added.title,
+        "kind": added.kind,
+        "source": added.source,
+        "approval_date": added.approval_date.isoformat(),
+        "review_cycle": added.review_cycle,
+        "added_at": added.added_at.isoformat(),
+    }
+
+
+@router.post("/documents", status_code=201)
+def add_document(
+    request: Annotated[DocumentRequest, Body()],
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+    store: AddedDocumentsStore,
+) -> Any:
+    """The lead adds an evidence document, or a new version of one with its title, to the
+    current company (#585): any signed-in user, as anyone may change the Goal. The file's
+    limits and the form's fields are checked first (a 400 with the sentence, nothing kept);
+    then text that reads like an instruction is a 409 warning, nothing kept, unless
+    `add_anyway`. Kept with its `document-add` entry, together (vouch.audit; noted when the
+    warning was shown): a 201 with the version kept. Nothing is re-assessed, no model runs. The
+    database down is a 503."""
+    new = request.new_document()
+    try:
+        checked_fields(new)
+        flagged = instruction_like(checked_text(new))
+        if flagged and not request.add_anyway:
+            warning = {"detail": INSTRUCTION_WARNING, "warning": "instruction-like"}
+            return JSONResponse(status_code=409, content=warning)
+        added = audit.add_document(
+            store,
+            new,
+            reviewer=audit.Reviewer(user.id, name),
+            profile_id=profile.id,
+            builtin_ids=builtin_ids(profile),
+            note=INSTRUCTION_NOTE if flagged else "",
+        )
+    except DocumentRefused as refusal:
+        raise HTTPException(status_code=400, detail=str(refusal)) from None
+    return {"document": _added_data(added)}
+
+
+@router.post("/documents/{doc_id}/withdraw")
+def withdraw_document(
+    doc_id: Annotated[str, StringConstraints(max_length=255)],
+    profile: Profile,
+    user: CurrentUser,
+    name: ReviewerName,
+    store: AddedDocumentsStore,
+) -> dict[str, Any]:
+    """The lead withdraws an added document of the current company (#586, Q11): every version
+    marked withdrawn with one `document-withdraw` entry, together, so it is no longer searched
+    or cited; its versions are kept. A 200 with the document; one withdrawn already is answered
+    the same, nothing more written. A built-in document's id is a 400, an unknown one a 404.
+    Nothing is re-assessed. The database down is a 503."""
+    if doc_id in builtin_ids(profile):
+        raise HTTPException(status_code=400, detail=BUILT_IN_NOT_WITHDRAWN)
+    versions = audit.withdraw_document(
+        store, doc_id, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id
+    )
+    if not versions:
+        raise HTTPException(status_code=404, detail=NO_ADDED_DOCUMENT)
+    return {"document": _added_data(versions[-1]) | {"withdrawn": True}}
 
 
 @router.get("/company")
@@ -2001,6 +2279,10 @@ def chat(
     memory: UserMemory,
     run: Annotated[AssessmentRun, Depends(assessment_run)],
     running: Running,
+    review: ReviewRounds,
+    marks: RemediationPlan,
+    asked: OpenQuestions,
+    added: AddedDocumentsStore,
 ) -> Iterable[ServerSentEvent]:
     """The chat agent's reply to the compliance lead's message (vouch.chat_agent), knowing the
     page and control they are on: first a `thread` event, the chat thread's `thread_id` to send
@@ -2030,7 +2312,8 @@ def chat(
 
     yield ServerSentEvent(event="thread", data={"thread_id": thread_id})
     try:
-        tools = ChatTools(profile, memory, run, spending, running, record)
+        reader = rounds_reader(review, profile, memory, run.saver, marks, asked, added)
+        tools = ChatTools(profile, memory, run, spending, running, record, reader)
         chat = chat_context(
             models.for_chat(chosen, callbacks=[meter], answer_language=profile.answer_language),
             tools,
@@ -2073,6 +2356,9 @@ def chat(
         record_off_the_event_loop(spending, user.id, CHAT, usage)
 
 
+DEMO_NOT_SEEDED = (
+    "The company was reset, but the demo round could not be played. Reset it again to retry."
+)
 DEVELOPERS = [Depends(require_developer)]
 """The developer page's API: a compliance lead gets a 403 (the role itself is never sent)."""
 
@@ -2138,7 +2424,9 @@ def _company_settings(
     return {
         "broken_profiles": [asdict(b) for b in scan.broken],
         "companies": made,
-        "listed_companies": [listed_profile(p) for p in scan.loaded],
+        "listed_companies": [
+            listed_profile(p) | {"demo": p.id == demo_reset.DEMO_COMPANY} for p in scan.loaded
+        ],
         "current_company": current_of(scan, stored_current_company(current)),
     }
 
@@ -2344,6 +2632,50 @@ def remove_company_profile(
         return {"settings_unavailable": True}
 
 
+@router.post("/developer/profiles/{profile_id}/reset-demo", dependencies=DEVELOPERS)
+def reset_demo(
+    profile_id: str,
+    request: Request,
+    user: CurrentUser,
+    settings: AppSettings,
+    companies: CompanyProfiles,
+    db: AppDatabase,
+) -> dict[str, Any]:
+    """Reset demo (#605, vouch.demo_reset): every user's progress and history under a listed
+    company deleted, the reset's audit entry written; on Nordlicht the demo round then seeded
+    for the developer, on the fake model, counting against no limit. An unlisted company is a
+    404, nothing changed; another reset of it running a 409 (#619), nothing changed; the
+    database down a 503. `seeded`: the demo round was played; a seed that stops partway leaves
+    the company wiped, with `note` saying so."""
+    listed = {p.id: p for p in _profile_scan(settings, companies.all()).loaded}
+    if profile_id not in listed:
+        raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    try:
+        with demo_reset.hold(request.app.state.resets, profile_id):
+            return _reset_held(request, user, settings, db, profile_id)
+    except demo_reset.ResetRunning:
+        company = listed[profile_id].company
+        raise HTTPException(
+            status_code=409, detail=demo_reset.ANOTHER_RESET.format(company=company)
+        ) from None
+
+
+def _reset_held(
+    request: Request, user: User, settings: Settings, db: Database | None, profile_id: str
+) -> dict[str, Any]:
+    name = reviewer_name(request, user, settings)
+    demo_reset.wipe(db, profile_id, audit.Reviewer(user.id, name), audit.now())
+    log.info("company %s reset to its demo state by %s", profile_id, user.id)
+    if profile_id != demo_reset.DEMO_COMPANY:
+        return {"reset": profile_id, "seeded": False}
+    try:
+        demo_reset.seed_demo(request.app, user.id, name)
+    except demo_round.SeedError as error:
+        log.error("the demo round could not be seeded after the reset: %s", error)
+        return {"reset": profile_id, "seeded": False, "note": DEMO_NOT_SEEDED}
+    return {"reset": profile_id, "seeded": True}
+
+
 def _forget_profile(profile_id: str) -> None:
     """Drop what this process keeps under a removed company's id (#418), so the caches don't grow
     with removals; the id is never used again."""
@@ -2409,6 +2741,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # The added documents (#584), so a search finds them from the first assessment on.
+        await asyncio.to_thread(added_index().load, app.state.added_documents)
         yield
         if app.state.auth is not None:
             app.state.auth.close()
@@ -2423,7 +2757,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(_Refused, refused)
     app.add_exception_handler(RequestValidationError, request_refused)
     app.add_exception_handler(DailyLimitReached, daily_limit_reached)
-    app.add_middleware(MessageLimit)  # security layer 1: no oversized message reaches a route
+    # Security layer 1: no oversized message reaches a route; an added document's own limit.
+    app.add_middleware(MessageLimit, larger={("POST", "/api/documents"): DOCUMENT_MESSAGE_BYTES})
     remember_secrets(settings)  # security layer 4: its own secret values never leave it
     app.state.settings = settings
     app.state.rate_limit = RateLimit(requests=settings.rate_requests)
@@ -2431,8 +2766,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = Database(settings.database_url) if settings.database_url else None
     app.state.models = ModelChoice(settings, model_store(app.state.database))
     app.state.current_company = current_company_store(app.state.database)
+    app.state.added_documents = added_documents_store(app.state.database)
     app.state.spending = SpendingGuard(spending_store(app.state.database))
     app.state.running = RunningAssessments()
+    app.state.resets = RunningAssessments()  # one Reset demo per company (#619)
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

@@ -23,6 +23,7 @@ message, the replies, the tools' words.
 
 import logging
 import queue
+import re
 import threading
 from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -104,6 +105,15 @@ from vouch.memory import Memory, newest_assessment, newest_by_control, progress
 from vouch.profile import ComplianceProfile
 from vouch.redaction import redact, redact_data, redacted_event, removal_step
 from vouch.report import DEFAULT_LANGUAGE, words_for, words_language
+from vouch.rounds import (
+    BEFORE_FRESH_START,
+    STILL_OPEN,
+    Answered,
+    Done,
+    ListedRound,
+    RoundComparison,
+    default_choice,
+)
 from vouch.runs import (
     ASSESSMENT_FAILED,
     RUNNING_ALREADY,
@@ -230,12 +240,38 @@ ASSESSED_CONTROLS_TOOL = {
         "parameters": {"type": "object", "properties": {}},
     },
 }
+COMPARE_ROUNDS = "compare_rounds"
+COMPARE_ROUNDS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": COMPARE_ROUNDS,
+        "description": (
+            "Now compared with a closed review round: how many controls are better, "
+            "worse, new or unchanged by accepted verdict, readiness then and now, each changed "
+            "control with its verdicts then and now, the scope changes, and the remediation "
+            "items done and open questions answered since the round closed."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "round": {
+                    "type": "string",
+                    "description": (
+                        "The review round's number or name, such as 2 or Q2 2026; leave it out "
+                        "for the last round closed."
+                    ),
+                }
+            },
+        },
+    },
+}
 CHAT_TOOLS = [
     PROGRESS_TOOL,
     START_ASSESSMENT_TOOL,
     EXPLAIN_CONTROL_TOOL,
     SEARCH_EVIDENCE_TOOL,
     ASSESSED_CONTROLS_TOOL,
+    COMPARE_ROUNDS_TOOL,
 ]
 SEARCHED = (SEARCH_POLICIES, SEARCH_RECORDS)
 """The evidence tools `search_evidence` runs, each only where the profile allows its source."""
@@ -249,6 +285,7 @@ _NEEDS = {
         f"{', '.join(SIGN_OFFS[:-1])} or {SIGN_OFFS[-1]}"
     ),
     SEARCH_EVIDENCE: "a query, the words to search for",
+    COMPARE_ROUNDS: "a round, the review round's number or name as text, or none",
 }
 """What a call to each tool with arguments needs, said when a call is refused without them."""
 GREETING_REQUEST = "I have just opened the chat. Please tell me where I stand and what to do next."
@@ -294,7 +331,11 @@ def chat_prompt(profile: ComplianceProfile, context: PageContext) -> SystemMessa
         f"company's evidence. Use the `{ASSESSED_CONTROLS}` tool for questions across "
         "controls, such as which controls have documented evidence only, stale evidence, or "
         "musts not evidenced: name each control by its id, and the controls not assessed yet "
-        "as such, never guessing their evidence. Answer only from what these tools return; "
+        "as such, never guessing their evidence. "
+        f"Use the `{COMPARE_ROUNDS}` tool for questions about what changed since a review round, "
+        "such as what improved or got worse since Q2, with the round's number or name when the "
+        "compliance lead names one: name each changed control by its id. "
+        "Answer only from what these tools return; "
         "when they find nothing, "
         f"say “{NO_EVIDENCE}” and nothing more, never an answer of your own. Cite evidence only "
         'as an exact quote inside a cite tag naming its document id, <cite doc="DOC_ID">exact '
@@ -439,6 +480,121 @@ def assessed_controls_words(
     return "\n".join(lines)
 
 
+Compared = tuple[RoundComparison, list[Done], list[Answered]]
+"""A round comparison (#571), and the remediation items done and questions answered since."""
+
+
+@dataclass(frozen=True)
+class RoundsReader:
+    """What `compare_rounds` reads (#581): the lead's rounds as listed under the profile, and a
+    closed one compared with now, as the round comparison's route does."""
+
+    listed: Callable[[], Sequence[ListedRound]]
+    compared: Callable[[ListedRound], Compared]
+
+
+NO_ROUND_CLOSED = (
+    "No review round has been closed since the fresh start, so there is none to compare with."
+)
+
+
+FIRST = re.compile(r"^(?:the )?(?:first|erste[nmr]?)(?: (?:review )?(?:round|runde))?$")
+"""The lead's "the first round": the first round closed since the fresh start, unless a round
+has that name."""
+
+
+def chosen_round(listed: Sequence[ListedRound], asked: str | None) -> ListedRound | str:
+    """The round `asked` names: its number, its name (any case), or the one round whose name
+    holds the words; None: the default choice. Else the sentence saying why there is none to
+    compare with (the round comparison's 404 and 409 reasons)."""
+    if asked is None or not asked.strip():
+        number = default_choice(listed)
+        return NO_ROUND_CLOSED if number is None else listed[number - 1]
+    words = " ".join(asked.split()).casefold()
+    words = re.sub(r"^(review )?round (?=\d+$)", "", words)
+    found = [r for r in listed if str(r.number) == words or r.name.casefold() == words]
+    if not found and FIRST.match(words):
+        found = [r for r in listed if r.closed_at is not None and not r.before_fresh_start][:1]
+    if not found:
+        found = [r for r in listed if words in r.name.casefold()]
+    if len(found) != 1:
+        return unknown_round(asked, listed)
+    (chosen,) = found
+    if chosen.closed_at is None:
+        return STILL_OPEN
+    return BEFORE_FRESH_START if chosen.before_fresh_start else chosen
+
+
+def unknown_round(asked: str, listed: Sequence[ListedRound]) -> str:
+    """The sentence for a round the lead names that isn't there, naming the rounds there are."""
+    if not listed:
+        return NO_ROUND_CLOSED
+    named = [f"{r.number} “{r.name}”" for r in listed]
+    rounds = ", ".join(named[:-1]) + f" and {named[-1]}" if len(named) > 1 else "".join(named)
+    return f"There is no review round “{asked.strip()}”. The rounds are {rounds}."
+
+
+def compare_rounds_words(
+    chosen: ListedRound,
+    comparison: RoundComparison,
+    done: Sequence[Done],
+    answered: Sequence[Answered],
+    language: str,
+) -> str:
+    """The round comparison in plain sentences (#581): the round, the counts, readiness then →
+    now, each changed control with its accepted verdicts then → now (proposed when its newest
+    assessment waits), the scope changes, and what was done and answered since. Verdicts are in
+    the profile's `language` where it has words for them (#208)."""
+
+    def verdict(v: Verdict | None) -> str:
+        return "not accepted" if v is None else verdict_words_for(v, language)
+
+    assert chosen.closed_at is not None
+    day = chosen.closed_at.astimezone(UTC).date()
+    lines = [
+        (
+            f"Now compared with review round {chosen.number}, “{chosen.name}”, closed on "
+            f"{day.day} {day:%B %Y}."
+        )
+    ]
+    counts = comparison["changes"]
+    lines.append(", ".join(f"{k}: {n}" for k, n in counts.items()).capitalize() + ".")
+    readiness = comparison["readiness"]
+    accepted = readiness["accepted"]
+    by_verdict = ", ".join(
+        f"{verdict(v)} {n['then']} → {n['now']}"
+        for v, n in readiness["by_verdict"].items()
+        if v != NOT_APPLICABLE or n["then"] or n["now"]
+    )
+    lines.append(
+        f"Readiness: {plural(accepted['then'], 'control')} accepted then, {accepted['now']} now. "
+        f"{by_verdict[0].upper()}{by_verdict[1:]}."
+    )
+    rows = comparison["controls"]
+    changed = [c for c in rows if c["change"] in ("better", "worse", "new")]
+    if changed:
+        lines.append("Changed controls:")
+        for c in changed:
+            waiting = "; proposed, waiting for review" if c["proposed"] else ""
+            lines.append(
+                f"- {c['control_id']}: {c['change']}, {verdict(c['before'])} → "
+                f"{verdict(c['after'])}{waiting}."
+            )
+    else:
+        lines.append("Changed controls: none.")
+    scope = [
+        f"{c['control_id']} {c['change'].replace('-', ' ')}"
+        for c in rows
+        if c["change"] in ("new-since", "out-of-scope-since")
+    ]
+    lines.append(f"Scope changes: {'; '.join(scope) if scope else 'none'}.")
+    items = [f"{d['requirement_id']} on {d['control_id']}" for d in done]
+    lines.append(f"Remediation items done since: {', '.join(items) if items else 'none'}.")
+    questions = [f"one on {a['control_id']}" for a in answered]
+    lines.append(f"Questions answered since: {', '.join(questions) if questions else 'none'}.")
+    return "\n".join(lines)
+
+
 def unknown_control(control_id: str) -> str:
     ids = ", ".join(control.id for control in load_base_framework().controls)
     return f"There is no VDA ISA control “{control_id}”. The controls are {ids}."
@@ -567,6 +723,8 @@ class ChatTools:
     spending: SpendingGuard
     running: RunningAssessments
     record: Callable[[str, Usage], None]
+    rounds: RoundsReader | None = None
+    """The lead's review rounds and the round comparison, for `compare_rounds`; None: none."""
     returned: list[str] = field(default_factory=list)
     """Text this turn gave the model to quote, as it saw it (redacted, normalised): the
     lead's message, and what the tools returned. An uncited quote is kept only when in it."""
@@ -583,6 +741,9 @@ class ChatTools:
             return self.progress(write)
         if name == ASSESSED_CONTROLS:
             return self.assessed_controls(write)
+        if name == COMPARE_ROUNDS and isinstance(args.get("round"), str | int | None):
+            asked = args.get("round")
+            return self.compare_rounds(None if asked is None else str(asked), write)
         given = args.get("control_id")
         control_id = given.strip() if isinstance(given, str) else None
         sign_off = args.get("sign_off")
@@ -626,6 +787,29 @@ class ChatTools:
         write(("step", {"node": ASSESSED_CONTROLS, "text": said}))
         write(("papers", {"control_ids": [control.id for control in controls]}))
         return assessed_controls_words(controls, latest, self.profile.answer_language)
+
+    def compare_rounds(self, asked: str | None, write: Write) -> str:
+        """Now compared with the closed round the lead names (#581), by number or name (None:
+        the default choice, the last closed since the fresh start): the round comparison's words
+        (#571), read only. A `papers` event lists the controls they name, so the chat links each
+        to its working paper. No closed round, an unknown one, the open one or one closed before
+        the fresh start: one sentence saying so, and nothing compared."""
+        listed = list(self.rounds.listed()) if self.rounds is not None else []
+        chosen = chosen_round(listed, asked)
+        if isinstance(chosen, str):
+            write(("step", {"node": COMPARE_ROUNDS, "text": chosen}))
+            return chosen
+        if self.rounds is None:
+            return NO_ROUND_CLOSED
+        comparison, done, answered = self.rounds.compared(chosen)
+        said = f"Compared now with review round {chosen.number}, “{chosen.name}”."
+        write(("step", {"node": COMPARE_ROUNDS, "text": said}))
+        named = [c["control_id"] for c in comparison["controls"] if c["change"] != "unchanged"]
+        named += [d["control_id"] for d in done] + [a["control_id"] for a in answered]
+        write(("papers", {"control_ids": list(dict.fromkeys(named))}))
+        return compare_rounds_words(
+            chosen, comparison, done, answered, self.profile.answer_language
+        )
 
     def start_assessment(self, control_id: str, write: Write, stop: threading.Event) -> str:
         """Assess the control as the assessment stream would (vouch.runs.begin_run), its steps
@@ -723,7 +907,7 @@ class ChatTools:
                 continue
             allowed += 1
             documents = allowed_documents(self.profile, tool.source)
-            result = tool.run({"query": query}, folder, documents)
+            result = tool.run({"query": query}, folder, documents, ())
             if isinstance(result, list):
                 passages = with_facts(result, tool.source, folder, self.today)
                 found += passages

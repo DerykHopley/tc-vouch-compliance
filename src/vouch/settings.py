@@ -47,6 +47,10 @@ PROFILE_PASS_TOKENS_ENV = "VOUCH_PROFILE_PASS_TOKENS"
 LANGFUSE_PUBLIC_KEY_ENV = "LANGFUSE_PUBLIC_KEY"
 LANGFUSE_SECRET_KEY_ENV = "LANGFUSE_SECRET_KEY"
 LANGFUSE_BASE_URL_ENV = "LANGFUSE_BASE_URL"
+COMMIT_ENV = "VOUCH_COMMIT"
+REVISION_ENV = "K_REVISION"
+DEV_COMMIT = "dev"
+"""The commit a build with none baked in names (#580): a developer's machine."""
 LANGFUSE_KEY_ENVS = (LANGFUSE_PUBLIC_KEY_ENV, LANGFUSE_SECRET_KEY_ENV)
 LANGFUSE_CLOUD = "https://cloud.langfuse.com"
 """Langfuse Cloud's EU region, the Langfuse SDK's own default too: where traces go unless
@@ -70,6 +74,7 @@ ENV_NAMES = frozenset(
     | {DATABASE_URL_ENV, LOCAL_USER_NAME_ENV}
     | {RATE_REQUESTS_ENV, PROFILE_PASS_TOKENS_ENV}
     | {*LANGFUSE_KEY_ENVS, LANGFUSE_BASE_URL_ENV}
+    | {COMMIT_ENV, REVISION_ENV}
 )
 
 DEMO_DIR = Path(__file__).parent / "demo"
@@ -160,6 +165,19 @@ class LangfuseKeys:
 
 
 @dataclass(frozen=True)
+class Build:
+    """Which build is running (#580), for the user menu's last line: served by `GET /api/health`.
+    Neither is a secret."""
+
+    commit: str = DEV_COMMIT
+    """The short commit the image was built from (VOUCH_COMMIT, baked in by the Dockerfile from
+    its build arg); "dev" when none was baked, as on a developer's machine."""
+    revision: str | None = None
+    """Cloud Run's revision (K_REVISION, which Cloud Run sets in every service container, e.g.
+    "vouch-00029"); None off Cloud Run."""
+
+
+@dataclass(frozen=True)
 class Settings:
     """Secrets are SecretStr: printed or logged, they show as '**********'."""
 
@@ -184,6 +202,8 @@ class Settings:
     langfuse_keys_unset: tuple[str, ...] = LANGFUSE_KEY_ENVS
     """The Langfuse key settings left unset, by name: why tracing is off, said once at startup
     (vouch.tracing.announce_tracing, #536); () with both set."""
+    build: Build = Build()
+    """Which build is running (#580): the baked commit and Cloud Run's revision."""
 
 
 def _read(env: Mapping[str, str], name: str) -> str | None:
@@ -308,6 +328,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         langfuse=load_langfuse_keys(env),
         langfuse_keys_unset=unset_langfuse_keys(env),
+        build=Build(commit=read(COMMIT_ENV) or DEV_COMMIT, revision=read(REVISION_ENV)),
     )
 
 

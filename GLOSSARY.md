@@ -71,8 +71,12 @@ The compliance profile over the whole sample library that the eval scores; it is
 _Avoid_: Sample company, test profile
 
 **Documents tab**:
-The read-only list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505).
+The list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505). A compliance lead may add a document or a new version of one, and withdraw an added one; built-in documents can't be changed (#345).
 _Avoid_: Document library, uploads, files
+
+**Withdrawn document**:
+An added evidence document the lead has taken away: no longer searched or cited, still listed, its versions kept so the audit trail stays true (#345).
+_Avoid_: Deleted, archived
 
 **Remove company**:
 A developer hiding a company made in company setup everywhere: it leaves every list and can't be opened again, but its audit trail is kept and its id is never used again. When it was the current company, everyone falls back to Nordlicht. File-defined profiles can't be removed.
@@ -168,6 +172,10 @@ _Avoid_: Resolved, fixed, complete
 A period the lead names and opens (such as "Q4 2026"; the first opens on its own) and later closes, which freezes its results. The overview compares the current round with the last closed one. Used in both goals.
 _Avoid_: Snapshot, cycle, sprint, audit period
 
+**Round comparison**:
+Where the lead stands now set against one closed review round they choose (the last closed one by default), control by control: verdict changes, readiness then and now, remediation items done and open questions answered since. Used in both goals. It is never called progress.
+_Avoid_: Timeline, diff, progress, history
+
 **Open question**:
 A question the lead logs on a control for someone else to answer: what is asked, who it is for, a due date, and the answer. Once answered or overdue, Vouch suggests re-assessing the control.
 _Avoid_: Task, query, follow-up, ticket
@@ -209,8 +217,12 @@ Where a user stands now under a compliance profile: each assessed control's late
 _Avoid_: Status, history
 
 **Fresh start**:
-The lead's progress under a compliance profile listed from a time on (#285): what they started before it is no longer listed or counted, so every control is not assessed again, and the chat opens a new conversation. Nothing is deleted: the assessments, the remediation decisions and the audit trail stay whole, and the audit trail still shows every entry. Started from the user menu ("Start <company> afresh…"), for a repeat demo.
+The lead's progress under a compliance profile listed from a time on (#285): what they started before it is no longer listed or counted, so every control is not assessed again, and the chat opens a new conversation. Nothing is deleted: the assessments, the remediation decisions and the audit trail stay whole, and the audit trail still shows every entry. Started from the user menu ("Start <company> afresh…"), for a repeat demo. Not Reset demo, which deletes.
 _Avoid_: Reset, clear
+
+**Reset demo**:
+A developer's action on the Developer page (#605), one company at a time: every user's progress and history under the company is deleted (assessments, review rounds, the audit trail, open questions, remediation decisions and the improvement plan, the Goal, and added documents with every version), the reset's own audit entry is written, and on Nordlicht the demo round is played again for the developer on the fake model ("Q2 2026" closed, "Q3 2026" open). Any other company is left empty. The same state every time, for rehearsals; a real deployment would drop it, as the audit trail is otherwise append-only.
+_Avoid_: Fresh start (which deletes nothing), wipe
 
 **Long-term memory**:
 What Vouch keeps for a user under a compliance profile from one visit to the next (which assessments they started, when they last worked), in LangGraph's store. The assessments themselves wait in the checkpointer, keyed by the same user and profile.

@@ -3,7 +3,7 @@ import { type TableWords, wordFor } from './documents.ts'
 import type { LibraryDocument } from './setup.ts'
 
 /** A document as the table shows it: the sample library's, or a profile's from any source (patch too). */
-export type ShownDocument = Omit<LibraryDocument, 'source'> & { source: string }
+export type ShownDocument = Omit<LibraryDocument, 'source'> & { source: string; withdrawn?: boolean }
 
 type Props<D extends ShownDocument> = {
   caption: string
@@ -15,8 +15,8 @@ type Props<D extends ShownDocument> = {
    * reason shown. With them, an overdue document shows the stale word alone (the approval date and cycle beside it
    * say why), and one whose review date can't be worked out the stale word and a reason word. */
   words?: TableWords
-  /** A last column, given each document (the Documents tab's Cited by). */
-  extraColumn?: { heading: string; cell: (document: D) => ReactNode }
+  /** Last columns, each given each document (the Documents tab's Cited by and Origin). */
+  extraColumns?: readonly { heading: string; cell: (document: D) => ReactNode }[]
 }
 
 // The table's own English, for company setup's step 6: the wizard keeps its lower-case kind words and shows cycles
@@ -24,13 +24,13 @@ type Props<D extends ShownDocument> = {
 // served. The stale reasons are unused here: without words, the server's reason is shown whole.
 const ENGLISH: TableWords = {
   columns: { document: 'Document', kind: 'Kind', version: 'Version', approved: 'Approved', review: 'Review',
-    status: 'Status', cited_by: 'Cited by' },
+    status: 'Status', cited_by: 'Cited by', origin: 'Origin' },
   kinds: { documented: 'documented', implemented: 'implemented' },
   cycles: {}, // shown as written
   stale: 'Stale',
   stale_reasons: { no_approval_date: 'no approval date', no_review_cycle: 'no review cycle',
     unknown_cycle: 'unknown review cycle' },
-  current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none',
+  current: 'Current', no_version: 'no version', no_date: 'no date', no_cycle: 'none', withdrawn: 'Withdrawn',
 }
 
 /** Whether `selected` holds this document of this source. */
@@ -50,11 +50,11 @@ function staleReason(d: ShownDocument, words: TableWords): string | null {
 /**
  * Evidence documents with what Vouch has read from each (#408): title and id, kind, version, approval date, review
  * cycle, and stale or current, as the judge reads them. Company setup's step 6 chooses with its checkboxes; the
- * Documents tab (#424) shows it read-only, in the profile's words, with a Cited by column. Each title carries its
+ * Documents tab (#424) shows it in the profile's words, with Cited by and Origin columns (#585). Each title carries its
  * document's language. Wide, it scrolls inside its own container (design.md, Layout).
  */
 export default function DocumentTable<D extends ShownDocument>({ caption, documents, selected, onToggle, words,
-  extraColumn }: Props<D>) {
+  extraColumns = [] }: Props<D>) {
   const w = words ?? ENGLISH
   const staleWord = (d: D) => {
     const reason = words ? staleReason(d, words) : d.stale_because
@@ -73,7 +73,7 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
             <th>{w.columns.approved}</th>
             <th>{w.columns.review}</th>
             <th>{w.columns.status}</th>
-            {extraColumn && <th>{extraColumn.heading}</th>}
+            {extraColumns.map((c) => <th key={c.heading}>{c.heading}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -98,11 +98,11 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
               <td>{d.approval_date ?? w.no_date}</td>
               <td>{d.review_cycle === null ? w.no_cycle : wordFor(w.cycles, d.review_cycle) ?? d.review_cycle}</td>
               <td>
-                {d.stale
-                  ? <span className="flag">{staleWord(d)}</span>
-                  : <span className="doc-current">{w.current}</span>}
+                {d.withdrawn ? <span className="doc-withdrawn">{w.withdrawn}</span>
+                  : d.stale ? <span className="flag">{staleWord(d)}</span>
+                    : <span className="doc-current">{w.current}</span>}
               </td>
-              {extraColumn && <td>{extraColumn.cell(d)}</td>}
+              {extraColumns.map((c) => <td key={c.heading}>{c.cell(d)}</td>)}
             </tr>
           ))}
         </tbody>

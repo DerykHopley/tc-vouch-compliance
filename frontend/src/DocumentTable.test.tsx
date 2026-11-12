@@ -69,19 +69,19 @@ describe('the document table', () => {
 describe('the document table, with words and an extra column (the Documents tab, issue 424)', () => {
   const WORDS: TableWords = {
     columns: { document: 'Dokument', kind: 'Art', version: 'Version', approved: 'Freigegeben am', review: 'Überprüfung',
-      status: 'Status', cited_by: 'Zitiert von' },
+      status: 'Status', cited_by: 'Zitiert von', origin: 'Herkunft' },
     kinds: { documented: 'Dokumentiert', implemented: 'Umgesetzt' },
     cycles: { quarterly: 'Vierteljährlich', 'half-yearly': 'Halbjährlich', yearly: 'Jährlich', 'two-yearly': 'Zweijährlich' },
     stale: 'Prüfung überfällig',
     stale_reasons: { no_approval_date: 'kein Freigabedatum', no_review_cycle: 'kein Prüfzyklus',
       unknown_cycle: 'unbekannter Prüfzyklus' },
-    current: 'Aktuell', no_version: 'keine Version', no_date: 'kein Datum', no_cycle: 'keine',
+    current: 'Aktuell', no_version: 'keine Version', no_date: 'kein Datum', no_cycle: 'keine', withdrawn: 'Zurückgezogen',
   }
   const extra = { heading: 'Zitiert von', cell: (d: LibraryDocument) => `cell ${d.id}` }
 
   it('shows the given headings, the kind and cycle words, an overdue stale word alone, and the extra column', () => {
     render(<DocumentTable caption="Richtlinien" documents={[BACKUP, UNDATED, TRAINING]} words={WORDS}
-      extraColumn={extra} />)
+      extraColumns={[extra]} />)
     expect(within(screen.getByRole('table')).getAllByRole('columnheader').map((h) => h.textContent))
       .toEqual(['Dokument', 'Art', 'Version', 'Freigegeben am', 'Überprüfung', 'Status', 'Zitiert von'])
     const [backup, undated, training] = rows()

@@ -12,7 +12,7 @@ import Prose from './Prose.tsx'
 import Remediation, { type Plan } from './Remediation.tsx'
 import type { RemediationItem } from './remediation.ts'
 import type { Goal } from './report.ts'
-import { type Override, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
+import { type Override, REVIEW_STEP_WORDS, reviewStep, rollUp, rollUpWords, withOverrides } from './review.ts'
 import ReviewBar, { OverrideEditor } from './ReviewBar.tsx'
 import StepText from './StepText.tsx'
 import InlineConfirm from './InlineConfirm.tsx'
@@ -75,7 +75,7 @@ type PaperProps = {
   /** The overview: the company; the profile's protection level, answer language and requirements; the cards (the
    * control index). */
   overview: Pick<Overview, 'company' | 'protection_level' | 'answer_language' | 'requirements' | 'controls'
-    | 'questions'> & { goal?: Goal }
+    | 'questions' | 'new_evidence'> & { goal?: Goal }
   /** The open control's card. */
   card: ControlCard
   /** The control being assessed just now, if any (one run at a time, maybe of another control). */
@@ -89,6 +89,9 @@ type PaperProps = {
   onAssess: () => void
   onOpen: (controlId: string) => void
   onOverview: () => void
+  /** The breadcrumb's way back when the paper was opened from elsewhere than the Overview (#573: a round comparison):
+   * its words and address; the Overview's without. */
+  back?: { label: string; href: string; onBack: () => void }
   /** The lead's decision is recorded: the reviewed assessment. */
   onReviewed: (assessment: Assessment) => void
   /** A remediation item's approval or discard is recorded (#43): the item as kept, to put in the latest copy of the
@@ -107,7 +110,7 @@ type PaperProps = {
  */
 export default function WorkingPaper(props: PaperProps) {
   const { overview, card, running, passing = false, checking = false, onAssess, onOpen, onOverview, onReviewed, onRefresh,
-    onItemDecided, onQuestionsChanged } = props
+    onItemDecided, onQuestionsChanged, back } = props
   // The lead's overrides, not yet recorded, recalculate the control's verdict on screen until Confirm findings; the
   // requirement whose override is open. Both belong to the assessment shown: when another is shown (another
   // control's, a new run's, the same one read again, or it reviewed), they are dropped, and the review bar is shown
@@ -173,6 +176,8 @@ export default function WorkingPaper(props: PaperProps) {
   const closed = improving && review === 'accepted' && card.closed === true
   // The open questions' reasons (#414), in both goals, while the control's newest assessment is accepted.
   const questionReasons = review === 'accepted' ? card.reassess_reasons ?? [] : []
+  // A newer version of a document the newest assessment cites (#586): whatever its review state.
+  const newEvidence = card.reassess_reasons?.includes('new-evidence') ? overview.new_evidence?.[card.id] ?? [] : []
   // Not applicable as a whole under the profile (#454): its chip and the profile's reason, and no assessment to start.
   const excluded = card.status === 'not-applicable'
   return (
@@ -181,7 +186,9 @@ export default function WorkingPaper(props: PaperProps) {
         language={overview.answer_language} improving={improving} />
       <section className="paper wrap" aria-label="Working paper">
         <nav className="crumbs" aria-label="Breadcrumb">
-          <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>
+          {back
+            ? <a href={back.href} onClick={(e) => { e.preventDefault(); back.onBack() }}>{back.label}</a>
+            : <a href="/" onClick={(e) => { e.preventDefault(); onOverview() }}>Overview</a>}
           <span aria-hidden="true">›</span>
           <span className="mono" aria-current="page">{card.id}</span>
         </nav>
@@ -198,6 +205,8 @@ export default function WorkingPaper(props: PaperProps) {
               <span>Verdict</span>
               {excluded ? <VerdictChip verdict="not-applicable" language={overview.answer_language} /> : <RunChip run={run} />}
               {review && <span className={`tag tag-${review}`}>{closed ? CLOSED_WORD : REVIEW_WORDS[review]}</span>}
+              {/* The step a proposed control's review is at, near the head (#467), as its bar may be out of view. */}
+              {step && <span className="review-step-now">Review step: {REVIEW_STEP_WORDS[step]}</span>}
             </div>
           )}
           {excluded && card.not_applicable && (
@@ -254,6 +263,12 @@ export default function WorkingPaper(props: PaperProps) {
               )}
               {questionReasons.includes('question-overdue') && (
                 <p className="field-note">An open question is overdue. Assess {card.id} again with what is known now.</p>
+              )}
+              {newEvidence.length > 0 && (
+                <p className="field-note">
+                  A new version of {newEvidence.join(' and ')} was added. Assess {card.id} again so its verdict takes it
+                  into account.
+                </p>
               )}
               {/* Keyed by the assessment shown, so a warning open on one never shows on another. */}
               <AssessButton key={assessed?.thread_id} id={card.id} run={run} held={held} onAssess={() => onAssess()}
@@ -323,14 +338,32 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
  * view beside the paper as the paper scrolls and scrolls on its own (#466): the open control's row is brought into
- * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. */
+ * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. Stacked
+ * above the paper (1000px or less), the index scrolls in its own box: `data-more` marks it while rows lie below its
+ * foot, which app.css fades (#555). */
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   const list = useRef<HTMLDivElement>(null)
+  const nav = useRef<HTMLElement>(null)
+  const [more, setMore] = useState(false)
   useEffect(() => {
     list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
   }, [openId])
+  useEffect(() => {
+    const box = nav.current
+    if (!box) return
+    const measure = () => setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 1)
+    measure()
+    box.addEventListener('scroll', measure, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(box)
+    if (list.current) observer?.observe(list.current)
+    return () => {
+      box.removeEventListener('scroll', measure)
+      observer?.disconnect()
+    }
+  }, [controls])
   return (
-    <nav className="wp-index" aria-label="Controls">
+    <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
       <div className="wp-index-list" ref={list}
         onFocus={(e) => e.target.closest('.wp-row')?.scrollIntoView?.({ block: 'nearest' })}>
         {areas(controls).map(([area, cards]) => (

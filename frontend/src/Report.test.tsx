@@ -38,7 +38,9 @@ const ENGLISH: ReportWords = {
   actions: { accept: 'Accepted', reject: 'Rejected', override: 'Overridden',
     confirm: 'Findings confirmed', approve: 'Approved', discard: 'Discarded', goal: 'Goal changed from {before} to {after}',
     'round-start': 'Review round started: {round}', 'round-close': 'Review round closed: {round}',
-    priority: 'Priority changed', done: 'Marked done', question: 'Open question logged', answer: 'Question answered' },
+    priority: 'Priority changed', done: 'Marked done', question: 'Open question logged', answer: 'Question answered',
+    'demo-reset': "Demo reset: every user's progress and history deleted", 'document-add': 'Document added',
+    'document-withdraw': 'Document withdrawn' },
   goals: { 'audit-readiness': 'Audit readiness', 'internal-improvement': 'Internal improvement' },
   protection_levels: { normal: 'Normal', high: 'High', 'very high': 'Very high' },
   priorities: { high: 'High', medium: 'Medium', low: 'Low' },
@@ -508,6 +510,24 @@ describe('Review round entries in the trail (ticket 402)', () => {
 
     expect(within(report).getByText('Prüfrunde begonnen: Q4 2026')).toBeTruthy()
   })
+})
+
+describe('Added and withdrawn document entries in the trail (ticket 618)', () => {
+  it.each([['document-add', 'Document added'], ['document-withdraw', 'Document withdrawn']] as const)(
+    'shows a %s entry with its word in the Action cell', async (action, word) => {
+      // As `vouch.audit.document_entry` writes it: no control, verdict, model or prompt.
+      const added = entry(5, '2026-11-11T09:00:00+00:00', action, { control_id: '', verdict_before: null,
+        verdict_after: null, evidence: [{ doc_id: 'visitor-badge-policy', version: '1' }], model: '',
+        prompt_version: '' })
+      serve({ ...REPORT, trail: { entries: [added], next: null } })
+      render(<Report />)
+      const report = await shown()
+
+      const trail = within(report).getByRole('table', { name: 'Audit trail' })
+      const [, row] = within(trail).getAllByRole('row')
+      const cell = within(row).getAllByRole('cell').find((c) => c.dataset.label === 'Action')
+      expect(cell?.textContent).toBe(word)
+    })
 })
 
 describe('Older trail entries', () => {

@@ -25,7 +25,8 @@ export type DeveloperSettings = {
   companies: MadeCompany[] | null
   /** Every company listed for users, as GET /api/profiles lists them: file companies first, then those made in setup
    * (#480). */
-  listed_companies: ProfileSummary[]
+  /** Every company listed for users; `demo` marks the one whose Reset demo plays the demo round (#605). */
+  listed_companies: (ProfileSummary & { demo: boolean })[]
   /** The current company's id (#480): every user's company; null with none listed. */
   current_company: string | null
   /** Each model's list price (#496), in vouch.spending.PRICES' order: for a cost OpenRouter doesn't report. */
@@ -184,6 +185,35 @@ export async function removeCompany(id: string): Promise<CompanyRemoval> {
   }
   if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
   if (response.status === 404) return { status: 'gone' }
+  if (response.status === 409) return { status: 'refused', problem: await refusedBecause(response) }
+  if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
+  return { status: 'failed' }
+}
+
+/** How a Reset demo went (#605): reset (with the demo round played, or the API's note why not), refused with the
+ * API's reason (another reset of the company running, #619), or not. */
+export type DemoReset =
+  | { status: 'reset'; seeded: boolean; note?: string }
+  | { status: 'refused'; problem: string }
+  | { status: 'signed-out' }
+  | { status: 'unavailable' }
+  | { status: 'failed' }
+
+/** Resets the company `id` to its demo state (#605): every user's progress and history under it deleted, and on
+ * Nordlicht the demo round played. A developer's only. */
+export async function resetDemo(id: string): Promise<DemoReset> {
+  let response: Response
+  try {
+    response = await fetch(`/api/developer/profiles/${encodeURIComponent(id)}/reset-demo`,
+      { method: 'POST', headers: await authHeaders() })
+  } catch {
+    return { status: 'failed' }
+  }
+  if (response.ok) {
+    const body = (await response.json().catch(() => null)) as { seeded?: boolean; note?: string } | null
+    return { status: 'reset', seeded: Boolean(body?.seeded), note: body?.note }
+  }
+  if (sessionEnded(response)) return { status: 'signed-out' }
   if (response.status === 409) return { status: 'refused', problem: await refusedBecause(response) }
   if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
   return { status: 'failed' }

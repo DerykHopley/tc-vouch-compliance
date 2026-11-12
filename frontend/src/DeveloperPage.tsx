@@ -3,7 +3,7 @@ import { costWords, count, dateTimeLabel, dollars, plural } from './assessment.t
 import {
   changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, type DeveloperPrompts, developerPrompts,
   developerSettings, type DeveloperSettings, makeCurrent, type MadeCompany, PROFILE_PASS, type PromptMessage,
-  type RecentRun, removeCompany, type RunTotals, type SettingChange, UNAVAILABLE,
+  type RecentRun, removeCompany, resetDemo, type RunTotals, type SettingChange, UNAVAILABLE,
 } from './developer.ts'
 import { fetchProfiles, type ProfileSummary } from './profiles.ts'
 
@@ -68,6 +68,7 @@ export default function DeveloperPage({ settings, onChange, onSetup, onRemoved, 
 /** What the Companies section is doing: nothing, removing or making current one company, done (its note), or a
  * problem (its message). */
 type Acting = { status: 'idle' } | { status: 'removing'; id: string } | { status: 'making'; id: string }
+  | { status: 'resetting'; id: string }
   | { status: 'done'; note: string } | { status: 'problem'; message: string }
 
 /** What a removal that didn't happen says, but for a refusal, which says the API's reason. */
@@ -80,6 +81,18 @@ const REMOVE_PROBLEM: Record<Extract<CompanyRemoval['status'], 'unavailable' | '
 const CURRENT_PROBLEM: Record<Extract<CurrentChange['status'], 'unavailable' | 'failed'>, string> = {
   unavailable: 'The database is unavailable just now. Nothing changed; try again in a moment.',
   failed: 'The company could not be made current. Nothing changed.',
+}
+
+const RESET_PROBLEM = {
+  unavailable: 'The database is unavailable just now. Nothing was reset; try again in a moment.',
+  failed: 'The company could not be reset. Try again.',
+}
+
+/** Reset demo's confirm (#605): it names the company and what goes. */
+function resetQuestion({ company, demo }: Row): string {
+  const then = demo ? 'Then the demo round is played: Q2 2026 closed, Q3 2026 open.' : 'It starts empty.'
+  return `Reset the demo of ${company}? Every user's progress and history under it is deleted: assessments, rounds, `
+    + `the audit trail, open questions, remediation and added documents. ${then} This can't be undone.`
 }
 
 /** "9 Nov 2026": the day a company was made, in the reader's time zone; as written when it doesn't parse. */
@@ -113,7 +126,7 @@ function withCurrent(done: string, held: DeveloperSettings, now: ProfileSummary 
 
 /** One row of the Companies list: a listed company (Current, or Make current), with Remove when made in setup; or a
  * company made in setup that isn't listed (broken, or its id taken by a profile folder since), with Remove only. */
-type Row = { id: string; company: string; listed: boolean; made: MadeCompany | undefined }
+type Row = { id: string; company: string; listed: boolean; made: MadeCompany | undefined; demo: boolean }
 
 /** Every listed company in the API's order, then the companies made in setup that aren't listed. A company made in
  * setup is listed when it isn't among the profiles left out: a shadowed one is, and its id lists the file one. */
@@ -122,8 +135,10 @@ function rowsOf(settings: DeveloperSettings): Row[] {
   const made = settings.companies ?? []
   const listedMade = new Map(made.filter((c) => !left.has(c.id)).map((c) => [c.id, c]))
   return [
-    ...settings.listed_companies.map((c) => ({ id: c.id, company: c.company, listed: true, made: listedMade.get(c.id) })),
-    ...made.filter((c) => left.has(c.id)).map((c) => ({ id: c.id, company: c.company, listed: false, made: c })),
+    ...settings.listed_companies.map((c) => ({ id: c.id, company: c.company, listed: true, made: listedMade.get(c.id),
+      demo: c.demo })),
+    ...made.filter((c) => left.has(c.id)).map((c) => ({ id: c.id, company: c.company, listed: false, made: c,
+      demo: false })),
   ]
 }
 
@@ -219,13 +234,34 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
     }
   }
 
-  const out = acting.status === 'removing' || acting.status === 'making'
+  const resetRow = async (row: Row) => {
+    if (busy.current) return
+    if (!window.confirm(resetQuestion(row))) return
+    busy.current = true
+    setActing({ status: 'resetting', id: row.id })
+    const result = await resetDemo(row.id)
+    busy.current = false
+    if (result.status === 'reset') {
+      const note = result.seeded ? `Reset ${row.company} to its demo state: Q2 2026 closed, Q3 2026 open.`
+        : result.note ? `Reset ${row.company}. ${result.note}` : `Reset ${row.company}: it has no progress or history.`
+      setActing({ status: 'done', note })
+    } else if (result.status === 'refused') {
+      setActing({ status: 'problem', message: result.problem || RESET_PROBLEM.failed })
+    } else if (result.status === 'signed-out') {
+      setActing({ status: 'idle' })
+    } else {
+      setActing({ status: 'problem', message: RESET_PROBLEM[result.status] })
+    }
+  }
+
+  const out = acting.status === 'removing' || acting.status === 'making' || acting.status === 'resetting'
   return (
     <>
       <ul className="companies">
         {rowsOf(settings).map((row) => {
           const removing = acting.status === 'removing' && acting.id === row.id
           const making = acting.status === 'making' && acting.id === row.id
+          const resetting = acting.status === 'resetting' && acting.id === row.id
           const current = row.listed && row.id === settings.current_company
           return (
             <li key={`${row.id}:${row.listed ? 'listed' : 'made'}`}>
@@ -241,6 +277,13 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
                     aria-label={making ? undefined : `Make ${row.company} current`}
                     onClick={() => void makeRowCurrent(row)}>
                     {making ? 'Making current…' : 'Make current'}
+                  </button>
+                )}
+                {row.listed && (
+                  <button type="button" className="btn" disabled={out} aria-busy={resetting}
+                    aria-label={resetting ? undefined : `Reset the demo of ${row.company}`}
+                    onClick={() => void resetRow(row)}>
+                    {resetting ? 'Resetting…' : 'Reset demo'}
                   </button>
                 )}
                 {row.made && (

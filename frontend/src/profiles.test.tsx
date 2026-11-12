@@ -7,14 +7,16 @@ import ProfiledApp from './ProfiledApp.tsx'
 import type { Goal } from './report.ts'
 
 // Company setup stands in as buttons that report the company made (#409) with the Goal chosen on step 4 (#447): its
-// steps are tested on their own.
-vi.mock('./CompanySetupWizard.tsx', () => {
+// steps are tested on their own. Like the wizard, each names its own history entry (#568).
+vi.mock('./CompanySetupWizard.tsx', async () => {
+  const { markSetupEntry } = await import('./setupHistory.ts')
   const made = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de' }
   return {
-    default: ({ onCreated }: { onCreated: (profile: ProfileSummary, goal: Goal) => void }) => (
+    default: ({ onCreated }: { onCreated: (profile: ProfileSummary, goal: Goal, entry: string) => void }) => (
       <>
-        <button type="button" onClick={() => onCreated(made, 'internal-improvement')}>Created</button>
-        <button type="button" onClick={() => onCreated(made, 'audit-readiness')}>Created for audit</button>
+        <button type="button" onClick={() => onCreated(made, 'internal-improvement', markSetupEntry())}>Created</button>
+        <button type="button" onClick={() => onCreated(made, 'audit-readiness', markSetupEntry())}>
+          Created for audit</button>
       </>
     ),
   }
@@ -256,16 +258,19 @@ describe('ProfiledApp, issue 480', () => {
   })
 
   it("without the list, the top bar names the overview's company once it's read, and none before (ticket 495)", async () => {
-    let answer: (response: Response) => void = () => {}
+    // The overview answers once released, whenever it was asked (#540): the app asks for it from an effect, which a
+    // busy runner can run after `findByRole` has returned, so a resolver taken from the call could still be unset.
+    let release: () => void = () => {}
+    const released = new Promise<void>((resolve) => { release = resolve })
     vi.stubGlobal('fetch', (url: string) => url === '/api/overview'
-      ? new Promise<Response>((resolve) => { answer = resolve })
+      ? released.then(() => Response.json(overviewOf('Nordlicht Komponenten GmbH')))
       : Promise.resolve(new Response(null, { status: 500 })))
     render(<ProfiledApp />)
     await screen.findByRole('navigation', { name: 'Main' })
     const banner = screen.getByRole('banner')
     expect(banner.querySelector('.top-company')).toBeNull()
     expect(banner.querySelector('.top-rule')).toBeNull()
-    answer(Response.json(overviewOf('Nordlicht Komponenten GmbH')))
+    release()
     await dossierOf('Nordlicht Komponenten GmbH')
     expect(within(banner).getByText('Somewhere · EN')).toBeTruthy() // a country with no ISO code by its name
     // The user menu's fresh start names the company the bar names.
@@ -412,16 +417,18 @@ describe('a company made in company setup, issue 409', () => {
     expect(screen.queryByText('Goal: Internal improvement')).toBeNull()
   })
 
-  /** serveDeveloper, the list read again held until the returned function answers it. */
+  /** serveDeveloper, the list read again held until the returned function answers it, whenever it was asked (#540):
+   * `reads` counts the read before its fetch call, so a resolver taken from the call could still be unset. */
   function heldRelisting() {
     const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
     const answered = fetch.getMockImplementation()!
     let release: (answer: Response) => void = () => {}
+    const relisted = new Promise<Response>((resolve) => { release = resolve })
     let listings = 0
     fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/profiles' && ++listings > 1
-      ? new Promise<Response>((resolve) => { release = resolve })
+      ? relisted
       : answered(url, init))
-    return (answer: Response) => release(answer)
+    return release
   }
 
   it('stays on the setup address until the list answers again, and after closing opens nothing', async () => {
@@ -456,7 +463,7 @@ describe('a company made in company setup, issue 409', () => {
 
 describe('a company removed on the developer page, issues 418 and 480', () => {
   const MADE = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', created_at: '2026-11-09T10:15:00+00:00' }
-  const WITH_MADE = { ...SETTINGS, companies: [MADE], listed_companies: [...SETTINGS.listed_companies, MUSTERFIRMA] }
+  const WITH_MADE = { ...SETTINGS, companies: [MADE], listed_companies: [...SETTINGS.listed_companies, { ...MUSTERFIRMA, demo: false }] }
 
   /** The API, for a developer on the developer page with Musterfirma made in setup and `current` the current company:
    * the DELETE answers the settings without it (Nordlicht current), and the list read again answers `relisted` (null:

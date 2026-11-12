@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
-import { swallowNextPointerClick } from './doubleClickGuard.ts'
+import { swallowPointerClickBurst } from './doubleClickGuard.ts'
 
 /** The trigger's own attributes: its class (a ghost pill unless given), `disabled` (can't be pressed or focused),
  * `aria-disabled` (can't be pressed, keeps focus: busy), `aria-busy`, `aria-label`. */
@@ -52,7 +52,7 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
   }, [open])
   if (open) {
     const confirm = (e: ReactMouseEvent<HTMLButtonElement>) => {
-      swallowNextPointerClick(e)
+      swallowPointerClickBurst(e)
       setOpen(false)
       onConfirm()
     }

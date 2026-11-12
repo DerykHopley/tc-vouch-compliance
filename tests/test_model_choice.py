@@ -259,18 +259,22 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "usage": {"openrouter": NO_USAGE, "fake": NO_USAGE},
         "broken_profiles": [],  # #47: every fixture profile loads
         "companies": [],  # #418: no company made in setup
-        "listed_companies": [  # #480: the fixture companies, as GET /api/profiles lists them
+        # #480: the fixture companies, as GET /api/profiles lists them, each marked whether its
+        # Reset demo plays the demo round (#605)
+        "listed_companies": [
             {
                 "id": "alpenwerk",
                 "company": "Alpenwerk Präzision GmbH",
                 "country": "Austria",
                 "answer_language": "de",
+                "demo": False,
             },
             {
                 "id": "nordlicht",
                 "company": "Nordlicht Komponenten GmbH",
                 "country": "Germany",
                 "answer_language": "en",
+                "demo": True,
             },
         ],
         "current_company": "nordlicht",  # #480: nothing stored
@@ -605,6 +609,27 @@ def test_a_profile_pass_request_has_600_s_no_reply_cap_and_no_retry():
     assert pass_model.max_retries == 0  # type: ignore[attr-defined]  # a timeout isn't paid twice
     assert assessment_model.request_timeout == 120  # type: ignore[attr-defined]
     assert assessment_model.max_retries == MAX_RETRIES  # type: ignore[attr-defined]
+
+
+def test_assessments_and_the_profile_pass_send_temperature_0_and_chat_sends_none(chat, catalogue):
+    # langchain-openai leaves an unset temperature out of the request, so the provider's default
+    # applies (#638); what reaches OpenRouter is what counts.
+    choice = ModelChoice(
+        Settings(openrouter_api_key=SecretStr(KEY)),
+        MemoryModelStore(),
+        fake_openrouter(chat, catalogue),
+    )
+
+    sent = {}
+    for use, model in (
+        ("assessment", choice.for_assessment(DEFAULT_MODEL)),
+        ("profile pass", choice.for_profile_pass(DEFAULT_MODEL)),
+        ("chat", choice.for_chat(DEFAULT_MODEL)),
+    ):
+        model.invoke("hello")
+        sent[use] = json.loads(chat.requests[-1].content).get("temperature", "absent")
+
+    assert sent == {"assessment": 0, "profile pass": 0, "chat": "absent"}
 
 
 # --- A compliance lead gets 403 from the developer API ------------------------------------------

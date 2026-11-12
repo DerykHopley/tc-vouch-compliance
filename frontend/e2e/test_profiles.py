@@ -124,7 +124,8 @@ def test_story_2_a_company_made_current_on_the_developer_page_is_every_users(
         expect(page).to_have_url(f"{profiles_url}/developer")
         row = companies(page).get_by_role("listitem").filter(has_text=TESTWERK)
         expect(row.get_by_text("Current", exact=True)).to_be_visible()
-        expect(row.get_by_role("button")).to_have_count(0)
+        # The current row keeps only Reset demo (#605): no Make current, no Remove.
+        expect(row.get_by_role("button")).to_have_text(["Reset demo"])
 
         other = browser.new_context()
         try:

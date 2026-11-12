@@ -63,13 +63,15 @@ type Shown = {
   goal?: Goal
   /** The open card's improvement plan flags (#410). */
   flags?: Pick<ControlCard, 'reassess_suggested' | 'reassess_reasons' | 'closed'>
+  /** The overview's titles of the added documents with a newer version, by control (#586). */
+  newEvidence?: Record<string, string[]>
 }
 
 function paper({ run = { status: 'idle', steps: [] }, running = null, checking = false, onAssess = () => {},
   onOpen = () => {}, onOverview = () => {}, onReviewed = () => {}, onRefresh = () => Promise.resolve(true),
-  onItemDecided = () => {}, language = 'en', goal = 'audit-readiness', flags }: Shown) {
+  onItemDecided = () => {}, language = 'en', goal = 'audit-readiness', flags, newEvidence }: Shown) {
   const card = { ...CONTROLS.find((c) => c.id === '5.1.2')!, question: QUESTION, ...flags }
-  return <WorkingPaper overview={{ ...OVERVIEW, answer_language: language, goal }} card={card} running={running} run={run} checking={checking}
+  return <WorkingPaper overview={{ ...OVERVIEW, answer_language: language, goal, new_evidence: newEvidence }} card={card} running={running} run={run} checking={checking}
     onAssess={onAssess} onOpen={onOpen} onOverview={onOverview} onReviewed={onReviewed} onRefresh={onRefresh}
     onItemDecided={onItemDecided} onQuestionsChanged={() => {}} />
 }
@@ -677,6 +679,21 @@ describe('the review in three steps (issue 372)', () => {
     expect(current()).toEqual(['Confirm findings'])
   })
 
+  describe("the current step named in the paper's head (issue 467)", () => {
+    const head = () => document.querySelector('.paper-head') as HTMLElement
+    it.each([
+      ['Confirm findings', PROPOSED], ['Plan fixes', PLANNING], ['Accept', READY],
+    ] as const)('names %s in the head', (name, assessment) => {
+      review({ assessment })
+      expect(within(head()).getByText(`Review step: ${name}`)).toBeTruthy()
+    })
+
+    it('names no step once the control is reviewed', () => {
+      review({ assessment: { ...READY, status: 'accepted', review_step: null } })
+      expect(within(head()).queryByText(/Review step/)).toBeNull()
+    })
+  })
+
   it('marks Accept current and shows Plan fixes as skipped for a control with no remediation item', () => {
     review({ assessment: READY })
     expect(current()).toEqual(['Accept'])
@@ -1234,6 +1251,34 @@ describe('the improvement plan (issue 410)', () => {
       review({ assessment: { ...PROPOSED, review_step: 'accept', confirmed: [] },
         flags: { reassess_suggested: true, reassess_reasons: ['question-overdue'], closed: false } })
       expect(screen.queryByText(OVERDUE)).toBeNull()
+    })
+  })
+
+  describe('the new evidence reason (ticket 586)', () => {
+    const NEW = 'A new version of Visitor badge policy was added. Assess 5.1.2 again so its verdict takes it into '
+      + 'account.'
+    const assessNotes = () => [...document.querySelectorAll('.assess .field-note')].map((p) => p.textContent)
+    const flags = { reassess_suggested: true, reassess_reasons: ['new-evidence' as const], closed: false }
+
+    it('says the new-version sentence above Assess again, naming the document', () => {
+      review({ assessment: { ...ACCEPTED, remediation: [] }, flags,
+        newEvidence: { '5.1.2': ['Visitor badge policy'] } })
+      expect(assessNotes()).toEqual([NEW])
+      const assess = screen.getByRole('button', { name: 'Assess again 5.1.2' })
+      expect(screen.getByText(NEW).compareDocumentPosition(assess) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('says it while the newest assessment waits for review too', () => {
+      review({ assessment: PROPOSED, flags, newEvidence: { '5.1.2': ['Visitor badge policy'] } })
+      expect(screen.getByText(NEW)).toBeTruthy()
+    })
+
+    it('names each document with a newer version', () => {
+      review({ assessment: { ...ACCEPTED, remediation: [] }, flags,
+        newEvidence: { '5.1.2': ['Visitor badge policy', 'Key register'] } })
+      expect(assessNotes()).toEqual([
+        'A new version of Visitor badge policy and Key register was added. Assess 5.1.2 again so its verdict takes '
+          + 'it into account.'])
     })
   })
 })

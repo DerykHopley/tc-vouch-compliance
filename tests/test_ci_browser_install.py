@@ -27,12 +27,28 @@ def test_the_browsers_are_cached_by_browser_and_the_e2e_lockfile():
     assert steps.index(cache) < steps.index(step_running("playwright install "))
 
 
-def test_the_system_packages_install_once_bounded_by_the_step_never_killed_midway():
+def test_the_system_packages_install_bounded_by_the_step_never_killed_midway():
     # #290: a `timeout` around apt killed only uv; apt kept the dpkg lock and the retry failed.
-    step = step_running("playwright install-deps")
+    # #611 retries the download once, safe because no `timeout` kills apt midway: apt exits on
+    # its own and frees the lock first.
+    [step] = [s for s in browser_steps() if s.get("id") == "apt-install"]
     assert 0 < step["timeout-minutes"] <= 8
-    assert "timeout " not in step["run"] and "for attempt" not in step["run"]
+    assert "timeout " not in step["run"]
+    assert "for attempt in 1 2" in step["run"]
     assert "--with-deps" not in step_running("playwright install ")["run"]
+
+
+def test_the_system_packages_come_from_a_cache_keyed_on_the_runner_image_and_playwright():
+    # #611: a mirror DNS outage timed the step out with no test run; the .debs are cached.
+    steps = browser_steps()
+    [key] = [s for s in steps if s.get("id") == "apt-key"]
+    assert "ImageOS" in key["run"] and "ImageVersion" in key["run"] and "playwright" in key["run"]
+    [restore] = [s for s in steps if s.get("uses", "").startswith("actions/cache/restore@")]
+    [save] = [s for s in steps if s.get("uses", "").startswith("actions/cache/save@")]
+    assert restore["with"]["path"] == save["with"]["path"] == "~/.cache/apt-debs"
+    [install] = [s for s in steps if s.get("id") == "apt-install"]
+    assert steps.index(restore) < steps.index(install) < steps.index(save)
+    assert "--no-download" in install["run"]
 
 
 def test_the_browser_download_is_bounded_and_tried_twice():

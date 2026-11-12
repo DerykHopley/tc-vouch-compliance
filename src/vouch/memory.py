@@ -60,7 +60,7 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _label(value: str) -> str:
+def store_label(value: str) -> str:
     """`value` as a store namespace label: LangGraph refuses a label with a period, so it's
     percent-encoded, periods too. Different values stay different."""
     return quote(value, safe="").replace(".", "%2E")
@@ -96,7 +96,7 @@ class Memory:
         return json.dumps([self.user_id, self.profile_id])
 
     def _namespace(self, *rest: str) -> tuple[str, ...]:
-        return ("vouch", _label(self.user_id), _label(self.profile_id), *rest)
+        return ("vouch", store_label(self.user_id), store_label(self.profile_id), *rest)
 
     def remember_assessment(self, thread_id: str, control_id: str) -> None:
         """Note a new assessment of `control_id` on `thread_id`, before its run starts: one

@@ -28,13 +28,22 @@ Vouch works for one **current company** at a time, the same for every user. It s
 Nordlicht Komponenten GmbH, a German supplier; Alpenwerk Präzision GmbH, an Austrian company
 working in German, is bundled too. A developer makes another company current on the
 **Developer page** (in the user menu), and can set up a new company there or remove one made in
-setup. The top bar names the current company, with the tabs **Overview**, **Report** and
-**Company**.
+setup. **Reset demo**, on the same page, deletes every user's progress and history under one
+company and puts it back in its demo state: for Nordlicht, review round "Q2 2026" closed and
+"Q3 2026" open; any other company is left empty. The top bar names the current company, with the tabs
+**Overview**, **Report** and **Company**.
 
 The **Company page** holds the company's details and settings: its country, answer language,
 protection level and overlays, its Goal, its review rounds, its scope, the controls that are not
-applicable and its evidence documents. Only the Goal can be changed there; the review rounds are
-closed and started there as on the Overview.
+applicable and its evidence documents. The lead can change the Goal there, and the evidence
+documents: **Add document**, **Add new version** of an added one, and **Withdraw** an added one,
+which then stays listed as a **Withdrawn document**, no longer searched or cited; built-in
+documents can't be changed. The review rounds are closed and started there as on the Overview.
+
+A **round comparison** sets where the lead stands now against a closed review round, the last
+one by default: verdict changes control by control, readiness then and now, and the remediation
+items done and open questions answered since. The Overview shows it, the Company page's Rounds
+list opens it for each closed round, and the chat answers from it ("What improved since Q2 2026?").
 
 One current company for everyone is a demo/prototype process: a real product would give each
 lead their own companies ([#163](https://github.com/DerykHopley/tc-vouch-compliance/issues/163)).
@@ -80,6 +89,8 @@ The optional tasks done; the full table, with the code and the app page for each
 
 | Level | Task | Details |
 |---|---|---|
+| Easy | Ask an LLM to critique the solution | [Easy](docs/course-tasks.md#easy) |
+| Easy | Let the user choose from a list of LLMs (developer only) | [Easy](docs/course-tasks.md#easy) |
 | Easy | Give the agent a personality | [Easy](docs/course-tasks.md#easy) |
 | Easy | An interactive help feature or chatbot guide | [Easy](docs/course-tasks.md#easy) |
 | Medium | Calculate and show token usage and cost | [Medium](docs/course-tasks.md#medium) |
@@ -88,6 +99,7 @@ The optional tasks done; the full table, with the code and the app page for each
 | Medium | Multi-model support | [Medium](docs/course-tasks.md#medium) |
 | Medium | A security guard; developer settings apart from the user experience | [Medium](docs/course-tasks.md#medium) |
 | Hard | Agentic RAG in the LangGraph app | [Hard](docs/course-tasks.md#hard) |
+| Hard | An LLM observability tool (Langfuse) | [Hard](docs/course-tasks.md#hard) |
 | Hard | An AI evaluation report with DeepEval | [Hard](docs/course-tasks.md#hard) |
 
 ## Docs
@@ -96,10 +108,13 @@ The optional tasks done; the full table, with the code and the app page for each
   container, the checks, keys, Cloud Run in short, and common failures.
 - [`docs/features.md`](docs/features.md): assess a control, review it, ask a question, read the
   report, and switch the current company.
-- [`docs/demo.md`](docs/demo.md): the demo in three parts: Part 1, Audit readiness (on the live
-  app, with the local run as a fallback), Part 2, Keep improving (the Internal improvement goal
-  and the profile pass, on the local app), and Part 3, Company setup (a developer sets up a new
-  company and removes it again, on the local app).
+- [`docs/demo.md`](docs/demo.md): the demo in three parts, Parts 1 and 2 starting from
+  Nordlicht's demo state (Reset demo): Part 1, Audit readiness (on the live app, with the local
+  run as a fallback), Part 2, Keep improving (the Internal improvement goal, an open question, a fix and
+  the round comparison with Q2 2026, on the local app), and Part 3, Company setup (a developer
+  sets up a new company and removes it again, on the local app).
+- [`docs/demo-files/`](docs/demo-files/README.md): sample files for showing Add document and Add
+  new version, and what each shows when a control is assessed.
 - [`docs/technical-decisions.md`](docs/technical-decisions.md),
   [`docs/course-tasks.md`](docs/course-tasks.md),
   [`docs/eval-summary.md`](docs/eval-summary.md) and [`docs/reflection.md`](docs/reflection.md).
