@@ -20,8 +20,8 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 `vouch-db-setup` creates LangGraph's tables (checkpointer and store), once, at deploy, on one
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
-limit, #35), the daily assessment counts, the usage (#35), the append-only audit trail (#39), the
-remediation items the lead decided on (#43), the improvement plan's marks on them (#410), each
+limit, #35), the daily assessment, profile pass and chat counts (#628), the usage (#35), the
+append-only audit trail (#39), the remediation items the lead decided on (#43), the improvement plan's marks on them (#410), each
 profile's Goal (#369), its review rounds (#402), the open questions on its controls (#414), the
 evidence documents added to it (#584) and the companies made in the app (#385); nothing else
 does. Before it has run, a setting reads as unset, a Goal as Audit readiness, the plan as no
@@ -96,6 +96,8 @@ COUNTS_TABLE = "vouch_assessment_counts"
 """How many assessments each user started on each UTC day (the daily limit, vouch.spending)."""
 PROFILE_PASS_COUNTS_TABLE = "vouch_profile_pass_counts"
 """How many profile passes each user ran on each UTC day (their own daily limit, #371)."""
+CHAT_COUNTS_TABLE = "vouch_chat_counts"
+"""How many chat messages each user sent on each UTC day (their own daily limit, #628)."""
 USAGE_TABLE = "vouch_usage"
 """Each assessment's tokens and cost (vouch.spending)."""
 CREATE_COUNTS = (
@@ -104,6 +106,10 @@ CREATE_COUNTS = (
 )
 CREATE_PROFILE_PASS_COUNTS = (
     f"CREATE TABLE IF NOT EXISTS {PROFILE_PASS_COUNTS_TABLE} (user_id text NOT NULL, "
+    "day date NOT NULL, count integer NOT NULL, PRIMARY KEY (user_id, day))"
+)
+CREATE_CHAT_COUNTS = (
+    f"CREATE TABLE IF NOT EXISTS {CHAT_COUNTS_TABLE} (user_id text NOT NULL, "
     "day date NOT NULL, count integer NOT NULL, PRIMARY KEY (user_id, day))"
 )
 CREATE_USAGE = (
@@ -446,6 +452,7 @@ SETUP_TABLES = (
     SETTINGS_TABLE,
     COUNTS_TABLE,
     PROFILE_PASS_COUNTS_TABLE,
+    CHAT_COUNTS_TABLE,
     USAGE_TABLE,
     AUDIT_TABLE,
     REMEDIATION_TABLE,
@@ -697,6 +704,20 @@ class Database:
         in the passes' own table (#371). (counted, the limit). Raises DatabaseUnavailable."""
         return self._take(PROFILE_PASS_COUNTS_TABLE, user_id, day, limit_setting, default_limit)
 
+    def take_chat_turn(
+        self, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Count one chat message for the user's day, as take_assessment counts an assessment,
+        in the chat's own table (#628). (counted, the limit). Raises DatabaseUnavailable."""
+        return self._take(CHAT_COUNTS_TABLE, user_id, day, limit_setting, default_limit)
+
+    def under_chat_limit(
+        self, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Whether the user sent fewer chat messages that day than the limit, counting nothing:
+        (under it, the limit). Raises DatabaseUnavailable."""
+        return self._under(CHAT_COUNTS_TABLE, user_id, day, limit_setting, default_limit)
+
     def _take(
         self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
     ) -> tuple[bool, int]:
@@ -727,12 +748,18 @@ class Database:
         """Whether the user started fewer assessments that day than the limit (as
         take_assessment reads it), counting nothing: (under it, the limit). Raises
         DatabaseUnavailable."""
-        with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
+        return self._under(COUNTS_TABLE, user_id, day, limit_setting, default_limit)
+
+    def _under(
+        self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
+    ) -> tuple[bool, int]:
+        """Whether the user's count that day in the counts `table` is under the limit."""
+        with self.connection() as conn, self._needs_setup(table):
             row = conn.execute(
                 "WITH lim AS (SELECT coalesce((SELECT value::integer FROM "
                 f"{SETTINGS_TABLE} WHERE name = %(setting)s), %(default)s) AS n) "
                 "SELECT (SELECT n FROM lim) AS lim, coalesce((SELECT count FROM "
-                f"{COUNTS_TABLE} WHERE user_id = %(user_id)s AND day = %(day)s), 0) "
+                f"{table} WHERE user_id = %(user_id)s AND day = %(day)s), 0) "
                 "< (SELECT n FROM lim) AS under",
                 {
                     "setting": limit_setting,
@@ -1491,6 +1518,7 @@ class Database:
                 conn.execute(CREATE_SETTINGS)
                 conn.execute(CREATE_COUNTS)
                 conn.execute(CREATE_PROFILE_PASS_COUNTS)
+                conn.execute(CREATE_CHAT_COUNTS)
                 conn.execute(CREATE_USAGE)
                 conn.execute(CREATE_AUDIT)
                 conn.execute(CREATE_AUDIT_INDEX)

@@ -17,6 +17,8 @@ export type DeveloperSettings = {
   kept_in: 'database' | 'memory'
   /** Assessments each user may start in a UTC day (#35). */
   daily_limit: number
+  /** Chat messages each user may send in a UTC day (#628), apart from the assessments' limit. */
+  chat_daily_limit: number
   /** Every assessment's usage added up: real spend on OpenRouter, and the fake model's estimates apart. */
   usage: { openrouter: RunTotals; fake: RunTotals }
   /** The compliance profiles left out of the list because they could not be loaded (#47). */
@@ -138,6 +140,14 @@ export async function developerSettings(): Promise<DeveloperSettings | typeof UN
 
 const BAD_LIMIT = 'The daily limit is a whole number of assessments, from 1 to 10,000.'
 const LIMIT_REFUSED = 'The daily limit could not be changed. Please try again later.'
+
+const BAD_CHAT_LIMIT = 'The chat limit is a whole number of chat messages, from 1 to 10,000.'
+const CHAT_LIMIT_REFUSED = 'The chat limit could not be changed. Please try again later.'
+
+/** Asks for each user's chat limit to be `limit` chat messages a day, from the next one on (#628). */
+export function changeChatDailyLimit(limit: number): Promise<SettingChange> {
+  return put('/api/developer/chat-daily-limit', { chat_daily_limit: limit }, BAD_CHAT_LIMIT, CHAT_LIMIT_REFUSED)
+}
 
 /** Asks for the next assessments to run on `model`; the API checks the id with OpenRouter first. */
 export function changeModel(model: string): Promise<SettingChange> {

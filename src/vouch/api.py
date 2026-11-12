@@ -183,6 +183,7 @@ from vouch.spending import (
     CHAT,
     MAX_DAILY_LIMIT,
     PROFILE_PASS,
+    ChatLimitReached,
     DailyLimitReached,
     NoSharedCounter,
     ProfilePassLimitReached,
@@ -888,13 +889,19 @@ def record_off_the_event_loop(
     thread.start()
 
 
+def _limit_name(error: DailyLimitReached) -> str:
+    if isinstance(error, ProfilePassLimitReached):
+        return "profile-pass"
+    return "chat" if isinstance(error, ChatLimitReached) else "daily"
+
+
 def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
-    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's, and
-    `"profile-pass"` the profile passes' own limit (#371)."""
+    """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's,
+    `"profile-pass"` the profile passes' own limit (#371) and `"chat"` the chat's (#628)."""
     assert isinstance(error, DailyLimitReached)
     content = {
         "detail": error.message(),
-        "limit": "profile-pass" if isinstance(error, ProfilePassLimitReached) else "daily",
+        "limit": _limit_name(error),
         "resets_at": error.resets_at.isoformat(),
     }
     headers = {"Retry-After": str(error.retry_after)}
@@ -2149,6 +2156,7 @@ def page_context(request: Annotated[ChatRequest, Body()], profile: Profile) -> P
 
 
 def chat_within_spending(
+    request: Annotated[ChatRequest, Body()],
     context: Annotated[PageContext, Depends(page_context)],
     user: CurrentUser,
     spending: AppSpending,
@@ -2156,9 +2164,10 @@ def chat_within_spending(
 ) -> None:
     """The spending guard before a chat message, once the page and the model are known (M3,
     docs/requirements.md 2026-11-03): at the day's limit, the daily limit's 429; a paid model
-    with only memory to count in, a 503. A chat message is not counted as an assessment."""
+    with only memory to count in, a 503. A chat message is not counted as an assessment, but
+    against the chat's own limit (#628, its 429 `limit: "chat"`); the greeting only checks it."""
     try:
-        spending.check(user.id, paid=chosen is not None)
+        spending.check(user.id, paid=chosen is not None, turn=request.message is not None)
     except NoSharedCounter as error:
         log.error("chat on OpenRouter needs %s for the daily limit", DATABASE_URL_ENV)
         raise HTTPException(status_code=503, detail=str(error)) from None
@@ -2364,6 +2373,10 @@ class DailyLimitRequest(BaseModel):
     daily_limit: Annotated[int, Field(ge=1, le=MAX_DAILY_LIMIT, strict=True)]
 
 
+class ChatDailyLimitRequest(BaseModel):
+    chat_daily_limit: Annotated[int, Field(ge=1, le=MAX_DAILY_LIMIT, strict=True)]
+
+
 def _developer_page(
     models: ModelChoice,
     spending: SpendingGuard,
@@ -2446,6 +2459,21 @@ def change_daily_limit(
     """Each user may start `daily_limit` assessments a day, from the next one on. The answer is
     the whole developer page, as `developer_settings` reads it (#455)."""
     spending.set_daily_limit(request.daily_limit)
+    return _developer_page(models, spending, settings, companies, current)
+
+
+@router.put("/developer/chat-daily-limit", dependencies=DEVELOPERS)
+def change_chat_daily_limit(
+    request: ChatDailyLimitRequest,
+    models: AppModels,
+    spending: AppSpending,
+    settings: AppSettings,
+    companies: CompanyProfiles,
+    current: AppCurrentCompany,
+) -> dict[str, Any]:
+    """Each user may send `chat_daily_limit` chat messages a day (#628), from the next one on.
+    The answer is the whole developer page, as `developer_settings` reads it."""
+    spending.set_chat_daily_limit(request.chat_daily_limit)
     return _developer_page(models, spending, settings, companies, current)
 
 

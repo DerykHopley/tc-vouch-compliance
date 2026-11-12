@@ -35,7 +35,7 @@ function api(settingsStatus = 200, put?: (body: Record<string, unknown>) => [num
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === '/api/developer/settings')
       return Promise.resolve(new Response(JSON.stringify(body), { status: settingsStatus }))
-    if ((url === '/api/developer/model' || url === '/api/developer/daily-limit') && put) {
+    if (['/api/developer/model', '/api/developer/daily-limit', '/api/developer/chat-daily-limit'].includes(url) && put) {
       const [status, body] = put(JSON.parse(init!.body as string))
       return Promise.resolve(new Response(JSON.stringify(body), { status }))
     }
@@ -114,6 +114,34 @@ describe('the developer page', () => {
       'The daily limit is a whole number of assessments, from 1 to 10,000.',
     )
     expect(field.getAttribute('aria-invalid')).toBe('true')
+  })
+
+  it('shows the chat limit next to the daily limit, changes it, and says the new limit applies, issue 628', async () => {
+    const put = vi.fn((body: Record<string, unknown>) =>
+      [200, { ...SETTINGS, chat_daily_limit: body.chat_daily_limit }] as [number, unknown])
+    api(200, put)
+    const onChange = vi.fn()
+    renderPage({ onChange })
+    expect(screen.getByText('50 chat messages per user per day (UTC)')).toBeTruthy()
+    const field = screen.getByRole('textbox', { name: 'Chat messages per day' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '1')
+    await userEvent.click(screen.getByRole('button', { name: 'Change chat limit' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...SETTINGS, chat_daily_limit: 1 }))
+    expect(put).toHaveBeenCalledWith({ chat_daily_limit: 1 })
+    expect(screen.getByRole('status').textContent).toBe('Each user may now send 1 chat message a day.')
+  })
+
+  it('shows a refused chat limit in place, issue 628', async () => {
+    api(200, () => [422, { detail: [{ msg: 'Input should be greater than or equal to 1' }] }])
+    renderPage()
+    const field = screen.getByRole('textbox', { name: 'Chat messages per day' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '0')
+    await userEvent.click(screen.getByRole('button', { name: 'Change chat limit' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'The chat limit is a whole number of chat messages, from 1 to 10,000.',
+    )
   })
 
   it('says when no key makes assessments run on the fake model, and when the choice lasts only until a restart', () => {

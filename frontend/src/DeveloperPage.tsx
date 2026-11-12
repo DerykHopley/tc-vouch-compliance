@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { costWords, count, dateTimeLabel, dollars, plural } from './assessment.ts'
 import {
-  changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, type DeveloperPrompts, developerPrompts,
+  changeChatDailyLimit, changeDailyLimit, changeModel, type CompanyRemoval, type CurrentChange, type DeveloperPrompts, developerPrompts,
   developerSettings, type DeveloperSettings, makeCurrent, type MadeCompany, PROFILE_PASS, type PromptMessage,
   type RecentRun, removeCompany, resetDemo, type RunTotals, type SettingChange, UNAVAILABLE,
 } from './developer.ts'
@@ -331,6 +331,12 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
         <SettingForm label="Assessments per day" button="Change limit" initial={String(settings.daily_limit)}
           inputMode="numeric" save={(value) => changeDailyLimit(Number(value))}
           saved={(s) => `Each user may now start ${plural(s.daily_limit, 'assessment')} a day.`}
+          onChange={onChange} />
+        <span>{plural(settings.chat_daily_limit, 'chat message')} per user per day (UTC)</span>
+        <SettingForm label="Chat messages per day" button="Change chat limit"
+          initial={String(settings.chat_daily_limit)} inputMode="numeric"
+          save={(value) => changeChatDailyLimit(Number(value))}
+          saved={(s) => `Each user may now send ${plural(s.chat_daily_limit, 'chat message')} a day.`}
           onChange={onChange} />
       </div>
       <Prompts listed={settings.listed_companies} />
