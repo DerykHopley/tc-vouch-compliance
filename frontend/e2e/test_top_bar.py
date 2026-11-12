@@ -36,6 +36,25 @@ def scrolls_sideways(page: Page) -> bool:
     )
 
 
+def developer_page_settled(page: Page, profiles_url: str, width: int) -> None:
+    """The Developer page, a long one, with its settings and prompts read and its fonts in, so its
+    height has settled before a test scrolls it (#671)."""
+    with (
+        page.expect_response("**/api/developer/settings"),
+        page.expect_response("**/api/developer/prompts"),
+    ):
+        opened(page, f"{profiles_url}/developer", width)
+    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+
+
+def assert_not_scrolled(page: Page, scrolled: int, what: str) -> None:
+    # FONTS_SETTLED ends on two drawn frames: a scroll anchoring adjustment, made at layout after
+    # the bar grows or shrinks, has had its turn before scrollY is read (#682)
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, f"{what} scrolled the page"
+
+
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize("width", [1280, 375])
 def test_story_1_a_lead_sees_one_company_named_in_the_top_bar_and_no_switcher(
@@ -248,14 +267,7 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
 ):
     """#671: Chromium scrolled a scrolled-down page by about 213px as "Your menu" took focus. No
     control in the sticky top bar moves the page as it takes focus; on a phone, with the Menu open."""
-    # its settings and prompts read, and its fonts in, before scrolling: its height settled
-    with (
-        page.expect_response("**/api/developer/settings"),
-        page.expect_response("**/api/developer/prompts"),
-    ):
-        opened(page, f"{profiles_url}/developer", width)
-    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
-    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+    developer_page_settled(page, profiles_url, width)
     bar = page.get_by_role("banner")
     if width < 700:
         bar.get_by_role("button", name="Menu", exact=True).click()
@@ -277,21 +289,14 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
     expect(user).to_be_focused()
 
 
-@pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize("width", [1280, 400])
 def test_opening_and_closing_the_user_menu_on_a_scrolled_page_never_scrolls_it(
-    page: Page, profiles_url, width, scheme
+    page: Page, profiles_url, width
 ):
     """#682: on a phone, with the Menu open on a scrolled page, opening Your menu raised scrollY by
     about 251px as the sticky bar grew: the browser's scroll anchoring kept the content under the
     bar in place. Opening or closing a menu in the bar leaves the page where it was."""
-    with (
-        page.expect_response("**/api/developer/settings"),
-        page.expect_response("**/api/developer/prompts"),
-    ):
-        opened(page, f"{profiles_url}/developer", width)
-    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
-    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+    developer_page_settled(page, profiles_url, width)
     bar = page.get_by_role("banner")
     toggle = bar.get_by_role("button", name="Menu", exact=True)
     page.evaluate(
@@ -302,22 +307,18 @@ def test_opening_and_closing_the_user_menu_on_a_scrolled_page_never_scrolls_it(
     if width < 700:
         toggle.click()
         expect(toggle).to_have_attribute("aria-expanded", "true")
-        page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
-        assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "opening the Menu scrolled"
+        assert_not_scrolled(page, scrolled, "opening the Menu")
     user = bar.get_by_role("button", name="Your menu")
     menu = page.get_by_role("menu", name="Your menu")
 
     user.click()
     expect(menu).to_be_visible()
-    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # two frames: anchoring has had its turn
-    assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "opening Your menu scrolled"
+    assert_not_scrolled(page, scrolled, "opening Your menu")
 
     user.click()
     expect(menu).to_have_count(0)
-    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
-    assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "closing Your menu scrolled"
+    assert_not_scrolled(page, scrolled, "closing Your menu")
     if width < 700:
         toggle.click()
         expect(toggle).to_have_attribute("aria-expanded", "false")
-        page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
-        assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "closing the Menu scrolled"
+        assert_not_scrolled(page, scrolled, "closing the Menu")
