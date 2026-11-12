@@ -190,9 +190,11 @@ export async function removeCompany(id: string): Promise<CompanyRemoval> {
   return { status: 'failed' }
 }
 
-/** How a Reset demo went (#605): reset (with the demo round played, or the API's note why not), or not. */
+/** How a Reset demo went (#605): reset (with the demo round played, or the API's note why not), refused with the
+ * API's reason (another reset of the company running, #619), or not. */
 export type DemoReset =
   | { status: 'reset'; seeded: boolean; note?: string }
+  | { status: 'refused'; problem: string }
   | { status: 'signed-out' }
   | { status: 'unavailable' }
   | { status: 'failed' }
@@ -212,6 +214,7 @@ export async function resetDemo(id: string): Promise<DemoReset> {
     return { status: 'reset', seeded: Boolean(body?.seeded), note: body?.note }
   }
   if (sessionEnded(response)) return { status: 'signed-out' }
+  if (response.status === 409) return { status: 'refused', problem: await refusedBecause(response) }
   if (response.status === 503 && isDatabaseDown(await response.json().catch(() => null))) return { status: 'unavailable' }
   return { status: 'failed' }
 }
