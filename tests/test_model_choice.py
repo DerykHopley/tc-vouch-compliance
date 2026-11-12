@@ -611,6 +611,27 @@ def test_a_profile_pass_request_has_600_s_no_reply_cap_and_no_retry():
     assert assessment_model.max_retries == MAX_RETRIES  # type: ignore[attr-defined]
 
 
+def test_assessments_and_the_profile_pass_send_temperature_0_and_chat_sends_none(chat, catalogue):
+    # langchain-openai leaves an unset temperature out of the request, so the provider's default
+    # applies (#638); what reaches OpenRouter is what counts.
+    choice = ModelChoice(
+        Settings(openrouter_api_key=SecretStr(KEY)),
+        MemoryModelStore(),
+        fake_openrouter(chat, catalogue),
+    )
+
+    sent = {}
+    for use, model in (
+        ("assessment", choice.for_assessment(DEFAULT_MODEL)),
+        ("profile pass", choice.for_profile_pass(DEFAULT_MODEL)),
+        ("chat", choice.for_chat(DEFAULT_MODEL)),
+    ):
+        model.invoke("hello")
+        sent[use] = json.loads(chat.requests[-1].content).get("temperature", "absent")
+
+    assert sent == {"assessment": 0, "profile pass": 0, "chat": "absent"}
+
+
 # --- A compliance lead gets 403 from the developer API ------------------------------------------
 
 
