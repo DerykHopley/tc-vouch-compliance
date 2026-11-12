@@ -17,6 +17,7 @@ from touch_targets import small_targets
 
 CONTROL = "4.1.2"
 REASON = "The 2025 MFA rollout record shows the risk-based decision."
+PRESS_MS = 150  # a person's press: the button is let go a moment after it goes down
 
 
 def assessed(request: APIRequestContext, paper_url: str) -> dict:
@@ -300,6 +301,59 @@ def test_the_ask_on_switching_override_editors_moves_focus(page: Page, paper_url
     page.keyboard.press("Enter")
     row(paper, "M2").get_by_role("button", name="Change M2 anyway").click()
     expect(page.get_by_role("form", name="Override M2").get_by_label("Verdict")).to_be_focused()
+
+
+def save_by_the_dock(page: Page, paper_url: str, foot: int) -> tuple[Locator, Locator, Locator]:
+    """M1's override typed in at 1280x900, its Save's foot `foot` px below the docked review
+    buttons' top (above it when negative), as the page may leave it: the paper, Save, the dock."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    save = override(paper, "M1", "Evidenced", REASON).get_by_role("button", name="Save")
+    dock = paper.get_by_role("region", name="Review").locator(".review-dock")
+    expect(dock).to_have_class(re.compile(r"\bstuck\b"))
+    page.evaluate(
+        "([save, dock, foot]) => window.scrollBy(0,"
+        " save.getBoundingClientRect().bottom - foot - dock.getBoundingClientRect().top)",
+        [save.element_handle(), dock.element_handle(), foot],
+    )
+    return paper, save, dock
+
+
+def test_a_press_on_save_half_under_the_docked_buttons_saves_the_override(page: Page, paper_url):
+    # #698: the press focused Save, and the page scrolled it clear of the docked review buttons
+    # before the button was let go, so the release, and the click, landed on the row instead.
+    paper, save, dock = save_by_the_dock(page, paper_url, 20)  # half under the docked buttons
+    at, under = save.bounding_box(), dock.bounding_box()
+    assert at is not None and under is not None
+    page.mouse.move(at["x"] + at["width"] / 2, under["y"] - 4)  # on its foot in view
+    page.mouse.down()
+    page.wait_for_timeout(PRESS_MS)
+    page.mouse.up()
+    expect(row(paper, "M1")).to_contain_text("Overridden from Partly evidenced")
+
+
+def test_a_press_released_outside_the_page_leaves_tab_clearing_the_docked_buttons(
+    page: Page, paper_url
+):
+    # #698's verifier: a press dragged out of the window is let go where the page never hears it.
+    # A field tabbed to after it is still brought clear of the docked buttons: Save, wholly in
+    # view (Firefox scrolls it no further) but inside the room kept clear of them.
+    paper, save, dock = save_by_the_dock(page, paper_url, -4)
+    reason = paper.get_by_label("Reason (required)")
+    at = reason.bounding_box()
+    assert at is not None
+    page.mouse.move(at["x"] + 8, at["y"] + 8)
+    page.mouse.down()  # never released here
+    page.wait_for_timeout(PRESS_MS)
+    page.keyboard.press("Tab")
+    expect(save).to_be_focused()
+    page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+    )
+    at, under = save.bounding_box(), dock.bounding_box()
+    assert at is not None and under is not None
+    assert at["y"] + at["height"] <= under["y"] - 7, (at, under)  # GAP (8px) above the dock
 
 
 def test_leaving_with_an_unsaved_override_asks_first_and_cancel_keeps_it(page: Page, paper_url):

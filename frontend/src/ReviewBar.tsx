@@ -157,7 +157,8 @@ const docks = (slot: HTMLElement) => slot.getBoundingClientRect().bottom > windo
  * slot's room and, in app.css, the scroll margin that keeps a field brought into view above the row; a field focused
  * under the row anyway, or under it as it grows, is scrolled clear of it once (Firefox doesn't scroll a field it
  * counts as in view), never so far that its top goes under the top bar; a field too tall for the room between them
- * keeps its top in view.
+ * keeps its top in view. A field focused by a pointer press isn't scrolled: the press is on what the lead can see, and
+ * a scroll before the release would move it from under the pointer, so the click lands elsewhere (#698).
  */
 function useDock(reviewing: boolean) {
   const bar = useRef<HTMLElement>(null)
@@ -219,12 +220,24 @@ function useDock(reviewing: boolean) {
         else if (under > SLACK) window.scrollBy(0, Math.min(under, -over))
       })
     }
-    document.addEventListener('focusin', clear)
+    // A press's focus comes in the same task as its pointerdown (#698): only that focus is left where it is. Nothing
+    // waits for the release, which the page never hears when the press is let go outside the window.
+    const pointer = { pressing: false, timer: 0 }
+    const press = () => {
+      pointer.pressing = true
+      window.clearTimeout(pointer.timer)
+      pointer.timer = window.setTimeout(() => { pointer.pressing = false })
+    }
+    const focused = () => { if (!pointer.pressing) clear() }
+    document.addEventListener('pointerdown', press, true)
+    document.addEventListener('focusin', focused)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(clear)
     observer?.observe(el)
     return () => {
       cancelAnimationFrame(pending.frame)
-      document.removeEventListener('focusin', clear)
+      window.clearTimeout(pointer.timer)
+      document.removeEventListener('pointerdown', press, true)
+      document.removeEventListener('focusin', focused)
       observer?.disconnect()
     }
   }, [reviewing])
