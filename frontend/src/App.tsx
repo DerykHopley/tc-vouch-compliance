@@ -77,8 +77,17 @@ function viewAt(path: string): View {
 }
 
 /** What a company setup's create did while the developer was on another page (#569), said under the top bar: `open`,
- * when it made the company current, opens it. */
-export type CreatedNotice = { text: string; open?: { label: string; onOpen: () => void } }
+ * when it made `company` current, opens it. */
+export type CreatedNotice = { text: string; open?: { company: string; onOpen: () => void } }
+
+/** After Dismiss on the created notice (#569), whose button is gone: focus goes to the page's h1, or else its main. */
+function focusPage() {
+  const main = document.querySelector<HTMLElement>('main')
+  const target = main?.querySelector<HTMLElement>('h1') ?? main
+  if (!target) return
+  if (!target.hasAttribute('tabindex')) target.tabIndex = -1
+  target.focus()
+}
 
 type AppProps = {
   /** Clerk mode's sign out, in the user menu; local mode has nobody to sign out. */
@@ -367,9 +376,12 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
           <p className="field-note notice">{createdNotice.text}</p>
           {createdNotice.open && (
             <button type="button" className="btn btn-primary" onClick={createdNotice.open.onOpen}>
-              {createdNotice.open.label}</button>
+              Open {createdNotice.open.company}</button>
           )}
-          <button type="button" className="btn btn-ghost" onClick={onNoticeDismissed}>Dismiss</button>
+          <button type="button" className="btn btn-ghost" onClick={() => {
+            onNoticeDismissed?.()
+            focusPage()
+          }}>Dismiss</button>
         </div>
       )}
       {shown === 'report' ? <Report />

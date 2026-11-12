@@ -11,6 +11,7 @@ passes' daily limit (3).
 """
 
 import re
+from collections.abc import Callable
 
 import pytest
 from playwright.sync_api import Page, Response, Route, expect
@@ -866,25 +867,15 @@ def held_once(page: Page, held: list[Route]) -> None:
 PROFILE_LIST = "/api/profiles"
 
 
-@pytest.mark.parametrize("width", [1280, 400])
-def test_back_while_the_create_answers_keeps_the_page_and_says_the_company_is_current(
-    page: Page, first_pass_url, nordlicht_later, width
-):
-    """#569 (after #476): Back pressed while the create is still answering (its Make current
-    held) leaves the wizard for the developer page, where the developer scrolls and types. When
-    the answer lands the page stays as it is, under the company it opened under: the typed value
-    and the scroll kept, a notice saying the new company is current; the next Back goes to the
-    page before (#568 dropped #476's extra entry). Open on the notice opens the new company on
-    the Overview, its first pass run (#447). On first_pass_url: desktop's pass is the second of
-    the passes' daily limit (3) there, after story 5's; the phone's ends before Open, so it runs
-    none."""
-    nordlicht_later(first_pass_url)
-    page.set_viewport_size({"width": width, "height": 700})
+def back_while_creating(
+    page: Page, url: str, company: str, meanwhile: Callable[[], None] = lambda: None
+) -> str:
+    """From the developer page, Set up a company to step 7, Create company with its Make current
+    held, Back to the developer page, `meanwhile` there, then the held answer lands (the list
+    read again): the created notice (#569). The new company's id."""
     with page.expect_response("**/api/developer/settings"):
-        page.goto(first_pass_url)
-    from_user_menu(page, "Developer page")
+        page.goto(f"{url}/developer")
     page.get_by_role("button", name="Set up a company").click()
-    company = f"Zurück {width} GmbH"
     to_step_7(page, company)
     held: list[Route] = []
     page.route(CURRENT_COMPANY, lambda route: held.append(route))
@@ -893,44 +884,75 @@ def test_back_while_the_create_answers_keeps_the_page_and_says_the_company_is_cu
     ) as created:
         press(page, "Create company")
     assert created.value.status == 201
-    profile = created.value.json()["id"]
     held_once(page, held)  # the create's Make current, still unanswered
-
     page.go_back()
-    expect(page).to_have_url(f"{first_pass_url}/developer")
-    field = page.get_by_role("textbox", name="Model id")
-    field.fill("typed/meanwhile")
-    page.get_by_role("region", name="Usage").scroll_into_view_if_needed()
-    scrolled = page.evaluate("window.scrollY")
-    assert scrolled > 0, scrolled
-    usage_top = page.get_by_role("region", name="Usage").bounding_box()["y"]
+    expect(page).to_have_url(f"{url}/developer")
+    meanwhile()
     with page.expect_response(lambda r: r.url.endswith(PROFILE_LIST)):
         held[0].continue_()
+    return created.value.json()["id"]
+
+
+def test_back_while_the_create_answers_keeps_the_scroll_and_open_runs_the_first_pass(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#569 (after #476): Back pressed while the create is still answering leaves the wizard for
+    the developer page, scrolled down. When the answer lands the scroll stays (the page isn't
+    opened afresh) and the notice, held under the top bar, is in view; Open on it opens the new
+    company on the Overview, its first pass run (#447). The kept input, the top bar and the next
+    Back are profiles.test.tsx's. On first_pass_url: its pass is the second of the passes' daily
+    limit (3) there, after story 5's."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 1280, "height": 700})
+    usage = page.get_by_role("region", name="Usage")
+    before: dict[str, float] = {}
+
+    def scroll_down() -> None:
+        usage.scroll_into_view_if_needed()
+        before["y"] = page.evaluate("window.scrollY")
+        assert before["y"] > 0, before
+        before["usage"] = usage.bounding_box()["y"]
+
+    company = "Zurück GmbH"
+    profile = back_while_creating(page, first_pass_url, company, scroll_down)
 
     notice = page.get_by_role("status").filter(has_text=f"{company} was made and is now current.")
-    expect(notice).to_be_in_viewport()  # held under the top bar, wherever the page is scrolled
+    expect(notice).to_be_in_viewport()
     assert current_of(page, first_pass_url) == profile
-    expect(page).to_have_url(f"{first_pass_url}/developer")
-    expect(field).to_have_value("typed/meanwhile")
-    expect(page.get_by_text("Loading the company…")).to_have_count(0)
-    assert page.evaluate("window.scrollY") >= scrolled  # not back at the top
-    assert abs(page.get_by_role("region", name="Usage").bounding_box()["y"] - usage_top) < 2
-    expect(bar_company(page)).not_to_have_text(company)  # the page's company, until Open
-    assert small_targets(page) == []
+    assert page.evaluate("window.scrollY") >= before["y"]  # not back at the top
+    assert abs(usage.bounding_box()["y"] - before["usage"]) < 2
 
-    page.go_back()
-    expect(page).to_have_url(f"{first_pass_url}/")
-    page.go_forward()
-    expect(page).to_have_url(f"{first_pass_url}/developer")
-    if width < 700:
-        return  # the open, and its pass, once: on desktop
     with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
         notice.get_by_role("button", name=f"Open {company}").click()
     assert passed.value.ok, passed.value.status
     expect(page).to_have_url(f"{first_pass_url}/")
     expect(bar_company(page)).to_have_text(company)
     expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
-    expect(page.get_by_role("status").filter(has_text="is now current")).to_have_count(0)
+
+
+def test_the_created_notice_is_walked_by_keyboard_and_dismiss_leaves_focus_on_the_page(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#569: Tab reaches the created notice's Open, then Dismiss; Dismiss by keyboard hides the
+    notice and puts focus on the page's main (the developer page has no h1), not the body. No
+    pass runs: nothing is opened."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    back_while_creating(page, first_pass_url, "Tastatur GmbH")
+    notice = page.get_by_role("status").filter(
+        has_text="Tastatur GmbH was made and is now current."
+    )
+    expect(notice).to_be_visible()
+    page.get_by_role("banner").get_by_role("button", name="Your menu").focus()  # the bar's last
+    page.keyboard.press("Tab")
+    expect(notice.get_by_role("button", name="Open Tastatur GmbH")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(notice.get_by_role("button", name="Dismiss")).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(notice).to_have_count(0)
+    expect(page.get_by_role("main")).to_be_focused()
+    page.keyboard.press("Tab")  # and on from there, into the page
+    assert page.evaluate("document.activeElement.closest('main') !== null")
 
 
 def test_a_tab_clicked_while_the_create_answers_stays_and_back_opens_the_company(

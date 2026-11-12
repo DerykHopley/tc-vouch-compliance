@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import App, { type CreatedNotice, DEVELOPER_PATH } from './App.tsx'
 import type { Arrival } from './arrival.ts'
-import { makeCurrent } from './developer.ts'
+import { makeCurrent, notMadeCurrent } from './developer.ts'
 import { mayLeave } from './leaving.ts'
 import { fetchProfiles, type Profiles, type ProfileSummary, withoutProfile, withProfile } from './profiles.ts'
 import type { Goal } from './report.ts'
@@ -96,16 +96,15 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
           waiting.current = { id: profile.id, goal }
           if (leaveSetup(entry, '/', openMade)) return openMade()
           setNotice({ text: `${profile.company} was made and is now current.`,
-            open: { label: `Open ${profile.company}`, onOpen: () => {
+            open: { company: profile.company, onOpen: () => {
               if (!mayLeave()) return
               toPath('/')
               openMade()
             } } })
           return
         }
-        const note = `${profile.company} was made but could not be made current.`
-        if (leaveSetup(entry, DEVELOPER_PATH)) reopen(found ? found.current : shown, `${note} Use Make current to try again.`)
-        else setNotice({ text: `${note} Use Make current on the Developer page to try again.` })
+        if (leaveSetup(entry, DEVELOPER_PATH)) reopen(found ? found.current : shown, notMadeCurrent(profile.company, true))
+        else setNotice({ text: notMadeCurrent(profile.company, false) })
       })
     })
   }
