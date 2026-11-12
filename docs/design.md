@@ -79,7 +79,7 @@ Type, spacing, radius, shadow and motion get rows here once the CSS names them a
 
 **Full width (owner, 2026-11-10, #448 decision 6):** "working paper and other pages we can start to use the full width of the page, no need to limit it to a thin vertical slice for all the data we need to review." Data pages (the working paper, the report, the Company page and the Developer page) use the viewport's width, with side gutters; long running prose inside them may keep a readable measure.
 
-At every width, the page's top scroll padding follows the sticky top bar's height (`--top-bar`, which TopBar measures; it grows at phone width), so a field scrolled to, tapped or tabbed to stops below the bar (#205).
+At every width, the page's top scroll padding follows the sticky top bar's height (`--top-bar`, which TopBar measures; it grows at phone width), so a field scrolled to, tapped or tabbed to stops below the bar (#205). Under 700px the page's scroll anchoring is off while the Menu panel is open and as it closes (`overflow-anchor: none` on `html`), so opening or closing the Menu or Your menu, which grows the bar, leaves the page where it was (#682); otherwise it stays on, so content filled in or a notice shown above a scrolled page moves nothing in view (#569).
 
 At every width, the page leaves room at its foot for the Ask Vouch button (88px of padding and of bottom scroll padding), so its last content scrolls clear of the button and a field scrolled to, tapped or tabbed to stops above it (#198 at phone width, #462 at every width; `frontend/e2e/test_fab_clearance.py` measures it). The button still floats over the page as it scrolls, the first screen included.
 

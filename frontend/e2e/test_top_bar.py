@@ -8,7 +8,7 @@ import re
 
 import pytest
 from fonts import FONTS_SETTLED
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 from top_bar import (
     back_to_overview,
     bar_company,
@@ -34,6 +34,25 @@ def scrolls_sideways(page: Page) -> bool:
     return page.evaluate(
         "document.documentElement.scrollWidth > document.documentElement.clientWidth"
     )
+
+
+def developer_page_settled(page: Page, profiles_url: str, width: int) -> None:
+    """The Developer page, a long one, with its settings and prompts read and its fonts in, so its
+    height has settled before a test scrolls it (#671)."""
+    with (
+        page.expect_response("**/api/developer/settings"),
+        page.expect_response("**/api/developer/prompts"),
+    ):
+        opened(page, f"{profiles_url}/developer", width)
+    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+
+
+def assert_not_scrolled(page: Page, scrolled: int, what: str) -> None:
+    # FONTS_SETTLED ends on two drawn frames: a scroll anchoring adjustment, made at layout after
+    # the bar grows or shrinks, has had its turn before scrollY is read (#682)
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, f"{what} scrolled the page"
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
@@ -248,14 +267,7 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
 ):
     """#671: Chromium scrolled a scrolled-down page by about 213px as "Your menu" took focus. No
     control in the sticky top bar moves the page as it takes focus; on a phone, with the Menu open."""
-    # its settings and prompts read, and its fonts in, before scrolling: its height settled
-    with (
-        page.expect_response("**/api/developer/settings"),
-        page.expect_response("**/api/developer/prompts"),
-    ):
-        opened(page, f"{profiles_url}/developer", width)
-    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
-    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+    developer_page_settled(page, profiles_url, width)
     bar = page.get_by_role("banner")
     if width < 700:
         bar.get_by_role("button", name="Menu", exact=True).click()
@@ -275,3 +287,62 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
         if user.evaluate("button => button === document.activeElement"):
             break
     expect(user).to_be_focused()
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+def test_opening_and_closing_the_user_menu_on_a_scrolled_page_never_scrolls_it(
+    page: Page, profiles_url, width
+):
+    """#682: on a phone, with the Menu open on a scrolled page, opening Your menu raised scrollY by
+    about 251px as the sticky bar grew: the browser's scroll anchoring kept the content under the
+    bar in place. Opening or closing a menu in the bar leaves the page where it was."""
+    developer_page_settled(page, profiles_url, width)
+    bar = page.get_by_role("banner")
+    toggle = bar.get_by_role("button", name="Menu", exact=True)
+    page.evaluate(
+        "window.scrollTo(0, (document.documentElement.scrollHeight - window.innerHeight) / 2)"
+    )
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 300, scrolled  # a long page, scrolled well down
+    if width < 700:
+        toggle.click()
+        expect(toggle).to_have_attribute("aria-expanded", "true")
+        assert_not_scrolled(page, scrolled, "opening the Menu")
+    user = bar.get_by_role("button", name="Your menu")
+    menu = page.get_by_role("menu", name="Your menu")
+
+    user.click()
+    expect(menu).to_be_visible()
+    assert_not_scrolled(page, scrolled, "opening Your menu")
+
+    user.click()
+    expect(menu).to_have_count(0)
+    assert_not_scrolled(page, scrolled, "closing Your menu")
+    if width < 700:
+        toggle.click()
+        expect(toggle).to_have_attribute("aria-expanded", "false")
+        assert_not_scrolled(page, scrolled, "closing the Menu")
+
+
+def test_on_a_phone_a_panel_filled_in_late_leaves_the_page_where_it_was(page: Page, profiles_url):
+    """Kept by #682: the page's scroll anchoring stays on while no top-bar menu is open, so the
+    Company page's Rounds panel, filled in above a scrolled page, moves nothing in view."""
+    held: list[Route] = []
+    page.route("**/api/rounds", lambda route: held.append(route))
+    page.set_viewport_size({"width": 390, "height": 700})
+    with page.expect_response("**/api/documents"):
+        page.goto(f"{profiles_url}/company")
+    documents = page.get_by_role("region", name="Documents")
+    expect(documents).to_be_visible()
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    assert page.evaluate("window.scrollY") > 300
+    rounds = page.get_by_role("region", name="Rounds", exact=True)
+    expect(rounds).not_to_be_in_viewport()  # above the view
+    before = documents.bounding_box()["y"]
+    assert len(held) == 1, len(held)
+    with page.expect_response("**/api/rounds"):
+        held[0].continue_()
+    expect(rounds.get_by_role("status")).to_have_count(0)  # filled in
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    assert abs(documents.bounding_box()["y"] - before) < 2, (before, documents.bounding_box())
