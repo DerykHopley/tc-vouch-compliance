@@ -31,6 +31,14 @@ class Box:
             and other.top < self.bottom - slack
         )
 
+    def overlaps(self, other: "Box", slack: float = 0.5) -> bool:
+        """The two boxes cross on one page, across and down."""
+        return (
+            self.overlaps_vertically(other, slack)
+            and self.left < other.right - slack
+            and other.left < self.right - slack
+        )
+
 
 @dataclass(frozen=True)
 class Printed:

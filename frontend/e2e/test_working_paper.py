@@ -898,7 +898,7 @@ def overlapping_words(printed: pdf_words.Printed) -> list[tuple[str, str, int]]:
         (a.text, b.text, a.page)
         for i, a in enumerate(words)
         for b in words[i + 1 :]
-        if a.overlaps_vertically(b) and a.left < b.right - 0.5 and b.left < a.right - 0.5
+        if a.overlaps(b)
     ]
 
 
