@@ -22,6 +22,7 @@ from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from touch_targets import small_targets
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, UNBREAKABLE, with_long_quotes
+from verdict_chips import LINES, ONE_LINE_FROM, SWEEP, WRAP_WIDTH
 
 LOCAL_USER = "Local user"
 OWNER = "Information security officer"  # the demo script's owner for M1's item
@@ -367,6 +368,32 @@ def test_at_1440_and_1024_neither_table_scrolls_sideways(
                     " return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; })"
                 )
                 assert days and all(lines == 1 for lines in days), (profile, width, days)
+
+
+@pytest.mark.parametrize("fonts", ["web", "fallback"])
+def test_from_701_the_controls_table_fits_and_its_verdict_chips_wrap_only_under_800(
+    page: Page, report_url, fonts, nordlicht_later
+):
+    """#550: at WRAP_WIDTH the German verdict ("Teilweise nachgewiesen") made the controls table
+    619px in 603px. From WRAP_WIDTH the controls table fits, in the web fonts and the fallback
+    (#512), as #463 owns the other tables' widths; from ONE_LINE_FROM its verdict chips are one
+    line each."""
+    if fonts == "fallback":
+        without_web_fonts(page)
+    accepted(page.request, report_url, "4.1.2", "alpenwerk")  # a German verdict, the widest
+    nordlicht_later(report_url)
+    for profile in ("nordlicht", "alpenwerk"):
+        make_current(page.request, report_url, profile)
+        for width in (WRAP_WIDTH, *SWEEP):
+            page.set_viewport_size({"width": width, "height": 900})
+            report = open_report(page, report_url)
+            expect(report.locator("table.report-controls")).to_be_visible()
+            assert tables_overflowing(report, ("table.report-controls",)) == [], (profile, width)
+            if profile == "alpenwerk" and width >= ONE_LINE_FROM:  # the one with a verdict
+                chips = report.locator("table.report-controls .chip").evaluate_all(
+                    f"els => els.map({LINES})"
+                )
+                assert chips and set(chips) == {1}, (profile, width, chips)
 
 
 def long_report_quotes(served: dict) -> None:

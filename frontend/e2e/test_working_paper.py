@@ -11,20 +11,34 @@ import re
 import pdf_words
 import pytest
 from current_company import make_current
+from dossier_cards import card as overview_card
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import confirmed
 from touch_targets import small_targets
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, with_long_quotes
+from verdict_chips import (
+    CHIPS,
+    ONE_LINE_FROM,
+    SWEEP,
+    WRAP_WIDTH,
+    assert_dot_on_first_line,
+)
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
 UNASSESSED = "5.1.2"  # assessed by one check only; Nordlicht marks its S3 not applicable
 
 
-def assessed(request: APIRequestContext, paper_url: str, control_id: str) -> None:
-    """Assesses a control on the server's fake model, up to the review."""
-    response = request.post(f"{paper_url}/api/assessments", data={"control_id": control_id})
+def assessed(
+    request: APIRequestContext, paper_url: str, control_id: str, profile: str | None = None
+) -> None:
+    """Assesses a control on the server's fake model, up to the review: under the profile when
+    one is named, else under the current company."""
+    headers = {"X-Vouch-Profile": profile} if profile else {}
+    response = request.post(
+        f"{paper_url}/api/assessments", data={"control_id": control_id}, headers=headers
+    )
     assert response.ok, response.status
     assert "event: result" in response.text()
 
@@ -363,7 +377,7 @@ TABLE_LAYOUT = (
 )
 
 
-@pytest.mark.parametrize("width", [1440, 1024, 390])
+@pytest.mark.parametrize("width", [1440, 1024, WRAP_WIDTH, 390])
 def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row(
     page: Page, paper_url, width, nordlicht_later
 ):
@@ -371,7 +385,8 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
     table doesn't scroll sideways on Nordlicht or Alpenwerk, and the Requirement column keeps at
     least REQUIREMENT_MIN; the requirement text hyphenates in its own language; each remediation
     item is its own row under its requirement, spanning the table on a desktop and inside the
-    card's width on a phone (#211)."""
+    card's width on a phone (#211). #550: at WRAP_WIDTH the German verdict widened the table by
+    about 16px."""
     page.set_viewport_size({"width": width, "height": 900})
     nordlicht_later(paper_url)
     for profile, language in (("nordlicht", "en"), ("alpenwerk", "de")):
@@ -403,6 +418,40 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert abs(item["width"] - layout["table"]) <= 1, item  # spans the table
             else:
                 assert item["width"] <= width, item
+
+
+def test_in_the_judged_table_a_verdict_chip_wraps_only_under_800(
+    page: Page, paper_url, nordlicht_later
+):
+    """#550: under ONE_LINE_FROM a verdict chip in the judged table may wrap at its space, its dot
+    on its first line, and the table still fits; from ONE_LINE_FROM every chip is one line. The
+    Overview's card chip stays on one line at WRAP_WIDTH."""
+    nordlicht_later(paper_url)
+    for profile in ("nordlicht", "alpenwerk"):
+        assessed(page.request, paper_url, WIDE, profile)
+        make_current(page.request, paper_url, profile)
+        page.set_viewport_size({"width": WRAP_WIDTH, "height": 900})
+        open_paper(page, paper_url, WIDE, assessed=True)
+        for width in (WRAP_WIDTH, *SWEEP):
+            page.set_viewport_size({"width": width, "height": 900})
+            chips = page.evaluate(CHIPS, "table.reqs.judged .verdict-col .chip")
+            if width >= ONE_LINE_FROM:
+                assert chips and all(c["lines"] == 1 for c in chips), (
+                    f"{profile} at {width}: {chips}"
+                )
+            else:
+                assert_dot_on_first_line(chips)
+            if width != WRAP_WIDTH:  # the fit at WRAP_WIDTH is the table test's
+                fit = page.evaluate(TABLE_LAYOUT)
+                assert fit["scroll"] <= fit["room"], f"{profile} at {width}px: {fit}"
+
+    page.set_viewport_size({"width": WRAP_WIDTH, "height": 900})
+    assessed(page.request, paper_url, ASSESSED, "alpenwerk")
+    with page.expect_response("**/api/overview"):
+        page.goto(f"{paper_url}/")
+    expect(overview_card(page, ASSESSED).locator(".chip")).to_have_text("Teilweise nachgewiesen")
+    (chip,) = page.evaluate(CHIPS, f"article[aria-label='Control {ASSESSED}'] .chip")
+    assert chip["whiteSpace"] == "nowrap" and chip["lines"] == 1, chip
 
 
 INDEX_ROWS = (
