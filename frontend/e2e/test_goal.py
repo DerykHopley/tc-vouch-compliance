@@ -14,6 +14,9 @@ from touch_targets import small_targets
 
 TO_IMPROVEMENT = "Goal changed from Audit readiness to Internal improvement"
 TO_READINESS = "Goal changed from Internal improvement to Audit readiness"
+# The guard's DOUBLE_CLICK_MS (#527, #562): a click within that long of the last click of a burst
+# that began on a pointer confirm presses nothing, so a person's next click comes after it.
+DOUBLE_CLICK_MS = 500
 
 
 def open_dossier(page: Page, url: str) -> None:
@@ -131,7 +134,9 @@ def test_a_double_click_on_the_confirm_presses_nothing_after_it(page: Page, doss
     expect(page.locator("[role=alert]", has_text="Close the review round")).to_have_count(0)
     assert len(puts) == 1, puts
 
-    # Ends on Audit readiness, as it began.
+    # Ends on Audit readiness, as it began: after a double-click's time, as the next click would
+    # still be the same burst (#562).
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     change_goal(page, dialogs, "Audit readiness")
     expect(goal).to_contain_text("Goal: Audit readiness")
     no_dialog(dialogs)

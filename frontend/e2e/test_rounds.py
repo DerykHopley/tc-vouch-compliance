@@ -31,8 +31,8 @@ CLOSE_FIRST = (
     'Close the review round "First round"? Its results are frozen, and the overview compares '
     "later work with them. The close is recorded in the audit trail."
 )
-# InlineConfirm's DOUBLE_CLICK_MS (#527): for that long after a pointer confirm, the next click
-# anywhere presses nothing, even once the ask has left the page.
+# The guard's DOUBLE_CLICK_MS (#527, #562): a click anywhere within that long of the last click of
+# a burst that began on a pointer confirm presses nothing, even once the ask has left the page.
 DOUBLE_CLICK_MS = 500
 
 
