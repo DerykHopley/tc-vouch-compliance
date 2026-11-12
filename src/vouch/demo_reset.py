@@ -10,11 +10,16 @@ Postgres deletes in one transaction under the guarded tables' reset setting
 (vouch.database's `reset_company`, RESET_DEMO_SETTING); without a database, this process's
 stores forget the company. A real deployment would drop this delete exception.
 
+One reset of a company runs at a time in this process (#619, `hold`): a second one
+while it runs is refused, rather than finding the seed's assessment already running.
+
 FastAPI's TestClient is imported at the top on purpose: the seed's client is the app's own
 routes, in this process, for the seeding app (`seed_demo`), not a test.
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 
@@ -28,12 +33,34 @@ from vouch.audit import AuditEntry, Reviewer
 from vouch.database import Database
 from vouch.memory import process_checkpointer, process_store, store_label
 from vouch.profile import DEFAULT_PROFILE
+from vouch.runs import RunningAssessments
 from vouch.spending import SpendingGuard
 
 PAGE = 100
 """How many namespaces, or items, the wipe reads from the process's store at a time."""
 DEMO_COMPANY = DEFAULT_PROFILE
 """The company whose Reset demo seeds the demo round; every other one is left empty."""
+ANOTHER_RESET = (
+    "Another reset of {company} is running. Nothing was reset; try again when it has finished."
+)
+"""The refusal of a reset while another of the same company runs (#619)."""
+
+
+class ResetRunning(RuntimeError):
+    """Another reset of the company is running in this process."""
+
+
+@contextmanager
+def hold(resets: RunningAssessments, profile_id: str) -> Iterator[None]:
+    """Held for the reset of `profile_id`, released however it ends; ResetRunning, with nothing
+    held, when another reset of it is running. `resets` is a guard of its own (app.state.resets),
+    vouch.runs' one-each lock keyed by company here rather than by memory scope."""
+    if not resets.try_hold(profile_id):
+        raise ResetRunning(profile_id)
+    try:
+        yield
+    finally:
+        resets.release(profile_id)
 
 
 def reset_entry(reviewer: Reviewer, profile_id: str, at: datetime) -> AuditEntry:

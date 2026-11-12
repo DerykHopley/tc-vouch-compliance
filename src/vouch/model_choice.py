@@ -78,6 +78,10 @@ threshold bounds it before the call instead."""
 PROFILE_PASS_MAX_RETRIES = 0
 """A profile pass request is never retried (#432): a timed-out pass may still be billed, so a
 retry could pay for it twice and hold the run for twice the timeout. The lead's Try again stays."""
+ASSESSMENT_TEMPERATURE = 0.0
+"""The sampling temperature of assessments and the profile pass (#638), so a verdict is as
+reproducible as the model allows. Unset, langchain-openai leaves temperature out of the request
+and the provider's default applies (OpenRouter documents 1.0 as the usual one). Chat sets none."""
 CATALOGUE_TIMEOUT_SECONDS = 10.0
 CATALOGUE_TTL_SECONDS = 600.0
 """How long one reading of OpenRouter's model list answers id checks."""
@@ -266,10 +270,12 @@ class OpenRouter:
         callbacks: list[BaseCallbackHandler] | None = None,
         timeout: float = TIMEOUT_SECONDS,
         max_retries: int = MAX_RETRIES,
+        temperature: float | None = None,
     ) -> BaseChatModel:
         """A chat model for one assessment, within CALL_BUDGET calls. `timeout`: one request's
         limit (a local model through the eval runner may need longer); `max_retries`: retries of
-        one request after its first try."""
+        one request after its first try; `temperature`: None sends none, so the provider's
+        default applies."""
         return _budgeted_chat_openai()(
             callbacks=callbacks,
             model=model,
@@ -277,6 +283,7 @@ class OpenRouter:
             base_url=str(self.base_url),
             max_retries=max_retries,
             timeout=timeout,
+            temperature=temperature,
             http_client=self._chat_client,
         )
 
@@ -409,7 +416,7 @@ class ModelChoice:
             fake = fake_model(self._settings, demo_script(answer_language, control_id))
             fake.callbacks = callbacks
             return fake
-        return self.openrouter.chat_model(chosen, callbacks)
+        return self.openrouter.chat_model(chosen, callbacks, temperature=ASSESSMENT_TEMPERATURE)
 
     def for_profile_pass(
         self,
@@ -441,6 +448,7 @@ class ModelChoice:
             callbacks,
             timeout=PROFILE_PASS_TIMEOUT_SECONDS,
             max_retries=PROFILE_PASS_MAX_RETRIES,
+            temperature=ASSESSMENT_TEMPERATURE,
         )
 
     def for_chat(
@@ -450,8 +458,9 @@ class ModelChoice:
         answer_language: str = "en",
     ) -> BaseChatModel:
         """A fresh model for one chat message (#44), on `chosen` (from `chosen()`), within
-        CALL_BUDGET calls; on the fake, the chat's canned answer, in `answer_language` where it
-        has one (#233). `callbacks` see every call (the usage meter), as for_assessment's do."""
+        CALL_BUDGET calls, at the provider's default temperature (#638); on the fake, the chat's
+        canned answer, in `answer_language` where it has one (#233). `callbacks` see every call
+        (the usage meter), as for_assessment's do."""
         if chosen is None or self.openrouter is None:  # None: runs_on is "fake"
             # Imported here: the fake knows the chat agent's tools, and the chat agent's
             # modules (vouch.spending among them) import this one.
