@@ -11,7 +11,9 @@ test_database's.
 
 import base64
 import json
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
@@ -33,9 +35,11 @@ from vouch.database import (
     REMEDIATION_TABLE,
     RESET_DEMO_SETTING,
     Database,
+    DatabaseUnavailable,
 )
 from vouch.demo_round import NEXT_ROUND, ROUND_NAME
 from vouch.memory import process_store
+from vouch.runs import RunningAssessments
 from vouch.spending import DAILY_LIMIT
 
 database_url = test_memory.database_url
@@ -185,6 +189,63 @@ def test_the_reset_counts_against_no_daily_limit(database_url, users):
 
     assert answer["seeded"] is True
     assert refused.status_code == 429  # the developer's own limit still holds
+
+
+def test_a_second_reset_of_the_company_while_one_runs_is_refused_with_409(monkeypatch, users):
+    """#619: two at once on the same company; the second is refused, saying another reset of
+    that company is running, and the first one's demo round is still played."""
+    developer, _ = users
+    wipe = demo_reset.wipe
+    first_in, second_done = threading.Event(), threading.Event()
+
+    def first_waits(*args: Any) -> None:
+        if not first_in.is_set():
+            first_in.set()
+            second_done.wait(timeout=30)  # the first reset is running while the second arrives
+        wipe(*args)
+
+    monkeypatch.setattr(demo_reset, "wipe", first_waits)
+    with TestClient(app_on(None)) as client, ThreadPoolExecutor(1) as pool:
+        first = pool.submit(reset, client, developer)
+        assert first_in.wait(timeout=30)
+        second = reset(client, developer)
+        second_done.set()
+        first_answer = first.result(timeout=60)
+
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"] == (
+        "Another reset of Nordlicht Komponenten GmbH is running. "
+        "Nothing was reset; try again when it has finished."
+    )
+    assert (first_answer.status_code, first_answer.json()["seeded"]) == (200, True)
+
+
+def test_a_second_hold_of_the_same_company_is_refused():
+    resets = RunningAssessments()
+    with demo_reset.hold(resets, "nordlicht"):
+        refused = pytest.raises(demo_reset.ResetRunning)
+        with refused, demo_reset.hold(resets, "nordlicht"):
+            pass
+
+
+def test_a_hold_on_another_company_is_not_blocked():
+    resets = RunningAssessments()
+    with demo_reset.hold(resets, "nordlicht"), demo_reset.hold(resets, "alpenwerk"):
+        pass
+
+
+def test_the_hold_is_released_after_a_normal_exit():
+    resets = RunningAssessments()
+    with demo_reset.hold(resets, "nordlicht"):
+        pass
+    assert resets.try_hold("nordlicht")
+
+
+def test_the_hold_is_released_after_an_exception():
+    resets = RunningAssessments()
+    with pytest.raises(DatabaseUnavailable), demo_reset.hold(resets, "nordlicht"):
+        raise DatabaseUnavailable("down")
+    assert resets.try_hold("nordlicht")
 
 
 def test_an_unknown_company_is_404(users):

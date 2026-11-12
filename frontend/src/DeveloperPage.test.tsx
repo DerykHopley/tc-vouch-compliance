@@ -870,6 +870,8 @@ describe('Reset demo, issue 605', () => {
   it.each([
     [503, { detail: 'down', unavailable: 'database' }, 'The database is unavailable just now. Nothing was reset; try again in a moment.'],
     [500, {}, 'The company could not be reset. Try again.'],
+    [409, { detail: 'Another reset of Nordlicht Komponenten GmbH is running. Nothing was reset; try again when it has finished.' },
+      'Another reset of Nordlicht Komponenten GmbH is running. Nothing was reset; try again when it has finished.'],
   ])('on a %i, says why under the list', async (status, body, message) => {
     resetting(status, body)
     vi.spyOn(window, 'confirm').mockReturnValue(true)

@@ -245,6 +245,8 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
       const note = result.seeded ? `Reset ${row.company} to its demo state: Q2 2026 closed, Q3 2026 open.`
         : result.note ? `Reset ${row.company}. ${result.note}` : `Reset ${row.company}: it has no progress or history.`
       setActing({ status: 'done', note })
+    } else if (result.status === 'refused') {
+      setActing({ status: 'problem', message: result.problem || RESET_PROBLEM.failed })
     } else if (result.status === 'signed-out') {
       setActing({ status: 'idle' })
     } else {
