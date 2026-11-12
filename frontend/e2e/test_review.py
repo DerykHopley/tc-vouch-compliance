@@ -17,6 +17,7 @@ from touch_targets import small_targets
 
 CONTROL = "4.1.2"
 REASON = "The 2025 MFA rollout record shows the risk-based decision."
+PRESS_MS = 150  # a person's press: the button is let go a moment after it goes down
 
 
 def assessed(request: APIRequestContext, paper_url: str) -> dict:
@@ -321,7 +322,7 @@ def test_a_press_on_save_half_under_the_docked_buttons_saves_the_override(page: 
     assert at is not None and under is not None
     page.mouse.move(at["x"] + at["width"] / 2, under["y"] - 4)
     page.mouse.down()
-    page.wait_for_timeout(150)  # a person's press: the button is let go a moment later
+    page.wait_for_timeout(PRESS_MS)
     page.mouse.up()
     expect(row(paper, "M1")).to_contain_text("Overridden from Partly evidenced")
 
