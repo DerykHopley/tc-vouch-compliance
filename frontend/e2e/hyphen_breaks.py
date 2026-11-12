@@ -10,12 +10,14 @@ from playwright.sync_api import Page
 # as those letters set unbroken, plus the hyphen the browser inserted. Chromium gives that hyphen a
 # rect of its own and Firefox widens the line's rect by it (#488), so the width is what both agree
 # on: a break with less than half a hyphen's extra width has none. `page.evaluate(UNHYPHENATED_BREAKS,
-# selector)` gives `{words, breaks}`: how many words it measured, and the ones broken bare.
+# selector)` gives `{words, breaks, broken}`: how many words it measured, the ones broken bare, and
+# every word set on more than one line (broken, with a hyphen or without).
 UNHYPHENATED_BREAKS = (
     "async (selector) => {"
     + FONTS_SETTLED
     + r"""  const words = []
   const breaks = []
+  const broken = []
   const rangeOf = (node, start, end) => {
     const range = document.createRange()
     range.setStart(node, start)
@@ -49,6 +51,7 @@ UNHYPHENATED_BREAKS = (
         const rects = [...rangeOf(node, word.index, word.index + word[0].length).getClientRects()]
         words.push(word[0])
         const tops = [...lines.keys()].sort((a, b) => a - b)
+        if (tops.length > 1) broken.push(word[0])
         const bare = tops.slice(0, -1).some((top) => {
           const here = rects.filter((r) => Math.abs(r.top - top) < 2)
           const width = Math.max(...here.map((r) => r.right)) - Math.min(...here.map((r) => r.left))
@@ -58,7 +61,7 @@ UNHYPHENATED_BREAKS = (
       }
     }
   }
-  return { words: words.length, breaks }
+  return { words: words.length, breaks, broken }
 }"""
 )
 

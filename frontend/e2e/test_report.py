@@ -228,30 +228,18 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
 
 # The title's widths and marks, once the fonts have settled: its own scrollWidth and clientWidth,
 # the sheet's content width (the title's box grows with its text, so it alone can't show the
-# overflow), its computed hyphens, the lang it carries (its own or the sheet's), and each word set on more
-# than one line (broken, with a hyphen or without).
+# overflow), its computed hyphens and the lang it carries (its own or the sheet's).
 TITLE = (
     "async () => {"
     + FONTS_SETTLED
     + r"""  const h1 = document.querySelector('h1#report-title')
   const sheet = h1.closest('article')
   const pad = getComputedStyle(sheet)
-  const node = h1.firstChild
-  const broken = [...node.data.matchAll(/\p{L}+/gu)].filter((word) => {
-    const tops = new Set()
-    for (let i = 0; i < word[0].length; i++) {
-      const range = document.createRange()
-      range.setStart(node, word.index + i)
-      range.setEnd(node, word.index + i + 1)
-      tops.add(Math.round([...range.getClientRects()].at(-1).top))
-    }
-    return tops.size > 1
-  }).map((word) => word[0])
   return {
     wide: h1.scrollWidth, box: h1.clientWidth,
     sheet: sheet.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight),
     hyphens: getComputedStyle(h1).hyphens,
-    lang: h1.closest('[lang]')?.lang, broken,
+    lang: h1.closest('[lang]')?.lang,
   }
 }"""
 )
@@ -284,13 +272,15 @@ def test_at_360px_the_reports_title_fits_and_a_german_one_hyphenates(
         )
         assert not scrolls, f"{profile}'s report scrolls sideways at 360px: {title}"
         assert title["wide"] <= min(title["box"], title["sheet"]), (profile, title)
+        words = page.evaluate(UNHYPHENATED_BREAKS, "h1#report-title")
         if profile == "alpenwerk":
-            assert (title["hyphens"], title["lang"]) == ("auto", "de"), title
+            assert title["hyphens"] == "auto", title
+            if goal != "audit-readiness":  # the readiness report's lang is checked above
+                assert title["lang"] == "de", title
             if fonts == "web":
-                bare = page.evaluate(UNHYPHENATED_BREAKS, "h1#report-title")
-                assert bare["words"] and bare["breaks"] == [], bare
+                assert words["words"] and words["breaks"] == [], words
         else:
-            assert title["broken"] == [], title
+            assert words["broken"] == [], words
 
 
 def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(
