@@ -1,0 +1,15 @@
+/* The nav bar every Pages page shares (#704): Home, Process flow, Eval report, Repo.
+   Colours only through the page's own tokens (--sheet, --rule, --ink, --muted, --navy), so it
+   follows each page's light and dark mode. Links are 44px tall, docs/design.md's touch floor. */
+.site-nav { background: var(--sheet); border-bottom: 1px solid var(--rule); padding: 0 16px; }
+.site-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: stretch; column-gap: 4px; }
+.site-nav li { display: flex; }
+.site-nav a { display: flex; align-items: center; min-height: 44px; padding: 0 10px; font: 500 14px/1.2 var(--f-body);
+  color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; }
+.site-nav li:first-child a { padding-left: 0; }
+.site-nav a:hover { color: var(--ink); }
+.site-nav a[aria-current="page"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--navy); }
+.site-nav a:focus-visible { outline: 2px solid var(--navy); outline-offset: -2px; }
+.site-nav .ext { margin-left: auto; }
+.site-nav .ext a { padding-right: 0; }
+@media (max-width: 400px) { .site-nav a { padding: 0 7px; font-size: 13px; } }

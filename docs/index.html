@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vouch</title>
+<meta name="description" content="Vouch, an audit-readiness agent for ISMS and TISAX: the live app, how it runs, its eval report, and the repo.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site-nav.css">
+<style>
+/* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), as the evals and
+   flow pages have them. */
+:root {
+  --paper: #E8E7E3; --sheet: #F7F7F5; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
+  --navy: #1F3B6E; --brass: #A8834A;
+  --f-display: "Libre Caslon Display", Georgia, serif;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 var(--f-body); }
+a { color: var(--navy); }
+main { max-width: 60rem; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 24px; }
+header { display: grid; gap: 10px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.eyebrow { font: 12px/1.4 var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+h1 { font: 400 clamp(40px, 8vw, 64px)/1.05 var(--f-display); margin: 0; }
+.lede { max-width: 62ch; margin: 0; font-size: 17px; }
+p { margin: 0; }
+.cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 8px; align-content: start; }
+.card h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0; letter-spacing: .02em; }
+.card .go { display: inline-flex; align-items: center; min-height: 44px; font: 400 24px/1.15 var(--f-display); text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.card ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.card li a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 500; }
+.card li span { color: var(--muted); font-size: 13px; }
+.muted { color: var(--muted); font-size: 14px; }
+.theme { font: inherit; font-size: 13px; background: none; color: var(--muted); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; min-height: 44px; cursor: pointer; }
+.theme:focus-visible, .card a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+footer { color: var(--muted); font-size: 13px; }
+@media (max-width: 40rem) { .card { padding: 16px; } .lede { font-size: 16px; } }
+</style>
+</head>
+<body>
+<nav class="site-nav" aria-label="Vouch pages"><ul>
+  <li><a href="./" aria-current="page">Home</a></li>
+  <li><a href="flow/">Process flow</a></li>
+  <li><a href="evals/">Eval report</a></li>
+  <li class="ext"><a href="https://github.com/DerykHopley/tc-vouch-compliance">Repo</a></li>
+</ul></nav>
+<main>
+  <header>
+    <div class="top">
+      <p class="eyebrow">ISMS and TISAX audit-readiness agent</p>
+      <button class="theme" id="theme" type="button" aria-label="Switch light or dark">Dark</button>
+    </div>
+    <h1>Vouch</h1>
+    <p class="lede">Vouch helps a compliance lead prepare for an information security audit (TISAX, ISO 27001) by tracing each control back to the company's own evidence.</p>
+    <p class="lede">An assessment searches the company's policies and records for one control, gives each requirement a verdict (evidenced, partly evidenced or not evidenced) backed by citations quoted word for word, and drafts an answer for the auditor. The compliance lead reviews every verdict in three steps, Confirm findings, Plan fixes and Accept, and only accepted verdicts count towards readiness.</p>
+  </header>
+
+  <div class="cards">
+    <section class="card" aria-labelledby="h-app">
+      <h2 id="h-app">Try it</h2>
+      <a class="go" href="https://vouch-828715466396.europe-west1.run.app">The live app</a>
+      <p class="muted">Invite-only: sign-in with Clerk, and members of the course's Discord server are let in too. It runs on the real model.</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-flow">
+      <h2 id="h-flow">How it runs</h2>
+      <a class="go" href="flow/">The process flow</a>
+      <p class="muted">One assessment end to end: FastAPI, the LangGraph graphs, the model calls, the guards, the three-step review, the chat and the profile pass, and what is written to Postgres when.</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-evals">
+      <h2 id="h-evals">How well it judges</h2>
+      <a class="go" href="evals/">The eval report</a>
+      <p class="muted">Each model's verdicts on the same 12 VDA ISA controls against expected answers: accuracy, citations and cost, built from the raw results with no model call.</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-repo">
+      <h2 id="h-repo">Read the code</h2>
+      <ul>
+        <li><a href="https://github.com/DerykHopley/tc-vouch-compliance">The repo</a></li>
+        <li><a href="https://github.com/DerykHopley/tc-vouch-compliance#readme">README</a></li>
+        <li><a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/docs/demo.md">The demo script</a></li>
+        <li><a href="https://github.com/DerykHopley/tc-vouch-compliance/tree/main/docs">The docs</a></li>
+        <li><a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/GLOSSARY.md">The glossary</a></li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>The controls are the VDA ISA 2027.1, © ENX Association, licensed under CC BY-ND 4.0, and shipped unchanged.</footer>
+</main>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const sync = () => { btn.textContent = dark() ? 'Light' : 'Dark'; };
+  btn.addEventListener('click', () => { root.dataset.theme = dark() ? 'light' : 'dark'; sync(); });
+  sync();
+})();
+</script>
+</body>
+</html>
