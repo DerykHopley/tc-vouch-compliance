@@ -13,6 +13,7 @@ light and dark, nothing scrolls sideways and every control is at least 44px."""
 import re
 
 import pytest
+from fonts import FONTS_SETTLED
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 from reviewing import decide
 from touch_targets import small_targets
@@ -51,11 +52,17 @@ def head_tag(paper: Locator) -> Locator:
 
 
 def assess_on_the_paper(page: Page, paper: Locator) -> None:
-    """Assess (again), waiting for the run to finish at Confirm findings."""
+    """Assess (again), waiting for the run to finish at Confirm findings. The click waits until the
+    button is enabled and the page has settled (fonts loaded, two frames drawn): Playwright checks
+    the hit target at the press only, so a button changed between press and release loses the click
+    without an error (#695)."""
+    button = paper.locator(".assess").get_by_role(
+        "button", name=re.compile(rf"^Assess( again)? {CONTROL}$")
+    )
+    expect(button).to_be_enabled()
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
     with page.expect_response("**/api/assessments"):
-        paper.locator(".assess").get_by_role(
-            "button", name=re.compile(rf"^Assess( again)? {CONTROL}$")
-        ).click()
+        button.click()
     expect(paper.get_by_role("button", name="Confirm findings")).to_be_visible()
 
 
