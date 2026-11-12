@@ -355,17 +355,19 @@ const CUT_SHOWS = 8
 /**
  * The stacked index (`nav`, while it scrolls in its own box) cuts a row at its foot (#617): when no row shows there
  * by at least CUT_SHOWS (the open row brought into view ends at the edge, or an area's heading meets it), it scrolls
- * on until the next row is half-shown under the fade, as far as the `open` row stays wholly in view. Beside the
- * paper the index's list scrolls, not `nav`, and nothing moves. A box that fits its rows has none below its edge.
+ * on until the next row is half-shown under the fade, as far as the `open` row stays wholly in view. When no row
+ * lies below the edge (the open row is the last), it scrolls to the very end, past the list's foot padding, so the
+ * fade goes and doesn't cover the open row. Beside the paper the index's list scrolls, not `nav`, and nothing moves.
  */
 function cutRowAtFoot(nav: HTMLElement, open: Element) {
   const top = nav.getBoundingClientRect().top + nav.clientTop
   const edge = top + nav.clientHeight
   const next = [...nav.querySelectorAll('.wp-row')].map((r) => r.getBoundingClientRect())
     .find((r) => r.bottom > edge + 0.5)
-  if (!next || next.top < edge - CUT_SHOWS) return
+  if (next && next.top < edge - CUT_SHOWS) return
   const room = open.getBoundingClientRect().top - top
-  nav.scrollTop += Math.min(next.top - edge + next.height / 2, room)
+  const toEnd = nav.scrollHeight - nav.clientHeight - nav.scrollTop
+  nav.scrollTop += Math.min(next ? next.top - edge + next.height / 2 : toEnd, room)
 }
 
 /** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
@@ -384,8 +386,13 @@ function ControlIndex({ controls, openId, running, run, onOpen, language, improv
       if (row && nav.current) cutRowAtFoot(nav.current, row)
     }
     place()
+    // A late web font changes the rows' heights: placed again as the fonts settle, until the user first scrolls the
+    // index by hand (a wheel, a touch, a press on its scrollbar, a key), whose place a late font leaves alone.
     const stop = new AbortController()
-    onFontsSettled(place, stop.signal) // a late web font changes the rows' heights
+    onFontsSettled(place, stop.signal)
+    for (const by of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+      nav.current?.addEventListener(by, () => stop.abort(), { once: true, passive: true, signal: stop.signal })
+    }
     return () => stop.abort()
   }, [openId])
   return (

@@ -1135,6 +1135,55 @@ def test_on_a_phone_the_stacked_index_cuts_a_row_at_its_foot_when_an_area_ends_t
     assert open_row["y"] + open_row["height"] <= cut["edge"] + 0.5, (open_row, cut)
 
 
+def test_on_a_phone_the_last_control_opens_at_the_stacked_indexs_end_with_no_fade(
+    page: Page, paper_url
+):
+    """#617: no row follows the last control (5.2.9), so the index scrolls to its very end, past
+    the list's foot padding: the fade goes, and the open row's question can be read."""
+    as_never_assessed(page)
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "5.2.9", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
+    seen = nav.evaluate(
+        "async (nav) => {"
+        + FONTS_SETTLED
+        + """  const box = nav.getBoundingClientRect()
+  const row = nav.querySelector('[aria-current="page"]').getBoundingClientRect()
+  return { top: box.top + nav.clientTop, edge: box.top + nav.clientTop + nav.clientHeight,
+    rowTop: row.top, rowBottom: row.bottom }
+}"""
+    )
+    assert seen["top"] - 0.5 <= seen["rowTop"], seen
+    assert seen["rowBottom"] <= seen["edge"] + 0.5, seen
+
+
+def test_a_late_font_leaves_the_stacked_index_where_a_hand_scroll_put_it(page: Page, paper_url):
+    """#617: the index is placed again as the web fonts settle, but only until the user scrolls
+    it: a font that loads after a hand scroll leaves the index where the user put it."""
+    as_never_assessed(page)
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "5.1.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    page.evaluate("async () => {" + FONTS_SETTLED + "}")
+    placed = nav.evaluate("n => n.scrollTop")
+    assert placed > 0, placed  # 5.1.1 lies below the foot, so the index scrolled to it
+
+    nav.hover()
+    page.mouse.wheel(0, -200)  # Firefox scrolls one wheel step only so far: wherever it stops
+    page.wait_for_function(
+        f"document.querySelector('.wp-index').scrollTop < {placed}", timeout=5000
+    )
+    by_hand = nav.evaluate("async (n) => {" + FONTS_SETTLED + "return n.scrollTop }")
+    # A web font that loads late: document.fonts says so, as it does when one finishes.
+    page.evaluate(
+        "async () => { document.fonts.dispatchEvent(new Event('loadingdone'))" + FONTS_SETTLED + "}"
+    )
+    assert nav.evaluate("n => n.scrollTop") == by_hand, (placed, by_hand)
+
+
 @pytest.mark.parametrize("how", ["tap", "click"])
 def test_on_a_phone_the_half_shown_row_under_the_fade_opens_on_the_first_press(
     browser, paper_url, how
