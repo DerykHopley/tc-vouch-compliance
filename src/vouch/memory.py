@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from typing import NamedTuple, get_args
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
@@ -64,6 +64,26 @@ def store_label(value: str) -> str:
     """`value` as a store namespace label: LangGraph refuses a label with a period, so it's
     percent-encoded, periods too. Different values stay different."""
     return quote(value, safe="").replace(".", "%2E")
+
+
+USERS_PAGE = 500
+"""How many namespaces one read of the store lists (`users_with_memory`), page after page."""
+
+
+def users_with_memory(store: BaseStore, profile_id: str) -> set[str]:
+    """Every user with something kept under the profile (an assessment, a chat): the users
+    whose namespace `("vouch", user, profile, ...)` the store holds (#624). Raises
+    DatabaseUnavailable (Postgres)."""
+    company = ("vouch", "*", store_label(profile_id))  # every user's namespaces under it
+    users: set[str] = set()
+    offset = 0
+    while namespaces := store.list_namespaces(
+        prefix=company, max_depth=3, limit=USERS_PAGE, offset=offset
+    ):
+        # A namespace emptied by Reset demo stays listed in the process store: kept ones only.
+        users |= {unquote(ns[1]) for ns in namespaces if store.search(ns, limit=1)}
+        offset += USERS_PAGE
+    return users
 
 
 class Entry(NamedTuple):

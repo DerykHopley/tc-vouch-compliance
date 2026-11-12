@@ -235,6 +235,25 @@ def test_a_new_version_tags_the_citing_control_and_assess_again_clears_it(
     expect(card(page, "4.1.2").get_by_text(NEW_EVIDENCE)).to_have_count(0)
 
 
+def test_a_lead_who_may_not_change_the_documents_sees_no_actions_and_who_can(page: Page, vouch_url):
+    """#624: only the company's creator or a developer changes its documents. Local mode's one
+    user is a developer, so the answer is served as a compliance lead's (`can_change` false)."""
+
+    def as_lead(route) -> None:
+        answer = route.fetch()
+        route.fulfill(response=answer, json=answer.json() | {"can_change": False})
+
+    page.route(DOCUMENTS, as_lead)
+    with page.expect_response(DOCUMENTS):
+        page.goto(f"{vouch_url}/company")
+
+    sheet = page.get_by_role("article", name="Documents")
+    expect(
+        sheet.get_by_text("Only the user who set up this company, or a developer")
+    ).to_be_visible()
+    expect(sheet.get_by_role("button")).to_have_count(0)
+
+
 # The tables' scroll hint (#607, #555's fade turned sideways): on a phone each table scrolls in its
 # own container, and while columns lie beyond its right edge that edge fades into the sheet, in the
 # sheet's own colour; the fade goes at the table's end. Each table's item: whether the box around

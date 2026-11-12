@@ -123,6 +123,7 @@ from vouch.memory import (
     newest_by_control,
     process_checkpointer,
     process_store,
+    users_with_memory,
 )
 from vouch.model_choice import (
     MODEL_ID,
@@ -217,6 +218,10 @@ BUILT_IN_NOT_WITHDRAWN = "A built-in document can't be withdrawn."
 """`POST /api/documents/{id}/withdraw`'s 400 for a built-in document's id (#586)."""
 NO_ADDED_DOCUMENT = "This company has no added document with that id."
 """`POST /api/documents/{id}/withdraw`'s 404 (#586)."""
+DOCUMENTS_CHANGE_REFUSED = (
+    "Only the user who set up this company, or a developer, can add or withdraw documents."
+)
+"""The 403 of an add or withdraw by anyone else (#624)."""
 NOT_BASE64 = "The file could not be read. Choose it again."
 FUTURE_APPROVAL = "The approval date can't be after today."
 """`POST /api/documents`'s 400 for a future approval date, which would never be stale (#627)."""
@@ -633,6 +638,41 @@ def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterato
 UserMemory = Annotated[Memory, Depends(user_memory)]
 
 
+def role_if_known(request: Request, user: CurrentUser, settings: AppSettings) -> Role | None:
+    """The user's role as `user_role` reads it, or None when Clerk can't be asked: for a page
+    that still loads without it (#624: the Documents panel)."""
+    try:
+        found = _clerk_user(request, user, settings)
+    except ClerkUnavailable:
+        return None
+    return "developer" if found is None else found.role
+
+
+def may_change_documents(
+    profile: Profile,
+    user: CurrentUser,
+    role: Annotated[Role | None, Depends(role_if_known)],
+    companies: CompanyProfiles,
+) -> bool:
+    """Whether the user may add, version or withdraw the current company's documents (#624,
+    owner decision A): a developer, or the user who set the company up. A file-defined company
+    has no creator, so developers only. A role Clerk can't say isn't a developer's: the
+    read-only list still loads, and a change is refused."""
+    if role == "developer":
+        return True
+    stored = companies.one(profile.id)
+    return stored is not None and stored.created_by == user.id
+
+
+MayChangeDocuments = Annotated[bool, Depends(may_change_documents)]
+
+
+def require_document_change(allowed: MayChangeDocuments) -> None:
+    """An add or withdraw of a document by anyone `may_change_documents` refuses: a 403."""
+    if not allowed:
+        raise HTTPException(status_code=403, detail=DOCUMENTS_CHANGE_REFUSED)
+
+
 def audit_trail(db: AppDatabase) -> audit.AuditTrail:
     """Where reviewed verdicts and overrides are recorded (#39): Postgres with a database URL,
     else this process."""
@@ -640,6 +680,21 @@ def audit_trail(db: AppDatabase) -> audit.AuditTrail:
 
 
 AuditTrail = Annotated[audit.AuditTrail, Depends(audit_trail)]
+
+
+def affected_leads(db: AppDatabase, profile: Profile, trail: AuditTrail) -> set[str]:
+    """Every user with work under the current company: something kept in their memory under
+    it (an assessment, a chat) or an audit entry. A change of its evidence is recorded in each
+    one's trail (#624). The database down is a 503."""
+    if db is None:
+        kept = users_with_memory(process_store(), profile.id)
+    else:
+        with db.store() as store:
+            kept = users_with_memory(store, profile.id)
+    return kept | trail.users(profile.id)
+
+
+AffectedLeads = Annotated[set[str], Depends(affected_leads)]
 
 
 def remediation_items(db: AppDatabase) -> remediation.RemediationItems:
@@ -1917,7 +1972,7 @@ def readiness_report(
 
 @router.get("/documents")
 def profile_documents_tab(
-    profile: Profile, memory: UserMemory, saver: Checkpointer
+    profile: Profile, memory: UserMemory, saver: Checkpointer, can_change: MayChangeDocuments
 ) -> dict[str, Any]:
     """The Documents tab (#424), for every signed-in user: each evidence document the profile
     uses, with its summary, whether it is stale today and the controls whose newest assessment
@@ -1935,7 +1990,7 @@ def profile_documents_tab(
         raise HTTPException(status_code=500, detail=DOCUMENTS_FAILED) from None
     clean, _ = redact_data({"documents": [d.as_dict() for d in listed]})
     language, words = documents_tab.document_words(profile.answer_language)
-    return clean | {"words": words, "words_language": language}
+    return clean | {"words": words, "words_language": language, "can_change": can_change}
 
 
 class DocumentRequest(BaseModel):
@@ -1986,16 +2041,17 @@ def _added_data(added: AddedDocument) -> dict[str, Any]:
     }
 
 
-@router.post("/documents", status_code=201)
+@router.post("/documents", status_code=201, dependencies=[Depends(require_document_change)])
 def add_document(
     request: Annotated[DocumentRequest, Body()],
     profile: Profile,
     user: CurrentUser,
     name: ReviewerName,
     store: AddedDocumentsStore,
+    leads: AffectedLeads,
 ) -> Any:
     """The lead adds an evidence document, or a new version of one with its title, to the
-    current company (#585): any signed-in user, as anyone may change the Goal. The file's
+    current company (#585): its creator or a developer, anyone else a 403 (#624). The file's
     limits and the form's fields are checked first (a 400 with the sentence, nothing kept);
     then text that reads like an instruction is a 409 warning, nothing kept, unless
     `add_anyway`. Kept with its `document-add` entry, together (vouch.audit; noted when the
@@ -2014,6 +2070,7 @@ def add_document(
             reviewer=audit.Reviewer(user.id, name),
             profile_id=profile.id,
             builtin_ids=builtin_ids(profile),
+            leads=leads,
             note=INSTRUCTION_NOTE if flagged else "",
         )
     except DocumentRefused as refusal:
@@ -2021,23 +2078,25 @@ def add_document(
     return {"document": _added_data(added)}
 
 
-@router.post("/documents/{doc_id}/withdraw")
+@router.post("/documents/{doc_id}/withdraw", dependencies=[Depends(require_document_change)])
 def withdraw_document(
     doc_id: Annotated[str, StringConstraints(max_length=255)],
     profile: Profile,
     user: CurrentUser,
     name: ReviewerName,
     store: AddedDocumentsStore,
+    leads: AffectedLeads,
 ) -> dict[str, Any]:
     """The lead withdraws an added document of the current company (#586, Q11): every version
     marked withdrawn with one `document-withdraw` entry, together, so it is no longer searched
     or cited; its versions are kept. A 200 with the document; one withdrawn already is answered
-    the same, nothing more written. A built-in document's id is a 400, an unknown one a 404.
+    the same, nothing more written. Its creator or a developer only, anyone else a 403
+    (#624); the entry goes in every affected lead's trail. A built-in document's id is a 400, an unknown one a 404.
     Nothing is re-assessed. The database down is a 503."""
     if doc_id in builtin_ids(profile):
         raise HTTPException(status_code=400, detail=BUILT_IN_NOT_WITHDRAWN)
     versions = audit.withdraw_document(
-        store, doc_id, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id
+        store, doc_id, reviewer=audit.Reviewer(user.id, name), profile_id=profile.id, leads=leads
     )
     if not versions:
         raise HTTPException(status_code=404, detail=NO_ADDED_DOCUMENT)
