@@ -11,7 +11,7 @@ import {
   canPinChat, CHAT_WIDTH_STEP, type ChatWidthRange, chatWidthRange, clampChatWidth, pageWidth, rememberChatWidth,
   rememberedChatWidth,
 } from './chatWidth.ts'
-import { swallowNextPointerClick } from './doubleClickGuard.ts'
+import { swallowPointerClickBurst } from './doubleClickGuard.ts'
 import { controlPath, type NextStep } from './overview.ts'
 import StepText from './StepText.tsx'
 
@@ -390,10 +390,10 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     )
   }
   const { className, size, pin } = STATES[state]
-  /** Close: a double click's second click presses nothing under it (#527's guard), and focus, which its press may have
-   * moved, goes back to Ask Vouch (#333). */
+  /** Close: a double or triple click's later clicks press nothing under it (#527's guard, #562), and focus, which
+   * their press may have moved, goes back to Ask Vouch (#333). */
   const close = (e: ReactMouseEvent<HTMLButtonElement>) => {
-    swallowNextPointerClick(e, () => fabRef.current?.focus())
+    swallowPointerClickBurst(e, () => fabRef.current?.focus())
     setState('closed')
   }
   return (
