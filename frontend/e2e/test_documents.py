@@ -198,7 +198,12 @@ def test_the_lead_withdraws_an_added_document_and_sees_it_withdrawn(page: Page, 
     log = row(page, "Old visitor log")
     expect(row(page, "Authentication standard").get_by_role("button")).to_have_count(0)
 
-    log.get_by_role("button", name="Withdraw Old visitor log").click()
+    # #696: a web font landing mid-press rewraps the table above and moves Withdraw, and a click whose
+    # mousedown and mouseup straddle the move presses nothing. So the table is set in its fonts first.
+    withdraw = log.get_by_role("button", name="Withdraw Old visitor log")
+    expect(withdraw).to_be_visible()
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    withdraw.click()
     expect(log.get_by_role("alert")).to_have_text(
         'Withdraw "Old visitor log"? It is no longer searched or cited. Its versions are kept, so '
         "the audit trail stays true."
