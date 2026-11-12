@@ -220,21 +220,23 @@ function useDock(reviewing: boolean) {
         else if (under > SLACK) window.scrollBy(0, Math.min(under, -over))
       })
     }
-    const pointer = { down: false } // a press under way: the focus it gives stays where it is (#698)
-    const press = () => { pointer.down = true }
-    const release = () => { pointer.down = false }
-    const focused = () => { if (!pointer.down) clear() }
+    // A press's focus comes in the same task as its pointerdown (#698): only that focus is left where it is. Nothing
+    // waits for the release, which the page never hears when the press is let go outside the window.
+    const pointer = { pressing: false, timer: 0 }
+    const press = () => {
+      pointer.pressing = true
+      window.clearTimeout(pointer.timer)
+      pointer.timer = window.setTimeout(() => { pointer.pressing = false })
+    }
+    const focused = () => { if (!pointer.pressing) clear() }
     document.addEventListener('pointerdown', press, true)
-    document.addEventListener('pointerup', release, true)
-    document.addEventListener('pointercancel', release, true)
     document.addEventListener('focusin', focused)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(clear)
     observer?.observe(el)
     return () => {
       cancelAnimationFrame(pending.frame)
+      window.clearTimeout(pointer.timer)
       document.removeEventListener('pointerdown', press, true)
-      document.removeEventListener('pointerup', release, true)
-      document.removeEventListener('pointercancel', release, true)
       document.removeEventListener('focusin', focused)
       observer?.disconnect()
     }
