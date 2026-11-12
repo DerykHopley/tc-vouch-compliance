@@ -17,7 +17,7 @@ import pdf_words
 import pytest
 from current_company import make_current
 from fonts import FONTS_SETTLED, without_web_fonts
-from hyphen_breaks import assert_hyphenated_in_german
+from hyphen_breaks import UNHYPHENATED_BREAKS, assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import reviewed
 from touch_targets import small_targets
@@ -224,6 +224,63 @@ def test_at_400px_the_report_does_not_scroll_sideways_and_its_controls_are_44px(
         )
         assert not scrolls, f"the report scrolls sideways at 400px in {scheme}"
         assert small_targets(page) == []
+
+
+# The title's widths and marks, once the fonts have settled: its own scrollWidth and clientWidth,
+# the sheet's content width (the title's box grows with its text, so it alone can't show the
+# overflow), its computed hyphens and the lang it carries (its own or the sheet's).
+TITLE = (
+    "async () => {"
+    + FONTS_SETTLED
+    + r"""  const h1 = document.querySelector('h1#report-title')
+  const sheet = h1.closest('article')
+  const pad = getComputedStyle(sheet)
+  return {
+    wide: h1.scrollWidth, box: h1.clientWidth,
+    sheet: sheet.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight),
+    hyphens: getComputedStyle(h1).hyphens,
+    lang: h1.closest('[lang]')?.lang,
+  }
+}"""
+)
+
+
+@pytest.mark.parametrize("fonts", ["web", "fallback"])
+@pytest.mark.parametrize("goal", ["audit-readiness", "internal-improvement"])
+def test_at_360px_the_reports_title_fits_and_a_german_one_hyphenates(
+    page: Page, request, goal, fonts, nordlicht_later
+):
+    """#544: at 360px Alpenwerk's one-word titles ("Bereitschaftsbericht", "Verbesserungsbericht")
+    set 322-330px in the 296px sheet, and the improvement report scrolled sideways. The title
+    hyphenates in the report's lang, and breaks anywhere as the last resort (the fallback font,
+    DejaVu Sans, has wider capitals, #512). Nordlicht's English titles fit unbroken."""
+    url = request.getfixturevalue("report_url" if goal == "audit-readiness" else "improvement_url")
+    if fonts == "fallback":
+        without_web_fonts(page)
+    if goal != "audit-readiness":  # each profile's default
+        for profile in ("nordlicht", "alpenwerk"):
+            set_goal(page, url, profile, goal)
+    page.set_viewport_size({"width": 360, "height": 800})
+    nordlicht_later(url)
+    for profile in ("alpenwerk", "nordlicht"):
+        make_current(page.request, url, profile)  # #480: the report opens under the current company
+        report = open_report(page, url)
+        expect(report.get_by_role("heading", level=1)).to_be_visible()
+        title = page.evaluate(TITLE)
+        scrolls = page.evaluate(
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        )
+        assert not scrolls, f"{profile}'s report scrolls sideways at 360px: {title}"
+        assert title["wide"] <= min(title["box"], title["sheet"]), (profile, title)
+        words = page.evaluate(UNHYPHENATED_BREAKS, "h1#report-title")
+        if profile == "alpenwerk":
+            assert title["hyphens"] == "auto", title
+            if goal != "audit-readiness":  # the readiness report's lang is checked above
+                assert title["lang"] == "de", title
+            if fonts == "web":
+                assert words["words"] and words["breaks"] == [], words
+        else:
+            assert words["broken"] == [], words
 
 
 def test_at_701px_alpenwerks_question_column_breaks_words_only_with_a_hyphen(

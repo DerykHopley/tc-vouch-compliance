@@ -536,7 +536,7 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .report { max-width: 1000px; margin: 0 auto; padding-block: 20px 110px; display: grid; gap: 16px; }
 /* Each part's gap is a property, so print's margins (below) use the same value. */
 .report-doc { --report-doc-gap: 28px; padding: 28px 32px; gap: var(--report-doc-gap); justify-items: stretch; min-width: 0; }
-.report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); }
+.report-doc h1 { font-size: clamp(26px, 3.4vw, 36px); hyphens: auto; overflow-wrap: break-word; }
 .report-doc h2 { font-size: 20px; margin-bottom: 8px; }
 .report-top { display: grid; gap: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
 .report-head, .setup-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
