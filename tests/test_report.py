@@ -16,7 +16,7 @@ import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import pytest
 import reviewing
@@ -31,7 +31,7 @@ from test_dossier import WHOLE_REASON, WITHOUT_1_1_1, seeded
 from test_memory import app_on, restart
 
 from vouch import api, audit, goal, isa, report
-from vouch.database import Database
+from vouch.database import AuditAction, Database
 from vouch.dossier import overview
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import Review
@@ -464,6 +464,26 @@ def test_a_stale_quote_has_its_flag_word_in_each_language():
     # #56: the page's stale flag, and later the Markdown export's, in the report's language.
     assert report.words_for("en")["labels"]["stale"] == "Stale"
     assert report.words_for("de")["labels"]["stale"] == "Prüfung überfällig"
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_every_audit_action_has_a_word_in_each_language(language):
+    # #618: an added or withdrawn document's entry had none, and the exports answered 500.
+    assert set(report.words_for(language)["actions"]) >= set(get_args(AuditAction))
+
+
+@pytest.mark.parametrize(
+    ("language", "added", "withdrawn"),
+    [
+        ("en", "Document added", "Document withdrawn"),
+        ("de", "Dokument hinzugefügt", "Dokument zurückgezogen"),
+    ],
+)
+def test_an_added_and_a_withdrawn_documents_entries_have_their_words(language, added, withdrawn):
+    words = report.words_for(language)
+
+    assert report.action_word({"action": "document-add"}, words) == added
+    assert report.action_word({"action": "document-withdraw"}, words) == withdrawn
 
 
 @pytest.mark.parametrize("language", ["en", "de"])
