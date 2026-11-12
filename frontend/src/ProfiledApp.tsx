@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import App, { DEVELOPER_PATH, SETUP_PATH } from './App.tsx'
+import App, { DEVELOPER_PATH } from './App.tsx'
 import type { Arrival } from './arrival.ts'
 import { makeCurrent } from './developer.ts'
 import { fetchProfiles, type Profiles, type ProfileSummary, withoutProfile, withProfile } from './profiles.ts'
 import type { Goal } from './report.ts'
 import { setProfile, signOutCount } from './session.ts'
+import { leaveSetup } from './setupHistory.ts'
 import TopBar from './TopBar.tsx'
 
 /** The profile list as read: not yet, or what came back (null: it couldn't be read). */
@@ -70,8 +71,9 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   // opens afresh under it on the Dossier, focus on its heading, with the Goal chosen in setup for its first pass (#447).
   // Not made current: the developer page opens under the current company, saying so; the company is made all the same.
   // A list that can't be read again gains it, so its name is known still. Either way the setup's history entry gives
-  // way (#476, leaveSetup); a developer who left setup while the create answered stays where they went.
-  const created = (profile: ProfileSummary, goal: Goal) => {
+  // way (#476, leaveSetup); a developer who left setup while the create answered (Back, a tab) stays where they went,
+  // and Back or Forward onto that entry later gives the page the create would have opened (#568).
+  const created = (profile: ProfileSummary, goal: Goal, entry: string) => {
     const signOuts = signOutCount()
     void makeCurrent(profile.id).then((change) => {
       if (!open.current || signOutCount() !== signOuts || change.status === 'signed-out') return
@@ -79,11 +81,11 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
         setListing({ status: 'read', profiles: withProfile(found ?? held, profile) })
         if (change.status === 'made') {
           setArrival({ goal })
-          leaveSetup('/')
+          leaveSetup(entry, '/')
           reopen(profile.id)
           return
         }
-        leaveSetup(DEVELOPER_PATH)
+        leaveSetup(entry, DEVELOPER_PATH)
         reopen(found ? found.current : shown,
           `${profile.company} was made but could not be made current. Use Make current to try again.`)
       })
@@ -124,13 +126,4 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
 /** Puts `path` in the address bar, as a new history entry, unless it is there already. */
 function toPath(path: string) {
   if (window.location.pathname !== path) window.history.pushState(null, '', path)
-}
-
-/** After a create (#476), so neither Back nor Forward reaches the finished setup as an empty wizard: on the setup,
- * `path` replaces its history entry. A developer who left it while the create answered (Back) stays where they went,
- * and a copy of that entry cuts off the setup's, still ahead of it. */
-function leaveSetup(path: string) {
-  const { pathname, search, hash } = window.location
-  if (pathname === SETUP_PATH) window.history.replaceState(null, '', path)
-  else window.history.pushState(null, '', `${pathname}${search}${hash}`)
 }

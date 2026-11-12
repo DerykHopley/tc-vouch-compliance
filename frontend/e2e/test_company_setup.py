@@ -15,7 +15,7 @@ import re
 import pytest
 from playwright.sync_api import Page, Response, Route, expect
 from test_developer_page import as_compliance_lead
-from top_bar import bar_company, from_user_menu
+from top_bar import bar_company, company_tab, from_user_menu
 from touch_targets import small_targets
 
 LEVELS = "/api/developer/protection-levels"
@@ -891,6 +891,47 @@ def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizar
     page.wait_for_timeout(SETTLE_MS)
     expect(page).not_to_have_url(re.compile(r"/developer/setup$"))
     expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+
+
+def test_a_tab_clicked_while_the_create_answers_stays_and_back_never_reaches_the_wizard(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#568: the Company tab clicked while the create is still answering (its Make current held)
+    moves past the wizard's history entry, so Back reaches it from behind. When the answer lands
+    the developer stays on the Company page, under the new company; the first Back gives the
+    Dossier the create would have opened, the second the Dossier setup was opened from, and
+    neither an empty wizard. On first_pass_url: its pass is the third of the passes' daily limit
+    (3) there, after story 5's and #476's."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    open_setup(page, first_pass_url)
+    to_step_7(page, "Reiter GmbH")
+    held: list[Route] = []
+    page.route(CURRENT_COMPANY, lambda route: held.append(route))
+    with page.expect_response(
+        lambda r: r.url.endswith(PROFILES) and r.request.method == "POST"
+    ) as created:
+        press(page, "Create company")
+    assert created.value.status == 201
+    profile = created.value.json()["id"]
+    page.wait_for_timeout(200)
+    assert len(held) == 1  # the create's Make current, still unanswered
+
+    company_tab(page).click()
+    expect(page).to_have_url(f"{first_pass_url}/company")
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
+        held[0].continue_()
+    assert passed.value.ok, passed.value.status
+    expect(bar_company(page)).to_have_text("Reiter GmbH")
+    assert current_of(page, first_pass_url) == profile
+    expect(page).to_have_url(f"{first_pass_url}/company")  # no jump to the Dossier
+
+    for _ in range(2):
+        page.go_back()
+        expect(page).to_have_url(f"{first_pass_url}/")
+        expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+        expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+        expect(bar_company(page)).to_have_text("Reiter GmbH")
 
 
 def test_a_company_not_made_current_replaces_the_setup_in_history(page: Page, first_pass_url):

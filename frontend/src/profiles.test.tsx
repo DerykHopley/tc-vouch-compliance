@@ -7,14 +7,16 @@ import ProfiledApp from './ProfiledApp.tsx'
 import type { Goal } from './report.ts'
 
 // Company setup stands in as buttons that report the company made (#409) with the Goal chosen on step 4 (#447): its
-// steps are tested on their own.
-vi.mock('./CompanySetupWizard.tsx', () => {
+// steps are tested on their own. Like the wizard, each names its own history entry (#568).
+vi.mock('./CompanySetupWizard.tsx', async () => {
+  const { markSetupEntry } = await import('./setupHistory.ts')
   const made = { id: 'musterfirma-gmbh', company: 'Musterfirma GmbH', country: 'Germany', answer_language: 'de' }
   return {
-    default: ({ onCreated }: { onCreated: (profile: ProfileSummary, goal: Goal) => void }) => (
+    default: ({ onCreated }: { onCreated: (profile: ProfileSummary, goal: Goal, entry: string) => void }) => (
       <>
-        <button type="button" onClick={() => onCreated(made, 'internal-improvement')}>Created</button>
-        <button type="button" onClick={() => onCreated(made, 'audit-readiness')}>Created for audit</button>
+        <button type="button" onClick={() => onCreated(made, 'internal-improvement', markSetupEntry())}>Created</button>
+        <button type="button" onClick={() => onCreated(made, 'audit-readiness', markSetupEntry())}>
+          Created for audit</button>
       </>
     ),
   }

@@ -22,6 +22,7 @@ import { type Run, useAssessment } from './useAssessment.ts'
 import RoundComparisonView from './RoundComparison.tsx'
 import { forgetScrolls } from './roundComparison.ts'
 import { COMPANY_PATH, roundPath } from './rounds.ts'
+import { settledPath } from './setupHistory.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
 
@@ -86,8 +87,8 @@ type AppProps = {
   /** The fresh start went through (#285): ProfiledApp opens the app afresh. */
   onStartedAfresh?: () => void
   /** Company setup made a company (#409), with the Goal chosen in it (#447): ProfiledApp makes it current (#480) and
-   * opens the app afresh under it. */
-  onCompanyCreated?: (profile: ProfileSummary, goal: Goal) => void
+   * opens the app afresh under it; `entry` is the wizard's history entry, which gives way (#476, #568). */
+  onCompanyCreated?: (profile: ProfileSummary, goal: Goal, entry: string) => void
   /** A company made in setup was removed on the developer page (#418), with the page's note: ProfiledApp reads the
    * profile list again, and opens the app afresh under the current company when it changed (#480). */
   onCompanyRemoved?: (id: string, note: string) => void
@@ -166,7 +167,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
         return
       }
       setFocusHeading(false)
-      const next = viewAt(window.location.pathname)
+      const next = viewAt(settledPath()) // a finished setup's entry gives way (#568)
       if (next.name !== 'paper' && next.name !== 'round') leaveRounds()
       setView(next)
     }
