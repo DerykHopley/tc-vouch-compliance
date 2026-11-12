@@ -54,6 +54,14 @@ describe('the click-burst guard (ticket 562)', () => {
     expect(onSwallowed).toHaveBeenCalledTimes(2)
   })
 
+  it('cancels each press of the burst, so it neither selects a word nor moves focus (ticket 563)', () => {
+    const press = () => behind.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 2 }))
+    swallowPointerClickBurst({ detail: 1 })
+    expect(press()).toBe(false)
+    vi.advanceTimersByTime(DOUBLE_CLICK_MS)
+    expect(press()).toBe(true)
+  })
+
   it('never swallows a keyboard click (detail 0), and a keyboard click sets no guard', () => {
     swallowPointerClickBurst({ detail: 1 })
     click(0)
