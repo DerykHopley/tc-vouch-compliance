@@ -133,6 +133,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "question": "Open question logged",
             "answer": "Question answered",
             "demo-reset": "Demo reset: every user's progress and history deleted",
+            "document-add": "Document added",
+            "document-withdraw": "Document withdrawn",
         },
         "goals": {
             "audit-readiness": "Audit readiness",
@@ -249,6 +251,8 @@ WORDS: dict[str, dict[str, Any]] = {
             "question": "Offene Frage erfasst",
             "answer": "Frage beantwortet",
             "demo-reset": "Demo zurückgesetzt: Fortschritt und Verlauf aller Nutzer gelöscht",
+            "document-add": "Dokument hinzugefügt",
+            "document-withdraw": "Dokument zurückgezogen",
         },
         # As `actions.goal` reads them, after "von" and "zu" (dative): "Interner Verbesserung".
         "goals": {
