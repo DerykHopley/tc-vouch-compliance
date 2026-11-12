@@ -286,6 +286,24 @@ def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(pag
     expect(change).to_be_focused()
 
 
+def test_the_ask_on_switching_override_editors_moves_focus(page: Page, paper_url):
+    # #559: the ask on Change M2, with M1's override typed, moves focus as the in-app ask does (#441).
+    page.set_viewport_size({"width": 400, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    override(paper, "M1", "Evidenced", REASON)
+    change_m2 = row(paper, "M2").get_by_role("button", name="Change M2", exact=True)
+    change_m2.click()
+
+    expect(row(paper, "M2").get_by_role("button", name="Keep editing M1")).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(change_m2).to_be_focused()
+
+    page.keyboard.press("Enter")
+    row(paper, "M2").get_by_role("button", name="Change M2 anyway").click()
+    expect(page.get_by_role("form", name="Override M2").get_by_label("Verdict")).to_be_focused()
+
+
 def test_leaving_with_an_unsaved_override_asks_first_and_cancel_keeps_it(page: Page, paper_url):
     # #182: an override saved but not yet recorded used to be dropped without a word.
     page.set_viewport_size({"width": 1280, "height": 900})
