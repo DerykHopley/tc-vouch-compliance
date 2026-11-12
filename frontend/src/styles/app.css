@@ -726,6 +726,12 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 /* The container may shrink below the table in a grid, so the table scrolls in it, not the page; and it holds the
    rows' screen-reader text (.sr-only, positioned), which would otherwise widen the page from outside it. */
 .doc-table-wrap { position: relative; min-width: 0; }
+/* The table shows that it scrolls (#607, #555's hint turned sideways): while columns lie beyond its right edge
+   (data-more, which DocumentTable keeps), that edge fades into the sheet (40px) over the column it cuts; gone at the
+   table's end. No new control. */
+.doc-table-hint { position: relative; width: 100%; min-width: 0; }
+.doc-table-hint[data-more]::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 40px;
+  pointer-events: none; background: linear-gradient(to right, transparent, var(--sheet)); }
 .doc-table caption { text-align: left; font-weight: 600; padding: 4px 0 6px; }
 .doc-table .doc-title { display: block; overflow-wrap: anywhere; }
 .doc-table .doc-id { display: block; font-size: 12px; color: var(--muted); }

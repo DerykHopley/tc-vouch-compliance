@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { type TableWords, wordFor } from './documents.ts'
 import type { LibraryDocument } from './setup.ts'
 
@@ -51,62 +51,82 @@ function staleReason(d: ShownDocument, words: TableWords): string | null {
  * Evidence documents with what Vouch has read from each (#408): title and id, kind, version, approval date, review
  * cycle, and stale or current, as the judge reads them. Company setup's step 6 chooses with its checkboxes; the
  * Documents tab (#424) shows it in the profile's words, with Cited by and Origin columns (#585). Each title carries its
- * document's language. Wide, it scrolls inside its own container (design.md, Layout).
+ * document's language. Wide, it scrolls inside its own container (design.md, Layout), and shows that it does: while
+ * columns lie beyond its right edge, `data-more` marks the box around it, which app.css fades (#607, #555's hint).
  */
 export default function DocumentTable<D extends ShownDocument>({ caption, documents, selected, onToggle, words,
   extraColumns = [] }: Props<D>) {
+  const wrap = useRef<HTMLDivElement>(null)
+  const table = useRef<HTMLTableElement>(null)
+  const [more, setMore] = useState(false)
+  useEffect(() => {
+    const box = wrap.current
+    if (!box) return
+    const measure = () => setMore(box.scrollWidth - box.scrollLeft - box.clientWidth > 1)
+    measure()
+    box.addEventListener('scroll', measure, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(box)
+    if (table.current) observer?.observe(table.current)
+    return () => {
+      box.removeEventListener('scroll', measure)
+      observer?.disconnect()
+    }
+  }, [])
   const w = words ?? ENGLISH
   const staleWord = (d: D) => {
     const reason = words ? staleReason(d, words) : d.stale_because
     return reason ? `${w.stale}: ${reason}` : w.stale
   }
   return (
-    <div className="table-wrap doc-table-wrap">
-      <table className="report-table doc-table">
-        <caption>{caption}</caption>
-        <thead>
-          <tr>
-            {onToggle && <th><span className="sr-only">Chosen</span></th>}
-            <th>{w.columns.document}</th>
-            <th>{w.columns.kind}</th>
-            <th>{w.columns.version}</th>
-            <th>{w.columns.approved}</th>
-            <th>{w.columns.review}</th>
-            <th>{w.columns.status}</th>
-            {extraColumns.map((c) => <th key={c.heading}>{c.heading}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {documents.map((d) => (
-            <tr key={`${d.source}/${d.id}`}>
-              {onToggle && (
-                <td className="doc-choose">
-                  {/* A label, so the whole 44px cell takes the press, in forced colours too (the box is drawn 18px). */}
-                  <label className="setup-choice setup-check">
-                    <input type="checkbox" aria-label={`Choose ${d.title}`}
-                      checked={isChosen(selected, d.source, d.id)}
-                      onChange={() => onToggle(d.id, d.source)} />
-                  </label>
-                </td>
-              )}
-              <th scope="row">
-                <span className="doc-title" lang={d.language ?? undefined}>{d.title}</span>
-                <span className="mono doc-id">{d.id}</span>
-              </th>
-              <td><span className={`kind kind-${d.kind}`}>{w.kinds[d.kind]}</span></td>
-              <td>{d.version ?? w.no_version}</td>
-              <td>{d.approval_date ?? w.no_date}</td>
-              <td>{d.review_cycle === null ? w.no_cycle : wordFor(w.cycles, d.review_cycle) ?? d.review_cycle}</td>
-              <td>
-                {d.withdrawn ? <span className="doc-withdrawn">{w.withdrawn}</span>
-                  : d.stale ? <span className="flag">{staleWord(d)}</span>
-                    : <span className="doc-current">{w.current}</span>}
-              </td>
-              {extraColumns.map((c) => <td key={c.heading}>{c.cell(d)}</td>)}
+    <div className="doc-table-hint" data-more={more || undefined}>
+      <div className="table-wrap doc-table-wrap" ref={wrap}>
+        <table className="report-table doc-table" ref={table}>
+          <caption>{caption}</caption>
+          <thead>
+            <tr>
+              {onToggle && <th><span className="sr-only">Chosen</span></th>}
+              <th>{w.columns.document}</th>
+              <th>{w.columns.kind}</th>
+              <th>{w.columns.version}</th>
+              <th>{w.columns.approved}</th>
+              <th>{w.columns.review}</th>
+              <th>{w.columns.status}</th>
+              {extraColumns.map((c) => <th key={c.heading}>{c.heading}</th>)}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {documents.map((d) => (
+              <tr key={`${d.source}/${d.id}`}>
+                {onToggle && (
+                  <td className="doc-choose">
+                    {/* A label, so the whole 44px cell takes the press, in forced colours too (the box is drawn 18px). */}
+                    <label className="setup-choice setup-check">
+                      <input type="checkbox" aria-label={`Choose ${d.title}`}
+                        checked={isChosen(selected, d.source, d.id)}
+                        onChange={() => onToggle(d.id, d.source)} />
+                    </label>
+                  </td>
+                )}
+                <th scope="row">
+                  <span className="doc-title" lang={d.language ?? undefined}>{d.title}</span>
+                  <span className="mono doc-id">{d.id}</span>
+                </th>
+                <td><span className={`kind kind-${d.kind}`}>{w.kinds[d.kind]}</span></td>
+                <td>{d.version ?? w.no_version}</td>
+                <td>{d.approval_date ?? w.no_date}</td>
+                <td>{d.review_cycle === null ? w.no_cycle : wordFor(w.cycles, d.review_cycle) ?? d.review_cycle}</td>
+                <td>
+                  {d.withdrawn ? <span className="doc-withdrawn">{w.withdrawn}</span>
+                    : d.stale ? <span className="flag">{staleWord(d)}</span>
+                      : <span className="doc-current">{w.current}</span>}
+                </td>
+                {extraColumns.map((c) => <td key={c.heading}>{c.cell(d)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
