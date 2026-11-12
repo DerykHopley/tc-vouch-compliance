@@ -269,8 +269,9 @@ Budgets: 0:50 + 0:50 + 1:20 + 1:40 + 1:00 + 0:30 = 6 minutes 10 seconds.
    12 when Q2 2026 closed.", the verdict counts with their change, and under "Changed controls"
    four controls, 4.1.2 among them, "Partly evidenced → Evidenced". 4.1.2's card reads "Closed".
 2. **Company › Rounds** (0:40): select **Company** in the top bar. Under "Rounds", point at the
-   list: "Q3 2026" open, "Q2 2026" marked "Compared by default", and "First round". Select **Q2
-   2026**: its comparison page (`/company/rounds/2`), "Compared with Q2 2026", with "Better 4",
+   list: "Q3 2026" open and "Q2 2026" marked "Compared by default" (Reset demo names the first
+   round "Q2 2026", so no "First round" is listed). Select **Q2 2026**: its comparison page
+   (`/company/rounds/1`), "Compared with Q2 2026", with "Better 4",
    "Worse 0", readiness then and now, and the controls by topic. Under "Access", point at 4.1.2,
    "Better", with "Done since" (its M1 item) and "Answered since" (its question), and open the
    unchanged controls to show 4.2.1's "Answered since".
