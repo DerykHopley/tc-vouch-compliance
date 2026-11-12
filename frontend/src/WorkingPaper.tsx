@@ -135,6 +135,8 @@ export default function WorkingPaper(props: PaperProps) {
   const editorUnsaved = editing !== null && changedEditor === editing
     && !overrides.some((o) => o.requirement_id === editing)
   const unsaved = overrides.length + (editorUnsaved ? 1 : 0)
+  // Another requirement's Change asks first while the open editor holds input not yet Saved (#559).
+  const typedIn = editing !== null && changedEditor === editing ? editing : null
   useEffect(() => setUnsaved(unsaved), [unsaved])
   useEffect(() => () => setUnsaved(0), [])
   const run = overridden(props.run, overrides)
@@ -277,7 +279,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
-                language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
+                typedIn={typedIn} language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
                 statementNote={assessed?.statement_note} statementWord={assessed?.statement_word}
                 onEdit={setEditing} onChanged={onChanged} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
@@ -457,6 +459,8 @@ type JudgedProps = {
   overrides: Overrides
   /** The requirement whose override is open. */
   editing: string | null
+  /** The open editor's requirement while it holds input not yet Saved (#559): another's Change asks first. */
+  typedIn: string | null
   onEdit: (requirementId: string | null) => void
   /** Whether the requirement's open editor holds input not yet Saved (#356). */
   onChanged: (requirementId: string, changed: boolean) => void
@@ -534,7 +538,7 @@ const JUDGED_COLUMNS = 5
 const STATEMENT_NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is "
   + 'needed to close it.'
 
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onChanged, onSave, onUndo, items, language,
+function JudgedRequirements({ judged, listed, overrides, editing, typedIn, onEdit, onChanged, onSave, onUndo, items, language,
   staleWord = 'Stale', currentWord = 'Current', statementNote = STATEMENT_NOTE,
   statementWord = "Lead's statement" }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
@@ -573,10 +577,13 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onChan
                     {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
                     {overrides.editable && applies && editing !== r.id && (
                       <span>
-                        <button ref={(el) => { changeButtons.current[r.id] = el }} className="btn btn-ghost"
-                          aria-label={`Change ${r.id}`} onClick={() => onEdit(r.id)}>
-                          Change
-                        </button>
+                        {/* Another requirement's typed override is dropped only once the lead says so (#559). */}
+                        <InlineConfirm label="Change" trigger={{ 'aria-label': `Change ${r.id}` }}
+                          triggerRef={(el) => { changeButtons.current[r.id] = el }}
+                          ask={typedIn !== null}
+                          question={typedIn ? `You have an override of ${typedIn} not yet saved. Drop it and change ${r.id}?` : ''}
+                          confirmLabel={`Change ${r.id} anyway`} cancelLabel={`Keep editing ${typedIn}`}
+                          onConfirm={() => onEdit(r.id)} />
                         {replaced && (
                           <button className="btn btn-ghost" aria-label={`Undo the override of ${r.id}`}
                             onClick={() => {

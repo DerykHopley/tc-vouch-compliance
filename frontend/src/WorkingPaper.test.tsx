@@ -786,6 +786,46 @@ describe("the override form's keyboard focus (issue 226)", () => {
   })
 })
 
+describe("switching to another requirement's override keeps a typed reason unless the lead drops it (issue 559)", () => {
+  const changeM2 = () => within(row('M2')).getByRole('button', { name: 'Change M2' })
+  const QUESTION = 'You have an override of M1 not yet saved. Drop it and change M2?'
+
+  it('asks first in the app while M1 holds a typed reason, and Keep editing M1 keeps it', async () => {
+    review()
+    await overrideM1()
+    await userEvent.click(changeM2())
+    expect(within(row('M2')).getByRole('alert').textContent).toBe(QUESTION)
+    const keep = within(row('M2')).getByRole('button', { name: 'Keep editing M1' })
+    expect(document.activeElement).toBe(keep)
+    expect(screen.queryByRole('form', { name: 'Override M2' })).toBeNull()
+
+    await userEvent.click(keep)
+    const editor = screen.getByRole('form', { name: 'Override M1' })
+    expect((within(editor).getByLabelText('Reason (required)') as HTMLTextAreaElement).value).toBe(REASON)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(document.activeElement).toBe(changeM2())
+  })
+
+  it("Change M2 anyway drops M1's typed reason and opens M2", async () => {
+    review()
+    await overrideM1()
+    await userEvent.click(changeM2())
+    await userEvent.click(within(row('M2')).getByRole('button', { name: 'Change M2 anyway' }))
+    expect(screen.queryByRole('form', { name: 'Override M1' })).toBeNull()
+    expect(screen.getByRole('form', { name: 'Override M2' })).toBeTruthy()
+    expect(within(row('M1')).queryByText(/^Overridden/)).toBeNull()
+  })
+
+  it('switches in one press when the open editor holds nothing typed', async () => {
+    review()
+    await userEvent.click(within(row('M1')).getByRole('button', { name: 'Change M1' }))
+    await userEvent.click(changeM2())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('form', { name: 'Override M1' })).toBeNull()
+    expect(screen.getByRole('form', { name: 'Override M2' })).toBeTruthy()
+  })
+})
+
 describe('overrides belong to the assessment shown', () => {
   afterEach(() => vi.unstubAllGlobals())
 

@@ -286,6 +286,30 @@ def test_at_400px_enter_on_change_focuses_the_override_and_cancel_returns_it(pag
     expect(change).to_be_focused()
 
 
+def test_change_on_another_requirement_asks_before_dropping_a_typed_reason(page: Page, paper_url):
+    # #559: Change on M2 used to close M1's editor and drop its typed reason without a word.
+    page.set_viewport_size({"width": 400, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    m1 = override(paper, "M1", "Evidenced", REASON)
+    change_m2 = row(paper, "M2").get_by_role("button", name="Change M2", exact=True)
+    change_m2.click()
+
+    expect(row(paper, "M2").get_by_role("alert")).to_have_text(
+        "You have an override of M1 not yet saved. Drop it and change M2?"
+    )
+    expect(row(paper, "M2").get_by_role("button", name="Keep editing M1")).to_be_focused()
+    assert small_targets(page) == []
+    page.keyboard.press("Enter")
+    expect(change_m2).to_be_focused()
+    expect(m1.get_by_label("Reason (required)")).to_have_value(REASON)
+
+    page.keyboard.press("Enter")
+    row(paper, "M2").get_by_role("button", name="Change M2 anyway").click()
+    expect(m1).to_have_count(0)
+    expect(page.get_by_role("form", name="Override M2").get_by_label("Verdict")).to_be_focused()
+
+
 def test_leaving_with_an_unsaved_override_asks_first_and_cancel_keeps_it(page: Page, paper_url):
     # #182: an override saved but not yet recorded used to be dropped without a word.
     page.set_viewport_size({"width": 1280, "height": 900})
