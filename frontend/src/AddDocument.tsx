@@ -104,7 +104,7 @@ export default function AddDocument({ documents, title, onAdded, onCancel }: Pro
         </label>
         <label className="doc-form-field">
           <span>Approval date</span>
-          <input className="field" type="date" value={fields.approval_date} disabled={sending}
+          <input className="field" type="date" value={fields.approval_date} max={today()} disabled={sending}
             onChange={(e) => set('approval_date', e.target.value)} />
         </label>
         <label className="doc-form-field">
