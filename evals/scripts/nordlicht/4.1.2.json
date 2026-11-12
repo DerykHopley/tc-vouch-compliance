@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "services secured systems access"}},
     {"tool": "search_records", "args": {"query": "services secured systems access"}},
-    {"answer": "Draft answer for 4.1.2, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nauthentication-standard: “We follow the national cyber security authority's current guidance on sign-in methods.”\n\nmfa-rollout-record: “Employees sign in to the outside services in the cloud services register with their company account, so the same password settings and second factor apply.”\n\n### What is missing\n\n- M1 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

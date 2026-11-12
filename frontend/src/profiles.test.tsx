@@ -17,6 +17,8 @@ vi.mock('./CompanySetupWizard.tsx', async () => {
         <button type="button" onClick={() => onCreated(made, 'internal-improvement', markSetupEntry())}>Created</button>
         <button type="button" onClick={() => onCreated(made, 'audit-readiness', markSetupEntry())}>
           Created for audit</button>
+        <button type="button" onClick={() => onCreated({ id: 'testwerk', company: 'Testwerk Prüfstand GmbH',
+          country: 'Austria', answer_language: 'de' }, 'audit-readiness', markSetupEntry())}>Created Testwerk</button>
       </>
     ),
   }
@@ -822,5 +824,207 @@ describe('the first pass on a company just made, issue 447', () => {
     expect(screen.getByRole('button', { name: 'Assess 1.1.1 on its own' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
     expect(barName()).toBe('Musterfirma GmbH')
+  })
+
+  describe('a developer who left setup while the create answered, issue 569', () => {
+    const MADE = 'Musterfirma GmbH was made and is now current.'
+    /** Back or Forward, once the browser has moved: jsdom moves history asynchronously, then fires popstate. */
+    const moved = (move: () => void) => new Promise<void>((done) => {
+      window.addEventListener('popstate', () => done(), { once: true })
+      move()
+    })
+    /** serveSetup with each create's Make current held, in order, answered by `madeCurrent` once released (`held`);
+     * the list and the developer settings name a company made once its answer landed, and current when that answer
+     * was a 2xx (not by count, as StrictMode reads the list twice on mounting). */
+    function heldMakeCurrent(madeCurrent: () => Response) {
+      const fetch = serveSetup()
+      const answered = fetch.getMockImplementation()!
+      const releases: (() => void)[] = []
+      const held = { release: () => releases.shift()?.() }
+      let current = 'nordlicht'
+      const made: ProfileSummary[] = []
+      fetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/developer/current-company') return new Promise<Response>((resolve) => {
+          const id = (JSON.parse(String(init?.body)) as { company: string }).company
+          releases.push(() => {
+            const answer = madeCurrent()
+            if (answer.ok) current = id
+            made.push([MUSTERFIRMA, TESTWERK].find((p) => p.id === id)!)
+            resolve(answer)
+          })
+        })
+        if (url === '/api/developer/settings') return Promise.resolve(Response.json({ ...DEVELOPER_SETTINGS,
+          listed_companies: [...DEVELOPER_SETTINGS.listed_companies, ...made.map((p) => ({ ...p, demo: false }))],
+          current_company: current }))
+        if (url === '/api/profiles') return Promise.resolve(Response.json(listOf([NORDLICHT,
+          ...[TESTWERK, MUSTERFIRMA].filter((p) => p.id !== 'musterfirma-gmbh' || made.includes(p))], current)))
+        return answered(url, init)
+      })
+      return { fetch, held }
+    }
+    /** From the developer page, Set up a company, Created, then Back to the developer page while Make current is
+     * held, where a value is typed in the Model id field. Then the held answer lands and the list is read again. */
+    async function leaveWhileCreating(madeCurrent: () => Response = () => Response.json(DEVELOPER_SETTINGS)) {
+      const { fetch, held } = heldMakeCurrent(madeCurrent)
+      window.history.replaceState(null, '', '/developer')
+      window.history.pushState(null, '', '/developer/setup')
+      render(<StrictMode><ProfiledApp /></StrictMode>)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+      await waitFor(() => expect(currentChanges(fetch)).toHaveLength(1))
+      await moved(() => window.history.back())
+      const field = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Model id' })
+      await userEvent.clear(field)
+      await userEvent.type(field, 'typed/meanwhile')
+      held.release()
+      await waitFor(() => expect(reads).toHaveLength(2))
+      await reads[1]
+      return { fetch, field }
+    }
+
+    it('stays on the page they went to, its input kept and nothing reopened, saying the company is now current',
+      async () => {
+      const { fetch, field } = await leaveWhileCreating()
+
+      const status = (await screen.findByText(MADE)).closest('[role="status"]')
+      expect(status).not.toBeNull()
+      expect(within(status as HTMLElement).queryAllByRole('button')).toEqual([]) // the sentence alone is announced
+      // The developer page reads its settings again: the company made is listed, current.
+      const companies = screen.getByRole('region', { name: 'Companies' })
+      expect(await within(companies).findByText('Musterfirma GmbH')).toBeTruthy()
+      expect(within(companies).queryByRole('button', { name: 'Make Musterfirma GmbH current' })).toBeNull()
+      expect(window.location.pathname).toBe('/developer')
+      expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Model id' })).toBe(field) // not mounted afresh
+      expect(field.value).toBe('typed/meanwhile')
+      expect(barName()).toBe('Nordlicht Komponenten GmbH') // the page stays under the company it opened under
+      expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' })
+      expect(firstPassCalls(fetch)).toEqual([]) // the Goal and the pass wait for the company to open
+    })
+
+    it('Open opens the company made on the Overview, sets its Goal and runs its first pass, once', async () => {
+      const { fetch } = await leaveWhileCreating()
+      await userEvent.click(await screen.findByRole('button', { name: 'Open Musterfirma GmbH' }))
+
+      await dossierOf('Musterfirma GmbH')
+      expect(window.location.pathname).toBe('/')
+      await screen.findByText('1 assessment waiting for your review.')
+      expect(firstPassCalls(fetch)).toEqual([
+        ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
+        ['/api/profile-pass', 'musterfirma-gmbh', null],
+      ])
+      expect(screen.queryByText(MADE)).toBeNull()
+      // The Overview took the wizard's place after the developer page: Back and Forward run nothing again.
+      await moved(() => window.history.back())
+      expect(window.location.pathname).toBe('/developer')
+      await moved(() => window.history.forward())
+      expect(window.location.pathname).toBe('/')
+      await screen.findByRole('button', { name: 'Run a profile pass' })
+      expect(passes(fetch)).toHaveLength(1)
+    })
+
+    it("Forward onto the wizard's entry opens the company made there, as the create would have, with its first pass",
+      async () => {
+      const { fetch } = await leaveWhileCreating()
+      await screen.findByText(MADE)
+
+      await moved(() => window.history.forward())
+      await dossierOf('Musterfirma GmbH')
+      expect(window.location.pathname).toBe('/')
+      await screen.findByText('1 assessment waiting for your review.')
+      expect(passes(fetch)).toHaveLength(1)
+      expect(screen.queryByText(MADE)).toBeNull()
+    })
+
+    it("the next Back goes to the page before, not the same page again (issue 476's extra entry, gone since issue 568)",
+      async () => {
+      const { fetch, held } = heldMakeCurrent(() => Response.json(DEVELOPER_SETTINGS))
+      window.history.replaceState(null, '', '/report')
+      window.history.pushState(null, '', '/developer')
+      window.history.pushState(null, '', '/developer/setup')
+      render(<ProfiledApp />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+      await waitFor(() => expect(currentChanges(fetch)).toHaveLength(1))
+      await moved(() => window.history.back())
+      held.release()
+      await screen.findByText(MADE)
+
+      await moved(() => window.history.back())
+      expect(window.location.pathname).toBe('/report')
+      expect(passes(fetch)).toHaveLength(0)
+    })
+
+    it('Dismiss hides the notice, and the page stays as it is', async () => {
+      const { field } = await leaveWhileCreating()
+      await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByText(MADE)).toBeNull()
+      expect(field.value).toBe('typed/meanwhile')
+    })
+
+    it('not made current: says so in the notice, with no Open, and keeps the page as it is', async () => {
+      const { fetch, field } = await leaveWhileCreating(() => Response.json(
+        { detail: 'The database is unavailable just now.', unavailable: 'database' }, { status: 503 }))
+
+      expect(await screen.findByText('Musterfirma GmbH was made but could not be made current. Use Make current on '
+        + 'the Developer page to try again.')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Open Musterfirma GmbH' })).toBeNull()
+      expect(field.value).toBe('typed/meanwhile')
+      // Its advice can be followed: the developer page, read again, offers Make current for the company made.
+      expect(await screen.findByRole('button', { name: 'Make Musterfirma GmbH current' })).toBeTruthy()
+      expect(barName()).toBe('Nordlicht Komponenten GmbH')
+      await moved(() => window.history.forward()) // the wizard's entry gave way to the developer page
+      expect(window.location.pathname).toBe('/developer')
+      expect(firstPassCalls(fetch)).toEqual([])
+    })
+
+    it('keeps an empty status region in place before any notice, so a notice put in it is announced', async () => {
+      heldMakeCurrent(() => Response.json(DEVELOPER_SETTINGS))
+      window.history.replaceState(null, '', '/developer')
+      render(<ProfiledApp />)
+      await screen.findByRole('textbox', { name: 'Model id' })
+      const region = document.querySelector('.created-notice [role="status"]')
+      expect(region).not.toBeNull()
+      expect(region!.textContent).toBe('')
+    })
+
+    it('a second create while away keeps the first one waiting: each wizard entry opens its own company, with its '
+      + 'own first pass', async () => {
+      const { fetch, held } = heldMakeCurrent(() => Response.json(DEVELOPER_SETTINGS))
+      window.history.replaceState(null, '', '/developer/setup')
+      render(<ProfiledApp />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' })) // Musterfirma, from this entry
+      window.history.pushState(null, '', '/company') // left for a tab; the wizard stands in for the next setup
+      await userEvent.click(screen.getByRole('button', { name: 'Created Testwerk' })) // from this entry
+      window.history.pushState(null, '', '/report')
+      await waitFor(() => expect(currentChanges(fetch)).toHaveLength(2))
+      held.release()
+      await screen.findByText(MADE)
+      held.release()
+      await screen.findByText('Testwerk Prüfstand GmbH was made and is now current.')
+
+      await moved(() => window.history.back()) // Testwerk's entry
+      await dossierOf('Testwerk Prüfstand GmbH')
+      await waitFor(() => expect(passes(fetch)).toHaveLength(1))
+      await moved(() => window.history.back()) // Musterfirma's entry
+      await dossierOf('Musterfirma GmbH')
+      await waitFor(() => expect(passes(fetch)).toHaveLength(2))
+      expect(firstPassCalls(fetch)).toEqual([
+        ['/api/profile-pass', 'testwerk', null],
+        ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
+        ['/api/profile-pass', 'musterfirma-gmbh', null],
+      ])
+    })
+
+    it('an app that closed (a sign-out) opens nothing from its entries: the next app finds the wizard there',
+      async () => {
+      const { fetch } = await leaveWhileCreating()
+      await screen.findByText(MADE)
+      cleanup() // signed out: ProfiledApp unmounts
+      render(<ProfiledApp />)
+      await screen.findByRole('textbox', { name: 'Model id' })
+
+      await moved(() => window.history.forward())
+      expect(window.location.pathname).toBe('/developer/setup')
+      expect(await screen.findByRole('button', { name: 'Created' })).toBeTruthy()
+      expect(firstPassCalls(fetch)).toEqual([])
+    })
   })
 })

@@ -11,6 +11,7 @@ passes' daily limit (3).
 """
 
 import re
+from collections.abc import Callable
 
 import pytest
 from playwright.sync_api import Page, Response, Route, expect
@@ -355,7 +356,7 @@ def test_a_developer_chooses_evidence_and_sees_it_ready_to_cite(page: Page, prof
     expect(training.locator(".kind.kind-implemented")).to_have_text("implemented")
     expect(training).to_contain_text("2026-10-05")
 
-    status = page.get_by_role("status")
+    status = page.get_by_role("main").get_by_role("status")
     expect(status).to_have_text("No documents chosen yet.")
     document(page, "Backup policy").check()
     document(page, "Access rights policy").check()
@@ -471,7 +472,7 @@ def test_select_all_and_deselect_all_work_by_keyboard_one_folder_at_a_time(
     for i in range(policies.count()):
         expect(policies.nth(i)).to_be_checked()
     assert [records.nth(i).is_checked() for i in range(records.count())] == ticked_records
-    expect(page.get_by_role("status")).to_contain_text(
+    expect(page.get_by_role("main").get_by_role("status")).to_contain_text(
         f"Ready to cite: {policies.count() + 1} documents"
     )
 
@@ -480,7 +481,9 @@ def test_select_all_and_deselect_all_work_by_keyboard_one_folder_at_a_time(
     for i in range(policies.count()):
         expect(policies.nth(i)).not_to_be_checked()
     expect(document(page, "Security training record 2026")).to_be_checked()
-    expect(page.get_by_role("status")).to_have_text(re.compile(r"^Ready to cite: 1 document \("))
+    expect(page.get_by_role("main").get_by_role("status")).to_have_text(
+        re.compile(r"^Ready to cite: 1 document \(")
+    )
 
 
 def test_next_while_the_library_loads_keeps_focus_on_the_heading_when_it_lands(
@@ -863,19 +866,19 @@ def held_once(page: Page, held: list[Route]) -> None:
     assert len(held) == 1, len(held)
 
 
-def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizard(
-    page: Page, first_pass_url, nordlicht_later
-):
-    """#476: Back pressed while the create is still answering (its Make current held) leaves the
-    wizard for the developer page. When the answer lands the developer stays there, under the new
-    company, its first pass run (#447); Forward never reaches an empty wizard. On first_pass_url:
-    its pass is the second of the passes' daily limit (3) there, after story 5's."""
-    nordlicht_later(first_pass_url)
-    page.set_viewport_size({"width": 1280, "height": 900})
+PROFILE_LIST = "/api/profiles"
+
+
+def back_while_creating(
+    page: Page, url: str, company: str, meanwhile: Callable[[], None] = lambda: None
+) -> str:
+    """From the developer page, Set up a company to step 7, Create company with its Make current
+    held, Back to the developer page, `meanwhile` there, then the held answer lands (the list
+    read again): the created notice (#569). The new company's id."""
     with page.expect_response("**/api/developer/settings"):
-        page.goto(f"{first_pass_url}/developer")
+        page.goto(f"{url}/developer")
     page.get_by_role("button", name="Set up a company").click()
-    to_step_7(page, "Zurück GmbH")
+    to_step_7(page, company)
     held: list[Route] = []
     page.route(CURRENT_COMPANY, lambda route: held.append(route))
     with page.expect_response(
@@ -883,34 +886,108 @@ def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizar
     ) as created:
         press(page, "Create company")
     assert created.value.status == 201
-    profile = created.value.json()["id"]
     held_once(page, held)  # the create's Make current, still unanswered
-
     page.go_back()
-    expect(page).to_have_url(f"{first_pass_url}/developer")
-    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
+    expect(page).to_have_url(f"{url}/developer")
+    meanwhile()
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_LIST)):
         held[0].continue_()
-    assert passed.value.ok, passed.value.status
-
-    expect(bar_company(page)).to_have_text("Zurück GmbH")
-    assert current_of(page, first_pass_url) == profile
-    expect(page).to_have_url(f"{first_pass_url}/developer")  # no jump to the Dossier
-    expect(page.get_by_role("button", name="Set up a company")).to_be_visible()
-    page.go_forward()
-    page.wait_for_timeout(SETTLE_MS)
-    expect(page).not_to_have_url(re.compile(r"/developer/setup$"))
-    expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+    return created.value.json()["id"]
 
 
-def test_a_tab_clicked_while_the_create_answers_stays_and_back_never_reaches_the_wizard(
+def test_back_while_the_create_answers_keeps_the_scroll_and_open_runs_the_first_pass(
     page: Page, first_pass_url, nordlicht_later
 ):
-    """#568: the Company tab clicked while the create is still answering (its Make current held)
-    moves past the wizard's history entry, so Back reaches it from behind. When the answer lands
-    the developer stays on the Company page, under the new company; the first Back gives the
-    Dossier the create would have opened, the second the Dossier setup was opened from, and
-    neither an empty wizard. On first_pass_url: its pass is the third of the passes' daily limit
-    (3) there, after story 5's and #476's."""
+    """#569 (after #476): Back pressed while the create is still answering leaves the wizard for
+    the developer page, scrolled down. When the answer lands the scroll stays (the page isn't
+    opened afresh) and the notice, held under the top bar, is in view; Open on it opens the new
+    company on the Overview, its first pass run (#447). The kept input, the top bar and the next
+    Back are profiles.test.tsx's. On first_pass_url: its pass is the second of the passes' daily
+    limit (3) there, after story 5's."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 1280, "height": 700})
+    usage = page.get_by_role("region", name="Usage")
+    before: dict[str, float] = {}
+
+    def scroll_down() -> None:
+        usage.scroll_into_view_if_needed()
+        before["y"] = page.evaluate("window.scrollY")
+        assert before["y"] > 0, before
+        before["usage"] = usage.bounding_box()["y"]
+
+    company = "Zurück GmbH"
+    profile = back_while_creating(page, first_pass_url, company, scroll_down)
+
+    notice = page.get_by_role("status").filter(has_text=f"{company} was made and is now current.")
+    expect(notice).to_be_in_viewport()
+    assert current_of(page, first_pass_url) == profile
+    assert page.evaluate("window.scrollY") >= before["y"]  # not back at the top
+    assert abs(usage.bounding_box()["y"] - before["usage"]) < 2
+    # A field brought into view stops below the bar and the notice both (scroll padding).
+    padding, bar, band = page.evaluate(
+        "[getComputedStyle(document.documentElement).scrollPaddingTop,"
+        " document.querySelector('header.top').getBoundingClientRect().height,"
+        " document.querySelector('.created-notice').getBoundingClientRect().height]"
+    )
+    assert band > 0, band
+    assert abs(float(padding.removesuffix("px")) - (bar + band + 8)) < 1, (padding, bar, band)
+
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
+        page.get_by_role("button", name=f"Open {company}").click()
+    assert passed.value.ok, passed.value.status
+    expect(page).to_have_url(f"{first_pass_url}/")
+    expect(bar_company(page)).to_have_text(company)
+    expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+
+
+def test_the_created_notice_is_walked_by_keyboard_and_dismiss_leaves_focus_on_the_page(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#569: Tab reaches the created notice's Open, then Dismiss; Dismiss by keyboard hides the
+    notice and puts focus on the page's h1 (on the Company page, its company), not the body,
+    leaving the page where it was scrolled rather than at that heading. The notice stays with the
+    developer from page to page until then. No pass runs: nothing is opened."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 1280, "height": 500})
+    back_while_creating(page, first_pass_url, "Tastatur GmbH")
+    notice = page.get_by_role("status").filter(
+        has_text="Tastatur GmbH was made and is now current."
+    )
+    expect(notice).to_be_visible()
+    company_tab(page).click()
+    heading = page.get_by_role("heading", level=1)
+    expect(heading).to_be_visible()
+    expect(page.get_by_role("region", name="Documents")).to_be_visible()
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 200, scrolled
+    page.get_by_role("banner").get_by_role("button", name="Your menu").focus()  # the bar's last
+    expect(heading).not_to_be_in_viewport()
+
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Open Tastatur GmbH")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Dismiss")).to_be_focused()
+    assert page.evaluate("window.scrollY") == scrolled  # the band's buttons take focus in place
+    band = page.locator(".created-notice").bounding_box()["height"]
+    page.keyboard.press("Enter")
+    expect(notice).to_have_count(0)
+    expect(heading).to_be_focused()
+    # Focused where it is, not scrolled to: the page moves up by the band gone at most.
+    after = page.evaluate("window.scrollY")
+    assert after >= scrolled - band - 2, (scrolled, band, after)
+
+
+def test_a_tab_clicked_while_the_create_answers_stays_and_back_opens_the_company(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#568, #569: the Company tab clicked while the create is still answering (its Make current
+    held) moves past the wizard's history entry, so Back reaches it from behind. When the answer
+    lands the developer stays on the Company page as it is, told the new company is current; the
+    first Back gives the Dossier the create would have opened, under the new company, its first
+    pass run; the second the Dossier setup was opened from, and neither an empty wizard. On
+    first_pass_url: its pass is the third of the passes' daily limit (3) there, after story 5's
+    and #569's."""
     nordlicht_later(first_pass_url)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, first_pass_url)
@@ -927,15 +1004,17 @@ def test_a_tab_clicked_while_the_create_answers_stays_and_back_never_reaches_the
 
     company_tab(page).click()
     expect(page).to_have_url(f"{first_pass_url}/company")
-    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
-        held[0].continue_()
-    assert passed.value.ok, passed.value.status
-    expect(bar_company(page)).to_have_text("Reiter GmbH")
+    held[0].continue_()
+    expect(page.get_by_text("Reiter GmbH was made and is now current.")).to_be_visible()
     assert current_of(page, first_pass_url) == profile
     expect(page).to_have_url(f"{first_pass_url}/company")  # no jump to the Dossier
 
-    for _ in range(2):
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
         page.go_back()
+    assert passed.value.ok, passed.value.status
+    for back in range(2):
+        if back:
+            page.go_back()
         expect(page).to_have_url(f"{first_pass_url}/")
         expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
         expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)

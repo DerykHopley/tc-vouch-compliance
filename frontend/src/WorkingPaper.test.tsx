@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Assessment, RequirementVerdict } from './assessment.ts'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
 import { NO_OWNER, type RemediationItem } from './remediation.ts'
 import type { ControlCard } from './overview.ts'
 import type { Goal } from './report.ts'
@@ -536,6 +537,11 @@ function reviewRoute(status = 200, body: unknown = {}, answer?: () => Promise<Re
 /** The paper head's verdict line: the control's verdict chip and its review state. */
 const headVerdict = () => screen.getByText('Verdict', { selector: '.paper-meta span' }).parentElement!
 const bar = () => screen.getByRole('region', { name: 'Review' })
+/** Presses a final decision and confirms it in its ask (#634): the confirm button bears the trigger's words. */
+async function decide(name: 'Accept verdict' | 'Reject verdict') {
+  await userEvent.click(within(bar()).getByRole('button', { name }))
+  await userEvent.click(within(bar()).getByRole('button', { name }))
+}
 
 /** Opens M1's override and fills it in; the editor, not yet saved. */
 async function overrideM1(verdict = 'evidenced', reason = REASON) {
@@ -626,11 +632,12 @@ describe('the review of a proposed control', () => {
     const sent = reviewRoute(503)
     const onReviewed = vi.fn()
     review({ onReviewed })
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
+    await decide('Reject verdict')
     expect((await within(bar()).findByRole('alert')).textContent).toBe(
       'This step could not be recorded just now. Nothing was changed; please try again.')
     expect(onReviewed).not.toHaveBeenCalled()
     expect(within(headVerdict()).getByText('Proposed')).toBeTruthy()
+    await pastDoubleClick() // Retry is a new press after the confirm's click burst (#562), and asks nothing
     await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
     expect(sent.map((s) => (s.body as { decision: string }).decision)).toEqual(['reject', 'reject'])
   })
@@ -729,7 +736,7 @@ describe('the review in three steps (issue 372)', () => {
     const onReviewed = vi.fn()
     review({ assessment: READY, onReviewed })
     await userEvent.type(within(bar()).getByLabelText('Your note (kept in the audit trail)'), 'Checked.')
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    await decide('Accept verdict')
     expect(sent).toEqual([{ url: '/api/assessments/t1/review', body: { decision: 'accept', note: 'Checked.' } }])
     expect(onReviewed).toHaveBeenCalledWith(accepted)
   })
@@ -738,7 +745,7 @@ describe('the review in three steps (issue 372)', () => {
     const sent = reviewRoute(200, { assessment: { ...PLANNING, status: 'rejected', review_step: null } })
     review({ assessment: PLANNING })
     await userEvent.type(within(bar()).getByLabelText('Your note (kept in the audit trail)'), 'Look again.')
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
+    await decide('Reject verdict')
     expect(sent).toEqual([{ url: '/api/assessments/t1/review', body: { decision: 'reject', note: 'Look again.' } }])
   })
 
@@ -750,6 +757,55 @@ describe('the review in three steps (issue 372)', () => {
       'This step could not be recorded just now. Nothing was changed; please try again.')
     await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
     expect(sent.map((s) => s.url)).toEqual(['/api/assessments/t1/findings', '/api/assessments/t1/findings'])
+  })
+})
+
+describe('the final decisions ask first (issue 634)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const READY: Assessment = { ...PROPOSED, review_step: 'accept', confirmed: [], remediation: [] }
+  const ask = () => within(bar()).getByRole('alert').textContent
+  const note = () => within(bar()).getByLabelText('Your note (kept in the audit trail)')
+
+  it('Accept verdict sends nothing on its first press: it asks, naming what is recorded; Cancel closes it', async () => {
+    const sent = reviewRoute(200, { assessment: { ...READY, status: 'accepted', review_step: null } })
+    review({ assessment: READY })
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    expect(sent).toEqual([])
+    expect(ask()).toBe("Accept this control's verdict? Your decision is recorded in the audit trail, and the verdict "
+      + 'counts towards readiness.')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Cancel' }))
+    expect(within(bar()).queryByRole('alert')).toBeNull()
+    expect(sent).toEqual([])
+  })
+
+  it('names the note in the accept ask when one is written', async () => {
+    review({ assessment: READY })
+    await userEvent.type(note(), 'Checked.')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Accept verdict' }))
+    expect(ask()).toBe("Accept this control's verdict? Your decision and note are recorded in the audit trail, and "
+      + 'the verdict counts towards readiness.')
+  })
+
+  it("Reject verdict with no note asks first, saying the note is the next assessment's only guidance", async () => {
+    const sent = reviewRoute(200, { assessment: { ...PROPOSED, status: 'rejected', review_step: null } })
+    review()
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
+    expect(sent).toEqual([])
+    expect(ask()).toBe("Reject this control's verdict with no note? Your decision is recorded in the audit trail. A "
+      + 'note is the only guidance the next assessment of this control gets: write one in Your note first.')
+  })
+
+  it('a note written while the reject ask is open turns the ask to say the next assessment reads it', async () => {
+    const sent = reviewRoute(200, { assessment: { ...PROPOSED, status: 'rejected', review_step: null } })
+    review()
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
+    await userEvent.type(note(), 'Look at the key register.')
+    expect(ask()).toBe("Reject this control's verdict? Your decision and note are recorded in the audit trail, and "
+      + 'the next assessment of this control reads your note.')
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Reject verdict' }))
+    expect(sent).toEqual([{ url: '/api/assessments/t1/review',
+      body: { decision: 'reject', note: 'Look at the key register.' } }])
   })
 })
 
@@ -783,6 +839,43 @@ describe("the override form's keyboard focus (issue 226)", () => {
     await saveOverrideOfM1()
     await userEvent.click(within(row('M1')).getByRole('button', { name: 'Undo the override of M1' }))
     expect(document.activeElement).toBe(change())
+  })
+})
+
+describe("switching to another requirement's override keeps a typed reason unless the lead drops it (issue 559)", () => {
+  const changeM2 = () => within(row('M2')).getByRole('button', { name: 'Change M2' })
+  const QUESTION = 'You have an override of M1 not yet saved. Drop it and change M2?'
+
+  it('asks first in the app while M1 holds a typed reason, and Keep editing M1 keeps it', async () => {
+    review()
+    await overrideM1()
+    await userEvent.click(changeM2())
+    expect(within(row('M2')).getByRole('alert').textContent).toBe(QUESTION)
+    expect(screen.queryByRole('form', { name: 'Override M2' })).toBeNull()
+
+    await userEvent.click(within(row('M2')).getByRole('button', { name: 'Keep editing M1' }))
+    const editor = screen.getByRole('form', { name: 'Override M1' })
+    expect((within(editor).getByLabelText('Reason (required)') as HTMLTextAreaElement).value).toBe(REASON)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("Change M2 anyway drops M1's typed reason and opens M2", async () => {
+    review()
+    await overrideM1()
+    await userEvent.click(changeM2())
+    await userEvent.click(within(row('M2')).getByRole('button', { name: 'Change M2 anyway' }))
+    expect(screen.queryByRole('form', { name: 'Override M1' })).toBeNull()
+    expect(screen.getByRole('form', { name: 'Override M2' })).toBeTruthy()
+    expect(within(row('M1')).queryByText(/^Overridden/)).toBeNull()
+  })
+
+  it('switches in one press when the open editor holds nothing typed', async () => {
+    review()
+    await userEvent.click(within(row('M1')).getByRole('button', { name: 'Change M1' }))
+    await userEvent.click(changeM2())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('form', { name: 'Override M1' })).toBeNull()
+    expect(screen.getByRole('form', { name: 'Override M2' })).toBeTruthy()
   })
 })
 

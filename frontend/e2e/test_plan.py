@@ -14,6 +14,7 @@ import re
 
 import pytest
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from reviewing import decide
 from touch_targets import small_targets
 
 CONTROL = "4.1.2"
@@ -68,12 +69,9 @@ def confirm_and_accept(page: Page, paper: Locator, *, approve: bool) -> None:
         expect(item).to_contain_text("Priority: Medium")  # the default for partly evidenced
         with page.expect_response(re.compile(r"/remediation/M1$")):
             item.get_by_role("button", name="Approve M1").click()
-    with (
-        page.expect_response(re.compile(r"/review$")) as accepted,
-        page.expect_response("**/api/overview"),  # read again in the improvement goal
-    ):
-        bar.get_by_role("button", name="Accept verdict").click()
-    assert accepted.value.ok, accepted.value.status
+    with page.expect_response("**/api/overview"):  # read again in the improvement goal
+        accepted = decide(page, bar, "Accept verdict")
+    assert accepted.ok, accepted.status
 
 
 @pytest.mark.parametrize("width", [1280, 400])

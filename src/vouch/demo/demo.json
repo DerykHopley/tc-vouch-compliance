@@ -1,7 +1,7 @@
 {
   "gather": [
     {"tool": "search_policies", "args": {"query": "authentication password second factor administrator"}},
-    {"answer": "Sign-in methods are chosen by each system's exposure: passwords of at least 12 characters checked against breach lists, an authenticator app on internet-facing systems, and hardware security keys for separate administrator accounts."}
+    {"answer": "### What the evidence shows\n\nThe authentication standard chooses sign-in methods by exposure: “We decide how people sign in to a system by looking at what could go wrong with it.” It says “All internet-facing systems require an authenticator app as a second factor.”\n\nFor passwords, the same standard sets: “Passwords have at least 12 characters. The directory blocks passwords found in known breach lists.” For administrators: “Administrator accounts always require a hardware security key.”\n\n### What is missing\n\n- No record shows that each system's exposure was assessed to choose its sign-in method."}
   ],
   "judge": {
     "requirements": [

@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "assigned managed access extent"}},
     {"tool": "search_records", "args": {"query": "assigned managed access extent"}},
-    {"answer": "Draft answer for 4.2.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\naccess-control-policy: “Rights that are no longer needed are removed within five working days of the manager telling IT.”\n\njoiner-leaver-record: “January to September 2026: 12 joiners, 7 movers and 9 leavers.”\n\naccess-review-record: “All accounts in the directory, the ERP and the CAD system: 171 employee accounts, 9 administrator accounts, 14 supplier accounts and 6 technical accounts.”\n\nmfa-rollout-record: “All 9 administrator accounts are separate from their owners' everyday accounts and require a hardware security key since 15 April 2026.”\n\n### What is missing\n\n- M2 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

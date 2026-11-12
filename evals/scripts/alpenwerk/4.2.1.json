@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "zugriffsrechte inwieweit verwaltet vergeben"}},
     {"tool": "search_records", "args": {"query": "zugriffsrechte inwieweit verwaltet vergeben"}},
-    {"answer": "Antwortentwurf für 4.2.1: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nbenutzerkonten-protokoll: „Auszug aus dem IT-Serviceportal, Stand 30.“\n\nberechtigungskonzept: „Jede Rolle hat genau die Rechte, die für ihre Aufgaben nötig sind (Need-to-know und Least-Privilege).“\n\nzugriffsrechte-ueberpruefung: „Technische Konten und die Benutzerkonten von Alpenwerk in den Portalen von drei Kunden wurden nicht geprüft.“\n\n### Was fehlt\n\n- M2 ist nur teilweise nachgewiesen."}
   ],
   "judge": {
     "requirements": [

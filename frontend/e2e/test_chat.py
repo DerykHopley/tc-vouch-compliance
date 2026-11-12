@@ -6,6 +6,7 @@ On their own server (chat_url), so their requests don't spend another suite's ra
 import json
 
 import pytest
+from click_burst import DOUBLE_CLICK_MS
 from dossier_cards import click_on_card
 from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, Route, expect
@@ -108,7 +109,8 @@ def test_each_state_is_reachable_and_drawn_in_the_theme(page: Page, chat_url, sc
     assert chat(page).evaluate("el => getComputedStyle(el).boxShadow") == "none"
     assert chat(page).evaluate("el => getComputedStyle(el).backgroundColor") == sheet
 
-    # Closed again: the button is back.
+    # Closed again: the button is back. A person's next click comes after the pin's burst (#563).
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     page.get_by_role("button", name="Close the chat").click()
     expect(ask).to_be_focused()
 
@@ -145,7 +147,9 @@ def test_pinned_the_page_and_chat_sit_side_by_side_with_no_sideways_scroll(page:
         side = box(page, part)
         assert side["x"] + side["width"] <= pinned["x"], part
     assert page.evaluate(SCROLLS_SIDEWAYS) is False
-    # The page under it still works: a click on a card's question opens its paper beside the chat (#231).
+    # The page under it still works: a click on a card's question opens its paper beside the chat (#231),
+    # after the pin's burst (#563).
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     click_on_card(page, "4.1.2")
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
     expect(chat(page)).to_contain_text("on 4.1.2 · Working paper")
@@ -266,11 +270,15 @@ def test_a_chosen_width_survives_unpin_and_pin_a_working_paper_and_a_reload(page
     assert chat_width(page) == 600
 
     pin_button = page.get_by_role("button", name="Pin beside the page")
+    # A person's next click comes after the burst of the pin and the drag's click (#563).
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     pin_button.click()  # unpinned: enlarged
     expect(chat(page)).to_have_class("bubble enlarged")
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     pin_button.click()
     assert chat_width(page) == 600
 
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     click_on_card(page, "4.1.2")
     expect(page.get_by_role("region", name="Working paper")).to_be_visible()
     assert chat_width(page) == 600

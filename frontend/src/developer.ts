@@ -270,3 +270,11 @@ export async function developerPrompts(control?: string): Promise<PromptsRead> {
   if (sessionEnded(response)) return { status: 'signed-out' } // a 401 signs out, as every API call's does
   return { status: 'failed' }
 }
+
+/** A company made in setup that could not be made current (#476, #569), in one sentence for both places it is said:
+ * the developer page's note, when the app opens afresh there (`onDeveloperPage`), or the created notice, when the
+ * developer had left setup for another page. */
+export function notMadeCurrent(company: string, onDeveloperPage: boolean): string {
+  const where = onDeveloperPage ? '' : ' on the Developer page'
+  return `${company} was made but could not be made current. Use Make current${where} to try again.`
+}

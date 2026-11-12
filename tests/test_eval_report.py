@@ -13,8 +13,10 @@ from vouch.eval_report import (
     assessment_measures,
     load_runs,
     main,
+    over_claimed,
     render,
     routed,
+    verdict_table,
     write_atomic,
 )
 from vouch.evals import ResultsFile, RunInfo, load_cases, run_confirmed
@@ -341,3 +343,71 @@ def test_routed_matches_the_same_model_under_its_dated_slug_variant_or_ollama_na
     model, served, is_routed
 ):
     assert routed(model, served) is is_routed
+
+
+def req(expected: str, given: str | None) -> dict:
+    return {"requirement_id": "M1", "expected": expected, "verdict": given}
+
+
+def verdicts(*pairs: tuple[str, str | None], **extra) -> dict:
+    return case("1.1.1", 1000, 0.002, 4.0, requirements=[req(e, g) for e, g in pairs], **extra)
+
+
+def test_over_claimed_counts_verdicts_more_evidenced_than_expected():
+    cases = [
+        verdicts(
+            ("not-evidenced", "evidenced"),  # over-claimed
+            ("not-evidenced", "partly-evidenced"),  # over-claimed
+            ("partly-evidenced", "evidenced"),  # over-claimed
+            ("evidenced", "partly-evidenced"),  # under-claimed: not counted
+            ("evidenced", "evidenced"),
+        ),
+        verdicts(("evidenced", "not-applicable")),
+        verdicts(("not-evidenced", None), error="ConnectionError: 502"),  # in the whole only
+    ]
+
+    assert over_claimed(cases) == (3, 7)
+
+
+def test_over_claimed_scores_nothing_for_cases_saved_without_requirements():
+    assert over_claimed([case("1.1.1", 1000, 0.002, 4.0)]) == (0, 0)
+
+
+def test_the_verdict_table_counts_expected_against_given_in_the_glossarys_words():
+    cases = [
+        verdicts(
+            ("evidenced", "evidenced"),
+            ("evidenced", "evidenced"),
+            ("evidenced", "partly-evidenced"),
+            ("not-evidenced", "evidenced"),
+            ("partly-evidenced", None),
+        )
+    ]
+
+    assert verdict_table(cases) == [
+        "| Expected \\ given | evidenced | partly evidenced | not evidenced | no verdict |",
+        "|---|---|---|---|---|",
+        "| evidenced | 2 | 1 | 0 | 0 |",
+        "| partly evidenced | 0 | 0 | 0 | 1 |",
+        "| not evidenced | 1 | 0 | 0 | 0 |",
+    ]
+
+
+def test_the_verdict_table_adds_not_applicable_only_when_a_run_gave_it():
+    table = verdict_table([verdicts(("evidenced", "not-applicable"))])
+
+    assert table[0].endswith("| not evidenced | not applicable | no verdict |")
+    assert table[2] == "| evidenced | 0 | 0 | 0 | 1 | 0 |"
+
+
+def test_the_page_shows_the_over_claimed_rate_and_a_verdict_table_per_run(tmp_path):
+    over = verdicts(("not-evidenced", "evidenced"), ("evidenced", "evidenced"))
+    write(tmp_path, "a.json", raw("nordlicht", "m/x", "2026-11-05T10", 0.5, cases=[over]))
+    write(tmp_path, "b.json", raw("alpenwerk", "m/x", "2026-11-05T11", 0.5))
+
+    page = render(load_runs([tmp_path]))
+
+    assert "## Over-claimed" in page
+    assert "| m/x | n/a | 50% (1/2) |" in page
+    assert "### m/x on nordlicht" in page
+    assert "### m/x on alpenwerk" in page

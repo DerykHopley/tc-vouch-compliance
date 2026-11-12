@@ -5,6 +5,7 @@ import {
 import { type ControlCard, controlPath, isoLabel, isReviewState, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, indexLabel, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
+import { useScrollMore } from './useScrollMore.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { setUnsaved } from './leaving.ts'
 import OpenQuestions from './OpenQuestions.tsx'
@@ -130,10 +131,11 @@ export default function WorkingPaper(props: PaperProps) {
   const [changedEditor, setChangedEditor] = useState<string | null>(null)
   const onChanged = useCallback((requirementId: string, changed: boolean) =>
     setChangedEditor((now) => changed ? requirementId : now === requirementId ? null : now), [])
+  // The open editor's requirement while it holds input not yet Saved: another requirement's Change asks first (#559).
+  const typedIn = editing !== null && changedEditor === editing ? editing : null
   // Leaving asks first while overrides are saved and not recorded (#182), or typed in the open editor and not yet
   // Saved (#356), an override opened again counted once; none once the paper is gone.
-  const editorUnsaved = editing !== null && changedEditor === editing
-    && !overrides.some((o) => o.requirement_id === editing)
+  const editorUnsaved = typedIn !== null && !overrides.some((o) => o.requirement_id === typedIn)
   const unsaved = overrides.length + (editorUnsaved ? 1 : 0)
   useEffect(() => setUnsaved(unsaved), [unsaved])
   useEffect(() => () => setUnsaved(0), [])
@@ -277,7 +279,7 @@ export default function WorkingPaper(props: PaperProps) {
             </div>}
             {judged ? (
               <JudgedRequirements judged={judged} listed={requirements} overrides={marks} editing={editing}
-                language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
+                typedIn={typedIn} language={answerLanguage(run)} staleWord={assessed?.stale_word} currentWord={assessed?.current_word}
                 statementNote={assessed?.statement_note} statementWord={assessed?.statement_word}
                 onEdit={setEditing} onChanged={onChanged} onSave={save} onUndo={undo} items={{
                   shown: remediation, threadId: assessed?.thread_id ?? '',
@@ -344,24 +346,10 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   const list = useRef<HTMLDivElement>(null)
   const nav = useRef<HTMLElement>(null)
-  const [more, setMore] = useState(false)
+  const more = useScrollMore(nav, list, 'y')
   useEffect(() => {
     list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
   }, [openId])
-  useEffect(() => {
-    const box = nav.current
-    if (!box) return
-    const measure = () => setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 1)
-    measure()
-    box.addEventListener('scroll', measure, { passive: true })
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(box)
-    if (list.current) observer?.observe(list.current)
-    return () => {
-      box.removeEventListener('scroll', measure)
-      observer?.disconnect()
-    }
-  }, [controls])
   return (
     <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
       <div className="wp-index-list" ref={list}
@@ -457,6 +445,8 @@ type JudgedProps = {
   overrides: Overrides
   /** The requirement whose override is open. */
   editing: string | null
+  /** The open editor's requirement while it holds input not yet Saved (#559): another's Change asks first. */
+  typedIn: string | null
   onEdit: (requirementId: string | null) => void
   /** Whether the requirement's open editor holds input not yet Saved (#356). */
   onChanged: (requirementId: string, changed: boolean) => void
@@ -534,7 +524,7 @@ const JUDGED_COLUMNS = 5
 const STATEMENT_NOTE = "A lead's statement can't fully evidence a requirement: a document or record that shows it is "
   + 'needed to close it.'
 
-function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onChanged, onSave, onUndo, items, language,
+function JudgedRequirements({ judged, listed, overrides, editing, typedIn, onEdit, onChanged, onSave, onUndo, items, language,
   staleWord = 'Stale', currentWord = 'Current', statementNote = STATEMENT_NOTE,
   statementWord = "Lead's statement" }: JudgedProps) {
   const source = (id: string) => listed.find((r) => r.id === id)?.source
@@ -573,10 +563,13 @@ function JudgedRequirements({ judged, listed, overrides, editing, onEdit, onChan
                     {replaced && <span className="why">Overridden from {VERDICT_WORDS[replaced]}</span>}
                     {overrides.editable && applies && editing !== r.id && (
                       <span>
-                        <button ref={(el) => { changeButtons.current[r.id] = el }} className="btn btn-ghost"
-                          aria-label={`Change ${r.id}`} onClick={() => onEdit(r.id)}>
-                          Change
-                        </button>
+                        {/* Another requirement's typed override is dropped only once the lead says so (#559). */}
+                        <InlineConfirm label="Change" trigger={{ 'aria-label': `Change ${r.id}` }}
+                          triggerRef={(el) => { changeButtons.current[r.id] = el }}
+                          ask={typedIn !== null}
+                          question={typedIn ? `You have an override of ${typedIn} not yet saved. Drop it and change ${r.id}?` : ''}
+                          confirmLabel={`Change ${r.id} anyway`} cancelLabel={`Keep editing ${typedIn}`}
+                          onConfirm={() => onEdit(r.id)} />
                         {replaced && (
                           <button className="btn btn-ghost" aria-label={`Undo the override of ${r.id}`}
                             onClick={() => {

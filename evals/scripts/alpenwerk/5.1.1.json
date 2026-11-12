@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "kryptografischer inwieweit verfahren verwaltet"}},
     {"tool": "search_records", "args": {"query": "kryptografischer inwieweit verfahren verwaltet"}},
-    {"answer": "Antwortentwurf für 5.1.1: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nkryptografiekonzept: „Die Verfahren richten sich nach der aktuellen Technischen Richtlinie TR-02102 des BSI.“\n\ncloud-dienste-register: „Diese Dienste betreiben Anbieter außerhalb von Alpenwerk für uns.“\n\n### Was fehlt\n\n- H1 ist nur teilweise nachgewiesen."}
   ],
   "judge": {
     "requirements": [

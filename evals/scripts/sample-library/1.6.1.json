@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "observations information relevant reported"}},
     {"tool": "search_records", "args": {"query": "observations information relevant reported"}},
-    {"answer": "Draft answer for 1.6.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nNo document found shows what 1.6.1 asks for.\n\n### What is missing\n\n- M1 is not evidenced.\n- M2 is not evidenced.\n- M3 is not evidenced.\n- S1 is not evidenced.\n- S2 is not evidenced.\n- S3 is not evidenced.\n- S4 is not evidenced.\n- S5 is not evidenced.\n- S6 is not evidenced."}
   ],
   "judge": {
     "requirements": [

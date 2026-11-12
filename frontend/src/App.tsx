@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useHeightVar } from './useHeightVar.ts'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import { type Arrival, useFirstPass } from './arrival.ts'
 import AskVouch from './AskVouch.tsx'
@@ -76,6 +77,20 @@ function viewAt(path: string): View {
   }
 }
 
+/** What a company setup's create did while the developer was on another page (#569), said under the top bar: `open`,
+ * when it made `company` current, opens it. */
+export type CreatedNotice = { text: string; open?: { company: string; onOpen: () => void } }
+
+/** After Dismiss on the created notice (#569), whose button is gone: focus goes to the page's h1, or else its main,
+ * where the page is scrolled to now. */
+function focusPage() {
+  const main = document.querySelector<HTMLElement>('main')
+  const target = main?.querySelector<HTMLElement>('h1') ?? main
+  if (!target) return
+  if (!target.hasAttribute('tabindex')) target.tabIndex = -1
+  target.focus({ preventScroll: true })
+}
+
 type AppProps = {
   /** Clerk mode's sign out, in the user menu; local mode has nobody to sign out. */
   onSignOut?: () => void
@@ -105,12 +120,20 @@ type AppProps = {
    * taken once, as the app mounts, and `onArrivalUsed` then lets ProfiledApp clear it, so no later mount reruns it. */
   arrival?: Arrival | null
   onArrivalUsed?: () => void
+  /** A create landed while the developer was elsewhere (#569): said under the top bar, the page left as it is, until
+   * Dismiss (`onNoticeDismissed`) or the app opens afresh. */
+  createdNotice?: CreatedNotice
+  onNoticeDismissed?: () => void
+  /** Back or Forward reached the setup entry of a create that landed while the developer was elsewhere: ProfiledApp
+   * opens the company it made, `id` (#568, #569). */
+  onSetupReached?: (id: string) => void
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs and the user menu, behind one Menu button on a phone;
  * no profile switcher since #480), then the page shown, and the chat. */
 export default function App({ onSignOut, userName, profile, onStartedAfresh, onCompanyCreated, onCompanyRemoved,
-  onMadeCurrent, developerNote, onNoteShown, arrival = null, onArrivalUsed }: AppProps = {}) {
+  onMadeCurrent, developerNote, onNoteShown, arrival = null, onArrivalUsed, createdNotice, onNoticeDismissed,
+  onSetupReached }: AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -155,6 +178,13 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     setPaperFrom(null)
     forgetScrolls()
   }
+  const onSetupReachedRef = useRef(onSetupReached) // read by the popstate listener, set up once
+  useEffect(() => {
+    onSetupReachedRef.current = onSetupReached
+  }, [onSetupReached])
+  // The notice band's height, for the scroll padding and the sticky parts below it (app.css).
+  const noticeBand = useRef<HTMLDivElement>(null)
+  useHeightVar(noticeBand, '--created-notice', createdNotice !== undefined)
   const shownPath = useRef(pathOf(view)) // the address of the view shown, put back when the lead stays (#182)
   useEffect(() => {
     shownPath.current = pathOf(view)
@@ -167,9 +197,11 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
         return
       }
       setFocusHeading(false)
-      const next = viewAt(settleSetupEntry()) // a finished setup's entry gives way (#568)
+      const settled = settleSetupEntry() // a finished setup's entry gives way (#568)
+      const next = viewAt(settled.path)
       if (next.name !== 'paper' && next.name !== 'round') leaveRounds()
       setView(next)
+      if (settled.opens !== null) onSetupReachedRef.current?.(settled.opens) // the company it made opens (#569)
     }
     // A reload or closing the tab: the browser asks in its own words while overrides are unsaved.
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -202,6 +234,16 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
     void developerSettings().then((settings) => current && setDeveloper(settings))
     return () => { current = false }
   }, [])
+  // A create's notice (#569): the developer settings are read again, so the developer page lists the company made
+  // (and offers Make current, when it could not be made current); a read that fails keeps the page as it is.
+  useEffect(() => {
+    if (!createdNotice) return
+    let current = true
+    void developerSettings().then((settings) => {
+      if (current && settings && settings !== UNAVAILABLE) setDeveloper(settings)
+    })
+    return () => { current = false }
+  }, [createdNotice])
   const overview = useOverview()
   const { load, noteAssessed, refresh: refreshOverview } = overview
   const onDossier = view.name === 'dossier'
@@ -353,6 +395,20 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
               ? { onPage: () => go({ name: 'developer' }), onSetup: () => go({ name: 'setup' }) } : undefined} />
         </div>
       </TopBar>
+      {/* Mounted empty before any notice, so a sentence put in its status region is announced (#569). */}
+      <div ref={noticeBand} className={createdNotice ? 'wrap created-notice shown' : 'created-notice'}>
+        <div role="status">{createdNotice && <p className="field-note notice">{createdNotice.text}</p>}</div>
+        {createdNotice?.open && (
+          <button type="button" className="btn btn-primary" onClick={createdNotice.open.onOpen}>
+            Open {createdNotice.open.company}</button>
+        )}
+        {createdNotice && (
+          <button type="button" className="btn btn-ghost" onClick={() => {
+            onNoticeDismissed?.()
+            focusPage()
+          }}>Dismiss</button>
+        )}
+      </div>
       {shown === 'report' ? <Report />
         : shown === 'company' ? (
           <CompanyPage overview={overview.state} onRetryOverview={overview.retry} onGoalChanged={changedGoal}

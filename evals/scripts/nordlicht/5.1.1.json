@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "cryptographic procedures managed extent"}},
     {"tool": "search_records", "args": {"query": "cryptographic procedures managed extent"}},
-    {"answer": "Draft answer for 5.1.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nencryption-standard: “We use only encryption methods that the national cyber security authority recommends: AES with keys of at least 128 bits for stored data, RSA with at least 3072 bits or elliptic curves with at least 256 bits for key exchange and signatures, and SHA-256 or stronger for hashing.”\n\n### What is missing\n\n- M1 is only partly evidenced.\n- S1 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

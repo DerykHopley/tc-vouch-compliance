@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "informationen übertragung geschützt inwieweit"}},
     {"tool": "search_records", "args": {"query": "informationen übertragung geschützt inwieweit"}},
-    {"answer": "Antwortentwurf für 5.1.2: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nnetzwerkdienste-verzeichnis: „September 2026 hat der IT-Leiter mit einer Auswertung der Firewall bestätigt, dass nur diese Dienste genutzt werden und alle Verbindungen verschlüsselt sind.“\n\nnetzwerk-uebertragungsrichtlinie: „Unverschlüsselte Protokolle wie FTP oder Telnet sind an der Firewall gesperrt.“\n\n### Was fehlt\n\nEs fehlt nichts."}
   ],
   "judge": {
     "requirements": [

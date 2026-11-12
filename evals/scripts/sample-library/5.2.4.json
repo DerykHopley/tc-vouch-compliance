@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "analysed recorded extent event"}},
     {"tool": "search_records", "args": {"query": "analysed recorded extent event"}},
-    {"answer": "Draft answer for 5.2.4, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nlog-check-record: “Each administrator's own actions in the logs are checked by the other one.”\n\nlogging-standard: “Requirements that customer contracts set for logs, such as how long to keep them or who may read them, are listed with the contract and built into the settings of the log server.”\n\n### What is missing\n\n- M3 is only partly evidenced.\n- M4 is only partly evidenced.\n- S2 is only partly evidenced.\n- H1 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

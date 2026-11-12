@@ -1,7 +1,7 @@
 {
   "gather": [
     {"tool": "search_policies", "args": {"query": "Authentifizierung Passwort Hardware-Token Administratorkonten Risikobewertung"}},
-    {"answer": "Die Anmeldeverfahren richten sich nach einer jährlichen Risikobewertung, die die Erreichbarkeit aus dem Internet und die zu erwartenden Angriffe berücksichtigt. Passwörter haben mindestens 14 Zeichen und werden gegen eine Liste geleakter Passwörter geprüft. Für Administratorkonten, den Fernzugriff über VPN und die Cloud-Dienste ist ein Hardware-Token als zweiter Faktor Pflicht."}
+    {"answer": "### Was die Nachweise zeigen\n\nDie Authentifizierungsrichtlinie leitet die Anmeldeverfahren aus einer Risikobewertung ab: „Die Anmeldeverfahren dieser Richtlinie folgen aus der Risikobewertung der Anmeldeverfahren, die der IT-Leiter jedes Jahr erstellt.“\n\nFür Passwörter legt sie fest: „Passwörter haben mindestens 14 Zeichen.“ und „Der Verzeichnisdienst lehnt Standard-Passwörter und solche aus der Liste technisch ab.“ Einen zweiten Faktor verlangt sie so: „Eine zweite Anmeldung mit einem Hardware-Token ist Pflicht für alle Administratorkonten, für den Fernzugriff über VPN und für alle Cloud-Dienste.“\n\n### Was fehlt\n\n- Kein Nachweis zeigt, dass die jährliche Risikobewertung der Anmeldeverfahren erstellt wurde."}
   ],
   "judge": {
     "requirements": [

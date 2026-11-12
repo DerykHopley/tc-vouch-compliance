@@ -11,19 +11,34 @@ import re
 import pdf_words
 import pytest
 from current_company import make_current
+from dossier_cards import card as overview_card
 from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import confirmed
+from touch_targets import small_targets
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, with_long_quotes
+from verdict_chips import (
+    CHIPS,
+    ONE_LINE_FROM,
+    SWEEP,
+    WRAP_WIDTH,
+    assert_dot_on_first_line,
+)
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
 UNASSESSED = "5.1.2"  # assessed by one check only; Nordlicht marks its S3 not applicable
 
 
-def assessed(request: APIRequestContext, paper_url: str, control_id: str) -> None:
-    """Assesses a control on the server's fake model, up to the review."""
-    response = request.post(f"{paper_url}/api/assessments", data={"control_id": control_id})
+def assessed(
+    request: APIRequestContext, paper_url: str, control_id: str, profile: str | None = None
+) -> None:
+    """Assesses a control on the server's fake model, up to the review: under the profile when
+    one is named, else under the current company."""
+    headers = {"X-Vouch-Profile": profile} if profile else {}
+    response = request.post(
+        f"{paper_url}/api/assessments", data={"control_id": control_id}, headers=headers
+    )
     assert response.ok, response.status
     assert "event: result" in response.text()
 
@@ -123,7 +138,7 @@ def test_a_finished_assessment_is_still_shown_after_a_reload(page: Page, paper_u
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result).to_be_visible()
     verdict = result.locator(".chip").inner_text()
-    answer = result.locator(".answer").inner_text()
+    answer = result.locator(".answer").text_content()  # its headings and paragraphs as one text
     assert answer
 
     with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):  # read from the database
@@ -362,7 +377,7 @@ TABLE_LAYOUT = (
 )
 
 
-@pytest.mark.parametrize("width", [1440, 1024, 390])
+@pytest.mark.parametrize("width", [1440, 1024, WRAP_WIDTH, 390])
 def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row(
     page: Page, paper_url, width, nordlicht_later
 ):
@@ -370,7 +385,8 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
     table doesn't scroll sideways on Nordlicht or Alpenwerk, and the Requirement column keeps at
     least REQUIREMENT_MIN; the requirement text hyphenates in its own language; each remediation
     item is its own row under its requirement, spanning the table on a desktop and inside the
-    card's width on a phone (#211)."""
+    card's width on a phone (#211). #550: at WRAP_WIDTH the German verdict widened the table by
+    about 16px."""
     page.set_viewport_size({"width": width, "height": 900})
     nordlicht_later(paper_url)
     for profile, language in (("nordlicht", "en"), ("alpenwerk", "de")):
@@ -402,6 +418,40 @@ def test_the_requirements_table_fits_hyphenates_and_puts_each_fix_on_its_own_row
                 assert abs(item["width"] - layout["table"]) <= 1, item  # spans the table
             else:
                 assert item["width"] <= width, item
+
+
+def test_in_the_judged_table_a_verdict_chip_wraps_only_under_800(
+    page: Page, paper_url, nordlicht_later
+):
+    """#550: under ONE_LINE_FROM a verdict chip in the judged table may wrap at its space, its dot
+    on its first line, and the table still fits; from ONE_LINE_FROM every chip is one line. The
+    Overview's card chip stays on one line at WRAP_WIDTH."""
+    nordlicht_later(paper_url)
+    for profile in ("nordlicht", "alpenwerk"):
+        assessed(page.request, paper_url, WIDE, profile)
+        make_current(page.request, paper_url, profile)
+        page.set_viewport_size({"width": WRAP_WIDTH, "height": 900})
+        open_paper(page, paper_url, WIDE, assessed=True)
+        for width in (WRAP_WIDTH, *SWEEP):
+            page.set_viewport_size({"width": width, "height": 900})
+            chips = page.evaluate(CHIPS, "table.reqs.judged .verdict-col .chip")
+            if width >= ONE_LINE_FROM:
+                assert chips and all(c["lines"] == 1 for c in chips), (
+                    f"{profile} at {width}: {chips}"
+                )
+            else:
+                assert_dot_on_first_line(chips)
+            if width != WRAP_WIDTH:  # the fit at WRAP_WIDTH is the table test's
+                fit = page.evaluate(TABLE_LAYOUT)
+                assert fit["scroll"] <= fit["room"], f"{profile} at {width}px: {fit}"
+
+    page.set_viewport_size({"width": WRAP_WIDTH, "height": 900})
+    assessed(page.request, paper_url, ASSESSED, "alpenwerk")
+    with page.expect_response("**/api/overview"):
+        page.goto(f"{paper_url}/")
+    expect(overview_card(page, ASSESSED).locator(".chip")).to_have_text("Teilweise nachgewiesen")
+    (chip,) = page.evaluate(CHIPS, f"article[aria-label='Control {ASSESSED}'] .chip")
+    assert chip["whiteSpace"] == "nowrap" and chip["lines"] == 1, chip
 
 
 INDEX_ROWS = (
@@ -847,6 +897,53 @@ def test_a_409_in_the_docked_buttons_keeps_their_room_and_focus_clear(
     assert covered == [], covered
 
 
+def test_the_docked_reject_asks_in_the_docked_row_and_is_answered_by_keyboard(
+    page: Page, paper_url, nordlicht_later
+):
+    """#634: on a proposed 5.2.4 at 360px, Enter on the docked Reject verdict sends nothing: the
+    ask opens in the docked row, focus on Cancel, the row still docked under the top bar and above
+    Ask Vouch, its room kept in the bar, nothing sideways or under 44px. Esc closes it with focus
+    back on Reject verdict; asked again, Shift+Tab and Enter on its Reject verdict records it."""
+    nordlicht_later(paper_url)
+    paper, _ = proposed_wide_paper(page, paper_url, (360, 740))
+    page.evaluate("window.scrollTo(0, 0)")
+    assert page.evaluate(DOCK)["docked"]
+    sent: list[str] = []
+    page.on("request", lambda r: sent.append(r.url) if r.url.endswith("/review") else None)
+    bar = paper.get_by_role("region", name="Review")
+    reject = bar.get_by_role("button", name="Reject verdict")
+    reject.focus()
+    page.keyboard.press("Enter")
+    expect(bar.get_by_role("button", name="Cancel")).to_be_focused()
+    expect(bar.get_by_role("alert")).to_contain_text("with no note?")
+    page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+    )
+    seen = page.evaluate(DOCK)
+    assert seen["docked"], seen
+    assert seen["dock"]["top"] >= seen["top"] - 1, seen  # the whole ask below the top bar
+    assert seen["dock"]["bottom"] <= 740 - 88 + 1, seen  # and above Ask Vouch's clearance
+    assert abs(seen["slot"]["height"] - seen["content"]) <= 1, seen
+    assert not page.evaluate(
+        "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+    )
+    assert small_targets(page) == []
+
+    page.keyboard.press("Escape")
+    expect(bar.get_by_role("alert")).to_have_count(0)
+    expect(reject).to_be_focused()
+    assert sent == []
+
+    page.keyboard.press("Enter")
+    expect(bar.get_by_role("button", name="Cancel")).to_be_focused()
+    page.keyboard.press("Shift+Tab")
+    expect(bar.get_by_role("button", name="Reject verdict")).to_be_focused()
+    with page.expect_response(re.compile(r"/review$")) as answer:
+        page.keyboard.press("Enter")
+    assert answer.value.ok, answer.value.status
+    expect(bar.get_by_text("Rejected", exact=True)).to_be_visible()
+
+
 def test_the_docked_buttons_stay_docked_while_a_remediation_decision_lands(
     page: Page, paper_url, nordlicht_later
 ):
@@ -970,6 +1067,22 @@ def as_never_assessed(page: Page) -> None:
     page.route("**/api/overview", fresh)
 
 
+# The stacked index's edge and the first row it cuts (not wholly shown), read in one go once the
+# fonts have settled. Read one call at a time, a late IBM Plex Mono moved the index up 19px between
+# the edge and the rows (the top bar shrinks when it swaps in), so the row the fade covers was
+# missed and the next one measured: `383 < 354 - 8` (#656).
+CUT_ROW = (
+    "async (nav) => {"
+    + FONTS_SETTLED
+    + """  const edge = nav.getBoundingClientRect().top + nav.clientTop + nav.clientHeight
+  const row = [...nav.querySelectorAll('.wp-row')]
+    .find((r) => r.getBoundingClientRect().bottom > edge + 0.5)
+  const { x, y, width, height } = row.getBoundingClientRect()
+  return { edge, control: row.querySelector('.mono').textContent, x, y, width, height }
+}"""
+)
+
+
 def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page: Page, paper_url):
     as_never_assessed(page)
     page.set_viewport_size({"width": 390, "height": 844})
@@ -980,10 +1093,8 @@ def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page
 
     page.wait_for_function(INDEX_FADES, timeout=5000)
     # The next row is cut by the edge: the first row not wholly shown starts inside the box.
-    edge = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop + n.clientHeight")
-    rows = [box(link) for link in nav.get_by_role("link").all()]
-    cut = next(r for r in rows if r["y"] + r["height"] > edge + 0.5)
-    assert cut["y"] < edge - 8, (cut, edge)  # at least 8px of it shows
+    cut = nav.evaluate(CUT_ROW)
+    assert cut["y"] < cut["edge"] - 8, cut  # at least 8px of it shows
 
     nav.evaluate("n => { n.scrollTop = n.scrollHeight }")
     page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
@@ -1004,18 +1115,14 @@ def test_on_a_phone_the_half_shown_row_under_the_fade_opens_on_the_first_press(
         nav = page.get_by_role("navigation", name="Controls")
         expect(nav.get_by_role("link")).to_have_count(12)
         page.wait_for_function(INDEX_FADES, timeout=5000)
-        edge = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop + n.clientHeight")
-        links = nav.get_by_role("link").all()
-        cut = next(link for link in links if box(link)["y"] + box(link)["height"] > edge + 0.5)
-        control = cut.locator(".mono").inner_text()
-        shown = box(cut)
-        assert shown["y"] < edge - 8, (control, shown, edge)  # a part of it shows to press
-        x, y = shown["x"] + shown["width"] / 2, (shown["y"] + edge) / 2  # its visible part
+        cut = nav.evaluate(CUT_ROW)
+        assert cut["y"] < cut["edge"] - 8, cut  # a part of it shows to press
+        x, y = cut["x"] + cut["width"] / 2, (cut["y"] + cut["edge"]) / 2  # its visible part
         if how == "tap":
             page.touchscreen.tap(x, y)
         else:
             page.mouse.click(x, y)
-        expect(page).to_have_url(f"{paper_url}/controls/{control}")
+        expect(page).to_have_url(f"{paper_url}/controls/{cut['control']}")
     finally:
         context.close()
 
