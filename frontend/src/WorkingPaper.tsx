@@ -130,13 +130,12 @@ export default function WorkingPaper(props: PaperProps) {
   const [changedEditor, setChangedEditor] = useState<string | null>(null)
   const onChanged = useCallback((requirementId: string, changed: boolean) =>
     setChangedEditor((now) => changed ? requirementId : now === requirementId ? null : now), [])
+  // The open editor's requirement while it holds input not yet Saved: another requirement's Change asks first (#559).
+  const typedIn = editing !== null && changedEditor === editing ? editing : null
   // Leaving asks first while overrides are saved and not recorded (#182), or typed in the open editor and not yet
   // Saved (#356), an override opened again counted once; none once the paper is gone.
-  const editorUnsaved = editing !== null && changedEditor === editing
-    && !overrides.some((o) => o.requirement_id === editing)
+  const editorUnsaved = typedIn !== null && !overrides.some((o) => o.requirement_id === typedIn)
   const unsaved = overrides.length + (editorUnsaved ? 1 : 0)
-  // Another requirement's Change asks first while the open editor holds input not yet Saved (#559).
-  const typedIn = editing !== null && changedEditor === editing ? editing : null
   useEffect(() => setUnsaved(unsaved), [unsaved])
   useEffect(() => () => setUnsaved(0), [])
   const run = overridden(props.run, overrides)

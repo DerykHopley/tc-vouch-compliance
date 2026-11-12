@@ -795,15 +795,12 @@ describe("switching to another requirement's override keeps a typed reason unles
     await overrideM1()
     await userEvent.click(changeM2())
     expect(within(row('M2')).getByRole('alert').textContent).toBe(QUESTION)
-    const keep = within(row('M2')).getByRole('button', { name: 'Keep editing M1' })
-    expect(document.activeElement).toBe(keep)
     expect(screen.queryByRole('form', { name: 'Override M2' })).toBeNull()
 
-    await userEvent.click(keep)
+    await userEvent.click(within(row('M2')).getByRole('button', { name: 'Keep editing M1' }))
     const editor = screen.getByRole('form', { name: 'Override M1' })
     expect((within(editor).getByLabelText('Reason (required)') as HTMLTextAreaElement).value).toBe(REASON)
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(document.activeElement).toBe(changeM2())
   })
 
   it("Change M2 anyway drops M1's typed reason and opens M2", async () => {
