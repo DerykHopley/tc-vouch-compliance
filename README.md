@@ -90,6 +90,7 @@ The optional tasks done; the full table, with the code and the app page for each
 | Level | Task | Details |
 |---|---|---|
 | Easy | Ask an LLM to critique the solution | [Easy](docs/course-tasks.md#easy) |
+| Easy | Let the user choose from a list of LLMs (developer only) | [Easy](docs/course-tasks.md#easy) |
 | Easy | Give the agent a personality | [Easy](docs/course-tasks.md#easy) |
 | Easy | An interactive help feature or chatbot guide | [Easy](docs/course-tasks.md#easy) |
 | Medium | Calculate and show token usage and cost | [Medium](docs/course-tasks.md#medium) |
