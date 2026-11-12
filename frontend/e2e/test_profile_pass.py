@@ -29,7 +29,7 @@ def run_pass(page: Page) -> None:
         running = page.get_by_role("button", name="Running the profile pass…")
         expect(running).to_be_disabled()
         expect(running).to_have_attribute("aria-busy", "true")
-        expect(page.get_by_role("status")).to_have_text(
+        expect(page.get_by_role("main").get_by_role("status")).to_have_text(
             "Vouch is assessing every open control in one run. This can take a few minutes."
         )
     assert answered.value.ok, answered.value.status

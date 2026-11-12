@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { forgetSetupEntries, leaveSetup, markSetupEntry, settleSetupEntry } from './setupHistory.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { forgetFinishedEntries, forgetSetupEntries, leaveSetup, markSetupEntry, settleSetupEntry }
+  from './setupHistory.ts'
 
 /** Back or Forward, once the browser has moved: jsdom moves history asynchronously, then fires popstate. */
 const moved = (move: () => void) => new Promise<void>((done) => {
@@ -22,7 +23,7 @@ describe('leaveSetup, issues 476 and 568', () => {
 
     expect(window.location.pathname).toBe('/')
     expect(window.history.length).toBe(length)
-    expect(settleSetupEntry()).toBe('/')
+    expect(settleSetupEntry().path).toBe('/')
   })
 
   it('keeps a developer who clicked a tab where they went, and Back then gives the Dossier, not the wizard', async () => {
@@ -36,7 +37,7 @@ describe('leaveSetup, issues 476 and 568', () => {
     expect(window.location.pathname).toBe('/company')
     expect(window.history.length).toBe(length) // no copy of /company to press Back past
     await moved(() => window.history.back())
-    expect(settleSetupEntry()).toBe('/')
+    expect(settleSetupEntry().path).toBe('/')
     expect(window.location.pathname).toBe('/')
   })
 
@@ -50,7 +51,7 @@ describe('leaveSetup, issues 476 and 568', () => {
 
     expect(window.location.pathname).toBe('/developer')
     await moved(() => window.history.forward())
-    expect(settleSetupEntry()).toBe('/')
+    expect(settleSetupEntry().path).toBe('/')
     expect(window.location.pathname).toBe('/')
   })
 
@@ -66,7 +67,7 @@ describe('leaveSetup, issues 476 and 568', () => {
     leaveSetup(finished, '/')
 
     await moved(() => window.history.back())
-    expect(settleSetupEntry()).toBe('/developer/setup')
+    expect(settleSetupEntry().path).toBe('/developer/setup')
   })
 
   it('marks an entry once: the wizard opened again on it keeps its mark', () => {
@@ -87,31 +88,39 @@ describe('leaveSetup, issue 569', () => {
     expect(leaveSetup(left, '/')).toBe(false)
   })
 
-  it('calls `reached` once, when Back or Forward first reaches the finished entry, after it gave way', async () => {
+  it('names the company it opens once, when Back or Forward first reaches the finished entry', async () => {
     window.history.pushState(null, '', '/developer')
     window.history.pushState(null, '', '/developer/setup')
     const entry = markSetupEntry()
     await moved(() => window.history.back())
-    const reached = vi.fn(() => expect(window.location.pathname).toBe('/'))
 
-    leaveSetup(entry, '/', reached)
-    expect(reached).not.toHaveBeenCalled()
+    leaveSetup(entry, '/', 'musterfirma-gmbh')
+    expect(settleSetupEntry()).toEqual({ path: '/developer', opens: null })
 
     await moved(() => window.history.forward())
-    settleSetupEntry()
-    expect(reached).toHaveBeenCalledOnce()
+    expect(settleSetupEntry()).toEqual({ path: '/', opens: 'musterfirma-gmbh' })
     await moved(() => window.history.back())
     settleSetupEntry()
     await moved(() => window.history.forward())
-    settleSetupEntry()
-    expect(reached).toHaveBeenCalledOnce()
+    expect(settleSetupEntry()).toEqual({ path: '/', opens: null })
   })
 
-  it('never calls `reached` for an entry replaced as the create landed on it', () => {
+  it('names none for an entry replaced as the create landed on it', () => {
     window.history.pushState(null, '', '/developer/setup')
-    const reached = vi.fn()
-    leaveSetup(markSetupEntry(), '/', reached)
-    settleSetupEntry()
-    expect(reached).not.toHaveBeenCalled()
+    leaveSetup(markSetupEntry(), '/', 'musterfirma-gmbh')
+    expect(settleSetupEntry()).toEqual({ path: '/', opens: null })
+  })
+
+  it('forgets every finished entry once the app that made them closes (a sign-out): Back then finds its own page',
+    async () => {
+    window.history.pushState(null, '', '/developer/setup')
+    const entry = markSetupEntry()
+    window.history.pushState(null, '', '/company')
+    leaveSetup(entry, '/', 'musterfirma-gmbh')
+
+    forgetFinishedEntries()
+
+    await moved(() => window.history.back())
+    expect(settleSetupEntry()).toEqual({ path: '/developer/setup', opens: null })
   })
 })

@@ -345,6 +345,7 @@ def test_the_created_notice_s_open_and_dismiss_are_at_least_44px(
     page.set_viewport_size({"width": 400, "height": 900})
     back_while_creating(page, first_pass_url, "Daumen GmbH")
     notice = page.get_by_role("status").filter(has_text="Daumen GmbH was made and is now current.")
-    expect(notice.get_by_role("button", name="Open Daumen GmbH")).to_be_visible()
-    expect(notice.get_by_role("button", name="Dismiss")).to_be_visible()
+    expect(notice).to_be_visible()
+    expect(page.get_by_role("button", name="Open Daumen GmbH")).to_be_visible()
+    expect(page.get_by_role("button", name="Dismiss")).to_be_visible()
     assert small_targets(page) == []

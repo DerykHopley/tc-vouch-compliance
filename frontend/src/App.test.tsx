@@ -737,7 +737,7 @@ describe('the Company tab (ticket 495; the Company page, ticket 505)', () => {
     const fetch = serve()
     window.history.replaceState(null, '', '/company')
     render(<App />)
-    expect(screen.getByRole('status').textContent).toBe('Loading the company…')
+    expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe('Loading the company…')
     expect(tab('Company').getAttribute('aria-current')).toBe('page')
     expect(tab('Overview').getAttribute('aria-current')).toBeNull()
     expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Nordlicht Komponenten GmbH')
@@ -754,7 +754,7 @@ describe('the Company tab (ticket 495; the Company page, ticket 505)', () => {
       window.history.pushState(null, '', '/documents?from=mail#policies')
       const entries = window.history.length
       render(<App />)
-      expect(screen.getByRole('status').textContent).toBe('Loading the company…')
+      expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe('Loading the company…')
       expect(tab('Company').getAttribute('aria-current')).toBe('page')
       expect(window.location.pathname).toBe('/company') // as the app opens
       expect(window.location.search).toBe('?from=mail')

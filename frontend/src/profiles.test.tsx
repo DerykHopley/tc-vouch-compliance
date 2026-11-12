@@ -17,6 +17,8 @@ vi.mock('./CompanySetupWizard.tsx', async () => {
         <button type="button" onClick={() => onCreated(made, 'internal-improvement', markSetupEntry())}>Created</button>
         <button type="button" onClick={() => onCreated(made, 'audit-readiness', markSetupEntry())}>
           Created for audit</button>
+        <button type="button" onClick={() => onCreated({ id: 'testwerk', company: 'Testwerk Prüfstand GmbH',
+          country: 'Austria', answer_language: 'de' }, 'audit-readiness', markSetupEntry())}>Created Testwerk</button>
       </>
     ),
   }
@@ -831,25 +833,31 @@ describe('the first pass on a company just made, issue 447', () => {
       window.addEventListener('popstate', () => done(), { once: true })
       move()
     })
-    /** serveSetup with the developer page's full settings, and the create's Make current held, answered by
-     * `madeCurrent` once released; the list names Musterfirma current once that answer was a 2xx (not by count, as
-     * StrictMode reads the list twice on mounting). */
+    /** serveSetup with each create's Make current held, in order, answered by `madeCurrent` once released (`held`);
+     * the list and the developer settings name a company made once its answer landed, and current when that answer
+     * was a 2xx (not by count, as StrictMode reads the list twice on mounting). */
     function heldMakeCurrent(madeCurrent: () => Response) {
       const fetch = serveSetup()
       const answered = fetch.getMockImplementation()!
-      const held = { release: () => {} }
-      let made = false
+      const releases: (() => void)[] = []
+      const held = { release: () => releases.shift()?.() }
+      let current = 'nordlicht'
+      const made: ProfileSummary[] = []
       fetch.mockImplementation((url: string, init?: RequestInit) => {
         if (url === '/api/developer/current-company') return new Promise<Response>((resolve) => {
-          held.release = () => {
+          const id = (JSON.parse(String(init?.body)) as { company: string }).company
+          releases.push(() => {
             const answer = madeCurrent()
-            made = answer.ok
+            if (answer.ok) current = id
+            made.push([MUSTERFIRMA, TESTWERK].find((p) => p.id === id)!)
             resolve(answer)
-          }
+          })
         })
-        if (url === '/api/developer/settings') return Promise.resolve(Response.json(DEVELOPER_SETTINGS))
-        if (url === '/api/profiles') return Promise.resolve(Response.json(made
-          ? listOf([NORDLICHT, TESTWERK, MUSTERFIRMA], 'musterfirma-gmbh') : listOf([NORDLICHT, TESTWERK])))
+        if (url === '/api/developer/settings') return Promise.resolve(Response.json({ ...DEVELOPER_SETTINGS,
+          listed_companies: [...DEVELOPER_SETTINGS.listed_companies, ...made.map((p) => ({ ...p, demo: false }))],
+          current_company: current }))
+        if (url === '/api/profiles') return Promise.resolve(Response.json(listOf([NORDLICHT,
+          ...[TESTWERK, MUSTERFIRMA].filter((p) => p.id !== 'musterfirma-gmbh' || made.includes(p))], current)))
         return answered(url, init)
       })
       return { fetch, held }
@@ -877,7 +885,13 @@ describe('the first pass on a company just made, issue 447', () => {
       async () => {
       const { fetch, field } = await leaveWhileCreating()
 
-      expect((await screen.findByText(MADE)).closest('[role="status"]')).not.toBeNull()
+      const status = (await screen.findByText(MADE)).closest('[role="status"]')
+      expect(status).not.toBeNull()
+      expect(within(status as HTMLElement).queryAllByRole('button')).toEqual([]) // the sentence alone is announced
+      // The developer page reads its settings again: the company made is listed, current.
+      const companies = screen.getByRole('region', { name: 'Companies' })
+      expect(await within(companies).findByText('Musterfirma GmbH')).toBeTruthy()
+      expect(within(companies).queryByRole('button', { name: 'Make Musterfirma GmbH current' })).toBeNull()
       expect(window.location.pathname).toBe('/developer')
       expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Model id' })).toBe(field) // not mounted afresh
       expect(field.value).toBe('typed/meanwhile')
@@ -953,9 +967,63 @@ describe('the first pass on a company just made, issue 447', () => {
         + 'the Developer page to try again.')).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Open Musterfirma GmbH' })).toBeNull()
       expect(field.value).toBe('typed/meanwhile')
+      // Its advice can be followed: the developer page, read again, offers Make current for the company made.
+      expect(await screen.findByRole('button', { name: 'Make Musterfirma GmbH current' })).toBeTruthy()
       expect(barName()).toBe('Nordlicht Komponenten GmbH')
       await moved(() => window.history.forward()) // the wizard's entry gave way to the developer page
       expect(window.location.pathname).toBe('/developer')
+      expect(firstPassCalls(fetch)).toEqual([])
+    })
+
+    it('keeps an empty status region in place before any notice, so a notice put in it is announced', async () => {
+      heldMakeCurrent(() => Response.json(DEVELOPER_SETTINGS))
+      window.history.replaceState(null, '', '/developer')
+      render(<ProfiledApp />)
+      await screen.findByRole('textbox', { name: 'Model id' })
+      const region = document.querySelector('.created-notice [role="status"]')
+      expect(region).not.toBeNull()
+      expect(region!.textContent).toBe('')
+    })
+
+    it('a second create while away keeps the first one waiting: each wizard entry opens its own company, with its '
+      + 'own first pass', async () => {
+      const { fetch, held } = heldMakeCurrent(() => Response.json(DEVELOPER_SETTINGS))
+      window.history.replaceState(null, '', '/developer/setup')
+      render(<ProfiledApp />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' })) // Musterfirma, from this entry
+      window.history.pushState(null, '', '/company') // left for a tab; the wizard stands in for the next setup
+      await userEvent.click(screen.getByRole('button', { name: 'Created Testwerk' })) // from this entry
+      window.history.pushState(null, '', '/report')
+      await waitFor(() => expect(currentChanges(fetch)).toHaveLength(2))
+      held.release()
+      await screen.findByText(MADE)
+      held.release()
+      await screen.findByText('Testwerk Prüfstand GmbH was made and is now current.')
+
+      await moved(() => window.history.back()) // Testwerk's entry
+      await dossierOf('Testwerk Prüfstand GmbH')
+      await waitFor(() => expect(passes(fetch)).toHaveLength(1))
+      await moved(() => window.history.back()) // Musterfirma's entry
+      await dossierOf('Musterfirma GmbH')
+      await waitFor(() => expect(passes(fetch)).toHaveLength(2))
+      expect(firstPassCalls(fetch)).toEqual([
+        ['/api/profile-pass', 'testwerk', null],
+        ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
+        ['/api/profile-pass', 'musterfirma-gmbh', null],
+      ])
+    })
+
+    it('an app that closed (a sign-out) opens nothing from its entries: the next app finds the wizard there',
+      async () => {
+      const { fetch } = await leaveWhileCreating()
+      await screen.findByText(MADE)
+      cleanup() // signed out: ProfiledApp unmounts
+      render(<ProfiledApp />)
+      await screen.findByRole('textbox', { name: 'Model id' })
+
+      await moved(() => window.history.forward())
+      expect(window.location.pathname).toBe('/developer/setup')
+      expect(await screen.findByRole('button', { name: 'Created' })).toBeTruthy()
       expect(firstPassCalls(fetch)).toEqual([])
     })
   })

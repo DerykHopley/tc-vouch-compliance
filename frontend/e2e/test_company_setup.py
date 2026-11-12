@@ -356,7 +356,7 @@ def test_a_developer_chooses_evidence_and_sees_it_ready_to_cite(page: Page, prof
     expect(training.locator(".kind.kind-implemented")).to_have_text("implemented")
     expect(training).to_contain_text("2026-10-05")
 
-    status = page.get_by_role("status")
+    status = page.get_by_role("main").get_by_role("status")
     expect(status).to_have_text("No documents chosen yet.")
     document(page, "Backup policy").check()
     document(page, "Access rights policy").check()
@@ -472,7 +472,7 @@ def test_select_all_and_deselect_all_work_by_keyboard_one_folder_at_a_time(
     for i in range(policies.count()):
         expect(policies.nth(i)).to_be_checked()
     assert [records.nth(i).is_checked() for i in range(records.count())] == ticked_records
-    expect(page.get_by_role("status")).to_contain_text(
+    expect(page.get_by_role("main").get_by_role("status")).to_contain_text(
         f"Ready to cite: {policies.count() + 1} documents"
     )
 
@@ -481,7 +481,9 @@ def test_select_all_and_deselect_all_work_by_keyboard_one_folder_at_a_time(
     for i in range(policies.count()):
         expect(policies.nth(i)).not_to_be_checked()
     expect(document(page, "Security training record 2026")).to_be_checked()
-    expect(page.get_by_role("status")).to_have_text(re.compile(r"^Ready to cite: 1 document \("))
+    expect(page.get_by_role("main").get_by_role("status")).to_have_text(
+        re.compile(r"^Ready to cite: 1 document \(")
+    )
 
 
 def test_next_while_the_library_loads_keeps_focus_on_the_heading_when_it_lands(
@@ -921,9 +923,17 @@ def test_back_while_the_create_answers_keeps_the_scroll_and_open_runs_the_first_
     assert current_of(page, first_pass_url) == profile
     assert page.evaluate("window.scrollY") >= before["y"]  # not back at the top
     assert abs(usage.bounding_box()["y"] - before["usage"]) < 2
+    # A field brought into view stops below the bar and the notice both (scroll padding).
+    padding, bar, band = page.evaluate(
+        "[getComputedStyle(document.documentElement).scrollPaddingTop,"
+        " document.querySelector('header.top').getBoundingClientRect().height,"
+        " document.querySelector('.created-notice').getBoundingClientRect().height]"
+    )
+    assert band > 0, band
+    assert abs(float(padding.removesuffix("px")) - (bar + band + 8)) < 1, (padding, bar, band)
 
     with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
-        notice.get_by_role("button", name=f"Open {company}").click()
+        page.get_by_role("button", name=f"Open {company}").click()
     assert passed.value.ok, passed.value.status
     expect(page).to_have_url(f"{first_pass_url}/")
     expect(bar_company(page)).to_have_text(company)
@@ -934,25 +944,38 @@ def test_the_created_notice_is_walked_by_keyboard_and_dismiss_leaves_focus_on_th
     page: Page, first_pass_url, nordlicht_later
 ):
     """#569: Tab reaches the created notice's Open, then Dismiss; Dismiss by keyboard hides the
-    notice and puts focus on the page's main (the developer page has no h1), not the body. No
-    pass runs: nothing is opened."""
+    notice and puts focus on the page's h1 (on the Company page, its company), not the body,
+    leaving the page where it was scrolled rather than at that heading. The notice stays with the
+    developer from page to page until then. No pass runs: nothing is opened."""
     nordlicht_later(first_pass_url)
-    page.set_viewport_size({"width": 1280, "height": 900})
+    page.set_viewport_size({"width": 1280, "height": 500})
     back_while_creating(page, first_pass_url, "Tastatur GmbH")
     notice = page.get_by_role("status").filter(
         has_text="Tastatur GmbH was made and is now current."
     )
     expect(notice).to_be_visible()
+    company_tab(page).click()
+    heading = page.get_by_role("heading", level=1)
+    expect(heading).to_be_visible()
+    expect(page.get_by_role("region", name="Documents")).to_be_visible()
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
     page.get_by_role("banner").get_by_role("button", name="Your menu").focus()  # the bar's last
+    scrolled = page.evaluate("window.scrollY")  # after it: the bar's own focus may move the page
+    assert scrolled > 200, scrolled
+    expect(heading).not_to_be_in_viewport()
+
     page.keyboard.press("Tab")
-    expect(notice.get_by_role("button", name="Open Tastatur GmbH")).to_be_focused()
+    expect(page.get_by_role("button", name="Open Tastatur GmbH")).to_be_focused()
     page.keyboard.press("Tab")
-    expect(notice.get_by_role("button", name="Dismiss")).to_be_focused()
+    expect(page.get_by_role("button", name="Dismiss")).to_be_focused()
+    assert page.evaluate("window.scrollY") == scrolled  # the band's buttons take focus in place
+    band = page.locator(".created-notice").bounding_box()["height"]
     page.keyboard.press("Enter")
     expect(notice).to_have_count(0)
-    expect(page.get_by_role("main")).to_be_focused()
-    page.keyboard.press("Tab")  # and on from there, into the page
-    assert page.evaluate("document.activeElement.closest('main') !== null")
+    expect(heading).to_be_focused()
+    # Focused where it is, not scrolled to: the page moves up by the band gone at most.
+    after = page.evaluate("window.scrollY")
+    assert after >= scrolled - band - 2, (scrolled, band, after)
 
 
 def test_a_tab_clicked_while_the_create_answers_stays_and_back_opens_the_company(

@@ -9,8 +9,9 @@
 type SetupState = { setup: string }
 
 let made = 0
-// A finished setup entry's id: the path it gives way to, and what to do once Back or Forward reaches it (#569).
-const finished = new Map<string, { path: string; reached?: () => void }>()
+// A finished setup entry's id: the path it gives way to, and the company that opens once Back or Forward reaches it
+// (#569). Data only, no closures, so an entry cut from history holds nothing of the app that made it.
+const finished = new Map<string, { path: string; opens: string | null }>()
 
 const idOf = (state: unknown): string | null =>
   typeof state === 'object' && state !== null && typeof (state as SetupState).setup === 'string'
@@ -27,10 +28,10 @@ export function markSetupEntry(): string {
 
 /** A create from setup entry `entry` landed: that entry gives way to `path`. Shown, it is replaced now, with no new
  * entry, and this is true; otherwise the developer stays where they went (false), and the entry gives way once Back or
- * Forward reaches it, then `reached` runs, once (#569: the company made opens there). */
-export function leaveSetup(entry: string, path: string, reached?: () => void): boolean {
+ * Forward reaches it, naming `opens` then, once (#569: the company made, to open there). */
+export function leaveSetup(entry: string, path: string, opens: string | null = null): boolean {
   if (idOf(window.history.state) !== entry) {
-    finished.set(entry, { path, reached })
+    finished.set(entry, { path, opens })
     return false
   }
   window.history.replaceState(null, '', path)
@@ -38,16 +39,20 @@ export function leaveSetup(entry: string, path: string, reached?: () => void): b
 }
 
 /** After Back or Forward: a finished setup's entry, when Back or Forward reached one, is replaced by the path it gives
- * way to (and forgotten); then the path to show. */
-export function settleSetupEntry(): string {
+ * way to (and forgotten); then the path to show, and the company that entry opens (null: none, or no such entry). */
+export function settleSetupEntry(): { path: string; opens: string | null } {
   const entry = idOf(window.history.state)
   const given = entry === null ? undefined : finished.get(entry)
   if (given !== undefined) {
     finished.delete(entry!)
     window.history.replaceState(null, '', given.path)
-    given.reached?.()
   }
-  return window.location.pathname
+  return { path: window.location.pathname, opens: given?.opens ?? null }
+}
+
+/** The app that made the finished entries closed (signed out): none gives way any more, as after a reload. */
+export function forgetFinishedEntries() {
+  finished.clear()
 }
 
 /** Tests only: forgets every finished entry and restarts the ids, so each test starts as a fresh page. */

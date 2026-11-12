@@ -6,7 +6,7 @@ import { mayLeave } from './leaving.ts'
 import { fetchProfiles, type Profiles, type ProfileSummary, withoutProfile, withProfile } from './profiles.ts'
 import type { Goal } from './report.ts'
 import { setProfile, signOutCount } from './session.ts'
-import { leaveSetup } from './setupHistory.ts'
+import { forgetFinishedEntries, leaveSetup } from './setupHistory.ts'
 import TopBar from './TopBar.tsx'
 
 /** The profile list as read: not yet, or what came back (null: it couldn't be read). */
@@ -33,10 +33,11 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   const [developerNote, setDeveloperNote] = useState<string | null>(null) // carried to the developer page, said once
   const [arrival, setArrival] = useState<Arrival | null>(null) // a company was just made, until the app opened uses it
   const arrivalUsed = useCallback(() => setArrival(null), [])
-  // A company made while the developer was elsewhere (#569): said under the top bar, with its way to open it, until
-  // the app opens afresh or the developer dismisses it. `waiting` is that company, not yet opened, with its Goal.
+  // A create that landed while the developer was elsewhere (#569): said under the top bar, with its way to open the
+  // company made, until the app opens afresh or the developer dismisses it. `waiting`: each company made that way, not
+  // yet opened, with the Goal chosen for it; one each, so a second create while away keeps the first.
   const [notice, setNotice] = useState<CreatedNotice | null>(null)
-  const waiting = useRef<{ id: string; goal: Goal } | null>(null)
+  const waiting = useRef(new Map<string, Goal>())
   const open = useRef(true) // false once closed (signed out): a late answer then changes nothing
   // The list held and the company shown, as last rendered: the one way a late answer reads them (#418).
   const latest = useRef<{ profiles: Profiles | null; chosen: string | null }>({ profiles: null, chosen: null })
@@ -45,13 +46,15 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   }, [listing, chosen])
   useEffect(() => {
     open.current = true
+    const made = waiting.current // the one map, for this instance's life
     return () => {
       open.current = false
+      made.clear()
+      forgetFinishedEntries() // closed (signed out): no setup entry opens anything of this app's any more
     }
   }, [])
   // Opens the app afresh under `id` (none: the API's current company answers), with `note` for the developer page.
   const reopen = (id: string | null, note: string | null = null) => {
-    waiting.current = null
     setNotice(null)
     setProfile(id) // before the app opens again, so its first calls name it
     setChosen(id)
@@ -81,6 +84,14 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   // way (#476, leaveSetup). A developer who left setup while the create answered (Back, a tab) stays where they went,
   // on the page as it is, under the company it opened under (#569): a notice says what happened, and the company made
   // opens, with its arrival, from the notice's Open or when Back or Forward reaches the setup's entry (#568), once.
+  // A company made in setup and waiting (#569) opens, with the Goal chosen for it, once; not after the app closed.
+  const openMade = (id: string) => {
+    const goal = waiting.current.get(id)
+    if (!open.current || goal === undefined) return
+    waiting.current.delete(id)
+    setArrival({ goal })
+    reopen(id)
+  }
   const created = (profile: ProfileSummary, goal: Goal, entry: string) => {
     const signOuts = signOutCount()
     void makeCurrent(profile.id).then((change) => {
@@ -88,18 +99,13 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
       afterRelist((found, held, shown) => {
         setListing({ status: 'read', profiles: withProfile(found ?? held, profile) })
         if (change.status === 'made') {
-          const openMade = () => {
-            if (waiting.current?.id !== profile.id) return // opened already, or the app opened afresh since
-            setArrival({ goal })
-            reopen(profile.id)
-          }
-          waiting.current = { id: profile.id, goal }
-          if (leaveSetup(entry, '/', openMade)) return openMade()
+          waiting.current.set(profile.id, goal)
+          if (leaveSetup(entry, '/', profile.id)) return openMade(profile.id)
           setNotice({ text: `${profile.company} was made and is now current.`,
             open: { company: profile.company, onOpen: () => {
-              if (!mayLeave()) return
+              if (!waiting.current.has(profile.id) || !mayLeave()) return
               toPath('/')
-              openMade()
+              openMade(profile.id)
             } } })
           return
         }
@@ -139,7 +145,7 @@ export default function ProfiledApp({ onSignOut, userName }: { onSignOut?: () =>
   return <App key={`${chosen ?? ''}:${opens}`} onSignOut={onSignOut} userName={userName} profile={profile}
     onStartedAfresh={startedAfresh} onCompanyCreated={created} onCompanyRemoved={removed} onMadeCurrent={madeCurrent}
     developerNote={developerNote ?? undefined} onNoteShown={forgetNote} arrival={arrival} onArrivalUsed={arrivalUsed}
-    createdNotice={notice ?? undefined} onNoticeDismissed={dismissNotice} />
+    createdNotice={notice ?? undefined} onNoticeDismissed={dismissNotice} onSetupReached={openMade} />
 }
 
 /** Puts `path` in the address bar, as a new history entry, unless it is there already. */
