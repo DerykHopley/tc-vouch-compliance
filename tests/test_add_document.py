@@ -17,7 +17,7 @@ from pydantic import SecretStr
 from test_database import UNREACHABLE_URL, empty_database, needs_postgres  # noqa: F401
 from test_memory import app_on, restart
 
-from vouch import api
+from vouch import api, report
 from vouch.added_documents import (
     EMPTY,
     MAX_BYTES,
@@ -130,6 +130,30 @@ def test_a_file_breaking_a_limit_is_refused_with_its_sentence_and_nothing_is_kep
     assert response.json() == {"detail": sentence}
     assert kept() == []
     assert entries == []
+
+
+@pytest.mark.parametrize(
+    ("approval_date", "status"),
+    [
+        ("2026-11-14", 400),  # after today in every time zone
+        ("2026-11-13", 201),  # today already east of UTC
+        ("2026-11-12", 201),
+    ],
+)
+def test_an_approval_date_after_today_is_refused_and_nothing_is_kept(
+    users, monkeypatch, approval_date, status
+):
+    """A future approval date would keep the document from ever being stale (#627)."""
+    monkeypatch.setattr(report, "today", lambda: datetime.date(2026, 11, 12))
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        response = client.post(PATH, json=body(approval_date=approval_date), headers=alice)
+        entries = trail(client, alice)
+
+    assert response.status_code == status, response.text
+    if status == 400:
+        assert response.json() == {"detail": api.FUTURE_APPROVAL}
+        assert (kept(), entries) == ([], [])
 
 
 def test_the_51st_document_is_refused_with_its_sentence(users):
