@@ -183,6 +183,7 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
   const [state, setState] = useState<ChatState>('closed')
   const open = state !== 'closed'
   const fabRef = useRef<HTMLButtonElement>(null)
+  const pinRef = useRef<HTMLButtonElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const sheetRef = useRef<HTMLElement>(null)
 
@@ -396,6 +397,12 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
     swallowPointerClickBurst(e, () => fabRef.current?.focus())
     setState('closed')
   }
+  /** The pin toggle: pinning or unpinning moves the chat, so a double click's later clicks would land on the page
+   * where the toggle was; they press nothing, and focus stays on the toggle (#563, as Close). */
+  const togglePin = (e: ReactMouseEvent<HTMLButtonElement>, to: ChatState) => {
+    swallowPointerClickBurst(e, () => pinRef.current?.focus())
+    setState(to)
+  }
   return (
     <aside ref={sheetRef} className={className} aria-label="Chat with Vouch">
       {state === 'pinned' && pinnable && (
@@ -408,7 +415,8 @@ export default function AskVouch({ context, onOpen, onAssessed, language }: Prop
           <span className="page-context">{pageLabel(context)}</span>
         </div>
         {pinnable && pin && (
-          <button className="btn btn-ghost" aria-pressed={state === 'pinned'} onClick={() => setState(pin)}>
+          <button ref={pinRef} className="btn btn-ghost" aria-pressed={state === 'pinned'}
+            onClick={(e) => togglePin(e, pin)}>
             Pin beside the page
           </button>
         )}

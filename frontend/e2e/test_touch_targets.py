@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from current_company import current_company
 from playwright.sync_api import Page, expect
-from reviewing import reviewed
+from reviewing import confirmed, reviewed
 from test_company_setup import (
     LEVELS,
     back_while_creating,
@@ -28,7 +28,7 @@ from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
 from test_questions import readiness_afresh
 from test_remediation import ITEM, confirmed_with_an_item
-from test_review import assessed, open_paper, row
+from test_review import M1_EVIDENCED, REASON, assessed, open_paper, override, row
 from touch_targets import small_targets
 
 PAGES = ["/", "/controls/4.1.2", "/developer", "/company"]
@@ -261,6 +261,33 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
     # #437: Assess again on a review in progress warns first, with two pills in its place.
     paper.get_by_role("button", name="Assess again 4.1.2").click()
     expect(paper.get_by_role("button", name="Keep the review")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_asks_of_accept_verdict_and_reject_verdict_are_at_least_44px(page: Page, paper_url):
+    # #634: each final decision asks first, with two pills in its place; at Accept, M1 overridden
+    # to evidenced, so nothing is left to fix.
+    page.set_viewport_size({"width": 400, "height": 900})
+    thread_id = assessed(page.request, paper_url)["assessment"]["thread_id"]
+    confirmed(page.request, paper_url, thread_id, [M1_EVIDENCED])
+    bar = open_paper(page, paper_url).get_by_role("region", name="Review")
+    bar.evaluate("(bar) => bar.scrollIntoView({ block: 'end' })")  # the buttons in their place
+    expect(bar.locator(".review-dock")).not_to_have_class(re.compile(r"\bstuck\b"))
+    for name in ("Accept verdict", "Reject verdict"):
+        bar.get_by_role("button", name=name).click()
+        expect(bar.get_by_role("button", name="Cancel")).to_be_visible()
+        assert small_targets(page) == [], name
+        bar.get_by_role("button", name="Cancel").click()
+
+
+def test_the_ask_on_switching_override_editors_is_at_least_44px(page: Page, paper_url):
+    # #559: Change on M2 with M1's override typed asks first, with two pills in its place.
+    page.set_viewport_size({"width": 400, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    override(paper, "M1", "Evidenced", REASON)
+    row(paper, "M2").get_by_role("button", name="Change M2", exact=True).click()
+    expect(paper.get_by_role("button", name="Keep editing M1")).to_be_visible()
     assert small_targets(page) == []
 
 
