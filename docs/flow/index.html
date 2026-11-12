@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../site-nav.css">
 <style>
 /* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), as the evals page
    has them, plus one colour per card type for this diagram, in each mode. */
@@ -138,6 +139,12 @@ svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
 </style>
 </head>
 <body>
+<nav class="site-nav" aria-label="Vouch pages"><ul>
+  <li><a href="../">Home</a></li>
+  <li><a href="./" aria-current="page">Process flow</a></li>
+  <li><a href="../evals/">Eval report</a></li>
+  <li class="ext"><a href="https://github.com/DerykHopley/tc-vouch-compliance">Repo</a></li>
+</ul></nav>
 <div class="page">
 <header>
   <p class="eyebrow">Vouch · runtime process flow</p>

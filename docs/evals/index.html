@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../site-nav.css">
 <style>
 /* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), plus two chart
    colours checked with the dataviz palette validator in each mode. */
@@ -106,6 +107,12 @@ footer { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
+<nav class="site-nav" aria-label="Vouch pages"><ul>
+  <li><a href="../">Home</a></li>
+  <li><a href="../flow/">Process flow</a></li>
+  <li><a href="./" aria-current="page">Eval report</a></li>
+  <li class="ext"><a href="https://github.com/DerykHopley/tc-vouch-compliance">Repo</a></li>
+</ul></nav>
 <main>
   <header>
     <div class="top">
