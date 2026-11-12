@@ -21,6 +21,7 @@ import pytest
 from browser_dialogs import dialogs_of, no_dialog
 from click_burst import DOUBLE_CLICK_MS
 from current_company import current_company
+from fonts import FONTS_SETTLED
 from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
 from test_documents import added_by_api
@@ -240,10 +241,16 @@ def test_the_lead_opens_a_control_from_the_round_comparison_and_comes_back_to_th
         row = page.get_by_role("row", name=re.compile(rf"^{re.escape(control_id)} "))
         link = row.get_by_role("link")
         link.scroll_into_view_if_needed()
-        scrolled = page.evaluate("window.scrollY")
+        # A late font rewraps the comparison, so the scroll is read once the fonts have settled.
+        scrolled = page.evaluate(f"async () => {{ {FONTS_SETTLED} return window.scrollY }}")
         assert scrolled > 0, "the check needs the comparison scrolled"
-        link.click()
+        # #694: the paper is short while its newest assessment is read, and its breadcrumb moves when that read
+        # lands; a click across the move presses nothing. So the paper is read, and set in its fonts, first.
+        with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):
+            link.click()
         expect(page).to_have_url(f"{rounds_url}/controls/{control_id}")
+        expect(page.get_by_text("Reading the working paper…")).to_have_count(0)
+        page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
 
         crumbs = page.get_by_role("navigation", name="Breadcrumb")
         with page.expect_response(f"**/api/rounds/{number}/comparison"):

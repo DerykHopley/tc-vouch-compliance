@@ -9,10 +9,11 @@ again warns first (#437). The pass's own daily limit is 3 a day, so the file run
 import re
 
 import reviewing
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 from touch_targets import small_targets
 
 CONTROLS = 12
+PROFILE_PASS = "**/api/profile-pass"
 
 
 def open_dossier(page: Page, pass_url: str) -> None:
@@ -21,18 +22,32 @@ def open_dossier(page: Page, pass_url: str) -> None:
 
 
 def run_pass(page: Page) -> None:
-    """Presses Run a profile pass, sees it running, and waits for its answer and the overview read
-    after it."""
-    button = page.get_by_role("button", name="Run a profile pass")
-    with page.expect_response("**/api/profile-pass") as answered:
-        button.click()
-        running = page.get_by_role("button", name="Running the profile pass…")
-        expect(running).to_be_disabled()
-        expect(running).to_have_attribute("aria-busy", "true")
-        expect(page.get_by_role("main").get_by_role("status")).to_have_text(
-            "Vouch is assessing every open control in one run. This can take a few minutes."
-        )
+    """Presses Run a profile pass with its request held, so the running state is checked while
+    the pass runs however fast the fake answers (#693), then releases it and waits for its answer."""
+    held: list[Route] = []
+    page.route(PROFILE_PASS, lambda route: held.append(route))
+    page.get_by_role("button", name="Run a profile pass").click()
+    held_once(page, held)
+    running = page.get_by_role("button", name="Running the profile pass…")
+    expect(running).to_be_disabled()
+    expect(running).to_have_attribute("aria-busy", "true")
+    expect(page.get_by_role("main").get_by_role("status")).to_have_text(
+        "Vouch is assessing every open control in one run. This can take a few minutes."
+    )
+    with page.expect_response(PROFILE_PASS) as answered:
+        held[0].continue_()
+    page.unroute(PROFILE_PASS)
     assert answered.value.ok, answered.value.status
+
+
+def held_once(page: Page, held: list[Route]) -> None:
+    """Waits until the route holding the pass has caught its one request (up to 5 s), as
+    test_company_setup's held creates do; the route handler runs while Playwright waits."""
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert len(held) == 1, len(held)
 
 
 def panel(page: Page):

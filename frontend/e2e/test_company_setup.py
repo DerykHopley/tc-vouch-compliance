@@ -14,6 +14,7 @@ import re
 from collections.abc import Callable
 
 import pytest
+from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, Response, Route, expect
 from test_developer_page import as_compliance_lead
 from top_bar import bar_company, company_tab, from_user_menu
@@ -24,6 +25,8 @@ CONTROLS = "/api/developer/controls"
 LIBRARY = "/api/developer/sample-library"
 PROFILES = "/api/developer/profiles"
 PROFILE_PASS = "/api/profile-pass"
+ROUNDS = "**/api/rounds"
+DOCUMENTS = "**/api/documents"
 # The wizard ignores a press of its own within 400 ms of the last move (two quick clicks, a
 # double-tap); a person's separate presses come further apart, so each helper move waits this long
 # first. A double-click's second press is kept from acting whenever it comes.
@@ -954,10 +957,14 @@ def test_the_created_notice_is_walked_by_keyboard_and_dismiss_leaves_focus_on_th
         has_text="Tastatur GmbH was made and is now current."
     )
     expect(notice).to_be_visible()
-    company_tab(page).click()
+    with page.expect_response(ROUNDS), page.expect_response(DOCUMENTS):
+        company_tab(page).click()
     heading = page.get_by_role("heading", level=1)
     expect(heading).to_be_visible()
-    expect(page.get_by_role("region", name="Documents")).to_be_visible()
+    # The page laid out in full before its scroll is read (#685): a Rounds panel filled in after
+    # it grew the column above the window's anchor, and the browser's scroll anchoring moved the page.
+    expect(page.get_by_role("status").filter(has_text=re.compile(r"^Loading "))).to_have_count(0)
+    page.evaluate("async () => {" + FONTS_SETTLED + "}")
     page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
     scrolled = page.evaluate("window.scrollY")
     assert scrolled > 200, scrolled
