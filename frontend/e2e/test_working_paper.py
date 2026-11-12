@@ -1184,6 +1184,43 @@ def test_a_late_font_leaves_the_stacked_index_where_a_hand_scroll_put_it(page: P
     assert nav.evaluate("n => n.scrollTop") == by_hand, (placed, by_hand)
 
 
+@pytest.mark.parametrize("width", [390, 700])
+def test_a_late_font_never_scrolls_the_page_to_the_index(page: Page, paper_url, width):
+    """#617, verify round 2: the index is placed again as a late web font settles, and that
+    placing moves the index's own box only. With the font files held, a paper opened at 5.1.1 and
+    the page scrolled down to the paper, releasing the fonts leaves the page where it was."""
+    held: list[Route] = []
+    page.route(re.compile(r"^https://fonts\.gstatic\.com/"), lambda route: held.append(route))
+    as_never_assessed(page)
+    page.set_viewport_size({"width": width, "height": 844})
+    open_paper(page, paper_url, "5.1.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    page.wait_for_function("document.fonts.status === 'loading'", timeout=5000)
+    assert held, "no font file was asked for"
+
+    # The late fonts reflow the page (the top bar shrinks 19px as IBM Plex Mono swaps in, #656),
+    # which scroll anchoring follows, and shorten it, which clamps the scroll: up to 56px on main
+    # too. Without anchoring and with room below, only a script moves the page.
+    page.add_style_tag(
+        content="html, body { overflow-anchor: none } body { padding-bottom: 2000px }"
+    )
+    page.evaluate("window.scrollTo(0, 600)")
+    scrolled = page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => done(scrollY)))"
+    )
+    assert scrolled > 100, scrolled  # the page scrolled down, the index out of view above
+
+    page.unroute(re.compile(r"^https://fonts\.gstatic\.com/"))
+    for route in held:
+        route.continue_()
+    page.wait_for_function("document.fonts.status === 'loaded'", timeout=10000)
+    settled = page.evaluate("async () => {" + FONTS_SETTLED + "return scrollY }")
+    assert "loaded" in page.evaluate("[...document.fonts].map((f) => f.status)")
+    # Placing the index by scrollIntoView jumped the page up to it: 600 to 154 at 390px.
+    assert settled == scrolled, (scrolled, settled)
+
+
 @pytest.mark.parametrize("how", ["tap", "click"])
 def test_on_a_phone_the_half_shown_row_under_the_fade_opens_on_the_first_press(
     browser, paper_url, how
