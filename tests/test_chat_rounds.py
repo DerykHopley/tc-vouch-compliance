@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 from reviewing import accepted
 from test_api import read_events
 from test_chat_agent import chat_tools, reply
+from test_chat_fake import answer_to, english_words
 from test_database import empty_database  # noqa: F401 (a fixture: postgres's)
 from test_dossier import seeded
 from test_memory import DEMO_CONTROL, app_on, assess
@@ -27,6 +28,8 @@ from vouch.chat_agent import (
     RoundsReader,
     chat_prompt,
     compare_rounds_words,
+    unknown_round,
+    wrong_language,
 )
 from vouch.chat_fake import CannedChatModel
 from vouch.graph import Verdict
@@ -397,3 +400,110 @@ def test_first_names_the_first_closed_round_unless_a_round_has_that_name() -> No
     )
     for asked in ("first", "the first round", "First round", "erste Runde"):
         assert chosen_round([old, first, now], asked) == first
+
+
+# --- On a German profile, on the fake (#582) ------------------------------------------------------
+
+
+def _compared_words() -> str:
+    """test_its_words_carry_counts…'s comparison on `de`, one more question answered and its
+    new control proposed."""
+    chosen = listed_rounds()[1]
+    controls = _controls()
+    now = {
+        IDS[0]: _assessment(IDS[0], "evidenced"),
+        IDS[2]: _assessment(IDS[2], "not-evidenced"),
+    }
+    applicable = [c for c in controls if c.id != IDS[3]]
+    then = tuple(f for f in chosen.results if f.control_id != IDS[4])
+    comparison = rounds.round_comparison(then, controls, applicable, now, added=[], closed_at=AT)
+    next(c for c in comparison["controls"] if c["control_id"] == IDS[2])["proposed"] = True
+    done = [rounds.Done(control_id=IDS[0], requirement_id=f"{IDS[0]}-M1", at=CLOSED + HOUR)]
+    answered = [
+        rounds.Answered(control_id=IDS[2], question_id=3, at=CLOSED + HOUR),
+        rounds.Answered(control_id=IDS[0], question_id=4, at=CLOSED + HOUR),
+    ]
+    return compare_rounds_words(chosen, comparison, done, answered, "de")
+
+
+def _nothing_changed_words() -> str:
+    chosen = listed_rounds()[1]
+    comparison = rounds.round_comparison(
+        chosen.results, _controls(), _controls(), {}, added=[], closed_at=AT
+    )
+    comparison["controls"] = [{**c, "change": "unchanged"} for c in comparison["controls"]]
+    return compare_rounds_words(chosen, comparison, [], [], "de")
+
+
+ROUND_WORDS = {
+    "compared": _compared_words,
+    "nothing changed": _nothing_changed_words,
+    "no round closed": lambda: NO_ROUND_CLOSED,
+    "unknown round": lambda: unknown_round("Q4 2030", listed_rounds()),
+    "unknown round, one listed": lambda: unknown_round("Q4 2030", listed_rounds()[:1]),
+    "still open": lambda: rounds.STILL_OPEN,
+    "before the fresh start": lambda: rounds.BEFORE_FRESH_START,
+}
+
+
+PINNED = ("compared", "unknown round")  # their German is checked word for word below
+
+
+@pytest.mark.parametrize("case", [c for c in ROUND_WORDS if c not in PINNED])
+def test_on_de_the_fakes_answer_to_each_round_sentence_is_german(case):
+    answer = answer_to(ROUND_WORDS[case](), name=COMPARE_ROUNDS)
+
+    assert wrong_language(answer, "de") is None
+    assert english_words(answer) == []
+
+
+@pytest.mark.parametrize("case", ROUND_WORDS)
+def test_on_en_and_fr_the_fakes_answer_to_each_round_sentence_is_the_words(case):
+    words = ROUND_WORDS[case]()
+
+    assert answer_to(words, "en", COMPARE_ROUNDS) == words
+    assert answer_to(words, "fr", COMPARE_ROUNDS) == words
+
+
+def test_on_de_the_comparison_reads_in_the_reports_words():
+    answer = answer_to(_compared_words(), name=COMPARE_ROUNDS)
+
+    assert answer.splitlines() == [
+        "Jetzt verglichen mit Prüfrunde 2, “Q2 2026”, abgeschlossen am 30. Juni 2026.",
+        "Besser: 1, schlechter: 1, neu: 1, unverändert: 7.",
+        (
+            "Bereitschaft: 2 Kontrollen damals akzeptiert, 2 jetzt. Nachgewiesen 1 → 1, "
+            "Teilweise nachgewiesen 1 → 0, Nicht nachgewiesen 0 → 1."
+        ),
+        "Geänderte Kontrollen:",
+        f"- {IDS[0]}: besser, Teilweise nachgewiesen → Nachgewiesen.",
+        f"- {IDS[1]}: schlechter, Nachgewiesen → Nicht akzeptiert.",
+        (
+            f"- {IDS[2]}: neu, Nicht akzeptiert → Nicht nachgewiesen; vorgeschlagen und wartet "
+            "auf Ihre Prüfung."
+        ),
+        (
+            f"Änderungen im Anwendungsbereich: {IDS[3]} seitdem nicht mehr im "
+            f"Anwendungsbereich; {IDS[4]} seitdem neu im Anwendungsbereich."
+        ),
+        f"Seitdem erledigte Maßnahmen: {IDS[0]}-M1 zu {IDS[0]}.",
+        f"Seitdem beantwortete Fragen: eine zu {IDS[2]}, eine zu {IDS[0]}.",
+    ]
+
+
+def test_on_de_nothing_changed_says_keine():
+    answer = answer_to(_nothing_changed_words(), name=COMPARE_ROUNDS)
+
+    assert "Geänderte Kontrollen: keine." in answer
+    assert "Änderungen im Anwendungsbereich: keine." in answer
+    assert "Seitdem erledigte Maßnahmen: keine." in answer
+    assert "Seitdem beantwortete Fragen: keine." in answer
+
+
+def test_on_de_an_unknown_round_names_the_rounds_as_they_are():
+    answer = answer_to(ROUND_WORDS["unknown round"](), name=COMPARE_ROUNDS)
+
+    assert answer == (
+        "Die Prüfrunde “Q4 2030” gibt es nicht. Die Prüfrunden sind 1 “First round”, "
+        "2 “Q2 2026” und 3 “Q3 2026”."
+    )
