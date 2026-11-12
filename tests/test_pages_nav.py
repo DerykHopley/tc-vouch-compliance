@@ -1,6 +1,6 @@
-"""The GitHub Pages site (docs/, served from main) shares one nav bar across its pages (#704).
+"""The GitHub Pages site (docs/, served from main) shares one nav bar across its pages (#704, build review added 2026-11-12).
 
-Each page carries the same four links (Home, Process flow, Eval report, Repo), with its own one
+Each page carries the same five links (Home, Process flow, Eval report, Build review, Repo), with its own one
 marked `aria-current="page"`. The eval report's data is generated (scripts/eval-site.py writes
 docs/evals/data.js); its page is hand-written, so a regeneration must leave the page, and the
 nav in it, as it was."""
@@ -16,13 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 REPO = "https://github.com/DerykHopley/tc-vouch-compliance"
 
-# page -> (its nav hrefs in order: Home, Process flow, Eval report, Repo; the current one's label)
+# page -> (its nav hrefs in order: Home, Process flow, Eval report, Build review, Repo; the current one's label)
 PAGES = {
-    "index.html": (["./", "flow/", "evals/", REPO], "Home"),
-    "flow/index.html": (["../", "./", "../evals/", REPO], "Process flow"),
-    "evals/index.html": (["../", "../flow/", "./", REPO], "Eval report"),
+    "index.html": (["./", "flow/", "evals/", "build-review/", REPO], "Home"),
+    "flow/index.html": (["../", "./", "../evals/", "../build-review/", REPO], "Process flow"),
+    "evals/index.html": (["../", "../flow/", "./", "../build-review/", REPO], "Eval report"),
+    "build-review/index.html": (["../", "../flow/", "../evals/", "./", REPO], "Build review"),
 }
-LABELS = ["Home", "Process flow", "Eval report", "Repo"]
+LABELS = ["Home", "Process flow", "Eval report", "Build review", "Repo"]
 
 
 class NavLinks(HTMLParser):
