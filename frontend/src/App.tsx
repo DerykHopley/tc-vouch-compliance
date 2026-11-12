@@ -76,6 +76,10 @@ function viewAt(path: string): View {
   }
 }
 
+/** What a company setup's create did while the developer was on another page (#569), said under the top bar: `open`,
+ * when it made the company current, opens it. */
+export type CreatedNotice = { text: string; open?: { label: string; onOpen: () => void } }
+
 type AppProps = {
   /** Clerk mode's sign out, in the user menu; local mode has nobody to sign out. */
   onSignOut?: () => void
@@ -105,12 +109,17 @@ type AppProps = {
    * taken once, as the app mounts, and `onArrivalUsed` then lets ProfiledApp clear it, so no later mount reruns it. */
   arrival?: Arrival | null
   onArrivalUsed?: () => void
+  /** A create landed while the developer was elsewhere (#569): said under the top bar, the page left as it is, until
+   * Dismiss (`onNoticeDismissed`) or the app opens afresh. */
+  createdNotice?: CreatedNotice
+  onNoticeDismissed?: () => void
 }
 
 /** The app: the top bar (#222, the owner's option D: page tabs and the user menu, behind one Menu button on a phone;
  * no profile switcher since #480), then the page shown, and the chat. */
 export default function App({ onSignOut, userName, profile, onStartedAfresh, onCompanyCreated, onCompanyRemoved,
-  onMadeCurrent, developerNote, onNoteShown, arrival = null, onArrivalUsed }: AppProps = {}) {
+  onMadeCurrent, developerNote, onNoteShown, arrival = null, onArrivalUsed, createdNotice, onNoticeDismissed }:
+  AppProps = {}) {
   const [theme, setTheme] = useState<Theme>(startingTheme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -353,6 +362,16 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
               ? { onPage: () => go({ name: 'developer' }), onSetup: () => go({ name: 'setup' }) } : undefined} />
         </div>
       </TopBar>
+      {createdNotice && (
+        <div className="wrap created-notice" role="status">
+          <p className="field-note notice">{createdNotice.text}</p>
+          {createdNotice.open && (
+            <button type="button" className="btn btn-primary" onClick={createdNotice.open.onOpen}>
+              {createdNotice.open.label}</button>
+          )}
+          <button type="button" className="btn btn-ghost" onClick={onNoticeDismissed}>Dismiss</button>
+        </div>
+      )}
       {shown === 'report' ? <Report />
         : shown === 'company' ? (
           <CompanyPage overview={overview.state} onRetryOverview={overview.retry} onGoalChanged={changedGoal}

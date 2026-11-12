@@ -818,4 +818,140 @@ describe('the first pass on a company just made, issue 447', () => {
     expect(screen.getByRole('button', { name: 'Run a profile pass' })).toBeTruthy()
     expect(barName()).toBe('Musterfirma GmbH')
   })
+
+  describe('a developer who left setup while the create answered, issue 569', () => {
+    const MADE = 'Musterfirma GmbH was made and is now current.'
+    /** Back or Forward, once the browser has moved: jsdom moves history asynchronously, then fires popstate. */
+    const moved = (move: () => void) => new Promise<void>((done) => {
+      window.addEventListener('popstate', () => done(), { once: true })
+      move()
+    })
+    /** serveSetup with the developer page's full settings, and the create's Make current held, answered by
+     * `madeCurrent` once released; the list names Musterfirma current once that answer was a 2xx (not by count, as
+     * StrictMode reads the list twice on mounting). */
+    function heldMakeCurrent(madeCurrent: () => Response) {
+      const fetch = serveSetup()
+      const answered = fetch.getMockImplementation()!
+      const held = { release: () => {} }
+      let made = false
+      fetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/developer/current-company') return new Promise<Response>((resolve) => {
+          held.release = () => {
+            const answer = madeCurrent()
+            made = answer.ok
+            resolve(answer)
+          }
+        })
+        if (url === '/api/developer/settings') return Promise.resolve(Response.json(DEVELOPER_SETTINGS))
+        if (url === '/api/profiles') return Promise.resolve(Response.json(made
+          ? listOf([NORDLICHT, TESTWERK, MUSTERFIRMA], 'musterfirma-gmbh') : listOf([NORDLICHT, TESTWERK])))
+        return answered(url, init)
+      })
+      return { fetch, held }
+    }
+    /** From the developer page, Set up a company, Created, then Back to the developer page while Make current is
+     * held, where a value is typed in the Model id field. Then the held answer lands and the list is read again. */
+    async function leaveWhileCreating(madeCurrent: () => Response = () => Response.json(DEVELOPER_SETTINGS)) {
+      const { fetch, held } = heldMakeCurrent(madeCurrent)
+      window.history.replaceState(null, '', '/developer')
+      window.history.pushState(null, '', '/developer/setup')
+      render(<StrictMode><ProfiledApp /></StrictMode>)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+      await waitFor(() => expect(currentChanges(fetch)).toHaveLength(1))
+      await moved(() => window.history.back())
+      const field = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Model id' })
+      await userEvent.clear(field)
+      await userEvent.type(field, 'typed/meanwhile')
+      held.release()
+      await waitFor(() => expect(reads).toHaveLength(2))
+      await reads[1]
+      return { fetch, field }
+    }
+
+    it('stays on the page they went to, its input kept and nothing reopened, saying the company is now current',
+      async () => {
+      const { fetch, field } = await leaveWhileCreating()
+
+      expect((await screen.findByText(MADE)).closest('[role="status"]')).not.toBeNull()
+      expect(window.location.pathname).toBe('/developer')
+      expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Model id' })).toBe(field) // not mounted afresh
+      expect(field.value).toBe('typed/meanwhile')
+      expect(barName()).toBe('Nordlicht Komponenten GmbH') // the page stays under the company it opened under
+      expect(await authHeaders()).toEqual({ 'X-Vouch-Profile': 'nordlicht' })
+      expect(firstPassCalls(fetch)).toEqual([]) // the Goal and the pass wait for the company to open
+    })
+
+    it('Open opens the company made on the Overview, sets its Goal and runs its first pass, once', async () => {
+      const { fetch } = await leaveWhileCreating()
+      await userEvent.click(await screen.findByRole('button', { name: 'Open Musterfirma GmbH' }))
+
+      await dossierOf('Musterfirma GmbH')
+      expect(window.location.pathname).toBe('/')
+      await screen.findByText('1 assessment waiting for your review.')
+      expect(firstPassCalls(fetch)).toEqual([
+        ['/api/goal', 'musterfirma-gmbh', JSON.stringify({ goal: 'internal-improvement' })],
+        ['/api/profile-pass', 'musterfirma-gmbh', null],
+      ])
+      expect(screen.queryByText(MADE)).toBeNull()
+      // The Overview took the wizard's place after the developer page: Back and Forward run nothing again.
+      await moved(() => window.history.back())
+      expect(window.location.pathname).toBe('/developer')
+      await moved(() => window.history.forward())
+      expect(window.location.pathname).toBe('/')
+      await screen.findByRole('button', { name: 'Run a profile pass' })
+      expect(passes(fetch)).toHaveLength(1)
+    })
+
+    it("Forward onto the wizard's entry opens the company made there, as the create would have, with its first pass",
+      async () => {
+      const { fetch } = await leaveWhileCreating()
+      await screen.findByText(MADE)
+
+      await moved(() => window.history.forward())
+      await dossierOf('Musterfirma GmbH')
+      expect(window.location.pathname).toBe('/')
+      await screen.findByText('1 assessment waiting for your review.')
+      expect(passes(fetch)).toHaveLength(1)
+      expect(screen.queryByText(MADE)).toBeNull()
+    })
+
+    it("the next Back goes to the page before, not the same page again (issue 476's extra entry, gone since issue 568)",
+      async () => {
+      const { fetch, held } = heldMakeCurrent(() => Response.json(DEVELOPER_SETTINGS))
+      window.history.replaceState(null, '', '/report')
+      window.history.pushState(null, '', '/developer')
+      window.history.pushState(null, '', '/developer/setup')
+      render(<ProfiledApp />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Created' }))
+      await waitFor(() => expect(currentChanges(fetch)).toHaveLength(1))
+      await moved(() => window.history.back())
+      held.release()
+      await screen.findByText(MADE)
+
+      await moved(() => window.history.back())
+      expect(window.location.pathname).toBe('/report')
+      expect(passes(fetch)).toHaveLength(0)
+    })
+
+    it('Dismiss hides the notice, and the page stays as it is', async () => {
+      const { field } = await leaveWhileCreating()
+      await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByText(MADE)).toBeNull()
+      expect(field.value).toBe('typed/meanwhile')
+    })
+
+    it('not made current: says so in the notice, with no Open, and keeps the page as it is', async () => {
+      const { fetch, field } = await leaveWhileCreating(() => Response.json(
+        { detail: 'The database is unavailable just now.', unavailable: 'database' }, { status: 503 }))
+
+      expect(await screen.findByText('Musterfirma GmbH was made but could not be made current. Use Make current on '
+        + 'the Developer page to try again.')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Open Musterfirma GmbH' })).toBeNull()
+      expect(field.value).toBe('typed/meanwhile')
+      expect(barName()).toBe('Nordlicht Komponenten GmbH')
+      await moved(() => window.history.forward()) // the wizard's entry gave way to the developer page
+      expect(window.location.pathname).toBe('/developer')
+      expect(firstPassCalls(fetch)).toEqual([])
+    })
+  })
 })

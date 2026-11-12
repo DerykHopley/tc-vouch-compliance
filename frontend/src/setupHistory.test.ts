@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { forgetSetupEntries, leaveSetup, markSetupEntry, settleSetupEntry } from './setupHistory.ts'
 
 /** Back or Forward, once the browser has moved: jsdom moves history asynchronously, then fires popstate. */
@@ -72,5 +72,46 @@ describe('leaveSetup, issues 476 and 568', () => {
   it('marks an entry once: the wizard opened again on it keeps its mark', () => {
     window.history.pushState(null, '', '/developer/setup')
     expect(markSetupEntry()).toBe(markSetupEntry())
+  })
+})
+
+describe('leaveSetup, issue 569', () => {
+  it('says whether the setup entry was shown: true when replaced now, false when the developer had left it', async () => {
+    window.history.pushState(null, '', '/developer/setup')
+    const shown = markSetupEntry()
+    expect(leaveSetup(shown, '/')).toBe(true)
+
+    window.history.pushState(null, '', '/developer/setup')
+    const left = markSetupEntry()
+    await moved(() => window.history.back())
+    expect(leaveSetup(left, '/')).toBe(false)
+  })
+
+  it('calls `reached` once, when Back or Forward first reaches the finished entry, after it gave way', async () => {
+    window.history.pushState(null, '', '/developer')
+    window.history.pushState(null, '', '/developer/setup')
+    const entry = markSetupEntry()
+    await moved(() => window.history.back())
+    const reached = vi.fn(() => expect(window.location.pathname).toBe('/'))
+
+    leaveSetup(entry, '/', reached)
+    expect(reached).not.toHaveBeenCalled()
+
+    await moved(() => window.history.forward())
+    settleSetupEntry()
+    expect(reached).toHaveBeenCalledOnce()
+    await moved(() => window.history.back())
+    settleSetupEntry()
+    await moved(() => window.history.forward())
+    settleSetupEntry()
+    expect(reached).toHaveBeenCalledOnce()
+  })
+
+  it('never calls `reached` for an entry replaced as the create landed on it', () => {
+    window.history.pushState(null, '', '/developer/setup')
+    const reached = vi.fn()
+    leaveSetup(markSetupEntry(), '/', reached)
+    settleSetupEntry()
+    expect(reached).not.toHaveBeenCalled()
   })
 })

@@ -410,6 +410,10 @@ textarea.field { resize: vertical; font-family: inherit; }
 .field[aria-invalid="true"] { border-color: var(--ink); border-width: 2px; }
 .field-note { margin: 0; color: var(--muted); max-width: 72ch; }
 .field-note.notice { color: var(--ink); padding-left: 10px; }
+/* A create that landed while the developer was on another page (#569): its notice held under the sticky top bar, so
+   it shows wherever the page is scrolled, then Open and Dismiss, wrapping on a phone. */
+.created-notice { position: sticky; top: var(--top-bar, 0px); z-index: 19; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 8px 16px; padding-block: 8px; background: var(--paper); border-bottom: 1px solid var(--rule); }
 .sheet a, .msg a { color: var(--navy); }
 
 /* Ask Vouch: button and bubble */

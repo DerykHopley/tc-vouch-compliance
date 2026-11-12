@@ -863,19 +863,29 @@ def held_once(page: Page, held: list[Route]) -> None:
     assert len(held) == 1, len(held)
 
 
-def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizard(
-    page: Page, first_pass_url, nordlicht_later
+PROFILE_LIST = "/api/profiles"
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+def test_back_while_the_create_answers_keeps_the_page_and_says_the_company_is_current(
+    page: Page, first_pass_url, nordlicht_later, width
 ):
-    """#476: Back pressed while the create is still answering (its Make current held) leaves the
-    wizard for the developer page. When the answer lands the developer stays there, under the new
-    company, its first pass run (#447); Forward never reaches an empty wizard. On first_pass_url:
-    its pass is the second of the passes' daily limit (3) there, after story 5's."""
+    """#569 (after #476): Back pressed while the create is still answering (its Make current
+    held) leaves the wizard for the developer page, where the developer scrolls and types. When
+    the answer lands the page stays as it is, under the company it opened under: the typed value
+    and the scroll kept, a notice saying the new company is current; the next Back goes to the
+    page before (#568 dropped #476's extra entry). Open on the notice opens the new company on
+    the Overview, its first pass run (#447). On first_pass_url: desktop's pass is the second of
+    the passes' daily limit (3) there, after story 5's; the phone's ends before Open, so it runs
+    none."""
     nordlicht_later(first_pass_url)
-    page.set_viewport_size({"width": 1280, "height": 900})
+    page.set_viewport_size({"width": width, "height": 700})
     with page.expect_response("**/api/developer/settings"):
-        page.goto(f"{first_pass_url}/developer")
+        page.goto(first_pass_url)
+    from_user_menu(page, "Developer page")
     page.get_by_role("button", name="Set up a company").click()
-    to_step_7(page, "Zurück GmbH")
+    company = f"Zurück {width} GmbH"
+    to_step_7(page, company)
     held: list[Route] = []
     page.route(CURRENT_COMPANY, lambda route: held.append(route))
     with page.expect_response(
@@ -888,29 +898,51 @@ def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizar
 
     page.go_back()
     expect(page).to_have_url(f"{first_pass_url}/developer")
-    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
+    field = page.get_by_role("textbox", name="Model id")
+    field.fill("typed/meanwhile")
+    page.get_by_role("region", name="Usage").scroll_into_view_if_needed()
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 0, scrolled
+    usage_top = page.get_by_role("region", name="Usage").bounding_box()["y"]
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_LIST)):
         held[0].continue_()
-    assert passed.value.ok, passed.value.status
 
-    expect(bar_company(page)).to_have_text("Zurück GmbH")
+    notice = page.get_by_role("status").filter(has_text=f"{company} was made and is now current.")
+    expect(notice).to_be_in_viewport()  # held under the top bar, wherever the page is scrolled
     assert current_of(page, first_pass_url) == profile
-    expect(page).to_have_url(f"{first_pass_url}/developer")  # no jump to the Dossier
-    expect(page.get_by_role("button", name="Set up a company")).to_be_visible()
+    expect(page).to_have_url(f"{first_pass_url}/developer")
+    expect(field).to_have_value("typed/meanwhile")
+    expect(page.get_by_text("Loading the company…")).to_have_count(0)
+    assert page.evaluate("window.scrollY") >= scrolled  # not back at the top
+    assert abs(page.get_by_role("region", name="Usage").bounding_box()["y"] - usage_top) < 2
+    expect(bar_company(page)).not_to_have_text(company)  # the page's company, until Open
+    assert small_targets(page) == []
+
+    page.go_back()
+    expect(page).to_have_url(f"{first_pass_url}/")
     page.go_forward()
-    page.wait_for_timeout(SETTLE_MS)
-    expect(page).not_to_have_url(re.compile(r"/developer/setup$"))
-    expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
+    expect(page).to_have_url(f"{first_pass_url}/developer")
+    if width < 700:
+        return  # the open, and its pass, once: on desktop
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
+        notice.get_by_role("button", name=f"Open {company}").click()
+    assert passed.value.ok, passed.value.status
+    expect(page).to_have_url(f"{first_pass_url}/")
+    expect(bar_company(page)).to_have_text(company)
+    expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
+    expect(page.get_by_role("status").filter(has_text="is now current")).to_have_count(0)
 
 
-def test_a_tab_clicked_while_the_create_answers_stays_and_back_never_reaches_the_wizard(
+def test_a_tab_clicked_while_the_create_answers_stays_and_back_opens_the_company(
     page: Page, first_pass_url, nordlicht_later
 ):
-    """#568: the Company tab clicked while the create is still answering (its Make current held)
-    moves past the wizard's history entry, so Back reaches it from behind. When the answer lands
-    the developer stays on the Company page, under the new company; the first Back gives the
-    Dossier the create would have opened, the second the Dossier setup was opened from, and
-    neither an empty wizard. On first_pass_url: its pass is the third of the passes' daily limit
-    (3) there, after story 5's and #476's."""
+    """#568, #569: the Company tab clicked while the create is still answering (its Make current
+    held) moves past the wizard's history entry, so Back reaches it from behind. When the answer
+    lands the developer stays on the Company page as it is, told the new company is current; the
+    first Back gives the Dossier the create would have opened, under the new company, its first
+    pass run; the second the Dossier setup was opened from, and neither an empty wizard. On
+    first_pass_url: its pass is the third of the passes' daily limit (3) there, after story 5's
+    and #569's."""
     nordlicht_later(first_pass_url)
     page.set_viewport_size({"width": 1280, "height": 900})
     open_setup(page, first_pass_url)
@@ -927,15 +959,17 @@ def test_a_tab_clicked_while_the_create_answers_stays_and_back_never_reaches_the
 
     company_tab(page).click()
     expect(page).to_have_url(f"{first_pass_url}/company")
-    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
-        held[0].continue_()
-    assert passed.value.ok, passed.value.status
-    expect(bar_company(page)).to_have_text("Reiter GmbH")
+    held[0].continue_()
+    expect(page.get_by_text("Reiter GmbH was made and is now current.")).to_be_visible()
     assert current_of(page, first_pass_url) == profile
     expect(page).to_have_url(f"{first_pass_url}/company")  # no jump to the Dossier
 
-    for _ in range(2):
+    with page.expect_response(lambda r: r.url.endswith(PROFILE_PASS)) as passed:
         page.go_back()
+    assert passed.value.ok, passed.value.status
+    for back in range(2):
+        if back:
+            page.go_back()
         expect(page).to_have_url(f"{first_pass_url}/")
         expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
         expect(page.get_by_text(re.compile(r"^Step \d of 7$"))).to_have_count(0)
