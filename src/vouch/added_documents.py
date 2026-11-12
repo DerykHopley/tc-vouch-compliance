@@ -85,7 +85,7 @@ WITHDRAWN_TITLE = (
 )
 
 
-Entry = Callable[["AddedDocument"], Sequence[Mapping[str, Any]]]
+Entries = Callable[["AddedDocument"], Sequence[Mapping[str, Any]]]
 """The audit entries of an add (#585) or withdraw, given the version kept: one per lead whose
 trail records it (#624), each a mapping of vouch.database's AUDIT_COLUMNS, kept with the
 version, all or none."""
@@ -375,18 +375,18 @@ class AddedDocuments(Protocol):
         added_by: str,
         added_by_name: str,
         at: datetime.datetime,
-        entry: Entry | None = None,
+        entries: Entries | None = None,
     ) -> AddedDocument:
         """Keep `new` as the next version of the document with its title, or version 1 of a new
-        one whose id is none of `builtin_ids`, with `entry`'s audit entry when given, together.
+        one whose id is none of `builtin_ids`, with `entries`' audit entry when given, together.
         DocumentRefused, writing nothing, for a limit."""
         ...
 
     def withdraw(
-        self, profile_id: str, doc_id: str, at: datetime.datetime, entry: Entry | None = None
+        self, profile_id: str, doc_id: str, at: datetime.datetime, entries: Entries | None = None
     ) -> list[AddedDocument]:
         """Mark every version of the document withdrawn at `at` (one already withdrawn keeps
-        its time), with `entry`'s audit entry of its newest version when this marked any
+        its time), with `entries`' audit entry of its newest version when this marked any
         (#586), together: its versions as kept now, none when there is no such document."""
         ...
 
@@ -441,7 +441,7 @@ class ProcessAddedDocuments:
         added_by: str,
         added_by_name: str,
         at: datetime.datetime,
-        entry: Entry | None = None,
+        entries: Entries | None = None,
     ) -> AddedDocument:
         with self._guard:
             kept = self._kept.setdefault(profile_id, [])
@@ -456,13 +456,13 @@ class ProcessAddedDocuments:
             )
             kept.append(added)
             _refresh(self._index, profile_id, kept)  # under the guard: puts land in order
-            if entry is not None and self._keep is not None:
-                for row in entry(added):
+            if entries is not None and self._keep is not None:
+                for row in entries(added):
                     self._keep(row)
         return added
 
     def withdraw(
-        self, profile_id: str, doc_id: str, at: datetime.datetime, entry: Entry | None = None
+        self, profile_id: str, doc_id: str, at: datetime.datetime, entries: Entries | None = None
     ) -> list[AddedDocument]:
         with self._guard:
             kept = self._kept.get(profile_id, [])
@@ -473,8 +473,8 @@ class ProcessAddedDocuments:
                     marked = True
             _refresh(self._index, profile_id, kept)
             versions = _ordered(d for d in kept if d.doc_id == doc_id)
-            if marked and entry is not None and self._keep is not None:
-                for row in entry(versions[-1]):
+            if marked and entries is not None and self._keep is not None:
+                for row in entries(versions[-1]):
                     self._keep(row)
             return versions
 
@@ -505,7 +505,7 @@ class PostgresAddedDocuments:
         added_by: str,
         added_by_name: str,
         at: datetime.datetime,
-        entry: Entry | None = None,
+        entries: Entries | None = None,
     ) -> AddedDocument:
         def made(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             added = next_version(
@@ -519,15 +519,15 @@ class PostgresAddedDocuments:
             )
             return _row(added)
 
-        audit = None if entry is None else (lambda row: entry(_document(row)))
+        audit = None if entries is None else (lambda row: entries(_document(row)))
         added, rows = self.db.add_document(profile_id, made, audit)
         _refresh(self._index, profile_id, map(_document, rows))
         return _document(added)
 
     def withdraw(
-        self, profile_id: str, doc_id: str, at: datetime.datetime, entry: Entry | None = None
+        self, profile_id: str, doc_id: str, at: datetime.datetime, entries: Entries | None = None
     ) -> list[AddedDocument]:
-        audit = None if entry is None else (lambda row: entry(_document(row)))
+        audit = None if entries is None else (lambda row: entries(_document(row)))
         rows = [_document(r) for r in self.db.withdraw_document(profile_id, doc_id, at, audit)]
         _refresh(self._index, profile_id, rows)
         return [d for d in rows if d.doc_id == doc_id]

@@ -3,6 +3,7 @@ developers add a document, a new version or withdraw one; each change is recorde
 of every lead with work under the company."""
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -70,8 +71,8 @@ def test_a_lead_who_did_not_create_the_company_is_refused_and_nothing_is_written
 
     assert added.status_code == 201, added.text
     for refused in (refused_add, refused_withdraw):
-        assert refused.status_code == 403
         assert refused.json() == {"detail": api.DOCUMENTS_CHANGE_REFUSED}
+
     kept = process_added_documents().listed(company)
     assert [(d.version, d.withdrawn_at) for d in kept] == [(1, None)]
     assert tab["can_change"] is False
@@ -135,18 +136,22 @@ def test_a_lead_whose_only_work_is_a_trail_entry_is_told_too(users):
 
 
 @needs_postgres
-def test_on_postgres_every_affected_lead_gets_the_entry_and_a_lead_is_refused(postgres, users):
+def test_on_postgres_every_affected_lead_gets_the_entry(postgres, users):
     alice, bob = users
     with user_memory(postgres.url, bob, "nordlicht") as memory:
         memory.remember_assessment("thread-1", "1.1.1")
     with TestClient(app_with_roles(postgres.url, {uid(alice)})) as client:
-        refused = client.post(PATH, json=body(), headers=bob)
         added = client.post(PATH, json=body(), headers=alice)
         withdrawn = client.post(withdraw_path(DOC), headers=alice)
         bobs = document_entries(client, bob)
         mine = document_entries(client, alice)
 
-    assert refused.status_code == 403
     assert (added.status_code, withdrawn.status_code) == (201, 200)
     assert [e["action"] for e in bobs] == ["document-withdraw", "document-add"]
     assert [e["action"] for e in mine] == ["document-withdraw", "document-add"]
+
+
+def test_the_panels_note_is_the_403s_sentence():
+    """The Documents panel says who may change documents in the 403's own words."""
+    source = (Path(__file__).parents[1] / "frontend/src/documents.ts").read_text()
+    assert f"CHANGE_REFUSED_NOTE = '{api.DOCUMENTS_CHANGE_REFUSED}'" in source

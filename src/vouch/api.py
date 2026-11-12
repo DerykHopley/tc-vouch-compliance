@@ -220,7 +220,7 @@ BUILT_IN_NOT_WITHDRAWN = "A built-in document can't be withdrawn."
 NO_ADDED_DOCUMENT = "This company has no added document with that id."
 """`POST /api/documents/{id}/withdraw`'s 404 (#586)."""
 DOCUMENTS_CHANGE_REFUSED = (
-    "Only the user who set up this company, or a developer, can add or withdraw its documents."
+    "Only the user who set up this company, or a developer, can add or withdraw documents."
 )
 """The 403 of an add or withdraw by anyone else (#624)."""
 NOT_BASE64 = "The file could not be read. Choose it again."
