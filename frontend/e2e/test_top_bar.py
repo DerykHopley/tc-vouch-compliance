@@ -8,7 +8,7 @@ import re
 
 import pytest
 from fonts import FONTS_SETTLED
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 from top_bar import (
     back_to_overview,
     bar_company,
@@ -322,3 +322,27 @@ def test_opening_and_closing_the_user_menu_on_a_scrolled_page_never_scrolls_it(
         toggle.click()
         expect(toggle).to_have_attribute("aria-expanded", "false")
         assert_not_scrolled(page, scrolled, "closing the Menu")
+
+
+def test_on_a_phone_a_panel_filled_in_late_leaves_the_page_where_it_was(page: Page, profiles_url):
+    """Kept by #682: the page's scroll anchoring stays on while no top-bar menu is open, so the
+    Company page's Rounds panel, filled in above a scrolled page, moves nothing in view."""
+    held: list[Route] = []
+    page.route("**/api/rounds", lambda route: held.append(route))
+    page.set_viewport_size({"width": 390, "height": 700})
+    with page.expect_response("**/api/documents"):
+        page.goto(f"{profiles_url}/company")
+    documents = page.get_by_role("region", name="Documents")
+    expect(documents).to_be_visible()
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    assert page.evaluate("window.scrollY") > 300
+    rounds = page.get_by_role("region", name="Rounds", exact=True)
+    expect(rounds).not_to_be_in_viewport()  # above the view
+    before = documents.bounding_box()["y"]
+    assert len(held) == 1, len(held)
+    with page.expect_response("**/api/rounds"):
+        held[0].continue_()
+    expect(rounds.get_by_role("status")).to_have_count(0)  # filled in
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    assert abs(documents.bounding_box()["y"] - before) < 2, (before, documents.bounding_box())
