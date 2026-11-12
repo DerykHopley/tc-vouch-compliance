@@ -446,7 +446,10 @@ ROUND_WORDS = {
 }
 
 
-@pytest.mark.parametrize("case", ROUND_WORDS)
+PINNED = ("compared", "unknown round")  # their German is checked word for word below
+
+
+@pytest.mark.parametrize("case", [c for c in ROUND_WORDS if c not in PINNED])
 def test_on_de_the_fakes_answer_to_each_round_sentence_is_german(case):
     answer = answer_to(ROUND_WORDS[case](), name=COMPARE_ROUNDS)
 
@@ -455,10 +458,11 @@ def test_on_de_the_fakes_answer_to_each_round_sentence_is_german(case):
 
 
 @pytest.mark.parametrize("case", ROUND_WORDS)
-def test_on_en_the_fakes_answer_to_each_round_sentence_is_the_words(case):
+def test_on_en_and_fr_the_fakes_answer_to_each_round_sentence_is_the_words(case):
     words = ROUND_WORDS[case]()
 
     assert answer_to(words, "en", COMPARE_ROUNDS) == words
+    assert answer_to(words, "fr", COMPARE_ROUNDS) == words
 
 
 def test_on_de_the_comparison_reads_in_the_reports_words():

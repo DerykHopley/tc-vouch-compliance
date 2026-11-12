@@ -131,6 +131,15 @@ _MONTHS = {
     "November": "November",
     "December": "Dezember",
 }
+_DATE = rf"(\d+) ({'|'.join(_MONTHS)}) (\d{{4}})"
+"""A date as the tools write it ("3 March 2026"): its day, month and year."""
+
+
+def _date(day: str, month: str, year: str) -> str:
+    """A date _DATE found, in German: "3. März 2026"."""
+    return f"{day}. {_MONTHS[month]} {year}"
+
+
 _STATUSES = {  # vouch.chat_agent._STATUS_WORDS: (said of one control, of several)
     "accepted": ("akzeptiert", "akzeptiert"),
     "rejected": ("abgelehnt", "abgelehnt"),
@@ -224,6 +233,8 @@ def _why(german: Callable[[str, str, list[str]], str]) -> Callable[[re.Match[str
 
 
 _CHANGES = {"better": "besser", "worse": "schlechter", "new": "neu"}  # compare_rounds_words
+_PROPOSED = f"; {_STATUSES['proposed and waiting for your review'][0]}"
+"""A changed control's note in compare_rounds_words that its newest assessment waits."""
 
 
 def _accepted(verdict: str) -> str:
@@ -245,13 +256,17 @@ def _on(item: str) -> str:
     return f"{'eine' if what == 'one' else what} zu {control_id}"
 
 
-def _since(listed: str, german: Callable[[str], str]) -> str:
-    """compare_rounds_words' list of what changed since the round (scope changes are split by
-    "; ", the rest by ", "), each in German; "none" is "keine"."""
+def _since(listed: str, german: Callable[[str], str], sep: str = ", ") -> str:
+    """compare_rounds_words' list of what changed since the round, its items split by `sep`,
+    each in German; "none" is "keine"."""
     if listed == "none":
         return "keine"
-    sep = "; " if german is _scope else ", "
     return sep.join(german(item) for item in listed.split(sep))
+
+
+def _and(listed: str) -> str:
+    """A list ending "… and <last>" (unknown_round's rounds), ending "… und <last>"."""
+    return " und ".join(listed.rsplit(" and ", 1))
 
 
 _GERMAN: list[tuple[re.Pattern[str], Say]] = [
@@ -261,8 +276,8 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
         r"Sie haben noch keine der \1 Kontrollen bewertet.",
     ),
     (
-        re.compile(rf"You last worked on (\d+) ({'|'.join(_MONTHS)}) (\d{{4}})\."),
-        lambda f: f"Sie haben zuletzt am {f[1]}. {_MONTHS[f[2]]} {f[3]} gearbeitet.",
+        re.compile(rf"You last worked on {_DATE}\."),
+        lambda f: f"Sie haben zuletzt am {_date(f[1], f[2], f[3])} gearbeitet.",
     ),
     (re.compile(r"Of the (\d+) controls, ([^.]+)\."), _counts),
     (
@@ -434,13 +449,10 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
     # compare_rounds_words and its refusals (#582), in the report's words ("Prüfrunde",
     # "Bereitschaft", "Geänderte Kontrollen", "Maßnahmen", "Nicht akzeptiert")
     (
-        re.compile(
-            rf"Now compared with review round (\d+), {_QUOTED}, closed on (\d+) "
-            rf"({'|'.join(_MONTHS)}) (\d{{4}})\."
-        ),
+        re.compile(rf"Now compared with review round (\d+), {_QUOTED}, closed on {_DATE}\."),
         lambda f: (
             f"Jetzt verglichen mit Prüfrunde {f[1]}, {f[2]}, abgeschlossen am "
-            f"{f[3]}. {_MONTHS[f[4]]} {f[5]}."
+            f"{_date(f[3], f[4], f[5])}."
         ),
     ),
     (
@@ -460,12 +472,12 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
         _line(rf"- {_ID}: (better|worse|new), (.+?) → (.+?)(; proposed, waiting for review)?\."),
         lambda f: (
             f"- {f[1]}: {_CHANGES[f[2]]}, {_accepted(f[3])} → {_accepted(f[4])}"
-            f"{'; vorgeschlagen und wartet auf Ihre Prüfung' if f[5] else ''}."
+            f"{_PROPOSED if f[5] else ''}."
         ),
     ),
     (
         _line(r"Scope changes: (.*)\."),
-        lambda f: f"Änderungen im Anwendungsbereich: {_since(f[1], _scope)}.",
+        lambda f: f"Änderungen im Anwendungsbereich: {_since(f[1], _scope, '; ')}.",
     ),
     (
         _line(r"Remediation items done since: (.*)\."),
@@ -481,10 +493,7 @@ _GERMAN: list[tuple[re.Pattern[str], Say]] = [
     ),
     (
         _line(rf"There is no review round {_QUOTED}\. The rounds are (.+)\."),
-        lambda f: (
-            f"Die Prüfrunde {f[1]} gibt es nicht. Die Prüfrunden sind "
-            f"{re.sub(r' and (?=\d+ “[^”]*”$)', ' und ', f[2])}."
-        ),
+        lambda f: f"Die Prüfrunde {f[1]} gibt es nicht. Die Prüfrunden sind {_and(f[2])}.",
     ),
     (
         re.compile(re.escape(STILL_OPEN)),
