@@ -51,7 +51,7 @@ The one company every user sees, developers included. A developer sets it on the
 _Avoid_: Selected profile, active profile
 
 **Company page**:
-The page, reached by the top bar's **Company** tab, with the current company's details and settings. Only the Goal can be changed there.
+The page, reached by the top bar's **Company** tab, with the current company's details and settings. The Goal and the evidence documents can be changed there: add a document, add a new version, withdraw one (#585, #586).
 _Avoid_: Settings page, profile page
 
 **Goal**:
