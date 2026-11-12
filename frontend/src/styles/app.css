@@ -619,6 +619,12 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   :root[data-chat="pinned"] body { padding-right: 0; }
   .review-dock.stuck { position: static; left: auto; width: auto; border: 0; padding: 0; } /* in its place (#467) */
   .review-dock.stuck::after { display: none; }
+  /* The working paper flows as blocks too, as the report's sheet (#296): a grid placed the review bar as if the
+     requirements table had not grown from a page break, so the bar printed over the last remediation item (#591).
+     Its gap becomes a margin. A remediation item's Approve and Discard are for the screen: paper can't press them. */
+  .paper { display: block; }
+  .paper > * + * { margin-top: 16px; }
+  .remediation .review-actions { display: none; }
   body { background: var(--sheet); }
   .report { max-width: none; padding: 0; display: block; }
   .report.wrap { padding-inline: 0; }
