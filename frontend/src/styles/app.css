@@ -500,6 +500,10 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .bar-menu:not(.open) > * { display: none; } /* closed, the panel shows nothing */
   .bar-menu .tabs { flex-direction: column; }
   .bar-menu .menu-popup { position: static; margin-top: 4px; box-shadow: none; }
+  /* The panel and Your menu grow the sticky bar, which pushes the page down under it; the browser's scroll anchoring
+     then scrolled the page by as much to keep its content in place, about 251px for Your menu (#682). Off for the
+     page's own scroll, so it stays where it was; overflow-anchor isn't inherited, so inner scrollers keep it. */
+  html { overflow-anchor: none; }
   .bubble, .bubble.enlarged, .bubble.pinned { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 60; }
   .shortcut-hint { display: none; }
   .trace { grid-template-columns: minmax(0, 1fr); } /* each step's chip above its text (#232) */

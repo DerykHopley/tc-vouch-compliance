@@ -275,3 +275,49 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
         if user.evaluate("button => button === document.activeElement"):
             break
     expect(user).to_be_focused()
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize("width", [1280, 400])
+def test_opening_and_closing_the_user_menu_on_a_scrolled_page_never_scrolls_it(
+    page: Page, profiles_url, width, scheme
+):
+    """#682: on a phone, with the Menu open on a scrolled page, opening Your menu raised scrollY by
+    about 251px as the sticky bar grew: the browser's scroll anchoring kept the content under the
+    bar in place. Opening or closing a menu in the bar leaves the page where it was."""
+    with (
+        page.expect_response("**/api/developer/settings"),
+        page.expect_response("**/api/developer/prompts"),
+    ):
+        opened(page, f"{profiles_url}/developer", width)
+    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
+    bar = page.get_by_role("banner")
+    toggle = bar.get_by_role("button", name="Menu", exact=True)
+    page.evaluate(
+        "window.scrollTo(0, (document.documentElement.scrollHeight - window.innerHeight) / 2)"
+    )
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 300, scrolled  # a long page, scrolled well down
+    if width < 700:
+        toggle.click()
+        expect(toggle).to_have_attribute("aria-expanded", "true")
+        page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+        assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "opening the Menu scrolled"
+    user = bar.get_by_role("button", name="Your menu")
+    menu = page.get_by_role("menu", name="Your menu")
+
+    user.click()
+    expect(menu).to_be_visible()
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # two frames: anchoring has had its turn
+    assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "opening Your menu scrolled"
+
+    user.click()
+    expect(menu).to_have_count(0)
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+    assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "closing Your menu scrolled"
+    if width < 700:
+        toggle.click()
+        expect(toggle).to_have_attribute("aria-expanded", "false")
+        page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")
+        assert abs(page.evaluate("window.scrollY") - scrolled) <= 2, "closing the Menu scrolled"
