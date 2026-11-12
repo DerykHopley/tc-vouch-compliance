@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useHeightVar } from './useHeightVar.ts'
 import { type Assessment, newestAssessment, storedAssessment } from './assessment.ts'
 import { type Arrival, useFirstPass } from './arrival.ts'
@@ -162,6 +162,21 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
       document.removeEventListener('keydown', key)
       document.removeEventListener('pointerdown', outside)
     }
+  }, [barOpen])
+  // #682: the open panel grows the sticky bar, and the browser's scroll anchoring scrolled the page by as much. app.css
+  // keeps it off while the panel is open; this keeps it off for the two frames the bar shrinks in as it closes.
+  const wasOpen = useRef(false)
+  useLayoutEffect(() => {
+    const closing = wasOpen.current && !barOpen
+    wasOpen.current = barOpen
+    if (!closing) return
+    const root = document.documentElement
+    root.style.overflowAnchor = 'none'
+    const pending = { frame: 0 }
+    pending.frame = requestAnimationFrame(() => {
+      pending.frame = requestAnimationFrame(() => { root.style.overflowAnchor = '' })
+    })
+    return () => { cancelAnimationFrame(pending.frame); root.style.overflowAnchor = '' }
   }, [barOpen])
   const [view, setView] = useState<View>(() => {
     const { pathname, search, hash } = window.location

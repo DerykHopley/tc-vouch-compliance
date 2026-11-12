@@ -14,6 +14,7 @@ export const DEVELOPER_SETTINGS = {
   usage_url: 'https://openrouter.ai/activity',
   kept_in: 'database',
   daily_limit: 30,
+  chat_daily_limit: 50,
   usage: { openrouter: NO_RUNS, fake: NO_RUNS },
   broken_profiles: [],
   companies: [],

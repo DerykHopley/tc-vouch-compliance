@@ -943,6 +943,31 @@ def test_back_while_the_create_answers_keeps_the_scroll_and_open_runs_the_first_
     expect(page.get_by_role("article", name=re.compile(r"^Control "))).to_have_count(12)
 
 
+def test_on_a_phone_the_created_notice_appearing_leaves_the_page_where_it_was(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#569 at phone width, kept by #682: the page's scroll anchoring stays on while no top-bar
+    menu is open, so the notice appearing above a scrolled page moves nothing on it. No pass runs:
+    nothing is opened."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 390, "height": 700})
+    usage = page.get_by_role("region", name="Usage")
+    before: dict[str, float] = {}
+
+    def scroll_down() -> None:
+        usage.scroll_into_view_if_needed()
+        before["y"] = page.evaluate("window.scrollY")
+        assert before["y"] > 0, before
+        before["usage"] = usage.bounding_box()["y"]
+
+    company = "Telefon GmbH"
+    back_while_creating(page, first_pass_url, company, scroll_down)
+    notice = page.get_by_role("status").filter(has_text=f"{company} was made and is now current.")
+    expect(notice).to_be_in_viewport()
+    page.evaluate("async () => {" + FONTS_SETTLED + "}")
+    assert abs(usage.bounding_box()["y"] - before["usage"]) < 2, (before, usage.bounding_box())
+
+
 def test_the_created_notice_is_walked_by_keyboard_and_dismiss_leaves_focus_on_the_page(
     page: Page, first_pass_url, nordlicht_later
 ):
