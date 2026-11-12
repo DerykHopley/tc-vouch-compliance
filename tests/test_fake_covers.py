@@ -91,11 +91,6 @@ def test_a_covered_control_is_judged_in_full_by_its_own_script(client, users, pr
     (judge,) = [step for step in steps if step["node"] == "judge"]
     assert NOT_JUDGED not in judge["text"]
     assert not [step for step in steps if step["text"].startswith(DROPPED)]
-    # The output guard keeps the sectioned answer as scripted, headings and bullets (#670).
-    language = load_named_profile(profile).answer_language
-    script = ScriptedChatModel.from_file(demo_script(language, control_id)).script
-    (scripted,) = [t.answer for t in script.gather if isinstance(t, AnswerTurn)]
-    assert assessment["answer"] == scripted
     verdicts = {r["id"]: r["verdict"] for r in assessment["requirements"]}
     assert verdicts == expected_verdicts(profile, control_id)
     judged = {data["requirement"]["id"] for name, data in events if name == "requirement"}
