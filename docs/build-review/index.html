@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vouch build review</title>
+<meta name="description" content="How Vouch was built by agents over ten days: where the tokens went, what a spec, a Feature and a Fix cost, how the process changed, and what to do differently next time.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../site-nav.css">
+<style>
+/* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), as the other Pages
+   have them, plus five chart colours checked with the dataviz palette validator in each mode
+   (light: below 3:1 for four slots, so every chart shows its values and has a table). */
+:root {
+  --paper: #E8E7E3; --sheet: #F7F7F5; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
+  --navy: #1F3B6E; --brass: #A8834A;
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4;
+  --f-display: "Libre Caslon Display", Georgia, serif;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.6 var(--f-body); }
+a { color: var(--navy); }
+main { max-width: 60rem; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 28px; }
+header { display: grid; gap: 10px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 13px; letter-spacing: .02em; }
+h1 { margin: 0; font: 400 40px/1.1 var(--f-display); }
+h2 { margin: 0 0 4px; font: 400 26px/1.2 var(--f-display); }
+h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.lede { margin: 0; font-size: 17px; max-width: 46rem; }
+p { margin: 0; max-width: 46rem; }
+section { display: grid; gap: 12px; }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 14px; }
+.muted { color: var(--muted); font-size: 14px; }
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); }
+.tile { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; display: grid; gap: 2px; }
+.tile b { font: 400 30px/1.15 var(--f-display); }
+.tile span { color: var(--muted); font-size: 13px; }
+ul.points { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 46rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.hbars { display: grid; gap: 8px; }
+.hrow { display: grid; grid-template-columns: 7.5rem 1fr 4.5rem; gap: 10px; align-items: center; font-size: 14px; }
+.track { display: flex; gap: 2px; height: 22px; }
+.track b { height: 100%; display: block; }
+.track b:first-child { border-radius: 4px 0 0 4px; }
+.track b:last-child { border-radius: 0 4px 4px 0; }
+.track b:only-child { border-radius: 4px; }
+.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.cols { display: flex; align-items: flex-end; gap: 6px; height: 220px; padding-top: 8px; border-bottom: 1px solid var(--rule); }
+.col { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; justify-content: flex-start; position: relative; }
+.col b { display: block; width: 100%; }
+.col b:last-child { border-radius: 4px 4px 0 0; }
+.col .tot { position: absolute; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.xlab { display: flex; gap: 6px; font-size: 12px; color: var(--muted); }
+.xlab span { flex: 1; text-align: center; }
+details { font-size: 14px; }
+details summary { cursor: pointer; color: var(--navy); min-height: 44px; display: flex; align-items: center; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 600; color: var(--muted); font-size: 13px; }
+.score { display: inline-block; min-width: 2.4rem; }
+.theme { font: inherit; font-size: 13px; background: none; color: var(--muted); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; min-height: 44px; cursor: pointer; }
+.theme:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 13px; padding: 6px 8px; border-radius: 4px; opacity: 0; transition: opacity .1s; max-width: 16rem; z-index: 10; }
+footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
+@media (max-width: 40rem) { h1 { font-size: 32px; } .hrow { grid-template-columns: 5.5rem 1fr 4rem; } .card { padding: 16px; } .cols .tot { font-size: 10px; } }
+</style>
+</head>
+<body>
+<nav class="site-nav" aria-label="Vouch pages"><ul>
+  <li><a href="../">Home</a></li>
+  <li><a href="../flow/">Process flow</a></li>
+  <li><a href="../evals/">Eval report</a></li>
+  <li><a href="./" aria-current="page">Build review</a></li>
+  <li class="ext"><a href="https://github.com/DerykHopley/tc-vouch-compliance">Repo</a></li>
+</ul></nav>
+<main>
+  <header>
+    <div class="top">
+      <p class="eyebrow">Sprint 3 review · how Vouch was built</p>
+      <button class="theme" id="theme" type="button" aria-label="Switch light or dark">Dark</button>
+    </div>
+    <h1>Build review</h1>
+    <p class="lede">Vouch was built by Claude Code agents between 2 and 12 November 2026, run by <a href="https://github.com/DerykHopley/rig">rig</a>, a plugin that sets how agents plan, build, check and merge. This page looks at what that cost, where the tokens went, and what to change for the next project.</p>
+  </header>
+
+  <div class="tiles" aria-label="Headline numbers">
+    <div class="tile"><b>$2,472</b><span>at API prices; built on a Claude subscription</span></div>
+    <div class="tile"><b>330</b><span>merged pull requests</span></div>
+    <div class="tile"><b>10 · 12 · 124</b><span>specs · Features · Fixes</span></div>
+    <div class="tile"><b>230 : 1</b><span>tokens re-read to tokens written</span></div>
+  </div>
+
+  <section>
+    <h2>The short version</h2>
+    <ul class="points">
+      <li><b>Context, not writing, is the cost.</b> Agents wrote 26 million tokens but re-read 6 billion: each call re-reads the session's whole context. A long-lived thread gets dearer with every call.</li>
+      <li><b>A Fix cost three times as much per changed line as a Feature or a spec</b>, and half of that was the one Fixes thread, which ran for six days with about 476,000 tokens of context on each call.</li>
+      <li><b>A Feature cost the same per line as a spec</b> ($1.15 against $1.16 per 100 lines), without an integration branch, a ticket-writer or waiting on other specs. That's why Vouch ended building Features rather than specs.</li>
+      <li><b>Checking was cheap for what it caught:</b> the blind verifier was 10% of the spend and the code reviews 8%. Scoring each spec with a judge cost $4 in total.</li>
+    </ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-roles">
+    <h2 id="h-roles">Where the tokens went</h2>
+    <p class="muted">By role, across every session and agent. A "thread" is a long-running session: the coordinator, a spec's thread, the Fixes thread. The others are agents a thread starts for one job.</p>
+    <div class="hbars" id="roles"></div>
+    <details><summary>Table</summary><div class="tablewrap"><table id="roles-t"></table></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="h-unit">
+    <h2 id="h-unit">What a spec, a Feature and a Fix cost</h2>
+    <p class="muted">Cost per 100 changed lines (from each merged PR), split by role. A spec is several stories on an integration branch; a Feature is one story in one PR into main; a Fix is a bug, a process fix or a small enhancement.</p>
+    <div class="legend" id="unit-legend"></div>
+    <div class="hbars" id="unit"></div>
+    <details><summary>Table</summary><div class="tablewrap"><table id="unit-t"></table></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="h-ctx">
+    <h2 id="h-ctx">Why the Fixes cost more: context per call</h2>
+    <p class="muted">Average tokens re-read on each call by a thread, by what it was working on. The Fixes thread ran from 6 to 12 November in one session, compacting three times; Features each got a fresh thread.</p>
+    <div class="hbars" id="ctx"></div>
+    <details><summary>Table</summary><div class="tablewrap"><table id="ctx-t"></table></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="h-days">
+    <h2 id="h-days">Day by day</h2>
+    <p class="muted">Cost per day by kind of work. Specs ran the first week; from 10 November the Fixes lane took small enhancements too, and from 11 November new work came as Features.</p>
+    <div class="legend" id="days-legend"></div>
+    <div class="cols" id="days" role="img" aria-label="Stacked columns: cost per day by kind of work"></div>
+    <div class="xlab" id="days-x"></div>
+    <details><summary>Table</summary><div class="tablewrap"><table id="days-t"></table></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="h-specs">
+    <h2 id="h-specs">Each spec: cost and the judge's scores</h2>
+    <p class="muted">A judge agent, which took no part in the build, scored each landed spec from its GitHub record and session transcripts on four rubrics (1, 0.8, 0.4 or 0.2). M7 was never scored. Cost per 100 lines rose for the polish-heavy specs (M5, M6, M9): small changes, full ceremony.</p>
+    <div class="tablewrap"><table id="specs-t"></table></div>
+  </section>
+
+  <section>
+    <h2>How the process changed</h2>
+    <p>Each change to rig came from something seen in Vouch, and each is in rig's <a href="https://github.com/DerykHopley/rig/blob/main/CHANGELOG.md">changelog</a> with what would end it.</p>
+    <ul class="points">
+      <li><b>4 Nov · specs with a ticket loop:</b> each ticket built test-first by an implementer agent, reviewed, merged on green CI, then checked by a verifier that never sees the implementer's report.</li>
+      <li><b>5 Nov · a coordinator:</b> one thread per spec, several specs at once, and the owner's "desk": the latest message always holds everything waiting on them.</li>
+      <li><b>6 Nov · tickets written just in time:</b> in M2, 7 of 12 tickets written up front no longer matched the code when built. Agents decide reversible choices and flag them; only hard stops (money, secrets, live data, scope) wait for the owner.</li>
+      <li><b>9 Nov · a judge and a retro:</b> each landed spec scored, and the retro files proposals for rig. Three were accepted after M9: prove each claim with one test, change test setup behind one helper, a more patient merge gate.</li>
+      <li><b>10 Nov · a wider Fixes lane:</b> small enhancements became Fixes rather than being bundled into a spec.</li>
+      <li><b>11 Nov · one Build level:</b> each piece of work is chosen as a Fix, a Feature or a spec, so specs come and go without re-planning the project.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>What to do differently next time</h2>
+    <ul class="points">
+      <li><b>Restart long threads.</b> A fresh Fixes thread every few Fixes, and the coordinator after each spec lands. GitHub holds the record, so nothing is lost, and the Fixes alone would likely have cost a third to a half less.</li>
+      <li><b>Tag every session with its unit of work from day one.</b> Claude Code's OpenTelemetry export (here into a local Langfuse, added on 10 November) reports each call's model, effort, tokens and cost. With a tag naming the spec, Feature or Fix, this page would be a query rather than a reconstruction from transcripts.</li>
+      <li><b>Lighter models where judgement is narrow.</b> Reviews, the verifier and the ticket-writer were 20% of the spend, all on the largest model.</li>
+      <li><b>Make Features the default</b> and keep specs for stories that only work together.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p><b>Method.</b> Every Claude Code transcript for this repo (sessions and their agents) was read and each model call priced at the per-token rates fitted from Claude Code's own cost telemetry. A call belongs to the spec, Feature or Fix its agent was started for, from its prompt or branch; a thread's own calls belong to what it last started, or to the spec or Feature it ran. Lines are each merged PR's additions plus deletions, tests included. The coordinator ($150) and sessions matched to no unit ($117: research and one-off jobs) are counted in the totals but not in the per-unit chart. Costs are what the same calls would cost on the API; the project ran on a subscription.</p>
+    <p>Data as of 12 November 2026, built by an agent from the transcripts and GitHub.</p>
+  </footer>
+</main>
+<div class="tip" id="tip" role="tooltip"></div>
+<script>
+const ROLES = ["implementer", "thread", "verifier", "review", "ticket-writer"];
+const KINDS = ["spec", "fix", "feature", "coordinator", "other"];
+const KIND_LABEL = {spec: "Spec", fix: "Fix", feature: "Feature", coordinator: "Coordinator", other: "Other"};
+const D = {
+  roles: [["thread", 1071], ["implementer", 887], ["verifier", 257], ["review", 200], ["ticket-writer", 53], ["judge and retro", 4]],
+  unit: [
+    {k: "Spec", per100: 1.16, n: 10, median: 109.5, lines: 102246, share: [.445, .304, .123, .086, .043]},
+    {k: "Feature", per100: 1.15, n: 12, median: 8.12, lines: 792, share: [.56, .28, .07, .09, 0]},
+    {k: "Fix", per100: 3.60, n: 124, median: 4.89, lines: 151, share: [.32, .49, .11, .07, 0]},
+  ],
+  ctx: [["Fix", 476], ["Coordinator", 258], ["Spec", 234], ["Feature", 146], ["Other", 139]],
+  days: [
+    ["2 Nov", {other: 2}], ["3 Nov", {other: 20}], ["4 Nov", {spec: 259, other: 3}],
+    ["5 Nov", {spec: 270, other: 15, coordinator: 24, fix: 15}], ["6 Nov", {fix: 152, coordinator: 33, spec: 138}],
+    ["7 Nov", {coordinator: 5, spec: 79, fix: 55}], ["9 Nov", {spec: 238, coordinator: 12, other: 43, fix: 52}],
+    ["10 Nov", {coordinator: 38, fix: 252, other: 27, spec: 186}], ["11 Nov", {other: 3, feature: 98, fix: 199, coordinator: 27, spec: 10}],
+    ["12 Nov", {fix: 179, other: 4, coordinator: 11, feature: 18}],
+  ],
+  specs: [
+    ["M0 Walking skeleton", 52, 7645, [.8, .8, .8, .8]], ["M1 Assessment core", 108, 10152, [.8, .8, .8, .4]],
+    ["M2 Guided chat and memory", 193, 14040, [.4, .4, .8, .4]], ["M3 Live and guarded", 108, 8499, [.4, .8, .8, .4]],
+    ["M4 Second profile and evals", 111, 8257, [.8, .8, .8, .8]], ["M5 Readiness report and docs", 103, 5667, [.4, .4, .8, .8]],
+    ["M6 Demo polish", 79, 4466, [.8, .8, .8, .8]], ["M7 Keep improving", 177, 23365, null],
+    ["M8 Company setup", 127, 12479, [.8, .8, .8, 1]], ["M9 Company focus", 123, 7676, [.8, .4, .8, .8]],
+  ],
+};
+const $ = s => document.getElementById(s);
+const money = v => v >= 10 ? "$" + Math.round(v).toLocaleString("en") : "$" + v.toFixed(2);
+const tip = $("tip");
+function tipOn(el, text) {
+  el.addEventListener("mousemove", e => { tip.textContent = text; tip.style.opacity = 1;
+    tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px"; });
+  el.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+  el.setAttribute("aria-label", text);
+}
+function legend(id, names) { $(id).innerHTML = names.map((n, i) => `<span><i style="background:var(--c${i + 1})"></i>${n}</span>`).join(""); }
+function table(id, head, rows) {
+  $(id).innerHTML = "<thead><tr>" + head.map(h => `<th scope="col">${h}</th>`).join("") + "</tr></thead><tbody>" +
+    rows.map(r => "<tr>" + r.map(c => `<td>${c}</td>`).join("") + "</tr>").join("") + "</tbody>";
+}
+function single(id, rows, fmt, unit) {
+  const max = Math.max(...rows.map(r => r[1]));
+  $(id).innerHTML = rows.map(([n, v]) => `<div class="hrow"><div>${n}</div><div class="track"><b style="width:${100 * v / max}%;background:var(--c1)"></b></div><div class="num">${fmt(v)}</div></div>`).join("");
+  [...$(id).querySelectorAll(".track b")].forEach((b, i) => tipOn(b, `${rows[i][0]}: ${fmt(rows[i][1])}${unit}`));
+}
+// roles
+const total = D.roles.reduce((s, r) => s + r[1], 0);
+single("roles", D.roles, money, "");
+table("roles-t", ["Role", "Cost", "Share"], D.roles.map(([n, v]) => [n, money(v), (100 * v / total).toFixed(1) + "%"]));
+// unit
+legend("unit-legend", ROLES);
+const umax = Math.max(...D.unit.map(u => u.per100));
+$("unit").innerHTML = D.unit.map(u => `<div class="hrow"><div>${u.k}</div><div class="track" style="width:${100 * u.per100 / umax}%">${u.share.map((s, i) => s ? `<b style="width:${100 * s}%;background:var(--c${i + 1})"></b>` : "").join("")}</div><div class="num">${money(u.per100)}</div></div>`).join("");
+[...$("unit").querySelectorAll(".hrow")].forEach((row, r) => {
+  const u = D.unit[r]; let j = 0;
+  u.share.forEach((s, i) => { if (s) tipOn(row.querySelectorAll(".track b")[j++], `${u.k}, ${ROLES[i]}: ${money(u.per100 * s)} per 100 lines (${Math.round(100 * s)}%)`); });
+});
+table("unit-t", ["Unit", "Count", "Per 100 lines", "Median each", "Median lines", ...ROLES.map(r => r + " %")],
+  D.unit.map(u => [u.k, u.n, money(u.per100), money(u.median), u.k === "Spec" ? "per spec: 8,378" : u.lines, ...u.share.map(s => Math.round(100 * s))]));
+// ctx
+single("ctx", D.ctx, v => v + "k", " tokens re-read per call");
+table("ctx-t", ["Thread working on", "Average context per call"], D.ctx.map(([n, v]) => [n, v + ",000 tokens"]));
+// days
+legend("days-legend", KINDS.map(k => KIND_LABEL[k]));
+const dmax = Math.max(...D.days.map(([, v]) => Object.values(v).reduce((a, b) => a + b, 0)));
+$("days").innerHTML = D.days.map(([d, v]) => {
+  const t = Object.values(v).reduce((a, b) => a + b, 0);
+  return `<div class="col" style="height:${100 * t / dmax}%">${KINDS.map((k, i) => v[k] ? `<b data-d="${d}" data-k="${k}" style="flex:${v[k]};background:var(--c${i + 1})"></b>` : "").join("")}<span class="tot" style="top:-18px">$${Math.round(t)}</span></div>`;
+}).join("");
+$("days").querySelectorAll("b").forEach(b => { const v = D.days.find(x => x[0] === b.dataset.d)[1][b.dataset.k]; tipOn(b, `${b.dataset.d}, ${KIND_LABEL[b.dataset.k]}: ${money(v)}`); });
+$("days-x").innerHTML = D.days.map(([d]) => `<span>${d.replace(" Nov", "")}</span>`).join("");
+table("days-t", ["Day", ...KINDS.map(k => KIND_LABEL[k]), "Total"], D.days.map(([d, v]) => [d, ...KINDS.map(k => v[k] ? money(v[k]) : "–"), money(Object.values(v).reduce((a, b) => a + b, 0))]));
+// specs
+const sc = s => s == null ? "–" : `<span class="score">${s === 1 ? "1" : s.toFixed(1)}</span>`;
+table("specs-t", ["Spec", "Cost", "Lines", "Per 100 lines", "Efficiency", "Redundant tests", "Verbosity", "Owner load"],
+  D.specs.map(([n, c, l, s]) => [n, money(c), l.toLocaleString("en"), money(100 * c / l), ...(s ? s.map(sc) : ["not scored", "", "", ""])]));
+// theme
+(() => {
+  const root = document.documentElement, btn = $("theme");
+  const dark = () => root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  const sync = () => { btn.textContent = dark() ? "Light" : "Dark"; };
+  btn.addEventListener("click", () => { root.dataset.theme = dark() ? "light" : "dark"; sync(); });
+  sync();
+})();
+</script>
+</body>
+</html>
