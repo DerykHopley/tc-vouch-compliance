@@ -7,6 +7,7 @@ server's checks already spend most of that."""
 
 import json
 import re
+from collections.abc import Callable
 
 import pdf_words
 import pytest
@@ -1053,18 +1054,22 @@ INDEX_FADES = """(() => {
 })()"""
 
 
-def as_never_assessed(page: Page) -> None:
-    """The overview with every card not assessed, as a fresh profile's index shows it: the rows'
-    heights then don't hang on the review tags other checks on this server leave (a tag makes a
-    row taller, and then an area heading, not a row, can meet the box's foot)."""
+def with_cards(page: Page, card_state: Callable[[int], dict]) -> None:
+    """The overview with each card's served fields updated by `card_state(its index)`."""
 
-    def fresh(route: Route) -> None:
+    def served_with(route: Route) -> None:
         served = route.fetch().json()
-        for card in served["controls"]:
-            card |= {"status": "not-assessed", "verdict": None}
+        for i, card in enumerate(served["controls"]):
+            card |= card_state(i)
         route.fulfill(json=served)
 
-    page.route("**/api/overview", fresh)
+    page.route("**/api/overview", served_with)
+
+
+def as_never_assessed(page: Page) -> None:
+    """The overview with every card not assessed, as a fresh profile's index shows it, whatever
+    review states other checks on this server leave."""
+    with_cards(page, lambda _: {"status": "not-assessed", "verdict": None})
 
 
 # The stacked index's edge and the first row it cuts (not wholly shown), read in one go once the
@@ -1098,6 +1103,122 @@ def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page
 
     nav.evaluate("n => { n.scrollTop = n.scrollHeight }")
     page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
+
+
+def test_on_a_phone_the_stacked_index_cuts_a_row_at_its_foot_when_an_area_ends_there(
+    page: Page, paper_url
+):
+    """#617: opening a control below the box's foot brought its row into view with its foot on
+    the box's edge; when the row ends its area (4.2.1, the last of its three), the next area's
+    heading met the edge and no row was half-shown under the fade. The index now scrolls on until
+    a row is cut there, the open row still wholly shown. The rows carry review tags."""
+    with_cards(
+        page,
+        lambda i: {
+            "status": ["waiting-for-review", "accepted"][i % 2],
+            "verdict": "partly-evidenced",
+        },
+    )
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "4.2.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    expect(nav.locator(".tag-accepted").first).to_be_visible()
+    expect(nav.locator(".tag-waiting-for-review").first).to_be_visible()
+    page.wait_for_function(INDEX_FADES, timeout=5000)
+
+    cut = nav.evaluate(CUT_ROW)
+    assert cut["y"] < cut["edge"] - 8, cut  # a row, not a heading, meets the edge
+    open_row = box(nav.locator('[aria-current="page"]'))
+    top = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop")
+    assert top - 0.5 <= open_row["y"], (open_row, top)
+    assert open_row["y"] + open_row["height"] <= cut["edge"] + 0.5, (open_row, cut)
+
+
+def test_on_a_phone_the_last_control_opens_at_the_stacked_indexs_end_with_no_fade(
+    page: Page, paper_url
+):
+    """#617: no row follows the last control (5.2.9), so the index scrolls to its very end, past
+    the list's foot padding: the fade goes, and the open row's question can be read."""
+    as_never_assessed(page)
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "5.2.9", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
+    seen = nav.evaluate(
+        "async (nav) => {"
+        + FONTS_SETTLED
+        + """  const box = nav.getBoundingClientRect()
+  const row = nav.querySelector('[aria-current="page"]').getBoundingClientRect()
+  return { top: box.top + nav.clientTop, edge: box.top + nav.clientTop + nav.clientHeight,
+    rowTop: row.top, rowBottom: row.bottom }
+}"""
+    )
+    assert seen["top"] - 0.5 <= seen["rowTop"], seen
+    assert seen["rowBottom"] <= seen["edge"] + 0.5, seen
+
+
+def test_a_late_font_leaves_the_stacked_index_where_a_hand_scroll_put_it(page: Page, paper_url):
+    """#617: the index is placed again as the web fonts settle, but only until the user scrolls
+    it: a font that loads after a hand scroll leaves the index where the user put it."""
+    as_never_assessed(page)
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "5.1.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    page.evaluate("async () => {" + FONTS_SETTLED + "}")
+    placed = nav.evaluate("n => n.scrollTop")
+    assert placed > 0, placed  # 5.1.1 lies below the foot, so the index scrolled to it
+
+    nav.hover()
+    page.mouse.wheel(0, -200)  # Firefox scrolls one wheel step only so far: wherever it stops
+    page.wait_for_function(
+        f"document.querySelector('.wp-index').scrollTop < {placed}", timeout=5000
+    )
+    by_hand = nav.evaluate("async (n) => {" + FONTS_SETTLED + "return n.scrollTop }")
+    # A web font that loads late: document.fonts says so, as it does when one finishes.
+    page.evaluate(
+        "async () => { document.fonts.dispatchEvent(new Event('loadingdone'))" + FONTS_SETTLED + "}"
+    )
+    assert nav.evaluate("n => n.scrollTop") == by_hand, (placed, by_hand)
+
+
+@pytest.mark.parametrize("width", [390, 700])
+def test_a_late_font_never_scrolls_the_page_to_the_index(page: Page, paper_url, width):
+    """#617, verify round 2: the index is placed again as a late web font settles, and that
+    placing moves the index's own box only. With the font files held, a paper opened at 5.1.1 and
+    the page scrolled down to the paper, releasing the fonts leaves the page where it was."""
+    held: list[Route] = []
+    page.route(re.compile(r"^https://fonts\.gstatic\.com/"), lambda route: held.append(route))
+    as_never_assessed(page)
+    page.set_viewport_size({"width": width, "height": 844})
+    open_paper(page, paper_url, "5.1.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    page.wait_for_function("document.fonts.status === 'loading'", timeout=5000)
+    assert held, "no font file was asked for"
+
+    # The late fonts reflow the page (the top bar shrinks 19px as IBM Plex Mono swaps in, #656),
+    # which scroll anchoring follows, and shorten it, which clamps the scroll: up to 56px on main
+    # too. Without anchoring and with room below, only a script moves the page.
+    page.add_style_tag(
+        content="html, body { overflow-anchor: none } body { padding-bottom: 2000px }"
+    )
+    page.evaluate("window.scrollTo(0, 600)")
+    scrolled = page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => done(scrollY)))"
+    )
+    assert scrolled > 100, scrolled  # the page scrolled down, the index out of view above
+
+    page.unroute(re.compile(r"^https://fonts\.gstatic\.com/"))
+    for route in held:
+        route.continue_()
+    page.wait_for_function("document.fonts.status === 'loaded'", timeout=10000)
+    settled = page.evaluate("async () => {" + FONTS_SETTLED + "return scrollY }")
+    assert "loaded" in page.evaluate("[...document.fonts].map((f) => f.status)")
+    # Placing the index by scrollIntoView jumped the page up to it: 600 to 154 at 390px.
+    assert settled == scrolled, (scrolled, settled)
 
 
 @pytest.mark.parametrize("how", ["tap", "click"])

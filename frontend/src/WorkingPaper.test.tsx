@@ -453,20 +453,43 @@ describe('the control index', () => {
     expect(question?.getAttribute('lang')).toBe('de')
   })
 
-  it('brings the open control, then a focused row, into view in its own list (issue 466)', () => {
-    const scrolled: [string | null, unknown][] = []
-    const original = Element.prototype.scrollIntoView
-    Element.prototype.scrollIntoView = function (this: Element, how?: unknown) {
-      scrolled.push([this.querySelector('.mono')?.textContent ?? null, how])
+  it('brings the open control, then a focused row, into view by its own list\'s scroll, not the page\'s (issues 466, 617)', () => {
+    // Beside the paper the list scrolls (nav's overflow is visible here, with no stylesheet): a 100px list at the
+    // top, 5.1.2 below its foot and 4.1.2 above its head, read from the list's scroll.
+    const tops: Record<string, number> = { '5.1.2': 300, '4.1.2': -60 }
+    const scrollTops = new WeakMap<Element, number>()
+    const proto = HTMLElement.prototype
+    const saved = ['getBoundingClientRect', 'scrollTop', 'clientHeight', 'scrollIntoView'].map(
+      (key) => [key, Object.getOwnPropertyDescriptor(key === 'getBoundingClientRect' || key === 'scrollIntoView'
+        ? Element.prototype : proto, key)] as const)
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const id = this.classList.contains('wp-row') ? this.querySelector('.mono')?.textContent ?? '' : ''
+      const top = (tops[id] ?? 0) - (this.classList.contains('wp-row')
+        ? scrollTops.get(this.closest('.wp-index-list')!) ?? 0 : 0)
+      return { top, bottom: top + (id ? 52 : 0), left: 0, right: 0, width: 0, height: id ? 52 : 0, x: 0, y: top,
+        toJSON: () => ({}) }
     }
+    Object.defineProperty(proto, 'scrollTop', { configurable: true,
+      get(this: Element) { return scrollTops.get(this) ?? 0 },
+      set(this: Element, value: number) { scrollTops.set(this, value) } })
+    Object.defineProperty(proto, 'clientHeight', { configurable: true,
+      get(this: Element) { return this.classList.contains('wp-index-list') ? 100 : 0 } })
     try {
       show()
-      expect(scrolled).toEqual([['5.1.2', { block: 'nearest' }]])
       const index = screen.getByRole('navigation', { name: 'Controls' })
+      const list = index.querySelector('.wp-index-list')!
+      expect(list.scrollTop).toBe(252) // 5.1.2's foot at the list's
       within(index).getByRole('link', { name: /^4\.1\.2/ }).focus()
-      expect(scrolled.at(-1)).toEqual(['4.1.2', { block: 'nearest' }])
+      expect(list.scrollTop).toBe(-60) // 4.1.2's head at the list's (clamped to 0 in a browser)
+      expect(scrollIntoView).not.toHaveBeenCalled() // the page never moves
     } finally {
-      Element.prototype.scrollIntoView = original
+      for (const [key, descriptor] of saved) {
+        const target = key === 'getBoundingClientRect' || key === 'scrollIntoView' ? Element.prototype : proto
+        if (descriptor) Object.defineProperty(target, key, descriptor)
+        else delete (target as unknown as Record<string, unknown>)[key]
+      }
     }
   })
 

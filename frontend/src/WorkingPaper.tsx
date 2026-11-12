@@ -338,22 +338,81 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
   )
 }
 
+/** Calls `settled` once the web fonts are ready, and again after any font that loads later, until `signal` aborts:
+ * a late font rewraps text, and in a box of fixed height no resize fires (#516, #617). */
+function onFontsSettled(settled: () => void, signal: AbortSignal) {
+  const fonts = document.fonts as FontFaceSet | undefined
+  fonts?.ready.then(() => { if (!signal.aborted) settled() })
+  fonts?.addEventListener('loadingdone', settled, { signal })
+}
+
+/** Scrolls an index row into the view of the `box` that scrolls it, as little as needed, by the box's own scrollTop:
+ * the page never moves (scrollIntoView scrolled the page too, so a late font placing the index again jumped a page
+ * the user had scrolled down back up to it, #617). */
+function bringIntoView(box: HTMLElement, row: Element | null | undefined) {
+  if (!row) return
+  const top = box.getBoundingClientRect().top + box.clientTop
+  const r = row.getBoundingClientRect()
+  if (r.top < top) box.scrollTop += r.top - top
+  else if (r.bottom > top + box.clientHeight) box.scrollTop += Math.min(r.bottom - top - box.clientHeight, r.top - top)
+}
+
+/** The index's box that scrolls: the whole index stacked above the paper (#555), its list beside it (#466). */
+const indexBox = (nav: HTMLElement, list: HTMLElement) => getComputedStyle(nav).overflowY === 'visible' ? list : nav
+
+/** At least this much of the row at the stacked index's foot shows, so it reads as cut (#617). */
+const CUT_SHOWS = 8
+
+/**
+ * The stacked index (`nav`, while it scrolls in its own box) cuts a row at its foot (#617): when no row shows there
+ * by at least CUT_SHOWS (the open row brought into view ends at the edge, or an area's heading meets it), it scrolls
+ * on until the next row is half-shown under the fade, as far as the `open` row stays wholly in view. When no row
+ * lies below the edge (the open row is the last), it scrolls to the very end, past the list's foot padding, so the
+ * fade goes and doesn't cover the open row. Beside the paper the index's list scrolls, not `nav`, and nothing moves.
+ */
+function cutRowAtFoot(nav: HTMLElement, open: Element) {
+  const top = nav.getBoundingClientRect().top + nav.clientTop
+  const edge = top + nav.clientHeight
+  const next = [...nav.querySelectorAll('.wp-row')].map((r) => r.getBoundingClientRect())
+    .find((r) => r.bottom > edge + 0.5)
+  if (next && next.top < edge - CUT_SHOWS) return
+  const room = open.getBoundingClientRect().top - top
+  const toEnd = nav.scrollHeight - nav.clientHeight - nav.scrollTop
+  nav.scrollTop += Math.min(next ? next.top - edge + next.height / 2 : toEnd, room)
+}
+
 /** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
  * view beside the paper as the paper scrolls and scrolls on its own (#466): the open control's row is brought into
  * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. Stacked
  * above the paper (1000px or less), the index scrolls in its own box: `data-more` marks it while rows lie below its
- * foot, which app.css fades (#555). */
+ * foot, which app.css fades (#555), and the open row brought into view leaves a row cut at that foot (#617). */
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   const list = useRef<HTMLDivElement>(null)
   const nav = useRef<HTMLElement>(null)
   const more = useScrollMore(nav, list, 'y')
   useEffect(() => {
-    list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
+    const place = () => {
+      const row = list.current?.querySelector('[aria-current="page"]')
+      if (!row || !nav.current || !list.current) return
+      bringIntoView(indexBox(nav.current, list.current), row)
+      cutRowAtFoot(nav.current, row)
+    }
+    place()
+    // A late web font changes the rows' heights: placed again as the fonts settle, until the user first scrolls the
+    // index or the page, or moves focus (a wheel, a touch, a press, a key, anywhere), whose place a late font
+    // leaves alone.
+    const stop = new AbortController()
+    onFontsSettled(place, stop.signal)
+    for (const by of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+      window.addEventListener(by, () => stop.abort(), { capture: true, once: true, passive: true, signal: stop.signal })
+    }
+    return () => stop.abort()
   }, [openId])
   return (
     <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
       <div className="wp-index-list" ref={list}
-        onFocus={(e) => e.target.closest('.wp-row')?.scrollIntoView?.({ block: 'nearest' })}>
+        onFocus={(e) => nav.current && list.current
+          && bringIntoView(indexBox(nav.current, list.current), e.target.closest('.wp-row'))}>
         {areas(controls).map(([area, cards]) => (
           <div key={area}>
             <h3>{area}</h3>
@@ -493,12 +552,9 @@ function RequirementText({ text, language }: { text: string; language?: string }
     const measure = () => setCut(el.clientHeight === 0 || el.scrollHeight > el.clientHeight + 1)
     measure()
     // A web font that loads after this rewraps the text in a box the clamp keeps 2 lines high, so no resize fires
-    // (#516): measured again once the fonts are ready, and after any font that loads later.
-    // Stops this measure's font listeners when the text changes, it expands, or the cell goes.
+    // (#516). Stops this measure's font listeners when the text changes, it expands, or the cell goes.
     const stopMeasuring = new AbortController()
-    const fonts = document.fonts as FontFaceSet | undefined
-    fonts?.ready.then(() => { if (!stopMeasuring.signal.aborted) measure() })
-    fonts?.addEventListener('loadingdone', measure, { signal: stopMeasuring.signal })
+    onFontsSettled(measure, stopMeasuring.signal)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(el)
     return () => {
