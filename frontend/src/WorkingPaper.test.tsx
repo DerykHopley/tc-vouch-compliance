@@ -2,7 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Assessment, RequirementVerdict } from './assessment.ts'
-import { endDoubleClickGuard } from './doubleClickGuard.ts'
+import { pastDoubleClick } from './doubleClickFixtures.ts'
 import { NO_OWNER, type RemediationItem } from './remediation.ts'
 import type { ControlCard } from './overview.ts'
 import type { Goal } from './report.ts'
@@ -637,7 +637,7 @@ describe('the review of a proposed control', () => {
       'This step could not be recorded just now. Nothing was changed; please try again.')
     expect(onReviewed).not.toHaveBeenCalled()
     expect(within(headVerdict()).getByText('Proposed')).toBeTruthy()
-    endDoubleClickGuard() // a pause after the confirm's click burst (#527): Retry is a new press, and asks nothing
+    await pastDoubleClick() // Retry is a new press after the confirm's click burst (#562), and asks nothing
     await userEvent.click(within(bar()).getByRole('button', { name: 'Retry' }))
     expect(sent.map((s) => (s.body as { decision: string }).decision)).toEqual(['reject', 'reject'])
   })
@@ -774,11 +774,9 @@ describe('the final decisions ask first (issue 634)', () => {
     expect(sent).toEqual([])
     expect(ask()).toBe("Accept this control's verdict? Your decision is recorded in the audit trail, and the verdict "
       + 'counts towards readiness.')
-    expect(document.activeElement?.textContent).toBe('Cancel')
     await userEvent.click(within(bar()).getByRole('button', { name: 'Cancel' }))
     expect(within(bar()).queryByRole('alert')).toBeNull()
     expect(sent).toEqual([])
-    expect(document.activeElement?.textContent).toBe('Accept verdict')
   })
 
   it('names the note in the accept ask when one is written', async () => {

@@ -14,8 +14,8 @@ import re
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from click_burst import DOUBLE_CLICK_MS
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
+from reviewing import decide
 from touch_targets import small_targets
 
 CONTROL = "4.1.2"
@@ -55,14 +55,9 @@ def assess_and_accept(page: Page, paper: Locator) -> None:
     assert confirmed.value.ok, confirmed.value.status
     with page.expect_response(re.compile(r"/remediation/M1$")):
         paper.get_by_role("button", name="Approve M1").click()
-    bar.get_by_role("button", name="Accept verdict").click()  # it asks first (#634)
-    with page.expect_response(re.compile(r"/review$")) as accepted:
-        bar.get_by_role("button", name="Accept verdict").click()
-    assert accepted.value.ok, accepted.value.status
+    accepted = decide(page, bar, "Accept verdict")
+    assert accepted.ok, accepted.status
     expect(bar).to_contain_text("Accepted")
-    page.wait_for_timeout(
-        DOUBLE_CLICK_MS
-    )  # the next click comes after a double-click's time (#562)
 
 
 @pytest.mark.parametrize("width", [1280, 400])

@@ -237,8 +237,9 @@ function useDock(reviewing: boolean) {
  * review's three steps and marks the current one (#372). Confirm findings: the overrides made on the rows, recorded
  * with Confirm findings through the findings route. Plan fixes: the remediation items are decided on the rows; the
  * bar counts them, and Accept verdict waits, saying why. Accept: Accept verdict. The note goes with Reject (at any
- * step) or Accept; both ask first in the bar (InlineConfirm, `decisionAsk`, #634), a Retry doesn't. A failure shows the step as not recorded, with Retry; a refused one (422) says why, with nothing to
- * retry; a 409 shows the review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
+ * step) or Accept; both ask first in the bar (InlineConfirm, `decisionAsk`, #634), a Retry doesn't. A failure
+ * shows the step as not recorded, with Retry; a refused one (422) says why, with nothing to retry; a 409 shows the
+ * review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
  * a rejected one Assess again; an accepted one reviewed before the three steps is marked "before the three-step review"
  * (#373). Shown afresh (a new key) whenever its assessment is read again, so a message about an
  * older read never lingers. While the review is in progress its buttons stay in reach (#467, `useDock`).

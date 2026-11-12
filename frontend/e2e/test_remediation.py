@@ -12,10 +12,9 @@ import json
 import re
 from datetime import date, timedelta
 
-from click_burst import DOUBLE_CLICK_MS
 from current_company import reopened_under
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
-from reviewing import confirmed
+from reviewing import confirmed, decide
 from test_review import CONTROL, assessed, open_paper
 from top_bar import back_to_overview
 
@@ -112,13 +111,8 @@ def test_a_discarded_item_stays_out_of_the_open_count_once_accepted(page: Page, 
         item(paper).get_by_role("button", name=f"Discard {ITEM}").click()
     expect(item(paper)).to_contain_text("Discarded")
     bar = paper.get_by_role("region", name="Review")
-    bar.get_by_role("button", name="Accept verdict").click()  # it asks first (#634)
-    with page.expect_response(re.compile(r"/review$")):
-        bar.get_by_role("button", name="Accept verdict").click()
+    decide(page, bar, "Accept verdict")
     expect(bar.get_by_text("Accepted", exact=True)).to_be_visible()
-    page.wait_for_timeout(
-        DOUBLE_CLICK_MS
-    )  # the next click comes after a double-click's time (#562)
 
     expect(back_on_the_overview(page)).to_have_text(str(before))  # accepted, its item discarded
 

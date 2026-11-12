@@ -10,9 +10,8 @@ read from storage as the paper opens it, so each starts from a proposed assessme
 import json
 import re
 
-from click_burst import DOUBLE_CLICK_MS
 from playwright.sync_api import APIRequestContext, Dialog, Locator, Page, expect
-from reviewing import confirmed
+from reviewing import confirmed, decide
 from top_bar import back_to_overview
 from touch_targets import small_targets
 
@@ -126,10 +125,8 @@ def test_story_2_override_confirm_plan_fixes_and_accept_counts_on_the_overview(
     # Accept.
     expect(current_step(bar)).to_have_text("Accept")
     bar.get_by_label("Your note (kept in the audit trail)").fill("Checked against the records.")
-    bar.get_by_role("button", name="Accept verdict").click()  # it asks first (#634)
-    with page.expect_response(re.compile(r"/review$")) as answer:
-        bar.get_by_role("button", name="Accept verdict").click()
-    assert answer.value.ok, answer.value.status
+    answer = decide(page, bar, "Accept verdict")
+    assert answer.ok, answer.status
     expect(bar.get_by_text("Accepted", exact=True)).to_be_visible()
     # Who and when, kept with the review: local mode's reviewer name (#154).
     expect(bar).to_contain_text(re.compile(r"by Local user on \d+ \w+ \d{4}, \d\d:\d\d"))
@@ -145,9 +142,6 @@ def test_story_2_override_confirm_plan_fixes_and_accept_counts_on_the_overview(
         ("accept", None),
     ]
     assert entries[0]["note"] == "Checked against the records."
-    page.wait_for_timeout(
-        DOUBLE_CLICK_MS
-    )  # the next click comes after a double-click's time (#562)
 
     with page.expect_response("**/api/overview"):
         back_to_overview(page)
@@ -161,17 +155,9 @@ def test_reject_then_assess_again_carries_the_note_into_the_new_run(page: Page, 
 
     bar = paper.get_by_role("region", name="Review")
     bar.get_by_label("Your note (kept in the audit trail)").fill(note)
-    bar.get_by_role("button", name="Reject verdict").click()  # it asks first (#634)
-    expect(bar.get_by_role("alert")).to_contain_text(
-        "the next assessment of this control reads your note"
-    )
-    with page.expect_response(re.compile(r"/review$")):
-        bar.get_by_role("button", name="Reject verdict").click()
+    decide(page, bar, "Reject verdict")
     expect(bar.get_by_text("Rejected", exact=True)).to_be_visible()
     expect(bar).to_contain_text(note.strip())
-    page.wait_for_timeout(
-        DOUBLE_CLICK_MS
-    )  # the next click comes after a double-click's time (#562)
 
     with page.expect_request(
         lambda r: r.method == "POST" and r.url.endswith("/api/assessments")
