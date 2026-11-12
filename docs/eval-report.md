@@ -17,6 +17,20 @@ Right verdicts of all requirements scored (a failed case's count as wrong).
 | openai/gpt-6.1-terra | not run | 57% (48/84) |
 | typesafe/jev-router | not run | 70% (59/84) |
 
+## Over-claimed
+
+Verdicts more evidenced than expected (evidenced for partly evidenced or not evidenced, partly evidenced for not evidenced), of all requirements scored: the costly direction of error, a gap the lead would trust as closed. Lower is better.
+
+| Model | alpenwerk | nordlicht |
+|---|---|---|
+| anthropic/claude-haiku-5.5 | 1% (1/100) | 6% (5/84) |
+| anthropic/claude-sonnet-5.5 | 0% (0/100) | 5% (4/84) |
+| ollama/gpt-oss:20b | not run | 1% (1/84) |
+| openai/gpt-6-luna | not run | 6% (5/84) |
+| openai/gpt-6.1-sol | not run | 5% (4/84) |
+| openai/gpt-6.1-terra | not run | 4% (3/84) |
+| typesafe/jev-router | not run | 5% (4/84) |
+
 ## Control accuracy
 
 Controls whose rolled-up verdict is the expected one.
@@ -114,6 +128,82 @@ The models OpenRouter named as serving the assessments' calls, with how many eac
 | openai/gpt-6.1-sol | not run | not recorded |
 | openai/gpt-6.1-terra | not run | not recorded |
 | typesafe/jev-router | not run | not recorded |
+
+## Expected against given verdicts
+
+Per run, each requirement counted by its expected verdict (row) and the verdict given (column). Right verdicts sit on the diagonal; over-claimed ones below it, to its left. "No verdict" is a failed case's requirement, or one the run left unjudged.
+
+### anthropic/claude-haiku-5.5 on alpenwerk
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 39 | 38 | 0 | 0 |
+| partly evidenced | 1 | 17 | 3 | 0 |
+| not evidenced | 0 | 0 | 2 | 0 |
+
+### anthropic/claude-haiku-5.5 on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 25 | 28 | 1 | 4 |
+| partly evidenced | 1 | 10 | 2 | 0 |
+| not evidenced | 0 | 4 | 8 | 1 |
+
+### anthropic/claude-sonnet-5.5 on alpenwerk
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 35 | 22 | 20 | 0 |
+| partly evidenced | 0 | 13 | 8 | 0 |
+| not evidenced | 0 | 0 | 2 | 0 |
+
+### anthropic/claude-sonnet-5.5 on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 43 | 15 | 0 | 0 |
+| partly evidenced | 1 | 11 | 1 | 0 |
+| not evidenced | 0 | 3 | 10 | 0 |
+
+### ollama/gpt-oss:20b on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 4 | 0 | 21 | 33 |
+| partly evidenced | 1 | 0 | 4 | 8 |
+| not evidenced | 0 | 0 | 3 | 10 |
+
+### openai/gpt-6-luna on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 37 | 19 | 2 | 0 |
+| partly evidenced | 1 | 11 | 1 | 0 |
+| not evidenced | 0 | 4 | 9 | 0 |
+
+### openai/gpt-6.1-sol on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 36 | 22 | 0 | 0 |
+| partly evidenced | 1 | 12 | 0 | 0 |
+| not evidenced | 0 | 3 | 10 | 0 |
+
+### openai/gpt-6.1-terra on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 25 | 33 | 0 | 0 |
+| partly evidenced | 0 | 13 | 0 | 0 |
+| not evidenced | 0 | 3 | 10 | 0 |
+
+### typesafe/jev-router on nordlicht
+
+| Expected \ given | evidenced | partly evidenced | not evidenced | no verdict |
+|---|---|---|---|---|
+| evidenced | 39 | 16 | 3 | 0 |
+| partly evidenced | 1 | 10 | 2 | 0 |
+| not evidenced | 0 | 3 | 10 | 0 |
 
 ## Runs
 
