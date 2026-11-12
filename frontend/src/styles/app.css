@@ -60,16 +60,12 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
 .btn { min-height: 44px; border: 1px solid var(--rule); background: var(--sheet); border-radius: 999px; padding: 7px 16px; font-weight: 500; }
 .btn:hover { border-color: var(--navy); }
 .btn-ghost { border-color: transparent; background: none; color: var(--navy); padding: 4px 10px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
-.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-/* Under 800px on screen, in the working paper's requirements table and the report's controls table only, a verdict chip
-   may wrap at the space between its words ("Teilweise / nachgewiesen"), one chip with its dot centred on its first line
-   (#550: the German verdict made both tables 16px too wide at 701px). With one-line chips the tables fit from 718px in
-   the web fonts and from 770px in DejaVu Sans (a Linux fallback); a table wraps any chip it may, even one it has room
-   for, so wider, and in print, every chip stays on one line, as every other chip always does. */
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; --dot: 7px; }
+.chip::before { content: ""; width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; }
+/* #550: in these two tables a verdict chip may wrap under 800px (design.md, Components, Verdict chip). */
 @media screen and (max-width: 799px) {
   :is(.reqs.judged .verdict-col, .report-controls) .chip { white-space: normal; align-items: flex-start; }
-  :is(.reqs.judged .verdict-col, .report-controls) .chip::before { flex-shrink: 0; margin-top: calc((1lh - 7px) / 2); }
+  :is(.reqs.judged .verdict-col, .report-controls) .chip::before { flex-shrink: 0; margin-top: calc((1lh - var(--dot)) / 2); }
 }
 /* Not assessed (design.md, 2026-11-04): hollow, no colour of its own: a 1px --rule ring, a hollow dot, --muted text. */
 .v-none { color: var(--muted); background: none; box-shadow: inset 0 0 0 1px var(--rule); }
