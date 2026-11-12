@@ -5,6 +5,7 @@ import {
 import { type ControlCard, controlPath, isoLabel, isReviewState, type Overview } from './overview.ts'
 import { areas, COLUMN_WORDS, evidenceOf, indexLabel, languageName, type PaperRequirement } from './paper.ts'
 import type { Run } from './useAssessment.ts'
+import { useScrollMore } from './useScrollMore.ts'
 import CitedQuote from './CitedQuote.tsx'
 import { setUnsaved } from './leaving.ts'
 import OpenQuestions from './OpenQuestions.tsx'
@@ -345,24 +346,10 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   const list = useRef<HTMLDivElement>(null)
   const nav = useRef<HTMLElement>(null)
-  const [more, setMore] = useState(false)
+  const more = useScrollMore(nav, list, 'y')
   useEffect(() => {
     list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
   }, [openId])
-  useEffect(() => {
-    const box = nav.current
-    if (!box) return
-    const measure = () => setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 1)
-    measure()
-    box.addEventListener('scroll', measure, { passive: true })
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(box)
-    if (list.current) observer?.observe(list.current)
-    return () => {
-      box.removeEventListener('scroll', measure)
-      observer?.disconnect()
-    }
-  }, [controls])
   return (
     <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
       <div className="wp-index-list" ref={list}

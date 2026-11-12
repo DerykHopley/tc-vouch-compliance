@@ -1,6 +1,7 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useRef } from 'react'
 import { type TableWords, wordFor } from './documents.ts'
 import type { LibraryDocument } from './setup.ts'
+import { useScrollMore } from './useScrollMore.ts'
 
 /** A document as the table shows it: the sample library's, or a profile's from any source (patch too). */
 export type ShownDocument = Omit<LibraryDocument, 'source'> & { source: string; withdrawn?: boolean }
@@ -58,21 +59,7 @@ export default function DocumentTable<D extends ShownDocument>({ caption, docume
   extraColumns = [] }: Props<D>) {
   const wrap = useRef<HTMLDivElement>(null)
   const table = useRef<HTMLTableElement>(null)
-  const [more, setMore] = useState(false)
-  useEffect(() => {
-    const box = wrap.current
-    if (!box) return
-    const measure = () => setMore(box.scrollWidth - box.scrollLeft - box.clientWidth > 1)
-    measure()
-    box.addEventListener('scroll', measure, { passive: true })
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(box)
-    if (table.current) observer?.observe(table.current)
-    return () => {
-      box.removeEventListener('scroll', measure)
-      observer?.disconnect()
-    }
-  }, [])
+  const more = useScrollMore(wrap, table, 'x')
   const w = words ?? ENGLISH
   const staleWord = (d: D) => {
     const reason = words ? staleReason(d, words) : d.stale_because
