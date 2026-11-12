@@ -8,6 +8,7 @@ server's checks already spend most of that."""
 import json
 import re
 
+import pdf_words
 import pytest
 from current_company import make_current
 from dossier_cards import card as overview_card
@@ -971,6 +972,37 @@ def test_printed_the_docked_buttons_fit_the_bar(page: Page, paper_url, nordlicht
     assert seen["bar"]["right"] <= seen["page"] + 1, seen  # the bar isn't widened past the page
     assert seen["dock"]["left"] >= seen["bar"]["left"] + 12 - 1, seen  # inside the bar's padding
     assert seen["dock"]["right"] <= seen["bar"]["right"] - 12 + 1, seen
+
+
+def overlapping_words(printed: pdf_words.Printed) -> list[tuple[str, str, int]]:
+    """Each pair of printed words whose boxes cross on one page, by text and page."""
+    words = printed.words
+    return [
+        (a.text, b.text, a.page)
+        for i, a in enumerate(words)
+        for b in words[i + 1 :]
+        if a.overlaps(b)
+    ]
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (390, 844)], ids=lambda size: str(size[0]))
+def test_a_printed_paper_at_plan_fixes_has_no_buttons_and_no_overlap(
+    page: Page, paper_url, browser_name, nordlicht_later, size
+):
+    """#591: printed to A4 at Plan fixes, from a wide or a phone window, no printed word overlaps
+    another (the review bar printed over the last remediation item, its Approve pill over "Your
+    note"), and the remediation items' Approve and Discard are left off the paper. The bar's own
+    buttons print in its place (#467)."""
+    nordlicht_later(paper_url)
+    paper, _ = proposed_wide_paper(page, paper_url, size, confirm=True)
+    expect(paper.get_by_role("button", name=re.compile(r"^Approve ")).first).to_be_visible()
+    page.emulate_media(media="print")
+    if browser_name == "chromium":  # only Chromium prints to PDF
+        printed = pdf_words.read(page.pdf(format="A4"))
+        assert "decided." in [w.text for w in printed.words]  # the bar printed
+        assert overlapping_words(printed) == []
+    for name in (r"^Approve ", r"^Discard "):
+        expect(paper.get_by_role("button", name=re.compile(name))).to_have_count(0)
 
 
 def test_a_field_taller_than_the_room_keeps_its_top_below_the_top_bar(

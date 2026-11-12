@@ -1339,8 +1339,8 @@ def read_audit_trail(
     `before` for the page after (null: no more). The notes Vouch wrote (an approval or discard,
     a question, a priority change) are served in the profile's answer language, as the report's
     trail serves them (vouch.report.trail_entries, #535); a lead's own notes as written. The
-    trail is append-only: every entry stays stored as written, and no route changes or removes
-    one."""
+    trail is append-only, except Reset demo: every entry stays stored as written, and no route
+    changes or removes one; only Reset demo deletes a company's trail (vouch.demo_reset)."""
     page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
     entries = report.trail_entries(page.entries, profile.answer_language)
     clean, _ = redact_data({"entries": entries})
