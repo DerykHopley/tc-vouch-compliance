@@ -200,6 +200,22 @@ def test_the_user_menu_moves_with_the_arrows_and_tab_closes_it(page: Page, profi
     expect(page.get_by_role("banner").get_by_role("menu")).to_have_count(0)
 
 
+def test_home_and_end_move_to_the_user_menus_first_and_last_item(page: Page, profiles_url):
+    # The ARIA menu pattern (#615): Home to the first item, End to the last.
+    opened(page, profiles_url)
+    button = page.get_by_role("banner").get_by_role("button", name="Your menu")
+    button.focus()
+    page.keyboard.press("Enter")
+    choices = page.get_by_role("banner").get_by_role("menuitem")
+    expect(choices).to_have_count(4)
+    page.keyboard.press("ArrowDown")
+    expect(choices.nth(1)).to_be_focused()
+    page.keyboard.press("End")
+    expect(choices.nth(3)).to_be_focused()
+    page.keyboard.press("Home")
+    expect(choices.nth(0)).to_be_focused()
+
+
 def test_esc_closes_a_top_bar_menu_but_leaves_an_open_chat_open(page: Page, profiles_url):
     opened(page, profiles_url)
     page.get_by_role("button", name="Ask Vouch").click()
