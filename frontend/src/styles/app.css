@@ -14,7 +14,7 @@ h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: upperc
   repeating-linear-gradient(90deg, var(--check-a) 0 2px, transparent 2px 4px, var(--check-b) 4px 5px, transparent 5px 12px),
   repeating-linear-gradient(0deg, var(--check-a) 0 2px, transparent 2px 4px, var(--check-b) 4px 5px, transparent 5px 12px); }
 /* A field brought into view stops below the sticky bar; TopBar keeps --top-bar its height (#205). */
-html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
+html { scroll-padding-top: calc(var(--top-bar, 0px) + var(--created-notice, 0px) + 8px); }
 .top-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-block: 6px; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand b { font: 400 20px var(--f-display); text-transform: uppercase; letter-spacing: .08em; }
@@ -314,7 +314,7 @@ html { scroll-padding-top: calc(var(--top-bar, 0px) + 8px); }
   .wp-index { padding: 0; }
   /* The id keeps the chip's line when the tag wraps below it (centred, it sat half a line low). */
   .wp-row { align-items: start; }
-  .wp-index-list { position: sticky; top: var(--top-bar, 0px); max-height: calc(100vh - var(--top-bar, 0px) - 88px); overflow-y: auto; padding: 12px 0; }
+  .wp-index-list { position: sticky; top: calc(var(--top-bar, 0px) + var(--created-notice, 0px)); max-height: calc(100vh - var(--top-bar, 0px) - var(--created-notice, 0px) - 88px); overflow-y: auto; padding: 12px 0; }
   .wp-q { grid-column: 1 / -1; line-height: 1.4; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 }
 /* The requirement rows: a wide table scrolls inside its own container, never the page (design.md, Layout) */
@@ -415,6 +415,14 @@ textarea.field { resize: vertical; font-family: inherit; }
 .field[aria-invalid="true"] { border-color: var(--ink); border-width: 2px; }
 .field-note { margin: 0; color: var(--muted); max-width: 72ch; }
 .field-note.notice { color: var(--ink); padding-left: 10px; }
+/* A create that landed while the developer was on another page (#569): its notice held under the sticky top bar, so
+   it shows wherever the page is scrolled, then Open and Dismiss, wrapping on a phone. Empty (no notice) it takes no
+   room; shown, its height is --created-notice (App), which the scroll padding and the paper's sticky index add. */
+.created-notice.shown { position: sticky; top: var(--top-bar, 0px); z-index: 19; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 8px 16px; padding-block: 8px; background: var(--paper); border-bottom: 1px solid var(--rule); }
+/* Its buttons sit inside that scroll padding, being sticky: a negative margin keeps Chromium from scrolling the page
+   to "reveal" one as it takes focus. */
+.created-notice.shown button { scroll-margin-top: calc(-1 * var(--created-notice, 0px) - 8px); }
 .sheet a, .msg a { color: var(--navy); }
 
 /* Ask Vouch: button and bubble */

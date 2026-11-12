@@ -11,6 +11,7 @@ from playwright.sync_api import Page, expect
 from reviewing import confirmed, reviewed
 from test_company_setup import (
     LEVELS,
+    back_while_creating,
     control,
     document,
     open_setup,
@@ -359,4 +360,19 @@ def test_the_new_evidence_tag_and_withdraw_s_ask_are_at_least_44px(page: Page, d
     at_phone_width(page, f"{documents_url}/company")
     page.get_by_role("button", name="Withdraw Touch withdraw note").click()
     expect(page.get_by_role("button", name="Withdraw", exact=True)).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_created_notice_s_open_and_dismiss_are_at_least_44px(
+    page: Page, first_pass_url, nordlicht_later
+):
+    """#569: the notice a create leaves when the developer pressed Back while it answered, Open
+    and Dismiss beside it, at phone width. No pass runs: nothing is opened."""
+    nordlicht_later(first_pass_url)
+    page.set_viewport_size({"width": 400, "height": 900})
+    back_while_creating(page, first_pass_url, "Daumen GmbH")
+    notice = page.get_by_role("status").filter(has_text="Daumen GmbH was made and is now current.")
+    expect(notice).to_be_visible()
+    expect(page.get_by_role("button", name="Open Daumen GmbH")).to_be_visible()
+    expect(page.get_by_role("button", name="Dismiss")).to_be_visible()
     assert small_targets(page) == []
