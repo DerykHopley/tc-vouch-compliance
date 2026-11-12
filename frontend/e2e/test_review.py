@@ -302,6 +302,30 @@ def test_the_ask_on_switching_override_editors_moves_focus(page: Page, paper_url
     expect(page.get_by_role("form", name="Override M2").get_by_label("Verdict")).to_be_focused()
 
 
+def test_a_press_on_save_half_under_the_docked_buttons_saves_the_override(page: Page, paper_url):
+    # #698: the press focused Save, and the page scrolled it clear of the docked review buttons
+    # before the button was let go, so the release, and the click, landed on the row instead.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    save = override(paper, "M1", "Evidenced", REASON).get_by_role("button", name="Save")
+    dock = paper.get_by_role("region", name="Review").locator(".review-dock")
+    expect(dock).to_have_class(re.compile(r"\bstuck\b"))
+    # Save half under the docked buttons, as the page may leave it; pressed on its foot in view.
+    page.evaluate(
+        "([save, dock]) => window.scrollBy(0,"
+        " save.getBoundingClientRect().bottom - 20 - dock.getBoundingClientRect().top)",
+        [save.element_handle(), dock.element_handle()],
+    )
+    at, under = save.bounding_box(), dock.bounding_box()
+    assert at is not None and under is not None
+    page.mouse.move(at["x"] + at["width"] / 2, under["y"] - 4)
+    page.mouse.down()
+    page.wait_for_timeout(150)  # a person's press: the button is let go a moment later
+    page.mouse.up()
+    expect(row(paper, "M1")).to_contain_text("Overridden from Partly evidenced")
+
+
 def test_leaving_with_an_unsaved_override_asks_first_and_cancel_keeps_it(page: Page, paper_url):
     # #182: an override saved but not yet recorded used to be dropped without a word.
     page.set_viewport_size({"width": 1280, "height": 900})
