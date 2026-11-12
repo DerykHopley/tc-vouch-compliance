@@ -45,6 +45,7 @@ export type NotApplicable = { control_id: string; requirement_id: string; text: 
 
 export type TrailAction = 'accept' | 'reject' | 'override' | 'confirm' | 'approve' | 'discard' | 'goal'
   | 'round-start' | 'round-close' | 'priority' | 'done' | 'question' | 'answer' | 'demo-reset'
+  | 'document-add' | 'document-withdraw'
 
 /** A compliance profile's Goal (#369), on the wire. */
 export type Goal = 'audit-readiness' | 'internal-improvement'

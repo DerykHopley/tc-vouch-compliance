@@ -15,6 +15,7 @@ from test_add_document import PATH, added, body
 from test_database import empty_database, needs_postgres  # noqa: F401
 from test_memory import app_on, restart
 from test_plan import assessment
+from test_report import pdf_text
 
 from vouch import api
 from vouch.added_documents import added_index, process_added_documents
@@ -180,3 +181,20 @@ def test_no_new_evidence_otherwise(latest):
 def test_no_new_evidence_for_a_withdrawn_document():
     """Only a newer version raises it; the withdrawn one isn't given (out of scope, #586)."""
     assert newer_evidence({"4.1.2": citing("visitor-badge-policy", "1")}, []) == {}
+
+
+def test_the_markdown_and_pdf_reports_say_an_added_and_a_withdrawn_documents_actions(users):
+    # #618: either entry in the trail made both exports answer 500.
+    alice, _ = users
+    with TestClient(app_on(None)) as client:
+        client.post(PATH, json=body(), headers=alice)
+        client.post(withdraw_path("visitor-badge-policy"), headers=alice)
+        markdown = client.get("/api/report/markdown", headers=alice)
+        pdf = client.get("/api/report/pdf", headers=alice)
+
+    assert markdown.status_code == 200, markdown.text
+    assert pdf.status_code == 200, pdf.text
+    pdf_words = " ".join(pdf_text(pdf.content).split())
+    for word in ("Document added", "Document withdrawn"):
+        assert word in markdown.text
+        assert word in pdf_words
