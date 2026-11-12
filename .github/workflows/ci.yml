@@ -192,7 +192,12 @@ jobs:
             echo "::warning::browser download attempt $attempt failed or timed out"
           done
           exit 1
-      - run: frontend/e2e/run.sh --browser ${{ matrix.browser }}
+      # A trace for each failed test (#697), kept by pytest-playwright only when the test failed:
+      # the log alone couldn't say what the page was doing (#694, #695, #696). Open one with
+      # `uv run --project frontend/e2e playwright show-trace trace.zip`, or trace.playwright.dev.
+      - run: >-
+          frontend/e2e/run.sh --browser ${{ matrix.browser }}
+          --tracing retain-on-failure --output ${{ runner.temp }}/playwright-traces
         env:
           VOUCH_IMAGE: vouch:ci
           E2E_LOG_DIR: ${{ runner.temp }}
@@ -201,6 +206,13 @@ jobs:
         with:
           name: server-logs-${{ matrix.browser }}
           path: ${{ runner.temp }}/*.log
+      # Only a failed job uploads, and only what failed tests left: a green run uploads nothing extra.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-${{ matrix.browser }}
+          path: ${{ runner.temp }}/playwright-traces
+          if-no-files-found: ignore
 
   main-red:
     # A red run on main (a push, the nightly full lane, or by hand) opens a Fix by itself (#241),
