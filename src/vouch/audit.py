@@ -1,4 +1,4 @@
-"""The audit trail (#39): the lead's every action, append-only, written with its decision.
+"""The audit trail (#39): the lead's every action, append-only except Reset demo, written with its decision.
 
 One entry per action of the compliance lead: the findings confirmed and each override with
 them (the review's first step, #372), the review's accept or reject, and each remediation item
