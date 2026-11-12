@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "access rights roles review six months"}},
     {"tool": "search_records", "args": {"query": "accounts customers systems review removed"}},
-    {"answer": "Access starts from none and follows the job; rights sit in roles that their owners review every six months. The customer system access review covers the accounts staff hold in customers' systems."}
+    {"answer": "### What the evidence shows\n\nThe access control policy says: “Access to information is granted on the basis of the job a person does.” and “We start from no access and add only what the job needs.” It sets the review: “The access rights of all accounts, including administrator and technical accounts, are reviewed every six months by the role owners.”\n\nThe customer system access review covers the accounts staff hold in customers' systems: “The customers closed all five at our request by 7 July 2026 and confirmed it in writing.”\n\n### What is missing\n\nNothing is missing."}
   ],
   "judge": {
     "requirements": [

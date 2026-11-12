@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "analysed recorded extent event"}},
     {"tool": "search_records", "args": {"query": "analysed recorded extent event"}},
-    {"answer": "Draft answer for 5.2.4, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nlog-review-record: “Email | Customer correspondence | Internet | Yes: sign-ins, failed sign-ins, account and rights changes, administrator actions, forwarding rules”\n\nlogging-standard: “Logs can hold personal data, so we log only what we need, and the works council has agreed to these rules.”\n\ncloud-services-register: “None of this was looked at when the services were approved, and nobody at Nordlicht has been given the job of watching it.”\n\n### What is missing\n\n- M4 is only partly evidenced.\n- S2 is only partly evidenced.\n- S3 is not evidenced."}
   ],
   "judge": {
     "requirements": [

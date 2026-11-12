@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information protected transfer during"}},
     {"tool": "search_records", "args": {"query": "information protected transfer during"}},
-    {"answer": "Draft answer for 5.1.2, from the evidence found."}
+    {"answer": "### What the evidence shows\n\ndata-transfer-standard: “IT keeps this table current and adds a service before it is used.”\n\nencryption-check-record: “Of 30 emails with confidential attachments, all had the attachment encrypted.”\n\n### What is missing\n\nNothing is missing."}
   ],
   "judge": {
     "requirements": [

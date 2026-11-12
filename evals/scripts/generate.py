@@ -4,7 +4,8 @@
 to `evals/scripts/<profile>/<control id>.json`, replacing what is there. Each script searches
 the policies and the records (and asks Patch when an expected answer cites its response), then
 judges every requirement as the expected answers do; its draft answer is in the profile's
-answer language. Each citation quotes the sentence, list
+answer language, in the gather prompt's two sections (#670): each cited document quoted, then
+each requirement not evidenced. Each citation quotes the sentence, list
 item or table row of the cited document sharing most words with the requirement and its `why`.
 
 The scripts are drafted from the expected answers, so on the fake model the eval checks the
@@ -24,13 +25,27 @@ from vouch.documents import document_path, sections
 from vouch.evals import EXPECTED_ANSWERS, FAKE_SCRIPTS_DIR, load_cases
 from vouch.front_matter import split_front_matter
 from vouch.graph import SEARCH_POLICIES, SEARCH_RECORDS, VULNERABILITY_STATUS
+from vouch.language import ANSWER_HEADINGS, audit_claim
 from vouch.patch import RESPONSE_ID as PATCH_RESPONSE  # cited: the script asks Patch
 from vouch.profile import load_named_profile
 from vouch.settings import load_settings
 
-DRAFT_ANSWERS = {  # in the profile's answer language, so the language check passes (#51)
-    "en": "Draft answer for {}, from the evidence found.",
-    "de": "Antwortentwurf für {}: Die Nachweise sind unten mit der Anforderung abgeglichen.",
+ANSWER_WORDS = {  # in the profile's answer language, so the language check passes (#51); a
+    # gap names its verdict, not its `why`: Alpenwerk's expected answers give theirs in English
+    "en": {
+        "quote": "{}: “{}”",
+        "nothing_shown": "No document found shows what {} asks for.",
+        "none_missing": "Nothing is missing.",
+        "partly-evidenced": "{} is only partly evidenced.",
+        "not-evidenced": "{} is not evidenced.",
+    },
+    "de": {
+        "quote": "{}: „{}“",
+        "nothing_shown": "Kein gefundenes Dokument zeigt, was {} verlangt.",
+        "none_missing": "Es fehlt nichts.",
+        "partly-evidenced": "{} ist nur teilweise nachgewiesen.",
+        "not-evidenced": "{} ist nicht nachgewiesen.",
+    },
 }
 LIST_ITEM = re.compile(r"^([-*+]|\d+[.)])\s+")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -89,6 +104,32 @@ def _quote(path: Path, doc_id: str, wanted: set[str]) -> str:
     return max(candidates, key=lambda q: len(_words(q) & wanted))
 
 
+def _draft_answer(control_id: str, judged: list[dict], language: str) -> str:
+    """The draft answer in its two sections (#670): a paragraph quoting each cited document
+    once, then a bullet per requirement not evidenced, naming its verdict. A quote with an audit
+    word ("passed a rescan") is left out: the output guard lets it through only when a search
+    gathered its passage, and the scripted searches may not."""
+    words = ANSWER_WORDS[language]
+    shows_heading, missing_heading = ANSWER_HEADINGS[language]
+    quoted: dict[str, str] = {}
+    for requirement in judged:
+        for citation in requirement["citations"]:
+            if audit_claim(citation["quote"]) is None:
+                quoted.setdefault(citation["doc_id"], citation["quote"])
+    shows = [words["quote"].format(doc_id, quote) for doc_id, quote in quoted.items()]
+    gaps = [
+        f"- {words[r['verdict']].format(r['requirement_id'])}"
+        for r in judged
+        if r["verdict"] != "evidenced"
+    ]
+    return (
+        f"### {shows_heading}\n\n"
+        + ("\n\n".join(shows) or words["nothing_shown"].format(control_id))
+        + f"\n\n### {missing_heading}\n\n"
+        + ("\n".join(gaps) or words["none_missing"])
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--profile", default="nordlicht")
@@ -133,7 +174,7 @@ def main(argv: list[str] | None = None) -> None:
         ]
         if any(PATCH_RESPONSE in r.cites for r in case.requirements):
             gather.append({"tool": VULNERABILITY_STATUS, "args": {}})
-        gather.append({"answer": DRAFT_ANSWERS[profile.answer_language].format(case.control_id)})
+        gather.append({"answer": _draft_answer(case.control_id, judged, profile.answer_language)})
         script = out / f"{case.control_id}.json"
         script.write_text(_script_text(gather, judged), encoding="utf-8")
     print(f"wrote {len(cases)} scripts to {out}")

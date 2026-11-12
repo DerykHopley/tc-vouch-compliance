@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "vulnerabilities identified addressed extent"}},
     {"tool": "search_records", "args": {"query": "vulnerabilities identified addressed extent"}},
-    {"answer": "Draft answer for 5.2.5, from the evidence found."}
+    {"answer": "### What the evidence shows\n\npatch-status-record: “One high-rated vulnerability in August, on the machine control server, could not be patched until the manufacturer approved the patch.”\n\nvulnerability-management-standard: “For each vulnerability, IT finds the systems it affects and scores it with CVSS, adjusted for how exposed the system is.”\n\n### What is missing\n\nNothing is missing."}
   ],
   "judge": {
     "requirements": [

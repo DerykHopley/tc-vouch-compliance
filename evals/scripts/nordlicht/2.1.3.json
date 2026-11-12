@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information handling arising respect"}},
     {"tool": "search_records", "args": {"query": "information handling arising respect"}},
-    {"answer": "Draft answer for 2.1.3, from the evidence found."}
+    {"answer": "### What the evidence shows\n\ntraining-attendance-record: “The 2026 basic course ran from 12 January to 31 March.”\n\nawareness-training-concept: “The yearly security training covers: our information security policy, how to report a security event, what to do when malware is suspected, password and login rules, keeping customer information confidential under a non-disclosure agreement, and the rule that company information stays on company systems, never in private online storage.”\n\n### What is missing\n\nNothing is missing."}
   ],
   "judge": {
     "requirements": [

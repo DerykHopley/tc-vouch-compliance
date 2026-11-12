@@ -3,7 +3,7 @@
     {"tool": "search_policies", "args": {"query": "vulnerabilities identified addressed extent"}},
     {"tool": "search_records", "args": {"query": "vulnerabilities identified addressed extent"}},
     {"tool": "vulnerability_status", "args": {}},
-    {"answer": "Draft answer for 5.2.5, from the evidence found."}
+    {"answer": "### What the evidence shows\n\npatch-vulnerability-status: “Patch gathers advisories from the manufacturers and the CVE database every night and scores each one with CVSS 3.1.”\n\n### What is missing\n\n- S1 is only partly evidenced.\n- S3 is not evidenced."}
   ],
   "judge": {
     "requirements": [

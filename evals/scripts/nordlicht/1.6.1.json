@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "observations information relevant reported"}},
     {"tool": "search_records", "args": {"query": "observations information relevant reported"}},
-    {"answer": "Draft answer for 1.6.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nsecurity-event-reporting-procedure: “Examples: a stranger in the production hall without a visitor badge, a lost laptop or access card, a suspicious email or link, a warning from your antivirus, an unlocked server room, a colleague asking for your password, or a supplier telling us they have had a security problem.”\n\ntraining-attendance-record: “Managers: access approvals and incidents | 2026-03-04 | 22 | 20”\n\nsecurity-event-register: “43 reports received: 31 by email or ticket, 12 by the security hotline.”\n\n### What is missing\n\n- S4 is not evidenced."}
   ],
   "judge": {
     "requirements": [

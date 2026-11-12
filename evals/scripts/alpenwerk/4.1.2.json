@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "benutzern gesichert inwieweit diensten"}},
     {"tool": "search_records", "args": {"query": "benutzern gesichert inwieweit diensten"}},
-    {"answer": "Antwortentwurf für 4.1.2: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nauthentifizierungsrichtlinie: „Sie berücksichtigt, ob ein System direkt aus dem Internet erreichbar ist, welche Daten es enthält und welche Angriffe zu erwarten sind, zum Beispiel Phishing und das Durchprobieren von Passwörtern.“\n\nrisikobewertung-anmeldeverfahren: „Cloud-Dienste | ja | vertraulich bis intern | hoch | Anmeldung über den Verzeichnisdienst mit Hardware-Token | seit 2026-02“\n\n### Was fehlt\n\nEs fehlt nichts."}
   ],
   "judge": {
     "requirements": [

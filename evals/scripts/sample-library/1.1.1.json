@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information available policies security"}},
     {"tool": "search_records", "args": {"query": "information available policies security"}},
-    {"answer": "Draft answer for 1.1.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\ninformation-security-policy: “Every January the information security officer collects the security requirements that apply to us: from the business strategy, from customer contracts and their security annexes, and from the laws that bind us, such as data protection law.”\n\nbackup-policy: “IT reviews this policy and the recovery guides every year.”\n\n### What is missing\n\n- M4 is only partly evidenced.\n- M5 is only partly evidenced.\n- S4 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [
