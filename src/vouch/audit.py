@@ -25,7 +25,7 @@ Nothing offers an update or a delete: the table refuses both too (vouch-db-setup
 
 import logging
 import threading
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -228,6 +228,10 @@ class AuditTrail(Protocol):
         recording holds it, another raises NotWaitingForReviewError at once."""
         ...
 
+    def users(self, profile_id: str) -> set[str]:
+        """Every user with an entry under the profile (#624)."""
+        ...
+
     def entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[AuditEntry]:
@@ -301,6 +305,10 @@ class ProcessTrail:
         with self._guard:
             self._entries = [e for e in self._entries if e.profile_id != profile_id]
 
+    def users(self, profile_id: str) -> set[str]:
+        with self._guard:
+            return {e.user_id for e in self._entries if e.profile_id == profile_id}
+
     def entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
     ) -> list[AuditEntry]:
@@ -328,6 +336,9 @@ class PostgresTrail:
                 yield saver, record
         except ReviewInProgress:
             raise _busy(key) from None
+
+    def users(self, profile_id: str) -> set[str]:
+        return self.db.audit_users(profile_id)
 
     def entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None
@@ -472,6 +483,25 @@ def document_entry(
     )
 
 
+def _document_rows(
+    reviewer: Reviewer,
+    leads: Collection[str],
+    note: str,
+    at: datetime,
+    action: Literal["document-add", "document-withdraw"],
+) -> Callable[[AddedDocument], list[dict[str, Any]]]:
+    """The entries of one change of a document (#624): the same entry in the trail of the
+    reviewer and of each of `leads`, each naming the reviewer as who made it."""
+
+    def rows(document: AddedDocument) -> list[dict[str, Any]]:
+        row = asdict(document_entry(reviewer, document, note, at, action))
+        row.pop("id")
+        others = sorted(set(leads) - {reviewer.id})
+        return [row | {"user_id": lead} for lead in [reviewer.id, *others]]
+
+    return rows
+
+
 def add_document(
     store: AddedDocuments,
     new: NewDocument,
@@ -479,19 +509,17 @@ def add_document(
     reviewer: Reviewer,
     profile_id: str,
     builtin_ids: set[str],
+    leads: Collection[str] = (),
     note: str = "",
     clock: Callable[[], datetime] = now,
 ) -> AddedDocument:
-    """The lead adds a document (or its next version) under the profile, with its
-    `document-add` entry, together, at `clock()`: the version kept. Raises DocumentRefused
-    (nothing written) and DatabaseUnavailable (Postgres)."""
+    """The reviewer adds a document (or its next version) under the profile, with its
+    `document-add` entry in their trail and in each of `leads`' (#624), together, at `clock()`:
+    the version kept. Raises DocumentRefused (nothing written) and DatabaseUnavailable
+    (Postgres)."""
     at = clock()
-
-    def entry(added: AddedDocument) -> dict[str, Any]:
-        row = asdict(document_entry(reviewer, added, note, at))
-        return {k: v for k, v in row.items() if k != "id"}
-
-    return store.add(profile_id, new, builtin_ids, reviewer.id, reviewer.name, at, entry)
+    entries = _document_rows(reviewer, leads, note, at, "document-add")
+    return store.add(profile_id, new, builtin_ids, reviewer.id, reviewer.name, at, entries)
 
 
 def withdraw_document(
@@ -500,16 +528,14 @@ def withdraw_document(
     *,
     reviewer: Reviewer,
     profile_id: str,
+    leads: Collection[str] = (),
     clock: Callable[[], datetime] = now,
 ) -> list[AddedDocument]:
-    """The lead withdraws an added document of the profile (#586): every version marked
-    withdrawn at `clock()`, with one `document-withdraw` entry naming its newest version,
-    together; none written when it was withdrawn already. Its versions as kept now, none for an
-    unknown id. Raises DatabaseUnavailable (Postgres)."""
+    """The reviewer withdraws an added document of the profile (#586): every version marked
+    withdrawn at `clock()`, with one `document-withdraw` entry naming its newest version in
+    their trail and in each of `leads`' (#624), together; none written when it was withdrawn
+    already. Its versions as kept now, none for an unknown id. Raises DatabaseUnavailable
+    (Postgres)."""
     at = clock()
-
-    def entry(newest: AddedDocument) -> dict[str, Any]:
-        row = asdict(document_entry(reviewer, newest, "", at, "document-withdraw"))
-        return {k: v for k, v in row.items() if k != "id"}
-
-    return store.withdraw(profile_id, doc_id, at, entry)
+    entries = _document_rows(reviewer, leads, "", at, "document-withdraw")
+    return store.withdraw(profile_id, doc_id, at, entries)

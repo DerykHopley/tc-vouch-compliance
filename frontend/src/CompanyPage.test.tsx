@@ -48,6 +48,7 @@ const DOCUMENTS = {
   not_cited: 'Not cited yet', no_documents: 'This profile has no evidence documents.',
   origins: { 'built-in': 'Built in', added: 'Added' }, withdrawn: 'Withdrawn' },
   words_language: 'en',
+  can_change: true,
 }
 
 const json = (body: unknown, status = 200) => Promise.resolve(Response.json(body, { status }))

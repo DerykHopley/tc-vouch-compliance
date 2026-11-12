@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Documents from './Documents.tsx'
-import { DOCUMENTS_FAILED, type DocumentWords, WITHDRAW_FAILED, type ProfileDocument, type ProfileDocuments, useDocuments }
+import { CHANGE_REFUSED_NOTE, DOCUMENTS_FAILED, type DocumentWords, WITHDRAW_FAILED, type ProfileDocument, type ProfileDocuments, useDocuments }
   from './documents.ts'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
 
@@ -43,7 +43,8 @@ const ADDED: ProfileDocument = {
   approval_date: '2026-10-01', review_cycle: 'yearly', stale_because: null, stale: false, language: null,
   cited_by: [], origin: 'added',
 }
-const NORDLICHT: ProfileDocuments = { documents: [AUTHENTICATION, BACKUP, RECORD], words: ENGLISH, words_language: 'en' }
+const NORDLICHT: ProfileDocuments = { documents: [AUTHENTICATION, BACKUP, RECORD], words: ENGLISH, words_language: 'en',
+  can_change: true }
 
 /** The panel as the Company page shows it: read with useDocuments, then shown. */
 function Shown() {
@@ -164,6 +165,26 @@ describe('adding documents on the Documents panel (ticket 585)', () => {
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
     expect(screen.queryByRole('form')).toBeNull()
+  })
+})
+
+describe('who may change the documents (ticket 624)', () => {
+  it('shows a user who may not change them no Add document, Add new version or Withdraw, and says who can', async () => {
+    serve(() => json({ ...NORDLICHT, documents: [AUTHENTICATION, ADDED], can_change: false }))
+    render(<Shown />)
+
+    const sheet = await screen.findByRole('article', { name: 'Documents' })
+    expect(within(sheet).queryAllByRole('button')).toHaveLength(0)
+    expect(within(sheet).getByText(CHANGE_REFUSED_NOTE)).toBeTruthy()
+  })
+
+  it('shows one who may change them the actions and no note', async () => {
+    serve(() => json({ ...NORDLICHT, documents: [ADDED] }))
+    render(<Shown />)
+
+    const sheet = await screen.findByRole('article', { name: 'Documents' })
+    expect(within(sheet).getByRole('button', { name: 'Add document' })).toBeTruthy()
+    expect(within(sheet).queryByText(CHANGE_REFUSED_NOTE)).toBeNull()
   })
 })
 

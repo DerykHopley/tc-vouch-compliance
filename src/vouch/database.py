@@ -1386,10 +1386,10 @@ class Database:
         self,
         profile_id: str,
         made: Callable[[list[dict[str, Any]]], Mapping[str, Any]],
-        entry: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
+        entry: Callable[[dict[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Keep the version `made` gives from the profile's versions already kept (a mapping of
-        ADDED_DOCUMENT_COLUMNS), with `entry`'s audit entry of the version kept when given (a
+        ADDED_DOCUMENT_COLUMNS), with `entry`'s audit entries of the version kept when given, one per lead (#624) (a
         mapping of AUDIT_COLUMNS, #585), in one transaction holding the profile's lock, so two
         writes take turns: the version kept, and every version of the profile as it then
         stands. An exception from `made` writes nothing and is raised as itself. Raises
@@ -1417,7 +1417,7 @@ class Database:
             if added is None:  # an INSERT … RETURNING returns its row
                 raise DatabaseUnavailable(f"a document in {ADDED_DOCUMENTS_TABLE} was not kept")
             if entry is not None:
-                _insert_audit(conn, [entry(added)])
+                _insert_audit(conn, list(entry(added)))
         return added, [*kept, added]
 
     def withdraw_document(
@@ -1425,11 +1425,11 @@ class Database:
         profile_id: str,
         doc_id: str,
         at: datetime,
-        entry: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
+        entry: Callable[[dict[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Mark every version of the document not yet withdrawn withdrawn at `at`, holding the
         profile's lock as an add does (so an add can't slip a live version in beside it), with
-        `entry`'s audit entry of its newest version when this marked any (#586), in the same
+        `entry`'s audit entries of its newest version when this marked any (#586, one per lead, #624), in the same
         transaction: every version of the profile as it then stands, by id and version. Raises
         DatabaseUnavailable for any database failure, also before vouch-db-setup ran."""
         columns = ", ".join(ADDED_DOCUMENT_COLUMNS)
@@ -1452,8 +1452,18 @@ class Database:
             ).fetchall()
             if marked and entry is not None:
                 newest = [r for r in rows if r["doc_id"] == doc_id][-1]
-                _insert_audit(conn, [entry(newest)])
+                _insert_audit(conn, list(entry(newest)))
             return rows
+
+    def audit_users(self, profile_id: str) -> set[str]:
+        """Every user with an audit entry under the profile (#624: a change of its evidence is
+        recorded in each one's trail). Raises DatabaseUnavailable."""
+        with self.connection() as conn, self._needs_setup(AUDIT_TABLE):
+            rows = conn.execute(
+                f"SELECT DISTINCT user_id FROM {AUDIT_TABLE} WHERE profile_id = %s",
+                (profile_id,),
+            ).fetchall()
+        return {row["user_id"] for row in rows}
 
     def audit_entries(
         self, user_id: str, profile_id: str, *, limit: int, before: int | None = None

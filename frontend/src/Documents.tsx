@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import AddDocument from './AddDocument.tsx'
 import DocumentTable from './DocumentTable.tsx'
-import { type DocumentsState, type ProfileDocument, type ProfileDocuments, withdrawDocument, wordFor }
+import { CHANGE_REFUSED_NOTE, type DocumentsState, type ProfileDocument, type ProfileDocuments, withdrawDocument, wordFor }
   from './documents.ts'
 import InlineConfirm from './InlineConfirm.tsx'
 
@@ -10,7 +10,8 @@ type Props = { state: DocumentsState; tryAgain: () => void; onChanged: () => voi
 /** The Documents tab (#424), the Company page's Documents panel since #505: each evidence document the profile uses,
  * one table per source, with the controls citing it and its origin. A lead adds a document there, or a new version of
  * an added one (#585, AddDocument), or withdraws an added one (#586, Withdraw), which then stays listed as Withdrawn
- * with no actions; built-in documents are labelled "Built in" and offer nothing. Its words are the
+ * with no actions; built-in documents are labelled "Built in" and offer nothing. Only the company's creator or a
+ * developer sees those actions (`can_change`, #624); anyone else sees a one-line note instead of Add document. Its words are the
  * served ones, and the sheet carries their language (`words_language`); the panel around it (loading, the notice, Try
  * again, Add document and its form) stays English, as the report's does. Read each time the page opens, alongside the
  * company (documents.ts' `useDocuments`, which the page calls), and again after an add or a withdraw
@@ -35,7 +36,7 @@ export default function Documents({ state, tryAgain, onChanged }: Props) {
 /** The form open: Add document (no title) or Add new version of an added document's title; null, none. */
 type Open = { title?: string } | null
 
-function Sheet({ documents, words, words_language, onChanged }: ProfileDocuments & { onChanged: () => void }) {
+function Sheet({ documents, words, words_language, can_change, onChanged }: ProfileDocuments & { onChanged: () => void }) {
   const [open, setOpen] = useState<Open>(null)
   // The sources in the order the documents come: the profile's.
   const sources = [...new Set(documents.map((d) => d.source))]
@@ -51,7 +52,7 @@ function Sheet({ documents, words, words_language, onChanged }: ProfileDocuments
       : (
         <span className="doc-origin">
           <span>{words.origins.added}</span>
-          {!d.withdrawn && <>
+          {can_change && !d.withdrawn && <>
             <button className="btn btn-ghost" type="button" lang="en" aria-label={`Add new version of ${d.title}`}
               onClick={() => setOpen({ title: d.title })}>Add new version</button>
             <Withdraw document={d} onWithdrawn={onChanged} />
@@ -67,10 +68,11 @@ function Sheet({ documents, words, words_language, onChanged }: ProfileDocuments
     <article className="sheet report-doc documents-doc" lang={words_language} aria-labelledby="documents-title">
       <div className="documents-head">
         <h2 id="documents-title">{words.title}</h2>
-        {open === null && (
+        {can_change && open === null && (
           <button className="btn" type="button" lang="en" onClick={() => setOpen({})}>Add document</button>
         )}
       </div>
+      {!can_change && <p className="report-muted" lang="en">{CHANGE_REFUSED_NOTE}</p>}
       {open !== null && (
         <div lang="en">
           <AddDocument key={open.title ?? ''} documents={documents} title={open.title} onAdded={added}

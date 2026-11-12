@@ -71,11 +71,11 @@ The compliance profile over the whole sample library that the eval scores; it is
 _Avoid_: Sample company, test profile
 
 **Documents tab**:
-The list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505). A compliance lead may add a document or a new version of one, and withdraw an added one; built-in documents can't be changed (#345).
+The list of a compliance profile's evidence documents, each with its kind, version, approval date, review cycle and whether it is stale, and the controls whose newest assessment cites it. Every company has one, for every user. It is the Documents panel of the Company page (`/company`; `/documents` leads there; #495, #505). The company's creator (the user who set it up) or a developer may add a document or a new version of one, and withdraw an added one; anyone else sees the list only. Each change is an audit trail entry for every lead with work under the company. Built-in documents can't be changed (#345, #624).
 _Avoid_: Document library, uploads, files
 
 **Withdrawn document**:
-An added evidence document the lead has taken away: no longer searched or cited, still listed, its versions kept so the audit trail stays true (#345).
+An added evidence document its company's creator or a developer has taken away (#624): no longer searched or cited, still listed, its versions kept so the audit trail stays true (#345).
 _Avoid_: Deleted, archived
 
 **Remove company**:

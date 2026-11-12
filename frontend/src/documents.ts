@@ -45,7 +45,12 @@ export type ProfileDocuments = {
   words: DocumentWords
   /** ISO 639-1: the language of `words`, the sheet's `lang`. */
   words_language: string
+  /** Whether this user may add, version or withdraw documents: the company's creator or a developer (#624). */
+  can_change: boolean
 }
+
+/** Shown in place of Add document to a user who may not change the documents (#624). */
+export const CHANGE_REFUSED_NOTE = 'Only the user who set up this company, or a developer, can add or withdraw documents.'
 
 /** The page's own sentence when the documents can't be read. */
 export const DOCUMENTS_FAILED = 'The documents could not be loaded.'

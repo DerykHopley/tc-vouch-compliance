@@ -85,9 +85,10 @@ WITHDRAWN_TITLE = (
 )
 
 
-Entry = Callable[["AddedDocument"], Mapping[str, Any]]
-"""The audit entry of an add (#585), given the version kept: a mapping of vouch.database's
-AUDIT_COLUMNS, kept with the version, both or neither."""
+Entry = Callable[["AddedDocument"], Sequence[Mapping[str, Any]]]
+"""The audit entries of an add (#585) or withdraw, given the version kept: one per lead whose
+trail records it (#624), each a mapping of vouch.database's AUDIT_COLUMNS, kept with the
+version, all or none."""
 
 
 class DocumentRefused(ValueError):
@@ -456,7 +457,8 @@ class ProcessAddedDocuments:
             kept.append(added)
             _refresh(self._index, profile_id, kept)  # under the guard: puts land in order
             if entry is not None and self._keep is not None:
-                self._keep(entry(added))
+                for row in entry(added):
+                    self._keep(row)
         return added
 
     def withdraw(
@@ -472,7 +474,8 @@ class ProcessAddedDocuments:
             _refresh(self._index, profile_id, kept)
             versions = _ordered(d for d in kept if d.doc_id == doc_id)
             if marked and entry is not None and self._keep is not None:
-                self._keep(entry(versions[-1]))
+                for row in entry(versions[-1]):
+                    self._keep(row)
             return versions
 
 
