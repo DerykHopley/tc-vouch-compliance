@@ -11,7 +11,8 @@ let endGuard: (() => void) | null = null
  * after a pause that long goes through. A keyboard click (`detail === 0`) neither sets the guard nor is swallowed. The
  * guard outlives the control, which can leave the page as its click takes effect (Close round's, as the round closes)
  * with something else in its place. `onSwallowed`, if given, runs after each swallowed click: its press may already
- * have moved focus. Shared by the in-app ask's confirm and the chat's Close (#333).
+ * have moved focus. Shared by the in-app ask's confirm, the chat's Close (#333) and its pin
+ * toggle (#563).
  */
 export function swallowPointerClickBurst(click: { detail: number }, onSwallowed?: () => void) {
   if (click.detail === 0) return
@@ -25,11 +26,15 @@ export function swallowPointerClickBurst(click: { detail: number }, onSwallowed?
     timer = window.setTimeout(endDoubleClickGuard, DOUBLE_CLICK_MS)
     onSwallowed?.()
   }
+  // The burst's later presses come before their clicks: cancelled, they neither select a word nor move focus (#563).
+  const cancelPress = (e: MouseEvent) => e.preventDefault()
   endGuard = () => {
     window.clearTimeout(timer)
     document.removeEventListener('click', swallow, true)
+    document.removeEventListener('mousedown', cancelPress, true)
   }
   document.addEventListener('click', swallow, true)
+  document.addEventListener('mousedown', cancelPress, true)
 }
 
 /** Ends the double-click guard now: for the unit tests, between tests sharing one document (`testSetup.ts`). */
