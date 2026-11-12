@@ -389,7 +389,7 @@ def test_from_701_the_controls_table_fits_and_its_verdict_chips_wrap_only_under_
             report = open_report(page, report_url)
             expect(report.locator("table.report-controls")).to_be_visible()
             assert tables_overflowing(report, ("table.report-controls",)) == [], (profile, width)
-            if width >= ONE_LINE_FROM:
+            if profile == "alpenwerk" and width >= ONE_LINE_FROM:  # the one with a verdict
                 chips = report.locator("table.report-controls .chip").evaluate_all(
                     f"els => els.map({LINES})"
                 )

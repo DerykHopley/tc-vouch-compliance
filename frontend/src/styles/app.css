@@ -568,6 +568,8 @@ html { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
    (KONTROLLE, ANFORDERUNG): 963px of trail in the 902px sheet. Scaled to Manrope's widths, they fit; Manrope unchanged. */
 @font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans"); font-weight: 400 500; size-adjust: 85%; }
 @font-face { font-family: "Manrope Fallback"; src: local("DejaVu Sans Bold"); font-weight: 600 800; size-adjust: 85%; }
+/* #550: the controls table the same way, whose DejaVu columns summed to 607px in the 603px sheet at 701px. */
+.report-controls { font-family: "Manrope", "Manrope Fallback", var(--f-body); }
 .report-table.report-trail :is(th, td) { padding-inline: 5px; }
 .report-table.report-trail .report-q { min-width: 16ch; }
 .report-trail .report-at > .report-line { min-width: 10ch; }
