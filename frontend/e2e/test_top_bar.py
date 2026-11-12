@@ -239,3 +239,34 @@ def test_on_a_phone_a_profile_kept_by_an_earlier_version_changes_nothing(page: P
         page.get_by_role("banner").get_by_role("button", name="Menu", exact=True)
     ).to_have_attribute("aria-expanded", "false")
     assert not scrolls_sideways(page)
+
+
+@pytest.mark.parametrize("width", [1280, 400])
+def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
+    page: Page, profiles_url, width
+):
+    """#671: Chromium scrolled a scrolled-down page by about 213px as "Your menu" took focus. No
+    control in the sticky top bar moves the page as it takes focus; on a phone, with the Menu open."""
+    opened(page, f"{profiles_url}/developer", width)
+    expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
+    page.wait_for_load_state("networkidle")  # its prompts and settings read: its height settled
+    bar = page.get_by_role("banner")
+    if width < 700:
+        bar.get_by_role("button", name="Menu", exact=True).click()
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    scrolled = page.evaluate("window.scrollY")
+    assert scrolled > 300, scrolled  # a long page, scrolled well down
+    page.evaluate("document.activeElement.blur()")
+    user = bar.get_by_role("button", name="Your menu")
+    for _ in range(20):
+        page.keyboard.press("Tab")
+        in_bar = page.evaluate("document.activeElement.closest('header.top') !== null")
+        assert in_bar, "Tab left the top bar before reaching Your menu"
+        control = page.evaluate("document.activeElement.textContent")
+        assert page.evaluate("window.scrollY") == scrolled, (
+            f"focusing {control!r} scrolled the page"
+        )
+        if user.evaluate("button => button === document.activeElement"):
+            break
+    expect(user).to_be_focused()
+    assert page.evaluate("window.scrollY") == scrolled
