@@ -2,7 +2,7 @@
  * Company setup's history entries (#476, #568): once a create from a wizard has landed, neither Back nor Forward
  * reaches that wizard again, empty, under the new company. Each wizard marks its own entry (its history state carries
  * an id), so a create gives way only its own wizard's entry, wherever the developer has gone meanwhile: still on it,
- * it is replaced now; left by Back or a tab click, it is replaced when Back or Forward reaches it (settledPath). The
+ * it is replaced now; left by Back or a tab click, it is replaced when Back or Forward reaches it (settleSetupEntry). The
  * finished entries are held for this page's life only: after a reload, a wizard reached by Back is empty again.
  */
 
@@ -31,8 +31,9 @@ export function leaveSetup(entry: string, path: string) {
   else finished.set(entry, path)
 }
 
-/** After Back or Forward: the path to show. A finished setup's entry is first replaced by the path it gives way to. */
-export function settledPath(): string {
+/** After Back or Forward: a finished setup's entry, when Back or Forward reached one, is replaced by the path it gives
+ * way to (and forgotten); then the path to show. */
+export function settleSetupEntry(): string {
   const entry = idOf(window.history.state)
   const path = entry === null ? undefined : finished.get(entry)
   if (path !== undefined) {
@@ -40,4 +41,10 @@ export function settledPath(): string {
     window.history.replaceState(null, '', path)
   }
   return window.location.pathname
+}
+
+/** Tests only: forgets every finished entry and restarts the ids, so each test starts as a fresh page. */
+export function forgetSetupEntries() {
+  made = 0
+  finished.clear()
 }

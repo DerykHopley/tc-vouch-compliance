@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { leaveSetup, markSetupEntry, settledPath } from './setupHistory.ts'
+import { forgetSetupEntries, leaveSetup, markSetupEntry, settleSetupEntry } from './setupHistory.ts'
 
 /** Back or Forward, once the browser has moved: jsdom moves history asynchronously, then fires popstate. */
 const moved = (move: () => void) => new Promise<void>((done) => {
@@ -8,6 +8,7 @@ const moved = (move: () => void) => new Promise<void>((done) => {
 })
 
 beforeEach(() => {
+  forgetSetupEntries()
   window.history.replaceState(null, '', '/')
 })
 
@@ -21,7 +22,7 @@ describe('leaveSetup, issues 476 and 568', () => {
 
     expect(window.location.pathname).toBe('/')
     expect(window.history.length).toBe(length)
-    expect(settledPath()).toBe('/')
+    expect(settleSetupEntry()).toBe('/')
   })
 
   it('keeps a developer who clicked a tab where they went, and Back then gives the Dossier, not the wizard', async () => {
@@ -35,7 +36,7 @@ describe('leaveSetup, issues 476 and 568', () => {
     expect(window.location.pathname).toBe('/company')
     expect(window.history.length).toBe(length) // no copy of /company to press Back past
     await moved(() => window.history.back())
-    expect(settledPath()).toBe('/')
+    expect(settleSetupEntry()).toBe('/')
     expect(window.location.pathname).toBe('/')
   })
 
@@ -49,7 +50,7 @@ describe('leaveSetup, issues 476 and 568', () => {
 
     expect(window.location.pathname).toBe('/developer')
     await moved(() => window.history.forward())
-    expect(settledPath()).toBe('/')
+    expect(settleSetupEntry()).toBe('/')
     expect(window.location.pathname).toBe('/')
   })
 
@@ -65,7 +66,7 @@ describe('leaveSetup, issues 476 and 568', () => {
     leaveSetup(finished, '/')
 
     await moved(() => window.history.back())
-    expect(settledPath()).toBe('/developer/setup')
+    expect(settleSetupEntry()).toBe('/developer/setup')
   })
 
   it('marks an entry once: the wizard opened again on it keeps its mark', () => {

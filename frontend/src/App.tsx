@@ -22,7 +22,7 @@ import { type Run, useAssessment } from './useAssessment.ts'
 import RoundComparisonView from './RoundComparison.tsx'
 import { forgetScrolls } from './roundComparison.ts'
 import { COMPANY_PATH, roundPath } from './rounds.ts'
-import { settledPath } from './setupHistory.ts'
+import { settleSetupEntry } from './setupHistory.ts'
 import WorkingPaper, { ControlNotFound } from './WorkingPaper.tsx'
 
 
@@ -167,7 +167,7 @@ export default function App({ onSignOut, userName, profile, onStartedAfresh, onC
         return
       }
       setFocusHeading(false)
-      const next = viewAt(settledPath()) // a finished setup's entry gives way (#568)
+      const next = viewAt(settleSetupEntry()) // a finished setup's entry gives way (#568)
       if (next.name !== 'paper' && next.name !== 'round') leaveRounds()
       setView(next)
     }

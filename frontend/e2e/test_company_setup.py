@@ -853,6 +853,16 @@ def test_story_5_a_new_company_opens_with_its_goal_set_and_every_control_drafted
 CURRENT_COMPANY = "**/api/developer/current-company"
 
 
+def held_once(page: Page, held: list[Route]) -> None:
+    """Waits until the route holding Make current has caught its one request (up to 5 s), so a
+    check never asserts before the request is out; the route handler runs while Playwright waits."""
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert len(held) == 1, len(held)
+
+
 def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizard(
     page: Page, first_pass_url, nordlicht_later
 ):
@@ -874,8 +884,7 @@ def test_back_while_the_create_answers_stays_and_forward_never_reaches_the_wizar
         press(page, "Create company")
     assert created.value.status == 201
     profile = created.value.json()["id"]
-    page.wait_for_timeout(200)
-    assert len(held) == 1  # the create's Make current, still unanswered
+    held_once(page, held)  # the create's Make current, still unanswered
 
     page.go_back()
     expect(page).to_have_url(f"{first_pass_url}/developer")
@@ -914,8 +923,7 @@ def test_a_tab_clicked_while_the_create_answers_stays_and_back_never_reaches_the
         press(page, "Create company")
     assert created.value.status == 201
     profile = created.value.json()["id"]
-    page.wait_for_timeout(200)
-    assert len(held) == 1  # the create's Make current, still unanswered
+    held_once(page, held)  # the create's Make current, still unanswered
 
     company_tab(page).click()
     expect(page).to_have_url(f"{first_pass_url}/company")
