@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information available policies security"}},
     {"tool": "search_records", "args": {"query": "information available policies security"}},
-    {"answer": "Draft answer for 1.1.1, from the evidence found."}
+    {"answer": "### What the evidence shows\n\ninformation-security-policy: “The information security officer works out our security requirements each year from three inputs: the business plan agreed by management, the security clauses in our customer contracts, and the laws that apply to us in Germany, including data protection law.”\n\npolicy-publication-record: “Export from the intranet page \"Security\", taken on 5 October 2026.”\n\nencryption-standard: “Every company laptop uses full-disk encryption with AES-256.”\n\n### What is missing\n\n- S2 is not evidenced.\n- S4 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

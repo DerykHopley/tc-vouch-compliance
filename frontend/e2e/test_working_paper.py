@@ -138,7 +138,7 @@ def test_a_finished_assessment_is_still_shown_after_a_reload(page: Page, paper_u
     result = paper.get_by_role("region", name="Verdict and draft answer")
     expect(result).to_be_visible()
     verdict = result.locator(".chip").inner_text()
-    answer = result.locator(".answer").inner_text()
+    answer = result.locator(".answer").text_content()  # its headings and paragraphs as one text
     assert answer
 
     with page.expect_response(re.compile(r"/api/assessments/[^/]+$")):  # read from the database

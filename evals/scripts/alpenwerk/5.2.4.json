@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "ereignisprotokolle aufgezeichnet analysiert inwieweit"}},
     {"tool": "search_records", "args": {"query": "ereignisprotokolle aufgezeichnet analysiert inwieweit"}},
-    {"answer": "Antwortentwurf für 5.2.4: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nprotokollierungsrichtlinie: „Ereignisprotokolle werden so geführt, dass Sicherheitsvorfälle erkannt und nachvollzogen werden können.“\n\nprotokollauswertung: „Die IT hat die Ereignisprotokolle jeden Monat auf Regelverstöße und Auffälligkeiten ausgewertet, zuletzt am 6.“\n\ncloud-dienste-register: „Die IT und die Informationssicherheitsbeauftragte geben jeden Dienst vor der Nutzung frei, nachdem sie den Vertrag, den Datenstandort, die Schlüsselverwaltung und die Überwachungsmöglichkeiten geprüft haben.“\n\n### Was fehlt\n\n- M1 ist nur teilweise nachgewiesen.\n- M2 ist nur teilweise nachgewiesen.\n- M3 ist nur teilweise nachgewiesen.\n- S2 ist nur teilweise nachgewiesen.\n- S3 ist nur teilweise nachgewiesen.\n- H1 ist nur teilweise nachgewiesen."}
   ],
   "judge": {
     "requirements": [

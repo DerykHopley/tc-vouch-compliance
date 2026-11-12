@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "information accounts securely applied"}},
     {"tool": "search_records", "args": {"query": "information accounts securely applied"}},
-    {"answer": "Draft answer for 4.1.3, from the evidence found."}
+    {"answer": "### What the evidence shows\n\naccount-changes-record: “IT-4410 | 2026-07-01 | 2026-06-19 | 2026-06-22 | 2026-06-26 | Basic employee role”\n\nuser-account-standard: “Accounts and passwords that a manufacturer sets in advance are disabled or given a new password before a system goes live.”\n\nsign-in-settings-record: “Personal accounts | User account standard | Every sign-in account belongs to one person, apart from the six shop floor display accounts on the list”\n\naccess-rights-policy: “When someone leaves, all their rights end with their accounts under the user account standard.”\n\n### What is missing\n\n- M5 is only partly evidenced.\n- M6 is only partly evidenced.\n- S7 is only partly evidenced.\n- S8 is only partly evidenced.\n- S9 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

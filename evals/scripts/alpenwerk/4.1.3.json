@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "anmeldeinformationen benutzerkonten angewendet inwieweit"}},
     {"tool": "search_records", "args": {"query": "anmeldeinformationen benutzerkonten angewendet inwieweit"}},
-    {"answer": "Antwortentwurf für 4.1.3: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nbenutzerkonten-protokoll: „Auszug aus dem IT-Serviceportal, Stand 30.“\n\nbenutzerkonten-verfahren: „Die IT prüft halbjährlich mit den Führungskräften alle Benutzerkonten der eigenen Systeme.“\n\nzugriffsrechte-ueberpruefung: „Juli 2026 haben die Informationseigentümer mit den Führungskräften alle Benutzerkonten und die vergebenen Rechte ihrer Systeme geprüft und jede Rolle freigegeben oder angepasst.“\n\nauthentifizierungsrichtlinie: „Anmeldedaten werden an niemanden weitergegeben, auch nicht an Vorgesetzte.“\n\nschulungsnachweis: „Die Grundschulung umfasst die Leitlinie, das Melden von Sicherheitsereignissen, den Umgang mit Schadsoftware, Passwörter und Anmeldedaten sowie Datenschutz.“\n\n### Was fehlt\n\n- M4 ist nur teilweise nachgewiesen.\n- S2 ist nur teilweise nachgewiesen.\n- S7 ist nur teilweise nachgewiesen.\n- S8 ist nur teilweise nachgewiesen.\n- S9 ist nur teilweise nachgewiesen.\n- S10 ist nicht nachgewiesen."}
   ],
   "judge": {
     "requirements": [

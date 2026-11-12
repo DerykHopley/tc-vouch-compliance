@@ -62,6 +62,7 @@ from vouch.guards import (
 from vouch.isa import Column, IsaControl, Requirement
 from vouch.language import (
     CAP_WORDS,
+    answer_headings,
     audit_claim,
     audit_words_in,
     cap_note,
@@ -99,7 +100,7 @@ SEARCH_POLICIES = "search_policies"
 SEARCH_RECORDS = "search_records"
 VULNERABILITY_STATUS = "vulnerability_status"
 GUARD = "guard"  # the node a guard step names: a refusal, a flagged passage, a dropped quote
-PROMPT_VERSION = "m7-lead-statements-1"  # the lead's statements as evidence (#422)
+PROMPT_VERSION = "answer-sections-1"  # the draft answer's two sections (#670)
 """The version of the prompts below: change it whenever a prompt changes, so a run can say
 which prompts drafted it (the developer page, #34; the audit trail, M2)."""
 
@@ -801,8 +802,11 @@ def gather_prompt(
             f"You assess one {control.source} control for {profile.company} against the "
             f"company's own evidence. {search} When you are "
             f"done, call {SUBMIT_ANSWER} with a short draft answer for an auditor, written in "
-            f"{language_name(profile.answer_language)}; quote a document only unchanged, in its "
-            f"own language. Say what the evidence shows; {never_claim(profile)} {DATA_RULE}"
+            f"{language_name(profile.answer_language)}, in two sections headed "
+            f"{answer_headings(profile.answer_language)}. Under the first, short paragraphs, "
+            "each naming its document and quoting it; under the second, one bullet per gap, or "
+            "one line saying there is none. Quote a document only unchanged, in its own "
+            f"language; {never_claim(profile)} {DATA_RULE}"
             f"{lead_rule(statements)}"
         ),
         HumanMessage(

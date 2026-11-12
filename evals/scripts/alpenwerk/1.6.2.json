@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "sicherheitsereignisse gemeldete inwieweit verwaltet"}},
     {"tool": "search_records", "args": {"query": "sicherheitsereignisse gemeldete inwieweit verwaltet"}},
-    {"answer": "Antwortentwurf für 1.6.2: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nsicherheitsereignis-register: „Jede Meldung wurde am Tag des Eingangs erfasst; die erste Maßnahme erfolgte im Median nach 2 Stunden.“\n\nvorfallbehandlungsverfahren: „Kritische Ereignisse werden telefonisch weitergegeben, alle anderen per Ticket.“\n\n### Was fehlt\n\n- H3 ist nur teilweise nachgewiesen.\n- O1 ist nicht nachgewiesen."}
   ],
   "judge": {
     "requirements": [

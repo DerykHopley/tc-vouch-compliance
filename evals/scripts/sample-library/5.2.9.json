@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "recovery services ensured backup"}},
     {"tool": "search_records", "args": {"query": "recovery services ensured backup"}},
-    {"answer": "Draft answer for 5.2.9, from the evidence found."}
+    {"answer": "### What the evidence shows\n\nbackup-policy: “Backups are encrypted, written to a backup server in the second fire section of the building, and copied each week to a storage system at an outside data centre.”\n\n### What is missing\n\n- M1 is only partly evidenced.\n- M2 is only partly evidenced.\n- S1 is only partly evidenced.\n- H1 is only partly evidenced.\n- H2 is only partly evidenced.\n- H3 is only partly evidenced."}
   ],
   "judge": {
     "requirements": [

@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "informationssicherheit richtlinien inwieweit vorhanden"}},
     {"tool": "search_records", "args": {"query": "informationssicherheit richtlinien inwieweit vorhanden"}},
-    {"answer": "Antwortentwurf für 1.1.1: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\ninformationssicherheitsleitlinie: „Die Anforderungen an die Informationssicherheit werden jedes Jahr aus der Unternehmensstrategie, den Kundenverträgen und dem österreichischen und europäischen Recht abgeleitet, zum Beispiel aus der Datenschutz-Grundverordnung.“\n\nleitlinien-veroeffentlichung: „Juli 2026 im Intranet unter „Informationssicherheit“.“\n\nprotokollierungsrichtlinie: „Ereignisprotokolle werden so geführt, dass Sicherheitsvorfälle erkannt und nachvollzogen werden können.“\n\n### Was fehlt\n\n- M5 ist nur teilweise nachgewiesen.\n- S4 ist nur teilweise nachgewiesen."}
   ],
   "judge": {
     "requirements": [

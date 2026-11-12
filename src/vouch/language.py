@@ -135,6 +135,24 @@ def lead_statement_label(code: str) -> str:
     return LEAD_STATEMENT_WORDS.get(code, LEAD_STATEMENT_WORDS["en"])
 
 
+ANSWER_HEADINGS = {
+    "en": ("What the evidence shows", "What is missing"),
+    "de": ("Was die Nachweise zeigen", "Was fehlt"),
+}
+"""The draft answer's two section headings per answer language (#670): German in the app's own
+words, as the report's "Nachweise" and "Fehlt"."""
+
+
+def answer_headings(code: str) -> str:
+    """The draft answer's headings as the gather prompt names them: the language's own, or the
+    English ones to translate for a language Vouch has none for."""
+    shows, missing = ANSWER_HEADINGS.get(code, ANSWER_HEADINGS["en"])
+    named = f"“### {shows}” and “### {missing}”"
+    if code in ANSWER_HEADINGS:
+        return named
+    return f"{named}, translated into {language_name(code)}"
+
+
 @dataclass(frozen=True)
 class CapWords:
     """The stale-evidence cap's note in one answer language (#354): its lead-in, a stale

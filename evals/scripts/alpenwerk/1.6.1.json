@@ -2,7 +2,7 @@
   "gather": [
     {"tool": "search_policies", "args": {"query": "informationssicherheit beobachtungen ereignisse inwieweit"}},
     {"tool": "search_records", "args": {"query": "informationssicherheit beobachtungen ereignisse inwieweit"}},
-    {"answer": "Antwortentwurf für 1.6.1: Die Nachweise sind unten mit der Anforderung abgeglichen."}
+    {"answer": "### Was die Nachweise zeigen\n\nmeldeverfahren-sicherheitsereignisse: „Ereignisse der physischen Sicherheit, zum Beispiel ein Einbruch, ein Diebstahl, eine offene Tür zum Serverraum oder ein verlorener Zutrittschip;“\n\nschulungsnachweis: „Grundschulung Informationssicherheit 2026 | alle Mitarbeiter | 178 | 171 | 96 %“\n\nsicherheitsereignis-register: „37 Meldungen gingen ein: 26 per E-Mail oder Ticket, 9 über die Sicherheits-Hotline und 2 von externen Stellen.“\n\n### Was fehlt\n\nEs fehlt nichts."}
   ],
   "judge": {
     "requirements": [
