@@ -6,6 +6,7 @@ documents). Local mode, the scripted fake model."""
 import base64
 
 from dossier_cards import card
+from fonts import FONTS_SETTLED, without_web_fonts
 from playwright.sync_api import Page, expect
 from test_company_setup import create_company, open_setup, to_step_7
 from test_profiles import assessed as assessed_in
@@ -14,10 +15,14 @@ from top_bar import bar_company, company_tab
 DOCUMENTS = "**/api/documents"
 
 
-def open_documents(page: Page) -> None:
-    """The Company tab from the top bar, once its documents have been read."""
+def open_documents(page: Page, url: str | None = None) -> None:
+    """The Company tab from the top bar, or with `url` that server's /company, once its documents
+    have been read."""
     with page.expect_response(DOCUMENTS) as answer:
-        company_tab(page).click()
+        if url is None:
+            company_tab(page).click()
+        else:
+            page.goto(f"{url}/company")
     assert answer.value.ok, answer.value.status
     expect(page.locator("article.documents-doc")).to_be_visible()
 
@@ -228,3 +233,50 @@ def test_a_new_version_tags_the_citing_control_and_assess_again_clears_it(
     with page.expect_response("**/api/overview"):
         page.goto(documents_url)
     expect(card(page, "4.1.2").get_by_text(NEW_EVIDENCE)).to_have_count(0)
+
+
+# The tables' scroll hint (#607, #555's fade turned sideways): on a phone each table scrolls in its
+# own container, and while columns lie beyond its right edge that edge fades into the sheet, in the
+# sheet's own colour; the fade goes at the table's end. Each table's item: whether the box around
+# its scroller fades into the sheet.
+FADES = f"""async (tables) => {{
+  {FONTS_SETTLED}
+  return tables.map((t) => {{
+    const after = getComputedStyle(t.closest('.table-wrap').parentElement, '::after')
+    const sheet = getComputedStyle(t.closest('.sheet')).backgroundColor
+    return after.content !== 'none' && after.backgroundImage.includes('gradient')
+      && after.backgroundImage.includes(sheet)
+  }})
+}}"""
+NO_FADE = """() => [...document.querySelectorAll('article.documents-doc table')].every((t) =>
+  getComputedStyle(t.closest('.table-wrap').parentElement, '::after').content === 'none')"""
+TABLES = ["Policies", "Records", "Patch"]
+
+
+def test_on_a_phone_each_tables_right_edge_fades_until_scrolled_to_its_end(page: Page, vouch_url):
+    """At 360 in the fallback fonts, CI's case (its DejaVu is wider than the web fonts)."""
+    without_web_fonts(page)
+    page.set_viewport_size({"width": 360, "height": 900})
+    open_documents(page, vouch_url)
+    sheet = page.locator("article.documents-doc")
+    expect(sheet.get_by_role("table")).to_have_count(3)
+    wraps = [sheet.get_by_role("table", name=name).locator("xpath=..") for name in TABLES]
+    for name, wrap in zip(TABLES, wraps, strict=True):
+        assert wrap.evaluate("w => w.scrollWidth > w.clientWidth"), f"{name} doesn't scroll"
+
+    assert sheet.get_by_role("table").evaluate_all(FADES) == [True] * 3
+
+    for wrap in wraps:
+        wrap.evaluate("w => { w.scrollLeft = w.scrollWidth }")
+    page.wait_for_function(NO_FADE, timeout=5000)
+
+
+def test_on_a_wide_screen_the_tables_fit_and_show_no_fade(page: Page, vouch_url):
+    page.set_viewport_size({"width": 1400, "height": 900})
+    open_documents(page, vouch_url)
+    tables = page.locator("article.documents-doc").get_by_role("table")
+    expect(tables).to_have_count(3)
+    assert tables.evaluate_all(
+        "ts => ts.every((t) => t.parentElement.scrollWidth <= t.parentElement.clientWidth)"
+    )
+    page.wait_for_function(NO_FADE, timeout=5000)
