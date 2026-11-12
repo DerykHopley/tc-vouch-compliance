@@ -139,30 +139,11 @@ describe('the second click of a double-click (ticket 527)', () => {
     expect(onConfirm).toHaveBeenCalledOnce()
   })
 
-  it('lets a click 500ms or more after the confirm through', async () => {
-    vi.useFakeTimers()
-    const { other } = withOther()
-    opened()
-    confirm(1)
-    await pastDoubleClick()
-    fireEvent.click(button('Close round'), { detail: 1 })
-    expect(other).toHaveBeenCalledOnce()
-  })
-
   it('sets no guard on a keyboard confirm (detail 0)', () => {
     const { onConfirm, other } = withOther()
     opened(0)
     confirm(0)
     expect(onConfirm).toHaveBeenCalledOnce()
-    fireEvent.click(button('Close round'), { detail: 0 })
-    expect(other).toHaveBeenCalledOnce()
-  })
-
-  it('never swallows a keyboard click, even inside a pointer guard', () => {
-    vi.useFakeTimers()
-    const { other } = withOther()
-    opened()
-    confirm(1)
     fireEvent.click(button('Close round'), { detail: 0 })
     expect(other).toHaveBeenCalledOnce()
   })

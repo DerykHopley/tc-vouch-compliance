@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
+from click_burst import DOUBLE_CLICK_MS
 from current_company import current_company
 from playwright.sync_api import APIRequestContext, Page, expect
 from reviewing import reviewed
@@ -31,9 +32,6 @@ CLOSE_FIRST = (
     'Close the review round "First round"? Its results are frozen, and the overview compares '
     "later work with them. The close is recorded in the audit trail."
 )
-# The guard's DOUBLE_CLICK_MS (#527, #562): a click anywhere within that long of the last click of
-# a burst that began on a pointer confirm presses nothing, even once the ask has left the page.
-DOUBLE_CLICK_MS = 500
 
 
 def open_dossier(page: Page, url: str) -> None:

@@ -8,15 +8,13 @@ every control is at least 44px. Each run ends on Audit readiness, as it began.""
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
+from click_burst import DOUBLE_CLICK_MS
 from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from touch_targets import small_targets
 
 TO_IMPROVEMENT = "Goal changed from Audit readiness to Internal improvement"
 TO_READINESS = "Goal changed from Internal improvement to Audit readiness"
-# The guard's DOUBLE_CLICK_MS (#527, #562): a click within that long of the last click of a burst
-# that began on a pointer confirm presses nothing, so a person's next click comes after it.
-DOUBLE_CLICK_MS = 500
 
 
 def open_dossier(page: Page, url: str) -> None:
