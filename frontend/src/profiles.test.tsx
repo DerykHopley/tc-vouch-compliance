@@ -417,16 +417,18 @@ describe('a company made in company setup, issue 409', () => {
     expect(screen.queryByText('Goal: Internal improvement')).toBeNull()
   })
 
-  /** serveDeveloper, the list read again held until the returned function answers it. */
+  /** serveDeveloper, the list read again held until the returned function answers it, whenever it was asked (#540):
+   * `reads` counts the read before its fetch call, so a resolver taken from the call could still be unset. */
   function heldRelisting() {
     const fetch = serveDeveloper([NORDLICHT, TESTWERK, MUSTERFIRMA])
     const answered = fetch.getMockImplementation()!
     let release: (answer: Response) => void = () => {}
+    const relisted = new Promise<Response>((resolve) => { release = resolve })
     let listings = 0
     fetch.mockImplementation((url: string, init?: RequestInit) => url === '/api/profiles' && ++listings > 1
-      ? new Promise<Response>((resolve) => { release = resolve })
+      ? relisted
       : answered(url, init))
-    return (answer: Response) => release(answer)
+    return release
   }
 
   it('stays on the setup address until the list answers again, and after closing opens nothing', async () => {
