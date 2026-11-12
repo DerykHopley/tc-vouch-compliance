@@ -2637,10 +2637,26 @@ def reset_demo(
     """Reset demo (#605, vouch.demo_reset): every user's progress and history under a listed
     company deleted, the reset's audit entry written; on Nordlicht the demo round then seeded
     for the developer, on the fake model, counting against no limit. An unlisted company is a
-    404, nothing changed; the database down a 503. `seeded`: the demo round was played; a seed
-    that stops partway leaves the company wiped, with `note` saying so."""
-    if profile_id not in {p.id for p in _profile_scan(settings, companies.all()).loaded}:
+    404, nothing changed; another reset of it running a 409 (#619), nothing changed; the
+    database down a 503. `seeded`: the demo round was played; a seed that stops partway leaves
+    the company wiped, with `note` saying so."""
+    listed = {p.id: p for p in _profile_scan(settings, companies.all()).loaded}
+    if profile_id not in listed:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
+    resets: demo_reset.ResetsRunning = request.app.state.resets
+    try:
+        with resets.hold(profile_id):
+            return _reset_held(request, user, settings, db, profile_id)
+    except demo_reset.ResetRunning:
+        company = listed[profile_id].company
+        raise HTTPException(
+            status_code=409, detail=demo_reset.ANOTHER_RESET.format(company=company)
+        ) from None
+
+
+def _reset_held(
+    request: Request, user: User, settings: Settings, db: Database | None, profile_id: str
+) -> dict[str, Any]:
     name = reviewer_name(request, user, settings)
     demo_reset.wipe(db, profile_id, audit.Reviewer(user.id, name), audit.now())
     log.info("company %s reset to its demo state by %s", profile_id, user.id)
@@ -2747,6 +2763,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.added_documents = added_documents_store(app.state.database)
     app.state.spending = SpendingGuard(spending_store(app.state.database))
     app.state.running = RunningAssessments()
+    app.state.resets = demo_reset.ResetsRunning()
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)

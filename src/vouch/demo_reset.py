@@ -10,11 +10,17 @@ Postgres deletes in one transaction under the guarded tables' reset setting
 (vouch.database's `reset_company`, RESET_DEMO_SETTING); without a database, this process's
 stores forget the company. A real deployment would drop this delete exception.
 
+One reset of a company runs at a time in this process (#619, `ResetsRunning`): a second one
+while it runs is refused, rather than finding the seed's assessment already running.
+
 FastAPI's TestClient is imported at the top on purpose: the seed's client is the app's own
 routes, in this process, for the seeding app (`seed_demo`), not a test.
 """
 
 import json
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 
@@ -34,6 +40,36 @@ PAGE = 100
 """How many namespaces, or items, the wipe reads from the process's store at a time."""
 DEMO_COMPANY = DEFAULT_PROFILE
 """The company whose Reset demo seeds the demo round; every other one is left empty."""
+ANOTHER_RESET = (
+    "Another reset of {company} is running. Nothing was reset; try again when it has finished."
+)
+"""The refusal of a reset while another of the same company runs (#619)."""
+
+
+class ResetRunning(RuntimeError):
+    """Another reset of the company is running in this process."""
+
+
+class ResetsRunning:
+    """Which companies a Reset demo is running on in this process (#619): at most one each."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held: set[str] = set()
+
+    @contextmanager
+    def hold(self, profile_id: str) -> Iterator[None]:
+        """Held for the reset of `profile_id`, released however it ends; ResetRunning, with
+        nothing held, when another reset of it is running."""
+        with self._lock:
+            if profile_id in self._held:
+                raise ResetRunning(profile_id)
+            self._held.add(profile_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._held.discard(profile_id)
 
 
 def reset_entry(reviewer: Reviewer, profile_id: str, at: datetime) -> AuditEntry:
