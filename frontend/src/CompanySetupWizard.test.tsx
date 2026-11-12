@@ -888,7 +888,7 @@ describe('company setup', () => {
     const onCreated = wizard()
     await toStep7()
     await create()
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement', expect.any(String)))
     expect(onCreated).toHaveBeenCalledOnce()
   })
 
@@ -961,7 +961,7 @@ describe('company setup', () => {
     await next()
     expect(screen.queryByRole('alert')).toBeNull() // leaving the step drops it
     await create()
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement', expect.any(String)))
     expect(posts(fetch)).toHaveLength(2)
   })
 
@@ -978,7 +978,7 @@ describe('company setup', () => {
     expect(onCreated).not.toHaveBeenCalled()
     await create()
     expect(screen.queryByRole('alert')).toBeNull() // a new press clears the last alert
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement', expect.any(String)))
     expect(posts(fetch)).toHaveLength(2)
   })
 
@@ -993,7 +993,7 @@ describe('company setup', () => {
     const onCreated = wizard()
     await toStep7()
     await create()
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED, 'internal-improvement', expect.any(String)))
     expect(screen.queryByRole('alert')).toBeNull()
     expect(posts(fetch)).toHaveLength(1)
   })
