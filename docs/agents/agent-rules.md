@@ -14,6 +14,14 @@ Project rules on top of the rig's ticket loop (`CLAUDE.md`). Each line says wher
 
 - **Take an exit code before any pipe.** In `cmd | tail; echo $?`, `$?` is `tail`'s code, which is 0 even when `cmd` failed. Run the command on its own with its output in a scratch file (`cmd > "$SCRATCH/out.txt" 2>&1; echo rc=$?`), or read `${PIPESTATUS[0]}` straight after the pipe. From #213, where #53's verifier reported exit 0 for an eval run that exited 3.
 
+## The owner's machine
+
+Builders and verifiers share the owner's machine with each other and with the owner's own work. From 2026-11-12, when a builder reproducing a race ran `stress-ng --cpu 32` beside other builders' browser lanes: the load reached 54 on 16 cores, and the owner couldn't tell what was running (#703).
+
+- **CPU stress (stress-ng or similar) needs the owner's OK first.** Ask through your thread with why it's needed, how many CPUs, how long, and what else is running; wait for the OK. Keep to `--cpu 8` at most and `--timeout 300s` at most unless the owner says otherwise, and stop it straight after the reproduction. A held request (`page.route`) or a delayed font usually reproduces a race without loading the machine; try that first. No script or hook enforces this limit: it rests on this rule.
+- **One browser lane per builder.** Run Chromium and Firefox in separate `run.sh` calls, one after the other, never two lanes at once. The Fixes thread caps how many builders run lanes at the same time and names the number in its reports. A browser lane starts its own servers and browsers, and several at once crowd the machine.
+- **Servers stop when work ends.** Every server, preview or watcher you start stops when your work is done (`scripts/dev.sh --stop <name>` for a detached preview), even when the work ends in a failure. Leftover servers hold ports and memory the owner then has to find.
+
 ## Colour and contrast
 
 - **Compute every contrast ratio** with `scripts/contrast.py <fg> <bg> [--min 4.5]`, and quote the number it prints. Never estimate one. From the M0 design calls, where an estimated "~3.9:1" was really 3.0:1.
