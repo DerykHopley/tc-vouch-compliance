@@ -39,6 +39,7 @@ from vouch.database import (
 )
 from vouch.demo_round import NEXT_ROUND, ROUND_NAME
 from vouch.memory import process_store
+from vouch.runs import RunningAssessments
 from vouch.spending import DAILY_LIMIT
 
 database_url = test_memory.database_url
@@ -210,7 +211,6 @@ def test_a_second_reset_of_the_company_while_one_runs_is_refused_with_409(monkey
         second = reset(client, developer)
         second_done.set()
         first_answer = first.result(timeout=60)
-        after = reset(client, developer)  # the first one's hold is released
 
     assert second.status_code == 409, second.text
     assert second.json()["detail"] == (
@@ -218,21 +218,34 @@ def test_a_second_reset_of_the_company_while_one_runs_is_refused_with_409(monkey
         "Nothing was reset; try again when it has finished."
     )
     assert (first_answer.status_code, first_answer.json()["seeded"]) == (200, True)
-    assert after.status_code == 200
 
 
-def test_a_reset_that_fails_releases_its_hold(monkeypatch, users):
-    developer, _ = users
-    real = demo_reset.wipe
+def test_a_second_hold_of_the_same_company_is_refused():
+    resets = RunningAssessments()
+    with demo_reset.hold(resets, "nordlicht"):
+        refused = pytest.raises(demo_reset.ResetRunning)
+        with refused, demo_reset.hold(resets, "nordlicht"):
+            pass
 
-    def down(*args: Any) -> None:
+
+def test_a_hold_on_another_company_is_not_blocked():
+    resets = RunningAssessments()
+    with demo_reset.hold(resets, "nordlicht"), demo_reset.hold(resets, "alpenwerk"):
+        pass
+
+
+def test_the_hold_is_released_after_a_normal_exit():
+    resets = RunningAssessments()
+    with demo_reset.hold(resets, "nordlicht"):
+        pass
+    assert resets.try_hold("nordlicht")
+
+
+def test_the_hold_is_released_after_an_exception():
+    resets = RunningAssessments()
+    with pytest.raises(DatabaseUnavailable), demo_reset.hold(resets, "nordlicht"):
         raise DatabaseUnavailable("down")
-
-    with TestClient(app_on(None)) as client:
-        monkeypatch.setattr(demo_reset, "wipe", down)
-        assert reset(client, developer).status_code == 503
-        monkeypatch.setattr(demo_reset, "wipe", real)
-        assert reset(client, developer).status_code == 200
+    assert resets.try_hold("nordlicht")
 
 
 def test_an_unknown_company_is_404(users):

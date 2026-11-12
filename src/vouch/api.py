@@ -2643,9 +2643,8 @@ def reset_demo(
     listed = {p.id: p for p in _profile_scan(settings, companies.all()).loaded}
     if profile_id not in listed:
         raise HTTPException(status_code=404, detail=UNKNOWN_PROFILE)
-    resets: demo_reset.ResetsRunning = request.app.state.resets
     try:
-        with resets.hold(profile_id):
+        with demo_reset.hold(request.app.state.resets, profile_id):
             return _reset_held(request, user, settings, db, profile_id)
     except demo_reset.ResetRunning:
         company = listed[profile_id].company
@@ -2763,7 +2762,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.added_documents = added_documents_store(app.state.database)
     app.state.spending = SpendingGuard(spending_store(app.state.database))
     app.state.running = RunningAssessments()
-    app.state.resets = demo_reset.ResetsRunning()
+    app.state.resets = RunningAssessments()  # one Reset demo per company (#619)
     frontend = settings.frontend
     app.include_router(public)
     app.include_router(router)
