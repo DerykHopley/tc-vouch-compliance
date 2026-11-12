@@ -251,6 +251,7 @@ describe('the working paper', () => {
       render(<App />)
       const bar = await screen.findByRole('region', { name: 'Review' })
       await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' }))
+      await userEvent.click(within(bar).getByRole('button', { name: 'Accept verdict' })) // its ask's confirm (#634)
       expect(await within(screen.getByRole('region', { name: 'Review' })).findByText('Accepted')).toBeTruthy()
       const index = screen.getByRole('navigation', { name: 'Controls' })
       expect(within(within(index).getByRole('link', { name: /^4\.1\.2/ })).getByText('Accepted')).toBeTruthy()

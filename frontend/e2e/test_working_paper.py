@@ -15,6 +15,7 @@ from fonts import FONTS_SETTLED, without_web_fonts
 from hyphen_breaks import assert_hyphenated_in_german
 from playwright.sync_api import APIRequestContext, Locator, Page, Route, expect
 from reviewing import confirmed
+from touch_targets import small_targets
 from unbreakable import LONG_QUOTES, LONG_QUOTES_LEAST, with_long_quotes
 
 ASSESSED = "4.1.2"  # the demo script's control: five requirements, each with a quote
@@ -845,6 +846,53 @@ def test_a_409_in_the_docked_buttons_keeps_their_room_and_focus_clear(
         if (hit := page.evaluate(COVERED)) is not None:
             covered.append(hit)
     assert covered == [], covered
+
+
+def test_the_docked_reject_asks_in_the_docked_row_and_is_answered_by_keyboard(
+    page: Page, paper_url, nordlicht_later
+):
+    """#634: on a proposed 5.2.4 at 360px, Enter on the docked Reject verdict sends nothing: the
+    ask opens in the docked row, focus on Cancel, the row still docked under the top bar and above
+    Ask Vouch, its room kept in the bar, nothing sideways or under 44px. Esc closes it with focus
+    back on Reject verdict; asked again, Shift+Tab and Enter on its Reject verdict records it."""
+    nordlicht_later(paper_url)
+    paper, _ = proposed_wide_paper(page, paper_url, (360, 740))
+    page.evaluate("window.scrollTo(0, 0)")
+    assert page.evaluate(DOCK)["docked"]
+    sent: list[str] = []
+    page.on("request", lambda r: sent.append(r.url) if r.url.endswith("/review") else None)
+    bar = paper.get_by_role("region", name="Review")
+    reject = bar.get_by_role("button", name="Reject verdict")
+    reject.focus()
+    page.keyboard.press("Enter")
+    expect(bar.get_by_role("button", name="Cancel")).to_be_focused()
+    expect(bar.get_by_role("alert")).to_contain_text("with no note?")
+    page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+    )
+    seen = page.evaluate(DOCK)
+    assert seen["docked"], seen
+    assert seen["dock"]["top"] >= seen["top"] - 1, seen  # the whole ask below the top bar
+    assert seen["dock"]["bottom"] <= 740 - 88 + 1, seen  # and above Ask Vouch's clearance
+    assert abs(seen["slot"]["height"] - seen["content"]) <= 1, seen
+    assert not page.evaluate(
+        "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+    )
+    assert small_targets(page) == []
+
+    page.keyboard.press("Escape")
+    expect(bar.get_by_role("alert")).to_have_count(0)
+    expect(reject).to_be_focused()
+    assert sent == []
+
+    page.keyboard.press("Enter")
+    expect(bar.get_by_role("button", name="Cancel")).to_be_focused()
+    page.keyboard.press("Shift+Tab")
+    expect(bar.get_by_role("button", name="Reject verdict")).to_be_focused()
+    with page.expect_response(re.compile(r"/review$")) as answer:
+        page.keyboard.press("Enter")
+    assert answer.value.ok, answer.value.status
+    expect(bar.get_by_text("Rejected", exact=True)).to_be_visible()
 
 
 def test_the_docked_buttons_stay_docked_while_a_remediation_decision_lands(

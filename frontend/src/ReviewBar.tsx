@@ -2,6 +2,7 @@ import { type CSSProperties, type ReactNode, useEffect, useId, useLayoutEffect, 
 import { type Assessment, dateTimeLabel, plural, REVIEW_WORDS, type ReviewStatus, type Verdict, VERDICT_WORDS } from './assessment.ts'
 import { confirmFindings, JUDGED_VERDICTS, type JudgedVerdict, type Override, type Refusal, REVIEW_STEP_WORDS,
   REVIEW_STEPS, type Review, type ReviewDecision, type ReviewStep, submitReview } from './review.ts'
+import InlineConfirm from './InlineConfirm.tsx'
 import { useHeightVar } from './useHeightVar.ts'
 
 /** The lead's review on the working paper (#42, in three steps since #372): the override editor and the review bar at
@@ -67,6 +68,21 @@ export function OverrideEditor({ requirementId, agentVerdict, saved, onSave, onC
 
 export const NOT_READ_AGAIN = 'The assessment could not be read again just now. Please try again.'
 export const DECIDE_EACH_ITEM = 'Approve or discard each remediation item to accept the verdict.'
+
+/**
+ * What a final decision's ask says before it is recorded (#634): what goes in the audit trail, and what the decision
+ * leads to. A reject's note is the only guidance the next assessment gets (`_note_text` in `vouch.graph`), so a reject
+ * with none says so. The ask follows the note as it is typed, without closing.
+ */
+const decisionAsk = (decision: ReviewDecision['decision'], note: string) => {
+  const noted = note.trim() !== ''
+  const recorded = noted ? 'Your decision and note are recorded in the audit trail'
+    : 'Your decision is recorded in the audit trail'
+  if (decision === 'accept') return `Accept this control's verdict? ${recorded}, and the verdict counts towards readiness.`
+  return noted ? `Reject this control's verdict? ${recorded}, and the next assessment of this control reads your note.`
+    : `Reject this control's verdict with no note? ${recorded}. A note is the only guidance the next assessment of this `
+      + 'control gets: write one in Your note first.'
+}
 
 /** What the bar sends: the findings (Confirm findings), or a decision. */
 type Action = 'confirm' | ReviewDecision['decision']
@@ -221,8 +237,9 @@ function useDock(reviewing: boolean) {
  * review's three steps and marks the current one (#372). Confirm findings: the overrides made on the rows, recorded
  * with Confirm findings through the findings route. Plan fixes: the remediation items are decided on the rows; the
  * bar counts them, and Accept verdict waits, saying why. Accept: Accept verdict. The note goes with Reject (at any
- * step) or Accept. A failure shows the step as not recorded, with Retry; a refused one (422) says why, with nothing to
- * retry; a 409 shows the review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
+ * step) or Accept; both ask first in the bar (InlineConfirm, `decisionAsk`, #634), a Retry doesn't. A failure
+ * shows the step as not recorded, with Retry; a refused one (422) says why, with nothing to retry; a 409 shows the
+ * review moved on, with Refresh. On a reviewed control: who decided and when, the note, and for
  * a rejected one Assess again; an accepted one reviewed before the three steps is marked "before the three-step review"
  * (#373). Shown afresh (a new key) whenever its assessment is read again, so a message about an
  * older read never lingers. While the review is in progress its buttons stay in reach (#467, `useDock`).
@@ -291,11 +308,14 @@ export default function ReviewBar(props: ReviewBarProps) {
               <button className="btn btn-primary" disabled={held} aria-busy={sending === 'confirm'}
                 onClick={() => void act('confirm')}>Confirm findings</button>
             ) : (
-              <button className="btn btn-sign" disabled={held || planning} aria-busy={sending === 'accept'}
-                aria-describedby={planning ? whyId : undefined} onClick={() => void act('accept')}>Accept verdict</button>
+              <InlineConfirm label="Accept verdict" subject="accept" question={decisionAsk('accept', note)}
+                confirmDisabled={held} onConfirm={() => void act('accept')}
+                trigger={{ className: 'btn btn-sign', disabled: held || planning, 'aria-busy': sending === 'accept',
+                  'aria-describedby': planning ? whyId : undefined }} />
             )}
-            <button className="btn" disabled={held} aria-busy={sending === 'reject'}
-              onClick={() => void act('reject')}>Reject verdict</button>
+            <InlineConfirm label="Reject verdict" subject="reject" question={decisionAsk('reject', note)}
+              confirmDisabled={held} onConfirm={() => void act('reject')}
+              trigger={{ className: 'btn', disabled: held, 'aria-busy': sending === 'reject' }} />
           </div>
           {/* What a press answers stays with the buttons, where it was pressed. */}
           {refused && (

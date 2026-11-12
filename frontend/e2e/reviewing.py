@@ -5,7 +5,8 @@ Reject. The page's own steps are test_review's."""
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from playwright.sync_api import APIRequestContext
+from click_burst import DOUBLE_CLICK_MS
+from playwright.sync_api import APIRequestContext, Locator, Page, Response, expect
 
 OWNER = "IT security officer"
 """The owner role an approval names, so a "not drafted" item (no owner) can be approved too."""
@@ -70,3 +71,17 @@ def reviewed(
                 decided(request, url, thread_id, item["requirement_id"], body, headers)
     review = f"{url}/api/assessments/{thread_id}/review"
     return _post(request, review, {"decision": decision}, headers)["assessment"]
+
+
+def decide(
+    page: Page, bar: Locator, label: Literal["Accept verdict", "Reject verdict"]
+) -> Response:
+    """Presses a final decision in the review bar and confirms its ask (#634): the review route's
+    response, once a double-click's time has passed, so the next click isn't swallowed."""
+    bar.get_by_role("button", name=label).click()
+    expect(bar.get_by_role("alert")).to_be_visible()
+    with page.expect_response(lambda r: r.url.endswith("/review")) as answer:
+        bar.get_by_role("button", name=label).click()
+    # The next click comes after a double-click's time (#562).
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
+    return answer.value
