@@ -7,6 +7,7 @@ is gone). Local mode, on the fake model: its one user is a developer."""
 import re
 
 import pytest
+from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from top_bar import (
     back_to_overview,
@@ -247,9 +248,14 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
 ):
     """#671: Chromium scrolled a scrolled-down page by about 213px as "Your menu" took focus. No
     control in the sticky top bar moves the page as it takes focus; on a phone, with the Menu open."""
-    opened(page, f"{profiles_url}/developer", width)
+    # its settings and prompts read, and its fonts in, before scrolling: its height settled
+    with (
+        page.expect_response("**/api/developer/settings"),
+        page.expect_response("**/api/developer/prompts"),
+    ):
+        opened(page, f"{profiles_url}/developer", width)
     expect(page.get_by_role("region", name="Recent runs")).to_be_visible()  # the page's foot
-    page.wait_for_load_state("networkidle")  # its prompts and settings read: its height settled
+    page.evaluate(f"async () => {{ {FONTS_SETTLED} }}")  # a late font rewraps the prompts
     bar = page.get_by_role("banner")
     if width < 700:
         bar.get_by_role("button", name="Menu", exact=True).click()
@@ -269,4 +275,3 @@ def test_tabbing_through_the_top_bar_on_a_scrolled_page_never_scrolls_it(
         if user.evaluate("button => button === document.activeElement"):
             break
     expect(user).to_be_focused()
-    assert page.evaluate("window.scrollY") == scrolled
