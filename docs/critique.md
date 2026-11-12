@@ -100,6 +100,7 @@ Sign-in and access, the guards (quote check, output guard, redaction), the appen
 - **Seen:** the trigger lets any session that sets `vouch.reset_demo = 'on'` delete audit trail rows; the code says so ("the guard can't tell who did"). Reset demo deletes every user's trail under a company in one click after a confirm. *Unverified:* the app and `vouch-db-setup` share `VOUCH_DATABASE_URL` (`DEPLOY.md`, "The database"), so the app's database user likely owns the table and could drop the trigger too.
 - **Severity:** Medium. Fine for a demo; it is the claim "append-only" that is too strong.
 - **Fix:** say "append-only except Reset demo" in `docs/technical-decisions.md` and on the Company page. For real data: drop the exception, and give the app a database user without table ownership.
+- **Since:** the owner chose to keep the exception and say so (2026-11-12, #629): the docs and code comments now read "append-only, except Reset demo". A database user that doesn't own the table is an idea for later.
 
 ### S5. The instruction-like check is a word list
 

@@ -4,6 +4,7 @@ import DocumentTable from './DocumentTable.tsx'
 import { GOAL_LINES, GOAL_WORDS } from './overview.ts'
 import type { ProfileSummary } from './profiles.ts'
 import type { Goal } from './report.ts'
+import { markSetupEntry } from './setupHistory.ts'
 import {
   type AnswerLanguage, type ChosenEvidence, type CompanyCreated, COUNTRIES, createCompany, type FrameworkControl,
   frameworkControls, LANGUAGES, type LibraryDocument, type LibrarySource, MAX_COMPANY_LENGTH, type NotApplicable,
@@ -90,8 +91,11 @@ const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password'
 
 /** `developerPath`: the developer page's address, for the breadcrumb's link; `onDeveloper` opens it. `onCreated`: the
  * company was created, as GET /api/profiles lists it, with the Goal chosen on step 4; the app then opens under it, sets
- * that Goal and runs a profile pass (#447). The Goal isn't part of the create: it is kept per user and profile. */
-type Props = { developerPath: string; onDeveloper: () => void; onCreated?: (profile: ProfileSummary, goal: Goal) => void }
+ * that Goal and runs a profile pass (#447). The Goal isn't part of the create: it is kept per user and profile. With
+ * them, the wizard's own history entry (markSetupEntry), which gives way once the create lands (#476, #568). */
+type Props = {
+  developerPath: string; onDeveloper: () => void; onCreated?: (profile: ProfileSummary, goal: Goal, entry: string) => void
+}
 
 /**
  * Company setup (#403, M8 #351): a developer walks the steps that make a company, going back and forward without
@@ -102,6 +106,7 @@ type Props = { developerPath: string; onDeveloper: () => void; onCreated?: (prof
  */
 export default function CompanySetupWizard({ developerPath, onDeveloper, onCreated }: Props) {
   const [step, setStep] = useState(COMPANY)
+  const [entry] = useState(markSetupEntry)
   const [answers, setAnswers] = useState<Answers>({ company: '', country: '', language: 'en', level: null, goal: 'internal-improvement',
     notApplicable: [],
     evidence: { policies: [], records: [] } })
@@ -194,7 +199,7 @@ export default function CompanySetupWizard({ developerPath, onDeveloper, onCreat
       protection_level: answers.level, not_applicable: answers.notApplicable, evidence: answers.evidence,
     })
     if (created.status === 'created') {
-      onCreated?.(created.profile, answers.goal)
+      onCreated?.(created.profile, answers.goal, entry)
       return
     }
     setCreating(false)

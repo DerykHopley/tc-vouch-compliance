@@ -100,6 +100,17 @@ describe('the Add document form (ticket 585)', () => {
     expect(title.value).toBe('Visitor badge policy')
   })
 
+  it("the approval date can't be after today (ticket 627)", () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 12, 12)) // noon on 12 November, the lead's time
+    try {
+      shown()
+      expect((screen.getByLabelText('Approval date') as HTMLInputElement).max).toBe('2026-11-12')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a second file without front matter resets kind, date and cycle to their defaults', async () => {
     shown()
     const date = screen.getByLabelText('Approval date') as HTMLInputElement

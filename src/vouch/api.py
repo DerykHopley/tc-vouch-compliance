@@ -19,7 +19,7 @@ import unicodedata
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 from importlib.metadata import version
 from typing import Annotated, Any, NamedTuple, cast
 from urllib.parse import quote
@@ -220,6 +220,8 @@ BUILT_IN_NOT_WITHDRAWN = "A built-in document can't be withdrawn."
 NO_ADDED_DOCUMENT = "This company has no added document with that id."
 """`POST /api/documents/{id}/withdraw`'s 404 (#586)."""
 NOT_BASE64 = "The file could not be read. Choose it again."
+FUTURE_APPROVAL = "The approval date can't be after today."
+"""`POST /api/documents`'s 400 for a future approval date, which would never be stale (#627)."""
 DOCUMENT_MESSAGE_BYTES = 2 * MAX_BYTES
 """`POST /api/documents`'s body limit: the file in base64 (a third larger) and the form's
 fields, with room over, so a file a little over MAX_BYTES gets the add's own sentence rather
@@ -1344,8 +1346,8 @@ def read_audit_trail(
     `before` for the page after (null: no more). The notes Vouch wrote (an approval or discard,
     a question, a priority change) are served in the profile's answer language, as the report's
     trail serves them (vouch.report.trail_entries, #535); a lead's own notes as written. The
-    trail is append-only: every entry stays stored as written, and no route changes or removes
-    one."""
+    trail is append-only, except Reset demo: every entry stays stored as written, and no route
+    changes or removes one; only Reset demo deletes a company's trail (vouch.demo_reset)."""
     page = audit.read(trail, user.id, profile.id, limit=limit, before=before)
     entries = report.trail_entries(page.entries, profile.answer_language)
     clean, _ = redact_data({"entries": entries})
@@ -1958,11 +1960,16 @@ class DocumentRequest(BaseModel):
     """Add it although its text reads like an instruction (the lead saw the warning)."""
 
     def new_document(self) -> NewDocument:
-        """The document to add, or a 400 for content that isn't base64."""
+        """The document to add, or a 400 for content that isn't base64 or an approval date after
+        today."""
         try:
             raw = base64.b64decode(self.content, validate=True)
         except binascii.Error:
             raise HTTPException(status_code=400, detail=NOT_BASE64) from None
+        # Today somewhere: up to a day past the server's UTC date (UTC+14), as the form's
+        # date field allows the lead's own today.
+        if self.approval_date > report.today() + timedelta(days=1):
+            raise HTTPException(status_code=400, detail=FUTURE_APPROVAL)
         return NewDocument(
             filename=self.filename,
             content=raw,

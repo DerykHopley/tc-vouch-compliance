@@ -52,6 +52,16 @@ describe('Menu (issue 222)', () => {
       expect(document.activeElement).toBe(button)
     })
 
+  it('moves to its last item with End and its first with Home (issue 615)', async () => {
+    const { button } = shown()
+    button.focus()
+    await userEvent.keyboard('{Enter}')
+    await userEvent.keyboard('{End}')
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Second' }))
+    await userEvent.keyboard('{Home}')
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'First' }))
+  })
+
   it('closes with Esc after a click opened it, focus still on its button', async () => {
     const { button } = shown()
     await userEvent.click(button)

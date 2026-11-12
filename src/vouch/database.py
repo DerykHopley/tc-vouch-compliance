@@ -21,7 +21,8 @@ bound on every answer, the pool's checkout check included (BoundedConnection).
 direct connection outside the pool, so a wrong password or a missing database is reported at once.
 It also creates Vouch's own tables, the settings (the developer's model choice, #34; the daily
 limit, #35), the daily assessment, profile pass and chat counts (#628), the usage (#35), the
-append-only audit trail (#39), the remediation items the lead decided on (#43), the improvement plan's marks on them (#410), each
+audit trail (#39, append-only except Reset demo), the remediation items the lead decided on
+(#43), the improvement plan's marks on them (#410), each
 profile's Goal (#369), its review rounds (#402), the open questions on its controls (#414), the
 evidence documents added to it (#584) and the companies made in the app (#385); nothing else
 does. Before it has run, a setting reads as unset, a Goal as Audit readiness, the plan as no
@@ -131,7 +132,8 @@ _RESET_DELETE = (
     "THEN RETURN OLD; END IF; "
 )
 AUDIT_TABLE = "vouch_audit_trail"
-"""Every reviewed verdict and override (vouch.audit), append-only, in its decision's transaction."""
+"""Every reviewed verdict and override (vouch.audit), append-only except Reset demo, in its decision's
+transaction."""
 AuditAction = Literal[
     "accept",
     "reject",

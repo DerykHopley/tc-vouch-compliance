@@ -18,7 +18,8 @@ type MenuProps = {
 
 /**
  * A menu button (#222, the top bar's profile dropdown and user menu): a click, Enter, Space or Arrow Down opens it,
- * the keyboard on its first item; the arrows move between its items, round again; Esc, Tab or a click outside closes
+ * the keyboard on its first item; the arrows move between its items, round again, Home and End to the first and last
+ * (#615); Esc, Tab or a click outside closes
  * it, Esc back on the button. Its items are `MenuItem`s, or anything with role menuitem or menuitemradio.
  */
 export default function Menu({ label, button, className, buttonClassName, focusOnMount = false, children }:
@@ -59,6 +60,9 @@ export default function Menu({ label, button, className, buttonClassName, focusO
         e.preventDefault()
         const step = e.key === 'ArrowDown' ? 1 : -1
         all[at === -1 ? (step === 1 ? 0 : all.length - 1) : (at + step + all.length) % all.length]?.focus()
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault()
+        all[e.key === 'Home' ? 0 : all.length - 1]?.focus()
       }
     }
     document.addEventListener('pointerdown', outside)
