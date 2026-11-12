@@ -17,6 +17,9 @@ seconds means and counted instead.
 The served models (served_models, #185) are the models OpenRouter named as serving a run's
 calls: a router's picks, shown for a router run by this page and the summary alike, and "not
 recorded" for a run saved before they were.
+
+The over-claimed rate (over_claimed, #631) counts verdicts more evidenced than expected, the
+costly direction of error; verdict_table shows each run's expected against given verdicts.
 """
 
 import argparse
@@ -129,15 +132,20 @@ def served_models(cases: Sequence[dict[str, Any]]) -> dict[str, int] | None:
 
 
 EVIDENCE_RANK = {"not-evidenced": 0, "partly-evidenced": 1, "evidenced": 2}
-"""How much evidence a verdict claims; not applicable, and no verdict, claim none of this."""
+"""How much evidence a verdict claims: vouch.rounds' VERDICT_RANK without not applicable, which
+ranks with evidenced there (a round's comparison) but claims no evidence here, so it is never
+over-claimed. Written again here so the report needn't import the database code."""
 VERDICT_WORDS = {
     "evidenced": "evidenced",
     "partly-evidenced": "partly evidenced",
     "not-evidenced": "not evidenced",
     "not-applicable": "not applicable",
 }
-"""The glossary's words for the verdicts in the raw results."""
+"""The glossary's words for the verdicts in the raw results: vouch.graph's verdict_words, for
+each verdict in a fixed order (the table's rows and columns). Written again here so the report
+needn't import the model code."""
 NO_VERDICT = "no verdict"
+"""The column for a requirement scored without a verdict: a failed case's."""
 
 
 def _requirements(cases: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -163,7 +171,7 @@ def over_claimed(cases: Sequence[dict[str, Any]]) -> tuple[int, int]:
 def verdict_table(cases: Sequence[dict[str, Any]]) -> list[str]:
     """A Markdown table of a run's requirements, expected verdict (rows) against given verdict
     (columns). Not applicable gets a row or column only when it occurs; no verdict (a failed
-    case, or a requirement the run left out) is always a column."""
+    case's requirements) is always a column."""
     scored = _requirements(cases)
     seen = {r.get("expected") for r in scored} | {r.get("verdict") for r in scored}
     shown = [v for v in VERDICT_WORDS if v in EVIDENCE_RANK or v in seen]
@@ -268,17 +276,17 @@ def _mark(data: dict[str, Any]) -> str:
     return " (dry run only)"
 
 
+def _fraction(part: int, whole: int) -> str:
+    """A share as a cell: "75% (3/4)", or "n/a" of nothing."""
+    return f"{part / whole:.0%} ({part}/{whole})" if whole else "n/a"
+
+
 def _share(data: dict[str, Any], share: str, count: str) -> str:
-    value = data.get(share)
-    if value is None:
-        return "n/a"
-    part, whole = data[count]
-    return f"{value:.0%} ({part}/{whole})"
+    return "n/a" if data.get(share) is None else _fraction(*data[count])
 
 
 def _over_claimed(data: dict[str, Any]) -> str:
-    part, whole = over_claimed(data["cases"])
-    return f"{part / whole:.0%} ({part}/{whole})" if whole else "n/a"
+    return _fraction(*over_claimed(data["cases"]))
 
 
 def _faithfulness(m: Measures) -> str:
@@ -391,8 +399,10 @@ VERDICTS_HEADING = "## Expected against given verdicts"
 VERDICTS_EXPLAINED = (
     "Per run, each requirement counted by its expected verdict (row) and the verdict given "
     "(column). Right verdicts sit on the diagonal; over-claimed ones below it, to its left. "
-    '"No verdict" is a failed case\'s requirement, or one the run left unjudged.'
+    '"No verdict" is a failed case\'s requirement; a requirement the judge left unjudged was '
+    "saved as not evidenced, and counts there."
 )
+"""What the verdict tables' section says above them."""
 RUNS_HEADING = "## Runs"
 """The rendered page's last section: one `- `file`: ...` line per run."""
 

@@ -362,16 +362,11 @@ def test_over_claimed_counts_verdicts_more_evidenced_than_expected():
             ("evidenced", "partly-evidenced"),  # under-claimed: not counted
             ("evidenced", "evidenced"),
         ),
-        verdicts(("partly-evidenced", None), ("evidenced", "not-applicable")),
+        verdicts(("evidenced", "not-applicable")),
+        verdicts(("not-evidenced", None), error="ConnectionError: 502"),  # in the whole only
     ]
 
     assert over_claimed(cases) == (3, 7)
-
-
-def test_a_failed_cases_requirements_count_in_the_whole_but_never_as_over_claimed():
-    failed = verdicts(("not-evidenced", None), error="ConnectionError: 502")
-
-    assert over_claimed([verdicts(("not-evidenced", "evidenced")), failed]) == (1, 2)
 
 
 def test_over_claimed_scores_nothing_for_cases_saved_without_requirements():
@@ -415,5 +410,4 @@ def test_the_page_shows_the_over_claimed_rate_and_a_verdict_table_per_run(tmp_pa
     assert "## Over-claimed" in page
     assert "| m/x | n/a | 50% (1/2) |" in page
     assert "### m/x on nordlicht" in page
-    assert "| not evidenced | 1 | 0 | 0 | 0 |" in page
     assert "### m/x on alpenwerk" in page

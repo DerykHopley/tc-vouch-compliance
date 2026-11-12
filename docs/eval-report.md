@@ -131,7 +131,7 @@ The models OpenRouter named as serving the assessments' calls, with how many eac
 
 ## Expected against given verdicts
 
-Per run, each requirement counted by its expected verdict (row) and the verdict given (column). Right verdicts sit on the diagonal; over-claimed ones below it, to its left. "No verdict" is a failed case's requirement, or one the run left unjudged.
+Per run, each requirement counted by its expected verdict (row) and the verdict given (column). Right verdicts sit on the diagonal; over-claimed ones below it, to its left. "No verdict" is a failed case's requirement; a requirement the judge left unjudged was saved as not evidenced, and counts there.
 
 ### anthropic/claude-haiku-5.5 on alpenwerk
 
