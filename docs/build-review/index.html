@@ -117,7 +117,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
     <h2>The short version</h2>
     <ul class="points">
       <li><b>Context, not writing, is the cost.</b> Agents wrote 26 million tokens but re-read 6 billion: each call re-reads the session's whole context. A long-lived thread gets dearer with every call.</li>
-      <li><b>A Fix cost three times as much per changed line as a Feature or a spec</b>, and half of that was the one Fixes thread, which ran for six days with about 476,000 tokens of context on each call.</li>
+      <li><b>A Fix cost three times as much per changed line as a Feature or a spec</b>, and half of that was the one Fixes thread, which ran for six days re-reading nearly half a million tokens of context on each call.</li>
       <li><b>A Feature cost the same per line as a spec</b> ($1.15 against $1.16 per 100 lines), without an integration branch, a ticket-writer or waiting on other specs. That's why Vouch ended building Features rather than specs.</li>
       <li><b>Checking was cheap for what it caught:</b> the blind verifier was 10% of the spend and the code reviews 8%. Scoring each spec with a judge cost $4 in total.</li>
     </ul>
@@ -125,9 +125,25 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
 
   <section class="card" aria-labelledby="h-roles">
     <h2 id="h-roles">Where the tokens went</h2>
-    <p class="muted">By role, across every session and agent. A "thread" is a long-running session: the coordinator, a spec's thread, the Fixes thread. The others are agents a thread starts for one job.</p>
+    <p class="muted">By role, across every session and agent. "Sessions" are the long-running conversations: the coordinator, a thread per spec or Feature, the Fixes thread, and the owner's own sessions; the next section breaks them down. The other roles are agents a session starts for one job.</p>
     <div class="hbars" id="roles"></div>
     <details><summary>Table</summary><div class="tablewrap"><table id="roles-t"></table></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="h-threads">
+    <h2 id="h-threads">What the sessions did</h2>
+    <p class="muted">Each session's own calls, by which session it was and what the call did (the tool it used). The agents a session started are counted in their own roles above.</p>
+    <ul class="points muted">
+      <li><b>Fixes thread:</b> one session from 6 to 12 November. It took each Fix from the queue, started its implementer, verifier and review, watched CI, merged and reported.</li>
+      <li><b>Spec threads:</b> one per spec. Wrote the build order, started each slice's ticket-writer and agents, kept the spec issue up to date, and ran the owner's test before the merge.</li>
+      <li><b>Owner's own sessions:</b> grilling and planning, kickoff and setup, research, and some direct building early on.</li>
+      <li><b>Coordinator:</b> the owner's desk. Mapped the work, started threads, relayed between them and wrote the desk.</li>
+      <li><b>Feature threads:</b> one per Feature, fresh and short.</li>
+    </ul>
+    <div class="legend" id="act-legend"></div>
+    <div class="hbars" id="act"></div>
+    <details><summary>Table</summary><div class="tablewrap"><table id="act-t"></table></div></details>
+    <p class="muted">A call's cost is mostly re-reading the session's context, so the same small action (reading one issue) cost about $0.09 in the Fixes thread and about $0.02 in a Feature thread. The Fixes thread also spent $76 running tests and reading code itself, work its agents also do, and $58 waiting on CI, merges and background jobs, each check-in re-reading its whole context. Totals here differ from the role chart by under 0.5%, from counting calls logged in several pieces.</p>
   </section>
 
   <section class="card" aria-labelledby="h-unit">
@@ -177,6 +193,7 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
     <h2>What to do differently next time</h2>
     <ul class="points">
       <li><b>Restart long threads.</b> A fresh Fixes thread every few Fixes, and the coordinator after each spec lands. GitHub holds the record, so nothing is lost, and the Fixes alone would likely have cost a third to a half less.</li>
+      <li><b>Let a thread coordinate, not check.</b> The Fixes thread ran tests and read code itself, work its agents also do, and checked in on CI and merges again and again. One background command that reports once, and reading the agents' results, would have done.</li>
       <li><b>Tag every session with its unit of work from day one.</b> Claude Code's OpenTelemetry export (here into a local Langfuse, added on 10 November) reports each call's model, effort, tokens and cost. With a tag naming the spec, Feature or Fix, this page would be a query rather than a reconstruction from transcripts.</li>
       <li><b>Lighter models where judgement is narrow.</b> Reviews, the verifier and the ticket-writer were 20% of the spend, all on the largest model.</li>
       <li><b>Make Features the default</b> and keep specs for stories that only work together.</li>
@@ -190,16 +207,18 @@ footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
 </main>
 <div class="tip" id="tip" role="tooltip"></div>
 <script>
-const ROLES = ["implementer", "thread", "verifier", "review", "ticket-writer"];
+const ROLES = ["implementer", "session", "verifier", "review", "ticket-writer"];
 const KINDS = ["spec", "fix", "feature", "coordinator", "other"];
 const KIND_LABEL = {spec: "Spec", fix: "Fix", feature: "Feature", coordinator: "Coordinator", other: "Other"};
 const D = {
-  roles: [["thread", 1071], ["implementer", 887], ["verifier", 257], ["review", 200], ["ticket-writer", 53], ["judge and retro", 4]],
+  roles: [["sessions", 1071], ["implementer", 887], ["verifier", 257], ["review", 200], ["ticket-writer", 53], ["judge and retro", 4]],
   unit: [
     {k: "Spec", per100: 1.16, n: 10, median: 109.5, lines: 102246, share: [.445, .304, .123, .086, .043]},
     {k: "Feature", per100: 1.15, n: 12, median: 8.12, lines: 792, share: [.56, .28, .07, .09, 0]},
     {k: "Fix", per100: 3.60, n: 124, median: 4.89, lines: 151, share: [.32, .49, .11, .07, 0]},
   ],
+  acts: ["GitHub issues and PRs", "Waiting: CI, merges, background jobs", "Talking: replies, reports, thread messages", "Checking: tests, the app, reading code", "Other: git, starting agents, edits"],
+  sessions: [["Fixes thread", [79, 58, 90, 76, 63], 457], ["Spec threads", [88, 24, 81, 30, 69], 261], ["Owner's own sessions", [23, 16, 31, 121, 63], 227], ["Coordinator", [23, 18, 79, 9, 21], 258], ["Feature threads", [4, 0, 1, 5, 4], 116]],
   ctx: [["Fix", 476], ["Coordinator", 258], ["Spec", 234], ["Feature", 146], ["Other", 139]],
   days: [
     ["2 Nov", {other: 2}], ["3 Nov", {other: 20}], ["4 Nov", {spec: 259, other: 3}],
@@ -239,6 +258,14 @@ function single(id, rows, fmt, unit) {
 const total = D.roles.reduce((s, r) => s + r[1], 0);
 single("roles", D.roles, money, "");
 table("roles-t", ["Role", "Cost", "Share"], D.roles.map(([n, v]) => [n, money(v), (100 * v / total).toFixed(1) + "%"]));
+// sessions by activity
+legend("act-legend", D.acts);
+const amax = Math.max(...D.sessions.map(s => s[1].reduce((a, b) => a + b, 0)));
+$("act").innerHTML = D.sessions.map(([n, v]) => { const t = v.reduce((a, b) => a + b, 0);
+  return `<div class="hrow"><div>${n}</div><div class="track" style="width:${100 * t / amax}%">${v.map((x, i) => x ? `<b style="flex:${x};background:var(--c${i + 1})"></b>` : "").join("")}</div><div class="num">${money(t)}</div></div>`; }).join("");
+[...$("act").querySelectorAll(".hrow")].forEach((row, r) => { const [n, v] = D.sessions[r]; let j = 0;
+  v.forEach((x, i) => { if (x) tipOn(row.querySelectorAll(".track b")[j++], `${n}, ${D.acts[i]}: ${money(x)}`); }); });
+table("act-t", ["Session", ...D.acts, "Total", "Context per call"], D.sessions.map(([n, v, c]) => [n, ...v.map(x => x ? money(x) : "–"), money(v.reduce((a, b) => a + b, 0)), c + "k"]));
 // unit
 legend("unit-legend", ROLES);
 const umax = Math.max(...D.unit.map(u => u.per100));
