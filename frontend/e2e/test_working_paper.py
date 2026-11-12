@@ -7,6 +7,7 @@ server's checks already spend most of that."""
 
 import json
 import re
+from collections.abc import Callable
 
 import pdf_words
 import pytest
@@ -1053,18 +1054,22 @@ INDEX_FADES = """(() => {
 })()"""
 
 
-def as_never_assessed(page: Page) -> None:
-    """The overview with every card not assessed, as a fresh profile's index shows it: the rows'
-    heights then don't hang on the review tags other checks on this server leave (a tag makes a
-    row taller, and then an area heading, not a row, can meet the box's foot)."""
+def with_cards(page: Page, card_state: Callable[[int], dict]) -> None:
+    """The overview with each card's served fields updated by `card_state(its index)`."""
 
-    def fresh(route: Route) -> None:
+    def served_with(route: Route) -> None:
         served = route.fetch().json()
-        for card in served["controls"]:
-            card |= {"status": "not-assessed", "verdict": None}
+        for i, card in enumerate(served["controls"]):
+            card |= card_state(i)
         route.fulfill(json=served)
 
-    page.route("**/api/overview", fresh)
+    page.route("**/api/overview", served_with)
+
+
+def as_never_assessed(page: Page) -> None:
+    """The overview with every card not assessed, as a fresh profile's index shows it, whatever
+    review states other checks on this server leave."""
+    with_cards(page, lambda _: {"status": "not-assessed", "verdict": None})
 
 
 # The stacked index's edge and the first row it cuts (not wholly shown), read in one go once the
@@ -1107,17 +1112,13 @@ def test_on_a_phone_the_stacked_index_cuts_a_row_at_its_foot_when_an_area_ends_t
     the box's edge; when the row ends its area (4.2.1, the last of its three), the next area's
     heading met the edge and no row was half-shown under the fade. The index now scrolls on until
     a row is cut there, the open row still wholly shown. The rows carry review tags."""
-
-    def tagged(route: Route) -> None:
-        served = route.fetch().json()
-        for i, card in enumerate(served["controls"]):
-            card |= {
-                "status": ["waiting-for-review", "accepted"][i % 2],
-                "verdict": "partly-evidenced",
-            }
-        route.fulfill(json=served)
-
-    page.route("**/api/overview", tagged)
+    with_cards(
+        page,
+        lambda i: {
+            "status": ["waiting-for-review", "accepted"][i % 2],
+            "verdict": "partly-evidenced",
+        },
+    )
     page.set_viewport_size({"width": 390, "height": 844})
     open_paper(page, paper_url, "4.2.1", assessed=False)
     nav = page.get_by_role("navigation", name="Controls")

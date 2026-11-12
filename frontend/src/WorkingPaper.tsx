@@ -338,6 +338,17 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
   )
 }
 
+/** Calls `settled` once the web fonts are ready, and again after any font that loads later, until `signal` aborts:
+ * a late font rewraps text, and in a box of fixed height no resize fires (#516, #617). */
+function onFontsSettled(settled: () => void, signal: AbortSignal) {
+  const fonts = document.fonts as FontFaceSet | undefined
+  fonts?.ready.then(() => { if (!signal.aborted) settled() })
+  fonts?.addEventListener('loadingdone', settled, { signal })
+}
+
+/** Scrolls an index row into its list's view, as little as needed. */
+const bringIntoView = (row: Element | null | undefined) => row?.scrollIntoView?.({ block: 'nearest' })
+
 /** At least this much of the row at the stacked index's foot shows, so it reads as cut (#617). */
 const CUT_SHOWS = 8
 
@@ -345,10 +356,9 @@ const CUT_SHOWS = 8
  * The stacked index (`nav`, while it scrolls in its own box) cuts a row at its foot (#617): when no row shows there
  * by at least CUT_SHOWS (the open row brought into view ends at the edge, or an area's heading meets it), it scrolls
  * on until the next row is half-shown under the fade, as far as the `open` row stays wholly in view. Beside the
- * paper the index's list scrolls, not `nav`, and nothing moves.
+ * paper the index's list scrolls, not `nav`, and nothing moves. A box that fits its rows has none below its edge.
  */
 function cutRowAtFoot(nav: HTMLElement, open: Element) {
-  if (nav.scrollHeight <= nav.clientHeight) return
   const top = nav.getBoundingClientRect().top + nav.clientTop
   const edge = top + nav.clientHeight
   const next = [...nav.querySelectorAll('.wp-row')].map((r) => r.getBoundingClientRect())
@@ -370,16 +380,18 @@ function ControlIndex({ controls, openId, running, run, onOpen, language, improv
   useEffect(() => {
     const place = () => {
       const row = list.current?.querySelector('[aria-current="page"]')
-      row?.scrollIntoView?.({ block: 'nearest' })
+      bringIntoView(row)
       if (row && nav.current) cutRowAtFoot(nav.current, row)
     }
     place()
-    document.fonts?.ready.then(place) // a late web font changes the rows' heights
+    const stop = new AbortController()
+    onFontsSettled(place, stop.signal) // a late web font changes the rows' heights
+    return () => stop.abort()
   }, [openId])
   return (
     <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
       <div className="wp-index-list" ref={list}
-        onFocus={(e) => e.target.closest('.wp-row')?.scrollIntoView?.({ block: 'nearest' })}>
+        onFocus={(e) => bringIntoView(e.target.closest('.wp-row'))}>
         {areas(controls).map(([area, cards]) => (
           <div key={area}>
             <h3>{area}</h3>
@@ -519,12 +531,9 @@ function RequirementText({ text, language }: { text: string; language?: string }
     const measure = () => setCut(el.clientHeight === 0 || el.scrollHeight > el.clientHeight + 1)
     measure()
     // A web font that loads after this rewraps the text in a box the clamp keeps 2 lines high, so no resize fires
-    // (#516): measured again once the fonts are ready, and after any font that loads later.
-    // Stops this measure's font listeners when the text changes, it expands, or the cell goes.
+    // (#516). Stops this measure's font listeners when the text changes, it expands, or the cell goes.
     const stopMeasuring = new AbortController()
-    const fonts = document.fonts as FontFaceSet | undefined
-    fonts?.ready.then(() => { if (!stopMeasuring.signal.aborted) measure() })
-    fonts?.addEventListener('loadingdone', measure, { signal: stopMeasuring.signal })
+    onFontsSettled(measure, stopMeasuring.signal)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(el)
     return () => {
