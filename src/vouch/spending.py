@@ -336,11 +336,6 @@ class SpendingStore(Protocol):
         limit read in the same step: (counted, the limit)."""
         ...
 
-    def under_chat_limit(self, user_id: str, day: date) -> tuple[bool, int]:
-        """Whether the user sent fewer chat messages that day than the chat's limit, counting
-        nothing: (under it, the limit)."""
-        ...
-
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         """Count one profile pass for the user's day if they're under the passes' own limit, the
         limit read in the same step: (counted, the limit)."""
@@ -356,6 +351,29 @@ class SpendingStore(Protocol):
         ...
 
 
+class _DailyCounter:
+    """Each user's count for one UTC day against a limit, in memory; yesterday's counts go on
+    the first count of a new day. The caller holds the store's lock."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._day: date | None = None
+        self._counts: dict[str, int] = {}
+
+    def take(self, user_id: str, day: date) -> tuple[bool, int]:
+        if day != self._day:
+            self._day, self._counts = day, {}
+        count = self._counts.get(user_id, 0)
+        if count >= self.limit:
+            return False, self.limit
+        self._counts[user_id] = count + 1
+        return True, self.limit
+
+    def under(self, user_id: str, day: date) -> tuple[bool, int]:
+        count = self._counts.get(user_id, 0) if day == self._day else 0
+        return count < self.limit, self.limit
+
+
 class MemorySpendingStore:
     """No database: kept until the server restarts, for the fake model only."""
 
@@ -363,67 +381,38 @@ class MemorySpendingStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._limit = DAILY_LIMIT
-        self._day: date | None = None
-        self._counts: dict[str, int] = {}
-        self._pass_day: date | None = None
-        self._pass_counts: dict[str, int] = {}
-        self._chat_limit = CHAT_DAILY_LIMIT
-        self._chat_day: date | None = None
-        self._chat_counts: dict[str, int] = {}
+        self._assessments = _DailyCounter(DAILY_LIMIT)
+        self._passes = _DailyCounter(PROFILE_PASS_DAILY_LIMIT)
+        self._chat = _DailyCounter(CHAT_DAILY_LIMIT)
         self._records: list[UsageRecord] = []
 
     def daily_limit(self) -> int:
-        return self._limit
+        return self._assessments.limit
 
     def set_daily_limit(self, limit: int) -> None:
-        self._limit = limit
+        self._assessments.limit = limit
 
     def take(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            if day != self._day:  # a new day: yesterday's counts go
-                self._day, self._counts = day, {}
-            count = self._counts.get(user_id, 0)
-            if count >= self._limit:
-                return False, self._limit
-            self._counts[user_id] = count + 1
-            return True, self._limit
+            return self._assessments.take(user_id, day)
 
     def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            count = self._counts.get(user_id, 0) if day == self._day else 0
-            return count < self._limit, self._limit
+            return self._assessments.under(user_id, day)
 
     def chat_daily_limit(self) -> int:
-        return self._chat_limit
+        return self._chat.limit
 
     def set_chat_daily_limit(self, limit: int) -> None:
-        self._chat_limit = limit
+        self._chat.limit = limit
 
     def take_chat_turn(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            if day != self._chat_day:  # a new day: yesterday's counts go
-                self._chat_day, self._chat_counts = day, {}
-            count = self._chat_counts.get(user_id, 0)
-            if count >= self._chat_limit:
-                return False, self._chat_limit
-            self._chat_counts[user_id] = count + 1
-            return True, self._chat_limit
-
-    def under_chat_limit(self, user_id: str, day: date) -> tuple[bool, int]:
-        with self._lock:
-            count = self._chat_counts.get(user_id, 0) if day == self._chat_day else 0
-            return count < self._chat_limit, self._chat_limit
+            return self._chat.take(user_id, day)
 
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            if day != self._pass_day:  # a new day: yesterday's counts go
-                self._pass_day, self._pass_counts = day, {}
-            count = self._pass_counts.get(user_id, 0)
-            if count >= PROFILE_PASS_DAILY_LIMIT:
-                return False, PROFILE_PASS_DAILY_LIMIT
-            self._pass_counts[user_id] = count + 1
-            return True, PROFILE_PASS_DAILY_LIMIT
+            return self._passes.take(user_id, day)
 
     def record(self, record: UsageRecord) -> None:
         with self._lock:
@@ -481,9 +470,6 @@ class DatabaseSpendingStore:
     def take_chat_turn(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.take_chat_turn(user_id, day, CHAT_LIMIT_SETTING, CHAT_DAILY_LIMIT)
 
-    def under_chat_limit(self, user_id: str, day: date) -> tuple[bool, int]:
-        return self.db.under_chat_limit(user_id, day, CHAT_LIMIT_SETTING, CHAT_DAILY_LIMIT)
-
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.take_profile_pass(
             user_id, day, PROFILE_PASS_LIMIT_SETTING, PROFILE_PASS_DAILY_LIMIT
@@ -540,6 +526,8 @@ class DailyLimitReached(Exception):
 
     noun = "assessment"
     nouns = "assessments"
+    limit_name = "daily"
+    """The 429's `limit`, telling the limits apart."""
 
     def __init__(self, limit: int, resets_at: datetime, now: datetime) -> None:
         super().__init__(f"daily limit of {limit} reached")
@@ -558,6 +546,7 @@ class ProfilePassLimitReached(DailyLimitReached):
 
     noun = "profile pass"
     nouns = "profile passes"
+    limit_name = "profile-pass"
 
 
 class ChatLimitReached(DailyLimitReached):
@@ -565,6 +554,7 @@ class ChatLimitReached(DailyLimitReached):
 
     noun = "chat message"
     nouns = "chat messages"
+    limit_name = "chat"
 
 
 def _utc_now() -> datetime:
@@ -615,11 +605,11 @@ class SpendingGuard:
             log.info("a user reached the daily limit of %d %s", limit, reached.nouns)
             raise _reached(limit, now, reached)
 
-    def check(self, user_id: str, paid: bool, turn: bool = False) -> None:
+    def check(self, user_id: str, paid: bool) -> None:
         """Before a chat message (#44), whose model calls go through the spending guard too:
         refused at the assessments' limit, but nothing counted there, as chat isn't an
-        assessment. Then the chat's own limit (#628): `turn` (the lead's message) counts one
-        against it; the greeting only checks it. Raises NoSharedCounter, DailyLimitReached,
+        assessment. Then the chat's own limit (#628): every turn, the greeting too, counts one
+        against it, as each calls the model. Raises NoSharedCounter, DailyLimitReached,
         ChatLimitReached, or DatabaseUnavailable."""
         if paid and self.store.kept_in == "memory":
             raise NoSharedCounter(NO_SHARED_COUNTER)
@@ -628,9 +618,8 @@ class SpendingGuard:
         if not under:
             log.info("a user at the daily limit of %d assessments was refused a chat", limit)
             raise _reached(limit, now)
-        take = self.store.take_chat_turn if turn else self.store.under_chat_limit
-        allowed, limit = take(user_id, now.date())
-        if not allowed:
+        taken, limit = self.store.take_chat_turn(user_id, now.date())
+        if not taken:
             log.info("a user reached the daily limit of %d chat messages", limit)
             raise _reached(limit, now, ChatLimitReached)
 

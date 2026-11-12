@@ -505,7 +505,8 @@ def test_scrolled_to_the_end_the_closed_button_hides_nothing(page: Page, chat_ur
 def test_a_developer_sets_the_chat_limit_and_at_it_the_chat_says_so_in_place_of_a_reply(
     page: Page, chat_url
 ):
-    # Issue 628: the limit is the server's, shared, so it's put back to the default after.
+    # Issue 628: the limit is the server's, shared, so it's put back after.
+    before = page.request.get(f"{chat_url}/api/developer/settings").json()["chat_daily_limit"]
     page.goto(f"{chat_url}/developer")
     settings = page.get_by_role("region", name="Developer settings")
     try:
@@ -529,6 +530,6 @@ def test_a_developer_sets_the_chat_limit_and_at_it_the_chat_says_so_in_place_of_
         )
     finally:
         reset = page.request.put(
-            f"{chat_url}/api/developer/chat-daily-limit", data={"chat_daily_limit": 50}
+            f"{chat_url}/api/developer/chat-daily-limit", data={"chat_daily_limit": before}
         )
         assert reset.status == 200, reset.text()

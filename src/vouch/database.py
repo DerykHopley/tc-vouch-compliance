@@ -713,13 +713,6 @@ class Database:
         in the chat's own table (#628). (counted, the limit). Raises DatabaseUnavailable."""
         return self._take(CHAT_COUNTS_TABLE, user_id, day, limit_setting, default_limit)
 
-    def under_chat_limit(
-        self, user_id: str, day: date, limit_setting: str, default_limit: int
-    ) -> tuple[bool, int]:
-        """Whether the user sent fewer chat messages that day than the limit, counting nothing:
-        (under it, the limit). Raises DatabaseUnavailable."""
-        return self._under(CHAT_COUNTS_TABLE, user_id, day, limit_setting, default_limit)
-
     def _take(
         self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
     ) -> tuple[bool, int]:
@@ -750,18 +743,12 @@ class Database:
         """Whether the user started fewer assessments that day than the limit (as
         take_assessment reads it), counting nothing: (under it, the limit). Raises
         DatabaseUnavailable."""
-        return self._under(COUNTS_TABLE, user_id, day, limit_setting, default_limit)
-
-    def _under(
-        self, table: str, user_id: str, day: date, limit_setting: str, default_limit: int
-    ) -> tuple[bool, int]:
-        """Whether the user's count that day in the counts `table` is under the limit."""
-        with self.connection() as conn, self._needs_setup(table):
+        with self.connection() as conn, self._needs_setup(COUNTS_TABLE):
             row = conn.execute(
                 "WITH lim AS (SELECT coalesce((SELECT value::integer FROM "
                 f"{SETTINGS_TABLE} WHERE name = %(setting)s), %(default)s) AS n) "
                 "SELECT (SELECT n FROM lim) AS lim, coalesce((SELECT count FROM "
-                f"{table} WHERE user_id = %(user_id)s AND day = %(day)s), 0) "
+                f"{COUNTS_TABLE} WHERE user_id = %(user_id)s AND day = %(day)s), 0) "
                 "< (SELECT n FROM lim) AS under",
                 {
                     "setting": limit_setting,

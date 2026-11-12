@@ -1042,8 +1042,7 @@ def test_the_51st_chat_message_of_a_day_is_a_429_naming_the_chat_limit_and_reset
     monkeypatch.undo()
     next_day = send_chat(client)
 
-    assert CHAT_DAILY_LIMIT == 50
-    assert allowed == [200] * 50
+    assert allowed == [200] * 50  # CHAT_DAILY_LIMIT, the owner's 50
     assert refused.status_code == 429
     assert refused.json() == {
         "detail": "You have reached today's limit of 50 chat messages. "
@@ -1055,28 +1054,27 @@ def test_the_51st_chat_message_of_a_day_is_a_429_naming_the_chat_limit_and_reset
     assert next_day.status_code == 200
 
 
-def test_the_greeting_isnt_counted_but_is_refused_at_the_chat_limit():
+def test_a_developer_changes_the_chat_limit_and_the_greeting_counts_as_a_turn():
     app, _ = app_at(NOV_4_AFTERNOON)
-    app.state.spending.set_chat_daily_limit(1)
     client = TestClient(app, raise_server_exceptions=False)
 
-    greetings = [send_chat(client, None).status_code for _ in range(3)]
-    sent = send_chat(client)
-    greeting_after = send_chat(client, None)
+    changed = client.put("/api/developer/chat-daily-limit", json={"chat_daily_limit": 2})
+    greeting, sent, over = send_chat(client, None), send_chat(client), send_chat(client)
 
-    assert greetings == [200] * 3
-    assert sent.status_code == 200
-    assert greeting_after.status_code == 429 and greeting_after.json()["limit"] == "chat"
+    assert changed.status_code == 200
+    assert (greeting.status_code, sent.status_code) == (200, 200)
+    assert over.status_code == 429 and over.json()["limit"] == "chat"
+    assert "limit of 2 chat messages." in over.json()["detail"]
 
 
 def test_the_chat_limit_is_each_users_own_and_apart_from_the_assessments():
     guard = SpendingGuard(MemorySpendingStore(), clock=FixedClock(NOV_4_AFTERNOON))
     guard.set_chat_daily_limit(1)
 
-    guard.check("alice", paid=False, turn=True)
+    guard.check("alice", paid=False)
     with pytest.raises(ChatLimitReached) as refused:
-        guard.check("alice", paid=False, turn=True)
-    guard.check("bob", paid=False, turn=True)
+        guard.check("alice", paid=False)
+    guard.check("bob", paid=False)
     guard.start("alice", paid=False)  # the assessments' count is untouched
 
     assert refused.value.limit == 1
@@ -1089,25 +1087,10 @@ def test_a_chat_refused_at_the_assessments_limit_takes_no_chat_turn():
     guard.start("alice", paid=False)
 
     with pytest.raises(DailyLimitReached):
-        guard.check("alice", paid=False, turn=True)
+        guard.check("alice", paid=False)
     guard.set_daily_limit(2)
 
-    guard.check("alice", paid=False, turn=True)  # the day's one chat turn is still there
-
-
-def test_a_developer_changes_the_chat_limit_on_the_developer_page_and_it_applies_at_once():
-    app, _ = app_at(NOV_4_AFTERNOON)
-    client = TestClient(app, raise_server_exceptions=False)
-
-    before = client.get("/api/developer/settings").json()["chat_daily_limit"]
-    changed = client.put("/api/developer/chat-daily-limit", json={"chat_daily_limit": 1})
-    first, second = send_chat(client), send_chat(client)
-
-    assert before == CHAT_DAILY_LIMIT
-    assert changed.status_code == 200
-    assert changed.json()["chat_daily_limit"] == 1
-    assert (first.status_code, second.status_code) == (200, 429)
-    assert "limit of 1 chat message." in second.json()["detail"]
+    guard.check("alice", paid=False)  # the day's one chat turn is still there
 
 
 @pytest.mark.parametrize("limit", [0, -1, 10_001, "fifty", None])
@@ -1132,7 +1115,6 @@ def test_in_the_database_the_chat_count_is_its_own_and_reads_its_own_limit(empty
     taken = [store.take_chat_turn("alice", today) for _ in range(2)]
 
     assert taken == [(True, 2), (False, 2)]
-    assert store.under_chat_limit("alice", today) == (False, 2)
     assert store.take_chat_turn("bob", today) == (True, 2)
     assert store.take("alice", today) == (True, DAILY_LIMIT)
     assert store.chat_daily_limit() == 2

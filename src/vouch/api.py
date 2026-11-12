@@ -183,10 +183,8 @@ from vouch.spending import (
     CHAT,
     MAX_DAILY_LIMIT,
     PROFILE_PASS,
-    ChatLimitReached,
     DailyLimitReached,
     NoSharedCounter,
-    ProfilePassLimitReached,
     SpendingGuard,
     Usage,
     UsageMeter,
@@ -891,19 +889,13 @@ def record_off_the_event_loop(
     thread.start()
 
 
-def _limit_name(error: DailyLimitReached) -> str:
-    if isinstance(error, ProfilePassLimitReached):
-        return "profile-pass"
-    return "chat" if isinstance(error, ChatLimitReached) else "daily"
-
-
 def daily_limit_reached(request: Request, error: Exception) -> JSONResponse:
     """The daily limit's 429: `limit: "daily"` tells it apart from the request rate's,
     `"profile-pass"` the profile passes' own limit (#371) and `"chat"` the chat's (#628)."""
     assert isinstance(error, DailyLimitReached)
     content = {
         "detail": error.message(),
-        "limit": _limit_name(error),
+        "limit": error.limit_name,
         "resets_at": error.resets_at.isoformat(),
     }
     headers = {"Retry-After": str(error.retry_after)}
@@ -2163,7 +2155,6 @@ def page_context(request: Annotated[ChatRequest, Body()], profile: Profile) -> P
 
 
 def chat_within_spending(
-    request: Annotated[ChatRequest, Body()],
     context: Annotated[PageContext, Depends(page_context)],
     user: CurrentUser,
     spending: AppSpending,
@@ -2172,9 +2163,9 @@ def chat_within_spending(
     """The spending guard before a chat message, once the page and the model are known (M3,
     docs/requirements.md 2026-11-03): at the day's limit, the daily limit's 429; a paid model
     with only memory to count in, a 503. A chat message is not counted as an assessment, but
-    against the chat's own limit (#628, its 429 `limit: "chat"`); the greeting only checks it."""
+    against the chat's own limit (#628, its 429 `limit: "chat"`), the greeting too."""
     try:
-        spending.check(user.id, paid=chosen is not None, turn=request.message is not None)
+        spending.check(user.id, paid=chosen is not None)
     except NoSharedCounter as error:
         log.error("chat on OpenRouter needs %s for the daily limit", DATABASE_URL_ENV)
         raise HTTPException(status_code=503, detail=str(error)) from None
