@@ -94,7 +94,8 @@ describe('the in-app ask (ticket 441)', () => {
 })
 
 /** #527: a double-click on the confirm collapses the ask, and its second click lands on whatever moves up
- * under the pointer. After a pointer press, the next pointer click within 500ms presses nothing. */
+ * under the pointer. After a pointer press, the clicks that follow within 500ms of each other press nothing
+ * (the burst rule itself: `doubleClickGuard.test.ts`, #562). */
 describe('the second click of a double-click (ticket 527)', () => {
   function withOther() {
     const onConfirm = vi.fn()
@@ -128,16 +129,6 @@ describe('the second click of a double-click (ticket 527)', () => {
     expect(other).not.toHaveBeenCalled()
   })
 
-  it('swallows one click only: the next one works', () => {
-    vi.useFakeTimers()
-    const { other } = withOther()
-    opened()
-    confirm(1)
-    fireEvent.click(button('Close round'), { detail: 2 })
-    fireEvent.click(button('Close round'), { detail: 1 })
-    expect(other).toHaveBeenCalledOnce()
-  })
-
   it('swallows a second click that lands on its own trigger, so the ask stays closed', () => {
     vi.useFakeTimers()
     const { onConfirm } = withOther()
@@ -148,30 +139,11 @@ describe('the second click of a double-click (ticket 527)', () => {
     expect(onConfirm).toHaveBeenCalledOnce()
   })
 
-  it('lets a click 500ms or more after the confirm through', async () => {
-    vi.useFakeTimers()
-    const { other } = withOther()
-    opened()
-    confirm(1)
-    await pastDoubleClick()
-    fireEvent.click(button('Close round'), { detail: 1 })
-    expect(other).toHaveBeenCalledOnce()
-  })
-
   it('sets no guard on a keyboard confirm (detail 0)', () => {
     const { onConfirm, other } = withOther()
     opened(0)
     confirm(0)
     expect(onConfirm).toHaveBeenCalledOnce()
-    fireEvent.click(button('Close round'), { detail: 0 })
-    expect(other).toHaveBeenCalledOnce()
-  })
-
-  it('never swallows a keyboard click, even inside a pointer guard', () => {
-    vi.useFakeTimers()
-    const { other } = withOther()
-    opened()
-    confirm(1)
     fireEvent.click(button('Close round'), { detail: 0 })
     expect(other).toHaveBeenCalledOnce()
   })
@@ -187,7 +159,9 @@ describe('the second click of a double-click (ticket 527)', () => {
     fireEvent.click(button('Start round'), { detail: 2 })
     expect(other).not.toHaveBeenCalled()
 
-    // A fresh guard, then the 500ms run out with no click: the next click works.
+    // A fresh guard, after a pause that ends the first one's burst (#562), then the 500ms run out with no click:
+    // the next click works.
+    await pastDoubleClick()
     view.rerender(<InlineConfirm label="Change it" question={QUESTION} onConfirm={vi.fn()} />)
     opened()
     confirm(1)

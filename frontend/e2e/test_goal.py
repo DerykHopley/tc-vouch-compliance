@@ -8,6 +8,7 @@ every control is at least 44px. Each run ends on Audit readiness, as it began.""
 
 import pytest
 from browser_dialogs import dialogs_of, no_dialog
+from click_burst import DOUBLE_CLICK_MS
 from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from touch_targets import small_targets
@@ -131,7 +132,9 @@ def test_a_double_click_on_the_confirm_presses_nothing_after_it(page: Page, doss
     expect(page.locator("[role=alert]", has_text="Close the review round")).to_have_count(0)
     assert len(puts) == 1, puts
 
-    # Ends on Audit readiness, as it began.
+    # Ends on Audit readiness, as it began: after a double-click's time, as the next click would
+    # still be the same burst (#562).
+    page.wait_for_timeout(DOUBLE_CLICK_MS)
     change_goal(page, dialogs, "Audit readiness")
     expect(goal).to_contain_text("Goal: Audit readiness")
     no_dialog(dialogs)
