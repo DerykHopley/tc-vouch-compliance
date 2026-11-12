@@ -1100,6 +1100,40 @@ def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page
     page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
 
 
+def test_on_a_phone_the_stacked_index_cuts_a_row_at_its_foot_when_an_area_ends_there(
+    page: Page, paper_url
+):
+    """#617: opening a control below the box's foot brought its row into view with its foot on
+    the box's edge; when the row ends its area (4.2.1, the last of its three), the next area's
+    heading met the edge and no row was half-shown under the fade. The index now scrolls on until
+    a row is cut there, the open row still wholly shown. The rows carry review tags."""
+
+    def tagged(route: Route) -> None:
+        served = route.fetch().json()
+        for i, card in enumerate(served["controls"]):
+            card |= {
+                "status": ["waiting-for-review", "accepted"][i % 2],
+                "verdict": "partly-evidenced",
+            }
+        route.fulfill(json=served)
+
+    page.route("**/api/overview", tagged)
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_paper(page, paper_url, "4.2.1", assessed=False)
+    nav = page.get_by_role("navigation", name="Controls")
+    expect(nav.get_by_role("link")).to_have_count(12)
+    expect(nav.locator(".tag-accepted").first).to_be_visible()
+    expect(nav.locator(".tag-waiting-for-review").first).to_be_visible()
+    page.wait_for_function(INDEX_FADES, timeout=5000)
+
+    cut = nav.evaluate(CUT_ROW)
+    assert cut["y"] < cut["edge"] - 8, cut  # a row, not a heading, meets the edge
+    open_row = box(nav.locator('[aria-current="page"]'))
+    top = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop")
+    assert top - 0.5 <= open_row["y"], (open_row, top)
+    assert open_row["y"] + open_row["height"] <= cut["edge"] + 0.5, (open_row, cut)
+
+
 @pytest.mark.parametrize("how", ["tap", "click"])
 def test_on_a_phone_the_half_shown_row_under_the_fade_opens_on_the_first_press(
     browser, paper_url, how

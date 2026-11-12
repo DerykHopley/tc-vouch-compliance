@@ -338,17 +338,43 @@ function AssessingElsewhere({ controlId, onOpen }: { controlId: string; onOpen: 
   )
 }
 
+/** At least this much of the row at the stacked index's foot shows, so it reads as cut (#617). */
+const CUT_SHOWS = 8
+
+/**
+ * The stacked index (`nav`, while it scrolls in its own box) cuts a row at its foot (#617): when no row shows there
+ * by at least CUT_SHOWS (the open row brought into view ends at the edge, or an area's heading meets it), it scrolls
+ * on until the next row is half-shown under the fade, as far as the `open` row stays wholly in view. Beside the
+ * paper the index's list scrolls, not `nav`, and nothing moves.
+ */
+function cutRowAtFoot(nav: HTMLElement, open: Element) {
+  if (nav.scrollHeight <= nav.clientHeight) return
+  const top = nav.getBoundingClientRect().top + nav.clientTop
+  const edge = top + nav.clientHeight
+  const next = [...nav.querySelectorAll('.wp-row')].map((r) => r.getBoundingClientRect())
+    .find((r) => r.bottom > edge + 0.5)
+  if (!next || next.top < edge - CUT_SHOWS) return
+  const room = open.getBoundingClientRect().top - top
+  nav.scrollTop += Math.min(next.top - edge + next.height / 2, room)
+}
+
 /** The control index, by area: each control with its verdict and review state; the open one marked. Its list stays in
  * view beside the paper as the paper scrolls and scrolls on its own (#466): the open control's row is brought into
  * view in it when the paper opens, and a focused row too, as Firefox leaves one cut off at the list's foot. Stacked
  * above the paper (1000px or less), the index scrolls in its own box: `data-more` marks it while rows lie below its
- * foot, which app.css fades (#555). */
+ * foot, which app.css fades (#555), and the open row brought into view leaves a row cut at that foot (#617). */
 function ControlIndex({ controls, openId, running, run, onOpen, language, improving }: IndexProps) {
   const list = useRef<HTMLDivElement>(null)
   const nav = useRef<HTMLElement>(null)
   const more = useScrollMore(nav, list, 'y')
   useEffect(() => {
-    list.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
+    const place = () => {
+      const row = list.current?.querySelector('[aria-current="page"]')
+      row?.scrollIntoView?.({ block: 'nearest' })
+      if (row && nav.current) cutRowAtFoot(nav.current, row)
+    }
+    place()
+    document.fonts?.ready.then(place) // a late web font changes the rows' heights
   }, [openId])
   return (
     <nav className="wp-index" aria-label="Controls" ref={nav} data-more={more || undefined}>
