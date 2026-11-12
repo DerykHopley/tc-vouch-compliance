@@ -1,5 +1,11 @@
 # Vouch
 
+[Live app](https://vouch-828715466396.europe-west1.run.app) ·
+[Process flow](https://derykhopley.github.io/tc-vouch-compliance/flow/) ·
+[Eval report](https://derykhopley.github.io/tc-vouch-compliance/evals/) ·
+[Build review](https://derykhopley.github.io/tc-vouch-compliance/build-review/) ·
+[Demo script](docs/demo.md)
+
 Vouch is an audit-readiness agent for ISMS and TISAX. For each control it searches the company's
 policies and records, judges each requirement as Evidenced, Partly evidenced or Not evidenced
 (Not applicable when the company's compliance profile excludes it), and drafts an answer for the
@@ -7,6 +13,10 @@ auditor that quotes its sources word for word. The compliance lead reviews every
 three steps: **Confirm findings** (each requirement's verdict confirmed or overridden), **Plan
 fixes** (each remediation item approved or discarded) and **Accept**. Only accepted verdicts
 count towards readiness.
+
+![Working paper for control 5.1.1 after Assess again: the verdict Not evidenced, the steps under "How Vouch reached this", a draft answer in two sections ("What the evidence shows" and "What is missing"), and requirement M1 with its exact quote, the stale flag and "Quote verified"](docs/screenshots/working-paper.png)
+
+*5.1.1's working paper after Assess again: the encryption standard is past its review, so its quotes carry the stale flag and the requirement is capped at Partly evidenced.*
 
 Each compliance profile has a goal: **Audit readiness**, preparing for an external audit, or
 **Internal improvement**, improving the company's own security with no audit planned, through
@@ -33,6 +43,10 @@ company and puts it back in its demo state: for Nordlicht, review round "Q2 2026
 "Q3 2026" open; any other company is left empty. The top bar names the current company, with the tabs
 **Overview**, **Report** and **Company**.
 
+![The Overview for Nordlicht Komponenten GmbH after Reset demo: review round Q3 2026, "12 of 12 controls accepted", the readiness figures (8 evidenced, 4 partly evidenced, 0 not evidenced) and "Compared with Q2 2026" listing three changed controls](docs/screenshots/overview.png)
+
+*The Overview after Reset demo: 12 of 12 controls accepted, compared with the closed round Q2 2026.*
+
 The **Company page** holds the company's details and settings: its country, answer language,
 protection level and overlays, its Goal, its review rounds, its scope, the controls that are not
 applicable and its evidence documents. The lead can change the Goal there, and the evidence
@@ -44,6 +58,10 @@ A **round comparison** sets where the lead stands now against a closed review ro
 one by default: verdict changes control by control, readiness then and now, and the remediation
 items done and open questions answered since. The Overview shows it, the Company page's Rounds
 list opens it for each closed round, and the chat answers from it ("What improved since Q2 2026?").
+
+![Company › Rounds › Q2 2026: "Better 3, Worse 0, New 0, Unchanged 9", accepted 12 then and now, and the changed controls by theme, each with its verdict then and now](docs/screenshots/round-comparison.png)
+
+*The round comparison with Q2 2026, opened from Company › Rounds: three controls better, none worse.*
 
 One current company for everyone is a demo/prototype process: a real product would give each
 lead their own companies ([#163](https://github.com/DerykHopley/tc-vouch-compliance/issues/163)).
@@ -58,6 +76,10 @@ lead their own companies ([#163](https://github.com/DerykHopley/tc-vouch-complia
   stands, what is missing and who reviewed each verdict.
 - **The improvement report's readers:** the company's own team, who read what changed since the
   last review round, the plan by priority with each item's status, and the open questions.
+
+![The top of the readiness report: Export Markdown and Export PDF, the report's head (company, country, base framework, protection level, country overlays, language, date) and Readiness: "12 of 12 controls accepted" with its bar and counts](docs/screenshots/report.png)
+
+*The readiness report's top section, for management and the auditor; it exports as Markdown or PDF.*
 
 ## Run it locally
 
