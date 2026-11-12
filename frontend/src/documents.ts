@@ -170,7 +170,7 @@ export async function addDocument(file: File, fields: DocumentFields, addAnyway:
     const read = (await response.json().catch(() => ({}))) as { detail?: unknown }
     if (typeof read.detail !== 'string') return { status: 'failed', message: ADD_FAILED }
     if (response.status === 409) return { status: 'warning', message: read.detail }
-    if (response.status === 400 || response.status === 413) return { status: 'refused', message: read.detail }
+    if (response.status === 400 || response.status === 403 || response.status === 413) return { status: 'refused', message: read.detail }
     return { status: 'failed', message: ADD_FAILED }
   } catch {
     return { status: 'failed', message: ADD_FAILED }
@@ -188,7 +188,11 @@ export async function withdrawDocument(id: string): Promise<{ ok: true } | { ok:
       method: 'POST', headers: await authHeaders(),
     })
     if (response.ok) return { ok: true }
-    return { ok: false, message: sessionEnded(response) ? SESSION_ENDED : WITHDRAW_FAILED }
+    if (sessionEnded(response)) return { ok: false, message: SESSION_ENDED }
+    const read = (await response.json().catch(() => ({}))) as { detail?: unknown }
+    // A 403 (#624): who may change documents, in the server's words; anything else, the page's own.
+    if (response.status === 403 && typeof read.detail === 'string') return { ok: false, message: read.detail }
+    return { ok: false, message: WITHDRAW_FAILED }
   } catch {
     return { ok: false, message: WITHDRAW_FAILED }
   }

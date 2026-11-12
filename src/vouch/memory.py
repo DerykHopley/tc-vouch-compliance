@@ -80,7 +80,8 @@ def users_with_memory(store: BaseStore, profile_id: str) -> set[str]:
     while namespaces := store.list_namespaces(
         prefix=company, max_depth=3, limit=USERS_PAGE, offset=offset
     ):
-        users |= {unquote(ns[1]) for ns in namespaces}
+        # A namespace emptied by Reset demo stays listed in the process store: kept ones only.
+        users |= {unquote(ns[1]) for ns in namespaces if store.search(ns, limit=1)}
         offset += USERS_PAGE
     return users
 

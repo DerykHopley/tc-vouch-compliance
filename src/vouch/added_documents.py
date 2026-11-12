@@ -378,7 +378,8 @@ class AddedDocuments(Protocol):
         entries: Entries | None = None,
     ) -> AddedDocument:
         """Keep `new` as the next version of the document with its title, or version 1 of a new
-        one whose id is none of `builtin_ids`, with `entries`' audit entry when given, together.
+        one whose id is none of `builtin_ids`, with `entries`' audit entries (one per lead, #624)
+        when given, together.
         DocumentRefused, writing nothing, for a limit."""
         ...
 
@@ -386,7 +387,7 @@ class AddedDocuments(Protocol):
         self, profile_id: str, doc_id: str, at: datetime.datetime, entries: Entries | None = None
     ) -> list[AddedDocument]:
         """Mark every version of the document withdrawn at `at` (one already withdrawn keeps
-        its time), with `entries`' audit entry of its newest version when this marked any
+        its time), with `entries`' audit entries of its newest version when this marked any
         (#586), together: its versions as kept now, none when there is no such document."""
         ...
 

@@ -39,10 +39,12 @@ def app_with_roles(url: Any, developers: set[str]) -> Any:
     compliance lead (local mode makes everyone a developer)."""
     app = app_on(url)
 
-    def role(user: Annotated[User, Depends(api.current_user)]) -> Role:
+    def role(user: Annotated[User, Depends(api.current_user)]) -> Role | None:
+        if user.id == "user_clerk_down":
+            return None
         return "developer" if user.id in developers else "compliance-lead"
 
-    app.dependency_overrides[api.user_role] = role
+    app.dependency_overrides[api.role_if_known] = role
     return app
 
 
@@ -91,6 +93,17 @@ def test_the_creator_of_a_company_may_change_its_documents_without_the_developer
 
     assert (added.status_code, version.status_code, withdrawn.status_code) == (201, 201, 200)
     assert tab["can_change"] is True
+
+
+def test_when_clerk_cant_say_the_role_the_list_loads_and_a_change_is_refused():
+    down = {"X-Test-User": "user_clerk_down"}
+    with TestClient(app_with_roles(None, set())) as client:
+        tab = client.get(PATH, headers=down)
+        refused = client.post(PATH, json=body(), headers=down)
+
+    assert tab.status_code == 200, tab.text
+    assert tab.json()["can_change"] is False
+    assert refused.status_code == 403
 
 
 def test_on_a_file_defined_company_only_a_developer_may_change_documents(users):

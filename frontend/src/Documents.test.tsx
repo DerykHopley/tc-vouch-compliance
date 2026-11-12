@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Documents from './Documents.tsx'
-import { CHANGE_REFUSED_NOTE, DOCUMENTS_FAILED, type DocumentWords, WITHDRAW_FAILED, type ProfileDocument, type ProfileDocuments, useDocuments }
+import { CHANGE_REFUSED_NOTE, DOCUMENTS_FAILED, type DocumentWords, WITHDRAW_FAILED, withdrawDocument, type ProfileDocument, type ProfileDocuments, useDocuments }
   from './documents.ts'
 import { BACKUP_POLICY } from './libraryFixtures.ts'
 
@@ -176,6 +176,11 @@ describe('who may change the documents (ticket 624)', () => {
     const sheet = await screen.findByRole('article', { name: 'Documents' })
     expect(within(sheet).queryAllByRole('button')).toHaveLength(0)
     expect(within(sheet).getByText(CHANGE_REFUSED_NOTE)).toBeTruthy()
+  })
+
+  it("shows a refused withdraw's 403 in the server's words, not Try again", async () => {
+    vi.stubGlobal('fetch', vi.fn(() => json({ detail: CHANGE_REFUSED_NOTE }, 403)))
+    expect(await withdrawDocument('visitor-badge-policy')).toEqual({ ok: false, message: CHANGE_REFUSED_NOTE })
   })
 
   it('shows one who may change them the actions and no note', async () => {

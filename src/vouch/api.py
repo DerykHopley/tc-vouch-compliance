@@ -637,15 +637,26 @@ def user_memory(db: AppDatabase, user: CurrentUser, profile: Profile) -> Iterato
 UserMemory = Annotated[Memory, Depends(user_memory)]
 
 
+def role_if_known(request: Request, user: CurrentUser, settings: AppSettings) -> Role | None:
+    """The user's role as `user_role` reads it, or None when Clerk can't be asked: for a page
+    that still loads without it (#624: the Documents panel)."""
+    try:
+        found = _clerk_user(request, user, settings)
+    except ClerkUnavailable:
+        return None
+    return "developer" if found is None else found.role
+
+
 def may_change_documents(
     profile: Profile,
     user: CurrentUser,
-    role: Annotated[Role, Depends(user_role)],
+    role: Annotated[Role | None, Depends(role_if_known)],
     companies: CompanyProfiles,
 ) -> bool:
     """Whether the user may add, version or withdraw the current company's documents (#624,
     owner decision A): a developer, or the user who set the company up. A file-defined company
-    has no creator, so developers only."""
+    has no creator, so developers only. A role Clerk can't say isn't a developer's: the
+    read-only list still loads, and a change is refused."""
     if role == "developer":
         return True
     stored = companies.one(profile.id)
