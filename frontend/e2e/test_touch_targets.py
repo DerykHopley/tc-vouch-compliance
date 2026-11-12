@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from current_company import current_company
+from fonts import FONTS_SETTLED
 from playwright.sync_api import Page, expect
 from reviewing import confirmed, reviewed
 from test_company_setup import (
@@ -271,7 +272,10 @@ def test_the_asks_of_accept_verdict_and_reject_verdict_are_at_least_44px(page: P
     thread_id = assessed(page.request, paper_url)["assessment"]["thread_id"]
     confirmed(page.request, paper_url, thread_id, [M1_EVIDENCED])
     bar = open_paper(page, paper_url).get_by_role("region", name="Review")
-    bar.evaluate("(bar) => bar.scrollIntoView({ block: 'end' })")  # the buttons in their place
+    # The buttons in their place, once the web fonts have settled: a font landing after the scroll
+    # rewraps the paper above, which pushes the buttons' place below the window's foot, so they
+    # dock again (#683).
+    bar.evaluate("async (bar) => {" + FONTS_SETTLED + "bar.scrollIntoView({ block: 'end' }) }")
     expect(bar.locator(".review-dock")).not_to_have_class(re.compile(r"\bstuck\b"))
     for name in ("Accept verdict", "Reject verdict"):
         bar.get_by_role("button", name=name).click()

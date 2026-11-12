@@ -959,9 +959,9 @@ def test_the_created_notice_is_walked_by_keyboard_and_dismiss_leaves_focus_on_th
     expect(heading).to_be_visible()
     expect(page.get_by_role("region", name="Documents")).to_be_visible()
     page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-    page.get_by_role("banner").get_by_role("button", name="Your menu").focus()  # the bar's last
-    scrolled = page.evaluate("window.scrollY")  # after it: the bar's own focus may move the page
+    scrolled = page.evaluate("window.scrollY")
     assert scrolled > 200, scrolled
+    page.get_by_role("banner").get_by_role("button", name="Your menu").focus()  # the bar's last
     expect(heading).not_to_be_in_viewport()
 
     page.keyboard.press("Tab")
