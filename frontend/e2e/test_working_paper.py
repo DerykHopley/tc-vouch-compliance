@@ -1067,6 +1067,22 @@ def as_never_assessed(page: Page) -> None:
     page.route("**/api/overview", fresh)
 
 
+# The stacked index's edge and the first row it cuts (not wholly shown), read in one go once the
+# fonts have settled. Read one call at a time, a late IBM Plex Mono moved the index up 19px between
+# the edge and the rows (the top bar shrinks when it swaps in), so the row the fade covers was
+# missed and the next one measured: `383 < 354 - 8` (#656).
+CUT_ROW = (
+    "async (nav) => {"
+    + FONTS_SETTLED
+    + """  const edge = nav.getBoundingClientRect().top + nav.clientTop + nav.clientHeight
+  const row = [...nav.querySelectorAll('.wp-row')]
+    .find((r) => r.getBoundingClientRect().bottom > edge + 0.5)
+  const { x, y, width, height } = row.getBoundingClientRect()
+  return { edge, control: row.querySelector('.mono').textContent, x, y, width, height }
+}"""
+)
+
+
 def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page: Page, paper_url):
     as_never_assessed(page)
     page.set_viewport_size({"width": 390, "height": 844})
@@ -1077,10 +1093,8 @@ def test_on_a_phone_the_stacked_indexs_foot_fades_until_scrolled_to_its_end(page
 
     page.wait_for_function(INDEX_FADES, timeout=5000)
     # The next row is cut by the edge: the first row not wholly shown starts inside the box.
-    edge = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop + n.clientHeight")
-    rows = [box(link) for link in nav.get_by_role("link").all()]
-    cut = next(r for r in rows if r["y"] + r["height"] > edge + 0.5)
-    assert cut["y"] < edge - 8, (cut, edge)  # at least 8px of it shows
+    cut = nav.evaluate(CUT_ROW)
+    assert cut["y"] < cut["edge"] - 8, cut  # at least 8px of it shows
 
     nav.evaluate("n => { n.scrollTop = n.scrollHeight }")
     page.wait_for_function(f"!{INDEX_FADES}", timeout=5000)
@@ -1101,18 +1115,14 @@ def test_on_a_phone_the_half_shown_row_under_the_fade_opens_on_the_first_press(
         nav = page.get_by_role("navigation", name="Controls")
         expect(nav.get_by_role("link")).to_have_count(12)
         page.wait_for_function(INDEX_FADES, timeout=5000)
-        edge = nav.evaluate("n => n.getBoundingClientRect().top + n.clientTop + n.clientHeight")
-        links = nav.get_by_role("link").all()
-        cut = next(link for link in links if box(link)["y"] + box(link)["height"] > edge + 0.5)
-        control = cut.locator(".mono").inner_text()
-        shown = box(cut)
-        assert shown["y"] < edge - 8, (control, shown, edge)  # a part of it shows to press
-        x, y = shown["x"] + shown["width"] / 2, (shown["y"] + edge) / 2  # its visible part
+        cut = nav.evaluate(CUT_ROW)
+        assert cut["y"] < cut["edge"] - 8, cut  # a part of it shows to press
+        x, y = cut["x"] + cut["width"] / 2, (cut["y"] + cut["edge"]) / 2  # its visible part
         if how == "tap":
             page.touchscreen.tap(x, y)
         else:
             page.mouse.click(x, y)
-        expect(page).to_have_url(f"{paper_url}/controls/{control}")
+        expect(page).to_have_url(f"{paper_url}/controls/{cut['control']}")
     finally:
         context.close()
 
