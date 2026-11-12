@@ -13,6 +13,7 @@ light and dark, nothing scrolls sideways and every control is at least 44px."""
 import re
 
 import pytest
+from click_burst import DOUBLE_CLICK_MS
 from playwright.sync_api import APIRequestContext, Locator, Page, expect
 from touch_targets import small_targets
 
@@ -68,12 +69,16 @@ def confirm_and_accept(page: Page, paper: Locator, *, approve: bool) -> None:
         expect(item).to_contain_text("Priority: Medium")  # the default for partly evidenced
         with page.expect_response(re.compile(r"/remediation/M1$")):
             item.get_by_role("button", name="Approve M1").click()
+    bar.get_by_role("button", name="Accept verdict").click()  # it asks first (#634)
     with (
         page.expect_response(re.compile(r"/review$")) as accepted,
         page.expect_response("**/api/overview"),  # read again in the improvement goal
     ):
         bar.get_by_role("button", name="Accept verdict").click()
     assert accepted.value.ok, accepted.value.status
+    page.wait_for_timeout(
+        DOUBLE_CLICK_MS
+    )  # the next click comes after a double-click's time (#562)
 
 
 @pytest.mark.parametrize("width", [1280, 400])
