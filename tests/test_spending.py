@@ -31,6 +31,7 @@ from test_profile_pass import new_user, pass_app
 
 from vouch import database
 from vouch.api import create_app, record_off_the_event_loop
+from vouch.chat_fake import CannedChatModel
 from vouch.database import Database
 from vouch.fake_model import ScriptedChatModel
 from vouch.graph import Judgement
@@ -38,12 +39,14 @@ from vouch.model_choice import DEFAULT_MODEL, CallBudgetSpent, OpenRouter
 from vouch.settings import DEMO_SCRIPT, Settings
 from vouch.spending import (
     CHAT,
+    CHAT_DAILY_LIMIT,
     DAILY_LIMIT,
     PRICES,
     PROFILE_PASS,
     PROFILE_PASS_DAILY_LIMIT,
     PROFILE_PASS_LIMIT_SETTING,
     SONNET,
+    ChatLimitReached,
     DailyLimitReached,
     DatabaseSpendingStore,
     MemorySpendingStore,
@@ -1012,3 +1015,107 @@ def test_in_the_database_the_recent_runs_are_read_from_the_usage_table(empty_dat
     assert recent[0].at == NOV_4_AFTERNOON + timedelta(hours=11)
     assert recent[0].usage == twelve_records()[-1].usage
     assert tables(empty_database) == before
+
+
+# --- The chat's own daily limit (#628) -----------------------------------------------------------
+
+
+def send_chat(client: TestClient, message: str | None = "Hello"):
+    body: dict[str, Any] = {"page": "dossier"}
+    if message is not None:
+        body["message"] = message
+    return client.post("/api/chat", json=body)
+
+
+def test_the_51st_chat_message_of_a_day_is_a_429_naming_the_chat_limit_and_resets_next_day(
+    monkeypatch,
+):
+    app, clock = app_at(NOV_4_AFTERNOON)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    allowed = [send_chat(client).status_code for _ in range(CHAT_DAILY_LIMIT)]
+    calls: list[Any] = []
+    for method in ("_generate", "_stream"):
+        monkeypatch.setattr(CannedChatModel, method, lambda *a, **k: calls.append(a))
+    refused = send_chat(client)
+    clock.now = datetime(2026, 11, 5, 0, 0, 1, tzinfo=UTC)
+    monkeypatch.undo()
+    next_day = send_chat(client)
+
+    assert allowed == [200] * 50  # CHAT_DAILY_LIMIT, the owner's 50
+    assert refused.status_code == 429
+    assert refused.json() == {
+        "detail": "You have reached today's limit of 50 chat messages. "
+        "It resets at 00:00 UTC on 5 November 2026.",
+        "limit": "chat",
+        "resets_at": "2026-11-05T00:00:00+00:00",
+    }
+    assert calls == []
+    assert next_day.status_code == 200
+
+
+def test_a_developer_changes_the_chat_limit_and_the_greeting_counts_as_a_turn():
+    app, _ = app_at(NOV_4_AFTERNOON)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    changed = client.put("/api/developer/chat-daily-limit", json={"chat_daily_limit": 2})
+    greeting, sent, over = send_chat(client, None), send_chat(client), send_chat(client)
+
+    assert changed.status_code == 200
+    assert (greeting.status_code, sent.status_code) == (200, 200)
+    assert over.status_code == 429 and over.json()["limit"] == "chat"
+    assert "limit of 2 chat messages." in over.json()["detail"]
+
+
+def test_the_chat_limit_is_each_users_own_and_apart_from_the_assessments():
+    guard = SpendingGuard(MemorySpendingStore(), clock=FixedClock(NOV_4_AFTERNOON))
+    guard.set_chat_daily_limit(1)
+
+    guard.check("alice", paid=False)
+    with pytest.raises(ChatLimitReached) as refused:
+        guard.check("alice", paid=False)
+    guard.check("bob", paid=False)
+    guard.start("alice", paid=False)  # the assessments' count is untouched
+
+    assert refused.value.limit == 1
+
+
+def test_a_chat_refused_at_the_assessments_limit_takes_no_chat_turn():
+    guard = SpendingGuard(MemorySpendingStore(), clock=FixedClock(NOV_4_AFTERNOON))
+    guard.set_daily_limit(1)
+    guard.set_chat_daily_limit(1)
+    guard.start("alice", paid=False)
+
+    with pytest.raises(DailyLimitReached):
+        guard.check("alice", paid=False)
+    guard.set_daily_limit(2)
+
+    guard.check("alice", paid=False)  # the day's one chat turn is still there
+
+
+@pytest.mark.parametrize("limit", [0, -1, 10_001, "fifty", None])
+def test_a_chat_limit_outside_its_range_is_refused(limit):
+    client = TestClient(create_app(Settings()))
+
+    response = client.put("/api/developer/chat-daily-limit", json={"chat_daily_limit": limit})
+
+    assert response.status_code == 422
+    assert client.get("/api/developer/settings").json()["chat_daily_limit"] == CHAT_DAILY_LIMIT
+
+
+@needs_postgres
+def test_in_the_database_the_chat_count_is_its_own_and_reads_its_own_limit(empty_database):  # noqa: F811
+    empty_database.setup()
+    store = DatabaseSpendingStore(empty_database)
+    guard = SpendingGuard(store, clock=FixedClock(NOV_4_AFTERNOON))
+    today = NOV_4_AFTERNOON.date()
+
+    assert store.take_chat_turn("alice", today) == (True, CHAT_DAILY_LIMIT)
+    guard.set_chat_daily_limit(2)
+    taken = [store.take_chat_turn("alice", today) for _ in range(2)]
+
+    assert taken == [(True, 2), (False, 2)]
+    assert store.take_chat_turn("bob", today) == (True, 2)
+    assert store.take("alice", today) == (True, DAILY_LIMIT)
+    assert store.chat_daily_limit() == 2
+    assert database.CHAT_COUNTS_TABLE in tables(empty_database)

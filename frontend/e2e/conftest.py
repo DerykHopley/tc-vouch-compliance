@@ -56,12 +56,26 @@ def _developer_settings(url: str, limit: int | None = None) -> dict[str, Any]:
         return json.load(answer)
 
 
+def _raise_chat_limit(url: str) -> None:
+    """The chat's own daily limit (#628) to E2E_DAILY_LIMIT: every chat turn counts, the
+    greeting too, and a server's checks together send more than the default 50."""
+    request = urllib.request.Request(
+        f"{url}/api/developer/chat-daily-limit",
+        data=json.dumps({"chat_daily_limit": E2E_DAILY_LIMIT}).encode(),
+        method="PUT",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=30):
+        pass
+
+
 @pytest.fixture(scope="session", autouse=True)
 def daily_limit_above_the_suite() -> Iterator[None]:
     """Every test server but DEFAULT_LIMIT_SERVERS starts with E2E_DAILY_LIMIT (#489). After the
     suite, each still has room for one more assessment: a server whose checks used its whole daily
     limit answers the next one 429, which a check added there would meet."""
     for server in SERVERS:
+        _raise_chat_limit(os.environ[server])
         if server not in DEFAULT_LIMIT_SERVERS:
             _developer_settings(os.environ[server], E2E_DAILY_LIMIT)
     yield

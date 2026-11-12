@@ -256,6 +256,7 @@ def test_the_developer_page_shows_the_model_the_prompt_version_and_the_usage_lin
         "usage_url": USAGE_URL,
         "kept_in": "memory",
         "daily_limit": 30,  # vouch.spending (#35)
+        "chat_daily_limit": 50,  # the chat's own (#628)
         "usage": {"openrouter": NO_USAGE, "fake": NO_USAGE},
         "broken_profiles": [],  # #47: every fixture profile loads
         "companies": [],  # #418: no company made in setup
@@ -309,6 +310,7 @@ def test_a_developer_changes_the_model_and_the_next_assessment_uses_it(client, c
     [
         ("/api/developer/model", {"model": OTHER_MODEL}),
         ("/api/developer/daily-limit", {"daily_limit": 7}),
+        ("/api/developer/chat-daily-limit", {"chat_daily_limit": 7}),
     ],
 )
 def test_a_change_answers_the_whole_developer_page_as_the_settings_read_does(client, path, body):
@@ -646,6 +648,7 @@ def clerk() -> FakeClerk:
         ("GET", "/api/developer/settings", None),
         ("PUT", "/api/developer/model", {"model": OTHER_MODEL}),
         ("PUT", "/api/developer/daily-limit", {"daily_limit": 5}),
+        ("PUT", "/api/developer/chat-daily-limit", {"chat_daily_limit": 5}),
     ],
 )
 def test_a_compliance_lead_gets_403_from_the_developer_api(clerk, method, path, body):

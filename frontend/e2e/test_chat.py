@@ -508,3 +508,36 @@ def test_scrolled_to_the_end_the_closed_button_hides_nothing(page: Page, chat_ur
         fab,
     )
     assert covered == []
+
+
+def test_a_developer_sets_the_chat_limit_and_at_it_the_chat_says_so_in_place_of_a_reply(
+    page: Page, chat_url
+):
+    # Issue 628: the limit is the server's, shared, so it's put back after.
+    before = page.request.get(f"{chat_url}/api/developer/settings").json()["chat_daily_limit"]
+    page.goto(f"{chat_url}/developer")
+    settings = page.get_by_role("region", name="Developer settings")
+    try:
+        limit = settings.get_by_role("textbox", name="Chat messages per day")
+        limit.fill("1")
+        with page.expect_response("**/api/developer/chat-daily-limit") as answered:
+            limit.press("Enter")
+        assert answered.value.status == 200
+        expect(settings).to_contain_text("1 chat message per user per day (UTC)")
+
+        open_page(page, chat_url, WIDE)
+        page.get_by_role("button", name="Ask Vouch").click()
+        field = page.get_by_role("textbox", name="Message to Vouch")
+        for message in ("First question", "Second question"):  # the second is over any count
+            field.fill(message)
+            with page.expect_response("**/api/chat"):
+                page.get_by_role("button", name="Send").click()
+
+        expect(chat(page).get_by_role("log")).to_contain_text(
+            "You have reached today's limit of 1 chat message. It resets at 00:00 UTC on"
+        )
+    finally:
+        reset = page.request.put(
+            f"{chat_url}/api/developer/chat-daily-limit", data={"chat_daily_limit": before}
+        )
+        assert reset.status == 200, reset.text()

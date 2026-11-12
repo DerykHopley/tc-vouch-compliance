@@ -49,6 +49,10 @@ PROFILE_PASS_DAILY_LIMIT = 3
 developer may change it in the settings table, under PROFILE_PASS_LIMIT_SETTING, with no
 deploy."""
 PROFILE_PASS_LIMIT_SETTING = "profile_pass_daily_limit"
+CHAT_DAILY_LIMIT = 50
+"""Chat messages a user may send in a UTC day (#628, owner decision 2026-11-12), apart from the
+assessments' limit; a developer changes it on the developer page."""
+CHAT_LIMIT_SETTING = "chat_daily_limit"
 PROFILE_PASS = "profile-pass"
 """The control a usage record names for a profile pass (#371): one record for its one run."""
 CHAT = "chat"
@@ -323,6 +327,15 @@ class SpendingStore(Protocol):
         nothing: (under it, the limit)."""
         ...
 
+    def chat_daily_limit(self) -> int: ...
+
+    def set_chat_daily_limit(self, limit: int) -> None: ...
+
+    def take_chat_turn(self, user_id: str, day: date) -> tuple[bool, int]:
+        """Count one chat message for the user's day if they're under the chat's own limit, the
+        limit read in the same step: (counted, the limit)."""
+        ...
+
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         """Count one profile pass for the user's day if they're under the passes' own limit, the
         limit read in the same step: (counted, the limit)."""
@@ -338,6 +351,29 @@ class SpendingStore(Protocol):
         ...
 
 
+class _DailyCounter:
+    """Each user's count for one UTC day against a limit, in memory; yesterday's counts go on
+    the first count of a new day. The caller holds the store's lock."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._day: date | None = None
+        self._counts: dict[str, int] = {}
+
+    def take(self, user_id: str, day: date) -> tuple[bool, int]:
+        if day != self._day:
+            self._day, self._counts = day, {}
+        count = self._counts.get(user_id, 0)
+        if count >= self.limit:
+            return False, self.limit
+        self._counts[user_id] = count + 1
+        return True, self.limit
+
+    def under(self, user_id: str, day: date) -> tuple[bool, int]:
+        count = self._counts.get(user_id, 0) if day == self._day else 0
+        return count < self.limit, self.limit
+
+
 class MemorySpendingStore:
     """No database: kept until the server restarts, for the fake model only."""
 
@@ -345,43 +381,38 @@ class MemorySpendingStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._limit = DAILY_LIMIT
-        self._day: date | None = None
-        self._counts: dict[str, int] = {}
-        self._pass_day: date | None = None
-        self._pass_counts: dict[str, int] = {}
+        self._assessments = _DailyCounter(DAILY_LIMIT)
+        self._passes = _DailyCounter(PROFILE_PASS_DAILY_LIMIT)
+        self._chat = _DailyCounter(CHAT_DAILY_LIMIT)
         self._records: list[UsageRecord] = []
 
     def daily_limit(self) -> int:
-        return self._limit
+        return self._assessments.limit
 
     def set_daily_limit(self, limit: int) -> None:
-        self._limit = limit
+        self._assessments.limit = limit
 
     def take(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            if day != self._day:  # a new day: yesterday's counts go
-                self._day, self._counts = day, {}
-            count = self._counts.get(user_id, 0)
-            if count >= self._limit:
-                return False, self._limit
-            self._counts[user_id] = count + 1
-            return True, self._limit
+            return self._assessments.take(user_id, day)
 
     def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            count = self._counts.get(user_id, 0) if day == self._day else 0
-            return count < self._limit, self._limit
+            return self._assessments.under(user_id, day)
+
+    def chat_daily_limit(self) -> int:
+        return self._chat.limit
+
+    def set_chat_daily_limit(self, limit: int) -> None:
+        self._chat.limit = limit
+
+    def take_chat_turn(self, user_id: str, day: date) -> tuple[bool, int]:
+        with self._lock:
+            return self._chat.take(user_id, day)
 
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         with self._lock:
-            if day != self._pass_day:  # a new day: yesterday's counts go
-                self._pass_day, self._pass_counts = day, {}
-            count = self._pass_counts.get(user_id, 0)
-            if count >= PROFILE_PASS_DAILY_LIMIT:
-                return False, PROFILE_PASS_DAILY_LIMIT
-            self._pass_counts[user_id] = count + 1
-            return True, PROFILE_PASS_DAILY_LIMIT
+            return self._passes.take(user_id, day)
 
     def record(self, record: UsageRecord) -> None:
         with self._lock:
@@ -428,6 +459,16 @@ class DatabaseSpendingStore:
 
     def under_limit(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.under_assessment_limit(user_id, day, DAILY_LIMIT_SETTING, DAILY_LIMIT)
+
+    def chat_daily_limit(self) -> int:
+        stored = self.db.setting(CHAT_LIMIT_SETTING)
+        return int(stored) if stored and stored.isdigit() else CHAT_DAILY_LIMIT
+
+    def set_chat_daily_limit(self, limit: int) -> None:
+        self.db.set_setting(CHAT_LIMIT_SETTING, str(limit))
+
+    def take_chat_turn(self, user_id: str, day: date) -> tuple[bool, int]:
+        return self.db.take_chat_turn(user_id, day, CHAT_LIMIT_SETTING, CHAT_DAILY_LIMIT)
 
     def take_profile_pass(self, user_id: str, day: date) -> tuple[bool, int]:
         return self.db.take_profile_pass(
@@ -485,6 +526,8 @@ class DailyLimitReached(Exception):
 
     noun = "assessment"
     nouns = "assessments"
+    limit_name = "daily"
+    """The 429's `limit`, telling the limits apart."""
 
     def __init__(self, limit: int, resets_at: datetime, now: datetime) -> None:
         super().__init__(f"daily limit of {limit} reached")
@@ -503,6 +546,15 @@ class ProfilePassLimitReached(DailyLimitReached):
 
     noun = "profile pass"
     nouns = "profile passes"
+    limit_name = "profile-pass"
+
+
+class ChatLimitReached(DailyLimitReached):
+    """The user has sent `limit` chat messages today (#628); the count resets at `resets_at`."""
+
+    noun = "chat message"
+    nouns = "chat messages"
+    limit_name = "chat"
 
 
 def _utc_now() -> datetime:
@@ -555,8 +607,10 @@ class SpendingGuard:
 
     def check(self, user_id: str, paid: bool) -> None:
         """Before a chat message (#44), whose model calls go through the spending guard too:
-        refused as an assessment would be, but nothing counted, as chat isn't an assessment.
-        Raises NoSharedCounter, DailyLimitReached, or DatabaseUnavailable."""
+        refused at the assessments' limit, but nothing counted there, as chat isn't an
+        assessment. Then the chat's own limit (#628): every turn, the greeting too, counts one
+        against it, as each calls the model. Raises NoSharedCounter, DailyLimitReached,
+        ChatLimitReached, or DatabaseUnavailable."""
         if paid and self.store.kept_in == "memory":
             raise NoSharedCounter(NO_SHARED_COUNTER)
         now = self.clock().astimezone(UTC)
@@ -564,11 +618,20 @@ class SpendingGuard:
         if not under:
             log.info("a user at the daily limit of %d assessments was refused a chat", limit)
             raise _reached(limit, now)
+        taken, limit = self.store.take_chat_turn(user_id, now.date())
+        if not taken:
+            log.info("a user reached the daily limit of %d chat messages", limit)
+            raise _reached(limit, now, ChatLimitReached)
 
     def set_daily_limit(self, limit: int) -> None:
         """Raises DatabaseUnavailable."""
         self.store.set_daily_limit(limit)
         log.info("the daily limit is now %d assessments", limit)
+
+    def set_chat_daily_limit(self, limit: int) -> None:
+        """Raises DatabaseUnavailable."""
+        self.store.set_chat_daily_limit(limit)
+        log.info("the chat's daily limit is now %d messages", limit)
 
     def record(self, user_id: str, control_id: str, usage: Usage) -> None:
         """Keep the assessment's usage, a chat message's (`control_id` CHAT), or a profile
@@ -580,10 +643,11 @@ class SpendingGuard:
             log.warning("the usage of an assessment of %s could not be kept", control_id)
 
     def settings(self) -> dict[str, Any]:
-        """What the developer page shows: the daily limit, the usage totalled, each priced
+        """What the developer page shows: the daily limits, the usage totalled, each priced
         model's list price and the recent runs (#496). Raises DatabaseUnavailable."""
         return {
             "daily_limit": self.store.daily_limit(),
+            "chat_daily_limit": self.store.chat_daily_limit(),
             "usage": self.store.totals().to_dict(),
             "prices": [{"model": model} | asdict(price) for model, price in PRICES.items()],
             "recent_runs": [r.to_run() for r in self.store.recent(RECENT_RUNS)],
