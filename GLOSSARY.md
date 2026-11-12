@@ -193,7 +193,7 @@ A verdict the compliance lead has accepted (the last step of the review, after C
 _Avoid_: Approval, sign-off, final verdict
 
 **Audit trail**:
-The append-only record of every action of the compliance lead, one entry each: findings confirmed, a control accepted or rejected, a requirement overridden, a remediation item approved or discarded, its priority changed or its done mark, a review round started or closed, an open question logged or answered, the goal changed. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
+The append-only record (except Reset demo) of every action of the compliance lead, one entry each: findings confirmed, a control accepted or rejected, a requirement overridden, a remediation item approved or discarded, its priority changed or its done mark, a review round started or closed, an open question logged or answered, the goal changed. Each entry says who (the user id, and their display name as it was then), when, the note, the verdict before and after, the evidence versions behind it, and the model and prompt version of the run.
 _Avoid_: History, log, changelog
 
 **Override**:
