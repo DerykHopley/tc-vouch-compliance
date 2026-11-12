@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How Vouch runs</title>
-<meta name="description" content="One assessment through Vouch end to end, and the profile pass: FastAPI, the LangGraph graphs, the LangChain model calls, the guards, the three-step review, and what is written to Postgres when.">
+<meta name="description" content="One assessment through Vouch end to end, the chat, company setup and the profile pass: FastAPI, the LangGraph graphs, the LangChain model calls, the guards, the three-step review, and what is written to Postgres when.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -143,7 +143,8 @@ svg .cond { fill: var(--sheet); stroke: var(--muted); stroke-width: 1.4; }
   <p class="eyebrow">Vouch · runtime process flow</p>
   <h1>How Vouch runs an assessment</h1>
   <p class="lede">One VDA ISA control, from the lead's click through the three-step review to a reviewed verdict
-  and the report, and beside it the profile pass, which assesses every open control in one model run:
+  and the report, and beside it the chat and the profile pass, which assesses every open control in one model run,
+  and which company setup starts for a new company:
   each step, the technology it runs on, where LangGraph and LangChain come in, which guard checks what,
   and when Postgres is written.</p>
   <p class="note"><strong>Two agent layers.</strong> The chat is a ReAct agent that answers questions and starts assessments;
@@ -177,24 +178,28 @@ the 12-call budget on the model, and <code>check_answer</code>, which can send t
 <div class="scroll"><svg id="main" role="img" aria-label="Process flow of one Vouch assessment"></svg></div>
 
 <h2>2 · Ask Vouch, the chat</h2>
-<p class="note">The chat is a second, smaller LangGraph graph with its own tools. It never writes or reviews a verdict:
+<p class="note">The chat is a second, smaller LangGraph graph with its own six tools. It never writes or reviews a verdict:
 asked to sign off, it links the working paper. Its <code>start_assessment</code> tool runs diagram 1's graph.
 <code>agent ⇄ tools</code> is the same kind of hand-built ReAct loop, on <code>model.bind_tools(CHAT_TOOLS)</code> within the same call budget;
 the <code>answer</code> guard checks every reply and can send it back to <code>agent</code>.</p>
 <div class="scroll"><svg id="chat" role="img" aria-label="Process flow of one Ask Vouch chat turn"></svg></div>
 
-<h2>3 · The profile pass</h2>
-<p class="note">Every open control of a small compliance profile in one structured model call, with all its evidence
+<h2>3 · Company setup and the profile pass</h2>
+<p class="note">A developer sets up a new company in seven steps; it is kept, made the current company, given its Goal,
+and its first profile pass starts on its own. The pass: every open control of a small compliance profile in one structured model call, with all its evidence
 in the prompt: no ReAct loop and no tools. The same guards then run on each control's part of the reply, in code,
 and each result is written onto its own thread of diagram 1's graph, waiting at its <code>review</code> interrupt for
-the same three-step review. Controls already accepted are skipped.</p>
+the same three-step review. Controls already accepted, and reviews in progress, are skipped.</p>
 <div class="scroll"><svg id="pass" role="img" aria-label="Process flow of one profile pass"></svg></div>
 
 <ul class="legend" id="legend"></ul>
 
 <footer>
-  As of <code>spec/350-keep-improving</code> <code>4b74e60</code> (2026-11-09), read from <code>src/vouch/</code>:
-  M7 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/350">#350</a>), with the three-step review, the profile pass, review rounds, the improvement plan, open questions and the lead's statements.
+  As of <code>main</code> <code>ccc3ee6</code> (2026-11-12), read from <code>src/vouch/</code>:
+  M7 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/350">#350</a>), with the three-step review, the profile pass, review rounds, the improvement plan, open questions and the lead's statements;
+  M8 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/351">#351</a>), company setup from the sample library and Remove company;
+  M9 (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/448">#448</a>), the current company, the Company page and the Developer page;
+  and since, the round comparison and chat's <code>compare_rounds</code> (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/554">#554</a>, <a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/575">#575</a>), added documents (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/345">#345</a>), Reset demo (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/605">#605</a>) and the two-section draft answer (<a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/670">#670</a>).
   The domain words are <a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/GLOSSARY.md">GLOSSARY.md</a>'s.
   · <a href="../evals/">Model evals</a>
 </footer>
@@ -262,17 +267,21 @@ const MAIN = {
       { id: "branch", type: "graph", tag: "LangGraph node", title: "overlay_branch", mono: true, dashed: true,
         body: "Only when an overlay adds a requirement: asks for its evidence too." },
       { id: "gather", type: "graph", tag: "LangGraph node", title: "gather", mono: true, model: true,
-        body: "ReAct: the model asks for one or more searches, or calls submit_answer with its draft. Loops until it submits.",
+        body: "ReAct: the model asks for one or more searches, or calls submit_answer with its draft answer, in two sections: What the evidence shows, What is missing. Loops until it submits.",
         tech: "model.bind_tools" },
       { id: "tools", type: "guard", tag: "Node · guards", title: "tools", mono: true,
         body: "Runs each call the model asked for, one by one, each checked against the allow-list and its folder; passages go to the model as <evidence> data.",
         tech: "vouch.guards · layers 2, 3" },
       { id: "t-policies", type: "tool", tag: "Tool", title: "search_policies", mono: true,
-        body: "Keyword search over the policies folder the profile allows.", tech: "vouch.search" },
+        body: "Keyword search over the policies folder the profile allows, and the policies the lead added.", tech: "vouch.search" },
       { id: "t-records", type: "tool", tag: "Tool", title: "search_records", mono: true,
-        body: "The same over the records folder.", tech: "vouch.search" },
+        body: "The same over the records folder, and the records the lead added.", tech: "vouch.search" },
       { id: "t-patch", type: "tool", tag: "Tool", title: "vulnerability_status", mono: true,
         body: "The recorded Patch response, as implemented evidence.", tech: "vouch.patch" },
+      { id: "docs", type: "api", tag: "FastAPI", title: "Documents, on the Company page",
+        body: "The lead adds a document or a new version of one (instruction-like text flagged), or withdraws an added one. Searches read the newest version not withdrawn; built-in documents can't be changed. A new version of a document a control's newest assessment cites flags the control: New evidence, assess again.",
+        tech: "POST /api/documents · POST /api/documents/{doc_id}/withdraw · vouch.added_documents",
+        writes: "vouch_added_documents · vouch_audit_trail" },
     ] },
     { title: "Judge", sub: "LangGraph · vouch.graph",
       summary: "The model judges each requirement with quotes; code checks every quote, then the model drafts remediation.",
@@ -312,7 +321,7 @@ const MAIN = {
         writes: "checkpoint · vouch_audit_trail" },
     ] },
     { title: "Outputs", sub: "what the lead sees",
-      summary: "The streamed steps, the Dossier overview with the goal and the review round, review rounds, and the report; the chat has its own diagram below.",
+      summary: "The streamed steps, the Dossier overview with the goal and the review round, review rounds and the round comparison, and the report; the chat has its own diagram below.",
       chips: "SSE · fpdf2 · no model call", cards: [
       { id: "stream", type: "browser", tag: "Browser · SSE", title: "Streamed steps",
         body: "A step event as each node finishes, each requirement once its quotes are checked, then the result with its usage. All redacted.",
@@ -326,6 +335,9 @@ const MAIN = {
         body: "The lead names and starts a round (the first opens on its own) and closes it: closing freezes each control's result, for the next round's comparison.",
         tech: "POST /api/rounds · POST /api/rounds/close · vouch.rounds",
         writes: "vouch_review_rounds · vouch_audit_trail" },
+      { id: "compare", type: "api", tag: "FastAPI", title: "Round comparison",
+        body: "Now against a closed round, the last by default: each control's verdict then and now, readiness then and now, and the remediation items done, questions answered and evidence changed since. On the Overview, Company › Rounds, and the chat's compare_rounds. Read only.",
+        tech: "GET /api/rounds/{number}/comparison · vouch.rounds" },
       { id: "report", type: "api", tag: "FastAPI", title: "Readiness report or improvement report, by the goal",
         body: "One profile's standing as a page, Markdown or PDF, from the same routes: for management and an auditor, or for the team. No model call.",
         tech: "/report · /report/markdown · /report/pdf (fpdf2)" },
@@ -349,8 +361,8 @@ const MAIN = {
   ],
   lane: {
     title: "State · Postgres on Cloud SQL",
-    sub: "vouch.database: one psycopg pool; vouch-db-setup creates every table at deploy. With no database, the same in process memory.",
-    summary: "LangGraph's checkpointer (every thread) and store (long-term memory), and ten Vouch tables: the two daily counts, usage, the append-only audit trail, remediation items and the plan, goals, review rounds, open questions, settings.",
+    sub: "vouch.database: one psycopg pool; vouch-db-setup creates every table at deploy. With no database, the same in process memory. Reset demo (Developer page) deletes one company's rows.",
+    summary: "LangGraph's checkpointer (every thread) and store (long-term memory), and twelve Vouch tables: the two daily counts, usage, the append-only audit trail, remediation items and the plan, goals, review rounds, open questions, settings with the current company, the companies made in setup, and added documents.",
     cards: [
       { id: "s-ckpt", type: "state", tag: "LangGraph checkpointer", title: "Threads",
         body: "Each assessment and chat thread. A checkpoint after every node; each review step resumes from it.", tech: "PostgresSaver" },
@@ -363,7 +375,7 @@ const MAIN = {
       { id: "s-usage", type: "state", tag: "Table", title: "vouch_usage", mono: true,
         body: "Tokens and cost of each assessment, profile pass and chat turn, from the UsageMeter." },
       { id: "s-audit", type: "state", tag: "Table · append-only", title: "vouch_audit_trail", mono: true,
-        body: "Each review step, override, item decision, priority, done mark, round, question and goal change. A trigger refuses update and delete." },
+        body: "Each review step, override, item decision, priority, done mark, round, question, goal change, document added or withdrawn, and demo reset. A trigger refuses update and delete, but for Reset demo's delete." },
       { id: "s-rem", type: "state", tag: "Table", title: "vouch_remediation_items", mono: true,
         body: "The lead's approval or discard of each remediation item." },
       { id: "s-plan", type: "state", tag: "Table", title: "vouch_remediation_plan", mono: true,
@@ -375,7 +387,11 @@ const MAIN = {
       { id: "s-questions", type: "state", tag: "Table", title: "vouch_open_questions", mono: true,
         body: "Each open question and its answer." },
       { id: "s-set", type: "state", tag: "Table", title: "vouch_settings", mono: true,
-        body: "The developer's model choice and the daily limit." },
+        body: "The current company, for every user, and the developer's model choice and daily limit." },
+      { id: "s-company", type: "state", tag: "Table", title: "vouch_company_profiles", mono: true,
+        body: "Each company made in company setup; a removed one kept, so its id is never used again." },
+      { id: "s-added", type: "state", tag: "Table", title: "vouch_added_documents", mono: true,
+        body: "Each version of each document a lead added; withdrawn marked, never deleted." },
     ],
   },
   loops: [{ ids: ["gather", "tools"], stage: 2,
@@ -427,7 +443,8 @@ const MAIN = {
     { from: "review", fs: "r", fo: -16, to: "stream", ts: "l", label: "steps" },
     { from: "areview", fs: "r", to: "overview", ts: "l", label: "reviewed\nverdicts" },
     { from: "overview", to: "rounds", label: "the round" },
-    { from: "rounds", to: "report", label: "same readiness" },
+    { from: "rounds", to: "compare", label: "frozen results" },
+    { from: "compare", to: "report", label: "improvement\nreport" },
     { from: "overview", fs: "r", to: "iplan", ts: "l", label: "Internal\nimprovement" },
     { from: "iplan", to: "closed", label: "done, then\nassess again" },
   ],
@@ -481,7 +498,7 @@ const CHAT = {
         body: "Every quote checked against its document, no audit-result claim, the profile's language; refused: back to agent, once.",
         tech: "vouch.chat_citations" },
     ] },
-    { title: "Chat tools", sub: "five, in ChatTools", cards: [
+    { title: "Chat tools", sub: "six, in ChatTools", cards: [
       { id: "t-progress", type: "tool", tag: "Tool", title: "progress", mono: true,
         body: "Where the lead stands and the next step, from the store.", tech: "vouch.memory · vouch.dossier" },
       { id: "t-start", type: "tool", tag: "Tool", title: "start_assessment", mono: true,
@@ -492,6 +509,9 @@ const CHAT = {
         body: "Every control's newest assessment at once." },
       { id: "t-search", type: "tool", tag: "Tool", title: "search_evidence", mono: true,
         body: "Searches the allowed policies and records, behind the assessment's guards.", tech: "vouch.search" },
+      { id: "t-compare", type: "tool", tag: "Tool", title: "compare_rounds", mono: true,
+        body: "Now against a closed review round, by number or name (the last closed by default): reads the round's frozen results and the current state, as the round comparison does.",
+        tech: "vouch.rounds" },
     ] },
     { title: "Out and kept", sub: "SSE · Postgres", cards: [
       { id: "c-ckpt", type: "state", tag: "LangGraph checkpointer", title: "Chat thread",
@@ -531,8 +551,18 @@ const CHAT = {
 const PASS = {
   cols: [
     { title: "Ask", sub: "React · FastAPI", cards: [
+      { id: "p-setup", type: "browser", tag: "Browser · developers only", title: "Company setup",
+        body: "Seven steps, from the user menu or the Developer page: name and country, answer language, protection level, Goal, controls not applicable with reasons, evidence chosen from the sample library, then Finish.",
+        tech: "GET /api/developer/sample-library" },
+      { id: "p-create", type: "api", tag: "FastAPI", title: "POST /api/developer/profiles", mono: true,
+        body: "The answers checked as a compliance profile, then the company kept under a new id; one the checks refuse keeps nothing (422).",
+        tech: "vouch.company_profiles", writes: "vouch_company_profiles" },
+      { id: "p-current", type: "api", tag: "FastAPI", title: "Current company, then its Goal",
+        body: "The new company made current for every user; the app opens on its Overview, sets the Goal chosen in setup and starts the first pass.",
+        tech: "PUT /api/developer/current-company · PUT /api/goal",
+        writes: "vouch_settings · vouch_profile_goals · vouch_audit_trail" },
       { id: "p-browser", type: "browser", tag: "Browser", title: "Run a profile pass",
-        body: "On the Dossier: every open control of the lead's compliance profile in one run." },
+        body: "On the Dossier: every open control of the lead's compliance profile in one run; after company setup, on its own." },
       { id: "p-api", type: "api", tag: "FastAPI", title: "POST /api/profile-pass", mono: true,
         body: "One answer when the pass is done, not a stream.", tech: "vouch.api" },
     ] },
@@ -550,7 +580,7 @@ const PASS = {
     ] },
     { title: "One model call", sub: "LangChain · vouch.profile_pass", cards: [
       { id: "p-prompt", type: "rules", tag: "Rules", title: "The prompt",
-        body: "The rules; each included control's applicable requirements; every document of every allowed source as data, with its kind and whether it is stale; each control's lead statements under it. Accepted controls skipped." },
+        body: "The rules; each included control's applicable requirements; every document of every allowed source as data (added ones too, the newest version not withdrawn), with its kind and whether it is stale; each control's lead statements under it. Accepted controls and reviews in progress skipped." },
       { id: "p-call", type: "graph", tag: "LangChain", title: "One structured call", model: true,
         body: "One call answers for every included control: verdicts, quotes, answers and remediation drafts. Up to 600 s, never retried on its own (the lead's Try again).",
         tech: "with_structured_output · ProfilePassReply",
@@ -574,6 +604,9 @@ const PASS = {
     ] },
   ],
   arrows: [
+    { from: "p-setup", to: "p-create", label: "the answers" },
+    { from: "p-create", to: "p-current", label: "new company id" },
+    { from: "p-current", to: "p-browser", label: "first pass" },
     { from: "p-browser", to: "p-api", label: "profile" },
     { from: "p-api", fs: "r", to: "p-who", ts: "l", label: "request" },
     { from: "p-who", to: "p-one" },
