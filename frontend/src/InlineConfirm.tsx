@@ -21,6 +21,8 @@ type Props = {
    * question that changed under them. */
   subject?: string
   trigger?: Trigger
+  /** Given the trigger button as it mounts (and null as it goes), for a caller that moves focus to it. */
+  triggerRef?: (el: HTMLButtonElement | null) => void
 }
 
 /**
@@ -32,7 +34,7 @@ type Props = {
  * press on the confirm, the second click of a double-click presses nothing (#527).
  */
 export default function InlineConfirm({ label, confirmLabel = label, cancelLabel = 'Cancel', question, onConfirm,
-  confirmDisabled = false, ask = true, subject = question, trigger = {} }: Props) {
+  confirmDisabled = false, ask = true, subject = question, trigger = {}, triggerRef }: Props) {
   const [open, setOpen] = useState(false)
   // What the ask is about changed while it was open: it closes as this render's state, not after it.
   const [about, setAbout] = useState(subject)
@@ -84,6 +86,9 @@ export default function InlineConfirm({ label, confirmLabel = label, cancelLabel
     else onConfirm()
   }
   return (
-    <button type="button" ref={button} className="btn btn-ghost" {...trigger} onClick={press}>{label}</button>
+    <button type="button" ref={(el) => {
+      button.current = el
+      triggerRef?.(el)
+    }} className="btn btn-ghost" {...trigger} onClick={press}>{label}</button>
   )
 }

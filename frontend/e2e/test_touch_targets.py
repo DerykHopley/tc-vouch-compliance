@@ -27,7 +27,7 @@ from test_plan import improving_afresh
 from test_profiles import assessed as assessed_in
 from test_questions import readiness_afresh
 from test_remediation import ITEM, confirmed_with_an_item
-from test_review import assessed, open_paper, row
+from test_review import REASON, assessed, open_paper, override, row
 from touch_targets import small_targets
 
 PAGES = ["/", "/controls/4.1.2", "/developer", "/company"]
@@ -260,6 +260,17 @@ def test_a_requirement_card_s_toggle_override_and_remediation_controls_are_at_le
     # #437: Assess again on a review in progress warns first, with two pills in its place.
     paper.get_by_role("button", name="Assess again 4.1.2").click()
     expect(paper.get_by_role("button", name="Keep the review")).to_be_visible()
+    assert small_targets(page) == []
+
+
+def test_the_ask_on_switching_override_editors_is_at_least_44px(page: Page, paper_url):
+    # #559: Change on M2 with M1's override typed asks first, with two pills in its place.
+    page.set_viewport_size({"width": 400, "height": 900})
+    assessed(page.request, paper_url)
+    paper = open_paper(page, paper_url)
+    override(paper, "M1", "Evidenced", REASON)
+    row(paper, "M2").get_by_role("button", name="Change M2", exact=True).click()
+    expect(paper.get_by_role("button", name="Keep editing M1")).to_be_visible()
     assert small_targets(page) == []
 
 
