@@ -187,19 +187,21 @@ The assessment's prompts (gather, country overlay, judge, remediation), the chat
 
 ## Filed as issues
 
-Each point worth acting on is its own issue, labelled `needs-triage`, for the triage pass to sort into a lane. None is fixed here.
+Each point worth acting on is its own issue, labelled `needs-triage`, for the triage pass to sort into a lane. As of 2026-11-13, 6 of the 12 are fixed and 6 are open.
 
-- U1, Accept verdict and Reject verdict are one click, with no confirm: [#634](https://github.com/DerykHopley/tc-vouch-compliance/issues/634)
-- U3, The profile pass runs blind for minutes, and its cost note names a fixed model: [#635](https://github.com/DerykHopley/tc-vouch-compliance/issues/635)
-- S1, Any signed-in user changes the evidence every lead is assessed on: [#624](https://github.com/DerykHopley/tc-vouch-compliance/issues/624)
-- S2, The form decides what kind of evidence a document is, and how fresh: [#627](https://github.com/DerykHopley/tc-vouch-compliance/issues/627)
-- S3, Chat messages are paid and never counted: [#628](https://github.com/DerykHopley/tc-vouch-compliance/issues/628)
-- S4, The append-only audit trail has a back door: [#629](https://github.com/DerykHopley/tc-vouch-compliance/issues/629)
-- P1, The eval numbers describe older prompts: [#625](https://github.com/DerykHopley/tc-vouch-compliance/issues/625)
-- P2, The gather prompt gives no search plan: [#626](https://github.com/DerykHopley/tc-vouch-compliance/issues/626)
-- P3, The model decides whether its own verdict is capped: [#630](https://github.com/DerykHopley/tc-vouch-compliance/issues/630)
-- P4, The evals don't measure the costly direction of error: [#631](https://github.com/DerykHopley/tc-vouch-compliance/issues/631)
-- P5 (with U2), The output guard is strict on one English word and blind to others: [#632](https://github.com/DerykHopley/tc-vouch-compliance/issues/632)
-- P6, The chat and the profile pass are not evaluated: [#633](https://github.com/DerykHopley/tc-vouch-compliance/issues/633)
+| Point | Issue | State |
+|---|---|---|
+| U1, Accept verdict and Reject verdict are one click, with no confirm | [#634](https://github.com/DerykHopley/tc-vouch-compliance/issues/634) | Fixed in [#668](https://github.com/DerykHopley/tc-vouch-compliance/pull/668) |
+| U3, The profile pass runs blind for minutes, and its cost note names a fixed model | [#635](https://github.com/DerykHopley/tc-vouch-compliance/issues/635) | Open (Next) |
+| S1, Any signed-in user changes the evidence every lead is assessed on | [#624](https://github.com/DerykHopley/tc-vouch-compliance/issues/624) | Fixed in [#654](https://github.com/DerykHopley/tc-vouch-compliance/pull/654) |
+| S2, The form decides what kind of evidence a document is, and how fresh | [#627](https://github.com/DerykHopley/tc-vouch-compliance/issues/627) | Fixed in [#651](https://github.com/DerykHopley/tc-vouch-compliance/pull/651) |
+| S3, Chat messages are paid and never counted | [#628](https://github.com/DerykHopley/tc-vouch-compliance/issues/628) | Fixed in [#667](https://github.com/DerykHopley/tc-vouch-compliance/pull/667) |
+| S4, The append-only audit trail has a back door | [#629](https://github.com/DerykHopley/tc-vouch-compliance/issues/629) | Fixed in [#658](https://github.com/DerykHopley/tc-vouch-compliance/pull/658) |
+| P1, The eval numbers describe older prompts | [#625](https://github.com/DerykHopley/tc-vouch-compliance/issues/625) | Open (no milestone) |
+| P2, The gather prompt gives no search plan | [#626](https://github.com/DerykHopley/tc-vouch-compliance/issues/626) | Open (Next) |
+| P3, The model decides whether its own verdict is capped | [#630](https://github.com/DerykHopley/tc-vouch-compliance/issues/630) | Open (Next) |
+| P4, The evals don't measure the costly direction of error | [#631](https://github.com/DerykHopley/tc-vouch-compliance/issues/631) | Fixed in [#659](https://github.com/DerykHopley/tc-vouch-compliance/pull/659) |
+| P5 (with U2), The output guard is strict on one English word and blind to others | [#632](https://github.com/DerykHopley/tc-vouch-compliance/issues/632) | Open (Next) |
+| P6, The chat and the profile pass are not evaluated | [#633](https://github.com/DerykHopley/tc-vouch-compliance/issues/633) | Open (Next) |
 
 The Low points (U4 to U7, S5 to S7, P7, P8) stay here only.
