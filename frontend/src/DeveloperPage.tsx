@@ -307,7 +307,7 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
 
 /** Some runs' totals in words: assessments, profile passes when there were any (#691), tokens in and out. */
 const runWords = (t: RunTotals) =>
-  `${plural(t.assessments, 'assessment')}${t.profile_passes > 0 ? `, ${count(t.profile_passes)} profile ${t.profile_passes === 1 ? 'pass' : 'passes'}` : ''} · ${count(t.input_tokens)} tokens in · ${count(t.output_tokens)} tokens out`
+  `${plural(t.assessments, 'assessment')}${t.profile_passes > 0 ? `, ${plural(t.profile_passes, 'profile pass', 'profile passes')}` : ''} · ${count(t.input_tokens)} tokens in · ${count(t.output_tokens)} tokens out`
 
 function Settings({ settings, onChange }: { settings: DeveloperSettings; onChange: Props['onChange'] }) {
   const { openrouter, fake } = settings.usage

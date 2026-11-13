@@ -552,7 +552,7 @@ def test_the_totals_count_an_incomplete_cost_apart():
     assert totals.to_dict()["fake"]["assessments"] == 0
 
 
-PASS = Usage(DEFAULT_MODEL, 5, 1, 0.25, 0.0, estimated=False, cost_complete=True)
+PROFILE_PASS_USAGE = Usage(DEFAULT_MODEL, 5, 1, 0.25, 0.0, estimated=False, cost_complete=True)
 
 
 def test_the_totals_count_profile_passes_apart_with_their_cost():
@@ -560,7 +560,7 @@ def test_the_totals_count_profile_passes_apart_with_their_cost():
     whole = Usage(DEFAULT_MODEL, 10, 2, 0.5, 0.0, estimated=False, cost_complete=True)
     chat = Usage(DEFAULT_MODEL, 1, 1, 0.125, 0.0, estimated=False, cost_complete=True)
     store.record(UsageRecord("alice", CONTROL, whole, NOV_4_AFTERNOON))
-    store.record(UsageRecord("alice", PROFILE_PASS, PASS, NOV_4_AFTERNOON))
+    store.record(UsageRecord("alice", PROFILE_PASS, PROFILE_PASS_USAGE, NOV_4_AFTERNOON))
     store.record(UsageRecord("alice", CHAT, chat, NOV_4_AFTERNOON))
 
     openrouter = store.totals().to_dict()["openrouter"]
@@ -603,7 +603,7 @@ def test_in_the_database_usage_is_kept_and_totalled_apart_for_the_fake(empty_dat
     fake = Usage("fake", 7, 3, 0.0, 0.0001, estimated=True, cost_complete=True)
     store.record(UsageRecord("alice", CONTROL, real, NOV_4_AFTERNOON))
     store.record(UsageRecord("alice", CONTROL, fake, NOV_4_AFTERNOON))
-    store.record(UsageRecord("alice", PROFILE_PASS, PASS, NOV_4_AFTERNOON))
+    store.record(UsageRecord("alice", PROFILE_PASS, PROFILE_PASS_USAGE, NOV_4_AFTERNOON))
 
     totals = store.totals().to_dict()
 

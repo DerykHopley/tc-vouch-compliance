@@ -130,7 +130,7 @@ export type Usage = {
 }
 
 export const count = (n: number) => n.toLocaleString('en-US')
-export const plural = (n: number, noun: string) => `${count(n)} ${noun}${n === 1 ? '' : 's'}`
+export const plural = (n: number, noun: string, nouns = `${noun}s`) => `${count(n)} ${n === 1 ? noun : nouns}`
 export const dollars = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 })
 
