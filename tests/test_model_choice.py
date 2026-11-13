@@ -232,6 +232,7 @@ def test_without_a_key_an_assessment_runs_on_the_fake_model_and_nothing_reaches_
 
 NO_USAGE = {
     "assessments": 0,
+    "profile_passes": 0,
     "input_tokens": 0,
     "output_tokens": 0,
     "reported_cost_usd": 0.0,

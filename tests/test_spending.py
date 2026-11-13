@@ -511,6 +511,7 @@ def test_the_developer_page_totals_tokens_and_cost_keeping_fake_runs_apart(catal
     assert page["usage"] == {
         "openrouter": {
             "assessments": 2,
+            "profile_passes": 0,
             "input_tokens": sum(u["input_tokens"] for u in real),
             "output_tokens": sum(u["output_tokens"] for u in real),
             "reported_cost_usd": pytest.approx(sum(u["reported_cost_usd"] for u in real)),
@@ -519,6 +520,7 @@ def test_the_developer_page_totals_tokens_and_cost_keeping_fake_runs_apart(catal
         },
         "fake": {
             "assessments": 1,
+            "profile_passes": 0,
             "input_tokens": fake["input_tokens"],
             "output_tokens": fake["output_tokens"],
             "reported_cost_usd": 0.0,
@@ -540,6 +542,7 @@ def test_the_totals_count_an_incomplete_cost_apart():
     assert isinstance(totals, UsageTotals)
     assert totals.to_dict()["openrouter"] == {
         "assessments": 2,
+        "profile_passes": 0,
         "input_tokens": 14,
         "output_tokens": 3,
         "reported_cost_usd": 0.75,
@@ -547,6 +550,23 @@ def test_the_totals_count_an_incomplete_cost_apart():
         "incomplete": 1,
     }
     assert totals.to_dict()["fake"]["assessments"] == 0
+
+
+PROFILE_PASS_USAGE = Usage(DEFAULT_MODEL, 5, 1, 0.25, 0.0, estimated=False, cost_complete=True)
+
+
+def test_the_totals_count_profile_passes_apart_with_their_cost():
+    store = MemorySpendingStore()
+    whole = Usage(DEFAULT_MODEL, 10, 2, 0.5, 0.0, estimated=False, cost_complete=True)
+    chat = Usage(DEFAULT_MODEL, 1, 1, 0.125, 0.0, estimated=False, cost_complete=True)
+    store.record(UsageRecord("alice", CONTROL, whole, NOV_4_AFTERNOON))
+    store.record(UsageRecord("alice", PROFILE_PASS, PROFILE_PASS_USAGE, NOV_4_AFTERNOON))
+    store.record(UsageRecord("alice", CHAT, chat, NOV_4_AFTERNOON))
+
+    openrouter = store.totals().to_dict()["openrouter"]
+
+    assert (openrouter["assessments"], openrouter["profile_passes"]) == (1, 1)
+    assert openrouter["reported_cost_usd"] == 0.875
 
 
 # --- In the database: a real Postgres server, as in tests/test_database.py ----------------------
@@ -583,19 +603,22 @@ def test_in_the_database_usage_is_kept_and_totalled_apart_for_the_fake(empty_dat
     fake = Usage("fake", 7, 3, 0.0, 0.0001, estimated=True, cost_complete=True)
     store.record(UsageRecord("alice", CONTROL, real, NOV_4_AFTERNOON))
     store.record(UsageRecord("alice", CONTROL, fake, NOV_4_AFTERNOON))
+    store.record(UsageRecord("alice", PROFILE_PASS, PROFILE_PASS_USAGE, NOV_4_AFTERNOON))
 
     totals = store.totals().to_dict()
 
     assert totals["openrouter"] == {
         "assessments": 1,
-        "input_tokens": 10,
-        "output_tokens": 2,
-        "reported_cost_usd": 0.5,
+        "profile_passes": 1,
+        "input_tokens": 15,
+        "output_tokens": 3,
+        "reported_cost_usd": 0.75,
         "estimated_cost_usd": 0.25,
         "incomplete": 1,
     }
     assert totals["fake"] == {
         "assessments": 1,
+        "profile_passes": 0,
         "input_tokens": 7,
         "output_tokens": 3,
         "reported_cost_usd": 0.0,

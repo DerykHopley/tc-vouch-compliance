@@ -305,9 +305,9 @@ function Companies({ settings, onChange, onRemoved, onMadeCurrent, developerNote
   )
 }
 
-/** Some assessments' totals in words: assessments, tokens in and out. */
+/** Some runs' totals in words: assessments, profile passes when there were any (#691), tokens in and out. */
 const runWords = (t: RunTotals) =>
-  `${plural(t.assessments, 'assessment')} · ${count(t.input_tokens)} tokens in · ${count(t.output_tokens)} tokens out`
+  `${plural(t.assessments, 'assessment')}${t.profile_passes > 0 ? `, ${plural(t.profile_passes, 'profile pass', 'profile passes')}` : ''} · ${count(t.input_tokens)} tokens in · ${count(t.output_tokens)} tokens out`
 
 function Settings({ settings, onChange }: { settings: DeveloperSettings; onChange: Props['onChange'] }) {
   const { openrouter, fake } = settings.usage
@@ -352,7 +352,7 @@ function Settings({ settings, onChange }: { settings: DeveloperSettings; onChang
             calls' cost could not be known.
           </p>
         )}
-        {fake.assessments > 0 && (
+        {(fake.assessments > 0 || fake.profile_passes > 0) && (
           <p className="mono">Fake model: {runWords(fake)} · {dollars(fake.estimated_cost_usd)} estimated, not spent</p>
         )}
         <a className="link-target" href={settings.usage_url} target="_blank" rel="noopener noreferrer">Usage and costs on OpenRouter</a>

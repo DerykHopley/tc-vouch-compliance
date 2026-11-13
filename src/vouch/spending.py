@@ -157,19 +157,24 @@ class UsageRecord:
 
 @dataclass(frozen=True)
 class RunTotals:
-    """Some assessments' and chat messages' usage added up: `assessments` counts the
-    assessments alone; `incomplete` is how many of the two have a cost not wholly known."""
+    """Some assessments', profile passes' and chat messages' usage added up: `assessments` counts
+    the assessments alone, `profile_passes` the profile passes (#691); `incomplete` is how many of
+    them have a cost not wholly known."""
 
     assessments: int = 0
+    profile_passes: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     reported_cost_usd: float = 0.0
     estimated_cost_usd: float = 0.0
     incomplete: int = 0
 
-    def add(self, usage: Usage, assessment: bool = True) -> "RunTotals":
+    def add(self, usage: Usage, control_id: str) -> "RunTotals":
+        """The totals with one usage record's added, counted by its control: an assessment, a
+        profile pass, or neither (a chat message)."""
         return RunTotals(
-            self.assessments + assessment,
+            self.assessments + (control_id not in NOT_ASSESSMENTS),
+            self.profile_passes + (control_id == PROFILE_PASS),
             self.input_tokens + usage.input_tokens,
             self.output_tokens + usage.output_tokens,
             self.reported_cost_usd + usage.reported_cost_usd,
@@ -425,11 +430,10 @@ class MemorySpendingStore:
     def totals(self) -> UsageTotals:
         openrouter, fake = RunTotals(), RunTotals()
         for record in self.records():
-            assessment = record.control_id not in NOT_ASSESSMENTS
             if record.usage.model == FAKE:
-                fake = fake.add(record.usage, assessment)
+                fake = fake.add(record.usage, record.control_id)
             else:
-                openrouter = openrouter.add(record.usage, assessment)
+                openrouter = openrouter.add(record.usage, record.control_id)
         return UsageTotals(openrouter, fake)
 
     def recent(self, limit: int) -> list[UsageRecord]:
@@ -491,7 +495,9 @@ class DatabaseSpendingStore:
         )
 
     def totals(self) -> UsageTotals:
-        rows = self.db.usage_totals(fake_model=FAKE, not_assessments=NOT_ASSESSMENTS)
+        rows = self.db.usage_totals(
+            fake_model=FAKE, not_assessments=NOT_ASSESSMENTS, profile_pass=PROFILE_PASS
+        )
         return UsageTotals(
             openrouter=RunTotals(**rows["openrouter"]) if "openrouter" in rows else RunTotals(),
             fake=RunTotals(**rows["fake"]) if "fake" in rows else RunTotals(),

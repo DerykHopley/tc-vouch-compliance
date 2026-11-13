@@ -3,7 +3,7 @@ import type { DeveloperPrompts, DeveloperSettings, RunTotals } from './developer
 /** Test data (#418): no assessments run, and a developer's settings with none, shared by the developer API's, the
  * developer page's and ProfiledApp's tests so they agree on one shape. */
 export const NO_RUNS = {
-  assessments: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0,
+  assessments: 0, profile_passes: 0, input_tokens: 0, output_tokens: 0, reported_cost_usd: 0, estimated_cost_usd: 0, incomplete: 0,
 } satisfies RunTotals
 
 export const DEVELOPER_SETTINGS = {

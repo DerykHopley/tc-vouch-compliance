@@ -796,21 +796,23 @@ class Database:
             )
 
     def usage_totals(
-        self, fake_model: str, not_assessments: tuple[str, ...]
+        self, fake_model: str, not_assessments: tuple[str, ...], profile_pass: str
     ) -> dict[str, dict[str, Any]]:
         """Every usage added up, by "openrouter" and "fake" (runs on `fake_model`); rows whose
         control is one of `not_assessments` (chat messages, profile passes) count in the tokens
-        and cost but not as assessments. A kind with no runs is left out. Raises DatabaseUnavailable."""
+        and cost but not as assessments, and rows whose control is `profile_pass` count as
+        profile passes (#691). A kind with no runs is left out. Raises DatabaseUnavailable."""
         with self.connection() as conn, self._needs_setup(USAGE_TABLE):
             rows = conn.execute(
                 "SELECT CASE WHEN model = %s THEN 'fake' ELSE 'openrouter' END AS kind, "
                 "count(*) FILTER (WHERE control_id <> ALL(%s)) AS assessments, "
+                "count(*) FILTER (WHERE control_id = %s) AS profile_passes, "
                 "sum(input_tokens)::bigint AS input_tokens, "
                 "sum(output_tokens)::bigint AS output_tokens, sum(reported_cost_usd) AS reported_cost_usd, "
                 "sum(estimated_cost_usd) AS estimated_cost_usd, "
                 "count(*) FILTER (WHERE NOT cost_complete) AS incomplete "
                 f"FROM {USAGE_TABLE} GROUP BY kind",
-                (fake_model, list(not_assessments)),
+                (fake_model, list(not_assessments), profile_pass),
             ).fetchall()
         return {row.pop("kind"): row for row in rows}
 
