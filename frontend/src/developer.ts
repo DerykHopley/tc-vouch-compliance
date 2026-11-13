@@ -104,9 +104,11 @@ export type CurrentChange =
 /** A compliance profile left out because it can't be loaded: its name and the problem, with no server path. */
 export type BrokenProfile = { id: string; problem: string }
 
-/** Some assessments' usage added up; `incomplete` of them have a cost not wholly known. */
+/** Some runs' usage added up: `assessments` and `profile_passes` (#691) counted apart; `incomplete` of them have a
+ * cost not wholly known. */
 export type RunTotals = Pick<Usage, 'input_tokens' | 'output_tokens' | 'reported_cost_usd' | 'estimated_cost_usd'> & {
   assessments: number
+  profile_passes: number
   incomplete: number
 }
 

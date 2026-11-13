@@ -81,6 +81,17 @@ describe('the developer page', () => {
     expect(within(totals).queryByText(/incomplete/)).toBeNull()
   })
 
+  it('counts profile passes apart from assessments, and shows the fake line for profile passes alone', () => {
+    const openrouter = { ...NO_RUNS, assessments: 2, profile_passes: 1, input_tokens: 10, output_tokens: 2 }
+    const fake = { ...NO_RUNS, profile_passes: 2, input_tokens: 9, output_tokens: 3, estimated_cost_usd: 0.0001 }
+    renderPage({ settings: { ...SETTINGS, usage: { openrouter, fake } } })
+    const totals = screen.getByRole('region', { name: 'Usage' })
+    expect(within(totals).getByText(/^OpenRouter: 2 assessments, 1 profile pass · 10 tokens in/)).toBeTruthy()
+    expect(within(totals).getByText(
+      'Fake model: 0 assessments, 2 profile passes · 9 tokens in · 3 tokens out · $0.0001 estimated, not spent',
+    )).toBeTruthy()
+  })
+
   it('says how many assessments have an incomplete cost, and shows no fake line without fake runs', () => {
     const openrouter = { ...NO_RUNS, assessments: 2, input_tokens: 10, output_tokens: 2, reported_cost_usd: 0.5, incomplete: 1 }
     renderPage({ settings: { ...SETTINGS, usage: { openrouter, fake: NO_RUNS } } })
