@@ -1,4 +1,4 @@
-/* The nav bar every Pages page shares (#704): Home, Process flow, Eval report, Build review, Repo.
+/* The nav bar every Pages page shares (#704): Home, Process flow, Eval report, Build review, Scaling, Repo.
    Colours only through the page's own tokens (--sheet, --rule, --ink, --muted, --navy), so it
    follows each page's light and dark mode. Links are 44px tall, docs/design.md's touch floor. */
 .site-nav { background: var(--sheet); border-bottom: 1px solid var(--rule); padding: 0 16px; }

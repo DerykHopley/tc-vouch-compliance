@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scaling Vouch</title>
+<meta name="description" content="What it would take to turn Vouch from a single-company demo into a product businesses can buy: eight areas of tech and infrastructure, each with where it stands today and what to change.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Manrope:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../site-nav.css">
+<style>
+/* Vouch's tokens (frontend/src/styles/tokens.css, explained in docs/design.md), as the other Pages
+   have them. */
+:root {
+  --paper: #E8E7E3; --sheet: #F7F7F5; --ink: #1B1D21; --muted: #62656B; --rule: #D0CEC8;
+  --navy: #1F3B6E; --brass: #A8834A;
+  --f-display: "Libre Caslon Display", Georgia, serif;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --paper: #0D0D0E; --sheet: #171718; --ink: #ECE6DC; --muted: #9C978E; --rule: #2C2B29;
+  --navy: #A9BEE6; --brass: #E2C391;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.6 var(--f-body); }
+a { color: var(--navy); }
+code { font: 13px/1.4 var(--f-mono); overflow-wrap: anywhere; }
+main { max-width: 60rem; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 28px; }
+header { display: grid; gap: 10px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 13px; letter-spacing: .02em; }
+h1 { margin: 0; font: 400 40px/1.1 var(--f-display); }
+h2 { margin: 0 0 4px; font: 400 26px/1.2 var(--f-display); }
+h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.lede { margin: 0; font-size: 17px; max-width: 46rem; }
+p { margin: 0; max-width: 46rem; }
+section { display: grid; gap: 12px; }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 12px; }
+.card header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
+.card h3 { font: 400 22px/1.2 var(--f-display); }
+.size { font: 12px/1.4 var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.muted { color: var(--muted); font-size: 14px; }
+dl { margin: 0; display: grid; gap: 10px; }
+dt { font-size: 13px; font-weight: 600; color: var(--muted); }
+dd { margin: 0; max-width: 46rem; }
+ul.points { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 46rem; }
+.tag { font: 11px/1 var(--f-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--rule); border-radius: 4px; padding: 2px 5px; white-space: nowrap; }
+.tag.u { color: var(--brass); border-color: var(--brass); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 13px; white-space: nowrap; }
+td:first-child { white-space: nowrap; font-weight: 600; }
+td a { display: inline-block; }
+.theme { font: inherit; font-size: 13px; background: none; color: var(--muted); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; min-height: 44px; cursor: pointer; }
+.theme:focus-visible, a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
+@media (max-width: 40rem) { h1 { font-size: 32px; } .card { padding: 16px; } .lede { font-size: 16px; } }
+</style>
+</head>
+<body>
+<nav class="site-nav" aria-label="Vouch pages"><ul>
+  <li><a href="../">Home</a></li>
+  <li><a href="../flow/">Process flow</a></li>
+  <li><a href="../evals/">Eval report</a></li>
+  <li><a href="../build-review/">Build review</a></li>
+  <li><a href="./" aria-current="page">Scaling</a></li>
+  <li class="ext"><a href="https://github.com/DerykHopley/tc-vouch-compliance">Repo</a></li>
+</ul></nav>
+<main>
+  <header>
+    <div class="top">
+      <p class="eyebrow">Report · 2026-11-13 · read from <code>main</code> at <code>bda95d4</code></p>
+      <button class="theme" id="theme" type="button" aria-label="Switch light or dark">Dark</button>
+    </div>
+    <h1>Scaling Vouch</h1>
+    <p class="lede">What it would take to turn Vouch from a single-company course demo into a product businesses can buy: eight areas of tech and infrastructure, each with where it stands today, what to change, and why.</p>
+    <p class="muted">Written by Claude, an agent working in Claude Code, from the code and docs only. Nothing was run and no model was called. Each point about today is marked <span class="tag">checked</span> (seen in the code or docs) or <span class="tag u">unverified</span> (a reading not yet confirmed). The sizes are the writer's estimates. The open questions are research ticket <a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/716">#716</a>.</p>
+  </header>
+
+  <section aria-labelledby="h-summary">
+    <h2 id="h-summary">In short</h2>
+    <p>The biggest gap is that Vouch has no idea of a customer organisation. Every other area builds on that, so it comes first. The guards in code, the checkpointed review, the audit trail and the offline tests already hold up and carry over as they are.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">#</th><th scope="col">Area</th><th scope="col">The change</th><th scope="col">Size</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><a href="#tenancy">Tenancy and sign-in</a></td><td>An organisation on every row, row-level security, SSO and roles</td><td>L</td></tr>
+          <tr><td>2</td><td><a href="#data">Real customer data</a></td><td>An EU model contract, least-privilege database user, versioned migrations</td><td>M</td></tr>
+          <tr><td>3</td><td><a href="#ingestion">Evidence ingestion and search</a></td><td>Object storage, PDF and Office parsing, Postgres search, connectors</td><td>L</td></tr>
+          <tr><td>4</td><td><a href="#jobs">Runs as background jobs</a></td><td>A queue and workers; more than one instance</td><td>M</td></tr>
+          <tr><td>5</td><td><a href="#billing">Cost and billing</a></td><td>Per-organisation budgets, metering, Stripe</td><td>M</td></tr>
+          <tr><td>6</td><td><a href="#ops">Operations</a></td><td>Terraform, staging, deploy from CI, error tracking</td><td>M</td></tr>
+          <tr><td>7</td><td><a href="#catalogue">Catalogue</a></td><td>The full VDA ISA and ISO 27001 Annex A</td><td>M</td></tr>
+          <tr><td>8</td><td><a href="#code">Code shape</a></td><td>Split the three largest modules</td><td>S</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-areas">
+    <h2 id="h-areas">The eight areas</h2>
+
+    <article class="card" id="tenancy">
+      <header><h3>1. Tenancy and sign-in</h3><span class="size">Size L · do first</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>One current company, chosen by a developer, is shared by every user (<code>vouch.current_company</code>; decision 1 of 2026-11-10). <span class="tag">checked</span></li>
+          <li>Tables are keyed by <code>user_id</code> or <code>profile_id</code>; no table has an organisation (<code>vouch.database</code>). <span class="tag">checked</span></li>
+          <li>Access is Clerk sign-in plus membership of the course's Discord server (<code>vouch.auth</code>). <span class="tag">checked</span></li>
+          <li>Any signed-in user can add or withdraw evidence every lead is assessed on (critique S1; per-user profiles are <a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/163">#163</a>). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>An organisation id on every table, enforced by Postgres row-level security so a missed <code>WHERE</code> can't leak another customer's evidence. Clerk Organizations for membership, with SAML/SSO and roles: compliance lead, reviewer, read-only auditor.</dd>
+        <dt>Why first</dt>
+        <dd>It touches every table and query, so it grows more expensive with each feature added. It also closes S1 and #163 in one design. It is a data-model change, so it is the owner's call.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="data">
+      <header><h3>2. Real customer data</h3><span class="size">Size M</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>Evidence goes whole to OpenRouter; redaction runs on events, logs and traces, not on what the model is sent (<code>vouch.redaction</code>; critique S6). <span class="tag">checked</span></li>
+          <li>Reset demo can delete audit trail rows through a session setting (<code>vouch.database</code>; critique S4, kept on purpose in #629). <span class="tag">checked</span></li>
+          <li>The app's database user likely owns its tables, so it could drop the append-only trigger. <span class="tag u">unverified</span></li>
+          <li>The schema is kept by idempotent <code>CREATE</code> and <code>ALTER</code> statements run by <code>vouch-db-setup</code>, with no version history. <span class="tag">checked</span></li>
+          <li>No security headers, and Cloud Run runs as the default service account (critique S7). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>A direct model contract with EU processing and zero data retention (Anthropic, AWS Bedrock or Google Vertex). Redact before the model call. A database user that doesn't own the tables; no Reset demo in production. Versioned migrations (Alembic or similar). Security headers and a dedicated service account.</dd>
+        <dt>Why</dt>
+        <dd>A compliance buyer sends a security questionnaire before uploading anything. Vouch helps others prepare for ISO 27001, so its own handling has to pass the same reading.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="ingestion">
+      <header><h3>3. Evidence ingestion and search</h3><span class="size">Size L</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>An added document is a <code>.md</code> or <code>.txt</code> file of UTF-8 text (<code>vouch.added_documents</code>). <span class="tag">checked</span></li>
+          <li>Search is a keyword match that reads the text on each call; every version of every added document is held in each process's memory (<code>vouch.search</code>, <code>AddedIndex</code>). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>Files in object storage. PDF, DOCX and XLSX parsing that keeps text exact enough for the quote check. Postgres full-text search plus pgvector, measured against today's search on the eval set. Then connectors to where evidence really lives: SharePoint, Google Drive, Confluence, Jira.</dd>
+        <dt>Why</dt>
+        <dd>Real policies and records are Office files and PDFs in those systems, and a real company's evidence won't fit in memory. Staying on Postgres avoids a second datastore. The quote check stays as it is: it checks the text, wherever it came from.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="jobs">
+      <header><h3>4. Runs as background jobs</h3><span class="size">Size M</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>An assessment runs inside the HTTP request that streams it (<code>vouch.runs</code>, <code>vouch.api</code>). <span class="tag">checked</span></li>
+          <li>The profile pass is one <code>POST</code> that can take minutes, with no progress (<code>/api/profile-pass</code>; critique U3). <span class="tag">checked</span></li>
+          <li>The rate limit is held in each process's memory (<code>RateLimit</code> in <code>vouch.limits</code>). <span class="tag">checked</span></li>
+          <li>Cloud Run is capped at one instance (<code>--max-instances=1 --max=1</code> in the deploy wizard). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>A queue and workers (Cloud Tasks, Cloud Run jobs or similar). The UI reads a run's progress from the database instead of holding a stream open. The rate limit moves to Postgres or Redis.</dd>
+        <dt>Why</dt>
+        <dd>It lifts the one-instance cap and lets a lead run a whole profile overnight. LangGraph's Postgres checkpointer already makes each run resumable, so this is mostly plumbing.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="billing">
+      <header><h3>5. Cost and billing</h3><span class="size">Size M</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>Daily limits are per user: 30 assessments, 3 profile passes and 50 chat messages (<code>vouch.spending</code>). <span class="tag">checked</span></li>
+          <li>Each run's tokens and cost are recorded in the usage table. <span class="tag">checked</span></li>
+          <li>An assessment on Sonnet 5.5 costs about $0.10 to $0.12 (eval summary, with prompts that have since changed: critique P1). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>Budgets per organisation, metered from the usage table, then Stripe: seats, usage, or a mix. Try a cheaper model for gathering evidence and keep Sonnet for judging.</dd>
+        <dt>Why</dt>
+        <dd>A customer pays per organisation, not per user. The cheaper-gather saving is <span class="tag u">unverified</span> until an eval run, which is paid and needs the owner's OK first.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="ops">
+      <header><h3>6. Operations</h3><span class="size">Size M</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>Deploys run from an interactive wizard on the owner's machine (<code>scripts/deploy-wizard.sh</code>). <span class="tag">checked</span></li>
+          <li>One environment, the live one; Langfuse tracing (<code>vouch.tracing</code>). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>Terraform for Cloud Run, Cloud SQL, Secret Manager and the service account. A staging environment. Deploy from CI after the full lane passes. Error tracking and uptime alerts. The pipeline eval run on every prompt change, so quality numbers never describe old prompts again.</dd>
+        <dt>Why</dt>
+        <dd>A customer expects changes to be tested somewhere other than their data, and recovery not to depend on one person's laptop.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="catalogue">
+      <header><h3>7. Catalogue</h3><span class="size">Size M</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li>12 VDA ISA 2027.1 controls ship, in English and German, unchanged under CC BY-ND 4.0 (<code>src/vouch/data/vda-isa-2027.1/</code>). <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>The full ISA catalogue, then ISO 27001 Annex A. Profiles-as-data already carry the per-company differences.</dd>
+        <dt>Why</dt>
+        <dd>Customers prepare for the whole audit, not 12 controls. ISO's own text isn't free to quote, so its licence is a question for the research ticket.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="code">
+      <header><h3>8. Code shape</h3><span class="size">Size S</span></header>
+      <dl>
+        <dt>Today</dt>
+        <dd><ul class="points">
+          <li><code>vouch.api</code> is 2,869 lines, <code>vouch.graph</code> 2,161 and <code>vouch.database</code> 1,751, out of about 25,000. <span class="tag">checked</span></li>
+        </ul></dd>
+        <dt>Change</dt>
+        <dd>Split each into deeper modules along the lines tenancy and background jobs will cut anyway: routes per area, one store per table group, the graph's nodes apart from its wiring.</dd>
+        <dt>Why</dt>
+        <dd>Smaller modules let more than one developer, or agent, work at once without clashing on the same files. Doing it alongside areas 1 and 4 avoids moving the same code twice.</dd>
+      </dl>
+    </article>
+  </section>
+
+  <section aria-labelledby="h-keep">
+    <h2 id="h-keep">What to keep as it is</h2>
+    <ul class="points">
+      <li><b>Guards in code:</b> the exact-quote check, the wording rule, the allow-list and the call budget hold whatever the model does.</li>
+      <li><b>The checkpointed review:</b> a run waits for the lead in Postgres and survives a restart; it is also the base for background jobs.</li>
+      <li><b>The append-only audit trail:</b> the record an auditor wants to see, once the Reset demo exception is gone.</li>
+      <li><b>Compliance profiles as data:</b> a new customer is a profile, not new code.</li>
+      <li><b>Offline tests on a scripted fake model:</b> CI never pays for a model call.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="h-next">
+    <h2 id="h-next">Next step</h2>
+    <p>Research ticket <a href="https://github.com/DerykHopley/tc-vouch-compliance/issues/716">#716</a> holds the open questions: tenancy design, model contracts and prices, ingestion, job queues, billing, operations, catalogue licences, and what a buyer's security questionnaire asks of Vouch itself. Its answers land here. Then <code>/grill-with-docs</code> on area 1, since tenancy changes the data model.</p>
+  </section>
+
+  <footer>
+    <p>The words are those of the project's <a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/GLOSSARY.md">glossary</a>. The critique points (S1, S4, S6, S7, U3, P1) are from <a href="https://github.com/DerykHopley/tc-vouch-compliance/blob/main/docs/critique.md">docs/critique.md</a>.</p>
+  </footer>
+</main>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById("theme");
+  const dark = () => root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  const sync = () => { btn.textContent = dark() ? "Light" : "Dark"; };
+  btn.addEventListener("click", () => { root.dataset.theme = dark() ? "light" : "dark"; sync(); });
+  sync();
+})();
+</script>
+</body>
+</html>
