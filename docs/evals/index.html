@@ -153,6 +153,22 @@ footer { color: var(--muted); font-size: 13px; }
     </section>
   </div>
 
+  <section class="card" aria-labelledby="h-why">
+    <h2 id="h-why">Why one eval run costs about <span id="why-cost">$1.40</span></h2>
+    <ul class="findings">
+      <li><b>Each case is a full agent run, not one prompt.</b> The model calls search_policies and search_records several times, then writes its verdicts. Each turn re-sends the whole conversation, so one assessment uses about <span id="why-tok"></span>, against a few thousand for a single question and answer.</li>
+      <li><b>One run is <span id="why-cases"></span> control assessments</b> (<span id="why-verdicts"></span> requirement verdicts), so about <span id="why-run-tok"></span> tokens.</li>
+      <li><b>A judge on top.</b> DeepEval's faithfulness score makes a second model call for each answer: the run cost minus the cost of the assessments, <span id="why-judge"></span>.</li>
+      <li><b>The model choice dominates.</b> On similar token counts, one assessment costs <span id="why-models"></span>.</li>
+      <li><b>Ways to cut it:</b> run one model on one profile, use a cheaper judge, or score the verdicts only (exact match, no judge).</li>
+    </ul>
+    <div class="scroll"><table>
+      <thead><tr><th>Run</th><th class="num">Tokens per assessment</th><th class="num">Cost per assessment</th><th class="num">Judge</th><th class="num">Run cost</th></tr></thead>
+      <tbody id="why-table"></tbody>
+    </table></div>
+    <p class="muted">Judge is the run cost minus the cases times the cost per assessment. The local model ran free; its judge did not.</p>
+  </section>
+
   <section class="card" aria-labelledby="h-scores">
     <div class="row">
       <h2 id="h-scores">Scores by run</h2>
@@ -265,6 +281,29 @@ uv run python -m vouch.evals --profile nordlicht --model openai/gpt-6-luna --kee
     [String(D.runs.length), `runs through the agent, ${D.runs.reduce((s, r) => s + r.cases, 0)} assessments`],
     [`$${spend.toFixed(2)}`, 'paid model spend for these runs, judges included'],
   ]) { const t = el('div', 'tile'); t.append(el('div', 'v', v), el('div', 'k', k)); $('tiles').append(t); }
+
+  // Why one run costs what it does: derived from the runs, Sonnet on Nordlicht as the example.
+  (() => {
+    const nordOf = (id) => D.runs.find((r) => r.model_id.endsWith(id) && r.profile === 'Nordlicht');
+    const ex = nordOf('claude-sonnet-5.5');
+    if (!ex) return;
+    const judge = (r) => Math.max(0, r.run_cost - r.cases * r.cost);
+    const k = (n) => `${Math.round(n / 1000)}k`;
+    const n = (v) => Math.round(v).toLocaleString('en');
+    $('why-cost').textContent = `$${ex.run_cost.toFixed(2)}`;
+    $('why-tok').textContent = `${k(ex.tokens)} tokens (${ex.model}, ${ex.profile}: ${n(ex.tokens)})`;
+    $('why-cases').textContent = String(ex.cases);
+    $('why-verdicts').textContent = String(ex.verdicts[1]);
+    $('why-run-tok').textContent = k(ex.tokens * ex.cases);
+    $('why-judge').textContent = `for ${ex.model} on ${ex.profile} $${ex.run_cost.toFixed(3)} − ${ex.cases} × $${ex.cost.toFixed(4)} ≈ $${judge(ex).toFixed(2)}`;
+    $('why-models').textContent = ['claude-sonnet-5.5', 'claude-haiku-5.5', 'gpt-6-luna'].map(nordOf).filter(Boolean)
+      .map((r) => `${money(r.cost)} with ${r.model}`).join(', ');
+    for (const r of D.runs.slice().sort((a, b) => b.cost - a.cost)) {
+      const tr = el('tr');
+      tr.append(el('td', null, label(r)), el('td', 'num', n(r.tokens)), el('td', 'num', money(r.cost)), el('td', 'num', `$${judge(r).toFixed(2)}`), el('td', 'num', `$${r.run_cost.toFixed(2)}`));
+      $('why-table').append(tr);
+    }
+  })();
 
   // Scatter: accuracy against cost, log x; the free local model sits on its own "$0" tick.
   (() => {
